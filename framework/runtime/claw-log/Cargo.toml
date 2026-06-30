@@ -1,0 +1,84 @@
+[package]
+name = "claw-log"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Upper-layer logging: the log facade backend and flat-tree tracing subscriber that drive claw_sys's ESP_LOGx sink, plus the compile-time level ceilings"
+
+[lib]
+name = "claw_log"
+crate-type = ["rlib"]
+
+[features]
+# Compile-time log ceiling for release (on-device) builds. Each forwards to the
+# matching `log/release_max_level_*`: the `log` macros above the selected level
+# are compiled out, so `debug!`/`trace!` cost nothing (no formatting, no FFI)
+# when stripped. These only take effect in release builds; host/dev (debug)
+# builds keep full logging regardless.
+#
+# EXACTLY ONE may be enabled: `log`'s release_max_level_* features are mutually
+# exclusive (enabling two emits a compile_error!), so `--all-features` is
+# unsupported here. To change the ceiling, disable defaults
+# (`default-features = false`) and pick one. Default mirrors ESP-IDF's default
+# `CONFIG_LOG_MAXIMUM_LEVEL` (INFO); CMake-from-Kconfig selection is future work.
+default = ["log_max_info"]
+log_max_off = ["log/release_max_level_off"]
+log_max_error = ["log/release_max_level_error"]
+log_max_warn = ["log/release_max_level_warn"]
+log_max_info = ["log/release_max_level_info"]
+log_max_debug = ["log/release_max_level_debug"]
+log_max_trace = ["log/release_max_level_trace"]
+
+# Compile-time `tracing` ceiling for release (on-device) builds, mirroring the
+# `log_max_*` knobs above. Each forwards to `tracing/release_max_level_*`, which
+# strips `span!`/`event!` macros above the selected level out of the binary
+# entirely (zero code, zero runtime cost). Not in `default`, so release builds
+# keep full `tracing` unless opted out.
+trace_max_off = ["tracing/release_max_level_off"]
+trace_max_error = ["tracing/release_max_level_error"]
+trace_max_warn = ["tracing/release_max_level_warn"]
+trace_max_info = ["tracing/release_max_level_info"]
+trace_max_debug = ["tracing/release_max_level_debug"]
+trace_max_trace = ["tracing/release_max_level_trace"]
+
+[dependencies]
+# The C-shim boundary that turns a `log::Level` line into `ESP_LOGx` / stderr.
+claw-sys = { path = "../claw-sys" }
+log = "0.4"
+# Ergonomic error enum for `init_logger` (file-open + set-logger failures).
+thiserror = "2"
+# The flat-tree subscriber (`trace.rs`) implements `Subscriber` via `tracing`'s
+# re-exported core traits, and `set_global_default` + the `trace_max_*` ceiling
+# features need it too. NOT `log-always`: the subscriber consumes events directly,
+# so a log bridge would double-emit and risk a log<->trace loop.
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+
+# Host-only `log` backend. We supply a custom `format` so host output matches
+# ESP-IDF's `<L> (<ms>) <tag>: <msg>` line + colors (see `install_logger`). Never
+# pulled into the device firmware: the `espidf` target uses the `ESP_LOGx` bridge
+# instead. `max_level` is the authoritative filter (we do not read `RUST_LOG`).
+#
+# `default-features = false` drops `humantime` (we render our own uptime column)
+# and `regex` (no `RUST_LOG` parsing); `auto-color` keeps anstream so the ANSI we
+# emit is auto-stripped when stderr is not a TTY.
+[target.'cfg(not(target_os = "espidf"))'.dependencies]
+env_logger = { version = "0.11", default-features = false, features = ["auto-color"] }
+
+[dev-dependencies]
+# Ergonomic error handling for the `fmt_demo` example (host-only).
+anyhow = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Restriction lints per AGENTS.md (panic detection). `deny` (not `forbid`) so the
+# `trace.rs` test module can opt out with `#[allow(...)]` where panicking is fine.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

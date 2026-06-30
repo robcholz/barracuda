@@ -1,0 +1,98 @@
+//! `claw-agent-chat` — a minimal REPL that drives the whole agent system through
+//! the public [`claw_agent`] API: build an [`AgentSystem`], open a [`Chat`], and
+//! print each turn's replies.
+//!
+//! LLM config is read from `claw-core/.env.local` (the same file the integration
+//! tests use): `CLAW_LLM_API_KEY`, `CLAW_LLM_BASE_URL`, `CLAW_LLM_MODEL`. Memory
+//! is written under this crate's `output/claw-agent-chat/`.
+//!
+//! ```
+//! cargo run -p claw-agent --bin claw-agent-chat --target x86_64-unknown-linux-gnu
+//! ```
+//!
+//! [`Chat`]: claw_agent::Chat
+
+use std::io::{self, BufRead, Write};
+use std::path::Path;
+
+use anyhow::{bail, Result};
+use claw_agent::{AgentSystem, ClawApiConfig};
+
+const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
+
+fn main() {
+    if let Err(error) = run() {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    load_env();
+
+    let system = AgentSystem::on_disk(llm_config()?, MEMORY_DIR)?;
+    let chat = system.chat();
+
+    eprintln!("Session: {}", chat.session().to_wire());
+    eprintln!("Memory:  {MEMORY_DIR}");
+    eprintln!("Type your message and press Enter. Empty line or Ctrl-D to quit.\n");
+
+    let stdin = io::stdin();
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+
+        let mut line = String::new();
+        if stdin.lock().read_line(&mut line)? == 0 {
+            break;
+        }
+        let input = line.trim();
+        if input.is_empty() {
+            break;
+        }
+
+        let replies = chat.send(input);
+        if replies.is_empty() {
+            println!("\n(no reply)\n");
+        }
+        for reply in replies {
+            println!("\n{reply}\n");
+        }
+    }
+
+    eprintln!("Goodbye.");
+    Ok(())
+}
+
+/// Load `claw-core/.env.local` into the process environment if present. A parse
+/// failure is surfaced (not swallowed) but does not abort: the missing variables
+/// are then reported precisely by [`llm_config`].
+fn load_env() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../claw-core/.env.local");
+    if path.is_file() {
+        if let Err(error) = dotenvy::from_path(&path) {
+            eprintln!("warning: failed to load {}: {error}", path.display());
+        }
+    }
+}
+
+/// Build the LLM client config from the required `CLAW_LLM_*` variables.
+fn llm_config() -> Result<ClawApiConfig> {
+    Ok(ClawApiConfig {
+        api_key: Some(required("CLAW_LLM_API_KEY")?),
+        backend_type: "openai_compatible".into(),
+        model: Some(required("CLAW_LLM_MODEL")?),
+        base_url: Some(required("CLAW_LLM_BASE_URL")?),
+        supports_tools: true,
+        timeout_ms: 60_000,
+        ..Default::default()
+    })
+}
+
+/// Read a required, non-empty environment variable or fail with a clear message.
+fn required(key: &str) -> Result<String> {
+    match std::env::var(key) {
+        Ok(value) if !value.is_empty() => Ok(value),
+        _ => bail!("{key} must be set (in env or claw-core/.env.local)"),
+    }
+}

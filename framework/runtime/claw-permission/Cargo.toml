@@ -1,0 +1,28 @@
+[package]
+name = "claw-permission"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Permission policy layer: classifies tool actions into Allow/Ask/Deny decisions"
+
+[lib]
+name = "claw_permission"
+# Pure-Rust rlib bundled (with the other logic crates) into the single `claw_rt`
+# staticlib that the firmware links.
+crate-type = ["rlib"]
+
+[dependencies]
+thiserror = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

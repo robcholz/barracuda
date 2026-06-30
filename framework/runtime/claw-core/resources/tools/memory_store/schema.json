@@ -1,0 +1,27 @@
+{
+  "type": "function",
+  "function": {
+    "name": "memory_store",
+    "description": "Remember a durable fact for the long term (e.g. a user preference, identity detail, or standing commitment). Use this only for information worth recalling in future conversations, not transient task details.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "description": "The fact to remember, written concisely in the third person."
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Short topic labels to file this memory under (e.g. \"preference\", \"identity\"). You recall by these labels later."
+        },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Optional extra search terms that need not appear in the content."
+        }
+      },
+      "required": ["content"]
+    }
+  }
+}

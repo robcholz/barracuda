@@ -1,0 +1,19 @@
+[package]
+name = "claw-skill"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Skill registry and per-agent loaded set: scans SKILL.md skills over a ClawFs, renders the catalog, and assembles loaded skill documents into prompt context"
+
+[dependencies]
+claw-interface = { path = "../claw-interface" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+# Host-only ClawFs doubles: `memfs` for hermetic unit tests, `diskfs` for the
+# data-driven golden test over the `tests/data/skills` fixtures.
+claw-interface = { path = "../claw-interface", features = ["memfs", "diskfs"] }
+# Ergonomic error handling for the crate examples (host-only, never in firmware).
+anyhow = "1"

@@ -1,0 +1,102 @@
+//! Demonstrates assembling a request with `claw-context`.
+//!
+//! Run with:
+//!
+//! ```bash
+//! cargo run -p claw-context --example build_context --target x86_64-unknown-linux-gnu
+//! ```
+//!
+//! The crate owns *placement, change detection, and rendering*; this example
+//! plays the role of the *content sources* (the "filling"). It shows that blocks
+//! declared in any order render in the spec wire order, that a custom block slots
+//! within its band, and that the context only re-renders when a block actually
+//! changes (the `version()` stays put across an identical re-declaration, then
+//! advances when a block is updated).
+
+use std::borrow::Cow;
+
+use claw_context::{Band, Block, BlockKind, Context, Scope};
+use serde_json::json;
+
+fn main() {
+    let mut context = Context::new();
+
+    // A custom retrieved-docs block, placed at the bottom of the agent durable
+    // group (after ModeFraming, order 2).
+    let retrieved_docs = Block::new(
+        BlockKind::Custom {
+            band: Band::Durable,
+            scope: Scope::Agent,
+            order: 3,
+            label: Cow::Borrowed("RetrievedDocs"),
+        },
+        "Doc: the GPIO API exposes claw_gpio_set_level(pin, level).",
+    );
+
+    // Declare the full working-mode context. Insertion order is deliberately
+    // scrambled — the wire order is fixed by BlockKind.
+    context
+        .with(Block::new(
+            BlockKind::OutputContract,
+            "Respond as JSON: {actions, blockers, needs_approval, next_step}.",
+        ))
+        .with(Block::new(BlockKind::CurrentInput, "Make the LED blink."))
+        .with(Block::new(
+            BlockKind::CommonInstruction,
+            "You are Claw, a helpful on-device agent.",
+        ))
+        .with(Block::new(
+            BlockKind::AgentInstruction,
+            "Role: worker. Execute the task and report structured results.",
+        ))
+        .with(Block::new(
+            BlockKind::AgentMemory,
+            "Prefers metric units. Has an ESP32-S3 DevKitC.",
+        ))
+        .with(Block::new(
+            BlockKind::ActiveSkills,
+            "Skill blink_led: toggle the on-board LED N times.",
+        ))
+        .with(Block::new(
+            BlockKind::ModeFraming,
+            "Task: blink the LED 3 times. Workspace: board=esp32s3.",
+        ))
+        .with(retrieved_docs)
+        .with(Block::new(
+            BlockKind::RecentContext,
+            "tool_result(claw_gpio_set_level): ok",
+        ))
+        // A reminder is the ephemeral tail, never persisted, after the history.
+        .reminder(Some("Only the blink_led skill is permitted this phase."));
+
+    let history = json!([{ "role": "user", "content": "Make the LED blink." }]);
+
+    let version_before = context.version();
+    let request = context.request(&history);
+    println!(
+        "===== system prefix (version {version_before}) =====\n{}\n",
+        request.system()
+    );
+    println!("===== reminders (ephemeral tail) =====");
+    for reminder in request.reminders() {
+        if let Some(text) = reminder.get("content").and_then(serde_json::Value::as_str) {
+            println!("{text}");
+        }
+    }
+
+    // Re-declaring identical content every tick is a free no-op: the version (and
+    // so the cached prefix) does not move.
+    context.with(Block::new(
+        BlockKind::ActiveSkills,
+        "Skill blink_led: toggle the on-board LED N times.",
+    ));
+    println!(
+        "\nversion after identical re-declaration: {} (unchanged: {})",
+        context.version(),
+        context.version() == version_before
+    );
+
+    // A real change advances the version; the next request re-renders.
+    context.with(Block::new(BlockKind::ActiveSkills, ""));
+    println!("version after unloading the skill: {}", context.version());
+}

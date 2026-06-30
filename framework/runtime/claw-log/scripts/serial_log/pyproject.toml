@@ -1,0 +1,33 @@
+[project]
+name = "serial-log"
+version = "0.1.0"
+description = "Stream complete log lines from a subprocess (e.g. `idf.py monitor`) to per-line callbacks: strips ANSI color, configurable encoding. Framework-agnostic, zero runtime dependencies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = ["serial", "log", "subprocess", "esp-idf", "streaming", "monitor"]
+dependencies = []
+
+[project.optional-dependencies]
+# Future: a direct serial-port source backed by pyserial, kept out of the core so
+# the default install stays dependency-free.
+# serial = ["pyserial>=3.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/serial_log"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.14,<0.15",
+]
+
+[tool.pytest.ini_options]
+# src-layout: make `import serial_log` work under `uv run pytest` without an
+# install step.
+pythonpath = ["src"]
+testpaths = ["tests"]

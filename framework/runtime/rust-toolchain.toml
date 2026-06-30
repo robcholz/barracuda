@@ -1,0 +1,5 @@
+# ESP32-S3 is an xtensa core, which is only supported by Espressif's fork of
+# the Rust compiler. Install it with `espup install` (see the esp-rs book).
+[toolchain]
+channel = "esp"
+components = ["rust-src"]

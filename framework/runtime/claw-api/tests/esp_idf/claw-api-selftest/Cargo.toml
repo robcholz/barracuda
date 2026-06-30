@@ -1,0 +1,24 @@
+[package]
+name = "claw-api-selftest"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Device-only C-ABI scenario runner that drives claw-api's ClawApi over claw-sys's EspIdfHttp against a live LLM from an ESP-IDF Unity test app"
+publish = false
+
+[lib]
+# Built into libclaw_api_selftest.a and linked into the ESP-IDF test app as an
+# imported static component (see ../main/CMakeLists.txt). Gated
+# `#![cfg(target_os = "espidf")]`, so a host `cargo build --workspace` produces
+# an empty archive.
+name = "claw_api_selftest"
+crate-type = ["staticlib"]
+
+[dependencies]
+claw-api = { path = "../../../" }
+claw-interface = { path = "../../../../claw-interface" }
+# Provides the concrete `EspIdfHttp` (ClawHttp over esp_http_client) the API runs on.
+claw-sys = { path = "../../../../claw-sys" }
+serde_json = "1"
+# Async executor for the async chat test. See claw-sys-selftest for rationale.
+edge-executor = { version = "0.4.1", default-features = true }

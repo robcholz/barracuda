@@ -1,0 +1,17 @@
+# Watchdog off: TLS handshakes and the cooperative async executor can hold the
+# main task for a while during a single Unity case.
+# CONFIG_ESP_TASK_WDT_INIT is not set
+
+# Custom partition table with a large factory app (Rust std + TLS + Wi-Fi).
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The partition table needs >2MB; use 4MB flash (matches most esp32s3 devkits).
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# The Rust esp_http_client driver attaches the cert bundle for HTTPS.
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+
+# Unity cases (sync TLS POST, three concurrent async TLS POSTs) run on the main
+# task; give it headroom for the deepest mbedTLS call.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=24576

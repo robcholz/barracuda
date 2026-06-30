@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = [
+    "cli",
+    "claw-agent",
+    "claw-interface",
+    "claw-utils",
+    "claw-api",
+    "claw-sys",
+    "claw-log",
+    "claw-skill",
+    "claw-core",
+    "claw-capability",
+    "claw-cabi",
+    "claw-memory",
+    "claw-context",
+    "claw-permission",
+    "claw-tool",
+    "claw-sandbox",
+    # Device-only (`#![cfg(target_os = "espidf")]`) staticlib crates that back
+    # the on-device ESP-IDF integration test apps. They build to empty archives
+    # on the host, so they are harmless members of `cargo build --workspace`.
+    "claw-sys/tests/esp_idf/claw-sys-selftest",
+    "claw-api/tests/esp_idf/claw-api-selftest",
+]
+
+# Device images are built with the release profile (panic = abort, since the
+# xtensa-esp32s3-espidf image does not unwind). The dev/test profiles keep the
+# default unwind so the std crates can be unit-tested on the host.
+#
+# LTO is disabled on purpose: with `lto = true` rustc emits an archive of LLVM
+# bitcode objects, which the GCC-based ESP-IDF xtensa linker cannot consume. A
+# non-LTO staticlib carries real object code that links cleanly into the image.
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = false

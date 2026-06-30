@@ -1,0 +1,29 @@
+[package]
+name = "claw-capability"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Capability adapter: maps capabilities to internal tool and channel roles plus an orthogonal lifecycle"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The tool framework. A capability with the Tool role *is* a `claw_tool::Tool`;
+# this crate adapts/classifies, it does not re-implement tool dispatch, schema
+# rendering, or visibility (those live in claw-tool / claw-core).
+claw-tool = { path = "../claw-tool" }
+thiserror = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

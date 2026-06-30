@@ -1,0 +1,13 @@
+# Shared Ruff config for all Python living under the Rust crates' uv projects
+# (e.g. claw-log/scripts/). This is the single source of truth: each crate's uv
+# project inherits it because Ruff walks up the filesystem for config, and the
+# per-crate pyproject.toml intentionally has NO [tool.ruff] section. Keep it that
+# way so formatting stays identical across every crate.
+
+target-version = "py311"
+line-length = 88
+
+[format]
+# Match the repo-wide `double-quote-string-fixer` pre-commit hook (single quotes
+# for code; docstrings stay triple-double per PEP 257).
+quote-style = "single"

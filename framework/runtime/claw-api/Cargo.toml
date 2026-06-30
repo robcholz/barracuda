@@ -1,0 +1,38 @@
+[package]
+name = "claw-api"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "OpenAI-/Anthropic-compatible LLM client chat + media"
+
+[lib]
+name = "claw_api"
+crate-type = ["rlib"]
+
+[dependencies]
+claw-interface = { path = "../claw-interface" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
+# Real HTTP transport (claw-interface `RealHttp`) for the `#[ignore]`d live
+# mock-endpoint integration tests (host-only; never in the firmware lib build).
+claw-interface = { path = "../claw-interface", features = ["realhttp"] }
+# Ergonomic error handling for doc-tests and the chat example (host-only).
+anyhow = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "forbid"
+expect_used = "forbid"
+indexing_slicing = "forbid"
+panic = "forbid"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "forbid"

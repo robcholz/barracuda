@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "kind": "conversation",
+  "description": "The user-facing root agent for a session. Talks to the user and delegates work to specialist subagents.",
+  "spawn": {
+    "enabled": true,
+    "allowed_kinds": ["*"]
+  },
+  "runtime": {
+    "retries": 2,
+    "tool_block_retries": 1
+  }
+}

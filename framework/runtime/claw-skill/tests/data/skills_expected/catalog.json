@@ -1,0 +1,14 @@
+[
+  {
+    "description": "Turn a board light on or off, set LED strip color or brightness, and control GPIO lights. Requires board_hardware_info skill.",
+    "id": "light_switch"
+  },
+  {
+    "description": "Add timer-based scheduled tasks, periodic reminders, scheduled agent wake-ups, fixed IM messages, or scheduled Lua script runs. Prefer to use this skill rather than calling scheduler_add and add_router_rule directly.",
+    "id": "scheduled_task"
+  },
+  {
+    "description": "How to answer current weather, temperature, and forecast queries through direct web search capabilities.",
+    "id": "weather_search"
+  }
+]

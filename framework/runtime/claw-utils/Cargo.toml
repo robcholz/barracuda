@@ -1,0 +1,20 @@
+[package]
+name = "claw-utils"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Shared utilities: log-safe text truncation and the prefixed-id newtype macro"
+
+[lib]
+name = "claw_utils"
+crate-type = ["rlib"]
+
+[dependencies]
+thiserror = "2"
+# The `SharedTaskPool` spawns workers through the `ClawThread` injection seam.
+# Only the trait/types are used here; the `StdThread` impl is host-only (dev).
+claw-interface = { path = "../claw-interface" }
+
+[dev-dependencies]
+# `StdThread` (host std::thread spawner) for the pool doctest/tests.
+claw-interface = { path = "../claw-interface", features = ["stdthread"] }
