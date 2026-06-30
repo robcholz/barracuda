@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "src/claw_event.c"
+        "src/claw_event_router.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        runtime
+        claw_utils
+        json
+        freertos
+        console
+)
