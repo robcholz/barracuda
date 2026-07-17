@@ -2,6 +2,7 @@
   "kind": "conversation",
   "description": "The user-facing root agent for a session. Talks to the user and delegates work to specialist subagents.",
   "spawn": {
+    "root": true,
     "enabled": true,
     "allowed_kinds": ["worker"]
   },

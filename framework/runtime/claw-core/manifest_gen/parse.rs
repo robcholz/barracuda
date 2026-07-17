@@ -16,6 +16,7 @@ use crate::model::{AgentJson, ToolsJson};
 pub(crate) struct ParsedKind {
     pub(crate) kind: String,
     pub(crate) description: String,
+    pub(crate) root: bool,
     pub(crate) spawn_enabled: bool,
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
@@ -31,6 +32,7 @@ pub(crate) struct ParsedKind {
 pub(crate) struct ParsedManifest {
     pub(crate) kind: String,
     pub(crate) description: String,
+    pub(crate) root: bool,
     pub(crate) spawn_enabled: bool,
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
@@ -154,6 +156,7 @@ pub(crate) fn parse_kind(dir: &Path) -> Result<ParsedKind> {
     Ok(ParsedKind {
         kind: agent.kind,
         description: agent.description,
+        root: agent.spawn.root,
         spawn_enabled: agent.spawn.enabled,
         allowed_kinds: agent.spawn.allowed_kinds,
         retries: agent.runtime.retries,

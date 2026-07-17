@@ -68,6 +68,7 @@ impl PendingDeliveries {
 #[cfg(test)]
 mod tests {
     use super::PendingDeliveries;
+    use crate::config::catalog as agent_catalog;
     use crate::multiagent::model::SubagentTimeout;
     use crate::multiagent::MultiagentState;
     use crate::protocol::{AgentId, AgentKind};
@@ -81,7 +82,7 @@ mod tests {
         let root = AgentId(1);
         let child = AgentId(2);
         let mut state = MultiagentState::default();
-        assert!(state.insert_root(root, AgentKind::from_static("conversation")));
+        assert!(state.insert_root(root, agent_catalog::root_kind().clone()));
         assert!(state.insert_child(
             root,
             child,
@@ -112,7 +113,7 @@ mod tests {
         let parent = AgentId(2);
         let child = AgentId(3);
         let mut state = MultiagentState::default();
-        assert!(state.insert_root(root, AgentKind::from_static("conversation")));
+        assert!(state.insert_root(root, agent_catalog::root_kind().clone()));
         assert!(state.insert_child(
             root,
             parent,

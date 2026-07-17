@@ -65,8 +65,6 @@ pub(crate) use self::state::{MultiagentState, MultiagentWork};
 use self::timeouts::AgentTimeouts;
 use self::tool_port::MultiagentBridge;
 
-pub(in crate::multiagent) const ROOT_AGENT_KIND: &str = "conversation";
-
 /// Graph placement translated into a generic single-agent environment during
 /// construction. This orchestration type never enters `crate::agent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

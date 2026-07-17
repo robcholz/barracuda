@@ -3,9 +3,10 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
 use crate::agent::{AgentCommand, AgentCommandError, FsAgentCreateError};
-use crate::protocol::{AgentId, AgentKind, Message, SessionPersistence};
+use crate::config::catalog as agent_catalog;
+use crate::protocol::{AgentId, Message, SessionPersistence};
 
-use super::{AgentPlacement, MultiagentRuntime, ROOT_AGENT_KIND};
+use super::{AgentPlacement, MultiagentRuntime};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MultiagentDeliverError {
@@ -49,7 +50,7 @@ where
             }
             None => {
                 let id = self.agent_id_allocator.next();
-                let kind = AgentKind::from_static(ROOT_AGENT_KIND);
+                let kind = agent_catalog::root_kind().clone();
                 self.build_agent(
                     id,
                     &kind,

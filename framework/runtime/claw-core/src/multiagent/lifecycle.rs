@@ -401,14 +401,12 @@ mod tests {
     use claw_tool::ToolRegistry;
 
     use crate::agent::{FsAgentFactory, TickOutcome};
-    use crate::config::ClawApiManager;
+    use crate::config::{catalog as agent_catalog, ClawApiManager};
     use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
     use super::super::model::{SubagentTimeout, TranscriptText};
     use super::super::timeouts::ExpiredTimeout;
-    use super::super::{
-        AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState, ROOT_AGENT_KIND,
-    };
+    use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
 
     type TestInstance = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
 
@@ -437,7 +435,7 @@ mod tests {
         assert!(instance
             .state
             .get_mut()
-            .insert_root(root, AgentKind::from_static(ROOT_AGENT_KIND)));
+            .insert_root(root, agent_catalog::root_kind().clone()));
         (instance, root)
     }
 
@@ -623,7 +621,7 @@ mod tests {
     fn completed_background_child_remains_inspectable_until_root_consumes_its_result() {
         let (mut instance, root) = instance_with_root();
         let child = AgentId(2);
-        let root_kind = AgentKind::from_static(ROOT_AGENT_KIND);
+        let root_kind = agent_catalog::root_kind().clone();
         let worker = AgentKind::from_static("worker");
         instance
             .build_agent(

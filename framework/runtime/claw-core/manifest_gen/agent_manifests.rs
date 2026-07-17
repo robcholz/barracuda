@@ -36,8 +36,9 @@ const SHARED_DIR: &str = "common";
 /// # Errors
 ///
 /// Returns an error if the resources directory cannot be read, a manifest is
-/// malformed/invalid (via [`parse_kind`]), no kinds are found, or the output
-/// file cannot be written — any of which fails the build.
+/// malformed/invalid (via [`parse_kind`]), no kinds are found, the catalog does
+/// not declare exactly one root, or the output file cannot be written — any of
+/// which fails the build.
 pub(crate) fn generate(manifest_dir: &Path, out_dir: &Path) -> Result<()> {
     let agents_dir = manifest_dir.join("resources/agents");
     // Re-run when a kind is added or removed.
@@ -62,8 +63,9 @@ pub(crate) fn generate(manifest_dir: &Path, out_dir: &Path) -> Result<()> {
     if kinds.is_empty() {
         bail!("no agent kinds found under {}", agents_dir.display());
     }
+    let root_kind = unique_root_kind(&kinds, &agents_dir)?;
 
-    let generated = codegen::render(&kinds);
+    let generated = codegen::render(&kinds, root_kind);
     let out_path = out_dir.join(OUTPUT_FILE);
     fs::write(&out_path, generated).with_context(|| format!("writing {}", out_path.display()))?;
 
@@ -116,6 +118,7 @@ fn inherit_base(kind: ParsedKind, common: &CommonBase) -> ParsedManifest {
     ParsedManifest {
         kind: kind.kind,
         description: kind.description,
+        root: kind.root,
         spawn_enabled: kind.spawn_enabled,
         allowed_kinds: kind.allowed_kinds,
         retries: kind.retries,
@@ -123,6 +126,30 @@ fn inherit_base(kind: ParsedKind, common: &CommonBase) -> ParsedManifest {
         tool_blacklist: merge_unique(&common.tool_blacklist, &kind.tool_blacklist),
         instructions_path: kind.instructions_path,
         common_instructions_path: common.instructions_path.clone(),
+    }
+}
+
+/// Resolve the sole root kind while the manifests are still build-time data.
+/// Firmware generation fails rather than leaving root selection ambiguous at
+/// runtime.
+fn unique_root_kind<'a>(kinds: &'a [ParsedManifest], agents_dir: &Path) -> Result<&'a str> {
+    let roots = kinds
+        .iter()
+        .filter(|kind| kind.root)
+        .map(|kind| kind.kind.as_str())
+        .collect::<Vec<_>>();
+    match roots.as_slice() {
+        [root] => Ok(root),
+        [] => bail!(
+            "{}: exactly one agent kind must set spawn.root to true; found none",
+            agents_dir.display()
+        ),
+        _ => bail!(
+            "{}: exactly one agent kind must set spawn.root to true; found {}: {}",
+            agents_dir.display(),
+            roots.len(),
+            roots.join(", ")
+        ),
     }
 }
 

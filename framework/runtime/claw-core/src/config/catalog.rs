@@ -81,4 +81,19 @@ pub(crate) fn entries() -> &'static [AgentCatalogEntry] {
     ENTRIES
 }
 
+/// The sole root kind selected and verified by the manifest generator.
+pub(crate) fn root_kind() -> &'static AgentKind {
+    &ROOT_KIND
+}
+
 include!(concat!(env!("OUT_DIR"), "/manifests.rs"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn baked_root_kind_is_a_catalog_entry() {
+        assert!(find(root_kind()).is_some());
+    }
+}

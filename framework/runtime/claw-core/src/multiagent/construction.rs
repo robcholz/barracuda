@@ -186,13 +186,12 @@ mod tests {
     use futures_lite::future::block_on;
 
     use crate::agent::FsAgentFactory;
-    use crate::config::ClawApiManager;
+    use crate::config::{catalog as agent_catalog, ClawApiManager};
     use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
     use super::super::model::SubagentTimeout;
     use super::super::{
         AgentIdAllocator, AgentPlacement, MultiagentRestore, MultiagentRuntime, MultiagentState,
-        ROOT_AGENT_KIND,
     };
 
     type TestRuntime = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
@@ -223,7 +222,7 @@ mod tests {
         runtime
             .build_agent(
                 root,
-                &AgentKind::from_static(ROOT_AGENT_KIND),
+                agent_catalog::root_kind(),
                 Message::text("root"),
                 AgentPlacement::Root {
                     session,
@@ -299,7 +298,7 @@ mod tests {
         );
         let root = AgentId::new(1);
         let child = AgentId::new(2);
-        let root_kind = AgentKind::from_static(ROOT_AGENT_KIND);
+        let root_kind = agent_catalog::root_kind().clone();
         let child_kind = AgentKind::from_static("worker");
         runtime
             .build_agent(

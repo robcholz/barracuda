@@ -107,12 +107,10 @@ mod tests {
     use claw_tool::ToolRegistry;
 
     use crate::agent::{AgentCommandError, ApprovalDecision, FsAgentFactory};
-    use crate::config::ClawApiManager;
-    use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
+    use crate::config::{catalog as agent_catalog, ClawApiManager};
+    use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
 
-    use super::super::{
-        AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState, ROOT_AGENT_KIND,
-    };
+    use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
     use super::ApprovalResolutionError;
 
     type TestInstance = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
@@ -162,7 +160,7 @@ mod tests {
     fn rejected_agent_command_does_not_consume_active_approval() {
         let agent = AgentId(7);
         let mut instance = instance();
-        let kind = AgentKind::from_static(ROOT_AGENT_KIND);
+        let kind = agent_catalog::root_kind().clone();
         instance
             .build_agent(
                 agent,

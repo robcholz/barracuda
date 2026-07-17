@@ -11,7 +11,7 @@ pub(crate) struct AgentJson {
     pub(crate) kind: String,
     /// Human/model-facing summary of the kind's purpose.
     pub(crate) description: String,
-    /// Whether this kind may spawn subagents.
+    /// Root selection and subagent-spawn policy.
     pub(crate) spawn: SpawnJson,
     /// Per-agent runtime tuning.
     pub(crate) runtime: RuntimeJson,
@@ -20,6 +20,8 @@ pub(crate) struct AgentJson {
 /// The `spawn` block of `agent.json`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct SpawnJson {
+    /// Whether this kind is the one session root baked into the firmware.
+    pub(crate) root: bool,
     /// Gates the `subagent_spawn` tool.
     pub(crate) enabled: bool,
     /// Runtime-enforced allowlist of kinds this agent may spawn

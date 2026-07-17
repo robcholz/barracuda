@@ -450,11 +450,11 @@ mod tests {
     use super::super::model::{SubagentResult, SubagentTimeout};
     use super::super::{
         AgentIdAllocator, AgentPlacement, DriveControl, MultiagentRuntime, MultiagentState,
-        MultiagentWork, ROOT_AGENT_KIND,
+        MultiagentWork,
     };
     use super::DriveOutput;
     use crate::agent::FsAgentFactory;
-    use crate::config::ClawApiManager;
+    use crate::config::{catalog as agent_catalog, ClawApiManager};
     use crate::protocol::{
         AgentId, AgentKind, EventSink, Message, SessionId, SessionPersistence, TurnOrigin,
     };
@@ -544,7 +544,7 @@ mod tests {
         );
         let root = AgentId::new(1);
         let child = AgentId::new(2);
-        let root_kind = AgentKind::from_static(ROOT_AGENT_KIND);
+        let root_kind = agent_catalog::root_kind().clone();
         let child_kind = AgentKind::from_static("worker");
         runtime
             .build_agent(

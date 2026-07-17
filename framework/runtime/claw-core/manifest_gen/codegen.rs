@@ -13,8 +13,8 @@ use quote::quote;
 use crate::parse::ParsedManifest;
 
 /// Render the full generated module body for `kinds` (assumed already sorted for
-/// deterministic output): a single catalog array.
-pub(crate) fn render(kinds: &[ParsedManifest]) -> String {
+/// deterministic output): the catalog array and its verified root identity.
+pub(crate) fn render(kinds: &[ParsedManifest], root_kind: &str) -> String {
     let entries = kinds.iter().map(render_entry);
 
     let body = quote! {
@@ -22,6 +22,9 @@ pub(crate) fn render(kinds: &[ParsedManifest]) -> String {
         const ENTRIES: &[AgentCatalogEntry] = &[
             #(#entries),*
         ];
+
+        #[doc = "The sole firmware-baked root agent kind."]
+        static ROOT_KIND: AgentKind = AgentKind::from_static(#root_kind);
     };
 
     format!(
