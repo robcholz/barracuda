@@ -4,6 +4,17 @@
 //!
 //! Layer 1: [`Orchestrator`]
 
+/// Embed a prompt relative to `claw-core/resources/prompt/`.
+macro_rules! prompt {
+    ($path:literal $(,)?) => {
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/prompt/",
+            $path
+        ))
+    };
+}
+
 mod agent;
 mod config;
 mod memory;

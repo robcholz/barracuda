@@ -3,10 +3,10 @@
 use claw_context::{Block, BlockKind};
 use serde::{Deserialize, Serialize};
 
-const LOW_PROMPT: &str = include_str!("../../resources/prompt/effort/low.md");
-const MEDIUM_PROMPT: &str = include_str!("../../resources/prompt/effort/medium.md");
-const HIGH_PROMPT: &str = include_str!("../../resources/prompt/effort/high.md");
-const ULTRA_PROMPT: &str = include_str!("../../resources/prompt/effort/ultra.md");
+const LOW_PROMPT: &str = prompt!("effort/low.md");
+const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
+const HIGH_PROMPT: &str = prompt!("effort/high.md");
+const ULTRA_PROMPT: &str = prompt!("effort/ultra.md");
 
 /// How deliberately a session asks its root agent to orchestrate work.
 ///

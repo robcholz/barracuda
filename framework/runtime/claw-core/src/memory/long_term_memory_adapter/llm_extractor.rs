@@ -26,22 +26,7 @@ use super::extraction::{
 
 /// System prompt steering the extraction. Asks the model to reconcile memory
 /// against the conversation and reply with ONLY a JSON array of ops.
-const EXTRACT_SYSTEM_PROMPT: &str = "You maintain an AI assistant's long-term memory. \
-You are given the CURRENT MEMORY (each fact prefixed with its id) and a CONVERSATION \
-transcript. Decide what durable memory should change. Durable facts worth keeping are: \
-concrete user/device facts, standing factual preferences, important commitments, and \
-stable operational context. Do NOT store assistant persona, assistant identity, user \
-profile document edits, tone/style instructions, or requests to change long-term \
-behavior; those belong in profile documents. Ignore transient chit-chat and one-off \
-requests. Write each fact concisely in the third person. \
-Respond with ONLY a JSON array of operation objects. Each object has an \"op\" field: \
-{\"op\":\"add\", \"content\": string, \"tags\": [string], \"keywords\": [string]} to store a NEW fact; \
-{\"op\":\"replace\", \"id\": string, \"content\": string, \"tags\": [string], \"keywords\": [string]} \
-to update an existing fact the conversation changed; \
-{\"op\":\"forget\", \"id\": string} to remove a fact the user retracted or that is now false. \
-For \"replace\" and \"forget\", \"id\" MUST be one of the ids shown in CURRENT MEMORY. \
-Use short topic tags (e.g. \"preference\", \"device\", \"fact\"). Do not re-add facts \
-already present unchanged. If nothing should change, respond with [].";
+const EXTRACT_SYSTEM_PROMPT: &str = prompt!("memory/long_term_extraction_system.md");
 
 /// Header prefacing the current-memory listing handed to the model.
 const EXTRACT_MEMORY_HEADER: &str = "CURRENT MEMORY:";

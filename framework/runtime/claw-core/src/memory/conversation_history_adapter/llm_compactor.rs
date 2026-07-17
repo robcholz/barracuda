@@ -12,12 +12,8 @@ use tracing::Instrument as _;
 use crate::config::{ApiUsage, ClawApiManager};
 use crate::memory::async_llm::SharedAsyncLlm;
 
-const SUMMARY_SYSTEM_PROMPT: &str = "You compress conversation history. Produce a \
-concise, faithful summary of the conversation so far, preserving decisions, \
-facts, user intent, open questions, and any tool results needed to keep going. \
-Do not invent details. Output plain text only.";
-
-const SUMMARY_USER_PREFIX: &str = "Summarize the following conversation transcript:";
+const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_system.md");
+const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
 
 /// A [`Compactor`] that summarizes an aged history window via the LLM client.
 pub(crate) struct LlmCompactor<H: ClawHttp, Timer: ClawTimer> {
