@@ -11,7 +11,8 @@ use claw_tool::{
 };
 use serde_json::Value;
 
-/// Build the writable profile tools.
+/// Build the profile tools. Agent manifests may blacklist individual mutation
+/// tools while retaining `profile_read`.
 pub(crate) fn profile_tools<F: ClawFs + 'static>(store: ProfileStore<F>) -> ToolGroup {
     ToolGroup::new(
         "profile",

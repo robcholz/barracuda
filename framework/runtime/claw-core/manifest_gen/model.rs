@@ -36,9 +36,10 @@ pub(crate) struct RuntimeJson {
     pub(crate) tool_block_retries: u32,
 }
 
-/// `tools/tools.json` — the tool groups this kind may use.
+/// `tools/tools.json` — exact tool-group ids and tool names denied to this kind.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ToolsJson {
-    /// Tool group ids allowed for this agent kind.
-    pub(crate) tool_groups: Vec<String>,
+    /// Exact tool-group ids or tool names excluded from this agent kind.
+    pub(crate) tool_blacklist: Vec<String>,
 }

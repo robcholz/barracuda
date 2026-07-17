@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "plan_enter",
+    "description": "Enter Plan Mode before investigating and designing a plan. This changes the agent's planning prompt; it does not change ordinary tool availability or permissions.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

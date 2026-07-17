@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -251,6 +251,8 @@ pub enum ToolRegistryError {
     NotFound(ToolName),
     #[error("invalid tool: {0}")]
     InvalidTool(ToolName),
+    #[error("tool group and tool names must be distinct: {0}")]
+    AmbiguousName(String),
     #[error("invalid tool group: {0}")]
     InvalidGroup(ToolGroupId),
     #[error(transparent)]
@@ -280,12 +282,19 @@ impl ToolRegistry {
         if inner.groups.contains_key(&group.id) {
             return Err(ToolRegistryError::GroupAlreadyExists(group.id));
         }
+        if inner.tools.contains_key(&group.id) {
+            return Err(ToolRegistryError::AmbiguousName(group.id));
+        }
+        let mut names = HashSet::with_capacity(group.tools.len());
         for tool in &group.tools {
             let name = tool.name();
             if name.is_empty() {
                 return Err(ToolRegistryError::InvalidTool(name.to_owned()));
             }
-            if inner.tools.contains_key(name) {
+            if inner.groups.contains_key(name) || name == group.id.as_str() {
+                return Err(ToolRegistryError::AmbiguousName(name.to_owned()));
+            }
+            if inner.tools.contains_key(name) || !names.insert(name) {
                 return Err(ToolRegistryError::AlreadyExists(name.to_owned()));
             }
         }
@@ -337,11 +346,24 @@ impl ToolRegistry {
     }
 
     pub fn tool_set(self: &Arc<Self>) -> ToolSet {
-        ToolSet::new(self.clone())
+        ToolSet::new(self.clone(), &[])
+    }
+
+    /// Create one per-agent tool projection governed by a firmware-baked
+    /// blacklist. Entries match exact tool-group ids or exact tool names.
+    pub fn tool_set_with_blacklist(
+        self: &Arc<Self>,
+        blacklist: &'static [&'static str],
+    ) -> ToolSet {
+        ToolSet::new(self.clone(), blacklist)
     }
 
     pub fn tool_version(&self) -> ToolRegistryVersion {
         self.read_state().runtime_version
+    }
+
+    pub(super) fn contains_group(&self, id: &str) -> bool {
+        self.read_state().groups.contains_key(id)
     }
 
     pub(super) fn contains_tool(&self, name: &str) -> bool {

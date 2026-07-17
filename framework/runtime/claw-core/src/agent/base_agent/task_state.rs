@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::tools::ControlSignal;
+use crate::agent::tools::{ControlSignal, PlanModeExitOutcome};
 use crate::protocol::Message;
 
 use super::pending_tool_round::PendingToolRound;
@@ -90,6 +90,13 @@ pub(super) enum TaskAction {
     },
     EndConversation {
         final_message: String,
+    },
+    EnterPlanMode,
+    RequestClarification {
+        question: String,
+    },
+    ExitPlanMode {
+        outcome: PlanModeExitOutcome,
     },
 }
 
@@ -191,6 +198,17 @@ impl TaskState {
                 self.phase = TaskPhase::Idle;
                 TaskAction::EndConversation { final_message }
             }
+            Inbound::Control(ControlSignal::EnterPlanMode) => TaskAction::EnterPlanMode,
+            Inbound::Control(ControlSignal::RequestClarification { question }) => {
+                self.phase = TaskPhase::Idle;
+                TaskAction::RequestClarification { question }
+            }
+            Inbound::Control(ControlSignal::ExitPlanMode { outcome }) => {
+                if matches!(&outcome, PlanModeExitOutcome::Cancel { .. }) {
+                    self.phase = TaskPhase::Idle;
+                }
+                TaskAction::ExitPlanMode { outcome }
+            }
         };
         Ok(Some(action))
     }
@@ -241,7 +259,19 @@ fn transition(phase: TaskPhaseView, inbound: &Inbound) -> Result<TaskPhaseView, 
             TaskPhaseView::Idle => Ok(TaskPhaseView::Running),
             TaskPhaseView::Running | TaskPhaseView::AwaitingApproval => Ok(phase),
         },
-        Inbound::Control(ControlSignal::EndConversation { .. }) => Ok(TaskPhaseView::Idle),
+        Inbound::Control(
+            ControlSignal::EndConversation { .. }
+            | ControlSignal::RequestClarification { .. }
+            | ControlSignal::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Cancel { .. },
+            },
+        ) => Ok(TaskPhaseView::Idle),
+        Inbound::Control(
+            ControlSignal::EnterPlanMode
+            | ControlSignal::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Execute,
+            },
+        ) => Ok(phase),
     }
 }
 
@@ -387,5 +417,72 @@ mod tests {
                 .is_some_and(|approval| approval.signature == "sig-a")
         ));
         assert!(task.is_running());
+    }
+
+    #[test]
+    fn clarification_ends_one_task_and_the_reply_starts_the_next() {
+        let mut task = TaskState::new();
+        task.enqueue_task_input(Message::text("plan this"));
+        let _ = task.pop_action().expect("task starts");
+
+        task.enqueue_control(ControlSignal::EnterPlanMode);
+        assert!(matches!(
+            task.pop_action().expect("enter signal is valid"),
+            Some(TaskAction::EnterPlanMode)
+        ));
+        assert!(task.is_running());
+
+        task.enqueue_control(ControlSignal::RequestClarification {
+            question: "Which board?".to_owned(),
+        });
+        assert!(matches!(
+            task.pop_action().expect("clarification signal is valid"),
+            Some(TaskAction::RequestClarification { question }) if question == "Which board?"
+        ));
+        assert!(!task.is_running());
+
+        task.enqueue_task_input(Message::text("ESP32-S3"));
+        assert!(matches!(
+            task.pop_action().expect("reply starts a normal task"),
+            Some(TaskAction::TaskInput {
+                starts_task: true,
+                message,
+            }) if message.as_str() == "ESP32-S3"
+        ));
+    }
+
+    #[test]
+    fn plan_mode_exit_outcome_controls_the_task_boundary() {
+        let mut execute = TaskState::new();
+        execute.enqueue_task_input(Message::text("plan this"));
+        let _ = execute.pop_action().expect("task starts");
+        execute.enqueue_control(ControlSignal::ExitPlanMode {
+            outcome: PlanModeExitOutcome::Execute,
+        });
+
+        assert!(matches!(
+            execute.pop_action().expect("execute exit is valid"),
+            Some(TaskAction::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Execute,
+            })
+        ));
+        assert!(execute.is_running());
+
+        let mut cancel = TaskState::new();
+        cancel.enqueue_task_input(Message::text("plan this"));
+        let _ = cancel.pop_action().expect("task starts");
+        cancel.enqueue_control(ControlSignal::ExitPlanMode {
+            outcome: PlanModeExitOutcome::Cancel {
+                message: "No changes made.".to_owned(),
+            },
+        });
+
+        assert!(matches!(
+            cancel.pop_action().expect("cancel exit is valid"),
+            Some(TaskAction::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Cancel { message },
+            }) if message == "No changes made."
+        ));
+        assert!(!cancel.is_running());
     }
 }

@@ -533,7 +533,7 @@ test combining manifest projection, a hidden registry group, discovery, and
 `tool_load`.
 
 Exit condition: when the roadmap's agent/tool event-bus work lands, add
-black-box tests proving that baked `tool_groups` filters hidden registry groups
+black-box tests proving that baked `tool_blacklist` filters hidden registry groups
 before discovery, loading, and invocation. The tests should use product-visible
 behavior rather than opening new internal APIs solely for test access.
 

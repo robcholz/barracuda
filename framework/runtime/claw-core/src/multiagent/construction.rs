@@ -8,9 +8,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{
-    AgentEnvironment, FsAgentCreateError, FsAgentFactory, ProfileAccess, TranscriptTarget,
-};
+use crate::agent::{AgentEnvironment, FsAgentCreateError, FsAgentFactory, TranscriptTarget};
 use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
 use super::persistence::{MultiagentRestore, MultiagentRestoreError, RestoredAgentSlot};
@@ -154,24 +152,18 @@ where
         let extension_tools = tools::tool_group(id, kind, Arc::clone(&self.multiagent))
             .into_iter()
             .collect();
-        let (transcript, profile) = match placement {
+        let transcript = match placement {
             AgentPlacement::Root {
                 session,
                 persistence,
-            } => {
-                let transcript = match persistence {
-                    SessionPersistence::Persistent => TranscriptTarget::Persistent(session.0),
-                    SessionPersistence::Ephemeral => TranscriptTarget::InMemory(session.0),
-                };
-                (transcript, ProfileAccess::Writable)
-            }
-            AgentPlacement::Child(child) => {
-                (TranscriptTarget::InMemory(child.0), ProfileAccess::ReadOnly)
-            }
+            } => match persistence {
+                SessionPersistence::Persistent => TranscriptTarget::Persistent(session.0),
+                SessionPersistence::Ephemeral => TranscriptTarget::InMemory(session.0),
+            },
+            AgentPlacement::Child(child) => TranscriptTarget::InMemory(child.0),
         };
         let environment = AgentEnvironment::new(
             transcript,
-            profile,
             Arc::clone(&self.permission_policy),
             extension_tools,
             inherited_context,
@@ -204,6 +196,85 @@ mod tests {
     };
 
     type TestRuntime = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
+
+    #[test]
+    fn baked_blacklist_projects_worker_plan_and_profile_tools() {
+        MemFs::new();
+        let session = SessionId::new(1);
+        let factory = Rc::new(
+            FsAgentFactory::new(
+                Arc::new(ToolRegistry::new()),
+                "/plan-mode-tools-test".to_owned(),
+                Vec::new(),
+                Arc::new(RwLock::new(ClawApiManager::new())),
+            )
+            .expect("test factory builds"),
+        );
+        let mut runtime = TestRuntime::new(
+            session,
+            factory,
+            AgentIdAllocator::new(),
+            Arc::new(AllowAll),
+            MultiagentState::default(),
+        );
+        let root = AgentId::new(1);
+        let child = AgentId::new(2);
+
+        runtime
+            .build_agent(
+                root,
+                &AgentKind::from_static(ROOT_AGENT_KIND),
+                Message::text("root"),
+                AgentPlacement::Root {
+                    session,
+                    persistence: SessionPersistence::Ephemeral,
+                },
+                Vec::new(),
+            )
+            .expect("root builds");
+        runtime
+            .build_agent(
+                child,
+                &AgentKind::from_static("worker"),
+                Message::text("child"),
+                AgentPlacement::Child(child),
+                Vec::new(),
+            )
+            .expect("child builds");
+
+        for name in ["plan_enter", "plan_exit", "plan_clarify"] {
+            assert!(runtime
+                .slots
+                .available_agent_mut(root)
+                .expect("root is available")
+                .exposes_tool_for_test(name));
+            assert!(!runtime
+                .slots
+                .available_agent_mut(child)
+                .expect("child is available")
+                .exposes_tool_for_test(name));
+        }
+
+        for id in [root, child] {
+            assert!(runtime
+                .slots
+                .available_agent_mut(id)
+                .expect("agent is available")
+                .exposes_tool_for_test("profile_read"));
+        }
+        for name in ["profile_replace", "profile_clear"] {
+            assert!(runtime
+                .slots
+                .available_agent_mut(root)
+                .expect("root is available")
+                .exposes_tool_for_test(name));
+            assert!(!runtime
+                .slots
+                .available_agent_mut(child)
+                .expect("child is available")
+                .exposes_tool_for_test(name));
+        }
+    }
 
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]

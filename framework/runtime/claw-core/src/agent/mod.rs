@@ -14,8 +14,7 @@ pub(crate) use base_agent::{
     AgentAbortHandle, AgentCommand, AgentCommandError, ApprovalDecision, BaseAgent, TickOutcome,
 };
 pub(crate) use factory::{
-    AgentEnvironment, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError, ProfileAccess,
-    TranscriptTarget,
+    AgentEnvironment, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError, TranscriptTarget,
 };
 pub(crate) use iteration_loop::{
     CompletedKind, InterruptionControl, IterationLoop, IterationLoopError, IterationOutcome,

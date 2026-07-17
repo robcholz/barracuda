@@ -1,0 +1,27 @@
+{
+  "type": "function",
+  "function": {
+    "name": "plan_exit",
+    "description": "Exit Plan Mode either to execute the approved plan or to cancel without execution.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": ["execute", "cancel"],
+          "description": "Use execute after approval, or cancel when the user abandons the plan."
+        },
+        "plan": {
+          "type": "string",
+          "description": "The complete approved plan. Required for execute and omitted for cancel."
+        },
+        "message": {
+          "type": "string",
+          "description": "Optional user-facing closing message for cancel."
+        }
+      },
+      "required": ["outcome"],
+      "additionalProperties": false
+    }
+  }
+}

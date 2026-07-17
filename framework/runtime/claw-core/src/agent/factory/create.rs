@@ -16,7 +16,7 @@ use crate::memory::{
 use crate::protocol::{AgentId, AgentKind, Message};
 
 use super::error::FsAgentCreateError;
-use super::{AgentEnvironment, FsAgentFactory, ProfileAccess};
+use super::{AgentEnvironment, FsAgentFactory};
 
 const COMPACTION_TRIGGER_TOKENS: usize = 6000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 2000;
@@ -30,9 +30,8 @@ impl<
 {
     /// Build one agent of `kind`, already tasked with `goal`.
     ///
-    /// Its owner supplies storage, profile access, inherited context, and any
-    /// extension tools through `environment`. The factory does not interpret
-    /// orchestration roles.
+    /// Its owner supplies storage, inherited context, and any extension tools
+    /// through `environment`. The factory does not interpret orchestration roles.
     ///
     /// # Errors
     ///
@@ -48,8 +47,9 @@ impl<
     ) -> Result<BaseAgent<Http, Timer>, FsAgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
-        // The config is pure data. Registry tools are projected here, then
-        // filtered by the manifest's tool-group allowlist before the agent sees them.
+        // The config is pure baked data. The per-kind blacklist stays attached
+        // to this ToolSet projection so registry refreshes and later local
+        // groups follow the same exact-name policy.
         let config = self.resolve_config(kind).map_err(|error| {
             match &error {
                 AgentConfigError::UnknownKind(_) => {
@@ -58,8 +58,7 @@ impl<
             }
             FsAgentCreateError::Config(error)
         })?;
-        let mut tools = self.tools.tool_set();
-        tools.retain_registry_groups(config.tool_groups);
+        let mut tools = self.tools.tool_set_with_blacklist(config.tool_blacklist);
         tools.add_group(discovery_tools(tools.discovery()))?;
         for extension in environment.extension_tools {
             tools.add_group(extension)?;
@@ -86,7 +85,7 @@ impl<
         let conversation_history_store = store.clone();
 
         // This is the single configured-agent assembly point. BaseAgent adds
-        // only its invariant built-ins (skill projection and conversation_end).
+        // its invariant built-ins; the baked blacklist projects them uniformly.
         let base_config = BaseAgentConfig {
             store,
             tools,
@@ -131,10 +130,7 @@ impl<
             return Err(FsAgentCreateError::Agent(error));
         }
 
-        let profile_adapter = ProfileContextAdapter::new(
-            self.profile.clone(),
-            environment.profile == ProfileAccess::Writable,
-        );
+        let profile_adapter = ProfileContextAdapter::new(self.profile.clone());
         if let Err(error) = agent.register_context_adapter(Box::new(profile_adapter)) {
             tracing::error!(
                 name: "context_adapter_attach_failed",

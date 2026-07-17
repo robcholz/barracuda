@@ -9,7 +9,7 @@ use claw_checkpoint::{
 use claw_permission::Action;
 use serde::{Deserialize, Serialize};
 
-use super::registry::{ToolGroup, ToolRegistry, ToolRegistryVersion};
+use super::registry::{ToolGroup, ToolProjection, ToolRegistry, ToolRegistryVersion};
 use super::tool::{Tool, ToolError, ToolInvocation, ToolOutput, ToolResult};
 
 pub type ToolName = String;
@@ -53,14 +53,20 @@ pub enum ToolSetError {
     InvalidGroup(String),
     #[error("invalid tool: {0}")]
     InvalidTool(ToolName),
+    #[error("tool group and tool names must be distinct: {0}")]
+    AmbiguousName(String),
 }
 
 pub struct ToolSet {
     registry: Arc<ToolRegistry>,
+    blacklist: &'static [&'static str],
+    local_group_ids: HashSet<String>,
+    local_tool_names: HashSet<ToolName>,
     tools: HashMap<ToolName, Tool>,
     state: DurableState<ToolSetState>,
     cache: ToolSetCache,
     discovery: Arc<Mutex<ToolDiscovery>>,
+    registry_projection_ready: bool,
     should_rebuild_temporary_tool: bool,
     should_rebuild_tool: bool,
 }
@@ -169,13 +175,17 @@ impl DurableStateCodec for ToolSetState {
 }
 
 impl ToolSet {
-    pub(super) fn new(registry: Arc<ToolRegistry>) -> Self {
+    pub(super) fn new(registry: Arc<ToolRegistry>, blacklist: &'static [&'static str]) -> Self {
         Self {
             registry,
+            blacklist,
+            local_group_ids: HashSet::new(),
+            local_tool_names: HashSet::new(),
             tools: HashMap::new(),
             state: DurableState::default(),
             cache: ToolSetCache::default(),
             discovery: Arc::new(Mutex::new(ToolDiscovery::default())),
+            registry_projection_ready: false,
             should_rebuild_temporary_tool: false,
             should_rebuild_tool: false,
         }
@@ -194,17 +204,41 @@ impl ToolSet {
         if group_id.is_empty() || tools.is_empty() {
             return Err(ToolSetError::InvalidGroup(group_id));
         }
+        if self.local_group_ids.contains(&group_id) || self.registry.contains_group(&group_id) {
+            return Err(ToolSetError::GroupAlreadyExists(group_id));
+        }
+        if self.local_tool_names.contains(&group_id) || self.registry.contains_tool(&group_id) {
+            return Err(ToolSetError::AmbiguousName(group_id));
+        }
+        let mut names = HashSet::with_capacity(tools.len());
         for tool in &tools {
             let name = tool.name();
             if name.is_empty() {
                 return Err(ToolSetError::InvalidTool(name.to_owned()));
             }
-            if self.state.get().tools.contains_key(name) || self.registry.contains_tool(name) {
+            if name == group_id.as_str()
+                || self.local_group_ids.contains(name)
+                || self.registry.contains_group(name)
+            {
+                return Err(ToolSetError::AmbiguousName(name.to_owned()));
+            }
+            if self.local_tool_names.contains(name)
+                || self.registry.contains_tool(name)
+                || !names.insert(name.to_owned())
+            {
                 return Err(ToolSetError::AlreadyExists(name.to_owned()));
             }
         }
+        self.local_group_ids.insert(group_id.clone());
+        self.local_tool_names.extend(names);
+
+        let group_blacklisted = self.blacklist.contains(&group_id.as_str());
+        let mut changed = false;
         for tool in tools {
             let name = tool.name().to_owned();
+            if group_blacklisted || self.blacklist.contains(&name.as_str()) {
+                continue;
+            }
             self.tools.insert(name.clone(), tool);
             self.state.get_mut().tools.insert(
                 name,
@@ -219,45 +253,12 @@ impl ToolSet {
                     default_visibility,
                 },
             );
-        }
-        self.should_rebuild_tool = true;
-        Ok(())
-    }
-
-    pub fn retain_registry_groups(&mut self, group_ids: &[impl AsRef<str>]) {
-        let registry_version = self.registry.tool_version();
-        if self.state.get().registry_version != registry_version {
-            self.rebuild();
-        }
-        let projection = self.registry.tool_projection();
-        let allowed_names = projection
-            .tools
-            .iter()
-            .filter(|entry| {
-                group_ids
-                    .iter()
-                    .any(|group_id| group_id.as_ref() == entry.group_id)
-            })
-            .map(|entry| entry.name.clone())
-            .collect::<HashSet<_>>();
-        let mut changed = false;
-        for (name, entry) in &mut self.state.get_mut().tools {
-            if entry.source != ToolSource::Registry {
-                continue;
-            }
-            let next = if allowed_names.contains(name) {
-                ToolState::Enabled
-            } else {
-                ToolState::Disabled
-            };
-            if entry.state != next {
-                entry.state = next;
-                changed = true;
-            }
+            changed = true;
         }
         if changed {
             self.should_rebuild_tool = true;
         }
+        Ok(())
     }
 
     pub fn enable_tool(&mut self, name: ToolName) -> Result<(), ToolSetError> {
@@ -413,10 +414,12 @@ impl ToolSet {
     pub fn restore_state(&mut self, state: PartStateSlice<'_>) -> Result<(), DurablePartError> {
         let mut restored = ToolSetState::decode_state(state)?;
         restored.tools.retain(|name, entry| {
-            entry.source == ToolSource::Registry || self.tools.contains_key(name)
+            !self.is_blacklisted(entry.group_id.as_deref().unwrap_or_default(), name)
+                && (entry.source == ToolSource::Registry || self.tools.contains_key(name))
         });
         self.state = DurableState::new(restored);
         self.cache = ToolSetCache::default();
+        self.registry_projection_ready = false;
         self.should_rebuild_temporary_tool = true;
         self.should_rebuild_tool = true;
         Ok(())
@@ -424,8 +427,9 @@ impl ToolSet {
 
     pub fn begin(&mut self) -> Result<ToolSetHandle<'_>, ToolSetError> {
         let registry_version = self.registry.tool_version();
-        if self.state.get().registry_version != registry_version {
-            self.rebuild();
+        if !self.registry_projection_ready || self.state.get().registry_version != registry_version
+        {
+            self.rebuild()?;
         } else if self.should_rebuild_tool {
             self.rebuild_cache();
         } else if self.should_rebuild_temporary_tool {
@@ -438,11 +442,13 @@ impl ToolSet {
         })
     }
 
-    fn rebuild(&mut self) {
+    fn rebuild(&mut self) -> Result<(), ToolSetError> {
         let projection = self.registry.tool_projection();
+        self.validate_registry_namespace(&projection)?;
         let registry_names = projection
             .tools
             .iter()
+            .filter(|entry| !self.is_blacklisted(&entry.group_id, &entry.name))
             .map(|entry| entry.name.clone())
             .collect::<HashSet<_>>();
 
@@ -461,6 +467,9 @@ impl ToolSet {
         });
 
         for entry in projection.tools {
+            if self.is_blacklisted(&entry.group_id, &entry.name) {
+                continue;
+            }
             let carried_state =
                 tool_states
                     .get(&entry.name)
@@ -500,6 +509,30 @@ impl ToolSet {
             });
         }
         self.rebuild_cache();
+        self.registry_projection_ready = true;
+        Ok(())
+    }
+
+    fn is_blacklisted(&self, group_id: &str, tool_name: &str) -> bool {
+        self.blacklist.contains(&group_id) || self.blacklist.contains(&tool_name)
+    }
+
+    fn validate_registry_namespace(&self, projection: &ToolProjection) -> Result<(), ToolSetError> {
+        for entry in &projection.tools {
+            if self.local_group_ids.contains(&entry.group_id) {
+                return Err(ToolSetError::GroupAlreadyExists(entry.group_id.clone()));
+            }
+            if self.local_tool_names.contains(&entry.name) {
+                return Err(ToolSetError::AlreadyExists(entry.name.clone()));
+            }
+            if self.local_group_ids.contains(&entry.name) {
+                return Err(ToolSetError::AmbiguousName(entry.name.clone()));
+            }
+            if self.local_tool_names.contains(&entry.group_id) {
+                return Err(ToolSetError::AmbiguousName(entry.group_id.clone()));
+            }
+        }
+        Ok(())
     }
 
     fn rebuild_cache(&mut self) {

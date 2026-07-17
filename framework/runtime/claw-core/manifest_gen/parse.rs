@@ -20,7 +20,7 @@ pub(crate) struct ParsedKind {
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
     pub(crate) tool_block_retries: u32,
-    pub(crate) tool_groups: Vec<String>,
+    pub(crate) tool_blacklist: Vec<String>,
     /// Absolute path to `instructions.md`, embedded via `include_str!` in the
     /// generated code so the bytes are not duplicated into the generated source.
     pub(crate) instructions_path: PathBuf,
@@ -35,7 +35,7 @@ pub(crate) struct ParsedManifest {
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
     pub(crate) tool_block_retries: u32,
-    pub(crate) tool_groups: Vec<String>,
+    pub(crate) tool_blacklist: Vec<String>,
     /// Absolute path to `instructions.md`, embedded via `include_str!` in the
     /// generated code so the bytes are not duplicated into the generated source.
     pub(crate) instructions_path: PathBuf,
@@ -65,10 +65,10 @@ const COMMON_ROOT_ENTRIES: &[&str] = &["tools", "instructions.md"];
 /// The sole file the `tools/` subdirectory may contain.
 const TOOLS_DIR_ENTRIES: &[&str] = &["tools.json"];
 
-/// The shared `common/` base inherited by every kind: default tool groups plus
-/// the instructions preamble prepended to each kind's prompt.
+/// The shared `common/` base inherited by every kind: default tool blacklist
+/// entries plus the instructions preamble prepended to each kind's prompt.
 pub(crate) struct CommonBase {
-    pub(crate) tool_groups: Vec<String>,
+    pub(crate) tool_blacklist: Vec<String>,
     /// Absolute path to `common/instructions.md`, the shared preamble.
     pub(crate) instructions_path: PathBuf,
 }
@@ -98,6 +98,7 @@ pub(crate) fn parse_common(common_dir: &Path) -> Result<CommonBase> {
     ensure_exact_entries(&common_dir.join("tools"), TOOLS_DIR_ENTRIES)?;
 
     let tools: ToolsJson = read_json(common_dir, "tools/tools.json")?;
+    validate_tool_blacklist(&tools.tool_blacklist, &common_dir.join("tools/tools.json"))?;
 
     let instructions_path = common_dir.join("instructions.md");
     if !instructions_path.is_file() {
@@ -108,7 +109,7 @@ pub(crate) fn parse_common(common_dir: &Path) -> Result<CommonBase> {
     }
 
     Ok(CommonBase {
-        tool_groups: tools.tool_groups,
+        tool_blacklist: tools.tool_blacklist,
         instructions_path,
     })
 }
@@ -140,6 +141,7 @@ pub(crate) fn parse_kind(dir: &Path) -> Result<ParsedKind> {
     }
 
     let tools: ToolsJson = read_json(dir, "tools/tools.json")?;
+    validate_tool_blacklist(&tools.tool_blacklist, &dir.join("tools/tools.json"))?;
 
     let instructions_path = dir.join("instructions.md");
     if !instructions_path.is_file() {
@@ -156,7 +158,7 @@ pub(crate) fn parse_kind(dir: &Path) -> Result<ParsedKind> {
         allowed_kinds: agent.spawn.allowed_kinds,
         retries: agent.runtime.retries,
         tool_block_retries: agent.runtime.tool_block_retries,
-        tool_groups: tools.tool_groups,
+        tool_blacklist: tools.tool_blacklist,
         instructions_path,
     })
 }
@@ -216,4 +218,25 @@ fn read_json<T: serde::de::DeserializeOwned>(dir: &Path, relative: &str) -> Resu
     let path = dir.join(relative);
     let text = fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+}
+
+/// Keep the manifest selector language deliberately exact: no trimming and no
+/// wildcard interpretation. This makes a typo fail the firmware build instead
+/// of silently broadening an agent's tool surface.
+fn validate_tool_blacklist(entries: &[String], path: &Path) -> Result<()> {
+    for entry in entries {
+        if entry.is_empty() || entry.trim() != entry {
+            bail!(
+                "{}: tool_blacklist entries must be non-empty exact names without surrounding whitespace",
+                path.display()
+            );
+        }
+        if entry.contains('*') {
+            bail!(
+                "{}: wildcard tool_blacklist entries are not supported: '{entry}'",
+                path.display()
+            );
+        }
+    }
+    Ok(())
 }

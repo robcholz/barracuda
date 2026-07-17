@@ -7,6 +7,7 @@
 //! `Ask` decision in `base_agent`), not requested or resolved by the model.
 //!
 mod end_conversation;
+mod plan_mode;
 mod tool_load;
 mod tool_search;
 
@@ -18,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use end_conversation::EndConversationTool;
+use plan_mode::{EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool};
 use tool_load::ToolLoadTool;
 use tool_search::ToolSearchTool;
 
@@ -26,11 +28,25 @@ use tool_search::ToolSearchTool;
 /// A signal an internal tool raises for the agent to act on next tick.
 ///
 /// This is *internal*: it is not part of the public `AgentCommand` surface, so a
-/// caller cannot forge an end-of-conversation.
+/// caller cannot forge agent self-control actions.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub(crate) enum PlanModeExitOutcome {
+    /// Leave Plan Mode and continue the task under the normal prompt.
+    Execute,
+    /// Leave Plan Mode, end the task, and return a closing message.
+    Cancel { message: String },
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(crate) enum ControlSignal {
     /// The agent decided it is done; carries its closing message.
     EndConversation { final_message: String },
+    /// Switch the durable prompt framing to Plan Mode.
+    EnterPlanMode,
+    /// Yield one question to the user while keeping Plan Mode active.
+    RequestClarification { question: String },
+    /// Leave Plan Mode either by executing the approved plan or cancelling it.
+    ExitPlanMode { outcome: PlanModeExitOutcome },
 }
 
 /// The shared queue internal tools push [`ControlSignal`]s onto.
@@ -48,7 +64,10 @@ pub(crate) type ControlSink = Arc<Mutex<VecDeque<ControlSignal>>>;
 ///
 /// [`ToolError::InvalidArgumentsJson`] if the arguments are present but not valid JSON —
 /// a malformed call is surfaced, not swallowed.
-fn optional_string_argument(arguments_json: &str, key: &str) -> Result<Option<String>, ToolError> {
+pub(super) fn optional_string_argument(
+    arguments_json: &str,
+    key: &str,
+) -> Result<Option<String>, ToolError> {
     let text = arguments_json.trim();
     let value = if text.is_empty() {
         Value::Object(serde_json::Map::new())
@@ -82,6 +101,20 @@ pub(crate) fn internal_tools(sink: ControlSink) -> ToolGroup {
     )
 }
 
+/// Build the prompt-driven Plan Mode controls. Agent manifests may blacklist
+/// this group; ordinary tools are not filtered while Plan Mode is active.
+pub(crate) fn plan_tools(sink: ControlSink) -> ToolGroup {
+    ToolGroup::new(
+        "plan",
+        true,
+        [
+            Tool::from_sync(EnterPlanModeTool { sink: sink.clone() }),
+            Tool::from_sync(RequestClarificationTool { sink: sink.clone() }),
+            Tool::from_sync(ExitPlanModeTool { sink }),
+        ],
+    )
+}
+
 /// Build the always-visible tool-discovery tools over a [`ToolSet`]'s discovery
 /// bridge:
 /// - `tool_search` — list the hidden tool groups that can be loaded;
@@ -100,4 +133,16 @@ pub(crate) fn discovery_tools(discovery: ToolDiscoveryHandle) -> ToolGroup {
             Tool::from_sync(ToolLoadTool { discovery }),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_controls_use_the_plan_group() {
+        let sink = Arc::new(Mutex::new(VecDeque::new()));
+
+        assert_eq!(plan_tools(sink).id(), "plan");
+    }
 }

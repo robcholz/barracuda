@@ -105,6 +105,10 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         prepare_span.in_scope(|| {
             self.context
                 .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
+                .with(Block::new(
+                    BlockKind::ModeFraming,
+                    self.state.get().mode.framing(),
+                ))
                 .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()));
         });
 

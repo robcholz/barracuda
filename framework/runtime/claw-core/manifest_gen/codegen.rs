@@ -38,7 +38,7 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
     let allowed_kinds = kind.allowed_kinds.iter();
     let retries = kind.retries;
     let tool_block_retries = kind.tool_block_retries;
-    let tool_groups = kind.tool_groups.iter();
+    let tool_blacklist = kind.tool_blacklist.iter();
     let instructions = render_instructions(kind);
 
     quote! {
@@ -48,7 +48,7 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
             runtime: AgentRuntimeManifest {
                 retries: #retries,
                 tool_block_retries: #tool_block_retries,
-                tool_groups: &[#(#tool_groups),*],
+                tool_blacklist: &[#(#tool_blacklist),*],
                 instructions: #instructions,
             },
             multiagent: MultiagentManifest {

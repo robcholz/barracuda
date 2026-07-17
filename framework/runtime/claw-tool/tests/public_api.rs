@@ -39,6 +39,24 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
 }
 
 #[test]
+fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    let mut tool_set = registry.tool_set();
+
+    let error = match tool_set.add_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)]))
+    {
+        Ok(()) => return Err(anyhow!("group and tool names must be distinct")),
+        Err(error) => error,
+    };
+
+    assert!(matches!(
+        error,
+        claw_tool::ToolSetError::AmbiguousName(name) if name == "echo"
+    ));
+    Ok(())
+}
+
+#[test]
 fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
     let mut tool_set = registry.tool_set();
@@ -130,16 +148,38 @@ fn registry_rejects_duplicate_tools_across_groups() -> Result<()> {
     let registry = ToolRegistry::new();
 
     registry.register_group(ToolGroup::new("first", true, [Tool::from_sync(EchoTool)]))?;
-    let err = registry
-        .register_group(ToolGroup::new("second", true, [Tool::from_sync(EchoTool)]))
-        .expect_err("duplicate tool should fail");
+    let err = match registry.register_group(ToolGroup::new(
+        "second",
+        true,
+        [Tool::from_sync(EchoTool)],
+    )) {
+        Ok(()) => return Err(anyhow!("duplicate tool should fail")),
+        Err(error) => error,
+    };
 
     assert!(matches!(err, ToolRegistryError::AlreadyExists(name) if name == "echo"));
     Ok(())
 }
 
 #[test]
-fn tool_set_can_retain_only_selected_registry_groups() -> Result<()> {
+fn registry_rejects_a_group_id_that_is_also_a_tool_name() -> Result<()> {
+    let registry = ToolRegistry::new();
+
+    let error =
+        match registry.register_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)])) {
+            Ok(()) => return Err(anyhow!("group and tool names must be distinct")),
+            Err(error) => error,
+        };
+
+    assert!(matches!(
+        error,
+        ToolRegistryError::AmbiguousName(name) if name == "echo"
+    ));
+    Ok(())
+}
+
+#[test]
+fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
     registry.register_group(ToolGroup::new("allowed", true, [Tool::from_sync(EchoTool)]))?;
     registry.register_group(ToolGroup::new(
@@ -149,8 +189,7 @@ fn tool_set_can_retain_only_selected_registry_groups() -> Result<()> {
     ))?;
     registry.start_all()?;
 
-    let mut tool_set = registry.tool_set();
-    tool_set.retain_registry_groups(&["allowed"]);
+    let mut tool_set = registry.tool_set_with_blacklist(&["blocked"]);
     let handle = tool_set.begin()?;
 
     let allowed = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
@@ -170,6 +209,80 @@ fn tool_set_can_retain_only_selected_registry_groups() -> Result<()> {
             ok: false,
         }
     );
+    Ok(())
+}
+
+#[test]
+fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register_group(ToolGroup::new(
+        "mixed",
+        true,
+        [Tool::from_sync(EchoTool), Tool::from_sync(OtherTool)],
+    ))?;
+    registry.start_all()?;
+
+    let mut tool_set = registry.tool_set_with_blacklist(&["other"]);
+    let handle = tool_set.begin()?;
+
+    assert!(matches!(
+        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
+        ToolRunOutcome::Ran { ok: true, .. }
+    ));
+    assert_eq!(
+        run_with_default_gate(&handle, &invocation("other", "{}")?)?,
+        ToolRunOutcome::Ran {
+            content: "tool not found: other".into(),
+            ok: false,
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    let mut tool_set = registry.tool_set_with_blacklist(&["plan"]);
+
+    tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
+
+    let handle = tool_set.begin()?;
+    assert_eq!(handle.schemas_json(), "no schemas");
+    assert_eq!(
+        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
+        ToolRunOutcome::Ran {
+            content: "tool not found: echo".into(),
+            ok: false,
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn blacklist_does_not_interpret_wildcards() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    let mut tool_set = registry.tool_set_with_blacklist(&["plan_*"]);
+
+    tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
+
+    let handle = tool_set.begin()?;
+    assert!(matches!(
+        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
+        ToolRunOutcome::Ran { ok: true, .. }
+    ));
+    Ok(())
+}
+
+#[test]
+fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    let mut tool_set = registry.tool_set_with_blacklist(&["late"]);
+
+    registry.register_group(ToolGroup::new("late", true, [Tool::from_sync(EchoTool)]))?;
+    registry.start_all()?;
+
+    let handle = tool_set.begin()?;
+    assert_eq!(handle.schemas_json(), "no schemas");
     Ok(())
 }
 
@@ -195,7 +308,11 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
 #[test]
 fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
-    registry.register_group(ToolGroup::new("visible", true, [Tool::from_sync(OtherTool)]))?;
+    registry.register_group(ToolGroup::new(
+        "visible",
+        true,
+        [Tool::from_sync(OtherTool)],
+    ))?;
     registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
 
@@ -222,10 +339,17 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
 
     let catalog = discovery.catalog();
     assert_eq!(catalog.len(), 1);
-    assert_eq!(catalog[0].id, "hidden");
-    assert_eq!(catalog[0].tools.len(), 1);
-    assert_eq!(catalog[0].tools[0].name, "echo");
-    assert_eq!(catalog[0].tools[0].description, "Echoes the normalized arguments.");
+    let hidden = catalog
+        .first()
+        .ok_or_else(|| anyhow!("hidden group missing from discovery catalog"))?;
+    assert_eq!(hidden.id, "hidden");
+    assert_eq!(hidden.tools.len(), 1);
+    let echo = hidden
+        .tools
+        .first()
+        .ok_or_else(|| anyhow!("echo missing from hidden group"))?;
+    assert_eq!(echo.name, "echo");
+    assert_eq!(echo.description, "Echoes the normalized arguments.");
 
     // Loading the group queues it; the tool becomes callable after the set
     // applies pending loads.
@@ -244,6 +368,22 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     );
     // Once loaded, the group drops out of the catalog.
     assert!(discovery.catalog().is_empty());
+    Ok(())
+}
+
+#[test]
+fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.start_all()?;
+
+    let mut tool_set = registry.tool_set_with_blacklist(&["hidden"]);
+    let discovery = tool_set.discovery();
+    let handle = tool_set.begin()?;
+
+    assert_eq!(handle.schemas_json(), "no schemas");
+    assert!(discovery.catalog().is_empty());
+    assert!(!discovery.request_load("hidden"));
     Ok(())
 }
 
@@ -305,6 +445,38 @@ fn restored_tool_set_does_not_dirty_generation() -> Result<()> {
         outcome,
         ToolRunOutcome::Blocked {
             content: "tool is temporarily unavailable: echo".into(),
+        }
+    );
+    Ok(())
+}
+
+#[test]
+fn restored_tool_set_rebuilds_the_blacklisted_registry_projection() -> Result<()> {
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register_group(ToolGroup::new(
+        "mixed",
+        true,
+        [Tool::from_sync(EchoTool), Tool::from_sync(OtherTool)],
+    ))?;
+    registry.start_all()?;
+
+    let mut original = registry.tool_set_with_blacklist(&["other"]);
+    let _ = original.begin()?;
+    let blob = original.export_state()?;
+
+    let mut restored = registry.tool_set_with_blacklist(&["other"]);
+    restored.restore_state(blob.as_slice())?;
+    let handle = restored.begin()?;
+
+    assert!(matches!(
+        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
+        ToolRunOutcome::Ran { ok: true, .. }
+    ));
+    assert_eq!(
+        run_with_default_gate(&handle, &invocation("other", "{}")?)?,
+        ToolRunOutcome::Ran {
+            content: "tool not found: other".into(),
+            ok: false,
         }
     );
     Ok(())

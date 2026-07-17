@@ -19,7 +19,7 @@ use claw_tool::ToolRegistry;
 
 use self::long_term::LongTermDeps;
 
-pub(crate) use environment::{AgentEnvironment, ProfileAccess, TranscriptTarget};
+pub(crate) use environment::{AgentEnvironment, TranscriptTarget};
 pub(crate) use error::{FsAgentCreateError, FsAgentFactoryError};
 
 /// Shared assembly dependencies for independently-built agents.

@@ -35,7 +35,7 @@ impl AgentCatalogEntry {
 pub(crate) struct AgentRuntimeManifest {
     retries: u32,
     tool_block_retries: u32,
-    tool_groups: &'static [&'static str],
+    tool_blacklist: &'static [&'static str],
     instructions: &'static str,
 }
 
@@ -48,8 +48,8 @@ impl AgentRuntimeManifest {
         self.tool_block_retries
     }
 
-    pub(crate) fn tool_groups(&self) -> &'static [&'static str] {
-        self.tool_groups
+    pub(crate) fn tool_blacklist(&self) -> &'static [&'static str] {
+        self.tool_blacklist
     }
 
     pub(crate) fn instructions(&self) -> &'static str {

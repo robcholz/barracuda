@@ -109,6 +109,12 @@ pub(crate) enum TickOutcome {
         /// The model's user-facing answer.
         text: String,
     },
+    /// A control tool yielded a user-facing message that was not already
+    /// emitted through the LLM output stream. The agent is idle and reusable.
+    YieldedByTool {
+        /// The message the driver must emit to the user.
+        text: String,
+    },
     /// A tool call's permission policy returned `Ask`; the agent is waiting for a
     /// human decision. Resolve it by sending [`AgentCommand::ApprovalResult`].
     AwaitingApproval {

@@ -1,3 +1,7 @@
 {
-  "tool_groups": []
+  "tool_blacklist": [
+    "plan",
+    "profile_replace",
+    "profile_clear"
+  ]
 }

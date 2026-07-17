@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use super::mode::AgentMode;
 use super::task_state::TaskState;
 use super::IterationIdAllocator;
 
@@ -41,6 +42,8 @@ pub(super) enum ToolBlockVerdict {
 pub(super) struct BaseAgentState {
     pub(super) block_policy: BlockPolicy,
     pub(super) iterations: IterationIdAllocator,
+    #[serde(default)]
+    pub(super) mode: AgentMode,
     task: TaskState,
 }
 
@@ -49,6 +52,7 @@ impl BaseAgentState {
         Self {
             block_policy: BlockPolicy::new(block_retries),
             iterations: IterationIdAllocator::new(),
+            mode: AgentMode::Normal,
             task: TaskState::new(),
         }
     }

@@ -10,7 +10,7 @@ use claw_permission::PermissionPolicy;
 use claw_skill::SkillSet;
 use claw_tool::ToolSet;
 
-use crate::agent::tools::{internal_tools, ControlSink};
+use crate::agent::tools::{internal_tools, plan_tools, ControlSink};
 use crate::memory::{ContextAdapter, SkillContextAdapter, Transcript};
 
 use super::control::AgentInterruption;
@@ -41,6 +41,25 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         self.context.with(block);
     }
 
+    #[cfg(test)]
+    pub(crate) fn exposes_tool_for_test(&mut self, name: &str) -> bool {
+        let Ok(tools) = self.tools.begin() else {
+            return false;
+        };
+        let Ok(serde_json::Value::Array(schemas)) =
+            serde_json::from_str::<serde_json::Value>(tools.schemas_json())
+        else {
+            return false;
+        };
+        schemas.iter().any(|schema| {
+            schema
+                .get("function")
+                .and_then(|function| function.get("name"))
+                .and_then(serde_json::Value::as_str)
+                == Some(name)
+        })
+    }
+
     /// Assemble a runnable agent from a [`BaseAgentConfig`].
     pub(in crate::agent) fn build<F: ClawFs + 'static>(
         config: BaseAgentConfig<F>,
@@ -55,6 +74,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
         let mut tools = config.tools;
         tools.add_group(internal_tools(Arc::clone(&control)))?;
+        tools.add_group(plan_tools(Arc::clone(&control)))?;
 
         let mut context = Context::new();
         for block in config.inherited_context {

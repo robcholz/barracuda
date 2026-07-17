@@ -7,7 +7,7 @@ use crate::agent::iteration_loop::{
     CompletedKind, CompletedOutcome, IterationOutcome, IterationResult, PreemptedOutcome, ToolRun,
     ToolsOutcome,
 };
-use crate::agent::tools::ControlSignal;
+use crate::agent::tools::{ControlSignal, PlanModeExitOutcome};
 use crate::memory::AssistantCommit;
 use crate::protocol::Message;
 
@@ -15,6 +15,7 @@ use super::command::{
     AgentCommand, AgentCommandError, AgentRunError, ApprovalDecision, TickOutcome,
 };
 use super::control::AgentAbortHandle;
+use super::mode::AgentMode;
 use super::pending_tool_round::PendingToolRound;
 use super::state::ToolBlockVerdict;
 use super::task_state::TaskAction;
@@ -94,6 +95,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             TaskAction::Cancel => {
                 self.transcript.discard_open_turn();
                 self.interruption.clear();
+                self.state.get_mut().mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::Cancelled);
                 None
             }
@@ -106,7 +108,33 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             }),
             TaskAction::EndConversation { final_message } => {
                 self.transcript.commit_ended(&final_message);
+                self.state.get_mut().mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::Ended { final_message });
+                None
+            }
+            TaskAction::EnterPlanMode => {
+                self.state.get_mut().mode = AgentMode::Plan;
+                None
+            }
+            TaskAction::RequestClarification { question } => {
+                self.transcript
+                    .commit_assistant(AssistantCommit::PlainText(&question));
+                self.outcome = Some(TickOutcome::YieldedByTool { text: question });
+                None
+            }
+            TaskAction::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Execute,
+            } => {
+                self.state.get_mut().mode = AgentMode::Normal;
+                None
+            }
+            TaskAction::ExitPlanMode {
+                outcome: PlanModeExitOutcome::Cancel { message },
+            } => {
+                self.transcript
+                    .commit_assistant(AssistantCommit::PlainText(&message));
+                self.state.get_mut().mode = AgentMode::Normal;
+                self.outcome = Some(TickOutcome::YieldedByTool { text: message });
                 None
             }
         }
@@ -128,9 +156,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                     self.reduce_tool_round(tools);
                 }
             },
-            Ok(IterationOutcome::Preempted(outcome)) => {
-                self.merge_preempt_patch(outcome);
-            }
+            Ok(IterationOutcome::Preempted(outcome)) => self.merge_preempt_patch(outcome),
             Err(error) => self.fail_with(error.into()),
         }
     }
@@ -206,7 +232,9 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 
     pub(super) fn fail_with(&mut self, error: AgentRunError) {
-        self.state.get_mut().task_mut().finish_task();
+        let state = self.state.get_mut();
+        state.task_mut().finish_task();
+        state.mode = AgentMode::Normal;
         self.outcome = Some(TickOutcome::Failed(error));
     }
 

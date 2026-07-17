@@ -23,13 +23,6 @@ impl TranscriptTarget {
     }
 }
 
-/// Whether this agent may mutate the shared profile exposed in its context.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ProfileAccess {
-    ReadOnly,
-    Writable,
-}
-
 /// Runtime capabilities supplied by the owner constructing one agent.
 ///
 /// The agent factory does not interpret its owner's orchestration model.
@@ -37,7 +30,6 @@ pub(crate) enum ProfileAccess {
 /// boundary.
 pub(crate) struct AgentEnvironment {
     pub(super) transcript: TranscriptTarget,
-    pub(super) profile: ProfileAccess,
     pub(super) permission_policy: Arc<dyn PermissionPolicy>,
     pub(super) extension_tools: Vec<ToolGroup>,
     pub(super) inherited_context: Vec<Block<'static>>,
@@ -46,14 +38,12 @@ pub(crate) struct AgentEnvironment {
 impl AgentEnvironment {
     pub(crate) fn new(
         transcript: TranscriptTarget,
-        profile: ProfileAccess,
         permission_policy: Arc<dyn PermissionPolicy>,
         extension_tools: Vec<ToolGroup>,
         inherited_context: Vec<Block<'static>>,
     ) -> Self {
         Self {
             transcript,
-            profile,
             permission_policy,
             extension_tools,
             inherited_context,

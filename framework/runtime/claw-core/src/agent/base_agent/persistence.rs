@@ -9,7 +9,8 @@ use claw_interface::{ClawHttp, ClawTimer};
 use super::state::BaseAgentState;
 use super::BaseAgent;
 
-const BASE_AGENT_SCHEMA_VERSION: u32 = 3;
+const LEGACY_BASE_AGENT_SCHEMA_VERSION: u32 = 3;
+const BASE_AGENT_SCHEMA_VERSION: u32 = 4;
 
 impl DurableStateCodec for BaseAgentState {
     fn encode_state(&self) -> Result<PartStateBlob<'_>, DurablePartError> {
@@ -21,7 +22,10 @@ impl DurableStateCodec for BaseAgentState {
     }
 
     fn decode_state(state: PartStateSlice<'_>) -> Result<Self, DurablePartError> {
-        if state.schema_version != BASE_AGENT_SCHEMA_VERSION {
+        if !matches!(
+            state.schema_version,
+            LEGACY_BASE_AGENT_SCHEMA_VERSION | BASE_AGENT_SCHEMA_VERSION
+        ) {
             return Err(DurablePartError::InvalidState(
                 "unsupported base-agent schema version",
             ));
@@ -97,7 +101,7 @@ mod tests {
     use crate::protocol::Message;
 
     #[test]
-    fn schema_three_round_trips_the_pending_tool_round() {
+    fn current_schema_round_trips_the_pending_tool_round() {
         let mut state = BaseAgentState::new(0);
         state.task_mut().enqueue_task_input(Message::text("start"));
         let _ = state.task_mut().pop_action().expect("valid task input");
@@ -110,7 +114,7 @@ mod tests {
         assert_eq!(encoded.schema_version, BASE_AGENT_SCHEMA_VERSION);
 
         let mut restored = BaseAgentState::decode_state(encoded.as_slice())
-            .expect("schema three state round trips");
+            .expect("current state schema round trips");
         restored
             .task_mut()
             .enqueue_command(AgentCommand::ApprovalResult(ApprovalDecision::Approved))
@@ -127,6 +131,36 @@ mod tests {
                 .next()
                 .is_some_and(|approval| approval.signature == "signature-a")
         ));
+    }
+
+    #[test]
+    fn schema_three_defaults_to_normal_mode() {
+        let state = BaseAgentState::new(0);
+        let mut legacy = serde_json::to_value(&state).expect("state encodes");
+        legacy
+            .as_object_mut()
+            .expect("base-agent state is an object")
+            .remove("mode");
+        let bytes = serde_json::to_vec(&legacy).expect("legacy state encodes");
+        let restored = BaseAgentState::decode_state(PartStateSlice {
+            schema_version: LEGACY_BASE_AGENT_SCHEMA_VERSION,
+            bytes: &bytes,
+        })
+        .expect("legacy state restores");
+
+        assert_eq!(restored.mode, super::super::mode::AgentMode::Normal);
+    }
+
+    #[test]
+    fn current_schema_preserves_plan_mode() {
+        let mut state = BaseAgentState::new(0);
+        state.mode = super::super::mode::AgentMode::Plan;
+
+        let encoded = state.encode_state().expect("state encodes").into_owned();
+        let restored = BaseAgentState::decode_state(encoded.as_slice())
+            .expect("current state schema restores");
+
+        assert_eq!(restored.mode, super::super::mode::AgentMode::Plan);
     }
 
     #[test]

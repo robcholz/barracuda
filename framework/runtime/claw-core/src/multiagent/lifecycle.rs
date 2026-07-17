@@ -289,6 +289,7 @@ where
             TickOutcome::Idle => DriveOutput::default(),
             TickOutcome::AwaitingApproval { summary } => self.park_approval(id, summary),
             TickOutcome::Yielded { text } => self.route_yielded(id, text),
+            TickOutcome::YieldedByTool { text } => self.route_terminal(id, text, true),
             TickOutcome::Ended { final_message } => self.route_terminal(id, final_message, true),
             TickOutcome::Cancelled => self.route_cancelled(id),
             TickOutcome::Failed(error) => {
@@ -451,6 +452,14 @@ mod tests {
             },
         );
         assert!(yielded.into_messages().is_empty());
+
+        let tool_yielded = instance.route_outcome(
+            root,
+            TickOutcome::YieldedByTool {
+                text: "question".to_owned(),
+            },
+        );
+        assert_eq!(tool_yielded.into_messages(), vec!["question".to_owned()]);
 
         let ended = instance.route_outcome(
             root,

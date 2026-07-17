@@ -1,7 +1,8 @@
 //! Profile context adapter: project editable profile documents into context.
 //!
 //! The store lives in `claw-memory`; this adapter is the agent-runtime layer that
-//! maps documents to `BlockKind`s and optionally exposes profile-specific tools.
+//! maps documents to `BlockKind`s and exposes profile-specific tools. Per-agent
+//! read/write projection is owned by the baked tool blacklist.
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_interface::ClawFs;
@@ -14,34 +15,15 @@ mod tools;
 
 use self::tools::profile_tools;
 
-/// Whether this adapter exposes profile mutation tools to its agent.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProfileTools {
-    /// No profile tools. The adapter still contributes profile context.
-    Disabled,
-    /// Expose profile read/replace/clear tools.
-    Writable,
-}
-
 /// Pulls global profile documents into the current agent context.
 pub(crate) struct ProfileContextAdapter<F: ClawFs + 'static> {
     store: ProfileStore<F>,
-    tools: ProfileTools,
 }
 
 impl<F: ClawFs + 'static> ProfileContextAdapter<F> {
     /// Build an adapter over `store`.
-    pub(crate) fn new(store: ProfileStore<F>, writable: bool) -> Self {
-        // Every agent receives profile context. Its owner explicitly decides
-        // whether mutation tools are part of this agent's environment.
-        Self {
-            store,
-            tools: if writable {
-                ProfileTools::Writable
-            } else {
-                ProfileTools::Disabled
-            },
-        }
+    pub(crate) fn new(store: ProfileStore<F>) -> Self {
+        Self { store }
     }
 
     fn contribute_document(&self, document: ProfileDocument, output: &mut ContextSink<'_>) {
@@ -76,9 +58,6 @@ impl<F: ClawFs + 'static> ContextAdapter for ProfileContextAdapter<F> {
     }
 
     fn tools(&self) -> Option<ToolGroup> {
-        match self.tools {
-            ProfileTools::Disabled => None,
-            ProfileTools::Writable => Some(profile_tools(self.store.clone())),
-        }
+        Some(profile_tools(self.store.clone()))
     }
 }
