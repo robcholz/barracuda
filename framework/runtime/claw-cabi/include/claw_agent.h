@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -15,13 +16,14 @@ extern "C" {
 #endif
 
 typedef struct {
-    /* Required non-null UTF-8 C string. */
+    /* Initial root API fields. All four may be NULL/empty to initialize the
+     * runtime without an API and bind one later with claw_agent_link_api(). */
     const char *api_key;
-    /* Required non-null UTF-8 C string, e.g. "openai_compatible". */
+    /* UTF-8 C string, e.g. "openai_compatible". */
     const char *backend_type;
-    /* Required non-null UTF-8 C string. */
+    /* UTF-8 C string. */
     const char *model;
-    /* Required non-null UTF-8 C string. */
+    /* UTF-8 C string. */
     const char *base_url;
     /* Required non-null UTF-8 C string. */
     const char *persistence_dir;
@@ -33,80 +35,185 @@ typedef struct {
     const char *system_skills_root_dir;
 } claw_agent_config_t;
 
+typedef struct {
+    /* Required non-null UTF-8 C string. */
+    const char *api_key;
+    /* Required non-null UTF-8 C string, e.g. "openai_compatible". */
+    const char *backend_type;
+    /* Required non-null UTF-8 C string. */
+    const char *model;
+    /* Required non-null UTF-8 C string. */
+    const char *base_url;
+} claw_agent_api_config_t;
+
 typedef enum {
-    /* Content events. `text` is an append fragment: concatenate
-     * across events to reconstruct the full string. */
-    CLAW_AGENT_EVENT_KIND_OUTPUT = 0,    /* assistant-visible answer text */
-    CLAW_AGENT_EVENT_KIND_REASONING = 1, /* model thinking text (truncated) */
-    CLAW_AGENT_EVENT_KIND_TOOLS = 2,     /* one tool call name (emitted per call) */
-    CLAW_AGENT_EVENT_KIND_DONE = 3,   /* one root-visible turn finished */
-    CLAW_AGENT_EVENT_KIND_ERROR = 4,  /* session work failed; see error_message */
-    CLAW_AGENT_EVENT_KIND_CLOSED = 5, /* session stream closed; terminal */
-    CLAW_AGENT_EVENT_KIND_OUTPUT_END = 6,    /* current output stream ended */
-    CLAW_AGENT_EVENT_KIND_REASONING_END = 7, /* current reasoning stream ended */
-    CLAW_AGENT_EVENT_KIND_TOOLS_END = 8,     /* no more tool calls this iteration */
-    /* Current turn is waiting for caller input; see request_id and text. */
-    CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED = 9,
+    CLAW_AGENT_API_USAGE_ROOT_AGENT = 0,
+    CLAW_AGENT_API_USAGE_SUBAGENT = 1,
+    CLAW_AGENT_API_USAGE_MEMORY = 2,
+    CLAW_AGENT_API_USAGE_COMPACTION = 3,
+} claw_agent_api_usage_t;
+
+typedef enum {
+    CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT = 0,
+    CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL = 1,
+} claw_agent_session_persistence_t;
+
+typedef enum {
+    CLAW_AGENT_EVENT_KIND_TURN_STARTED = 0,
+    CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED = 1,
+    CLAW_AGENT_EVENT_KIND_ITERATION_STARTED = 2,
+    CLAW_AGENT_EVENT_KIND_REASONING_DELTA = 3,
+    CLAW_AGENT_EVENT_KIND_REASONING_END = 4,
+    CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA = 5,
+    CLAW_AGENT_EVENT_KIND_OUTPUT_END = 6,
+    CLAW_AGENT_EVENT_KIND_TOOL_CALL = 7,
+    CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END = 8,
+    CLAW_AGENT_EVENT_KIND_ITERATION_ENDED = 9,
+    CLAW_AGENT_EVENT_KIND_TURN_ENDED = 10,
+    CLAW_AGENT_EVENT_KIND_ERROR = 11,
+    CLAW_AGENT_EVENT_KIND_CLOSED = 12,
 } claw_agent_event_kind_t;
 
 typedef enum {
-    CLAW_AGENT_INPUT_REQUEST_KIND_NONE = 0,
-    CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL = 1,
+    CLAW_AGENT_TURN_ORIGIN_USER = 0,
+    CLAW_AGENT_TURN_ORIGIN_SUBAGENT = 1,
+} claw_agent_turn_origin_t;
+
+typedef enum {
+    CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL = 0,
 } claw_agent_input_request_kind_t;
 
 typedef struct {
-    claw_agent_event_kind_t kind;
-    /* Session-local id for INPUT_REQUESTED; zero otherwise. */
+    uint32_t turn_id;
+    claw_agent_turn_origin_t origin;
+    /* Non-zero only for SUBAGENT origin. */
+    uint32_t agent_id;
+} claw_agent_turn_started_event_t;
+
+typedef struct {
     uint32_t request_id;
-    /* Semantic input kind for INPUT_REQUESTED; NONE otherwise. */
-    claw_agent_input_request_kind_t input_kind;
-    /* Owned UTF-8 fragment for content events (OUTPUT/REASONING/TOOLS), or the
-     * semantic request summary for INPUT_REQUESTED; NULL otherwise. Release
-     * with claw_agent_event_free. */
+    claw_agent_input_request_kind_t kind;
+    /* Owned UTF-8 semantic summary. */
+    char *summary;
+} claw_agent_input_requested_event_t;
+
+typedef struct {
+    uint32_t iteration_id;
+} claw_agent_iteration_event_t;
+
+typedef struct {
+    /* Owned UTF-8 append fragment. */
     char *text;
-    /* Owned UTF-8 message for ERROR; NULL otherwise. Release with
-     * claw_agent_event_free. */
-    char *error_message;
+} claw_agent_text_delta_event_t;
+
+typedef struct {
+    /* All three strings are owned and contain one complete tool call. */
+    char *id;
+    char *name;
+    char *arguments_json;
+} claw_agent_tool_call_event_t;
+
+typedef struct {
+    uint32_t turn_id;
+} claw_agent_turn_ended_event_t;
+
+typedef struct {
+    /* Owned UTF-8 error message. */
+    char *message;
+} claw_agent_error_event_t;
+
+typedef union {
+    claw_agent_turn_started_event_t turn_started;
+    claw_agent_input_requested_event_t input_requested;
+    /* Used by ITERATION_STARTED. ITERATION_ENDED has no payload. */
+    claw_agent_iteration_event_t iteration;
+    /* Used by REASONING_DELTA and OUTPUT_DELTA. */
+    claw_agent_text_delta_event_t text_delta;
+    claw_agent_tool_call_event_t tool_call;
+    claw_agent_turn_ended_event_t turn_ended;
+    claw_agent_error_event_t error;
+    uint32_t reserved;
+} claw_agent_event_data_t;
+
+typedef struct {
+    claw_agent_event_kind_t kind;
+    /* Read only the union member selected by kind. Owned strings in that
+     * member remain valid until claw_agent_event_free(). */
+    claw_agent_event_data_t data;
 } claw_agent_event_t;
 
 /*
- * Initialize the runtime config.
+ * Construct the agent runtime in the stopped state.
+ *
+ * This creates and retains AgentSystem, restores persistent state, and
+ * registers capability tools. If all four initial API fields are configured,
+ * it also links them as the default ROOT_AGENT API. If all four are empty, the
+ * runtime starts unbound and may be configured later with claw_agent_link_api().
+ * Session operations remain disabled until claw_agent_start().
  *
  * Returns:
  * - ESP_OK on success.
- * - ESP_ERR_INVALID_ARG if config is NULL or any required string is NULL,
- *   non-UTF-8, or backend_type is unknown.
+ * - ESP_ERR_INVALID_ARG if config is NULL, the initial API is only partially
+ *   configured, a required runtime string is invalid, or backend_type is unknown.
  * - ESP_ERR_INVALID_STATE if the runtime is already initialized.
  */
 esp_err_t claw_agent_init(const claw_agent_config_t *config);
 
 /*
- * Start the runtime worker.
+ * Link or replace an LLM API config for one usage after claw_agent_init(). It
+ * may be called before or after claw_agent_start(). A running agent observes
+ * the change at the next turn boundary without disturbing an in-flight turn;
+ * the stopped runtime retains the same AgentSystem and therefore the same
+ * binding. Bindings survive a claw_agent_stop()/claw_agent_start() cycle and
+ * are released only by claw_agent_deinit(). If is_default is true, this model
+ * is also the fallback for usages without an explicit binding.
+ *
+ * Returns:
+ * - ESP_OK on success.
+ * - ESP_ERR_INVALID_ARG if config/usage is invalid or a required string is
+ *   missing, non-UTF-8, or empty.
+ * - ESP_ERR_INVALID_STATE if the runtime is not initialized.
+ */
+esp_err_t claw_agent_link_api(const claw_agent_api_config_t *config,
+                              claw_agent_api_usage_t usage,
+                              bool is_default);
+
+/*
+ * Transition an initialized runtime from stopped to running.
+ *
+ * This activates the registered tool set and enables session operations. It
+ * does not reconstruct AgentSystem; the instance created by init is retained.
  *
  * Returns:
  * - ESP_OK on success or if already started.
  * - ESP_ERR_INVALID_STATE if the runtime was not initialized.
- * - ESP_FAIL for worker/thread/agent startup failures.
+ * - ESP_FAIL for tool activation failures.
  */
 esp_err_t claw_agent_start(void);
 
 /*
- * Stop the runtime worker after in-flight requests drain.
+ * Transition a running runtime back to the initialized/stopped state.
+ *
+ * This deactivates the registered tool set and disables session operations.
+ * AgentSystem, API bindings, session state, and open session connections are
+ * retained for a later start. It does not perform deinitialization.
  *
  * Returns:
  * - ESP_OK on success or if initialized but not running.
- * - ESP_ERR_INVALID_STATE if the runtime was not initialized or the worker is gone.
- * - ESP_FAIL for worker/tool shutdown failures.
+ * - ESP_ERR_INVALID_STATE if the runtime was not initialized.
+ * - ESP_FAIL for tool deactivation failures.
  */
 esp_err_t claw_agent_stop(void);
 
 /*
- * Stop the runtime worker if needed and release runtime state.
+ * Stop if needed, then release the runtime and its AgentSystem.
+ *
+ * This is the only lifecycle call that destroys API bindings, in-memory
+ * sessions, open streams, and the underlying orchestrator worker.
  *
  * Returns:
  * - ESP_OK on success or if already deinitialized.
- * - ESP_ERR_INVALID_STATE if the running worker cannot be stopped cleanly.
- * - ESP_FAIL for worker/tool shutdown failures.
+ * - ESP_FAIL if tool deactivation failed; runtime state is still released.
  */
 esp_err_t claw_agent_deinit(void);
 
@@ -163,7 +270,7 @@ esp_err_t claw_agent_session_respond(uint32_t session_id,
 /*
  * Request graceful interruption of the active foreground turn.
  *
- * The stream may not emit DONE immediately; keep receiving session events.
+ * The stream may not emit TURN_ENDED immediately; keep receiving events.
  *
  * Returns:
  * - ESP_OK if the request was accepted or already unnecessary.
@@ -176,8 +283,8 @@ esp_err_t claw_agent_session_interrupt(uint32_t session_id);
 /*
  * Request hard cancellation of foreground and background work in a session.
  *
- * The stream may not emit DONE/CLOSED immediately; keep receiving session
- * events.
+ * The stream may not emit TURN_ENDED/CLOSED immediately; keep receiving
+ * session events.
  *
  * Returns:
  * - ESP_OK if the request was accepted or already unnecessary.
@@ -188,16 +295,19 @@ esp_err_t claw_agent_session_interrupt(uint32_t session_id);
 esp_err_t claw_agent_session_cancel(uint32_t session_id);
 
 /*
- * Create a new numeric session id.
+ * Create a new numeric session id with caller-selected persistence.
  *
+ * PERSISTENT sessions are checkpointed and survive a runtime restart.
+ * EPHEMERAL sessions remain in memory for this process only.
  * out_session_id must be non-NULL.
  *
  * Returns:
  * - ESP_OK on success.
- * - ESP_ERR_INVALID_ARG if out_session_id is NULL.
+ * - ESP_ERR_INVALID_ARG if persistence is unknown or out_session_id is NULL.
  * - ESP_ERR_INVALID_STATE if the runtime is not started or is stopping.
  */
-esp_err_t claw_agent_session_create(uint32_t *out_session_id);
+esp_err_t claw_agent_session_create(claw_agent_session_persistence_t persistence,
+                                    uint32_t *out_session_id);
 
 /*
  * List live numeric session ids.
@@ -250,13 +360,12 @@ esp_err_t claw_agent_session_delete(uint32_t session_id);
  * Receive the next event from an open session, one event per call.
  *
  * A session is consumed incrementally: call this in a loop, handling each event
- * as it arrives. CLAW_AGENT_EVENT_KIND_DONE means one turn ended; continue
- * receiving for future user submits or background results. _CLOSED is terminal.
+ * as it arrives. TURN_ENDED closes one turn but the stream remains open for
+ * future user submits and detached-subagent turns. CLOSED alone is terminal.
  *
  * session_id must be non-zero and open. out_event must be non-NULL. On ESP_OK,
- * out_event owns text/error_message until claw_agent_event_free. For
- * INPUT_REQUESTED, request_id identifies the response target and text contains
- * semantic data for the caller to present; this event does not end the turn.
+ * the payload union member selected by out_event->kind is valid. Any owned
+ * strings in that member remain valid until claw_agent_event_free().
  *
  * timeout_ms == 0 performs a non-blocking poll (returns the next buffered event
  * or ESP_ERR_TIMEOUT immediately). Otherwise it waits up to timeout_ms for the
@@ -266,7 +375,7 @@ esp_err_t claw_agent_session_delete(uint32_t session_id);
  * Returns:
  * - ESP_OK with out_event populated (inspect out_event->kind).
  * - ESP_ERR_INVALID_ARG if session_id is 0 or out_event is NULL.
- * - ESP_ERR_INVALID_STATE if the runtime is not initialized.
+ * - ESP_ERR_INVALID_STATE if the runtime is not started.
  * - ESP_ERR_NOT_FOUND if session_id is not open.
  * - ESP_ERR_TIMEOUT if no event is available before timeout_ms.
  * - ESP_FAIL for unexpected event allocation failures.
@@ -278,8 +387,8 @@ esp_err_t claw_agent_session_receive(uint32_t session_id,
 /*
  * Free owned strings returned by claw_agent_session_receive.
  *
- * event may be NULL. After return, event->text and event->error_message are set
- * to NULL.
+ * event may be NULL. After return, the event is reset to CLOSED with no owned
+ * payload.
  */
 void claw_agent_event_free(claw_agent_event_t *event);
 

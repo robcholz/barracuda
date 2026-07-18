@@ -13,7 +13,7 @@ use claw_agent::{
 };
 use claw_checkpoint::{
     BatchId, BatchWrite, ChangePatternHint, Checkpoint, CheckpointStorage, CheckpointWrite,
-    FsCheckpointStorage, PartStateBlob, PartWrite, StorageHint, StorageSizeHint,
+    DurablePart, FsCheckpointStorage, PartStateBlob, PartWrite, StorageHint, StorageSizeHint,
 };
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawFs, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse,
@@ -153,7 +153,16 @@ fn tool_registry_start_state_writes_checkpoint() {
     assert_eq!(tool_registry_started::<MemFs>(&root), Some(true));
 
     system.stop_all().unwrap();
-    assert_eq!(tool_registry_started::<MemFs>(&root), Some(false));
+    let state: Value = serde_json::from_slice(
+        system
+            .tool_registry()
+            .export_state()
+            .unwrap()
+            .bytes
+            .as_ref(),
+    )
+    .unwrap();
+    assert_eq!(state["started"].as_bool(), Some(false));
 }
 
 #[test]
@@ -168,7 +177,7 @@ fn tool_registry_direct_mutations_checkpoint_and_restore() {
         system
             .tool_registry()
             .register_group(ToolGroup::new(
-                "checkpoint_echo",
+                "checkpoint_echo_group",
                 true,
                 [Tool::from_sync(CheckpointEchoTool)],
             ))
@@ -176,6 +185,22 @@ fn tool_registry_direct_mutations_checkpoint_and_restore() {
         assert_eq!(tool_registry_enabled::<MemFs>(&root, tool_name), Some(true));
 
         system.tool_registry().disable(tool_name).unwrap();
+
+        // The production coordinator publishes at mutation 1 and then every
+        // 30 mutations. Advance through mutation 31 so the disabled state is
+        // part of a physical checkpoint before rebuilding the system.
+        for index in 1..=29 {
+            system
+                .tool_registry()
+                .register_group(ToolGroup::new(
+                    format!("checkpoint-flush-group-{index}"),
+                    true,
+                    [Tool::from_sync(NumberedCheckpointTool {
+                        name: format!("checkpoint-flush-tool-{index}"),
+                    })],
+                ))
+                .unwrap();
+        }
         assert_eq!(
             tool_registry_enabled::<MemFs>(&root, tool_name),
             Some(false)
@@ -187,7 +212,7 @@ fn tool_registry_direct_mutations_checkpoint_and_restore() {
     system
         .tool_registry()
         .register_group(ToolGroup::new(
-            "checkpoint_echo",
+            "checkpoint_echo_group",
             true,
             [Tool::from_sync(CheckpointEchoTool)],
         ))
@@ -205,18 +230,18 @@ fn tool_registry_direct_mutations_checkpoint_and_restore() {
 }
 
 #[test]
-fn tool_registry_keeps_only_two_checkpoints_across_fifty_four_registrations() {
+fn tool_registry_keeps_only_two_checkpoints_across_sixty_one_registrations() {
     let _script = serialize_script();
     MemFs::new();
     let root = mem_root("persist-tool-registry-two-slots");
     let checkpoint_root = format!("{root}/checkpoint");
     let system = build_mem_system(&root, Vec::new());
 
-    for index in 1..=54 {
+    for index in 1..=61 {
         system
             .tool_registry()
             .register_group(ToolGroup::new(
-                format!("checkpoint-tool-{index}"),
+                format!("checkpoint-group-{index}"),
                 true,
                 [Tool::from_sync(NumberedCheckpointTool {
                     name: format!("checkpoint-tool-{index}"),
@@ -226,13 +251,13 @@ fn tool_registry_keeps_only_two_checkpoints_across_fifty_four_registrations() {
     }
 
     let storage = FsCheckpointStorage::<MemFs>::new(checkpoint_root.clone());
-    assert_eq!(storage.latest_step().unwrap(), Some(54));
+    assert_eq!(storage.latest_step().unwrap(), Some(3));
     assert!(matches!(
-        storage.load_checkpoint(52),
-        Err(claw_checkpoint::LoadCheckpointError::StepNotFound(52))
+        storage.load_checkpoint(1),
+        Err(claw_checkpoint::LoadCheckpointError::StepNotFound(1))
     ));
-    assert_eq!(tool_count(&storage.load_checkpoint(53).unwrap()), 53);
-    assert_eq!(tool_count(&storage.load_checkpoint(54).unwrap()), 54);
+    assert_eq!(tool_count(&storage.load_checkpoint(2).unwrap()), 31);
+    assert_eq!(tool_count(&storage.load_checkpoint(3).unwrap()), 61);
 
     let mut step_directories = MemFs::list_dir(&checkpoint_root)
         .unwrap()
@@ -240,7 +265,7 @@ fn tool_registry_keeps_only_two_checkpoints_across_fifty_four_registrations() {
         .filter(|entry| entry.starts_with("step-"))
         .collect::<Vec<_>>();
     step_directories.sort();
-    assert_eq!(step_directories, vec!["step-53", "step-54"]);
+    assert_eq!(step_directories, vec!["step-2", "step-3"]);
 }
 
 #[test]

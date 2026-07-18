@@ -4,8 +4,8 @@ The OS / platform abstraction layer for the claw Rust crates.
 
 This is the **inbound boundary** (C / OS → Rust): it defines the
 **dependency-injection traits** that abstract over platform facilities —
-filesystem (`ClawFs`) and networking (`ClawHttp`) — plus the **shared types**
-those traits work with. The pure-Rust core crates (`claw-api`, `claw_core`,
+filesystem (`ClawFs`) and networking (`ClawHttp` / `StreamingHttp`) — plus the
+**shared types** those traits work with. The pure-Rust core crates (`claw-api`, `claw_core`,
 `claw-capability`, `claw-memory`, `claw-sandbox`, …) depend only on these traits, never
 on a platform directly, so the device build and host tests can plug in different
 implementations of the same seam.
@@ -24,15 +24,16 @@ tear-free whole-file checkpoints.
 | `ClawFs` | The trait: `read`, `read_at`, `len`, `write_atomic`, `append`, `create_dir_all`, `exists`, `remove`, `list_dir`. |
 | `FsError` | Coarse failure: `NotFound` vs `Io(..)`. |
 
-### `http` — the `ClawHttp` networking seam
+### `http` — the HTTP networking seams
 
-The JSON-POST injection point for the LLM backends, plus an async variant.
+JSON request injection for buffered and streaming transports.
 
 | Item | Role |
 |---|---|
-| `ClawHttp` | Blocking `post_json(request, abort)` → `HttpResponse`. |
-| `ClawHttpAsync` / `HttpResponseFuture` / `Cancel` | Object-safe async transport with structural cancellation (drops the in-flight transfer when the abort flag is set). |
-| `HttpJsonRequest` / `HttpHeader` / `HttpResponse` | Request/response shapes (mirror the C transport structs). |
+| `http::blocking::ClawHttp` | Blocking compatibility seam: `post_json(request, abort)` → buffered `HttpResponse`. |
+| `ClawHttp` / `HttpResponseFuture` / `Cancel` | Object-safe async buffered POST/GET transport with cooperative cancellation. |
+| `StreamingHttp` | Generic streaming POST seam. Its `ByteStream<'a>` GAT retains `&'a mut self`, so one transport cannot run another request until the body stream reaches EOF or is dropped. |
+| `HttpJsonRequest` / `HttpGetRequest` / `HttpHeader` / `HttpResponse` | Shared request/response shapes. |
 | `HttpError` | Transport failure (`Aborted`, `InvalidUrl`, `RequestFailed`, `UnexpectedStatus`, …). |
 
 ## Host-only reference implementations (opt-in features)
@@ -45,8 +46,8 @@ one place. They are **never** enabled in a device build.
 | `memfs` | `MemFs` — an in-memory `ClawFs` test double (no extra deps). |
 | `diskfs` | `DiskFs` — a `std::fs`-backed `ClawFs` for host CLIs and disk tests. |
 | `diskfs-pretty` | `DiskFs` that pretty-prints `.json` writes (implies `diskfs`). |
-| `httpmock` | Scripted / capturing / failing / never-called `ClawHttp` doubles: `ScriptedHttp`, `CapturingHttp`, `FailingHttp`, `NeverHttp`, `NoopHttp`, `YieldingClawHttpAsync`, `BlockingClawHttpAsync`, `ScriptStep`. |
-| `realhttp` | `RealHttp` / `RealHttpAsync` — a blocking reqwest backend for host CLIs and live tests. |
+| `httpmock` | Buffered doubles and adapters (`ScriptedHttp`, `CapturingHttp`, `FailingHttp`, `NeverHttp`, `NoopHttp`, `BlockingHttpAdapter`, `YieldingHttpAdapter`) plus `ChunkedHttp` for streaming tests. |
+| `realhttp` | `http::blocking::RealHttp` and async/streaming `http::RealHttp`, backed by reqwest. |
 
 ## Example
 

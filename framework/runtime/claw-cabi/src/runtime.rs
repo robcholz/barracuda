@@ -1,4 +1,4 @@
-use core::ffi::{c_char, CStr};
+use core::ffi::{c_char, c_int, CStr};
 use core::pin::Pin;
 use core::ptr;
 use core::task::{Context, Poll};
@@ -12,9 +12,9 @@ use std::task::Waker;
 use std::time::Duration;
 
 use claw_agent::{
-    AgentError, AgentPersistenceConfig, AgentSystem, InputRequestId, InputRequestKind, Message,
-    OpenSessionError, SessionControl, SessionControlError, SessionEvent, SessionEventStream,
-    SessionId, StreamPart,
+    AgentError, AgentPersistenceConfig, AgentSystem, ApiUsage, InputRequestId, InputRequestKind,
+    Message, OpenSessionError, SessionControl, SessionControlError, SessionEvent,
+    SessionEventStream, SessionId, SessionPersistence, StreamPart, TurnOrigin,
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
@@ -25,14 +25,21 @@ use futures_core::Stream;
 use futures_lite::StreamExt;
 
 use crate::abi::{
-    ClawAgentConfig, ClawAgentEvent, EspErr, CLAW_AGENT_EVENT_KIND_CLOSED,
-    CLAW_AGENT_EVENT_KIND_DONE, CLAW_AGENT_EVENT_KIND_ERROR, CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED,
-    CLAW_AGENT_EVENT_KIND_OUTPUT, CLAW_AGENT_EVENT_KIND_OUTPUT_END,
-    CLAW_AGENT_EVENT_KIND_REASONING, CLAW_AGENT_EVENT_KIND_REASONING_END,
-    CLAW_AGENT_EVENT_KIND_TOOLS, CLAW_AGENT_EVENT_KIND_TOOLS_END,
-    CLAW_AGENT_INPUT_REQUEST_KIND_NONE, CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
-    ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_SIZE, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FOUND,
-    ESP_ERR_TIMEOUT, ESP_FAIL, ESP_OK,
+    ClawAgentApiConfig, ClawAgentConfig, ClawAgentErrorEvent, ClawAgentEvent, ClawAgentEventData,
+    ClawAgentInputRequestedEvent, ClawAgentIterationEvent, ClawAgentTextDeltaEvent,
+    ClawAgentToolCallEvent, ClawAgentTurnEndedEvent, ClawAgentTurnStartedEvent, EspErr,
+    CLAW_AGENT_API_USAGE_COMPACTION, CLAW_AGENT_API_USAGE_MEMORY, CLAW_AGENT_API_USAGE_ROOT_AGENT,
+    CLAW_AGENT_API_USAGE_SUBAGENT, CLAW_AGENT_EVENT_KIND_CLOSED, CLAW_AGENT_EVENT_KIND_ERROR,
+    CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED, CLAW_AGENT_EVENT_KIND_ITERATION_ENDED,
+    CLAW_AGENT_EVENT_KIND_ITERATION_STARTED, CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA,
+    CLAW_AGENT_EVENT_KIND_OUTPUT_END, CLAW_AGENT_EVENT_KIND_REASONING_DELTA,
+    CLAW_AGENT_EVENT_KIND_REASONING_END, CLAW_AGENT_EVENT_KIND_TOOL_CALL,
+    CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END, CLAW_AGENT_EVENT_KIND_TURN_ENDED,
+    CLAW_AGENT_EVENT_KIND_TURN_STARTED, CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
+    CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL, CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT,
+    CLAW_AGENT_TURN_ORIGIN_SUBAGENT, CLAW_AGENT_TURN_ORIGIN_USER, ESP_ERR_INVALID_ARG,
+    ESP_ERR_INVALID_SIZE, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FOUND, ESP_ERR_TIMEOUT, ESP_FAIL,
+    ESP_OK,
 };
 use crate::tool::register_capability_tools;
 
@@ -47,17 +54,13 @@ const AGENT_BOOTSTRAP_STACK_SIZE: usize = 64 * 1024;
 static RUNTIME: AtomicPtr<RuntimeController> = AtomicPtr::new(ptr::null_mut());
 static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Clone)]
-struct RuntimeConfig {
-    api: ClawApiConfig,
-    persistence: AgentPersistenceConfig,
-}
-
 struct RuntimeController {
-    config: RuntimeConfig,
-    /// The running agent, present between `start` and `stop`/`deinit`. Dropping it
-    /// joins the orchestrator's drive worker.
-    agent: Option<DeviceAgent>,
+    /// Constructed by `init` and retained across `stop`/`start`. Only `deinit`
+    /// drops it and joins the orchestrator's drive worker.
+    agent: DeviceAgent,
+    /// `start`/`stop` own this lifecycle bit; initialization is represented by
+    /// the existence of `RuntimeController` itself.
+    started: bool,
     /// Open sessions keyed by numeric session id.
     sessions: Mutex<HashMap<u32, Arc<OpenSession>>>,
 }
@@ -70,53 +73,6 @@ struct OpenSession {
     terminal: AtomicBool,
 }
 
-/// One event handed across the FFI, mapped from a [`SessionEvent`].
-enum FfiEvent {
-    InputRequested {
-        request: InputRequestId,
-        summary: String,
-    },
-    Output(String),
-    OutputEnd,
-    Reasoning(String),
-    ReasoningEnd,
-    Tools(String),
-    ToolsEnd,
-    Done,
-    Error(String),
-    Closed,
-}
-
-impl FfiEvent {
-    fn is_terminal(&self) -> bool {
-        matches!(self, FfiEvent::Closed)
-    }
-}
-
-/// Map a stream event to its FFI form. `None` marks a bracket/meta event
-/// (`TurnStarted`, `IterationStarted`/`IterationEnded`) that C does not surface;
-/// the puller skips it and pulls the next.
-fn map_event(event: SessionEvent) -> Option<FfiEvent> {
-    match event {
-        SessionEvent::InputRequested {
-            request,
-            kind: InputRequestKind::PermissionApproval { summary },
-        } => Some(FfiEvent::InputRequested { request, summary }),
-        SessionEvent::Output(StreamPart::Delta(text)) => Some(FfiEvent::Output(text)),
-        SessionEvent::Output(StreamPart::End) => Some(FfiEvent::OutputEnd),
-        SessionEvent::Reasoning(StreamPart::Delta(text)) => Some(FfiEvent::Reasoning(text)),
-        SessionEvent::Reasoning(StreamPart::End) => Some(FfiEvent::ReasoningEnd),
-        SessionEvent::ToolCalls(StreamPart::Delta(call)) => Some(FfiEvent::Tools(call.name)),
-        SessionEvent::ToolCalls(StreamPart::End) => Some(FfiEvent::ToolsEnd),
-        SessionEvent::Error { message } => Some(FfiEvent::Error(message)),
-        SessionEvent::TurnEnded { .. } => Some(FfiEvent::Done),
-        SessionEvent::Closed => Some(FfiEvent::Closed),
-        SessionEvent::TurnStarted { .. }
-        | SessionEvent::IterationStarted { .. }
-        | SessionEvent::IterationEnded => None,
-    }
-}
-
 #[no_mangle]
 /// Initialize the C agent runtime.
 ///
@@ -124,6 +80,19 @@ fn map_event(event: SessionEvent) -> Option<FfiEvent> {
 /// `config` must point to valid UTF-8 C strings for this call.
 pub unsafe extern "C" fn claw_agent_init(config: *const ClawAgentConfig) -> EspErr {
     ffi_result(|| init(config))
+}
+
+#[no_mangle]
+/// Link or replace an LLM API configuration for one runtime usage.
+///
+/// # Safety
+/// `config` must point to valid UTF-8 C strings for this call.
+pub unsafe extern "C" fn claw_agent_link_api(
+    config: *const ClawAgentApiConfig,
+    usage: c_int,
+    is_default: bool,
+) -> EspErr {
+    ffi_result(|| link_api(config, usage, is_default))
 }
 
 #[no_mangle]
@@ -170,12 +139,15 @@ pub extern "C" fn claw_agent_session_open(session_id: u32) -> EspErr {
 }
 
 #[no_mangle]
-/// Create a new numeric session.
+/// Create a new numeric session with caller-selected persistence.
 ///
 /// # Safety
 /// `out_session_id` must point to writable memory for one u32.
-pub unsafe extern "C" fn claw_agent_session_create(out_session_id: *mut u32) -> EspErr {
-    ffi_result(|| session_create(out_session_id))
+pub unsafe extern "C" fn claw_agent_session_create(
+    persistence: c_int,
+    out_session_id: *mut u32,
+) -> EspErr {
+    ffi_result(|| session_create(persistence, out_session_id))
 }
 
 #[no_mangle]
@@ -246,14 +218,12 @@ fn init(config: *const ClawAgentConfig) -> Result<(), CabiError> {
     );
 
     let config = unsafe { config.as_ref() }.ok_or(CabiError::InvalidArgument)?;
-    let backend_type = required_string(config.backend_type)?;
-    let backend = BackendKind::from_str(&backend_type).map_err(|_| CabiError::InvalidArgument)?;
-    let api = ClawApiConfig::new(
-        backend,
-        required_string(config.api_key)?,
-        required_string(config.model)?,
-        required_string(config.base_url)?,
-    );
+    let api = parse_initial_api_config(
+        config.api_key,
+        config.backend_type,
+        config.model,
+        config.base_url,
+    )?;
     let persistence_dir = required_string(config.persistence_dir)?;
     // Skill roots are scanned in priority order: writable DATA skills first, then
     // read-only firmware skills. Both are optional; a missing/blank root is simply
@@ -280,26 +250,56 @@ fn init(config: *const ClawAgentConfig) -> Result<(), CabiError> {
         return Err(CabiError::InvalidState);
     }
 
+    // Agent construction registers every C capability as a Rust tool and can
+    // checkpoint deep serde/filesystem state. Keep it off ESP-IDF's small
+    // caller task stack, but complete it as part of `init`, not `start`.
+    let agent = bootstrap_agent(api, persistence)?;
     let runtime = Box::new(RuntimeController {
-        config: RuntimeConfig { api, persistence },
-        agent: None,
+        agent,
+        started: false,
         sessions: Mutex::new(HashMap::new()),
     });
     RUNTIME.store(Box::into_raw(runtime), Ordering::Release);
     Ok(())
 }
 
+fn link_api(
+    config: *const ClawAgentApiConfig,
+    usage: c_int,
+    is_default: bool,
+) -> Result<(), CabiError> {
+    let config = unsafe { config.as_ref() }.ok_or(CabiError::InvalidArgument)?;
+    let api = parse_api_config(
+        config.api_key,
+        config.backend_type,
+        config.model,
+        config.base_url,
+    )?;
+    let usage = parse_api_usage(usage)?;
+
+    let _guard = lock_runtime();
+    let runtime = runtime_mut()?;
+    runtime
+        .agent
+        .link_api(api, usage, is_default)
+        .map_err(link_api_error)
+}
+
 fn start() -> Result<(), CabiError> {
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
-    if runtime.agent.is_some() {
+    if runtime.started {
         return Ok(());
     }
+    runtime.agent.start_all()?;
+    runtime.started = true;
+    Ok(())
+}
 
-    // Capability registration checkpoints every inserted tool. Keep that deep
-    // serde/filesystem call chain off ESP-IDF's small `main` task stack.
-    let api = runtime.config.api.clone();
-    let persistence = runtime.config.persistence.clone();
+fn bootstrap_agent(
+    api: Option<ClawApiConfig>,
+    persistence: AgentPersistenceConfig,
+) -> Result<DeviceAgent, CabiError> {
     let (result_tx, result_rx) = mpsc::sync_channel(1);
     let worker = EspIdfThread::spawn_worker(
         "claw_bootstrap",
@@ -315,35 +315,29 @@ fn start() -> Result<(), CabiError> {
 
     let result = result_rx.recv();
     worker.join();
-    let agent = result.map_err(|_| CabiError::BootstrapExited)??;
-    runtime.agent = Some(agent);
-    Ok(())
+    result.map_err(|_| CabiError::BootstrapExited)?
 }
 
 fn build_agent(
-    api: ClawApiConfig,
+    api: Option<ClawApiConfig>,
     persistence: AgentPersistenceConfig,
 ) -> Result<DeviceAgent, CabiError> {
-    let agent = DeviceAgent::new::<EspIdfThread, EspIdfExecutor>(api, persistence)?;
+    let agent = DeviceAgent::new::<EspIdfThread, EspIdfExecutor>(persistence)?;
+    if let Some(api) = api {
+        agent.link_api(api, ApiUsage::RootAgent, true)?;
+    }
     register_capability_tools(agent.tool_registry())?;
-    agent.start_all()?;
     Ok(agent)
 }
 
 fn stop() -> Result<(), CabiError> {
-    // Take the agent out under the lock, then stop/drop it outside so the
-    // orchestrator worker join never happens while holding the runtime lock.
-    let agent = {
-        let _guard = lock_runtime();
-        let runtime = runtime_mut()?;
-        open_sessions(runtime).clear();
-        runtime.agent.take()
-    };
-    if let Some(agent) = agent {
-        let result = agent.stop_all().map_err(CabiError::from);
-        drop(agent);
-        return result.map(|_| ());
+    let _guard = lock_runtime();
+    let runtime = runtime_mut()?;
+    if !runtime.started {
+        return Ok(());
     }
+    runtime.agent.stop_all()?;
+    runtime.started = false;
     Ok(())
 }
 
@@ -356,14 +350,14 @@ fn deinit() -> Result<(), CabiError> {
         return Ok(());
     }
 
-    let mut runtime = unsafe { Box::from_raw(ptr) };
-    let agent = runtime.agent.take();
+    let runtime = unsafe { Box::from_raw(ptr) };
+    let stop_result = if runtime.started {
+        runtime.agent.stop_all().map_err(CabiError::from)
+    } else {
+        Ok(())
+    };
     drop(runtime);
-    if let Some(agent) = agent {
-        let _ = agent.stop_all();
-        drop(agent);
-    }
-    Ok(())
+    stop_result
 }
 
 fn submit_session(session_id: u32, text: *const c_char) -> Result<(), CabiError> {
@@ -374,7 +368,7 @@ fn submit_session(session_id: u32, text: *const c_char) -> Result<(), CabiError>
     let session = {
         let _guard = lock_runtime();
         let runtime = runtime_mut()?;
-        runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
+        running_agent(runtime)?;
         get_open_session_locked(runtime, session_id)?.ok_or(CabiError::NotFound)?
     };
     futures_lite::future::block_on(session.control.submit(Message::text(text)))
@@ -389,7 +383,7 @@ fn respond_session(session_id: u32, request_id: u32, text: *const c_char) -> Res
     let session = {
         let _guard = lock_runtime();
         let runtime = runtime_mut()?;
-        runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
+        running_agent(runtime)?;
         get_open_session_locked(runtime, session_id)?.ok_or(CabiError::NotFound)?
     };
     futures_lite::future::block_on(
@@ -406,7 +400,7 @@ fn session_open(session_id: u32) -> Result<(), CabiError> {
     }
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
-    let agent = runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
+    let agent = running_agent(runtime)?;
     if open_sessions(runtime).contains_key(&session_id) {
         return Err(CabiError::InvalidState);
     }
@@ -424,12 +418,13 @@ fn session_open(session_id: u32) -> Result<(), CabiError> {
     Ok(())
 }
 
-fn session_create(out_session_id: *mut u32) -> Result<(), CabiError> {
+fn session_create(persistence: c_int, out_session_id: *mut u32) -> Result<(), CabiError> {
+    let persistence = parse_session_persistence(persistence)?;
     let out_session_id = unsafe { out_session_id.as_mut() }.ok_or(CabiError::InvalidArgument)?;
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
-    let agent = runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
-    *out_session_id = agent.new_session().0;
+    let agent = running_agent(runtime)?;
+    *out_session_id = agent.new_session(persistence).0;
     Ok(())
 }
 
@@ -446,7 +441,7 @@ fn session_list(
     let sessions = {
         let _guard = lock_runtime();
         let runtime = runtime_mut()?;
-        let agent = runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
+        let agent = running_agent(runtime)?;
         agent.list_sessions()
     };
     *out_count = sessions.len();
@@ -478,7 +473,7 @@ fn session_delete(session_id: u32) -> Result<(), CabiError> {
     }
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
-    let agent = runtime.agent.as_ref().ok_or(CabiError::InvalidState)?;
+    let agent = running_agent(runtime)?;
     agent
         .delete_session(SessionId::new(session_id))
         .map_err(session_control_error)
@@ -518,7 +513,7 @@ fn receive(
 
     match next {
         Some(event) => {
-            let terminal = event.is_terminal();
+            let terminal = matches!(event, SessionEvent::Closed);
             write_event(out_event, event)?;
             if terminal {
                 session.terminal.store(true, Ordering::Release);
@@ -552,41 +547,29 @@ fn session_cancel(session_id: u32) -> Result<(), CabiError> {
     futures_lite::future::block_on(session.control.cancel()).map_err(|_| CabiError::InvalidState)
 }
 
-/// Pull the next surfaced event already buffered on the stream without blocking.
-/// Returns `None` when nothing is ready yet; skips bracket/meta events; maps a
-/// closed stream to [`FfiEvent::Closed`].
-fn next_ready(stream: &mut SessionEventStream) -> Option<FfiEvent> {
+/// Pull the next event already buffered on the stream without blocking.
+/// Returns `None` when nothing is ready yet and maps a closed receiver to
+/// [`SessionEvent::Closed`].
+fn next_ready(stream: &mut SessionEventStream) -> Option<SessionEvent> {
     let mut context = Context::from_waker(Waker::noop());
-    loop {
-        match Pin::new(&mut *stream).poll_next(&mut context) {
-            Poll::Ready(Some(event)) => {
-                if let Some(mapped) = map_event(event) {
-                    return Some(mapped);
-                }
-            }
-            Poll::Ready(None) => return Some(FfiEvent::Closed),
-            Poll::Pending => return None,
-        }
+    match Pin::new(stream).poll_next(&mut context) {
+        Poll::Ready(Some(event)) => Some(event),
+        Poll::Ready(None) => Some(SessionEvent::Closed),
+        Poll::Pending => None,
     }
 }
 
-/// Pull the next surfaced event, waiting up to `timeout_ms`. Returns `None` on
-/// timeout (the stream is retained for a later `receive`); skips bracket/meta
-/// events; maps a closed stream to [`FfiEvent::Closed`].
-fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<FfiEvent> {
+/// Pull the next event, waiting up to `timeout_ms`. Returns `None` on timeout
+/// (the stream is retained for a later `receive`) and maps a closed receiver to
+/// [`SessionEvent::Closed`].
+fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<SessionEvent> {
     let abort = AtomicBool::new(false);
     let mut timer = EspIdfTimer;
     futures_lite::future::block_on(async {
         let pull = async {
-            loop {
-                match stream.next().await {
-                    Some(event) => {
-                        if let Some(mapped) = map_event(event) {
-                            return Some(mapped);
-                        }
-                    }
-                    None => return Some(FfiEvent::Closed),
-                }
+            match stream.next().await {
+                Some(event) => Some(event),
+                None => Some(SessionEvent::Closed),
             }
         };
         let timeout = async {
@@ -596,7 +579,7 @@ fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<FfiEv
                     Cancel::new(&abort),
                 )
                 .await;
-            None::<FfiEvent>
+            None::<SessionEvent>
         };
         futures_lite::future::or(pull, timeout).await
     })
@@ -605,6 +588,7 @@ fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<FfiEv
 fn get_open_session(session_id: u32) -> Result<Option<Arc<OpenSession>>, CabiError> {
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
+    running_agent(runtime)?;
     get_open_session_locked(runtime, session_id)
 }
 
@@ -643,40 +627,107 @@ fn runtime_mut() -> Result<&'static mut RuntimeController, CabiError> {
     Ok(unsafe { &mut *ptr })
 }
 
-/// Marshal one [`FfiEvent`] into the C event struct.
-fn write_event(out_event: &mut ClawAgentEvent, event: FfiEvent) -> Result<(), CabiError> {
-    let mut request_id = 0;
-    let mut input_kind = CLAW_AGENT_INPUT_REQUEST_KIND_NONE;
-    let (kind, text, error_message) = match event {
-        FfiEvent::InputRequested { request, summary } => {
-            request_id = request.0;
-            input_kind = CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL;
-            (CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED, Some(summary), None)
+fn running_agent(runtime: &RuntimeController) -> Result<&DeviceAgent, CabiError> {
+    if !runtime.started {
+        return Err(CabiError::InvalidState);
+    }
+    Ok(&runtime.agent)
+}
+
+/// Marshal one [`SessionEvent`] into its corresponding tagged C payload.
+fn write_event(out_event: &mut ClawAgentEvent, event: SessionEvent) -> Result<(), CabiError> {
+    *out_event = match event {
+        SessionEvent::TurnStarted { turn, origin } => {
+            let (origin, agent_id) = match origin {
+                TurnOrigin::User => (CLAW_AGENT_TURN_ORIGIN_USER, 0),
+                TurnOrigin::Subagent { agent } => (CLAW_AGENT_TURN_ORIGIN_SUBAGENT, agent.0),
+            };
+            ClawAgentEvent {
+                kind: CLAW_AGENT_EVENT_KIND_TURN_STARTED,
+                data: ClawAgentEventData {
+                    turn_started: ClawAgentTurnStartedEvent {
+                        turn_id: turn.0,
+                        origin,
+                        agent_id,
+                    },
+                },
+            }
         }
-        FfiEvent::Output(text) => (CLAW_AGENT_EVENT_KIND_OUTPUT, Some(text), None),
-        FfiEvent::OutputEnd => (CLAW_AGENT_EVENT_KIND_OUTPUT_END, None, None),
-        FfiEvent::Reasoning(text) => (CLAW_AGENT_EVENT_KIND_REASONING, Some(text), None),
-        FfiEvent::ReasoningEnd => (CLAW_AGENT_EVENT_KIND_REASONING_END, None, None),
-        FfiEvent::Tools(text) => (CLAW_AGENT_EVENT_KIND_TOOLS, Some(text), None),
-        FfiEvent::ToolsEnd => (CLAW_AGENT_EVENT_KIND_TOOLS_END, None, None),
-        FfiEvent::Done => (CLAW_AGENT_EVENT_KIND_DONE, None, None),
-        FfiEvent::Error(message) => (CLAW_AGENT_EVENT_KIND_ERROR, None, Some(message)),
-        FfiEvent::Closed => (CLAW_AGENT_EVENT_KIND_CLOSED, None, None),
-    };
-    let text = match text {
-        Some(value) => cstring_raw(&value)?,
-        None => ptr::null_mut(),
-    };
-    let error_message = match error_message {
-        Some(value) => cstring_raw(&value)?,
-        None => ptr::null_mut(),
-    };
-    *out_event = ClawAgentEvent {
-        kind,
-        request_id,
-        input_kind,
-        text,
-        error_message,
+        SessionEvent::InputRequested {
+            request,
+            kind: InputRequestKind::PermissionApproval { summary },
+        } => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED,
+            data: ClawAgentEventData {
+                input_requested: ClawAgentInputRequestedEvent {
+                    request_id: request.0,
+                    kind: CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
+                    summary: cstring(&summary)?.into_raw(),
+                },
+            },
+        },
+        SessionEvent::IterationStarted { iteration } => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_ITERATION_STARTED,
+            data: ClawAgentEventData {
+                iteration: ClawAgentIterationEvent {
+                    iteration_id: iteration.0,
+                },
+            },
+        },
+        SessionEvent::Reasoning(StreamPart::Delta(text)) => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_REASONING_DELTA,
+            data: ClawAgentEventData {
+                text_delta: ClawAgentTextDeltaEvent {
+                    text: cstring(&text)?.into_raw(),
+                },
+            },
+        },
+        SessionEvent::Reasoning(StreamPart::End) => {
+            empty_event(CLAW_AGENT_EVENT_KIND_REASONING_END)
+        }
+        SessionEvent::Output(StreamPart::Delta(text)) => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA,
+            data: ClawAgentEventData {
+                text_delta: ClawAgentTextDeltaEvent {
+                    text: cstring(&text)?.into_raw(),
+                },
+            },
+        },
+        SessionEvent::Output(StreamPart::End) => empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END),
+        SessionEvent::ToolCalls(StreamPart::Delta(call)) => {
+            let id = cstring(&call.id)?;
+            let name = cstring(&call.name)?;
+            let arguments_json = cstring(&call.arguments_json)?;
+            ClawAgentEvent {
+                kind: CLAW_AGENT_EVENT_KIND_TOOL_CALL,
+                data: ClawAgentEventData {
+                    tool_call: ClawAgentToolCallEvent {
+                        id: id.into_raw(),
+                        name: name.into_raw(),
+                        arguments_json: arguments_json.into_raw(),
+                    },
+                },
+            }
+        }
+        SessionEvent::ToolCalls(StreamPart::End) => {
+            empty_event(CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END)
+        }
+        SessionEvent::IterationEnded => empty_event(CLAW_AGENT_EVENT_KIND_ITERATION_ENDED),
+        SessionEvent::TurnEnded { turn } => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_TURN_ENDED,
+            data: ClawAgentEventData {
+                turn_ended: ClawAgentTurnEndedEvent { turn_id: turn.0 },
+            },
+        },
+        SessionEvent::Error { message } => ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_ERROR,
+            data: ClawAgentEventData {
+                error: ClawAgentErrorEvent {
+                    message: cstring(&message)?.into_raw(),
+                },
+            },
+        },
+        SessionEvent::Closed => empty_event(CLAW_AGENT_EVENT_KIND_CLOSED),
     };
     Ok(())
 }
@@ -685,17 +736,37 @@ fn free_event(event: *mut ClawAgentEvent) {
     let Some(event) = (unsafe { event.as_mut() }) else {
         return;
     };
-    free_cstring(event.text);
-    free_cstring(event.error_message);
-    event.text = ptr::null_mut();
-    event.error_message = ptr::null_mut();
+    match event.kind {
+        CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED => {
+            free_cstring(unsafe { event.data.input_requested.summary });
+        }
+        CLAW_AGENT_EVENT_KIND_REASONING_DELTA | CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA => {
+            free_cstring(unsafe { event.data.text_delta.text });
+        }
+        CLAW_AGENT_EVENT_KIND_TOOL_CALL => {
+            let call = unsafe { event.data.tool_call };
+            free_cstring(call.id);
+            free_cstring(call.name);
+            free_cstring(call.arguments_json);
+        }
+        CLAW_AGENT_EVENT_KIND_ERROR => {
+            free_cstring(unsafe { event.data.error.message });
+        }
+        _ => {}
+    }
+    *event = empty_event(CLAW_AGENT_EVENT_KIND_CLOSED);
 }
 
-fn cstring_raw(value: &str) -> Result<*mut c_char, CabiError> {
+fn empty_event(kind: c_int) -> ClawAgentEvent {
+    ClawAgentEvent {
+        kind,
+        data: ClawAgentEventData { reserved: 0 },
+    }
+}
+
+fn cstring(value: &str) -> Result<CString, CabiError> {
     let sanitized = value.replace('\0', "\\0");
-    CString::new(sanitized)
-        .map(CString::into_raw)
-        .map_err(|_| CabiError::InvalidArgument)
+    CString::new(sanitized).map_err(|_| CabiError::InvalidArgument)
 }
 
 fn free_cstring(value: *mut c_char) {
@@ -703,6 +774,71 @@ fn free_cstring(value: *mut c_char) {
         return;
     }
     let _ = unsafe { CString::from_raw(value) };
+}
+
+fn parse_api_config(
+    api_key: *const c_char,
+    backend_type: *const c_char,
+    model: *const c_char,
+    base_url: *const c_char,
+) -> Result<ClawApiConfig, CabiError> {
+    let backend_type = required_string(backend_type)?;
+    let backend = BackendKind::from_str(&backend_type).map_err(|_| CabiError::InvalidArgument)?;
+    let config = ClawApiConfig::new(
+        backend,
+        required_string(api_key)?,
+        required_string(model)?,
+        required_string(base_url)?,
+    );
+    config.validate().map_err(|_| CabiError::InvalidArgument)?;
+    Ok(config)
+}
+
+fn parse_initial_api_config(
+    api_key: *const c_char,
+    backend_type: *const c_char,
+    model: *const c_char,
+    base_url: *const c_char,
+) -> Result<Option<ClawApiConfig>, CabiError> {
+    let fields = [
+        optional_string(api_key)?,
+        optional_string(backend_type)?,
+        optional_string(model)?,
+        optional_string(base_url)?,
+    ];
+    let configured = fields
+        .iter()
+        .filter(|field| {
+            field
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+        .count();
+    if configured == 0 {
+        return Ok(None);
+    }
+    if configured != fields.len() {
+        return Err(CabiError::InvalidArgument);
+    }
+    parse_api_config(api_key, backend_type, model, base_url).map(Some)
+}
+
+fn parse_api_usage(usage: c_int) -> Result<ApiUsage, CabiError> {
+    match usage {
+        CLAW_AGENT_API_USAGE_ROOT_AGENT => Ok(ApiUsage::RootAgent),
+        CLAW_AGENT_API_USAGE_SUBAGENT => Ok(ApiUsage::SubAgent),
+        CLAW_AGENT_API_USAGE_MEMORY => Ok(ApiUsage::Memory),
+        CLAW_AGENT_API_USAGE_COMPACTION => Ok(ApiUsage::Compaction),
+        _ => Err(CabiError::InvalidArgument),
+    }
+}
+
+fn parse_session_persistence(persistence: c_int) -> Result<SessionPersistence, CabiError> {
+    match persistence {
+        CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT => Ok(SessionPersistence::Persistent),
+        CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL => Ok(SessionPersistence::Ephemeral),
+        _ => Err(CabiError::InvalidArgument),
+    }
 }
 
 fn required_string(ptr: *const c_char) -> Result<String, CabiError> {
@@ -724,6 +860,13 @@ fn open_session_error(error: AgentError) -> CabiError {
         AgentError::OpenSession(OpenSessionError::SessionNotFound(_)) => CabiError::NotFound,
         AgentError::OpenSession(OpenSessionError::AlreadyOpen(_)) => CabiError::InvalidState,
         AgentError::OpenSession(OpenSessionError::WorkerStopped) => CabiError::InvalidState,
+        other => CabiError::Agent(other),
+    }
+}
+
+fn link_api_error(error: AgentError) -> CabiError {
+    match error {
+        AgentError::LlmConfig(_) => CabiError::InvalidArgument,
         other => CabiError::Agent(other),
     }
 }

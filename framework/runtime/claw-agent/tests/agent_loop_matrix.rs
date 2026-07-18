@@ -802,7 +802,7 @@ fn llm_response_for_case(kind: &str, output: &str, reasoning_bytes: usize) -> St
                     "tool_calls": [{
                         "id": "call_bad",
                         "type": "function",
-                        "function": { "name": "matrix_echo" }
+                        "function": { "arguments": "{}" }
                     }]
                 }
             }]

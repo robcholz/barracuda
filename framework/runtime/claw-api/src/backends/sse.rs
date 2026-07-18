@@ -43,8 +43,9 @@ fn merge_usage(current: &mut Option<ApiUsage>, incoming: ApiUsage) {
     }
 }
 
-/// SSE event separator. Providers frame events with a blank line.
-const FRAME_BOUNDARY: &[u8] = b"\n\n";
+/// SSE event separators. Providers may use LF or HTTP-style CRLF lines.
+const LF_FRAME_BOUNDARY: &[u8] = b"\n\n";
+const CRLF_FRAME_BOUNDARY: &[u8] = b"\r\n\r\n";
 
 /// The concrete SSE parser for the selected backend. Lets [`crate::ChatStream`]
 /// stay one non-generic type while dispatching to the right provider parser.
@@ -83,7 +84,7 @@ pub(crate) trait SseParse {
 }
 
 /// Buffers raw bytes and yields complete SSE frames (the text between blank
-/// lines). Cutting only on the ASCII `"\n\n"` never splits a multibyte code
+/// lines). Cutting only on ASCII line endings never splits a multibyte code
 /// point, so a returned frame is always valid UTF-8.
 #[derive(Default)]
 struct FrameBuffer {
@@ -96,11 +97,24 @@ impl FrameBuffer {
     }
 
     fn next_frame(&mut self) -> Result<Option<String>, ChatError> {
-        let Some(idx) = find_subsequence(&self.buf, FRAME_BOUNDARY) else {
+        let lf = find_subsequence(&self.buf, LF_FRAME_BOUNDARY)
+            .map(|index| (index, LF_FRAME_BOUNDARY.len()));
+        let crlf = find_subsequence(&self.buf, CRLF_FRAME_BOUNDARY)
+            .map(|index| (index, CRLF_FRAME_BOUNDARY.len()));
+        let boundary = match (lf, crlf) {
+            (Some(lf), Some(crlf)) if lf.0 <= crlf.0 => Some(lf),
+            (Some(_), Some(crlf)) => Some(crlf),
+            (Some(lf), None) => Some(lf),
+            (None, Some(crlf)) => Some(crlf),
+            (None, None) => None,
+        };
+        let Some((idx, boundary_len)) = boundary else {
             return Ok(None);
         };
-        let frame: Vec<u8> = self.buf.drain(..idx + FRAME_BOUNDARY.len()).collect();
-        let text = core::str::from_utf8(&frame[..idx]).map_err(|_| ClawApiError::Parse)?;
+        let frame_end = idx.checked_add(boundary_len).ok_or(ClawApiError::Parse)?;
+        let frame: Vec<u8> = self.buf.drain(..frame_end).collect();
+        let payload = frame.get(..idx).ok_or(ClawApiError::Parse)?;
+        let text = core::str::from_utf8(payload).map_err(|_| ClawApiError::Parse)?;
         Ok(Some(text.to_string()))
     }
 }
@@ -176,18 +190,23 @@ impl OpenAiSse {
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
-                self.merge_tool_call(call);
+                self.merge_tool_call(call)?;
             }
         }
         Ok(())
     }
 
-    fn merge_tool_call(&mut self, call: &Value) {
-        let index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-        while self.tool_calls.len() <= index {
+    fn merge_tool_call(&mut self, call: &Value) -> Result<(), ChatError> {
+        let raw_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let index = usize::try_from(u32::try_from(raw_index).map_err(|_| ClawApiError::Parse)?)
+            .map_err(|_| ClawApiError::Parse)?;
+        if index > self.tool_calls.len() {
+            return Err(ClawApiError::Parse.into());
+        }
+        if index == self.tool_calls.len() {
             self.tool_calls.push(OpenAiToolCall::default());
         }
-        let slot = &mut self.tool_calls[index];
+        let slot = self.tool_calls.get_mut(index).ok_or(ClawApiError::Parse)?;
         if let Some(id) = call
             .get("id")
             .and_then(Value::as_str)
@@ -207,6 +226,7 @@ impl OpenAiSse {
                 slot.args.push_str(args);
             }
         }
+        Ok(())
     }
 
     /// Emit an [`LlmDelta::ToolCall`] for every not-yet-emitted, named call in
@@ -215,19 +235,20 @@ impl OpenAiSse {
     ///
     /// Per-call emission at each call's own completion is a later refinement for
     /// eager dispatch; batched dispatch only needs the full set here.
-    fn flush_tool_calls(&mut self, out: &mut Vec<LlmDelta>) {
+    fn flush_tool_calls(&mut self, out: &mut Vec<LlmDelta>) -> Result<(), ChatError> {
         for (index, slot) in self.tool_calls.iter_mut().enumerate() {
             if slot.emitted || slot.name.is_empty() {
                 continue;
             }
             slot.emitted = true;
             out.push(LlmDelta::ToolCall {
-                index: index as u32,
+                index: u32::try_from(index).map_err(|_| ClawApiError::Parse)?,
                 id: slot.id.clone(),
                 name: slot.name.clone(),
                 arguments: slot.args.clone(),
             });
         }
+        Ok(())
     }
 }
 
@@ -238,7 +259,7 @@ impl SseParse for OpenAiSse {
             for payload in data_payloads(&frame) {
                 if payload == OPENAI_DONE {
                     self.done = true;
-                    self.flush_tool_calls(out);
+                    self.flush_tool_calls(out)?;
                 } else {
                     self.process_data(payload, out)?;
                 }
@@ -248,6 +269,9 @@ impl SseParse for OpenAiSse {
     }
 
     fn finish(self) -> Result<LlmResponse, ChatError> {
+        if !self.done {
+            return Err(ChatError::truncated_stream());
+        }
         let text = (!self.text.is_empty()).then(|| self.text.clone());
         let reasoning_content = (!self.reasoning.is_empty()).then(|| self.reasoning.clone());
         let tool_calls: Vec<ToolCall> = self
@@ -348,24 +372,29 @@ impl AnthropicSse {
             merge_usage(&mut self.usage, usage);
         }
         match value.get("type").and_then(Value::as_str) {
-            Some("content_block_start") => self.on_block_start(&value),
-            Some("content_block_delta") => self.on_block_delta(&value, out),
-            Some("content_block_stop") => self.on_block_stop(&value, out),
+            Some("content_block_start") => self.on_block_start(&value)?,
+            Some("content_block_delta") => self.on_block_delta(&value, out)?,
+            Some("content_block_stop") => self.on_block_stop(&value, out)?,
             Some("message_stop") => self.done = true,
             _ => {} // message_start / message_delta / ping: ignored
         }
         Ok(())
     }
 
-    fn slot(&mut self, index: usize) -> &mut AnthBlock {
-        while self.blocks.len() <= index {
+    fn slot(&mut self, index: usize) -> Result<&mut AnthBlock, ChatError> {
+        if index > self.blocks.len() {
+            return Err(ClawApiError::Parse.into());
+        }
+        if index == self.blocks.len() {
             self.blocks.push(AnthBlock::Other);
         }
-        &mut self.blocks[index]
+        self.blocks
+            .get_mut(index)
+            .ok_or_else(|| ClawApiError::Parse.into())
     }
 
-    fn on_block_start(&mut self, value: &Value) {
-        let index = block_index(value);
+    fn on_block_start(&mut self, value: &Value) -> Result<(), ChatError> {
+        let index = block_index(value)?;
         let kind = value
             .get("content_block")
             .and_then(|b| b.get("type"))
@@ -380,7 +409,7 @@ impl AnthropicSse {
             },
             Some("tool_use") => {
                 let ordinal = self.tool_count;
-                self.tool_count += 1;
+                self.tool_count = self.tool_count.checked_add(1).ok_or(ClawApiError::Parse)?;
                 let content_block = value.get("content_block");
                 AnthBlock::ToolUse {
                     ordinal,
@@ -399,19 +428,20 @@ impl AnthropicSse {
             }
             _ => AnthBlock::Other,
         };
-        *self.slot(index) = block;
+        *self.slot(index)? = block;
+        Ok(())
     }
 
-    fn on_block_delta(&mut self, value: &Value, out: &mut Vec<LlmDelta>) {
-        let index = block_index(value);
+    fn on_block_delta(&mut self, value: &Value, out: &mut Vec<LlmDelta>) -> Result<(), ChatError> {
+        let index = block_index(value)?;
         let Some(delta) = value.get("delta") else {
-            return;
+            return Ok(());
         };
         match delta.get("type").and_then(Value::as_str) {
             Some("thinking_delta") => {
                 if let Some(fragment) = delta.get("thinking").and_then(Value::as_str) {
                     if !fragment.is_empty() {
-                        if let AnthBlock::Thinking { text, .. } = self.slot(index) {
+                        if let AnthBlock::Thinking { text, .. } = self.slot(index)? {
                             text.push_str(fragment);
                         }
                         out.push(LlmDelta::Reasoning(fragment.to_string()));
@@ -420,7 +450,7 @@ impl AnthropicSse {
             }
             Some("signature_delta") => {
                 if let Some(sig) = delta.get("signature").and_then(Value::as_str) {
-                    if let AnthBlock::Thinking { signature, .. } = self.slot(index) {
+                    if let AnthBlock::Thinking { signature, .. } = self.slot(index)? {
                         signature.push_str(sig);
                     }
                 }
@@ -428,7 +458,7 @@ impl AnthropicSse {
             Some("text_delta") => {
                 if let Some(fragment) = delta.get("text").and_then(Value::as_str) {
                     if !fragment.is_empty() {
-                        if let AnthBlock::Text { text } = self.slot(index) {
+                        if let AnthBlock::Text { text } = self.slot(index)? {
                             text.push_str(fragment);
                         }
                         out.push(LlmDelta::Output(fragment.to_string()));
@@ -437,17 +467,18 @@ impl AnthropicSse {
             }
             Some("input_json_delta") => {
                 if let Some(fragment) = delta.get("partial_json").and_then(Value::as_str) {
-                    if let AnthBlock::ToolUse { args, .. } = self.slot(index) {
+                    if let AnthBlock::ToolUse { args, .. } = self.slot(index)? {
                         args.push_str(fragment);
                     }
                 }
             }
             _ => {}
         }
+        Ok(())
     }
 
-    fn on_block_stop(&mut self, value: &Value, out: &mut Vec<LlmDelta>) {
-        let index = block_index(value);
+    fn on_block_stop(&mut self, value: &Value, out: &mut Vec<LlmDelta>) -> Result<(), ChatError> {
+        let index = block_index(value)?;
         // A tool call's arguments are complete at its block stop — emit it now.
         if let Some(AnthBlock::ToolUse {
             ordinal,
@@ -465,6 +496,7 @@ impl AnthropicSse {
                 });
             }
         }
+        Ok(())
     }
 }
 
@@ -480,6 +512,9 @@ impl SseParse for AnthropicSse {
     }
 
     fn finish(self) -> Result<LlmResponse, ChatError> {
+        if !self.done {
+            return Err(ChatError::truncated_stream());
+        }
         let mut text = String::new();
         let mut reasoning = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -544,8 +579,10 @@ impl SseParse for AnthropicSse {
     }
 }
 
-fn block_index(value: &Value) -> usize {
-    value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize
+fn block_index(value: &Value) -> Result<usize, ChatError> {
+    let raw_index = value.get("index").and_then(Value::as_u64).unwrap_or(0);
+    usize::try_from(u32::try_from(raw_index).map_err(|_| ClawApiError::Parse)?)
+        .map_err(|_| ClawApiError::Parse.into())
 }
 
 /// Index of the first occurrence of `needle` in `haystack`, if any.
@@ -625,6 +662,18 @@ mod tests {
     }
 
     #[test]
+    fn openai_accepts_crlf_sse_frames() {
+        let mut parser = OpenAiSse::new();
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n",
+            "data: [DONE]\r\n\r\n",
+        );
+        let deltas = drive(&mut parser, body);
+        assert_eq!(deltas, vec![LlmDelta::Output("hi".to_string())]);
+        assert_eq!(parser.finish().unwrap().text.as_deref(), Some("hi"));
+    }
+
+    #[test]
     fn openai_reassembles_multibyte_utf8_split_across_chunks() {
         let mut parser = OpenAiSse::new();
         let mut out = Vec::new();
@@ -641,6 +690,16 @@ mod tests {
         let mut parser = OpenAiSse::new();
         drive(&mut parser, "data: [DONE]\n\n");
         assert!(parser.finish().is_err());
+    }
+
+    #[test]
+    fn openai_requires_done_marker() {
+        let mut parser = OpenAiSse::new();
+        drive(
+            &mut parser,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+        );
+        assert_eq!(parser.finish(), Err(ChatError::truncated_stream()));
     }
 
     #[cfg(feature = "cache_profile")]
@@ -717,6 +776,19 @@ mod tests {
         assert!(out.is_empty());
         parser.push(b.as_bytes(), &mut out).unwrap();
         assert_eq!(out, vec![LlmDelta::Output("hi".to_string())]);
+    }
+
+    #[test]
+    fn anthropic_requires_message_stop() {
+        let mut parser = AnthropicSse::new();
+        drive(
+            &mut parser,
+            concat!(
+                "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+                "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial\"}}\n\n",
+            ),
+        );
+        assert_eq!(parser.finish(), Err(ChatError::truncated_stream()));
     }
 
     #[cfg(feature = "cache_profile")]

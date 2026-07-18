@@ -3,8 +3,9 @@
 //!
 //! This is the inbound boundary (C / OS -> Rust): it defines the
 //! dependency-injection traits that abstract over platform facilities —
-//! filesystem ([`ClawFs`](fs::ClawFs)) and networking ([`ClawHttp`](http::ClawHttp)) —
-//! plus the shared types those traits work with. The pure-Rust core crates
+//! filesystem ([`ClawFs`](fs::ClawFs)) and networking
+//! ([`ClawHttp`](http::ClawHttp) plus [`StreamingHttp`](http::StreamingHttp)) — plus
+//! the shared types those traits work with. The pure-Rust core crates
 //! (`claw-api`, `claw_core`, `claw-tool`, `claw-memory`, `claw-sandbox`, ...)
 //! depend only on these traits, never on a platform directly, so the device
 //! build and host tests can plug in different implementations of the same seam.
@@ -32,7 +33,7 @@ pub use http::{
 };
 pub use http::{
     Cancel, ClawHttp, HttpAuth, HttpError, HttpGetRequest, HttpHeader, HttpJsonRequest,
-    HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode,
+    HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, StreamingHttp,
 };
 #[cfg(feature = "stdthread")]
 pub use thread::StdThread;

@@ -9,8 +9,8 @@ use claw_tool::{
 use serde_json::json;
 
 use crate::abi::{
-    claw_cap_call, claw_cap_get_descriptor_state, claw_cap_list, ClawCapCallContext,
-    ClawCapDescriptor, ClawCapDescriptorInfo, CLAW_CAP_FLAG_CALLABLE_BY_LLM,
+    claw_cap_call, claw_cap_get_descriptor_state, claw_cap_is_llm_tool_available, claw_cap_list,
+    ClawCapCallContext, ClawCapDescriptor, ClawCapDescriptorInfo, CLAW_CAP_FLAG_CALLABLE_BY_LLM,
     CLAW_CAP_FLAG_ROOT_AGENT_ONLY, CLAW_CAP_KIND_CALLABLE, CLAW_CAP_KIND_HYBRID, ESP_OK,
     TOOL_OUTPUT_CAPACITY,
 };
@@ -42,6 +42,9 @@ pub(crate) fn register_capability_tools(
         if !is_llm_tool(descriptor) {
             continue;
         }
+        if !is_available_to_root_agent(descriptor)? {
+            continue;
+        }
         let group_id = descriptor_group_id(descriptor)?;
         groups
             .entry(group_id)
@@ -52,6 +55,15 @@ pub(crate) fn register_capability_tools(
         registry.register_group(ToolGroup::new(group_id, false, tools))?;
     }
     Ok(())
+}
+
+fn is_available_to_root_agent(descriptor: &ClawCapDescriptor) -> Result<bool, CapToolError> {
+    let name = c_string(descriptor.name)
+        .or_else(|| c_string(descriptor.id))
+        .ok_or(CapToolError::InvalidDescriptor)?;
+    let c_name = CString::new(name).map_err(|_| CapToolError::InvalidDescriptor)?;
+    let ctx = ClawCapCallContext::default();
+    Ok(unsafe { claw_cap_is_llm_tool_available(c_name.as_ptr(), &ctx) })
 }
 
 fn is_llm_tool(descriptor: &ClawCapDescriptor) -> bool {
@@ -98,10 +110,7 @@ impl CapTool {
         let input_schema =
             c_string(descriptor.input_schema_json).ok_or(CapToolError::InvalidDescriptor)?;
         let description = c_string(descriptor.description);
-        let description_text = match description.as_deref() {
-            Some(description) => description,
-            None => "",
-        };
+        let description_text = description.as_deref().unwrap_or_default();
 
         let parameters = serde_json::from_str::<serde_json::Value>(&input_schema)
             .map_err(|error| CapToolError::InvalidSchema(error.to_string()))?;

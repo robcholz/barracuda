@@ -23,6 +23,8 @@ managed_components/
 # Environment
 .env
 .env.local
+test_secrets.h
+
 # Cache / Compiled
 .cache
 *.pyc

@@ -27,7 +27,7 @@ TEST_CASE("claw_api chat hits the live LLM and returns text", "[claw_api][networ
     TEST_ASSERT_TRUE(strlen(reply) > 0);
 }
 
-TEST_CASE("claw_api async chat via ClawHttpAsync returns text", "[claw_api][network][async]")
+TEST_CASE("claw_api async chat via ClawHttp returns text", "[claw_api][network][async]")
 {
     char reply[1024] = {0};
     int rc = claw_api_selftest_chat_async(

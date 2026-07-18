@@ -605,12 +605,12 @@ impl BackendImpl for Anthropic {
         }
     }
 
-    async fn chat_stream_async<'a, 'r, H: StreamingHttp>(
-        &'a self,
-        http: &'a mut H,
+    async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+        &self,
+        http: &'h mut H,
         request: &'r ChatRequest<'r>,
-        cancel: Cancel<'a>,
-    ) -> Result<ChatStream<H::ByteStream>, ChatError> {
+        cancel: Cancel<'h>,
+    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError> {
         let post_data = self.build_stream_body(request)?;
         let url = self.context.endpoint_url(CHAT_PATH);
         let headers = self.headers();
@@ -622,7 +622,7 @@ impl BackendImpl for Anthropic {
             .await
             .map_err(map_http_error)?;
         if !status.is_success() {
-            let body = drain_body(stream).await;
+            let body = drain_body(stream).await.map_err(map_http_error)?;
             return Err(ClawApiError::Transport(format!("HTTP {status}: {body}")).into());
         }
         Ok(ChatStream::new(

@@ -38,17 +38,24 @@ impl<T: ClawHttp> ClawHttp for Sse<T> {
 }
 
 impl<T: ClawHttp> StreamingHttp for Sse<T> {
-    type ByteStream = SliceChunks;
+    type ByteStream<'a>
+        = SliceChunks<'a>
+    where
+        Self: 'a;
 
     fn post_json_streaming<'a, 'r>(
         &'a mut self,
         request: &'r HttpJsonRequest<'r>,
         cancel: Cancel<'a>,
-    ) -> impl std::future::Future<Output = Result<(HttpStatusCode, SliceChunks), HttpError>> {
+    ) -> impl std::future::Future<Output = Result<(HttpStatusCode, SliceChunks<'a>), HttpError>>
+    {
         async move {
             let response = self.0.post_json(request, cancel).await?;
             let sse = openai_json_to_sse(&response.body);
-            Ok((response.status_code, SliceChunks::once(sse.into_bytes())))
+            Ok((
+                response.status_code,
+                SliceChunks::once_with_cancel(sse.into_bytes(), cancel),
+            ))
         }
     }
 }
@@ -58,7 +65,10 @@ impl<T: ClawHttp> StreamingHttp for Sse<T> {
 /// `[DONE]`. The `OpenAiSse` parser reconstructs the same `LlmResponse`.
 fn openai_json_to_sse(body: &str) -> String {
     let Ok(root) = serde_json::from_str::<Value>(body) else {
-        return "data: [DONE]\n\n".to_string();
+        // Preserve malformed provider data as an SSE payload so the streaming
+        // parser exercises its Parse error instead of collapsing it into an
+        // unrelated empty response.
+        return format!("data: {body}\n\ndata: [DONE]\n\n");
     };
     let message = root
         .get("choices")

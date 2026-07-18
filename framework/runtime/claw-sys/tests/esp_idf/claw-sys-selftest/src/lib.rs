@@ -19,11 +19,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpJsonRequest,
-    HttpStatusCode,
+    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, HttpJsonRequest,
+    HttpStatusCode, StreamingHttp,
 };
 use claw_interface::{ClawThread, CoreAffinity, Priority};
 use claw_sys::{EspIdfHttp, EspIdfThread};
+use futures_lite::StreamExt as _;
 
 use log::Level;
 
@@ -37,6 +38,14 @@ const ERR_THREAD_SPAWN: c_int = -3;
 const ERR_THREAD_RESULT: c_int = -5;
 /// The (blocking) HTTP request failed at the transport level.
 const ERR_HTTP: c_int = -6;
+/// A streaming request failed before yielding a response status.
+const ERR_STREAM_START: c_int = -7;
+/// A streaming response body was empty or failed while being read.
+const ERR_STREAM_BODY: c_int = -8;
+/// A cancelled body stream did not report `HttpError::Aborted`.
+const ERR_STREAM_CANCEL: c_int = -9;
+/// The same transport could not complete another HTTP exchange after streaming.
+const ERR_STREAM_REUSE: c_int = -10;
 
 /// Borrow a C string as `&str`, or `None` if null / not UTF-8.
 ///
@@ -208,6 +217,225 @@ pub unsafe extern "C" fn claw_sys_selftest_run_three_async_http_posts(url: *cons
 
     let count = successes.get();
     c_int::try_from(count).unwrap_or(c_int::MAX)
+}
+
+/// Log one streaming-test diagnostic through the device log sink.
+fn log_streaming(message: &str) {
+    claw_sys::log_sink::write(Level::Info, "claw_sys_stream", message);
+}
+
+/// Issue a buffered POST through an already-used [`EspIdfHttp`]. A non-2xx
+/// response still proves that the HTTP exchange reached a valid response
+/// status; only a transport/cancellation failure means reuse failed. This keeps
+/// the hardware test useful when the public echo endpoint is temporarily 5xx.
+async fn probe_reuse(http: &mut EspIdfHttp, url: &str, scenario: &str) -> c_int {
+    let cancel = AtomicBool::new(false);
+    let request = HttpJsonRequest {
+        url,
+        body: r#"{"selftest":"streaming_reuse"}"#,
+        auth: HttpAuth::None,
+        timeout_ms: 20_000,
+        headers: &[],
+    };
+
+    match ClawHttp::post_json(http, &request, Cancel::new(&cancel)).await {
+        Ok(response) => {
+            log_streaming(&format!(
+                "{scenario}: reused transport completed with HTTP {}",
+                response.status_code
+            ));
+            OK
+        }
+        Err(HttpError::UnexpectedStatus { status, .. }) => {
+            log_streaming(&format!(
+                "{scenario}: reused transport reached HTTP {status}"
+            ));
+            OK
+        }
+        Err(error) => {
+            log_streaming(&format!("{scenario}: reuse transport error: {error}"));
+            ERR_STREAM_REUSE
+        }
+    }
+}
+
+/// Drain a streaming response to EOF, then make a buffered request through the
+/// same `EspIdfHttp`. Prints observed callback chunk and byte counts; the
+/// public endpoint does not promise a particular wire chunk boundary.
+///
+/// # Safety
+/// `url` must point to a valid NUL-terminated HTTPS URL.
+#[no_mangle]
+pub unsafe extern "C" fn claw_sys_selftest_streaming_drain_reuse(url: *const c_char) -> c_int {
+    let Some(url) = cstr(url) else {
+        return ERR_NULL_ARG;
+    };
+
+    edge_executor::block_on(async {
+        let Ok(mut http) = EspIdfHttp::new(url) else {
+            return ERR_HTTP;
+        };
+        let cancel = AtomicBool::new(false);
+        let request = HttpJsonRequest {
+            url,
+            body: r#"{"selftest":"streaming_drain"}"#,
+            auth: HttpAuth::None,
+            timeout_ms: 20_000,
+            headers: &[],
+        };
+        let (status, mut stream) = match http
+            .post_json_streaming(&request, Cancel::new(&cancel))
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_streaming(&format!("drain: start failed: {error}"));
+                return ERR_STREAM_START;
+            }
+        };
+
+        let mut chunks = 0_u32;
+        let mut bytes = 0_usize;
+        while let Some(item) = stream.next().await {
+            let chunk = match item {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    log_streaming(&format!("drain: body failed: {error}"));
+                    return ERR_STREAM_BODY;
+                }
+            };
+            chunks = chunks.saturating_add(1);
+            bytes = bytes.saturating_add(chunk.len());
+        }
+        drop(stream);
+
+        log_streaming(&format!(
+            "drain: HTTP {status}, chunks={chunks}, bytes={bytes}"
+        ));
+        if chunks == 0 || bytes == 0 {
+            return ERR_STREAM_BODY;
+        }
+        probe_reuse(&mut http, url, "drain").await
+    })
+}
+
+/// Read the first body chunk, cancel the stream, require `Aborted`, then make a
+/// buffered request through the same `EspIdfHttp`.
+///
+/// # Safety
+/// `url` must point to a valid NUL-terminated HTTPS URL.
+#[no_mangle]
+pub unsafe extern "C" fn claw_sys_selftest_streaming_cancel_reuse(url: *const c_char) -> c_int {
+    let Some(url) = cstr(url) else {
+        return ERR_NULL_ARG;
+    };
+
+    edge_executor::block_on(async {
+        let Ok(mut http) = EspIdfHttp::new(url) else {
+            return ERR_HTTP;
+        };
+        let cancel = AtomicBool::new(false);
+        let request = HttpJsonRequest {
+            url,
+            body: r#"{"selftest":"streaming_cancel"}"#,
+            auth: HttpAuth::None,
+            timeout_ms: 20_000,
+            headers: &[],
+        };
+        let (status, mut stream) = match http
+            .post_json_streaming(&request, Cancel::new(&cancel))
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_streaming(&format!("cancel: start failed: {error}"));
+                return ERR_STREAM_START;
+            }
+        };
+
+        let first_bytes = match stream.next().await {
+            Some(Ok(chunk)) if !chunk.is_empty() => chunk.len(),
+            Some(Ok(_)) | None => return ERR_STREAM_BODY,
+            Some(Err(error)) => {
+                log_streaming(&format!("cancel: first body read failed: {error}"));
+                return ERR_STREAM_BODY;
+            }
+        };
+
+        cancel.store(true, Ordering::Relaxed);
+        match stream.next().await {
+            Some(Err(HttpError::Aborted)) => {}
+            Some(Err(error)) => {
+                log_streaming(&format!("cancel: wrong body error: {error}"));
+                return ERR_STREAM_CANCEL;
+            }
+            Some(Ok(chunk)) => {
+                log_streaming(&format!(
+                    "cancel: yielded {} bytes after cancellation",
+                    chunk.len()
+                ));
+                return ERR_STREAM_CANCEL;
+            }
+            None => return ERR_STREAM_CANCEL,
+        }
+        drop(stream);
+
+        log_streaming(&format!(
+            "cancel: HTTP {status}, first_chunk_bytes={first_bytes}, observed Aborted"
+        ));
+        probe_reuse(&mut http, url, "cancel").await
+    })
+}
+
+/// Read the first body chunk and drop the unfinished stream, then make a
+/// buffered request through the same `EspIdfHttp`.
+///
+/// # Safety
+/// `url` must point to a valid NUL-terminated HTTPS URL.
+#[no_mangle]
+pub unsafe extern "C" fn claw_sys_selftest_streaming_drop_reuse(url: *const c_char) -> c_int {
+    let Some(url) = cstr(url) else {
+        return ERR_NULL_ARG;
+    };
+
+    edge_executor::block_on(async {
+        let Ok(mut http) = EspIdfHttp::new(url) else {
+            return ERR_HTTP;
+        };
+        let cancel = AtomicBool::new(false);
+        let request = HttpJsonRequest {
+            url,
+            body: r#"{"selftest":"streaming_drop"}"#,
+            auth: HttpAuth::None,
+            timeout_ms: 20_000,
+            headers: &[],
+        };
+        let (status, mut stream) = match http
+            .post_json_streaming(&request, Cancel::new(&cancel))
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                log_streaming(&format!("drop: start failed: {error}"));
+                return ERR_STREAM_START;
+            }
+        };
+
+        let first_bytes = match stream.next().await {
+            Some(Ok(chunk)) if !chunk.is_empty() => chunk.len(),
+            Some(Ok(_)) | None => return ERR_STREAM_BODY,
+            Some(Err(error)) => {
+                log_streaming(&format!("drop: first body read failed: {error}"));
+                return ERR_STREAM_BODY;
+            }
+        };
+        drop(stream);
+
+        log_streaming(&format!(
+            "drop: HTTP {status}, dropped after first_chunk_bytes={first_bytes}"
+        ));
+        probe_reuse(&mut http, url, "drop").await
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -23,3 +23,5 @@ log = "0.4"
 # foundation as smol). Supports no_std via features=["heapless"] for future
 # bare-metal migration; use default (std) for ESP-IDF.
 edge-executor = { version = "0.4.1", default-features = true }
+# Poll `StreamingHttp::ByteStream` without introducing a device runtime.
+futures-lite = "2.6"

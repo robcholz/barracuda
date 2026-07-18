@@ -2,7 +2,7 @@
 //! `ChunkedHttp` double, which serves an SSE body in small byte chunks so the
 //! parser is exercised across arbitrary frame/codepoint splits.
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use claw_api::{BackendKind, ChatRequest, ClawApiAsync, ClawApiConfig, LlmDelta};
 use claw_interface::http::ChunkedHttp;
@@ -105,4 +105,35 @@ fn anthropic_streams_fragments_then_assembles_response() {
     );
     assert_eq!(response.text.as_deref(), Some("Hi"));
     assert_eq!(response.tool_calls[0].name, "ping");
+}
+
+#[test]
+fn streaming_abort_remains_active_after_headers() {
+    let sse = concat!(
+        "data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"second\"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let http = ChunkedHttp::new([sse], 64);
+    let mut rt = ClawApiAsync::<ChunkedHttp, ImmediateTimer>::new(http, ImmediateTimer);
+    rt.set_config(config(BackendKind::OpenAiCompatible))
+        .unwrap();
+    let abort = AtomicBool::new(false);
+    let messages = json!([{ "role": "user", "content": "hi" }]);
+    let request = ChatRequest::new("sys", &messages);
+
+    block_on(async {
+        let mut stream = rt.chat_stream(&request, Cancel::new(&abort)).await.unwrap();
+        assert!(matches!(
+            stream.next().await,
+            Some(Ok(LlmDelta::Output(text))) if text == "first"
+        ));
+        abort.store(true, Ordering::Relaxed);
+        let error = stream
+            .next()
+            .await
+            .expect("abort item")
+            .expect_err("aborted");
+        assert!(error.is_aborted(), "{error}");
+    });
 }

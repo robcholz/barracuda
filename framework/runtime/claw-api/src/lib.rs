@@ -7,26 +7,29 @@
 //!
 //! # Overview
 //!
-//! The entry point is [`ClawApi`]. You build it around an HTTP transport (any
-//! [`claw_interface::http::ClawHttp`]), install a complete [`ClawApiConfig`],
-//! then issue requests:
+//! The entry points are [`ClawApi`] for blocking transports and [`ClawApiAsync`]
+//! for async/streaming transports. Install a complete [`ClawApiConfig`], then
+//! issue requests:
 //!
 //! | Method | Request | Returns |
 //! |---|---|---|
 //! | [`ClawApi::chat`] | [`ChatRequest`] | [`LlmResponse`] (text + tool calls) |
 //! | [`ClawApi::chat_json`] | [`ChatJsonRequest`] | [`ChatJsonResponse`] (parsed `T` + tool calls) |
 //! | [`ClawApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
+//! | [`ClawApiAsync::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`LlmDelta`] values |
 //!
 //! Networking is **injected**: `claw-api` never opens sockets itself. On device
-//! the espidf layer implements [`ClawHttp`](claw_interface::http::ClawHttp) over
+//! the espidf layer implements [`ClawHttp`](claw_interface::http::ClawHttp) and
+//! [`StreamingHttp`](claw_interface::http::StreamingHttp) over one persistent
 //! `esp_http_client`; tests and host tools provide their own implementation.
 //!
 //! # Cancellation
 //!
-//! Every call takes `&AtomicBool` abort flag. Set it from another thread to
-//! cancel: the transport stops the in-flight request and any retry backoff sleep
-//! returns early. An aborted call surfaces as a non-retryable
-//! [`ClawApiError::Transport`] whose message contains `"aborted"`.
+//! Blocking calls take `&AtomicBool`; async calls take
+//! [`Cancel`](claw_interface::http::Cancel). For streaming, that token covers
+//! send, headers, and response-body reads; dropping [`ChatStream`] also cancels
+//! the body. An abort surfaces as a non-retryable [`ClawApiError::Transport`]
+//! whose message contains `"aborted"`.
 //!
 //! # Retries
 //!

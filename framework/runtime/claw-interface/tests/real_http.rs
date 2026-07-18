@@ -1,6 +1,6 @@
 #![cfg(feature = "realhttp")]
 
-use core::sync::atomic::AtomicBool;
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::mpsc;
@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use claw_interface::{
     Cancel, ClawHttp, HttpAuth, HttpError, HttpHeader, HttpJsonRequest, HttpStatusCode, RealHttp,
+    StreamingHttp,
 };
+use futures_lite::StreamExt;
 
 #[test]
 fn async_reqwest_roundtrip_sends_auth_and_parses_body() {
@@ -177,6 +179,61 @@ fn async_reqwest_large_body_roundtrip() {
     assert_eq!(response.status_code, HttpStatusCode::OK);
     assert_eq!(response.body.len(), big.len());
     assert_eq!(response.body, big);
+    handle.join().expect("server thread");
+}
+
+#[test]
+fn async_reqwest_streaming_roundtrip_yields_body_chunks() {
+    let (url, _rx, handle) = oneshot_server("200 OK", "data: hello\n\n");
+    let mut http = RealHttp::new();
+    let abort = AtomicBool::new(false);
+    let request = req(&url, "{}");
+
+    let (status, body) = block_on(async {
+        let (status, mut stream) = http
+            .post_json_streaming(&request, Cancel::new(&abort))
+            .await
+            .expect("headers");
+        let mut body = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            body.extend_from_slice(&chunk.expect("body chunk"));
+        }
+        (status, body)
+    });
+
+    assert_eq!(status, HttpStatusCode::OK);
+    assert_eq!(body, b"data: hello\n\n");
+    handle.join().expect("server thread");
+}
+
+#[test]
+fn async_reqwest_streaming_honors_abort_before_send() {
+    let mut http = RealHttp::new();
+    let abort = AtomicBool::new(true);
+    let request = req("http://127.0.0.1:9/never", "{}");
+
+    let result = block_on(http.post_json_streaming(&request, Cancel::new(&abort)));
+
+    assert!(matches!(result, Err(HttpError::Aborted)));
+}
+
+#[test]
+fn async_reqwest_streaming_honors_abort_during_body() {
+    let (url, _rx, handle) = oneshot_server("200 OK", "data: ignored\n\n");
+    let mut http = RealHttp::new();
+    let abort = AtomicBool::new(false);
+    let request = req(&url, "{}");
+
+    let next = block_on(async {
+        let (_, mut stream) = http
+            .post_json_streaming(&request, Cancel::new(&abort))
+            .await
+            .expect("headers");
+        abort.store(true, Ordering::Relaxed);
+        stream.next().await
+    });
+
+    assert!(matches!(next, Some(Err(HttpError::Aborted))));
     handle.join().expect("server thread");
 }
 

@@ -31,7 +31,7 @@ int claw_api_selftest_chat(const char *base_url,
                            size_t out_len);
 
 /*
- * Async variant: POST an OpenAI-format chat request via ClawHttpAsync (the
+ * Async variant: POST an OpenAI-format chat request via ClawHttp (the
  * async esp_http_client seam), driven by edge-executor on the calling thread.
  * Same return convention as claw_api_selftest_chat.
  */

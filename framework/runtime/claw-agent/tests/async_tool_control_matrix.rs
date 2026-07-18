@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use claw_agent::{
     AgentSystem, Message, SessionControlError, SessionEvent, StreamPart, TurnId, TurnOrigin,
@@ -285,23 +286,25 @@ fn wake_pending_request() {
 }
 
 fn wait_for(flag: &AtomicUsize, case: &str, failure: &str) {
-    for _ in 0..10_000 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
         if flag.load(Ordering::SeqCst) > 0 {
             return;
         }
-        thread::yield_now();
+        assert!(Instant::now() < deadline, "case {case}: {failure}");
+        thread::sleep(Duration::from_millis(1));
     }
-    panic!("case {case}: {failure}");
 }
 
 fn wait_for_bool(flag: &AtomicBool, case: &str, failure: &str) {
-    for _ in 0..10_000 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
         if flag.load(Ordering::SeqCst) {
             return;
         }
-        thread::yield_now();
+        assert!(Instant::now() < deadline, "case {case}: {failure}");
+        thread::sleep(Duration::from_millis(1));
     }
-    panic!("case {case}: {failure}");
 }
 
 fn assert_turn(events: &[SessionEvent], turn: TurnId, case: &str) {

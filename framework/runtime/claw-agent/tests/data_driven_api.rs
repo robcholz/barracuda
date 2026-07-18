@@ -336,16 +336,19 @@ fn drain_until_closed(events: &mut SessionEventStream) -> Vec<SessionEvent> {
 }
 
 fn apply_tool_operations(system: &support::MemAgentSystem, operations: &str) -> Option<String> {
+    let mut group_sequence = 0_u64;
+
     for operation in operations.split('|') {
         let result = match operation {
             "start" => system.start_all().map_err(|error| error.to_string()),
             "stop" => system.stop_all().map_err(|error| error.to_string()),
             _ if operation.starts_with("register:") => {
                 let name = &operation["register:".len()..];
+                group_sequence = group_sequence.saturating_add(1);
                 system
                     .tool_registry()
                     .register_group(ToolGroup::new(
-                        name,
+                        format!("csv-group-{group_sequence}"),
                         true,
                         [Tool::from_sync(CsvTool::new(name))],
                     ))

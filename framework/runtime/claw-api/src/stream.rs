@@ -23,10 +23,12 @@ use crate::types::{LlmDelta, LlmResponse};
 /// Implements [`Stream`] over `Result<LlmDelta, ChatError>`: `Reasoning` /
 /// `Output` fragments then complete `ToolCall`s, in that order. Drive it to
 /// completion (a `None` item), then call [`take_response`](Self::take_response)
-/// for the assembled [`LlmResponse`]. Dropping the stream cancels body reads.
+/// for the assembled [`LlmResponse`]. The request's cancellation token remains
+/// active during body reads; dropping the stream cancels them as well.
 ///
-/// `S` is the transport's owned byte stream; it (and therefore `ChatStream`) is
-/// `Unpin`, so no pinning gymnastics are needed at the call site.
+/// `S` is the transport's byte stream and retains that transport's exclusive
+/// mutable borrow; it (and therefore `ChatStream`) is `Unpin`, so no pinning
+/// gymnastics are needed at the call site.
 pub struct ChatStream<S> {
     bytes: S,
     /// `None` after the byte stream ends and the response has been assembled.
@@ -101,13 +103,13 @@ fn read_error(error: HttpError) -> ChatError {
 
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body
 /// before failing a streaming request.
-pub(crate) async fn drain_body<S>(mut stream: S) -> String
+pub(crate) async fn drain_body<S>(mut stream: S) -> Result<String, HttpError>
 where
     S: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin,
 {
     let mut buf = Vec::new();
-    while let Some(Ok(chunk)) = stream.next().await {
-        buf.extend_from_slice(&chunk);
+    while let Some(chunk) = stream.next().await {
+        buf.extend_from_slice(&chunk?);
     }
-    String::from_utf8_lossy(&buf).into_owned()
+    Ok(String::from_utf8_lossy(&buf).into_owned())
 }

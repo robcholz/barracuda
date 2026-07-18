@@ -31,43 +31,108 @@ pub struct ClawAgentConfig {
     pub system_skills_root_dir: *const c_char,
 }
 
-/// Event kinds delivered by `claw_agent_session_receive`, one event per call.
-///
-/// `OUTPUT`/`REASONING`/`TOOLS` are content events: `text` carries an append
-/// fragment (or one complete tool-call name). Their matching `_END` event
-/// explicitly closes that content stream. `DONE` marks one root-visible turn
-/// ending; the session stream stays open. `ERROR` carries `error_message`.
-/// `INPUT_REQUESTED` pauses the current turn and carries `request_id`,
-/// `input_kind`, and semantic data in `text`. `CLOSED` is terminal for the open
-/// session stream.
-pub const CLAW_AGENT_EVENT_KIND_OUTPUT: c_int = 0;
-pub const CLAW_AGENT_EVENT_KIND_REASONING: c_int = 1;
-pub const CLAW_AGENT_EVENT_KIND_TOOLS: c_int = 2;
-pub const CLAW_AGENT_EVENT_KIND_DONE: c_int = 3;
-pub const CLAW_AGENT_EVENT_KIND_ERROR: c_int = 4;
-pub const CLAW_AGENT_EVENT_KIND_CLOSED: c_int = 5;
-pub const CLAW_AGENT_EVENT_KIND_OUTPUT_END: c_int = 6;
-pub const CLAW_AGENT_EVENT_KIND_REASONING_END: c_int = 7;
-pub const CLAW_AGENT_EVENT_KIND_TOOLS_END: c_int = 8;
-pub const CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED: c_int = 9;
+/// One LLM API configuration linked to an agent usage.
+#[repr(C)]
+pub struct ClawAgentApiConfig {
+    pub api_key: *const c_char,
+    pub backend_type: *const c_char,
+    pub model: *const c_char,
+    pub base_url: *const c_char,
+}
 
-pub const CLAW_AGENT_INPUT_REQUEST_KIND_NONE: c_int = 0;
-pub const CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL: c_int = 1;
+pub const CLAW_AGENT_API_USAGE_ROOT_AGENT: c_int = 0;
+pub const CLAW_AGENT_API_USAGE_SUBAGENT: c_int = 1;
+pub const CLAW_AGENT_API_USAGE_MEMORY: c_int = 2;
+pub const CLAW_AGENT_API_USAGE_COMPACTION: c_int = 3;
+
+pub const CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT: c_int = 0;
+pub const CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL: c_int = 1;
+
+/// Event kinds delivered by `claw_agent_session_receive`, one event per call.
+/// The event payload union member is selected by this kind.
+pub const CLAW_AGENT_EVENT_KIND_TURN_STARTED: c_int = 0;
+pub const CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED: c_int = 1;
+pub const CLAW_AGENT_EVENT_KIND_ITERATION_STARTED: c_int = 2;
+pub const CLAW_AGENT_EVENT_KIND_REASONING_DELTA: c_int = 3;
+pub const CLAW_AGENT_EVENT_KIND_REASONING_END: c_int = 4;
+pub const CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA: c_int = 5;
+pub const CLAW_AGENT_EVENT_KIND_OUTPUT_END: c_int = 6;
+pub const CLAW_AGENT_EVENT_KIND_TOOL_CALL: c_int = 7;
+pub const CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END: c_int = 8;
+pub const CLAW_AGENT_EVENT_KIND_ITERATION_ENDED: c_int = 9;
+pub const CLAW_AGENT_EVENT_KIND_TURN_ENDED: c_int = 10;
+pub const CLAW_AGENT_EVENT_KIND_ERROR: c_int = 11;
+pub const CLAW_AGENT_EVENT_KIND_CLOSED: c_int = 12;
+
+pub const CLAW_AGENT_TURN_ORIGIN_USER: c_int = 0;
+pub const CLAW_AGENT_TURN_ORIGIN_SUBAGENT: c_int = 1;
+
+pub const CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL: c_int = 0;
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentTurnStartedEvent {
+    pub turn_id: u32,
+    pub origin: c_int,
+    pub agent_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentInputRequestedEvent {
+    pub request_id: u32,
+    pub kind: c_int,
+    pub summary: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentIterationEvent {
+    pub iteration_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentTextDeltaEvent {
+    pub text: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentToolCallEvent {
+    pub id: *mut c_char,
+    pub name: *mut c_char,
+    pub arguments_json: *mut c_char,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentTurnEndedEvent {
+    pub turn_id: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentErrorEvent {
+    pub message: *mut c_char,
+}
+
+#[repr(C)]
+pub union ClawAgentEventData {
+    pub turn_started: ClawAgentTurnStartedEvent,
+    pub input_requested: ClawAgentInputRequestedEvent,
+    pub iteration: ClawAgentIterationEvent,
+    pub text_delta: ClawAgentTextDeltaEvent,
+    pub tool_call: ClawAgentToolCallEvent,
+    pub turn_ended: ClawAgentTurnEndedEvent,
+    pub error: ClawAgentErrorEvent,
+    pub reserved: u32,
+}
 
 #[repr(C)]
 pub struct ClawAgentEvent {
     pub kind: c_int,
-    /// Session-local id for `INPUT_REQUESTED`; zero otherwise.
-    pub request_id: u32,
-    /// Semantic input kind for `INPUT_REQUESTED`; `NONE` otherwise.
-    pub input_kind: c_int,
-    /// Owned UTF-8 fragment for content events (`OUTPUT`/`REASONING`/`TOOLS`),
-    /// or the semantic request summary for `INPUT_REQUESTED`; null otherwise.
-    /// Released by `claw_agent_event_free`.
-    pub text: *mut c_char,
-    /// Owned UTF-8 message for `ERROR`; null otherwise. Released by
-    /// `claw_agent_event_free`.
-    pub error_message: *mut c_char,
+    pub data: ClawAgentEventData,
 }
 
 #[repr(C)]
@@ -154,6 +219,10 @@ extern "C" {
         id_or_name: *const c_char,
         info: *mut ClawCapDescriptorInfo,
     ) -> EspErr;
+    pub fn claw_cap_is_llm_tool_available(
+        id_or_name: *const c_char,
+        ctx: *const ClawCapCallContext,
+    ) -> bool;
     pub fn claw_cap_call(
         id_or_name: *const c_char,
         input_json: *const c_char,

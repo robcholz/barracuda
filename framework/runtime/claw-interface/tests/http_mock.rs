@@ -1,14 +1,16 @@
 #![cfg(feature = "httpmock")]
 
 use core::future::Future;
+use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::task::{Context, Poll, Waker};
 
-use claw_interface::http::blocking;
+use claw_interface::http::{blocking, ChunkedHttp};
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpAuth, HttpError, HttpJsonRequest,
-    HttpRequestFailure, HttpResponse, HttpStatusCode, YieldingHttpAdapter,
+    HttpRequestFailure, HttpResponse, HttpStatusCode, StreamingHttp, YieldingHttpAdapter,
 };
+use futures_core::Stream;
 
 #[test]
 fn blocking_adapter_drives_clawhttp_through_async_seam() {
@@ -78,6 +80,31 @@ fn yielding_adapter_honors_abort() {
     let request = request("https://example.test", "{}");
     let error = block_on(transport.post_json(&request, Cancel::new(&abort))).unwrap_err();
     assert!(matches!(error, HttpError::Aborted));
+}
+
+#[test]
+fn chunked_stream_honors_abort_during_body() {
+    let mut transport = ChunkedHttp::new(["first second"], 5);
+    let abort = AtomicBool::new(false);
+    let request = request("https://example.test", "{}");
+
+    let (first, aborted) = block_on(async {
+        let (_, mut stream) = transport
+            .post_json_streaming(&request, Cancel::new(&abort))
+            .await
+            .expect("headers");
+        let first = next(&mut stream).await;
+        abort.store(true, Ordering::Relaxed);
+        let aborted = next(&mut stream).await;
+        (first, aborted)
+    });
+
+    assert_eq!(first.expect("first chunk").expect("ok chunk"), b"first");
+    assert!(matches!(aborted, Some(Err(HttpError::Aborted))));
+}
+
+async fn next<S: Stream + Unpin>(stream: &mut S) -> Option<S::Item> {
+    core::future::poll_fn(|context| Pin::new(&mut *stream).poll_next(context)).await
 }
 
 struct EchoStatus {

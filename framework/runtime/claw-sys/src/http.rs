@@ -1,4 +1,5 @@
-//! `ClawHttp` driver over `esp_http_client`, porting `claw_llm_http_transport.c`.
+//! `ClawHttp`/`StreamingHttp` drivers over `esp_http_client`, porting
+//! `claw_llm_http_transport.c`.
 //!
 //! The pure-Rust helpers (auth header construction, error-body parsing) are
 //! host-testable; only the `esp_http_client` plumbing is gated to the espidf
@@ -48,20 +49,21 @@ fn truncate(s: &str, max: usize) -> &str {
 }
 
 #[cfg(target_os = "espidf")]
-pub use espidf_driver::EspIdfHttp;
+pub use espidf_driver::{EspHttpByteStream, EspIdfHttp};
 
 #[cfg(target_os = "espidf")]
 mod espidf_driver {
     use super::parse_error_message_body;
     use claw_interface::http::{
         blocking, Cancel, ClawHttp, HttpError, HttpGetRequest, HttpJsonRequest, HttpRequestFailure,
-        HttpResponse, HttpResponseFuture, HttpStatusCode,
+        HttpResponse, HttpResponseFuture, HttpStatusCode, StreamingHttp,
     };
     use core::ffi::{c_char, c_int, c_void};
     use core::future::Future;
     use core::pin::Pin;
     use core::sync::atomic::{AtomicBool, Ordering};
     use core::task::{Context, Poll};
+    use futures_lite::Stream;
     use std::ffi::CString;
     use std::time::{Duration, Instant};
 
@@ -92,7 +94,9 @@ mod espidf_driver {
 
     // esp_http_client_event_id_t: ERROR=0, ON_CONNECTED=1, HEADERS_SENT=2,
     // ON_HEADER=3, ON_DATA=4, ON_FINISH=5, ...
+    const HTTP_EVENT_ON_HEADER: c_int = 3;
     const HTTP_EVENT_ON_DATA: c_int = 4;
+    const HTTP_EVENT_ON_FINISH: c_int = 5;
     const HTTP_METHOD_GET: c_int = 0;
     const HTTP_METHOD_POST: c_int = 1;
 
@@ -179,6 +183,10 @@ mod espidf_driver {
     struct RequestCtx {
         body: Vec<u8>,
         abort: *const AtomicBool,
+        // Status observed by a callback belonging to the current response.
+        // `esp_http_client_get_status_code` itself may retain the previous
+        // request's value while a reused connection is still sending headers.
+        response_status: c_int,
     }
 
     extern "C" fn http_event_handler(evt: *mut esp_http_client_event_t) -> c_int {
@@ -192,13 +200,35 @@ mod espidf_driver {
             if !ctx.abort.is_null() && (*ctx.abort).load(Ordering::Relaxed) {
                 return ESP_FAIL;
             }
-            if evt.event_id == HTTP_EVENT_ON_DATA && evt.data_len > 0 {
-                let slice =
-                    core::slice::from_raw_parts(evt.data as *const u8, evt.data_len as usize);
-                ctx.body.extend_from_slice(slice);
+            if matches!(evt.event_id, HTTP_EVENT_ON_HEADER | HTTP_EVENT_ON_DATA) {
+                ctx.response_status = esp_http_client_get_status_code(evt.client);
+                if evt.event_id == HTTP_EVENT_ON_DATA && evt.data_len > 0 {
+                    let slice =
+                        core::slice::from_raw_parts(evt.data as *const u8, evt.data_len as usize);
+                    ctx.body.extend_from_slice(slice);
+                }
+            }
+            // `perform` follows redirects internally. Do not let the
+            // intermediate response body leak into the final response/stream.
+            if evt.event_id == HTTP_EVENT_ON_FINISH {
+                let status = esp_http_client_get_status_code(evt.client);
+                if is_intermediate_status(status) {
+                    ctx.body.clear();
+                    ctx.response_status = 0;
+                } else {
+                    ctx.response_status = status;
+                }
             }
         }
         ESP_OK
+    }
+
+    fn is_redirect_status(status: c_int) -> bool {
+        matches!(status, 301 | 302 | 303 | 307 | 308)
+    }
+
+    fn is_intermediate_status(status: c_int) -> bool {
+        matches!(status, 100..=199) || is_redirect_status(status)
     }
 
     fn err_name(err: c_int) -> String {
@@ -385,6 +415,7 @@ mod espidf_driver {
             let mut ctx = Box::new(RequestCtx {
                 body: Vec::with_capacity(4096),
                 abort: core::ptr::null(),
+                response_status: 0,
             });
 
             let mut config: esp_http_client_config_t = unsafe { core::mem::zeroed() };
@@ -490,6 +521,7 @@ mod espidf_driver {
         ) -> Result<(), HttpError> {
             self.ctx.body.clear();
             self.ctx.abort = abort;
+            self.ctx.response_status = 0;
 
             // `set_url` copies the string internally; it only needs to live for
             // the duration of the call.
@@ -549,11 +581,10 @@ mod espidf_driver {
             }
         }
 
-        /// Run one non-blocking transfer step. `Ok(None)` means the transfer is
-        /// still in progress (caller should yield and poll again); `Ok(Some(_))`
-        /// is the finished response. An EAGAIN with a non-pending errno means
-        /// the underlying connection has failed.
-        fn perform_step(&self) -> Result<Option<HttpResponse>, HttpError> {
+        /// Run one raw non-blocking transfer step. `Ok(false)` means the
+        /// transfer is still in progress; `Ok(true)` means `perform` completed.
+        /// An EAGAIN with a non-pending errno is a transport failure.
+        fn perform_raw_step(&mut self) -> Result<bool, HttpError> {
             let err = unsafe { esp_http_client_perform(self.raw) };
             if err == ESP_ERR_HTTP_EAGAIN {
                 let transport_errno = unsafe { esp_http_client_get_errno(self.raw) };
@@ -561,7 +592,7 @@ mod espidf_driver {
                     transport_errno,
                     ERRNO_NONE | ERRNO_EAGAIN | ERRNO_EINPROGRESS
                 ) {
-                    return Ok(None);
+                    return Ok(false);
                 }
                 return Err(HttpError::RequestFailed(HttpRequestFailure::driver(
                     "esp_http_client_perform",
@@ -573,6 +604,14 @@ mod espidf_driver {
                     "esp_http_client_perform",
                     err_name(err),
                 )));
+            }
+            Ok(true)
+        }
+
+        /// Run one non-blocking transfer step for the buffered-response API.
+        fn perform_step(&mut self) -> Result<Option<HttpResponse>, HttpError> {
+            if !self.perform_raw_step()? {
+                return Ok(None);
             }
             let status =
                 status_code_from_c_int(unsafe { esp_http_client_get_status_code(self.raw) })?;
@@ -589,35 +628,62 @@ mod espidf_driver {
             }))
         }
 
+        /// Return the parsed response status once an event from this request's
+        /// final response has arrived. Reading the raw status directly is not
+        /// sufficient on a reused handle: it can briefly retain the previous
+        /// response's status during connect/send.
+        fn response_status(&self) -> Result<Option<HttpStatusCode>, HttpError> {
+            let status = self.ctx.response_status;
+            if status <= 0 || is_intermediate_status(status) {
+                return Ok(None);
+            }
+            status_code_from_c_int(status).map(Some)
+        }
+
+        /// Move bytes collected by response-data callbacks out as one stream
+        /// item. The replacement buffer receives subsequent ESP-IDF callbacks.
+        fn take_body_chunk(&mut self) -> Option<Vec<u8>> {
+            if self.ctx.body.is_empty() {
+                return None;
+            }
+            Some(std::mem::replace(
+                &mut self.ctx.body,
+                Vec::with_capacity(4096),
+            ))
+        }
+
         /// Cancel the active transfer without destroying the reusable client
         /// handle. Best-effort: cancellation itself reports [`HttpError::Aborted`]
         /// to the caller even if the ESP-IDF helper says there was no active
         /// socket yet.
-        fn cancel_active_request(&self) {
+        fn cancel_active_request(&mut self) {
             cancel_raw_request(self.raw);
         }
 
         /// Close the active socket after a transport-level failure while keeping
         /// the reusable client handle alive for the next request.
-        fn close_failed_connection(&self, error: &HttpError) {
+        fn close_failed_connection(&mut self, error: &HttpError) {
             if matches!(error, HttpError::RequestFailed(_)) {
                 close_raw_connection(self.raw);
             }
-        }
-
-        /// Replace a failed persistent client with a fresh handle. This keeps
-        /// stale keep-alive recovery inside the HTTP transport.
-        fn reconnect(&mut self, initial_url: &str) -> Result<(), HttpError> {
-            let replacement = Self::new(initial_url)?;
-            let failed = std::mem::replace(self, replacement);
-            drop(failed);
-            Ok(())
         }
 
         /// Blocking compatibility path over the async-mode client. This keeps
         /// the single persistent handle model while the sync trait is still
         /// present during the migration.
         fn execute_blocking(
+            &mut self,
+            request: &HttpJsonRequest,
+            abort: &AtomicBool,
+        ) -> Result<HttpResponse, HttpError> {
+            let result = self.execute_blocking_inner(request, abort);
+            // The event callback borrows this flag only for the active request;
+            // never leave a caller-owned pointer in a persistent client.
+            self.ctx.abort = core::ptr::null();
+            result
+        }
+
+        fn execute_blocking_inner(
             &mut self,
             request: &HttpJsonRequest,
             abort: &AtomicBool,
@@ -662,7 +728,7 @@ mod espidf_driver {
                 return Err(HttpError::Aborted);
             }
             let deadline = Deadline::new(request.timeout_ms);
-            let mut reconnected = false;
+            let mut retried_after_close = false;
             'connection: loop {
                 if cancel.is_cancelled() {
                     return Err(HttpError::Aborted);
@@ -691,12 +757,16 @@ mod espidf_driver {
                             yield_once().await;
                         }
                         Err(error) => {
-                            if !reconnected && matches!(error, HttpError::RequestFailed(_)) {
+                            if !retried_after_close && matches!(error, HttpError::RequestFailed(_))
+                            {
+                                // A stale keep-alive socket does not require a
+                                // second HTTP client. Close this handle's socket
+                                // and let the next `perform` reconnect it.
+                                self.close_failed_connection(&error);
                                 active.finish();
                                 drop(body);
                                 drop(active);
-                                self.reconnect(request.url)?;
-                                reconnected = true;
+                                retried_after_close = true;
                                 continue 'connection;
                             }
                             self.close_failed_connection(&error);
@@ -717,7 +787,7 @@ mod espidf_driver {
                 return Err(HttpError::Aborted);
             }
             let deadline = Deadline::new(request.timeout_ms);
-            let mut reconnected = false;
+            let mut retried_after_close = false;
             'connection: loop {
                 if cancel.is_cancelled() {
                     return Err(HttpError::Aborted);
@@ -746,11 +816,12 @@ mod espidf_driver {
                             yield_once().await;
                         }
                         Err(error) => {
-                            if !reconnected && matches!(error, HttpError::RequestFailed(_)) {
+                            if !retried_after_close && matches!(error, HttpError::RequestFailed(_))
+                            {
+                                self.close_failed_connection(&error);
                                 active.finish();
                                 drop(active);
-                                self.reconnect(request.url)?;
-                                reconnected = true;
+                                retried_after_close = true;
                                 continue 'connection;
                             }
                             self.close_failed_connection(&error);
@@ -761,11 +832,179 @@ mod espidf_driver {
                 }
             }
         }
+
+        /// Drive this persistent client through the send/header phase, then
+        /// lend it to [`EspHttpByteStream`] for the response body. The stream's
+        /// lifetime keeps the transport exclusively borrowed, so the same raw
+        /// `esp_http_client` handle serves both buffered and streaming requests.
+        async fn begin_streaming<'a>(
+            &'a mut self,
+            request: &HttpJsonRequest<'_>,
+            cancel: Cancel<'a>,
+        ) -> Result<(HttpStatusCode, EspHttpByteStream<'a>), HttpError> {
+            if cancel.is_cancelled() {
+                return Err(HttpError::Aborted);
+            }
+
+            let deadline = Deadline::new(request.timeout_ms);
+            let mut retried_after_close = false;
+
+            'connection: loop {
+                if cancel.is_cancelled() {
+                    return Err(HttpError::Aborted);
+                }
+                if deadline.expired() {
+                    return Err(timeout_error(request.timeout_ms));
+                }
+
+                let request_body = self.prepare_request(request, core::ptr::null())?;
+                let mut active = ActiveRequestGuard::new(self.raw);
+
+                loop {
+                    if cancel.is_cancelled() {
+                        active.cancel();
+                        return Err(HttpError::Aborted);
+                    }
+                    if deadline.expired() {
+                        active.cancel();
+                        return Err(timeout_error(request.timeout_ms));
+                    }
+
+                    match self.perform_raw_step() {
+                        Ok(complete) => {
+                            if !complete {
+                                active.mark_started();
+                            }
+
+                            if let Some(status) = self.response_status()? {
+                                active.finish();
+                                drop(active);
+                                return Ok((
+                                    status,
+                                    EspHttpByteStream {
+                                        conn: self,
+                                        _request_body: request_body,
+                                        deadline,
+                                        timeout_ms: request.timeout_ms,
+                                        cancel,
+                                        transfer_complete: complete,
+                                        terminated: false,
+                                    },
+                                ));
+                            }
+
+                            if complete {
+                                active.finish();
+                                return Err(HttpError::RequestFailed(HttpRequestFailure::driver(
+                                    "esp_http_client_perform",
+                                    "response completed without a final HTTP status",
+                                )));
+                            }
+                        }
+                        Err(error) => {
+                            if !retried_after_close && matches!(error, HttpError::RequestFailed(_))
+                            {
+                                // Recover a stale keep-alive socket without
+                                // allocating another client handle.
+                                self.close_failed_connection(&error);
+                                active.finish();
+                                drop(request_body);
+                                drop(active);
+                                retried_after_close = true;
+                                continue 'connection;
+                            }
+                            self.close_failed_connection(&error);
+                            active.finish();
+                            return Err(error);
+                        }
+                    }
+
+                    yield_once().await;
+                }
+            }
+        }
     }
 
-    /// `esp_http_client`-backed transport implementing both [`blocking::ClawHttp`]
-    /// (blocking, cancelled via the in-band abort flag) and [`ClawHttp`]
-    /// (non-blocking `config.is_async` mode).
+    /// ESP-IDF response-body stream borrowing [`EspIdfHttp`]'s sole client.
+    ///
+    /// Each poll advances `esp_http_client_perform` by one non-blocking step and
+    /// yields bytes delivered by its data callback. Dropping an unfinished
+    /// stream closes the active connection and releases the transport borrow.
+    pub struct EspHttpByteStream<'a> {
+        conn: &'a mut EspClient,
+        // `esp_http_client_set_post_field` retains this allocation's pointer for
+        // the whole transfer. `Drop` closes the connection before this field is
+        // released.
+        _request_body: CString,
+        deadline: Deadline,
+        timeout_ms: u32,
+        cancel: Cancel<'a>,
+        transfer_complete: bool,
+        terminated: bool,
+    }
+
+    impl EspHttpByteStream<'_> {
+        fn fail(&mut self, error: HttpError) -> Poll<Option<Result<Vec<u8>, HttpError>>> {
+            close_raw_connection(self.conn.raw);
+            self.transfer_complete = true;
+            self.terminated = true;
+            Poll::Ready(Some(Err(error)))
+        }
+    }
+
+    impl Stream for EspHttpByteStream<'_> {
+        type Item = Result<Vec<u8>, HttpError>;
+
+        fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+            let this = self.get_mut();
+            if this.terminated {
+                return Poll::Ready(None);
+            }
+            if this.cancel.is_cancelled() {
+                return this.fail(HttpError::Aborted);
+            }
+            if let Some(chunk) = this.conn.take_body_chunk() {
+                return Poll::Ready(Some(Ok(chunk)));
+            }
+            if this.transfer_complete {
+                this.terminated = true;
+                return Poll::Ready(None);
+            }
+            if this.deadline.expired() {
+                return this.fail(timeout_error(this.timeout_ms));
+            }
+
+            match this.conn.perform_raw_step() {
+                Ok(complete) => this.transfer_complete = complete,
+                Err(error) => return this.fail(error),
+            }
+
+            if let Some(chunk) = this.conn.take_body_chunk() {
+                return Poll::Ready(Some(Ok(chunk)));
+            }
+            if this.transfer_complete {
+                this.terminated = true;
+                return Poll::Ready(None);
+            }
+
+            // `perform` made as much progress as the non-blocking transport
+            // currently allows. Cooperatively yield before the next step.
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        }
+    }
+
+    impl Drop for EspHttpByteStream<'_> {
+        fn drop(&mut self) {
+            if !self.transfer_complete {
+                close_raw_connection(self.conn.raw);
+            }
+        }
+    }
+
+    /// `esp_http_client`-backed transport implementing [`blocking::ClawHttp`]
+    /// (blocking), [`ClawHttp`] (async buffered responses), and [`StreamingHttp`]
+    /// (async response chunks).
     ///
     /// The transport owns one persistent keep-alive [`EspClient`] created at
     /// construction and reused until `EspIdfHttp` is dropped. Async cancellation
@@ -842,6 +1081,21 @@ mod espidf_driver {
             cancel: Cancel<'a>,
         ) -> HttpResponseFuture<'a> {
             Box::pin(async move { self.conn.execute_get_async(request, cancel).await })
+        }
+    }
+
+    impl StreamingHttp for EspIdfHttp {
+        type ByteStream<'a>
+            = EspHttpByteStream<'a>
+        where
+            Self: 'a;
+
+        async fn post_json_streaming<'a, 'r>(
+            &'a mut self,
+            request: &'r HttpJsonRequest<'r>,
+            cancel: Cancel<'a>,
+        ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
+            self.conn.begin_streaming(request, cancel).await
         }
     }
 }

@@ -104,12 +104,12 @@ trait BackendImpl: Sized {
     /// request, and on 2xx wraps the response body stream in a [`ChatStream`]
     /// backed by this backend's SSE parser; a non-2xx status reads the error body
     /// and fails.
-    async fn chat_stream_async<'a, 'r, H: StreamingHttp>(
-        &'a self,
-        http: &'a mut H,
+    async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+        &self,
+        http: &'h mut H,
         request: &'r ChatRequest<'r>,
-        cancel: Cancel<'a>,
-    ) -> Result<ChatStream<H::ByteStream>, ChatError>;
+        cancel: Cancel<'h>,
+    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError>;
 }
 
 /// Constructed backend instance, dispatched by [`BackendKind`].
@@ -246,12 +246,12 @@ macro_rules! define_backends {
                 }
             }
 
-            pub(crate) async fn chat_stream_async<'a, 'r, H: StreamingHttp>(
-                &'a self,
-                http: &'a mut H,
+            pub(crate) async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+                &self,
+                http: &'h mut H,
                 request: &'r ChatRequest<'r>,
-                cancel: Cancel<'a>,
-            ) -> Result<ChatStream<H::ByteStream>, ChatError> {
+                cancel: Cancel<'h>,
+            ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError> {
                 match &self.0 {
                     $( BackendInner::$variant(backend) =>
                         BackendImpl::chat_stream_async(backend, http, request, cancel)

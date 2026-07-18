@@ -1,4 +1,4 @@
-//! The `ClawHttp` networking injection trait.
+//! Blocking, async, and streaming HTTP dependency-injection traits.
 //!
 //! Replaces `claw_llm_http_transport.c`. The espidf wiring implements this over
 //! `esp_http_client`; host tests provide canned responses.
@@ -387,35 +387,61 @@ pub trait ClawHttp {
 ///
 /// Kept separate from [`ClawHttp`] so the one-shot seam stays object-safe. This
 /// seam is always used generically (`H: StreamingHttp`), never as `dyn`, which
-/// lets it carry a GAT: **each transport names its own body-stream type**. The
-/// device driver stays allocation-free (a concrete `poll_next` over
-/// `esp_http_client`), and only host transports whose stream type is unnameable
-/// (e.g. `reqwest::Response::bytes_stream`) pay for boxing — inside their own
-/// impl, never in this shared signature or the device build.
+/// lets it carry a lifetime-indexed GAT: **each transport names a body-stream
+/// type that keeps the transport mutably borrowed until that stream reaches EOF
+/// or is dropped**. This statically enforces one in-flight operation per
+/// transport. The device driver uses a concrete `poll_next` over its existing
+/// `esp_http_client`; only host transports whose stream type is unnameable
+/// (e.g. `reqwest::Response::bytes_stream`) pay for boxing.
+///
+/// The stream keeps the mutable transport borrow alive, so a second request
+/// cannot start before the first stream is dropped:
+///
+/// ```compile_fail
+/// use claw_interface::http::{Cancel, HttpError, HttpJsonRequest, StreamingHttp};
+///
+/// async fn overlapping<'r, H: StreamingHttp>(
+///     http: &mut H,
+///     request: &'r HttpJsonRequest<'r>,
+/// ) -> Result<(), HttpError> {
+///     let (_, first) = http
+///         .post_json_streaming(request, Cancel::never())
+///         .await?;
+///     let _second = http
+///         .post_json_streaming(request, Cancel::never())
+///         .await?;
+///     drop(first);
+///     Ok(())
+/// }
+/// ```
 pub trait StreamingHttp {
-    /// This transport's response-body chunk stream. It **owns** its read side
-    /// (e.g. a moved `reqwest::Response`, or a device read handle), so it borrows
-    /// neither the transport nor the request. Cancelling body streaming is done
-    /// by **dropping** the stream, so it carries no cancellation flag.
+    /// This transport's response-body chunk stream. The `'a` lifetime carries
+    /// the exclusive borrow of the transport for the entire response body. A
+    /// device implementation can therefore read from its existing client
+    /// handle without allocating a second HTTP client. Cancelling body
+    /// streaming is done by **dropping** the stream or triggering the supplied
+    /// [`Cancel`] token.
     ///
     /// `Unpin` keeps consumers pin-free; a host stream whose concrete type is
     /// `!Unpin` (e.g. `reqwest`'s) boxes into `Pin<Box<dyn Stream>>`, which is
     /// `Unpin` — and it had to box its unnameable type anyway.
-    type ByteStream: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin;
+    type ByteStream<'a>: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin + 'a
+    where
+        Self: 'a;
 
     /// POST `request` and resolve the response status paired with a stream of raw
     /// body chunks. The status arrives first so the caller can read a non-2xx
     /// response as an error body; the stream carries only transport read errors.
     ///
-    /// `cancel` covers the send/header phase only (the returned future observes
-    /// it cooperatively); cancel body streaming by dropping [`Self::ByteStream`].
-    /// `'r` (the request) is independent of `'a` (the transport borrow) so a
-    /// caller may build the request body in a shorter local scope.
+    /// `cancel` covers both the send/header phase and response-body reads. Its
+    /// lifetime matches the transport borrow because the returned stream keeps
+    /// observing it. Dropping [`Self::ByteStream`] also cancels body streaming.
+    /// The request lifetime is independent and is not retained by the stream.
     fn post_json_streaming<'a, 'r>(
         &'a mut self,
         request: &'r HttpJsonRequest<'r>,
         cancel: Cancel<'a>,
-    ) -> impl Future<Output = Result<(HttpStatusCode, Self::ByteStream), HttpError>>;
+    ) -> impl Future<Output = Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError>>;
 }
 
 /// Drive `future` while checking `cancel` before each poll.
@@ -453,6 +479,7 @@ fn cancel_on_poll<'a>(
 #[cfg(feature = "httpmock")]
 mod httpmock {
     use core::future::Future;
+    use core::marker::PhantomData;
     use core::pin::Pin;
     use core::task::{Context, Poll};
     use std::collections::VecDeque;
@@ -470,16 +497,21 @@ mod httpmock {
     /// A response body served as a queue of raw byte chunks. Names a concrete
     /// [`Stream`] type so [`ChunkedHttp`] stays allocation-light and mirrors how a
     /// device transport would name its own stream (no boxing).
-    pub struct SliceChunks {
+    pub struct SliceChunks<'a> {
         chunks: VecDeque<Vec<u8>>,
+        // Carry the transport borrow in the concrete type. Without this marker,
+        // a caller using `ChunkedHttp` directly (rather than through a generic
+        // `H: StreamingHttp`) could start another request while still holding
+        // the first response stream.
+        _transport: PhantomData<&'a mut ()>,
+        cancel: Cancel<'a>,
+        terminated: bool,
     }
 
-    impl SliceChunks {
+    impl SliceChunks<'static> {
         /// A stream that yields `chunks` in order (format-agnostic).
         pub fn from_chunks(chunks: impl IntoIterator<Item = Vec<u8>>) -> Self {
-            Self {
-                chunks: chunks.into_iter().collect(),
-            }
+            Self::from_chunks_with_cancel(chunks, Cancel::never())
         }
 
         /// A stream that yields `body` as a single chunk.
@@ -488,19 +520,77 @@ mod httpmock {
         }
     }
 
-    impl Stream for SliceChunks {
+    impl<'a> SliceChunks<'a> {
+        /// A chunk stream that cooperatively observes `cancel` on every poll.
+        pub fn from_chunks_with_cancel(
+            chunks: impl IntoIterator<Item = Vec<u8>>,
+            cancel: Cancel<'a>,
+        ) -> Self {
+            Self {
+                chunks: chunks.into_iter().collect(),
+                _transport: PhantomData,
+                cancel,
+                terminated: false,
+            }
+        }
+
+        /// A cancellable stream that yields `body` as a single chunk.
+        pub fn once_with_cancel(body: Vec<u8>, cancel: Cancel<'a>) -> Self {
+            Self::from_chunks_with_cancel([body], cancel)
+        }
+    }
+
+    impl Stream for SliceChunks<'_> {
         type Item = Result<Vec<u8>, HttpError>;
 
         fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-            Poll::Ready(self.chunks.pop_front().map(Ok))
+            if self.terminated {
+                return Poll::Ready(None);
+            }
+            if self.cancel.is_cancelled() {
+                self.terminated = true;
+                return Poll::Ready(Some(Err(HttpError::Aborted)));
+            }
+            let next = self.chunks.pop_front().map(Ok);
+            if next.is_none() {
+                self.terminated = true;
+            }
+            Poll::Ready(next)
         }
     }
 
     /// Streaming [`StreamingHttp`] double: serves preset response bodies as byte
     /// chunks, so tests can exercise SSE parsing across arbitrary chunk splits.
     /// Panics if called more times than scripted.
+    ///
+    /// The concrete mock preserves the same exclusive-stream rule as a device
+    /// transport:
+    ///
+    /// ```compile_fail
+    /// use claw_interface::http::{ChunkedHttp, StreamingHttp};
+    /// use claw_interface::{Cancel, HttpAuth, HttpJsonRequest};
+    ///
+    /// async fn overlap() {
+    ///     let mut http = ChunkedHttp::new(["data: [DONE]\n\n"], 0);
+    ///     let request = HttpJsonRequest {
+    ///         url: "http://example.test",
+    ///         body: "{}",
+    ///         auth: HttpAuth::None,
+    ///         timeout_ms: 1_000,
+    ///         headers: &[],
+    ///     };
+    ///     let (_, first) = http
+    ///         .post_json_streaming(&request, Cancel::never())
+    ///         .await
+    ///         .unwrap();
+    ///     let _second = http
+    ///         .post_json_streaming(&request, Cancel::never())
+    ///         .await;
+    ///     drop(first);
+    /// }
+    /// ```
     pub struct ChunkedHttp {
-        rounds: Mutex<VecDeque<(HttpStatusCode, Vec<Vec<u8>>)>>,
+        rounds: VecDeque<(HttpStatusCode, Vec<Vec<u8>>)>,
     }
 
     impl ChunkedHttp {
@@ -511,9 +601,7 @@ mod httpmock {
                 .into_iter()
                 .map(|body| (HttpStatusCode::OK, split_bytes(body.into(), chunk_size)))
                 .collect();
-            Self {
-                rounds: Mutex::new(rounds),
-            }
+            Self { rounds }
         }
 
         /// Full control: an explicit status and chunk list per round.
@@ -521,18 +609,22 @@ mod httpmock {
             rounds: impl IntoIterator<Item = (HttpStatusCode, Vec<Vec<u8>>)>,
         ) -> Self {
             Self {
-                rounds: Mutex::new(rounds.into_iter().collect()),
+                rounds: rounds.into_iter().collect(),
             }
         }
 
-        fn serve(&self) -> (HttpStatusCode, SliceChunks) {
-            let (status, chunks) = guard(&self.rounds)
+        fn serve<'a>(&'a mut self, cancel: Cancel<'a>) -> (HttpStatusCode, SliceChunks<'a>) {
+            let (status, chunks) = self
+                .rounds
                 .pop_front()
                 .expect("ChunkedHttp: LLM called more times than scripted");
             (
                 status,
                 SliceChunks {
                     chunks: chunks.into(),
+                    _transport: PhantomData,
+                    cancel,
+                    terminated: false,
                 },
             )
         }
@@ -556,17 +648,20 @@ mod httpmock {
     }
 
     impl StreamingHttp for ChunkedHttp {
-        type ByteStream = SliceChunks;
+        type ByteStream<'a>
+            = SliceChunks<'a>
+        where
+            Self: 'a;
 
         async fn post_json_streaming<'a, 'r>(
             &'a mut self,
             _request: &'r HttpJsonRequest<'r>,
             cancel: Cancel<'a>,
-        ) -> Result<(HttpStatusCode, SliceChunks), HttpError> {
+        ) -> Result<(HttpStatusCode, SliceChunks<'a>), HttpError> {
             if cancel.is_cancelled() {
                 return Err(HttpError::Aborted);
             }
-            Ok(self.serve())
+            Ok(self.serve(cancel))
         }
     }
 
@@ -996,7 +1091,9 @@ pub use httpmock::{
 mod realhttp {
     use std::time::Duration;
 
+    use core::future::Future as _;
     use core::pin::Pin;
+    use core::task::Poll;
 
     use futures_lite::StreamExt as _;
 
@@ -1090,56 +1187,71 @@ mod realhttp {
     }
 
     impl StreamingHttp for RealHttp {
-        type ByteStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, HttpError>> + Send>>;
+        type ByteStream<'a>
+            = Pin<Box<dyn Stream<Item = Result<Vec<u8>, HttpError>> + Send + 'a>>
+        where
+            Self: 'a;
 
-        fn post_json_streaming<'a, 'r>(
+        async fn post_json_streaming<'a, 'r>(
             &'a mut self,
             request: &'r HttpJsonRequest<'r>,
-            _cancel: Cancel<'a>,
-        ) -> impl core::future::Future<Output = Result<(HttpStatusCode, Self::ByteStream), HttpError>>
-        {
-            // Own every request input up front so the returned future and stream
-            // borrow neither `self` nor `request` (`reqwest::Client` is cheap to
-            // clone — it is `Arc`-backed).
-            let client = self.client.clone();
-            let user_agent = self.user_agent.clone();
-            let url = request.url.to_string();
-            let body = request.body.to_string();
-            let timeout = Duration::from_millis(u64::from(request.timeout_ms));
-            let auth = request.auth.header();
-            let headers: Vec<(String, String)> = request
-                .headers
-                .iter()
-                .map(|header| (header.name.to_string(), header.value.to_string()))
-                .collect();
-
-            async move {
-                let mut builder = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .timeout(timeout)
-                    .body(body);
-                if let Some(user_agent) = &user_agent {
-                    builder = builder.header("User-Agent", user_agent);
-                }
-                if let Some((name, value)) = auth {
-                    builder = builder.header(name, value);
-                }
-                for (name, value) in &headers {
-                    builder = builder.header(name, value);
-                }
-
-                let response = builder.send().await.map_err(|error| {
-                    HttpError::RequestFailed(HttpRequestFailure::transport(error.to_string()))
-                })?;
-                let status = HttpStatusCode::new(response.status().as_u16());
-                let stream = response.bytes_stream().map(|chunk| {
-                    chunk.map(|bytes| bytes.to_vec()).map_err(|error| {
-                        HttpError::RequestFailed(HttpRequestFailure::transport(error.to_string()))
-                    })
-                });
-                Ok((status, Box::pin(stream) as Self::ByteStream))
+            cancel: Cancel<'a>,
+        ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
+            let mut builder = self
+                .client
+                .post(request.url)
+                .header("Content-Type", "application/json")
+                .timeout(Duration::from_millis(u64::from(request.timeout_ms)))
+                .body(request.body.to_string());
+            if let Some(user_agent) = &self.user_agent {
+                builder = builder.header("User-Agent", user_agent);
             }
+            if let Some((name, value)) = request.auth.header() {
+                builder = builder.header(name, value);
+            }
+            for header in request.headers {
+                builder = builder.header(header.name, header.value);
+            }
+
+            let mut send = core::pin::pin!(builder.send());
+            let response = core::future::poll_fn(|context| {
+                if cancel.is_cancelled() {
+                    return Poll::Ready(Err(HttpError::Aborted));
+                }
+                match send.as_mut().poll(context) {
+                    Poll::Pending => Poll::Pending,
+                    Poll::Ready(Ok(response)) => Poll::Ready(Ok(response)),
+                    Poll::Ready(Err(error)) => Poll::Ready(Err(HttpError::RequestFailed(
+                        HttpRequestFailure::transport(error.to_string()),
+                    ))),
+                }
+            })
+            .await?;
+            let status = HttpStatusCode::new(response.status().as_u16());
+            let stream = response.bytes_stream().map(|chunk| {
+                chunk.map(|bytes| bytes.to_vec()).map_err(|error| {
+                    HttpError::RequestFailed(HttpRequestFailure::transport(error.to_string()))
+                })
+            });
+            let mut stream = Box::pin(stream);
+            let mut terminated = false;
+            let stream = futures_lite::stream::poll_fn(move |context| {
+                if terminated {
+                    return Poll::Ready(None);
+                }
+                if cancel.is_cancelled() {
+                    terminated = true;
+                    return Poll::Ready(Some(Err(HttpError::Aborted)));
+                }
+                match stream.as_mut().poll_next(context) {
+                    Poll::Ready(None) => {
+                        terminated = true;
+                        Poll::Ready(None)
+                    }
+                    ready => ready,
+                }
+            });
+            Ok((status, Box::pin(stream) as Self::ByteStream<'a>))
         }
     }
 }

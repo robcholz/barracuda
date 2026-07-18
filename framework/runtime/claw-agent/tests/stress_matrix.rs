@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use claw_agent::{
     AgentSystem, Message, SessionControl, SessionControlError, SessionEvent, SessionEventStream,
@@ -130,6 +131,7 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(format!("storm start {case}")))).unwrap();
+        wait_for_yielding_http(case);
         let handles = spawn_control_storm(&control, interrupts, cancels);
         for handle in handles {
             let result = handle.join().expect("control worker should not panic");
@@ -158,6 +160,18 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
                 "case {case}: second submit should produce output: {second_events:?}"
             );
         }
+    }
+}
+
+fn wait_for_yielding_http(case: &str) {
+    let deadline = Instant::now() + Duration::from_secs(1);
+
+    while YIELDING_HTTP_POLLS.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "case {case}: yielding HTTP did not start before the control storm"
+        );
+        thread::yield_now();
     }
 }
 

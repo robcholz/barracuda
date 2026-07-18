@@ -134,7 +134,9 @@ async fn run_one_iteration<H: ClawHttp + StreamingHttp, Timer: ClawTimer>(
         retry: loop_.retry,
     };
     let cancel = Cancel::new(loop_.interruption.interrupt_flag().as_ref());
-    let max_attempts = u64::from(chat_request.retry.max_retries).saturating_add(1);
+    // Streaming bodies cannot be resumed safely, so this path deliberately has
+    // one attempt even when the request's non-streaming retry policy is larger.
+    let max_attempts = 1_u64;
     let chat_span = tracing::info_span!("api.chat", purpose = "iteration", max_attempts);
 
     // Interpret a streaming/LLM error: a cooperative interrupt or provider abort

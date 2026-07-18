@@ -440,20 +440,36 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
     /// then output, then complete tool calls. Drain it to the end, then call
     /// [`ChatStream::take_response`] for the assembled [`LlmResponse`]. Unlike
     /// [`chat`](Self::chat) it does not retry: a stream cannot be resumed
-    /// mid-body, so a failure is surfaced to the caller.
-    pub async fn chat_stream<'a>(
-        &'a mut self,
-        request: &'a ChatRequest<'_>,
-        cancel: Cancel<'a>,
-    ) -> Result<ChatStream<H::ByteStream>, ChatError>
+    /// mid-body, so a failure is surfaced to the caller. `cancel` remains active
+    /// for the full body stream, not only the send/header phase.
+    pub async fn chat_stream<'h, 'r>(
+        &'h mut self,
+        request: &'r ChatRequest<'r>,
+        cancel: Cancel<'h>,
+    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError>
     where
         H: StreamingHttp,
     {
-        self.backend
-            .as_ref()
-            .ok_or(ClawApiError::NotConfigured)?
-            .chat_stream_async(&mut self.http, request, cancel)
-            .await
+        let backend = self.backend.as_ref().ok_or(ClawApiError::NotConfigured)?;
+        let attempt = 1_u64;
+        let max_attempts = 1_u64;
+
+        async {
+            let result = backend
+                .chat_stream_async(&mut self.http, request, cancel)
+                .await;
+            match &result {
+                Ok(_) => tracing::info!(name: "opened", ""),
+                Err(error) => {
+                    let kind = chat_error_kind(error);
+                    let retryable = error.is_retryable();
+                    tracing::error!(name: "failed", kind, retryable, final = true);
+                }
+            }
+            result
+        }
+        .instrument(tracing::info_span!("api.attempt", attempt, max_attempts))
+        .await
     }
 
     /// Async structured JSON chat over [`ClawHttp`].

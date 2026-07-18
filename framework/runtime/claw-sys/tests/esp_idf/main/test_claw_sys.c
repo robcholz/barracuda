@@ -32,11 +32,32 @@ TEST_CASE("claw_sys sync ClawHttp POST returns HTTP 200", "[claw_sys][network]")
     TEST_ASSERT_EQUAL_INT(200, status);
 }
 
-TEST_CASE("claw_sys async ClawHttpAsync runs 3 posts via edge-executor", "[claw_sys][network]")
+TEST_CASE("claw_sys async ClawHttp runs 3 posts via edge-executor", "[claw_sys][network]")
 {
     int ok = claw_sys_selftest_run_three_async_http_posts(TEST_HTTPS_URL);
     printf("async posts succeeded=%d\n", ok);
     TEST_ASSERT_EQUAL_INT(3, ok);
+}
+
+TEST_CASE("claw_sys StreamingHttp drains body then reuses client", "[claw_sys][streaming][network]")
+{
+    int rc = claw_sys_selftest_streaming_drain_reuse(TEST_HTTPS_URL);
+    printf("streaming drain/reuse rc=%d\n", rc);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+}
+
+TEST_CASE("claw_sys StreamingHttp cancellation then reuses client", "[claw_sys][streaming][network]")
+{
+    int rc = claw_sys_selftest_streaming_cancel_reuse(TEST_HTTPS_URL);
+    printf("streaming cancel/reuse rc=%d\n", rc);
+    TEST_ASSERT_EQUAL_INT(0, rc);
+}
+
+TEST_CASE("claw_sys StreamingHttp drop then reuses client", "[claw_sys][streaming][network]")
+{
+    int rc = claw_sys_selftest_streaming_drop_reuse(TEST_HTTPS_URL);
+    printf("streaming drop/reuse rc=%d\n", rc);
+    TEST_ASSERT_EQUAL_INT(0, rc);
 }
 
 /* ---------- Resource profiling ---------- */
