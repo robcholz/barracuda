@@ -16,7 +16,7 @@ mod state;
 mod task_state;
 
 use claw_api::{ClawApiAsync, RetryPolicy};
-use claw_checkpoint::DurableState;
+use claw_persistence::DurableState;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 

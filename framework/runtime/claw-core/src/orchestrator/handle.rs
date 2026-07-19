@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use async_channel::Sender;
 use claw_api::{ClawApiConfig, InitError};
-use claw_checkpoint::{FsCheckpointStorage, SharedCheckpointCoordinator};
+use claw_persistence::{FsCheckpointStorage, SharedCheckpointCoordinator};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{
     ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, CoreAffinity, Priority, WorkerHandle,

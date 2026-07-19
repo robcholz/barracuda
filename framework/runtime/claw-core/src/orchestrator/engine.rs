@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::{mpsc, Arc, RwLock};
 
 use async_channel::{Receiver, Sender};
-use claw_checkpoint::{FsCheckpointStorage, SharedCheckpointCoordinator};
+use claw_persistence::{FsCheckpointStorage, SharedCheckpointCoordinator};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawTimer};
 use claw_tool::ToolRegistry;

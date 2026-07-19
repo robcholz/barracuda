@@ -8,7 +8,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use claw_api::{ClawApiConfig, InitError};
-use claw_checkpoint::{
+use claw_persistence::{
     BatchId, CheckpointCoordinatorInitError, CheckpointStorage, CheckpointStorageError,
     DurableBatchSnapshot, DurablePart, DurablePartError, DurablePartSnapshot, FsCheckpointStorage,
     LoadCheckpointError, SharedCheckpointCoordinator,

@@ -10,7 +10,7 @@ mod handle;
 use std::error::Error as StdError;
 use std::io;
 
-use claw_checkpoint::{BatchId, CheckpointStorageError, DurablePartError, LoadCheckpointError};
+use claw_persistence::{BatchId, CheckpointStorageError, DurablePartError, LoadCheckpointError};
 use claw_memory::LongTermInitError;
 use claw_skill::SkillError;
 

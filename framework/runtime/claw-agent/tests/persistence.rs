@@ -11,7 +11,7 @@ use claw_agent::{
     AgentError, AgentSystem, Message, OpenSessionError, SessionEvent, SessionId,
     SessionPersistence, StreamPart, TurnId, TurnOrigin,
 };
-use claw_checkpoint::{
+use claw_persistence::{
     BatchId, BatchWrite, ChangePatternHint, Checkpoint, CheckpointStorage, CheckpointWrite,
     DurablePart, FsCheckpointStorage, PartStateBlob, PartWrite, StorageHint, StorageSizeHint,
 };
@@ -254,7 +254,7 @@ fn tool_registry_keeps_only_two_checkpoints_across_sixty_one_registrations() {
     assert_eq!(storage.latest_step().unwrap(), Some(3));
     assert!(matches!(
         storage.load_checkpoint(1),
-        Err(claw_checkpoint::LoadCheckpointError::StepNotFound(1))
+        Err(claw_persistence::LoadCheckpointError::StepNotFound(1))
     ));
     assert_eq!(tool_count(&storage.load_checkpoint(2).unwrap()), 31);
     assert_eq!(tool_count(&storage.load_checkpoint(3).unwrap()), 61);

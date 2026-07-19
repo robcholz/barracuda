@@ -3,7 +3,7 @@
 use std::borrow::Cow;
 use std::sync::{Mutex, MutexGuard};
 
-use claw_checkpoint::{
+use claw_persistence::{
     ChangePatternHint, DurablePart, DurablePartError, DurablePartSnapshot, DurableState,
     DurableStateCodec, PartGeneration, PartStateBlob, PartStateSlice, StorageHint, StorageSizeHint,
 };

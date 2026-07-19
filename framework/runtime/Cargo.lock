@@ -141,12 +141,12 @@ dependencies = [
  "anstyle",
  "anyhow",
  "claw-api",
- "claw-checkpoint",
  "claw-context",
  "claw-core",
  "claw-interface",
  "claw-log",
  "claw-memory",
+ "claw-persistence",
  "claw-tool",
  "claw-utils",
  "dotenvy",
@@ -206,18 +206,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "claw-checkpoint"
-version = "0.1.0"
-dependencies = [
- "claw-interface",
- "claw-utils",
- "serde",
- "serde_json",
- "tempdir",
- "thiserror",
-]
-
-[[package]]
 name = "claw-context"
 version = "0.1.0"
 dependencies = [
@@ -231,11 +219,11 @@ dependencies = [
  "anyhow",
  "async-channel",
  "claw-api",
- "claw-checkpoint",
  "claw-context",
  "claw-interface",
  "claw-memory",
  "claw-permission",
+ "claw-persistence",
  "claw-skill",
  "claw-tool",
  "claw-utils",
@@ -301,6 +289,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "claw-persistence"
+version = "0.1.0"
+dependencies = [
+ "claw-interface",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "claw-sandbox"
 version = "0.1.0"
 dependencies = [
@@ -348,8 +346,8 @@ name = "claw-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "claw-checkpoint",
  "claw-permission",
+ "claw-persistence",
  "serde",
  "serde_json",
  "thiserror",

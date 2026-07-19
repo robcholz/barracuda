@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use claw_checkpoint::DurablePartError;
+use claw_persistence::DurablePartError;
 
 use crate::agent::FsAgentCreateError;
 use crate::protocol::AgentId;

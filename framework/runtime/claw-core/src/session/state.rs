@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use claw_checkpoint::{DurablePartError, DurableStateCodec, PartStateBlob, PartStateSlice};
+use claw_persistence::{DurablePartError, DurableStateCodec, PartStateBlob, PartStateSlice};
 use claw_permission::PermissionLevel;
 use serde::{Deserialize, Serialize};
 
@@ -206,7 +206,7 @@ impl DurableStateCodec for SessionState {
 
 #[cfg(test)]
 mod tests {
-    use claw_checkpoint::DurableStateCodec;
+    use claw_persistence::DurableStateCodec;
 
     use super::{SessionState, SESSION_STATE_SCHEMA_VERSION};
     use claw_permission::PermissionLevel;

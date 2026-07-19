@@ -1,4 +1,4 @@
-use claw_checkpoint::SchemaVersion;
+use claw_persistence::SchemaVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{AgentId, Message};

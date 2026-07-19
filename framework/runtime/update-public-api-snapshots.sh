@@ -14,7 +14,7 @@ crates=(
     claw-agent
     claw-api
     claw-cabi
-    claw-checkpoint
+    claw-persistence
     claw-context
     claw-core
     claw-interface

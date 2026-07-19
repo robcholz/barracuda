@@ -4,7 +4,7 @@ mod schema;
 
 use std::collections::BTreeMap;
 
-use claw_checkpoint::{
+use claw_persistence::{
     ChangePatternHint, DurablePart, DurablePartError, PartGeneration, PartStateBlob, StorageHint,
     StorageSizeHint,
 };

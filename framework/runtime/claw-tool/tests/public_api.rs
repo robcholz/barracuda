@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 
 use anyhow::{anyhow, Result};
-use claw_checkpoint::{CheckpointError, CheckpointStorageError, DurablePart};
+use claw_persistence::{CheckpointError, CheckpointStorageError, DurablePart};
 use claw_tool::{
     RawToolInvocation, RetryCount, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation,
     ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryCheckpointError, ToolRegistryError,

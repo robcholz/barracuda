@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use claw_api::{ClawApiAsync, ClawApiConfig, InitError, RetryPolicy};
-use claw_checkpoint::DurableState;
+use claw_persistence::DurableState;
 use claw_context::{Block, Context};
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::TranscriptStore;

@@ -9,7 +9,7 @@ use claw_agent::{
     AgentError, AgentSystem, IterationId, Message, OpenSessionError, SessionControlError,
     SessionEvent, SessionEventStream, SessionId, StreamPart, TurnId, TurnOrigin,
 };
-use claw_checkpoint::DurablePart;
+use claw_persistence::DurablePart;
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
 };

@@ -60,7 +60,7 @@ cache_profile = [
 [dependencies]
 claw-core = { path = "../claw-core" }
 claw-api = { path = "../claw-api" }
-claw-checkpoint = { path = "../claw-checkpoint" }
+claw-persistence = { path = "../claw-persistence" }
 claw-tool = { path = "../claw-tool" }
 # Conversation/long-term memory. The compaction policy is wired internally
 # (the LLM-backed `LlmCompactor`), so no stub-compactor feature is needed.

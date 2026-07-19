@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use async_channel::{Receiver, Sender};
-use claw_checkpoint::DurableState;
+use claw_persistence::DurableState;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use futures_core::Stream;

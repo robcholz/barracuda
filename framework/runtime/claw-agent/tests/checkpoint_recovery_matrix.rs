@@ -7,7 +7,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use claw_agent::AgentSystem;
-use claw_checkpoint::{
+use claw_persistence::{
     BatchId, BatchWrite, ChangePatternHint, CheckpointStorage, CheckpointWrite,
     FsCheckpointStorage, PartStateBlob, PartWrite, StorageHint, StorageSizeHint,
 };

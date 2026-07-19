@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use claw_checkpoint::{DurableState, PartStateSlice};
+use claw_persistence::{DurableState, PartStateSlice};
 use claw_context::Block;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
@@ -179,7 +179,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
-    use claw_checkpoint::{DurablePart, PartStateSlice};
+    use claw_persistence::{DurablePart, PartStateSlice};
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;

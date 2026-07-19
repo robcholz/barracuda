@@ -15,9 +15,9 @@ pub claw_core::OpenSessionError::SessionNotFound(claw_core::SessionId)
 pub claw_core::OpenSessionError::WorkerStopped
 pub enum claw_core::OrchestratorBuildError
 pub claw_core::OrchestratorBuildError::CheckpointInstanceRestore(claw_core::OrchestratorInstanceRestoreError)
-pub claw_core::OrchestratorBuildError::CheckpointLoad(claw_checkpoint::LoadCheckpointError)
-pub claw_core::OrchestratorBuildError::CheckpointRestore(claw_checkpoint::DurablePartError)
-pub claw_core::OrchestratorBuildError::CheckpointStorage(claw_checkpoint::CheckpointStorageError)
+pub claw_core::OrchestratorBuildError::CheckpointLoad(claw_persistence::LoadCheckpointError)
+pub claw_core::OrchestratorBuildError::CheckpointRestore(claw_persistence::DurablePartError)
+pub claw_core::OrchestratorBuildError::CheckpointStorage(claw_persistence::CheckpointStorageError)
 pub claw_core::OrchestratorBuildError::LongTermInit(claw_memory::long_term_memory::LongTermInitError)
 pub claw_core::OrchestratorBuildError::MissingCheckpointPart
 pub claw_core::OrchestratorBuildError::MissingCheckpointPart::batch: &'static str

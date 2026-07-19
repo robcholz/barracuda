@@ -1,4 +1,4 @@
-use claw_checkpoint::{
+use claw_persistence::{
     BatchId, CheckpointError, CheckpointStorage, DurableBatchSnapshot, DurablePart,
     DurablePartError, DurableStateCodec, FsCheckpointStorage, SharedCheckpointCoordinator,
 };

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use claw_checkpoint::{
+use claw_persistence::{
     BatchId, ChangePatternHint, CheckpointError, CheckpointStorage, CheckpointStorageError,
     DurableBatchSnapshot, DurablePartError, DurablePartSnapshot, DurableState, DurableStateCodec,
     FsCheckpointStorage, LoadCheckpointError, SharedCheckpointCoordinator, StorageHint,

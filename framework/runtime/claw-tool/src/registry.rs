@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use claw_checkpoint::{
+use claw_persistence::{
     ChangePatternHint, CheckpointError, CheckpointStorageError, DurablePart, DurablePartError,
     DurableState, DurableStateCodec, PartGeneration, PartStateBlob, PartStateSlice, StorageHint,
     StorageSizeHint,

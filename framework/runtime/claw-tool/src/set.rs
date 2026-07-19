@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use claw_checkpoint::{
+use claw_persistence::{
     ChangePatternHint, DurablePart, DurablePartError, DurableState, DurableStateCodec,
     PartGeneration, PartStateBlob, PartStateSlice, StorageHint, StorageSizeHint,
 };

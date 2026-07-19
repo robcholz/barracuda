@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use claw_checkpoint::{DurablePartError, DurableStateCodec, PartStateBlob, PartStateSlice};
+use claw_persistence::{DurablePartError, DurableStateCodec, PartStateBlob, PartStateSlice};
 use claw_interface::{ClawHttp, ClawTimer};
 
 use crate::protocol::{AgentId, AgentKind};
@@ -322,7 +322,7 @@ fn validate_topology(parents: &BTreeMap<AgentId, Option<AgentId>>) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use claw_checkpoint::{DurableStateCodec, PartStateSlice};
+    use claw_persistence::{DurableStateCodec, PartStateSlice};
 
     use crate::protocol::AgentId;
     use crate::protocol::Message;
@@ -372,14 +372,14 @@ mod tests {
 
     fn decode(
         snapshot: &MultiagentCheckpoint,
-    ) -> Result<MultiagentRestore, claw_checkpoint::DurablePartError> {
+    ) -> Result<MultiagentRestore, claw_persistence::DurablePartError> {
         decode_schema(snapshot, MULTIAGENT_SCHEMA_VERSION)
     }
 
     fn decode_schema(
         snapshot: &MultiagentCheckpoint,
         schema_version: u32,
-    ) -> Result<MultiagentRestore, claw_checkpoint::DurablePartError> {
+    ) -> Result<MultiagentRestore, claw_persistence::DurablePartError> {
         let bytes = serde_json::to_vec(snapshot).expect("snapshot encodes");
         MultiagentRestore::decode_state(PartStateSlice {
             schema_version,

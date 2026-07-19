@@ -17,7 +17,7 @@ feature_packages=(
     claw-agent
     claw-api
     claw-cabi
-    claw-checkpoint
+    claw-persistence
     claw-context
     claw-interface
     claw-memory

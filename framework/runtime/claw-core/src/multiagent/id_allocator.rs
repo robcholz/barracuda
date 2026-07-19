@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use claw_checkpoint::{
+use claw_persistence::{
     ChangePatternHint, DurablePart, DurablePartError, PartGeneration, PartStateBlob,
     PartStateSlice, StorageHint, StorageSizeHint,
 };

@@ -8,9 +8,9 @@ pub claw_tool::ToolError::NotFound(alloc::string::String)
 impl core::convert::From<claw_tool::ToolError> for claw_tool::ToolInvokeError
 pub fn claw_tool::ToolInvokeError::from(claw_tool::ToolError) -> Self
 pub enum claw_tool::ToolRegistryCheckpointError
-pub claw_tool::ToolRegistryCheckpointError::Coordinator(claw_checkpoint::CheckpointError)
-pub claw_tool::ToolRegistryCheckpointError::Part(claw_checkpoint::DurablePartError)
-pub claw_tool::ToolRegistryCheckpointError::Storage(claw_checkpoint::CheckpointStorageError)
+pub claw_tool::ToolRegistryCheckpointError::Coordinator(claw_persistence::CheckpointError)
+pub claw_tool::ToolRegistryCheckpointError::Part(claw_persistence::DurablePartError)
+pub claw_tool::ToolRegistryCheckpointError::Storage(claw_persistence::CheckpointStorageError)
 pub enum claw_tool::ToolRegistryError
 pub claw_tool::ToolRegistryError::AlreadyExists(claw_tool::ToolName)
 pub claw_tool::ToolRegistryError::Checkpoint(claw_tool::ToolRegistryCheckpointError)
@@ -85,12 +85,12 @@ pub fn claw_tool::ToolRegistry::start_all(&self) -> core::result::Result<(), cla
 pub fn claw_tool::ToolRegistry::stop_all(&self) -> core::result::Result<(), claw_tool::ToolRegistryError>
 pub fn claw_tool::ToolRegistry::tool_set(&alloc::sync::Arc<Self>) -> claw_tool::ToolSet
 pub fn claw_tool::ToolRegistry::tool_version(&self) -> claw_tool::ToolRegistryVersion
-impl claw_checkpoint::DurablePart for claw_tool::ToolRegistry
-pub fn claw_tool::ToolRegistry::export_state(&self) -> core::result::Result<claw_checkpoint::PartStateBlob<'_>, claw_checkpoint::DurablePartError>
-pub fn claw_tool::ToolRegistry::generation(&self) -> claw_checkpoint::PartGeneration
+impl claw_persistence::DurablePart for claw_tool::ToolRegistry
+pub fn claw_tool::ToolRegistry::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
+pub fn claw_tool::ToolRegistry::generation(&self) -> claw_persistence::PartGeneration
 pub fn claw_tool::ToolRegistry::name(&self) -> &'static str
-pub fn claw_tool::ToolRegistry::restore_from_state(claw_checkpoint::PartStateSlice<'_>) -> core::result::Result<Self, claw_checkpoint::DurablePartError>
-pub fn claw_tool::ToolRegistry::storage_hint(&self) -> claw_checkpoint::StorageHint
+pub fn claw_tool::ToolRegistry::restore_from_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError>
+pub fn claw_tool::ToolRegistry::storage_hint(&self) -> claw_persistence::StorageHint
 impl core::fmt::Debug for claw_tool::ToolRegistry
 pub fn claw_tool::ToolRegistry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_tool::ToolRunner<'a>
@@ -105,14 +105,14 @@ pub fn claw_tool::ToolSet::clear_temporary_tools(&mut self)
 pub fn claw_tool::ToolSet::disable_tool(&mut self, claw_tool::ToolName) -> core::result::Result<(), claw_tool::ToolSetError>
 pub fn claw_tool::ToolSet::enable_tool(&mut self, claw_tool::ToolName) -> core::result::Result<(), claw_tool::ToolSetError>
 pub fn claw_tool::ToolSet::remove_tool(&mut self, claw_tool::ToolName) -> core::result::Result<(), claw_tool::ToolSetError>
-pub fn claw_tool::ToolSet::restore_state(&mut self, claw_checkpoint::PartStateSlice<'_>) -> core::result::Result<(), claw_checkpoint::DurablePartError>
+pub fn claw_tool::ToolSet::restore_state(&mut self, claw_persistence::PartStateSlice<'_>) -> core::result::Result<(), claw_persistence::DurablePartError>
 pub fn claw_tool::ToolSet::temporarily_disable_tool(&mut self, claw_tool::ToolName) -> core::result::Result<(), claw_tool::ToolSetError>
 pub fn claw_tool::ToolSet::temporarily_enable_tool(&mut self, claw_tool::ToolName) -> core::result::Result<(), claw_tool::ToolSetError>
-impl claw_checkpoint::DurablePart for claw_tool::ToolSet
-pub fn claw_tool::ToolSet::export_state(&self) -> core::result::Result<claw_checkpoint::PartStateBlob<'_>, claw_checkpoint::DurablePartError>
-pub fn claw_tool::ToolSet::generation(&self) -> claw_checkpoint::PartGeneration
+impl claw_persistence::DurablePart for claw_tool::ToolSet
+pub fn claw_tool::ToolSet::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
+pub fn claw_tool::ToolSet::generation(&self) -> claw_persistence::PartGeneration
 pub fn claw_tool::ToolSet::name(&self) -> &'static str
-pub fn claw_tool::ToolSet::storage_hint(&self) -> claw_checkpoint::StorageHint
+pub fn claw_tool::ToolSet::storage_hint(&self) -> claw_persistence::StorageHint
 pub struct claw_tool::ToolSetHandle<'a>
 impl<'a> claw_tool::ToolSetHandle<'a>
 pub fn claw_tool::ToolSetHandle<'a>::extra_tool_context(&self) -> &str
