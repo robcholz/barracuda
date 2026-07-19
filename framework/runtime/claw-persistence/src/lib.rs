@@ -6,6 +6,7 @@ pub use persistence::{Persistence, PersistenceError};
 
 use std::{
     borrow::Cow,
+    error::Error,
     ops::{Deref, DerefMut},
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
@@ -13,29 +14,62 @@ use std::{
 type Shared<T> = Arc<Mutex<T>>;
 
 pub type SchemaVersion = u32;
-pub type PartGeneration = u32;
+type PartGeneration = u32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DurablePartMetadata {
-    namespace: Option<String>,
-    key: String,
+pub enum Entry {
+    Singleton(String),
+    Collection(String),
 }
 
-impl DurablePartMetadata {
-    pub fn new(namespace: Option<String>, key: impl Into<String>) -> Self {
-        Self {
-            namespace,
-            key: key.into(),
+impl Entry {
+    pub fn singleton(key: impl Into<String>) -> Self {
+        Self::Singleton(key.into())
+    }
+
+    pub fn collection(namespace: impl Into<String>) -> Self {
+        Self::Collection(namespace.into())
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Singleton(key) | Self::Collection(key) => key,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InstanceId(String);
+
+impl InstanceId {
+    pub fn new(id: impl Into<String>) -> Result<Self, InvalidInstanceId> {
+        let id = id.into();
+        if is_valid_key(&id) {
+            Ok(Self(id))
+        } else {
+            Err(InvalidInstanceId { id })
         }
     }
 
-    pub fn namespace(&self) -> Option<&str> {
-        self.namespace.as_deref()
+    pub fn as_str(&self) -> &str {
+        &self.0
     }
+}
 
-    pub fn key(&self) -> &str {
-        &self.key
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("invalid collection instance id `{id}`")]
+pub struct InvalidInstanceId {
+    id: String,
+}
+
+impl InvalidInstanceId {
+    pub fn as_str(&self) -> &str {
+        &self.id
     }
+}
+
+pub(crate) fn is_valid_key(key: &str) -> bool {
+    !key.is_empty() && !key.contains('/') && key != "." && key != ".."
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,7 +157,7 @@ impl<T> Clone for DurableState<T> {
 }
 
 impl<T> DurableState<T> {
-    pub fn new(value: T) -> Self {
+    pub(crate) fn new(value: T) -> Self {
         Self {
             inner: Arc::new(Mutex::new(DurableStateInner {
                 value,
@@ -132,7 +166,7 @@ impl<T> DurableState<T> {
         }
     }
 
-    pub fn generation(&self) -> PartGeneration {
+    pub(crate) fn generation(&self) -> PartGeneration {
         self.lock().generation
     }
 
@@ -157,40 +191,19 @@ impl<T> DurableState<T> {
     }
 }
 
-impl<T: Default> Default for DurableState<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
-}
-
 #[derive(Debug)]
-pub struct DurablePart<T> {
-    metadata: DurablePartMetadata,
+pub(crate) struct DurablePart<T> {
     state: DurableState<T>,
 }
 
-impl<T> Clone for DurablePart<T> {
-    fn clone(&self) -> Self {
-        Self {
-            metadata: self.metadata.clone(),
-            state: self.state.clone(),
-        }
-    }
-}
-
 impl<T> DurablePart<T> {
-    pub fn new(metadata: DurablePartMetadata, value: T) -> Self {
+    pub(crate) fn new(value: T) -> Self {
         Self {
-            metadata,
             state: DurableState::new(value),
         }
     }
 
-    pub fn metadata(&self) -> &DurablePartMetadata {
-        &self.metadata
-    }
-
-    pub fn generation(&self) -> PartGeneration {
+    pub(crate) fn generation(&self) -> PartGeneration {
         self.state.generation()
     }
 }
@@ -208,19 +221,29 @@ impl<T: DurableStateCodec> DurablePart<T> {
     pub(crate) fn restore(
         schema_version: SchemaVersion,
         state: StateSlice<'_>,
-    ) -> Result<DurableState<T>, DurablePartError> {
-        Ok(DurableState::new(T::decode_state(schema_version, state)?))
+    ) -> Result<Self, DurablePartError> {
+        Ok(Self::new(T::decode_state(schema_version, state)?))
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum DurablePartError {
     #[error("failed to encode durable state: {0}")]
-    Encode(#[source] serde_json::Error),
+    Encode(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error("failed to decode durable state: {0}")]
-    Decode(#[source] serde_json::Error),
+    Decode(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error("invalid durable state: {0}")]
     InvalidState(&'static str),
+}
+
+impl DurablePartError {
+    pub fn encode(source: impl Error + Send + Sync + 'static) -> Self {
+        Self::Encode(Box::new(source))
+    }
+
+    pub fn decode(source: impl Error + Send + Sync + 'static) -> Self {
+        Self::Decode(Box::new(source))
+    }
 }
 
 #[cfg(test)]
@@ -239,7 +262,7 @@ mod tests {
 
         fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
             Ok(StateBlob {
-                bytes: Cow::Owned(serde_json::to_vec(self).map_err(DurablePartError::Encode)?),
+                bytes: Cow::Owned(serde_json::to_vec(self).map_err(DurablePartError::encode)?),
             })
         }
 
@@ -252,7 +275,22 @@ mod tests {
                     "unsupported test state schema",
                 ));
             }
-            serde_json::from_slice(state.bytes).map_err(DurablePartError::Decode)
+            serde_json::from_slice(state.bytes).map_err(DurablePartError::decode)
+        }
+    }
+
+    #[test]
+    fn instance_id_is_validated_when_constructed() {
+        assert_eq!(
+            InstanceId::new("session-1")
+                .expect("valid instance id is accepted")
+                .as_str(),
+            "session-1"
+        );
+
+        for invalid in ["", ".", "..", "nested/session"] {
+            let error = InstanceId::new(invalid).expect_err("invalid instance id is rejected");
+            assert_eq!(error.as_str(), invalid);
         }
     }
 
@@ -275,10 +313,7 @@ mod tests {
 
     #[test]
     fn export_captures_one_owned_snapshot() {
-        let part = DurablePart::new(
-            DurablePartMetadata::new(Some("test".to_owned()), "state"),
-            TestState { value: 3 },
-        );
+        let part = DurablePart::new(TestState { value: 3 });
         part.state.get_mut().value = 4;
 
         let (generation, schema_version, blob) =
