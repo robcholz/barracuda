@@ -6,7 +6,7 @@ use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::protocol::{AgentId, AgentKind, Message};
+use crate::protocol::{AgentId, AgentKind, Message, TrackedToolCall};
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,
@@ -39,11 +39,19 @@ pub(super) struct SpawnCommand {
     id: AgentId,
     spec: SubagentSpec,
     completion: Option<Sender<SubagentResult>>,
+    source_call: Option<TrackedToolCall>,
 }
 
 impl SpawnCommand {
-    pub(super) fn into_parts(self) -> (AgentId, SubagentSpec, Option<Sender<SubagentResult>>) {
-        (self.id, self.spec, self.completion)
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        AgentId,
+        SubagentSpec,
+        Option<Sender<SubagentResult>>,
+        Option<TrackedToolCall>,
+    ) {
+        (self.id, self.spec, self.completion, self.source_call)
     }
 }
 
@@ -83,9 +91,13 @@ impl SubagentControl {
         name: Option<String>,
         goal: Message,
         timeout: SubagentTimeout,
+        source_call: TrackedToolCall,
     ) -> AgentId {
-        self.bridge
-            .spawn_background(self.caller, SubagentSpec::new(kind, name, goal, timeout))
+        self.bridge.spawn_background(
+            self.caller,
+            SubagentSpec::new(kind, name, goal, timeout),
+            source_call,
+        )
     }
 
     pub(super) fn spawn_foreground(
@@ -146,6 +158,7 @@ impl MultiagentBridge {
         parent: AgentId,
         spec: SubagentSpec,
         completion: Option<Sender<SubagentResult>>,
+        source_call: Option<TrackedToolCall>,
     ) -> AgentId {
         let id = self.agent_id_allocator.next();
         self.push(MultiagentCommand::new(
@@ -154,6 +167,7 @@ impl MultiagentBridge {
                 id,
                 spec,
                 completion,
+                source_call,
             }),
         ));
         id
@@ -191,8 +205,13 @@ impl MultiagentBridge {
 }
 
 impl MultiagentBridge {
-    pub(super) fn spawn_background(&self, parent: AgentId, spec: SubagentSpec) -> AgentId {
-        self.spawn(parent, spec, None)
+    pub(super) fn spawn_background(
+        &self,
+        parent: AgentId,
+        spec: SubagentSpec,
+        source_call: TrackedToolCall,
+    ) -> AgentId {
+        self.spawn(parent, spec, None, Some(source_call))
     }
 
     pub(super) fn spawn_foreground(
@@ -201,7 +220,7 @@ impl MultiagentBridge {
         spec: SubagentSpec,
     ) -> (AgentId, Receiver<SubagentResult>) {
         let (completion, result) = async_channel::bounded(1);
-        let child = self.spawn(parent, spec, Some(completion));
+        let child = self.spawn(parent, spec, Some(completion), None);
         (child, result)
     }
 
@@ -237,7 +256,6 @@ where
     pub(in crate::multiagent) fn refresh_multiagent_snapshot(&self) {
         let live = self
             .state
-            .get()
             .nodes()
             .map(|(id, meta)| {
                 SubagentSnapshot::new(
@@ -245,11 +263,8 @@ where
                     meta.kind().clone(),
                     meta.name().map(str::to_owned),
                     meta.parent(),
-                    self.state
-                        .get()
-                        .depth(id)
-                        .expect("live graph topology is valid"),
-                    self.state.get().agent_status(id, self.slots.is_running(id)),
+                    self.state.depth(id).expect("live graph topology is valid"),
+                    self.state.agent_status(id, self.slots.is_running(id)),
                 )
             })
             .collect::<Vec<_>>();

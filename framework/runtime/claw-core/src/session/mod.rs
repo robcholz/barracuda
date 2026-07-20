@@ -1,4 +1,4 @@
-//! One-session API, actor, durable turn state, and registry.
+//! One-session API, actor, durable settings/recovery state, and registry.
 
 mod actor;
 mod api;
@@ -9,10 +9,9 @@ mod registry;
 mod state;
 
 pub(crate) use actor::{SessionActor, SessionActorExit};
-pub use api::{OpenSessionError, SessionControl, SessionControlError, SessionEventStream};
-pub(crate) use api::{SessionCommand, SessionEndpoint};
-pub(crate) use persistence::{
-    load_session_restores, SessionCheckpointer, SessionRestoreLoadError, AGENT_ID_ALLOCATOR_PART,
-    ORCHESTRATOR_BATCH, ORCHESTRATOR_BATCH_ID, SESSION_RUNTIME_BATCH,
+pub use api::{
+    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionEventStream,
 };
-pub(crate) use registry::{SessionStore, SessionStoreState};
+pub(crate) use api::{SessionCommand, SessionEndpoint};
+pub(crate) use persistence::{session_entry, session_instance, SessionState};
+pub(crate) use registry::SessionStore;

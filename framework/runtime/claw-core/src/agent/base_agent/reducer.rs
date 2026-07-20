@@ -29,13 +29,13 @@ pub(super) struct ApprovalResume {
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     /// Queue a command. The single inbound entry point.
     pub(crate) fn send_command(&mut self, command: AgentCommand) -> Result<(), AgentCommandError> {
-        self.state.get_mut().task_mut().enqueue_command(command)
+        self.state.task_mut().enqueue_command(command)
     }
 
     /// Activate an input that the orchestrator already deferred until this
     /// agent returned to an idle boundary.
     pub(crate) fn activate_deferred_message(&mut self, message: Message) {
-        self.state.get_mut().task_mut().enqueue_task_input(message);
+        self.state.task_mut().enqueue_task_input(message);
     }
 
     pub(crate) fn abort_handle(&self) -> AgentAbortHandle {
@@ -45,7 +45,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     pub(super) fn drain_inbox(&mut self) -> Option<ApprovalResume> {
         let mut approval_resume = None;
         loop {
-            let action = match self.state.get_mut().task_mut().pop_action() {
+            let action = match self.state.task_mut().pop_action() {
                 Ok(action) => action,
                 Err(error) => {
                     tracing::error!(
@@ -76,7 +76,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             sink.drain(..).collect()
         };
         if !signals.is_empty() {
-            let state = self.state.get_mut();
+            let state = &mut self.state;
             for signal in signals {
                 state.task_mut().enqueue_control(signal);
             }
@@ -95,7 +95,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             TaskAction::Cancel => {
                 self.transcript.discard_open_turn();
                 self.interruption.clear();
-                self.state.get_mut().mode = AgentMode::Normal;
+                self.state.mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::Cancelled);
                 None
             }
@@ -108,12 +108,12 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             }),
             TaskAction::EndConversation { final_message } => {
                 self.transcript.commit_ended(&final_message);
-                self.state.get_mut().mode = AgentMode::Normal;
+                self.state.mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::Ended { final_message });
                 None
             }
             TaskAction::EnterPlanMode => {
-                self.state.get_mut().mode = AgentMode::Plan;
+                self.state.mode = AgentMode::Plan;
                 None
             }
             TaskAction::RequestClarification { question } => {
@@ -125,7 +125,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             TaskAction::ExitPlanMode {
                 outcome: PlanModeExitOutcome::Execute,
             } => {
-                self.state.get_mut().mode = AgentMode::Normal;
+                self.state.mode = AgentMode::Normal;
                 None
             }
             TaskAction::ExitPlanMode {
@@ -133,7 +133,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             } => {
                 self.transcript
                     .commit_assistant(AssistantCommit::PlainText(&message));
-                self.state.get_mut().mode = AgentMode::Normal;
+                self.state.mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::YieldedByTool { text: message });
                 None
             }
@@ -149,7 +149,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                         None => AssistantCommit::PlainText(&answer.text),
                     };
                     self.transcript.commit_assistant(commit);
-                    self.state.get_mut().task_mut().finish_task();
+                    self.state.task_mut().finish_task();
                     self.outcome = Some(TickOutcome::Yielded { text: answer.text });
                 }
                 CompletedKind::Tools(tools) => {
@@ -207,8 +207,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         if !blocked.is_empty() {
             tracing::warn!(name: "tool_gate_blocked", count = blocked.len() as u64);
         }
-        if let ToolBlockVerdict::Exhausted { name } =
-            self.state.get_mut().block_policy.record_round(blocked)
+        if let ToolBlockVerdict::Exhausted { name } = self.state.block_policy.record_round(blocked)
         {
             self.fail_with(AgentRunError::ToolNotPermitted { name });
         }
@@ -219,7 +218,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             self.fail_with(AgentRunError::TaskStateInvariant);
             return;
         };
-        if let Err(error) = self.state.get_mut().task_mut().await_approval(pending) {
+        if let Err(error) = self.state.task_mut().await_approval(pending) {
             tracing::error!(
                 name: "task_phase_transition_failed",
                 transition = "await_approval",
@@ -232,7 +231,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 
     pub(super) fn fail_with(&mut self, error: AgentRunError) {
-        let state = self.state.get_mut();
+        let state = &mut self.state;
         state.task_mut().finish_task();
         state.mode = AgentMode::Normal;
         self.outcome = Some(TickOutcome::Failed(error));
@@ -265,7 +264,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
     fn append_task_input(&mut self, message: &Message, starts_task: bool) {
         if starts_task {
-            let state = self.state.get_mut();
+            let state = &mut self.state;
             state.iterations = IterationIdAllocator::new();
             self.outcome = None;
         }

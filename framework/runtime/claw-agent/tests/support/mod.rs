@@ -43,20 +43,17 @@ impl<T: ClawHttp> StreamingHttp for Sse<T> {
     where
         Self: 'a;
 
-    fn post_json_streaming<'a, 'r>(
+    async fn post_json_streaming<'a, 'r>(
         &'a mut self,
         request: &'r HttpJsonRequest<'r>,
         cancel: Cancel<'a>,
-    ) -> impl std::future::Future<Output = Result<(HttpStatusCode, SliceChunks<'a>), HttpError>>
-    {
-        async move {
-            let response = self.0.post_json(request, cancel).await?;
-            let sse = openai_json_to_sse(&response.body);
-            Ok((
-                response.status_code,
-                SliceChunks::once_with_cancel(sse.into_bytes(), cancel),
-            ))
-        }
+    ) -> Result<(HttpStatusCode, SliceChunks<'a>), HttpError> {
+        let response = self.0.post_json(request, cancel).await?;
+        let sse = openai_json_to_sse(&response.body);
+        Ok((
+            response.status_code,
+            SliceChunks::once_with_cancel(sse.into_bytes(), cancel),
+        ))
     }
 }
 

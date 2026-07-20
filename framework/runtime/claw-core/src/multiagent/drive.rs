@@ -1,19 +1,29 @@
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use futures_lite::future;
-use tracing::Instrument as _;
 
+use crate::agent::AgentEvent;
 use crate::config::ApiUsage;
-use crate::protocol::{AgentId, EventSink, TurnOrigin};
+use crate::protocol::{AgentId, EventSink, TrackedToolCall, TurnOrigin};
 
-use super::agents::{tick_agent, CompletedAgentTick, ReadyAgent};
+use super::agents::{AgentTickEvent, ReadyAgent};
 use super::drive_control::{DriveControl, DriveStop};
 use super::timeouts::ExpiredTimeout;
 use super::{MultiagentRuntime, MultiagentWork};
 
 enum RuntimeWake {
-    Agents(Vec<CompletedAgentTick>),
+    Agents(Vec<AgentTickEvent>),
     Timeouts(Vec<ExpiredTimeout>),
+}
+
+struct RoutedWake {
+    output: DriveOutput,
+    root_tool_started: Option<TrackedToolCall>,
+}
+
+pub(crate) enum DriveOutcome {
+    Complete(DriveOutput, DriveStop),
+    ToolStarted(DriveOutput, TrackedToolCall),
 }
 
 /// Messages created outside the LLM stream and still awaiting engine emission.
@@ -51,16 +61,25 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     pub(in crate::multiagent) fn clear_turn_work(&mut self) {
-        self.state.get_mut().clear_turn_work();
+        self.state.clear_turn_work();
         self.slots.clear_inboxes();
         self.pending_deliveries.clear();
+        self.root_deliveries_in_turn.clear();
         self.foreground_results.clear();
         self.multiagent.clear();
     }
 
+    pub(crate) fn commit_root_deliveries(&mut self) -> Vec<TrackedToolCall> {
+        let children = std::mem::take(&mut self.root_deliveries_in_turn);
+        children
+            .into_iter()
+            .filter_map(|child| self.root_background_spawns.remove(&child))
+            .collect()
+    }
+
     pub(crate) fn work(&self) -> MultiagentWork {
-        let root = self.state.get().root();
-        let scheduled = self.state.get().work(
+        let root = self.state.root();
+        let scheduled = self.state.work(
             self.slots.has_running_root(),
             self.slots.has_running_background(),
         );
@@ -83,40 +102,44 @@ where
     }
 
     pub(crate) fn pending_root_origin(&self) -> Option<TurnOrigin> {
-        let root = self.state.get().root()?;
+        let root = self.state.root()?;
+        if self.slots.is_running(root) {
+            return None;
+        }
         self.slots.first_inbox_origin(root)
     }
 
     pub(crate) fn activate_pending_root_results(&mut self) -> bool {
-        let Some(root) = self.state.get().root() else {
+        let Some(root) = self.state.root() else {
             return false;
         };
         if !self.slots.activate_inbox(root) {
             return false;
         }
-        self.pending_deliveries.clear_for_parent(root);
+        self.root_deliveries_in_turn
+            .extend(self.pending_deliveries.take_for_parent(root));
         self.enqueue(root);
         true
     }
 
     pub(in crate::multiagent) fn enqueue(&mut self, id: AgentId) {
-        self.state.get_mut().enqueue(id);
+        self.state.enqueue(id);
     }
 
     pub(in crate::multiagent) fn has_ready(&self) -> bool {
-        self.state.get().has_ready()
+        self.state.has_ready()
     }
 
     pub(in crate::multiagent) fn has_root_work(&self) -> bool {
-        let Some(root) = self.state.get().root() else {
+        let Some(root) = self.state.root() else {
             return false;
         };
-        self.state.get().is_ready(root) || self.slots.has_running_root()
+        self.state.is_ready(root) || self.slots.has_running_root()
     }
 
     /// Stop every task owned by the active turn. Agents are first recovered from
     /// in-flight futures, then reset to idle through their normal cancel reducer.
-    /// The caller chooses whether the durable graph is preserved or pruned.
+    /// The caller chooses whether the process-local graph is preserved or pruned.
     pub(crate) async fn stop_turn_tasks(&mut self, mode: TurnStopMode) {
         let events = EventSink::disabled();
         let control = DriveControl::new();
@@ -124,7 +147,7 @@ where
         self.cancel_foreground_results();
         self.slots.abort_all();
         while self.slots.has_running() {
-            let _ = self.slots.next_completed(&control).await;
+            let _ = self.slots.next_events(&control).await;
         }
 
         self.clear_turn_work();
@@ -134,7 +157,7 @@ where
             if !self.slots.has_running() {
                 continue;
             }
-            let _ = self.slots.next_completed(&control).await;
+            let _ = self.slots.next_events(&control).await;
         }
         self.clear_turn_work();
         if mode == TurnStopMode::DeleteSpawnedAgents {
@@ -151,7 +174,7 @@ where
         &mut self,
         control: &DriveControl,
         events: &EventSink,
-    ) -> (DriveOutput, DriveStop) {
+    ) -> DriveOutcome {
         let mut output = DriveOutput::default();
         let mut cancel_requested = false;
         let mut interrupt_requested = false;
@@ -173,12 +196,12 @@ where
             if cancel_requested {
                 if !self.slots.has_running() {
                     control.clear_cancel_hook();
-                    return (output, DriveStop::Cancelled);
+                    return DriveOutcome::Complete(output, DriveStop::Cancelled);
                 }
             } else if interrupt_requested {
                 if !self.slots.has_running_root() {
                     control.clear_cancel_hook();
-                    return (output, DriveStop::Interrupted);
+                    return DriveOutcome::Complete(output, DriveStop::Interrupted);
                 }
             } else if !self.has_root_work() && !self.has_pending_approval() {
                 break;
@@ -194,7 +217,12 @@ where
             self.set_cancel_hook(control);
 
             let wake = self.next_runtime_wake(control).await;
-            output.absorb(self.route_runtime_wake(wake));
+            let routed = self.route_runtime_wake(wake);
+            output.absorb(routed.output);
+            if let Some(call) = routed.root_tool_started {
+                control.clear_cancel_hook();
+                return DriveOutcome::ToolStarted(output, call);
+            }
             if self.has_pending_approval() {
                 // A foreground root tool may still be waiting on the child
                 // that asked. Keep its future in the slot and return control
@@ -203,7 +231,7 @@ where
             }
         }
         control.clear_cancel_hook();
-        (output, DriveStop::Quiescent)
+        DriveOutcome::Complete(output, DriveStop::Quiescent)
     }
 
     /// Poll background agents until they either make the root ready, run out of
@@ -254,7 +282,9 @@ where
             self.set_cancel_hook(control);
 
             let wake = self.next_runtime_wake(control).await;
-            output.absorb(self.route_runtime_wake(wake));
+            let routed = self.route_runtime_wake(wake);
+            debug_assert!(routed.root_tool_started.is_none());
+            output.absorb(routed.output);
             if self.has_pending_approval() {
                 control.clear_cancel_hook();
                 return (output, DriveStop::Quiescent);
@@ -277,7 +307,7 @@ where
         if !self.timeouts.has_pending() {
             return RuntimeWake::Agents(
                 self.slots
-                    .next_completed_or_command(control, &self.multiagent)
+                    .next_events_or_command(control, &self.multiagent)
                     .await,
             );
         }
@@ -307,7 +337,7 @@ where
             async {
                 RuntimeWake::Agents(
                     self.slots
-                        .next_completed_or_command(control, &self.multiagent)
+                        .next_events_or_command(control, &self.multiagent)
                         .await,
                 )
             },
@@ -349,7 +379,6 @@ where
             };
             let meta = self
                 .state
-                .get()
                 .node(id)
                 .expect("a ready agent must remain in the live graph");
             let span = tracing::info_span!(
@@ -359,41 +388,52 @@ where
                 kind = %meta.kind().as_str(),
                 depth = self
                     .state
-                    .get()
                     .depth(id)
                     .expect("live graph topology is valid") as u64,
             );
-            self.slots.start(
-                id,
-                is_root,
-                abort,
-                Box::pin(tick_agent(ready, sink).instrument(span)),
-            );
+            self.slots
+                .start(id, is_root, abort, span, ready.agent.run(sink));
         }
         self.refresh_multiagent_snapshot();
     }
 
-    /// Apply subagent commands, then route outcomes from agents already restored
-    /// to their stable slots.
-    fn route_completed_agents(&mut self, completed: Vec<CompletedAgentTick>) -> DriveOutput {
+    /// Apply subagent commands, then route events from running agent ticks.
+    fn route_agent_events(&mut self, events: Vec<AgentTickEvent>) -> RoutedWake {
         let mut output = DriveOutput::default();
+        let mut root_tool_started = None;
         self.apply_multiagent_commands();
-        for CompletedAgentTick { id, outcome } in completed {
-            if self.state.get().contains(id) {
-                output.absorb(self.route_outcome(id, outcome));
+        for AgentTickEvent { id, event } in events {
+            if !self.state.contains(id) {
+                continue;
+            }
+            match event {
+                AgentEvent::ToolStarted(call) if self.state.is_root(id) => {
+                    debug_assert!(root_tool_started.is_none());
+                    root_tool_started = Some(call);
+                }
+                AgentEvent::ToolStarted(_) => {}
+                AgentEvent::TickFinished(outcome) => {
+                    output.absorb(self.route_outcome(id, outcome));
+                }
             }
         }
         self.refresh_multiagent_snapshot();
-        output
+        RoutedWake {
+            output,
+            root_tool_started,
+        }
     }
 
-    fn route_runtime_wake(&mut self, wake: RuntimeWake) -> DriveOutput {
+    fn route_runtime_wake(&mut self, wake: RuntimeWake) -> RoutedWake {
         match wake {
-            RuntimeWake::Agents(completed) => self.route_completed_agents(completed),
+            RuntimeWake::Agents(events) => self.route_agent_events(events),
             RuntimeWake::Timeouts(expired) => {
                 let output = self.route_expired_timeouts(expired);
                 self.refresh_multiagent_snapshot();
-                output
+                RoutedWake {
+                    output,
+                    root_tool_started: None,
+                }
             }
         }
     }
@@ -401,7 +441,7 @@ where
     fn drain_ready_agents(&mut self) -> Vec<ReadyAgent<Http, Timer>> {
         let mut ready_agents = Vec::new();
         while let Some(id) = self.pop_ready() {
-            if !self.state.get().contains(id) {
+            if !self.state.contains(id) {
                 continue;
             }
             let Some(agent) = self.slots.take_idle(id) else {
@@ -409,7 +449,7 @@ where
             };
             ready_agents.push(ReadyAgent {
                 id,
-                is_root: self.state.get().is_root(id),
+                is_root: self.state.is_root(id),
                 agent,
             });
         }
@@ -417,23 +457,22 @@ where
     }
 
     fn schedule_pending_inboxes(&mut self, include_root: bool) {
-        let root = self.state.get().root();
+        let root = self.state.root();
         let pending = self.slots.ready_inbox_ids().collect::<Vec<_>>();
         for id in pending {
             if (include_root || Some(id) != root)
-                && self.state.get().contains(id)
-                && !self.state.get().is_awaiting_approval(id)
+                && self.state.contains(id)
+                && !self.state.is_awaiting_approval(id)
+                && self.slots.activate_inbox(id)
             {
-                if self.slots.activate_inbox(id) {
-                    self.pending_deliveries.clear_for_parent(id);
-                    self.enqueue(id);
-                }
+                let _ = self.pending_deliveries.take_for_parent(id);
+                self.enqueue(id);
             }
         }
     }
 
     fn pop_ready(&mut self) -> Option<AgentId> {
-        self.state.get_mut().pop_ready()
+        self.state.pop_ready()
     }
 }
 
@@ -515,12 +554,12 @@ mod tests {
         );
 
         assert_eq!(stop, super::DriveStop::Quiescent);
-        assert!(!runtime.state.get().contains(child));
+        assert!(!runtime.state.contains(child));
         assert_eq!(
             runtime.pending_root_origin(),
             Some(TurnOrigin::Subagent { agent: child })
         );
-        assert!(runtime.state.get().contains(root));
+        assert!(runtime.state.contains(root));
         assert!(!runtime.timeouts.has_pending());
     }
 
@@ -558,7 +597,7 @@ mod tests {
                 Vec::new(),
             )
             .expect("root builds");
-        assert!(runtime.state.get_mut().insert_root(root, root_kind));
+        assert!(runtime.state.insert_root(root, root_kind));
         runtime
             .build_agent(
                 child,
@@ -568,7 +607,7 @@ mod tests {
                 Vec::new(),
             )
             .expect("child builds");
-        assert!(runtime.state.get_mut().insert_child(
+        assert!(runtime.state.insert_child(
             root,
             child,
             child_kind,

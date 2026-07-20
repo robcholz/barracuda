@@ -8,6 +8,12 @@ pub claw_permission::PermissionDecision::Ask
 pub claw_permission::PermissionDecision::Ask::reason: alloc::string::String
 pub claw_permission::PermissionDecision::Deny
 pub claw_permission::PermissionDecision::Deny::reason: alloc::string::String
+pub enum claw_permission::PermissionLevel
+pub claw_permission::PermissionLevel::AllowAll
+pub claw_permission::PermissionLevel::Ask
+pub claw_permission::PermissionLevel::Deny
+impl claw_permission::PermissionPolicy for claw_permission::PermissionLevel
+pub fn claw_permission::PermissionLevel::evaluate(&self, &claw_permission::PermissionRequest<'_>) -> claw_permission::PermissionDecision
 pub enum claw_permission::Resource
 pub claw_permission::Resource::Agent(alloc::string::String)
 pub claw_permission::Resource::Host(alloc::string::String)
@@ -59,5 +65,7 @@ impl claw_permission::PermissionPolicy for claw_permission::AllowAll
 pub fn claw_permission::AllowAll::evaluate(&self, &claw_permission::PermissionRequest<'_>) -> claw_permission::PermissionDecision
 impl claw_permission::PermissionPolicy for claw_permission::AskAtOrAbove
 pub fn claw_permission::AskAtOrAbove::evaluate(&self, &claw_permission::PermissionRequest<'_>) -> claw_permission::PermissionDecision
+impl claw_permission::PermissionPolicy for claw_permission::PermissionLevel
+pub fn claw_permission::PermissionLevel::evaluate(&self, &claw_permission::PermissionRequest<'_>) -> claw_permission::PermissionDecision
 impl claw_permission::PermissionPolicy for claw_permission::PolicyChain
 pub fn claw_permission::PolicyChain::evaluate(&self, &claw_permission::PermissionRequest<'_>) -> claw_permission::PermissionDecision

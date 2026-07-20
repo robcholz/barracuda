@@ -1,32 +1,27 @@
-use std::collections::HashSet;
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, RwLock};
 
 use async_channel::Sender;
 use claw_api::{ClawApiConfig, InitError};
-use claw_persistence::{FsCheckpointStorage, SharedCheckpointCoordinator};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{
     ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, CoreAffinity, Priority, WorkerHandle,
 };
+use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;
 
 use crate::config::{ApiUsage, ClawApiManager};
+use crate::multiagent::AgentIdAllocator;
 use crate::protocol::EventSink;
 use crate::protocol::{SessionId, SessionPersistence};
+use crate::runtime_state::load_runtime_state;
 use crate::session::{
-    OpenSessionError, SessionControl, SessionControlError, SessionEventStream, SessionStore,
+    session_entry, OpenSessionError, SessionControl, SessionControlError, SessionCreateError,
+    SessionEventStream, SessionState, SessionStore,
 };
 
-use super::checkpoint::{
-    checkpoint_session_registry, load_session_store_state, SessionRegistryCheckpointError,
-};
 use super::engine::{run_engine, Command};
-use super::{OrchestratorBuildError, CHECKPOINT_DIR, ENGINE_WORKER_STACK_SIZE, SYSTEM_TRACE_SCOPE};
-
-type CheckpointSessions = dyn Fn(&SessionStore, Option<SessionId>) -> Result<(), SessionRegistryCheckpointError>
-    + Send
-    + Sync;
+use super::{OrchestratorBuildError, ENGINE_WORKER_STACK_SIZE, SYSTEM_TRACE_SCOPE};
 
 /// A `Send + Sync` handle to a running orchestrator.
 ///
@@ -36,18 +31,16 @@ pub struct Orchestrator {
     sessions: Arc<SessionStore>,
     command_tx: Sender<Command>,
     worker: Mutex<Option<WorkerHandle>>,
-    pending_runtime_removals: Arc<Mutex<HashSet<SessionId>>>,
-    checkpoint_sessions: Box<CheckpointSessions>,
     /// Shared with the engine worker: turns read the per-usage config from it at
     /// their start; this handle side updates it via [`link_api`](Self::link_api).
     api_manager: Arc<RwLock<ClawApiManager>>,
 }
 
 impl Orchestrator {
-    #[doc(hidden)]
-    pub fn new_with_checkpoint_coordinator<Filesystem, Http, Timer, Thread, Executor>(
+    /// new
+    pub fn new<Filesystem, Http, Timer, Thread, Executor>(
         tools: Arc<ToolRegistry>,
-        checkpoints: SharedCheckpointCoordinator<FsCheckpointStorage<Filesystem>>,
+        persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
     ) -> Result<Self, OrchestratorBuildError>
@@ -58,35 +51,18 @@ impl Orchestrator {
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        let persistence_root = persistence_dir.trim_end_matches('/');
-        let checkpoint_dir = format!("{persistence_root}/{CHECKPOINT_DIR}");
-        let session_state = load_session_store_state::<Filesystem>(&checkpoint_dir)?;
-        let sessions = Arc::new(SessionStore::new(session_state));
+        let runtime = load_runtime_state(&persistence)?;
+        let session_entry = session_entry();
+        persistence.create_template::<SessionState>(session_entry.clone())?;
+        let persisted_sessions = persistence
+            .list(&session_entry)?
+            .into_iter()
+            .map(|instance| SessionId::from_wire(instance.as_str()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sessions = Arc::new(SessionStore::new(runtime.clone(), persisted_sessions));
+        let agent_ids = AgentIdAllocator::from_runtime(runtime.clone());
         let (command_tx, command_rx) = async_channel::unbounded();
         let (ready_tx, ready_rx) = mpsc::channel();
-        let checkpoint_sessions_coordinator = checkpoints.clone();
-        let pending_runtime_removals = Arc::new(Mutex::new(HashSet::new()));
-        let checkpoint_pending_removals = Arc::clone(&pending_runtime_removals);
-        let checkpoint_sessions = Box::new(
-            move |sessions: &SessionStore, removed_session: Option<SessionId>| {
-                let mut pending = checkpoint_pending_removals
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Some(session) = removed_session {
-                    pending.insert(session);
-                }
-                let removed_sessions = pending.iter().copied().collect::<Vec<_>>();
-                let result = checkpoint_session_registry::<Filesystem>(
-                    &checkpoint_sessions_coordinator,
-                    sessions,
-                    &removed_sessions,
-                );
-                if result.is_ok() {
-                    pending.clear();
-                }
-                result
-            },
-        );
 
         let api_manager = Arc::new(RwLock::new(ClawApiManager::new()));
         let api_manager_engine = Arc::clone(&api_manager);
@@ -100,11 +76,11 @@ impl Orchestrator {
             move || {
                 run_engine::<Filesystem, Http, Timer, Executor>(
                     tools,
-                    checkpoints,
+                    persistence,
                     persistence_dir,
-                    checkpoint_dir,
                     skill_roots,
                     sessions_engine,
+                    agent_ids,
                     command_rx,
                     ready_tx,
                     api_manager_engine,
@@ -117,8 +93,6 @@ impl Orchestrator {
                 sessions,
                 command_tx,
                 worker: Mutex::new(Some(worker)),
-                pending_runtime_removals,
-                checkpoint_sessions,
                 api_manager,
             }),
             Ok(Err(error)) => {
@@ -219,21 +193,28 @@ impl Orchestrator {
     }
 
     /// Create a fresh isolated conversation session.
-    pub fn session_create(&self, persistence: SessionPersistence) -> SessionId {
-        let session = self.sessions.create(persistence);
+    pub fn session_create(
+        &self,
+        persistence: SessionPersistence,
+    ) -> Result<SessionId, SessionCreateError> {
+        let (ack_tx, ack_rx) = async_channel::bounded(1);
+        self.command_tx
+            .send_blocking(Command::CreateSession {
+                persistence,
+                ack: ack_tx,
+            })
+            .map_err(|_| SessionCreateError::WorkerStopped)?;
+        let session = ack_rx
+            .recv_blocking()
+            .unwrap_or(Err(SessionCreateError::WorkerStopped))?;
         let span = tracing::info_span!(
             "session.create",
             run.system = SYSTEM_TRACE_SCOPE,
             run.session = %session,
         );
         let _enter = span.enter();
-        if persistence == SessionPersistence::Persistent {
-            if let Err(error) = (self.checkpoint_sessions)(&self.sessions, None) {
-                tracing::error!(name: "checkpoint_failed", target = "session_registry", error = %error);
-            }
-        }
         tracing::info!(name: "created", persistence = ?persistence);
-        session
+        Ok(session)
     }
 
     /// The live conversation sessions, sorted by id.
@@ -258,7 +239,7 @@ impl Orchestrator {
             run.session = %session_id,
         );
         let _enter = span.enter();
-        let Some(persistence) = self.sessions.persistence(session_id) else {
+        let Some(_persistence) = self.sessions.persistence(session_id) else {
             tracing::warn!(name: "delete_rejected", reason = "session_closed");
             return Err(SessionControlError::SessionClosed(session_id));
         };
@@ -273,19 +254,7 @@ impl Orchestrator {
                 SessionControlError::WorkerStopped
             })?;
         match ack_rx.recv_blocking() {
-            Ok(Ok(())) => {
-                if persistence == SessionPersistence::Persistent {
-                    if let Err(error) = (self.checkpoint_sessions)(&self.sessions, Some(session_id))
-                    {
-                        tracing::error!(
-                            name: "checkpoint_failed",
-                            target = "session_registry",
-                            error = %error
-                        );
-                    }
-                }
-                Ok(())
-            }
+            Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => {
                 match &error {
                     SessionControlError::SessionClosed(_) => {
@@ -297,7 +266,7 @@ impl Orchestrator {
                     SessionControlError::WorkerStopped => {
                         tracing::error!(name: "delete_rejected", reason = "worker_stopped");
                     }
-                    SessionControlError::ClosePersistence => {
+                    SessionControlError::Persistence => {
                         tracing::error!(name: "delete_rejected", reason = "persistence");
                     }
                     SessionControlError::NotAwaitingInput(_)
@@ -319,20 +288,6 @@ impl Drop for Orchestrator {
     fn drop(&mut self) {
         let span = tracing::info_span!("orchestrator.shutdown", run.system = SYSTEM_TRACE_SCOPE,);
         let _enter = span.enter();
-        let has_pending_removals = !self
-            .pending_runtime_removals
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .is_empty();
-        if has_pending_removals {
-            if let Err(error) = (self.checkpoint_sessions)(&self.sessions, None) {
-                tracing::error!(
-                    name: "checkpoint_failed",
-                    target = "session_registry_shutdown",
-                    error = %error
-                );
-            }
-        }
         let _ = self.command_tx.try_send(Command::Stop);
         if let Some(worker) = self
             .worker

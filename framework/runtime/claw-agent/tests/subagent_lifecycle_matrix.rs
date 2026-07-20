@@ -87,7 +87,9 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         system
             .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
             .unwrap();
-        let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+        let session = system
+            .new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap();
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(format!("delegate {}", fixture.case)))).unwrap();
@@ -166,7 +168,9 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("delegate in foreground"))).unwrap();
@@ -215,7 +219,9 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -281,7 +287,9 @@ fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() 
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -320,7 +328,9 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("start background work"))).unwrap();
@@ -360,7 +370,9 @@ fn completed_background_child_is_inspectable_until_its_result_enters_root_contex
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("inspect completed delivery"))).unwrap();
@@ -394,7 +406,9 @@ fn cancelled_foreground_spawn_deletes_its_subagent() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text(format!("delegate then {control_name}")))).unwrap();
@@ -431,7 +445,9 @@ fn foreground_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("start foreground timeout"))).unwrap();
@@ -459,7 +475,9 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("start background timeout"))).unwrap();

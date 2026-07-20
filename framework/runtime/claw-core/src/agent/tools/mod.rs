@@ -15,7 +15,6 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use claw_tool::{Tool, ToolDiscoveryHandle, ToolError, ToolGroup};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use end_conversation::EndConversationTool;
@@ -29,7 +28,7 @@ use tool_search::ToolSearchTool;
 ///
 /// This is *internal*: it is not part of the public `AgentCommand` surface, so a
 /// caller cannot forge agent self-control actions.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PlanModeExitOutcome {
     /// Leave Plan Mode and continue the task under the normal prompt.
     Execute,
@@ -37,7 +36,7 @@ pub(crate) enum PlanModeExitOutcome {
     Cancel { message: String },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ControlSignal {
     /// The agent decided it is done; carries its closing message.
     EndConversation { final_message: String },

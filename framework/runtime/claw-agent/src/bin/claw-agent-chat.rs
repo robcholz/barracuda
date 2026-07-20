@@ -520,7 +520,7 @@ async fn run() -> Result<()> {
     let system = HostAgentSystem::new::<StdThread, TokioExecutor>(persistence)?;
     system.link_api(llm_config, claw_agent::ApiUsage::RootAgent, true)?;
     system.start_all()?;
-    let session = system.new_session(SessionPersistence::Persistent);
+    let session = system.new_session(SessionPersistence::Persistent)?;
     let (control, events) = system.open_session(session)?;
     let mut chat = ChatDriver::new(control, events);
 

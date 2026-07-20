@@ -1,8 +1,8 @@
 //! Per-session agent runtime: the **graph + scheduler + lifecycle**.
 //!
 //! Each session owns one [`MultiagentRuntime`]. It holds:
-//! - durable graph state — root plus node topology and lifecycle metadata;
-//! - durable scheduler state — ready work and approvals;
+//! - runtime graph state — root plus node topology and lifecycle metadata;
+//! - runtime scheduler state — ready work and approvals;
 //! - stable agent slots — each slot owns its idle agent or its running tick;
 //! - one subagent host that owns tool commands and the inspection read model.
 //!
@@ -32,7 +32,6 @@ mod id_allocator;
 mod lifecycle;
 mod model;
 mod pending_deliveries;
-mod persistence;
 mod policy;
 mod state;
 mod timeouts;
@@ -43,24 +42,21 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use claw_persistence::DurableState;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::FsAgentFactory;
-use crate::protocol::{AgentId, SessionId, SessionPersistence};
+use crate::agent::{AgentMode, AgentResume, FsAgentFactory};
+use crate::protocol::{AgentId, SessionId, SessionPersistence, TrackedToolCall};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
 use self::agents::AgentSlots;
 pub(crate) use self::approval::ApprovalResolutionError;
-pub(crate) use self::drive::{DriveOutput, TurnStopMode};
+pub(crate) use self::drive::{DriveOutcome, DriveOutput, TurnStopMode};
 pub(crate) use self::drive_control::{DriveControl, DriveStop};
 pub(crate) use self::id_allocator::AgentIdAllocator;
 use self::model::SubagentResult;
 use self::pending_deliveries::PendingDeliveries;
-pub(crate) use self::persistence::MultiagentRestore;
-pub(crate) use self::persistence::MultiagentRestoreError;
 pub(crate) use self::state::{MultiagentState, MultiagentWork};
 use self::timeouts::AgentTimeouts;
 use self::tool_port::MultiagentBridge;
@@ -88,14 +84,19 @@ where
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
     /// Session-owned policy propagated unchanged to every built agent.
     permission_policy: Arc<dyn PermissionPolicy>,
+    /// Session-level root state restored without restoring the old root object.
+    root_mode: AgentMode,
+    root_resume: Option<AgentResume>,
+    root_deliveries_in_turn: Vec<AgentId>,
+    root_background_spawns: BTreeMap<AgentId, TrackedToolCall>,
     /// Shared, process-wide id allocator for roots and spawned children.
     agent_id_allocator: AgentIdAllocator,
-    /// Durable graph and scheduler state.
-    state: DurableState<MultiagentState>,
+    /// Process-local graph and scheduler state. Agents are not restored.
+    state: MultiagentState,
     /// Stable slots for live graph nodes. Each slot owns the agent in both its
-    /// idle and running forms; slot inboxes are part of the checkpoint.
+    /// idle and running forms.
     slots: AgentSlots<Http, Timer>,
-    /// Process-local deadline futures, one for every durable non-root node.
+    /// Process-local deadline futures, one for every live non-root node.
     timeouts: AgentTimeouts,
     /// One-shot completions for foreground spawns. They are process-local: an
     /// active tool future owns the matching receiver.
@@ -106,17 +107,4 @@ where
     /// The only boundary exposed to subagent tools. It owns their pending
     /// commands and read-only inspection projection.
     multiagent: Arc<MultiagentBridge>,
-}
-
-impl<Filesystem, Http, Timer> MultiagentRuntime<Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    /// A checkpoint may only capture slots whose running ticks have returned
-    /// their agents. The session actor defers persistence until this boundary.
-    pub(crate) fn checkpoint_ready(&self) -> bool {
-        !self.slots.has_running()
-    }
 }

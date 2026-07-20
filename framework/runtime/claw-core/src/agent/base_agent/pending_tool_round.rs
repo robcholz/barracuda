@@ -1,20 +1,17 @@
 use std::collections::VecDeque;
 
 use claw_tool::ToolRunOutcome;
-use serde::{Deserialize, Serialize};
 
 use crate::agent::iteration_loop::{AppendedMessages, ToolsOutcome};
 
 /// A tool round withheld from the transcript until each `Ask` call has a real
 /// result. Calls that already finished are represented only by their messages.
-#[derive(Deserialize, Serialize)]
 pub(super) struct PendingToolRound {
     appended: AppendedMessages,
     calls: VecDeque<PendingToolCall>,
     blocked_tools: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize)]
 pub(super) struct PendingToolCall {
     pub(super) name: String,
     pub(super) tool_call_id: String,

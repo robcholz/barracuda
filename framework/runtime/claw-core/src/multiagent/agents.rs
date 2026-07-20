@@ -6,14 +6,12 @@ use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 
-use crate::agent::{AgentAbortHandle, BaseAgent, TickOutcome};
-use crate::protocol::{AgentId, EventSink, Message, TurnOrigin};
+use crate::agent::{AgentAbortHandle, AgentEvent, AgentRun, BaseAgent, TickOutcome};
+use crate::protocol::{AgentId, Message, TurnOrigin};
 
 use super::drive_control::DriveControl;
 use super::model::{SubagentResult, TranscriptText};
 use super::tool_port::MultiagentBridge;
-
-type AgentTickFuture<Http, Timer> = Pin<Box<dyn Future<Output = TickedAgent<Http, Timer>>>>;
 
 /// Whether a slot is idle or currently running one agent tick.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,46 +27,21 @@ pub(super) struct ReadyAgent<Http: ClawHttp, Timer: ClawTimer> {
     pub(super) agent: BaseAgent<Http, Timer>,
 }
 
-pub(super) struct CompletedAgentTick {
+pub(super) struct AgentTickEvent {
     pub(super) id: AgentId,
-    pub(super) outcome: TickOutcome,
-}
-
-pub(super) struct TickedAgent<Http: ClawHttp, Timer: ClawTimer> {
-    agent: BaseAgent<Http, Timer>,
-    outcome: TickOutcome,
+    pub(super) event: AgentEvent,
 }
 
 struct RunningAgent<Http: ClawHttp, Timer: ClawTimer> {
     is_root: bool,
     abort: AgentAbortHandle,
-    future: AgentTickFuture<Http, Timer>,
+    span: tracing::Span,
+    run: AgentRun<Http, Timer>,
 }
 
 enum AgentExecution<Http: ClawHttp, Timer: ClawTimer> {
     Idle(BaseAgent<Http, Timer>),
     Running(RunningAgent<Http, Timer>),
-}
-
-/// Read-only projection used by checkpoint encoding.
-pub(super) struct AgentSlotView<'a, Http: ClawHttp, Timer: ClawTimer> {
-    id: AgentId,
-    agent: Option<&'a BaseAgent<Http, Timer>>,
-    inbox: &'a VecDeque<Message>,
-}
-
-impl<'a, Http: ClawHttp, Timer: ClawTimer> AgentSlotView<'a, Http, Timer> {
-    pub(super) fn id(&self) -> AgentId {
-        self.id
-    }
-
-    pub(super) fn agent(&self) -> Option<&'a BaseAgent<Http, Timer>> {
-        self.agent
-    }
-
-    pub(super) fn inbox(&self) -> &'a VecDeque<Message> {
-        self.inbox
-    }
 }
 
 /// Stable storage for one live graph node.
@@ -117,14 +90,16 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlot<Http, Timer> {
         id: AgentId,
         is_root: bool,
         abort: AgentAbortHandle,
-        future: AgentTickFuture<Http, Timer>,
+        span: tracing::Span,
+        run: AgentRun<Http, Timer>,
     ) {
         assert!(
             self.execution
                 .replace(AgentExecution::Running(RunningAgent {
                     is_root,
                     abort,
-                    future,
+                    span,
+                    run,
                 }))
                 .is_none(),
             "agent slot must be checked out before it starts: {id}"
@@ -208,6 +183,10 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         self.slots.get_mut(&id)?.idle_agent_mut()
     }
 
+    pub(super) fn available_agent(&self, id: AgentId) -> Option<&BaseAgent<Http, Timer>> {
+        self.slots.get(&id)?.idle_agent()
+    }
+
     pub(super) fn remove(&mut self, id: AgentId) -> bool {
         if let Some(slot) = self.slots.remove(&id) {
             slot.abort_if_running();
@@ -226,12 +205,13 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         id: AgentId,
         is_root: bool,
         abort: AgentAbortHandle,
-        future: AgentTickFuture<Http, Timer>,
+        span: tracing::Span,
+        run: AgentRun<Http, Timer>,
     ) {
         self.slots
             .get_mut(&id)
             .unwrap_or_else(|| panic!("agent slot is missing: {id}"))
-            .start(id, is_root, abort, future);
+            .start(id, is_root, abort, span, run);
     }
 
     pub(super) fn activate_inbox(&mut self, id: AgentId) -> bool {
@@ -276,23 +256,6 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         }
     }
 
-    pub(super) fn restore_inbox(&mut self, id: AgentId, inbox: Vec<Message>) {
-        let slot = self
-            .slots
-            .get_mut(&id)
-            .unwrap_or_else(|| panic!("agent slot is missing: {id}"));
-        assert!(slot.inbox.is_empty(), "agent slot inbox is not empty: {id}");
-        slot.inbox = inbox.into();
-    }
-
-    pub(super) fn views(&self) -> impl Iterator<Item = AgentSlotView<'_, Http, Timer>> + '_ {
-        self.slots.iter().map(|(&id, slot)| AgentSlotView {
-            id,
-            agent: slot.idle_agent(),
-            inbox: &slot.inbox,
-        })
-    }
-
     pub(super) fn is_running(&self, id: AgentId) -> bool {
         self.slots.get(&id).is_some_and(AgentSlot::is_running)
     }
@@ -329,23 +292,23 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         self.slots.get(&id).is_some_and(AgentSlot::abort_if_running)
     }
 
-    pub(super) fn next_completed<'a>(
+    pub(super) fn next_events<'a>(
         &'a mut self,
         control: &'a DriveControl,
-    ) -> CompletedAgentTicks<'a, Http, Timer> {
-        CompletedAgentTicks {
+    ) -> NextAgentEvents<'a, Http, Timer> {
+        NextAgentEvents {
             slots: self,
             control,
             multiagent: None,
         }
     }
 
-    pub(super) fn next_completed_or_command<'a>(
+    pub(super) fn next_events_or_command<'a>(
         &'a mut self,
         control: &'a DriveControl,
         multiagent: &'a MultiagentBridge,
-    ) -> CompletedAgentTicks<'a, Http, Timer> {
-        CompletedAgentTicks {
+    ) -> NextAgentEvents<'a, Http, Timer> {
+        NextAgentEvents {
             slots: self,
             control,
             multiagent: Some(multiagent),
@@ -353,14 +316,18 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
     }
 }
 
-pub(super) struct CompletedAgentTicks<'a, Http: ClawHttp, Timer: ClawTimer> {
+pub(super) struct NextAgentEvents<'a, Http: ClawHttp, Timer: ClawTimer> {
     slots: &'a mut AgentSlots<Http, Timer>,
     control: &'a DriveControl,
     multiagent: Option<&'a MultiagentBridge>,
 }
 
-impl<Http: ClawHttp, Timer: ClawTimer> Future for CompletedAgentTicks<'_, Http, Timer> {
-    type Output = Vec<CompletedAgentTick>;
+impl<Http, Timer> Future for NextAgentEvents<'_, Http, Timer>
+where
+    Http: ClawHttp + StreamingHttp + 'static,
+    Timer: ClawTimer + 'static,
+{
+    type Output = Vec<AgentTickEvent>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -375,13 +342,24 @@ impl<Http: ClawHttp, Timer: ClawTimer> Future for CompletedAgentTicks<'_, Http, 
             return Poll::Ready(Vec::new());
         }
 
-        let mut completed = Vec::new();
+        let mut events = Vec::new();
         let mut pending = false;
         for (&id, slot) in &mut this.slots.slots {
+            let mut finished_agent = None;
             let polled = match slot.execution.as_mut() {
                 Some(AgentExecution::Running(running)) => {
-                    match running.future.as_mut().poll(context) {
-                        Poll::Ready(output) => Some(output),
+                    let event = {
+                        let _entered = running.span.enter();
+                        running.run.poll_event(context)
+                    };
+                    match event {
+                        Poll::Ready(event) => {
+                            if let AgentEvent::TickFinished(outcome) = &event {
+                                log_tick_outcome(id, running.is_root, outcome);
+                                finished_agent = running.run.take_finished_agent();
+                            }
+                            Some(event)
+                        }
                         Poll::Pending => {
                             pending = true;
                             None
@@ -391,14 +369,16 @@ impl<Http: ClawHttp, Timer: ClawTimer> Future for CompletedAgentTicks<'_, Http, 
                 Some(AgentExecution::Idle(_)) => None,
                 None => panic!("agent slot left in a transition state: {id}"),
             };
-            if let Some(TickedAgent { agent, outcome }) = polled {
-                slot.execution = Some(AgentExecution::Idle(agent));
-                completed.push(CompletedAgentTick { id, outcome });
+            if let Some(event) = polled {
+                if let Some(agent) = finished_agent {
+                    slot.execution = Some(AgentExecution::Idle(agent));
+                }
+                events.push(AgentTickEvent { id, event });
             }
         }
 
-        if !completed.is_empty() {
-            Poll::Ready(completed)
+        if !events.is_empty() {
+            Poll::Ready(events)
         } else if this
             .multiagent
             .is_some_and(|host| host.register_waiter(context.waker()))
@@ -412,37 +392,21 @@ impl<Http: ClawHttp, Timer: ClawTimer> Future for CompletedAgentTicks<'_, Http, 
     }
 }
 
-pub(super) fn tick_agent<Http, Timer>(
-    ready: ReadyAgent<Http, Timer>,
-    events: EventSink,
-) -> AgentTickFuture<Http, Timer>
-where
-    Http: ClawHttp + StreamingHttp + 'static,
-    Timer: ClawTimer + 'static,
-{
-    Box::pin(async move {
-        let ReadyAgent {
-            id,
-            is_root,
-            mut agent,
-        } = ready;
-        let outcome = agent.tick(&events).await;
-        match &outcome {
-            TickOutcome::AwaitingApproval { .. } => {
-                tracing::info!(name: "awaiting_approval", agent = %id);
-            }
-            TickOutcome::Cancelled => {
-                if is_root {
-                    tracing::warn!(name: "root_cancelled", "");
-                } else {
-                    tracing::warn!(name: "subagent_cancelled", agent = %id);
-                }
-            }
-            TickOutcome::Failed(_) => {
-                tracing::error!(name: "task_failed", "");
-            }
-            _ => {}
+fn log_tick_outcome(id: AgentId, is_root: bool, outcome: &TickOutcome) {
+    match outcome {
+        TickOutcome::AwaitingApproval { .. } => {
+            tracing::info!(name: "awaiting_approval", agent = %id);
         }
-        TickedAgent { agent, outcome }
-    })
+        TickOutcome::Cancelled => {
+            if is_root {
+                tracing::warn!(name: "root_cancelled", "");
+            } else {
+                tracing::warn!(name: "subagent_cancelled", agent = %id);
+            }
+        }
+        TickOutcome::Failed(_) => {
+            tracing::error!(name: "task_failed", "");
+        }
+        _ => {}
+    }
 }

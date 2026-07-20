@@ -1,10 +1,7 @@
-use serde::{Deserialize, Serialize};
-
 use super::mode::AgentMode;
 use super::task_state::TaskState;
 use super::IterationIdAllocator;
 
-#[derive(Deserialize, Serialize)]
 pub(super) struct BlockPolicy {
     retries: u32,
     blocked_rounds: u32,
@@ -38,21 +35,19 @@ pub(super) enum ToolBlockVerdict {
     Exhausted { name: String },
 }
 
-#[derive(Deserialize, Serialize)]
 pub(super) struct BaseAgentState {
     pub(super) block_policy: BlockPolicy,
     pub(super) iterations: IterationIdAllocator,
-    #[serde(default)]
     pub(super) mode: AgentMode,
     task: TaskState,
 }
 
 impl BaseAgentState {
-    pub(super) fn new(block_retries: u32) -> Self {
+    pub(super) fn new(block_retries: u32, mode: AgentMode) -> Self {
         Self {
             block_policy: BlockPolicy::new(block_retries),
             iterations: IterationIdAllocator::new(),
-            mode: AgentMode::Normal,
+            mode,
             task: TaskState::new(),
         }
     }

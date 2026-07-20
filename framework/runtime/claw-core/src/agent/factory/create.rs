@@ -95,6 +95,8 @@ impl<
             inherited_context: environment.inherited_context,
             retry_policy: config.retry_policy,
             block_retries: config.tool_block_retries,
+            initial_mode: environment.initial_mode,
+            resume: environment.resume,
         };
         let mut agent = match BaseAgent::<Http, Timer>::build(base_config) {
             Ok(agent) => agent,

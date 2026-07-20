@@ -45,8 +45,14 @@ impl PendingDeliveries {
             .is_none()
     }
 
-    pub(super) fn clear_for_parent(&mut self, parent: AgentId) {
+    pub(super) fn take_for_parent(&mut self, parent: AgentId) -> Vec<AgentId> {
+        let children = self
+            .entries
+            .iter()
+            .filter_map(|(&child, delivery)| (delivery.parent == parent).then_some(child))
+            .collect::<Vec<_>>();
         self.entries.retain(|_, delivery| delivery.parent != parent);
+        children
     }
 
     pub(super) fn clear_for_removed_parents(&mut self, removed: &[AgentId]) {
@@ -103,7 +109,7 @@ mod tests {
         assert_eq!(value["status"], "completed_pending_delivery");
         assert!(!state.contains(child));
 
-        pending.clear_for_parent(root);
+        assert_eq!(pending.take_for_parent(root), vec![child]);
         assert_eq!(pending.snapshots().count(), 0);
     }
 

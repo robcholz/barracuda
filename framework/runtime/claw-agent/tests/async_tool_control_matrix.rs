@@ -12,9 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claw_agent::{
-    AgentSystem, Message, SessionControlError, SessionEvent, StreamPart, TurnId, TurnOrigin,
-};
+use claw_agent::{AgentSystem, Message, SessionEvent, StreamPart, TurnId, TurnOrigin};
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, FsError, HttpError, HttpJsonRequest, HttpResponse,
     HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFile, MemFs, StdThread, TokioExecutor,
@@ -26,14 +24,14 @@ use support::{
     assistant_text, csv_dicts, drain_until_turn_ended, llm_config, mem_root, persistence,
 };
 
-type ControlSystem = AgentSystem<CheckpointFailFs, Sse<ControlHttp>, ImmediateTimer>;
+type ControlSystem = AgentSystem<PersistenceFailFs, Sse<ControlHttp>, ImmediateTimer>;
 
 static CONTROL_LOCK: Mutex<()> = Mutex::new(());
 static CASE_STATE: Mutex<Option<CaseState>> = Mutex::new(None);
 static REQUEST_POLLS: AtomicUsize = AtomicUsize::new(0);
 static CONTROL_SENT: AtomicBool = AtomicBool::new(false);
 static ALLOW_RESPONSE: AtomicBool = AtomicBool::new(false);
-static FAIL_CHECKPOINT_WRITES: AtomicBool = AtomicBool::new(false);
+static FAIL_PERSISTENCE_WRITES: AtomicBool = AtomicBool::new(false);
 static REQUEST_WAKER: Mutex<Option<Waker>> = Mutex::new(None);
 
 #[test]
@@ -51,7 +49,9 @@ fn pending_request_control_ends_the_turn_before_returning() {
         system
             .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
             .unwrap();
-        let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+        let session = system
+            .new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap();
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(format!("run {}", fixture.case)))).unwrap();
@@ -61,7 +61,7 @@ fn pending_request_control_ends_the_turn_before_returning() {
             "request did not become pending",
         );
 
-        FAIL_CHECKPOINT_WRITES.store(true, Ordering::SeqCst);
+        FAIL_PERSISTENCE_WRITES.store(true, Ordering::SeqCst);
         let control_clone = control.clone();
         let control_name = fixture.control.clone();
         let control_thread = thread::spawn(move || {
@@ -87,20 +87,13 @@ fn pending_request_control_ends_the_turn_before_returning() {
         ALLOW_RESPONSE.store(true, Ordering::SeqCst);
         wake_pending_request();
         let control_result = control_thread.join().unwrap();
-        FAIL_CHECKPOINT_WRITES.store(false, Ordering::SeqCst);
+        FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
         control_result.unwrap();
 
         block_on(control.submit(Message::text(format!("after control {}", fixture.case)))).unwrap();
 
         let controlled_turn = drain_until_turn_ended(&mut events);
         assert_turn(&controlled_turn, TurnId(1), &fixture.case);
-        assert!(
-            controlled_turn
-                .iter()
-                .any(|event| matches!(event, SessionEvent::Error { .. })),
-            "case {}: checkpoint degradation should be observable",
-            fixture.case
-        );
         let expected_first_output = if fixture.control == "interrupt" {
             vec![fixture.interrupted_output.clone()]
         } else {
@@ -125,27 +118,29 @@ fn pending_request_control_ends_the_turn_before_returning() {
 }
 
 #[test]
-fn close_reports_final_checkpoint_failure_after_closing_the_stream() {
+fn close_is_not_a_synchronous_persistence_barrier() {
     let _lock = CONTROL_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    FAIL_CHECKPOINT_WRITES.store(false, Ordering::SeqCst);
+    FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
     MemFs::new();
 
-    let root = mem_root("close-checkpoint-failure");
+    let root = mem_root("close-persistence-failure");
     let system = ControlSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
-    FAIL_CHECKPOINT_WRITES.store(true, Ordering::SeqCst);
+    FAIL_PERSISTENCE_WRITES.store(true, Ordering::SeqCst);
     let result = block_on(control.close_session());
-    FAIL_CHECKPOINT_WRITES.store(false, Ordering::SeqCst);
+    FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
 
-    assert_eq!(result, Err(SessionControlError::ClosePersistence));
+    assert_eq!(result, Ok(()));
     assert_eq!(
         block_on(events.next()),
         Some(SessionEvent::Closed),
-        "close must complete even when its final checkpoint fails"
+        "close must complete even when its final persistence flush fails"
     );
 }
 
@@ -174,9 +169,9 @@ struct PendingResponse<'a> {
     cancel: Cancel<'a>,
 }
 
-struct CheckpointFailFs;
+struct PersistenceFailFs;
 
-impl ClawFs for CheckpointFailFs {
+impl ClawFs for PersistenceFailFs {
     type File = MemFile;
 
     fn open(path: &str) -> Result<Self::File, FsError> {
@@ -184,8 +179,8 @@ impl ClawFs for CheckpointFailFs {
     }
 
     fn create(path: &str) -> Result<Self::File, FsError> {
-        if checkpoint_write_is_disabled(path) {
-            return Err(FsError::io_message("checkpoint write disabled"));
+        if persistence_write_is_disabled(path) {
+            return Err(FsError::io_message("persistence write disabled"));
         }
         MemFs::create(path)
     }
@@ -195,8 +190,8 @@ impl ClawFs for CheckpointFailFs {
     }
 
     fn rename(from: &str, to: &str) -> Result<(), FsError> {
-        if checkpoint_write_is_disabled(to) {
-            return Err(FsError::io_message("checkpoint write disabled"));
+        if persistence_write_is_disabled(to) {
+            return Err(FsError::io_message("persistence write disabled"));
         }
         MemFs::rename(from, to)
     }
@@ -218,8 +213,9 @@ impl ClawFs for CheckpointFailFs {
     }
 }
 
-fn checkpoint_write_is_disabled(path: &str) -> bool {
-    FAIL_CHECKPOINT_WRITES.load(Ordering::SeqCst) && path.contains("/checkpoint/")
+fn persistence_write_is_disabled(path: &str) -> bool {
+    let target = path.strip_suffix(".tmp").unwrap_or(path);
+    FAIL_PERSISTENCE_WRITES.load(Ordering::SeqCst) && target.ends_with(".bin")
 }
 
 impl Future for PendingResponse<'_> {

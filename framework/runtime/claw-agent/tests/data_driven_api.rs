@@ -9,7 +9,6 @@ use claw_agent::{
     AgentError, AgentSystem, IterationId, Message, OpenSessionError, SessionControlError,
     SessionEvent, SessionEventStream, SessionId, StreamPart, TurnId, TurnOrigin,
 };
-use claw_persistence::DurablePart;
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
 };
@@ -18,7 +17,6 @@ use claw_tool::{
 };
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
-use serde_json::Value;
 use support::{
     assistant_text, build_mem_system, csv_dicts, drain_until_turn_ended, install_script,
     llm_config, mem_root, persistence, serialize_script,
@@ -42,7 +40,9 @@ fn submit_streams_csv_reply_cases() {
             vec![assistant_text(expected_output)]
         };
         let system = build_mem_system(&root, bodies);
-        let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+        let session = system
+            .new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap();
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(field(&row, "user_input")))).unwrap();
@@ -118,7 +118,7 @@ fn prefixed_ids_reject_csv_invalid_wire_cases() {
 }
 
 #[test]
-fn tool_registry_csv_mutations_report_versions_state_and_errors() {
+fn tool_registry_csv_mutations_report_versions_and_errors() {
     let _script = serialize_script();
 
     for row in csv_dicts(include_str!("fixtures/tool_registry_cases.csv")) {
@@ -133,13 +133,6 @@ fn tool_registry_csv_mutations_report_versions_state_and_errors() {
             field(&row, "expected_version").parse::<u64>().unwrap(),
             "case {case}"
         );
-        let state = tool_registry_state(system.tool_registry());
-        assert_eq!(
-            state["started"].as_bool(),
-            Some(parse_bool(field(&row, "expected_started"))),
-            "case {case}"
-        );
-        assert_tool_states(&state, field(&row, "expected_tools"), case);
         assert_expected_error(actual_error.as_deref(), field(&row, "error_contains"), case);
     }
 }
@@ -185,14 +178,14 @@ fn construction_csv_roots_accept_tempdirs_and_reject_blank_roots() {
                 Ok(system) => system,
                 Err(error) => panic!("case {case} should build: {error}"),
             };
-            let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+            let session = system
+                .new_session(claw_agent::SessionPersistence::Persistent)
+                .unwrap();
 
             assert_eq!(system.list_sessions(), vec![session], "case {case}");
+            drop(system);
             assert!(
-                DiskFs::exists(&format!(
-                    "{}/checkpoint/manifest.json",
-                    root.trim_end_matches('/')
-                )),
+                DiskFs::exists(&format!("{}/state.bin", root.trim_end_matches('/'))),
                 "case {case}"
             );
         } else {
@@ -247,7 +240,9 @@ enum ControlAfterClose {
 }
 
 fn lifecycle_open_twice(system: &support::MemAgentSystem) -> Option<String> {
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (_control, _events) = system.open_session(session).unwrap();
     match system.open_session(session) {
         Ok(_) => panic!("second open should fail"),
@@ -266,7 +261,9 @@ fn lifecycle_delete_unknown(system: &support::MemAgentSystem) -> Option<String> 
 }
 
 fn lifecycle_reopen_after_close(system: &support::MemAgentSystem) -> Option<String> {
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
@@ -281,7 +278,9 @@ fn lifecycle_control_after_close(
     system: &support::MemAgentSystem,
     control_kind: ControlAfterClose,
 ) -> Option<String> {
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
@@ -302,7 +301,9 @@ fn lifecycle_control_after_close(
 }
 
 fn lifecycle_delete_after_close(system: &support::MemAgentSystem) -> Option<String> {
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
@@ -376,34 +377,6 @@ fn apply_tool_operations(system: &support::MemAgentSystem, operations: &str) -> 
         }
     }
     None
-}
-
-fn tool_registry_state(registry: &claw_tool::ToolRegistry) -> Value {
-    let blob = registry.export_state().unwrap();
-    serde_json::from_slice(blob.bytes.as_ref()).unwrap()
-}
-
-fn assert_tool_states(state: &Value, expected: &str, case: &str) {
-    let tools = state["tools"]
-        .as_object()
-        .expect("tools state is an object");
-    if expected.is_empty() {
-        assert!(tools.is_empty(), "case {case}: {tools:?}");
-        return;
-    }
-
-    let pairs = expected.split(';').collect::<Vec<_>>();
-    assert_eq!(tools.len(), pairs.len(), "case {case}");
-    for pair in pairs {
-        let (name, enabled) = pair
-            .split_once('=')
-            .unwrap_or_else(|| panic!("case {case}: invalid expected tool pair {pair:?}"));
-        assert_eq!(
-            tools.get(name).and_then(Value::as_bool),
-            Some(parse_bool(enabled)),
-            "case {case}, tool {name}"
-        );
-    }
 }
 
 fn assert_expected_error(actual: Option<&str>, expected_contains: &str, case: &str) {

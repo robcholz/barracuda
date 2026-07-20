@@ -6,9 +6,9 @@ use std::rc::Rc;
 use std::sync::{mpsc, Arc, RwLock};
 
 use async_channel::{Receiver, Sender};
-use claw_persistence::{FsCheckpointStorage, SharedCheckpointCoordinator};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawTimer};
+use claw_persistence::{DurableState, SharedPersistence};
 use claw_tool::ToolRegistry;
 use futures_core::Stream;
 use tracing::Instrument as _;
@@ -16,17 +16,21 @@ use tracing::Instrument as _;
 use crate::agent::FsAgentFactory;
 use crate::config::ClawApiManager;
 use crate::multiagent::AgentIdAllocator;
-use crate::protocol::{EventSink, SessionId};
+use crate::protocol::{EventSink, SessionId, SessionPersistence};
 use crate::session::{
-    load_session_restores, OpenSessionError, SessionActor, SessionActorExit, SessionCheckpointer,
-    SessionCommand, SessionControlError, SessionEndpoint, SessionStore,
+    session_entry, session_instance, OpenSessionError, SessionActor, SessionActorExit,
+    SessionCommand, SessionControlError, SessionCreateError, SessionEndpoint, SessionState,
+    SessionStore,
 };
 
-use super::checkpoint::load_agent_id_allocator;
 use super::{OrchestratorBuildError, ORCHESTRATOR_TRACE_TASK, SYSTEM_TRACE_SCOPE};
 
 /// Process-wide commands. Turn and control commands go directly to a session actor.
 pub(super) enum Command {
+    CreateSession {
+        persistence: SessionPersistence,
+        ack: Sender<Result<SessionId, SessionCreateError>>,
+    },
     OpenSession {
         session: SessionId,
         events: EventSink,
@@ -53,11 +57,10 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+    persistence: SharedPersistence<Filesystem>,
     sessions: Arc<SessionStore>,
     agent_ids: AgentIdAllocator,
-    checkpointer: SessionCheckpointer<Filesystem>,
     api_manager: Arc<RwLock<ClawApiManager>>,
-    dormant: HashMap<SessionId, SessionActor<Filesystem, Http, Timer>>,
     actors: HashMap<SessionId, ActorTask>,
 }
 
@@ -70,85 +73,100 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         tools: Arc<ToolRegistry>,
-        checkpoints: SharedCheckpointCoordinator<FsCheckpointStorage<Filesystem>>,
+        persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
-        checkpoint_dir: String,
         skill_roots: Vec<String>,
         sessions: Arc<SessionStore>,
+        agent_ids: AgentIdAllocator,
         api_manager: Arc<RwLock<ClawApiManager>>,
     ) -> Result<Self, OrchestratorBuildError> {
-        let agent_ids = load_agent_id_allocator::<Filesystem>(&checkpoint_dir)?;
         let factory = Rc::new(FsAgentFactory::new(
             tools,
             persistence_dir,
             skill_roots,
             Arc::clone(&api_manager),
         )?);
-        let checkpointer = SessionCheckpointer::new(checkpoints, agent_ids.clone());
-        let restores = load_session_restores::<Filesystem>(&checkpoint_dir, sessions.as_ref())?;
-        let mut dormant = HashMap::with_capacity(restores.len());
-        for (session, restore) in restores {
-            let span = tracing::info_span!("session.restore", run.session = %session);
-            let persistence = sessions
-                .persistence(session)
-                .expect("only live session checkpoints are restored");
-            let actor = span.in_scope(|| {
-                SessionActor::restored(
-                    session,
-                    persistence,
-                    Rc::clone(&factory),
-                    agent_ids.clone(),
-                    checkpointer.clone(),
-                    Arc::clone(&api_manager),
-                    restore,
-                )
-            })?;
-            dormant.insert(session, actor);
+        let entry = session_entry();
+        let persistent_sessions = sessions
+            .list()
+            .into_iter()
+            .filter(|session| {
+                sessions.persistence(*session) == Some(SessionPersistence::Persistent)
+            })
+            .collect::<Vec<_>>();
+        for session in persistent_sessions {
+            let _ = persistence.get::<SessionState>(&entry, Some(&session_instance(session)))?;
         }
+
         Ok(Self {
             factory,
+            persistence,
             sessions,
             agent_ids,
-            checkpointer,
             api_manager,
-            dormant,
             actors: HashMap::new(),
         })
     }
 
-    async fn run(mut self, commands: Receiver<Command>) {
-        let mut commands = Box::pin(commands);
-        let mut stopping = false;
-        loop {
-            if stopping && self.actors.is_empty() {
-                self.reject_queued_commands(commands.as_ref().get_ref());
-                return;
+    fn run(self, commands: Receiver<Command>) -> EngineDriver<Filesystem, Http, Timer> {
+        EngineDriver {
+            engine: self,
+            commands: Box::pin(commands),
+            stopping: false,
+        }
+    }
+
+    fn handle_event(&mut self, event: EngineEvent, stopping: &mut bool) {
+        match event {
+            EngineEvent::ActorExited(exit) => {
+                self.actors.remove(&exit.session());
             }
-            match (EnginePoll {
-                commands: (!stopping).then_some(commands.as_mut()),
-                actors: &mut self.actors,
-            })
-            .await
-            {
-                EngineEvent::ActorExited(exit) => {
-                    self.actors.remove(&exit.session());
-                }
-                EngineEvent::Command(Some(Command::OpenSession {
-                    session,
-                    events,
-                    ack,
-                })) => self.open_session(session, events, ack),
-                EngineEvent::Command(Some(Command::DeleteSession { session, ack })) => {
-                    self.delete_session(session, ack)
-                }
-                EngineEvent::Command(Some(Command::Stop)) | EngineEvent::Command(None) => {
-                    stopping = true;
-                    for actor in self.actors.values() {
-                        let _ = actor.commands.try_send(SessionCommand::Shutdown);
-                    }
+            EngineEvent::Command(Some(Command::CreateSession { persistence, ack })) => {
+                self.create_session(persistence, ack);
+            }
+            EngineEvent::Command(Some(Command::OpenSession {
+                session,
+                events,
+                ack,
+            })) => {
+                self.open_session(session, events, ack);
+            }
+            EngineEvent::Command(Some(Command::DeleteSession { session, ack })) => {
+                self.delete_session(session, ack);
+            }
+            EngineEvent::Command(Some(Command::Stop)) | EngineEvent::Command(None) => {
+                *stopping = true;
+                for actor in self.actors.values() {
+                    let _ = actor.commands.try_send(SessionCommand::Shutdown);
                 }
             }
         }
+    }
+
+    fn create_session(
+        &self,
+        session_persistence: SessionPersistence,
+        ack: Sender<Result<SessionId, SessionCreateError>>,
+    ) {
+        let session = self.sessions.allocate();
+        let entry = session_entry();
+        let initialized = match session_persistence {
+            SessionPersistence::Persistent => self
+                .persistence
+                .put(
+                    &entry,
+                    Some(session_instance(session)),
+                    SessionState::default(),
+                )
+                .map(|_| ())
+                .map_err(SessionCreateError::from),
+            SessionPersistence::Ephemeral => Ok(()),
+        };
+        let result = initialized.map(|()| {
+            self.sessions.publish(session, session_persistence);
+            session
+        });
+        let _ = ack.try_send(result);
     }
 
     fn open_session(
@@ -157,21 +175,38 @@ where
         events: EventSink,
         ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
     ) {
-        let Some(persistence) = self.sessions.persistence(session) else {
+        let Some(session_persistence) = self.sessions.persistence(session) else {
             let _ = ack.try_send(Err(OpenSessionError::SessionNotFound(session)));
             return;
         };
         if !self.actors.contains_key(&session) {
-            let actor = self.dormant.remove(&session).unwrap_or_else(|| {
-                SessionActor::fresh(
-                    session,
-                    persistence,
-                    Rc::clone(&self.factory),
-                    self.agent_ids.clone(),
-                    self.checkpointer.clone(),
-                    Arc::clone(&self.api_manager),
-                )
-            });
+            let state = if session_persistence == SessionPersistence::Persistent {
+                match self
+                    .persistence
+                    .get::<SessionState>(&session_entry(), Some(&session_instance(session)))
+                {
+                    Ok(state) => state,
+                    Err(error) => {
+                        tracing::error!(
+                            name: "session_state_load_failed",
+                            session = %session,
+                            error = %error,
+                        );
+                        let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
+                        return;
+                    }
+                }
+            } else {
+                DurableState::new(SessionState::default())
+            };
+            let actor = SessionActor::new(
+                session,
+                session_persistence,
+                Rc::clone(&self.factory),
+                self.agent_ids.clone(),
+                state,
+                Arc::clone(&self.api_manager),
+            );
             self.spawn_actor(session, actor);
         }
         let task = self
@@ -192,11 +227,25 @@ where
     }
 
     fn delete_session(&mut self, session: SessionId, ack: Sender<Result<(), SessionControlError>>) {
-        if !self.sessions.delete(session) {
+        let Some(session_persistence) = self.sessions.persistence(session) else {
             let _ = ack.try_send(Err(SessionControlError::SessionClosed(session)));
             return;
+        };
+        if session_persistence == SessionPersistence::Persistent {
+            if let Err(error) = self
+                .persistence
+                .remove(&session_entry(), Some(&session_instance(session)))
+            {
+                tracing::error!(
+                    name: "session_state_remove_failed",
+                    session = %session,
+                    error = %error,
+                );
+                let _ = ack.try_send(Err(SessionControlError::Persistence));
+                return;
+            }
         }
-        self.dormant.remove(&session);
+        self.sessions.delete(session);
         let Some(task) = self.actors.get(&session) else {
             let _ = ack.try_send(Ok(()));
             return;
@@ -224,6 +273,9 @@ where
     fn reject_queued_commands(&self, commands: &Receiver<Command>) {
         while let Ok(command) = commands.try_recv() {
             match command {
+                Command::CreateSession { ack, .. } => {
+                    let _ = ack.try_send(Err(SessionCreateError::WorkerStopped));
+                }
                 Command::OpenSession { ack, .. } => {
                     let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
                 }
@@ -265,14 +317,80 @@ impl Future for EnginePoll<'_> {
     }
 }
 
+struct EngineDriver<Filesystem, Http, Timer>
+where
+    Filesystem: ClawFs + 'static,
+    Http: ClawHttp + StreamingHttp + Default + 'static,
+    Timer: ClawTimer + Default + 'static,
+{
+    engine: Engine<Filesystem, Http, Timer>,
+    commands: Pin<Box<Receiver<Command>>>,
+    stopping: bool,
+}
+
+impl<Filesystem, Http, Timer> Unpin for EngineDriver<Filesystem, Http, Timer>
+where
+    Filesystem: ClawFs + 'static,
+    Http: ClawHttp + StreamingHttp + Default + 'static,
+    Timer: ClawTimer + Default + 'static,
+{
+}
+
+impl<Filesystem, Http, Timer> Future for EngineDriver<Filesystem, Http, Timer>
+where
+    Filesystem: ClawFs + 'static,
+    Http: ClawHttp + StreamingHttp + Default + 'static,
+    Timer: ClawTimer + Default + 'static,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let event = if this.stopping && this.engine.actors.is_empty() {
+            None
+        } else {
+            let mut engine_poll = EnginePoll {
+                commands: (!this.stopping).then_some(this.commands.as_mut()),
+                actors: &mut this.engine.actors,
+            };
+            match Pin::new(&mut engine_poll).poll(context) {
+                Poll::Ready(event) => Some(event),
+                Poll::Pending => None,
+            }
+        };
+
+        let handled_event = event.is_some();
+        if let Some(event) = event {
+            this.engine.handle_event(event, &mut this.stopping);
+        }
+
+        // The entire runtime has one persistence boundary: after every
+        // top-level async poll, including polls where a tool future yields.
+        if let Err(error) = this.engine.persistence.maybe_persist() {
+            tracing::error!(name: "persistence_failed", error = %error);
+        }
+
+        if this.stopping && this.engine.actors.is_empty() {
+            this.engine
+                .reject_queued_commands(this.commands.as_ref().get_ref());
+            Poll::Ready(())
+        } else {
+            if handled_event {
+                context.waker().wake_by_ref();
+            }
+            Poll::Pending
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_engine<Filesystem, Http, Timer, Executor>(
     tools: Arc<ToolRegistry>,
-    checkpoints: SharedCheckpointCoordinator<FsCheckpointStorage<Filesystem>>,
+    persistence: SharedPersistence<Filesystem>,
     persistence_dir: String,
-    checkpoint_dir: String,
     skill_roots: Vec<String>,
     sessions: Arc<SessionStore>,
+    agent_ids: AgentIdAllocator,
     command_rx: Receiver<Command>,
     ready: mpsc::Sender<Result<(), OrchestratorBuildError>>,
     api_manager: Arc<RwLock<ClawApiManager>>,
@@ -290,11 +408,11 @@ pub(super) fn run_engine<Filesystem, Http, Timer, Executor>(
     let engine = match span.in_scope(|| {
         Engine::<Filesystem, Http, Timer>::new(
             tools,
-            checkpoints,
+            persistence,
             persistence_dir,
-            checkpoint_dir,
             skill_roots,
             sessions,
+            agent_ids,
             api_manager,
         )
     }) {

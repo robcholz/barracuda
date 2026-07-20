@@ -46,6 +46,7 @@ impl SubagentTimeout {
         Self(milliseconds)
     }
 
+    #[cfg(test)]
     pub(in crate::multiagent) fn from_millis(milliseconds: u32) -> Option<Self> {
         NonZeroU32::new(milliseconds).map(Self)
     }
@@ -194,7 +195,7 @@ impl MultiagentSnapshot {
     }
 }
 
-/// Shared parent-chain rule for durable topology and its read model.
+/// Shared parent-chain rule for the live topology and its read model.
 pub(in crate::multiagent) fn is_strict_descendant(
     ancestor: AgentId,
     node: AgentId,

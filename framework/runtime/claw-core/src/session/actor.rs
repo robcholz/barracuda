@@ -5,23 +5,22 @@ use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use async_channel::{Receiver, Sender};
-use claw_persistence::DurableState;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_persistence::DurableState;
 use futures_core::Stream;
 use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
-use crate::agent::FsAgentFactory;
+use crate::agent::{AgentResume, FsAgentFactory};
 use crate::config::ClawApiManager;
 use crate::multiagent::{
-    AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutput, DriveStop,
-    MultiagentDeliverError, MultiagentRestoreError, MultiagentRuntime, MultiagentState,
-    MultiagentWork, TurnStopMode,
+    AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
+    MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
 };
 use crate::protocol::{
     EventSink, InputRequestId, InputRequestKind, Message, SessionEvent, SessionId,
-    SessionPersistence, StreamPart, TurnId, TurnOrigin,
+    SessionPersistence, StreamPart, TrackedToolCall, TurnId, TurnOrigin,
 };
 
 use super::api::{
@@ -29,8 +28,8 @@ use super::api::{
 };
 use super::approval::{self, ApprovalResolverError, PermissionReplyResolution};
 use super::permission::SessionPermission;
-use super::persistence::{SessionCheckpointer, SessionRestore};
-use super::state::{PendingTurnInput, SessionState};
+use super::persistence::SessionState;
+use super::state::{PendingTurnInput, TurnState};
 
 type RuntimeFuture<Filesystem, Http, Timer> =
     Pin<Box<dyn Future<Output = RuntimeCompletion<Filesystem, Http, Timer>>>>;
@@ -49,7 +48,7 @@ impl RuntimeDriveKind {
 }
 
 enum RuntimeDriveResult {
-    Driven(Result<(DriveOutput, DriveStop), DeliverError>),
+    Driven(Result<DriveOutcome, DeliverError>),
     Stopped,
 }
 
@@ -59,7 +58,7 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    runtime: MultiagentRuntime<Filesystem, Http, Timer>,
+    runtime: Box<MultiagentRuntime<Filesystem, Http, Timer>>,
     result: RuntimeDriveResult,
 }
 
@@ -69,7 +68,7 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    Idle(MultiagentRuntime<Filesystem, Http, Timer>),
+    Idle(Box<MultiagentRuntime<Filesystem, Http, Timer>>),
     Driving {
         kind: RuntimeDriveKind,
         control: DriveControl,
@@ -113,16 +112,15 @@ where
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionState>,
-    permission: Arc<SessionPermission>,
+    /// Active turns and request ids are process-local and restart at boot.
+    turn: TurnState,
     execution: Option<RuntimeExecution<Filesystem, Http, Timer>>,
-    checkpointer: SessionCheckpointer<Filesystem>,
     api_manager: Arc<RwLock<ClawApiManager>>,
     events: Option<EventSink>,
     active_lease: Option<u64>,
     next_lease: u64,
     announced_turn: Option<TurnId>,
     announced_input_request: Option<InputRequestId>,
-    checkpoint_pending: bool,
     requested_control: Option<ControlOp>,
     control_acks: Vec<Sender<Result<(), SessionControlError>>>,
     close_requested: bool,
@@ -139,86 +137,43 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn fresh(
+    pub(crate) fn new(
         session: SessionId,
         persistence: SessionPersistence,
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
         agent_ids: AgentIdAllocator,
-        checkpointer: SessionCheckpointer<Filesystem>,
+        state: DurableState<SessionState>,
         api_manager: Arc<RwLock<ClawApiManager>>,
     ) -> Self {
-        let state = SessionState::default();
-        let permission = Arc::new(SessionPermission::new(state.permission_level()));
-        let runtime = MultiagentRuntime::new(
+        let (root_mode, recovery) = {
+            let state = state.get();
+            (state.mode(), state.recovery())
+        };
+        let resume = recovery.map(|recovery| {
+            AgentResume::new(recovery.loaded_tool_groups, recovery.inflight_toolcalls)
+        });
+        let permission = Arc::new(SessionPermission::new(state.clone()));
+        let runtime = MultiagentRuntime::new_with_resume(
             session,
             factory,
             agent_ids,
             permission.clone(),
             MultiagentState::default(),
+            root_mode,
+            resume,
         );
-        Self::new(
-            session,
-            persistence,
-            state,
-            permission,
-            runtime,
-            checkpointer,
-            api_manager,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn restored(
-        session: SessionId,
-        persistence: SessionPersistence,
-        factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
-        agent_ids: AgentIdAllocator,
-        checkpointer: SessionCheckpointer<Filesystem>,
-        api_manager: Arc<RwLock<ClawApiManager>>,
-        restore: SessionRestore,
-    ) -> Result<Self, MultiagentRestoreError> {
-        let permission = Arc::new(SessionPermission::new(restore.state.permission_level()));
-        let runtime = MultiagentRuntime::from_restored_state(
-            session,
-            factory,
-            agent_ids,
-            permission.clone(),
-            restore.multiagent,
-        )?;
-        Ok(Self::new(
-            session,
-            persistence,
-            restore.state,
-            permission,
-            runtime,
-            checkpointer,
-            api_manager,
-        ))
-    }
-
-    fn new(
-        session: SessionId,
-        persistence: SessionPersistence,
-        state: SessionState,
-        permission: Arc<SessionPermission>,
-        runtime: MultiagentRuntime<Filesystem, Http, Timer>,
-        checkpointer: SessionCheckpointer<Filesystem>,
-        api_manager: Arc<RwLock<ClawApiManager>>,
-    ) -> Self {
         Self {
             session,
             persistence,
-            state: DurableState::new(state),
-            permission,
-            execution: Some(RuntimeExecution::Idle(runtime)),
-            checkpointer,
+            state,
+            turn: TurnState::default(),
+            execution: Some(RuntimeExecution::Idle(Box::new(runtime))),
             api_manager,
             events: None,
             active_lease: None,
             next_lease: 1,
             announced_turn: None,
             announced_input_request: None,
-            checkpoint_pending: false,
             requested_control: None,
             control_acks: Vec::new(),
             close_requested: false,
@@ -245,7 +200,9 @@ where
                 ActorEvent::Command(Some(command)) => self.handle_command(command),
                 ActorEvent::Command(None) => self.shutdown_requested = true,
                 ActorEvent::RuntimeFinished { kind, result } => {
-                    self.handle_runtime_finished(kind, result)
+                    if self.handle_runtime_finished(kind, result) {
+                        futures_lite::future::yield_now().await;
+                    }
                 }
                 ActorEvent::RuntimeTimedOut { output } => self.handle_idle_timeout(output),
             }
@@ -265,7 +222,7 @@ where
                     self.start_stop(TurnStopMode::DeleteSpawnedAgents);
                     return None;
                 }
-                self.finish_active_turn();
+                self.finish_active_turn(false);
                 self.finish_control_request();
                 if self.delete_requested {
                     self.emit_closed();
@@ -275,7 +232,7 @@ where
                     return Some(SessionActorExit::Deleted(self.session));
                 }
                 if self.shutdown_requested {
-                    let _ = self.checkpoint();
+                    self.record_recovery();
                     self.emit_closed();
                     return Some(SessionActorExit::Shutdown(self.session));
                 }
@@ -292,44 +249,34 @@ where
                     self.start_stop(mode);
                     return None;
                 }
-                self.finish_active_turn();
+                self.finish_active_turn(false);
                 self.finish_control_request();
                 continue;
             }
 
-            if self.active_lease.is_none() {
-                return None;
-            }
+            self.active_lease?;
 
             self.ensure_input_request();
 
-            if self.checkpoint_pending {
-                if self.runtime().checkpoint_ready() {
-                    self.checkpoint_pending = false;
-                    if let Err(error) = self.checkpoint() {
-                        self.emit_error(error.to_string());
-                    }
-                }
-            }
-
             self.announce_turn();
             self.announce_input_request();
-            if let Some(input) = self.state.get_mut().take_pending_input() {
+            if let Some(input) = self.turn.take_pending_input() {
                 self.start_turn_input(input);
                 return None;
             }
-            if self.state.get().active_input_request().is_some() {
+            if self.turn.active_input_request().is_some() {
                 return None;
             }
 
             match self.runtime().work() {
-                MultiagentWork::Root => match self.state.get().active_turn_origin() {
+                MultiagentWork::Root => match self.turn.active_turn_origin() {
                     None => {
                         let origin = self
                             .runtime()
                             .pending_root_origin()
                             .expect("root work outside a turn has a subagent origin");
-                        self.state.get_mut().begin_subagent_turn(origin);
+                        let effort = self.state.get().reasoning_effort();
+                        self.turn.begin_subagent_turn(origin, effort);
                     }
                     Some(TurnOrigin::User) if self.runtime().pending_root_origin().is_some() => {
                         self.start_pending_root_result();
@@ -347,16 +294,16 @@ where
                     }
                 },
                 MultiagentWork::Background => {
-                    if self.state.get().has_active_turn() {
-                        self.finish_active_turn();
+                    if self.turn.has_active_turn() {
+                        self.finish_active_turn(true);
                     } else {
                         self.start_background();
                         return None;
                     }
                 }
                 MultiagentWork::None => {
-                    if self.state.get().has_active_turn() {
-                        self.finish_active_turn();
+                    if self.turn.has_active_turn() {
+                        self.finish_active_turn(true);
                     } else {
                         return None;
                     }
@@ -386,7 +333,9 @@ where
             SessionCommand::Control { lease, op, ack } => self.control(lease, op, ack),
             SessionCommand::SetReasoningEffort { lease, effort, ack } => {
                 if self.accepts(lease) {
-                    self.state.get_mut().set_reasoning_effort(effort);
+                    if self.state.get().reasoning_effort() != effort {
+                        self.state.get_mut().set_reasoning_effort(effort);
+                    }
                     let _ = ack.try_send(Ok(()));
                 } else {
                     self.reject_closed(ack);
@@ -394,9 +343,9 @@ where
             }
             SessionCommand::SetPermissionLevel { lease, level, ack } => {
                 if self.accepts(lease) {
-                    self.state.get_mut().set_permission_level(level);
-                    self.permission.set(level);
-                    self.checkpoint_pending = true;
+                    if self.state.get().permission_level() != level {
+                        self.state.get_mut().set_permission_level(level);
+                    }
                     let _ = ack.try_send(Ok(()));
                 } else {
                     self.reject_closed(ack);
@@ -453,16 +402,16 @@ where
             .idle_runtime()
             .is_some_and(|runtime| runtime.work() == MultiagentWork::Root);
         if foreground_running
-            || self.state.get().has_pending_input()
-            || self.state.get().has_active_turn()
+            || self.turn.has_pending_input()
+            || self.turn.has_active_turn()
             || root_busy
         {
             tracing::warn!(name: "submit_rejected", reason = "busy", has_text, text_bytes);
             let _ = ack.try_send(Err(SessionControlError::Busy(self.session)));
             return;
         }
-        self.state.get_mut().begin_user_turn(input);
-        self.checkpoint_pending = true;
+        let effort = self.state.get().reasoning_effort();
+        self.turn.begin_user_turn(input, effort);
         if let Some(control) = self.driving_control() {
             control.request_wake();
         }
@@ -482,17 +431,12 @@ where
             self.reject_closed(ack);
             return;
         }
-        if self.is_driving() || self.state.get().has_pending_input() {
+        if self.is_driving() || self.turn.has_pending_input() {
             tracing::warn!(name: "respond_rejected", reason = "busy", request = %request);
             let _ = ack.try_send(Err(SessionControlError::Busy(self.session)));
             return;
         }
-        let Some(expected) = self
-            .state
-            .get()
-            .active_input_request()
-            .map(|pending| pending.id)
-        else {
+        let Some(expected) = self.turn.active_input_request().map(|pending| pending.id) else {
             tracing::warn!(name: "respond_rejected", reason = "not_awaiting_input", request = %request);
             let _ = ack.try_send(Err(SessionControlError::NotAwaitingInput(self.session)));
             return;
@@ -511,10 +455,9 @@ where
             }));
             return;
         }
-        let accepted = self.state.get_mut().respond_to_input(request, input);
+        let accepted = self.turn.respond_to_input(request, input);
         debug_assert!(accepted, "validated input request must still be active");
         self.announced_input_request = None;
-        self.checkpoint_pending = true;
         tracing::info!(name: "respond_accepted", request = %request);
         let _ = ack.try_send(Ok(()));
     }
@@ -524,7 +467,7 @@ where
             self.reject_closed(ack);
             return;
         }
-        let has_active_turn = self.state.get().has_active_turn();
+        let has_active_turn = self.turn.has_active_turn();
         let has_background = self
             .driving_kind()
             .is_some_and(|kind| kind == RuntimeDriveKind::Background)
@@ -568,7 +511,7 @@ where
     }
 
     fn needs_stop(&self) -> bool {
-        self.state.get().has_active_turn()
+        self.turn.has_active_turn()
             || self
                 .idle_runtime()
                 .is_some_and(|runtime| runtime.work() != MultiagentWork::None)
@@ -581,15 +524,14 @@ where
     }
 
     fn announce_turn(&mut self) {
-        let Some(turn) = self.state.get().active_turn_id() else {
+        let Some(turn) = self.turn.active_turn_id() else {
             return;
         };
         if self.announced_turn == Some(turn) {
             return;
         }
         let origin = self
-            .state
-            .get()
+            .turn
             .active_turn_origin()
             .expect("an active turn has an origin");
         self.announced_turn = Some(turn);
@@ -597,22 +539,19 @@ where
     }
 
     fn ensure_input_request(&mut self) {
-        if self.state.get().has_pending_input() || self.state.get().active_input_request().is_some()
-        {
+        if self.turn.has_pending_input() || self.turn.active_input_request().is_some() {
             return;
         }
         let Some(request) = self.runtime().required_input() else {
             return;
         };
         let (idle_origin, kind) = request.into_parts();
-        let requested = self.state.get_mut().request_input(idle_origin, kind);
-        if requested.is_some() {
-            self.checkpoint_pending = true;
-        }
+        let effort = self.state.get().reasoning_effort();
+        let _ = self.turn.request_input(idle_origin, kind, effort);
     }
 
     fn announce_input_request(&mut self) {
-        let Some(pending) = self.state.get().active_input_request().cloned() else {
+        let Some(pending) = self.turn.active_input_request().cloned() else {
             return;
         };
         if self.announced_input_request == Some(pending.id) {
@@ -625,20 +564,40 @@ where
         });
     }
 
-    fn finish_active_turn(&mut self) {
-        let Some(turn) = self.state.get_mut().finish_turn() else {
+    fn finish_active_turn(&mut self, commit_background_results: bool) {
+        let Some(finished) = self.turn.finish_turn() else {
             return;
         };
+        if commit_background_results {
+            let background_results = self.runtime_mut().commit_root_deliveries();
+            self.settle_persisted_toolcalls(&background_results);
+            let deferred = self.runtime().active_root_background_spawns();
+            let ordinary = finished
+                .toolcalls
+                .into_iter()
+                .filter(|call| !deferred.contains(call))
+                .collect::<Vec<_>>();
+            self.settle_persisted_toolcalls(&ordinary);
+        }
         self.announced_turn = None;
         self.announced_input_request = None;
-        if self.runtime().checkpoint_ready() {
-            if let Err(error) = self.checkpoint() {
-                self.emit_error(error.to_string());
-            }
-        } else {
-            self.checkpoint_pending = true;
+        self.record_recovery();
+        self.emit(SessionEvent::TurnEnded { turn: finished.id });
+    }
+
+    fn record_tool_started(&mut self, call: TrackedToolCall) {
+        self.state.get_mut().add_inflight_toolcall(&call);
+        self.turn.record_tool_started(call);
+    }
+
+    fn settle_persisted_toolcalls(&self, calls: &[TrackedToolCall]) {
+        if calls.is_empty() {
+            return;
         }
-        self.emit(SessionEvent::TurnEnded { turn });
+        let mut state = self.state.get_mut();
+        for call in calls {
+            state.remove_inflight_toolcall(call);
+        }
     }
 
     fn finish_control_request(&mut self) {
@@ -649,23 +608,16 @@ where
     }
 
     fn finish_close(&mut self) {
-        let result = match self.checkpoint() {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                tracing::error!(name: "checkpoint_failed", target = "session_runtime", error = %error);
-                Err(SessionControlError::ClosePersistence)
-            }
-        };
+        self.record_recovery();
         self.emit_closed();
         self.active_lease = None;
         self.close_requested = false;
-        self.checkpoint_pending = false;
         self.requested_control = None;
         for ack in std::mem::take(&mut self.control_acks) {
             let _ = ack.try_send(Ok(()));
         }
         for ack in std::mem::take(&mut self.close_acks) {
-            let _ = ack.try_send(result.clone());
+            let _ = ack.try_send(Ok(()));
         }
     }
 
@@ -686,14 +638,34 @@ where
         self.emit(SessionEvent::Error { message });
     }
 
-    fn checkpoint(&self) -> Result<(), super::persistence::SessionCheckpointError> {
-        self.checkpointer
-            .checkpoint(self.session, self.persistence, &self.state, self.runtime())
+    fn record_recovery(&mut self) {
+        if self.runtime().root_resume_pending() {
+            return;
+        }
+        let Some((mode, mut loaded_groups)) = self.runtime().root_recovery() else {
+            return;
+        };
+        loaded_groups.sort_unstable();
+        loaded_groups.dedup();
+        if self.state.get().recovery_matches(mode, &loaded_groups) {
+            return;
+        }
+        self.state.get_mut().record_recovery(mode, loaded_groups);
     }
 
     fn runtime(&self) -> &MultiagentRuntime<Filesystem, Http, Timer> {
         self.idle_runtime()
             .expect("session runtime is idle outside an actor drive")
+    }
+
+    fn runtime_mut(&mut self) -> &mut MultiagentRuntime<Filesystem, Http, Timer> {
+        match self.execution.as_mut() {
+            Some(RuntimeExecution::Idle(runtime)) => runtime,
+            Some(RuntimeExecution::Driving { .. }) => {
+                panic!("session runtime is driving outside an actor drive")
+            }
+            None => panic!("session runtime left in a transition state"),
+        }
     }
 
     fn idle_runtime(&self) -> Option<&MultiagentRuntime<Filesystem, Http, Timer>> {
@@ -703,7 +675,7 @@ where
         }
     }
 
-    fn take_runtime(&mut self) -> MultiagentRuntime<Filesystem, Http, Timer> {
+    fn take_runtime(&mut self) -> Box<MultiagentRuntime<Filesystem, Http, Timer>> {
         match self.execution.take() {
             Some(RuntimeExecution::Idle(runtime)) => runtime,
             Some(driving @ RuntimeExecution::Driving { .. }) => {
@@ -735,12 +707,14 @@ where
     fn start_turn_input(&mut self, input: PendingTurnInput) {
         let runtime = self.take_runtime();
         let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let effort = self.state.get().reasoning_effort();
+        let effort = self
+            .turn
+            .reasoning_effort()
+            .expect("user input belongs to an active turn");
         let persistence = self.persistence;
         let api_manager = Arc::clone(&self.api_manager);
         let turn = self
-            .state
-            .get()
+            .turn
             .active_turn_id()
             .expect("user input belongs to an active turn");
         let control = DriveControl::new();
@@ -772,10 +746,12 @@ where
     fn start_pending_root_result(&mut self) {
         let runtime = self.take_runtime();
         let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let effort = self.state.get().reasoning_effort();
+        let effort = self
+            .turn
+            .reasoning_effort()
+            .expect("a pending root result belongs to an active turn");
         let turn = self
-            .state
-            .get()
+            .turn
             .active_turn_id()
             .expect("a pending root result belongs to an active turn");
         let control = DriveControl::new();
@@ -800,8 +776,7 @@ where
         let runtime = self.take_runtime();
         let events = self.events.clone().unwrap_or_else(EventSink::disabled);
         let turn = self
-            .state
-            .get()
+            .turn
             .active_turn_id()
             .expect("resumed root work belongs to an active turn");
         let control = DriveControl::new();
@@ -858,25 +833,46 @@ where
         });
     }
 
-    fn handle_runtime_finished(&mut self, kind: RuntimeDriveKind, result: RuntimeDriveResult) {
+    fn handle_runtime_finished(
+        &mut self,
+        kind: RuntimeDriveKind,
+        result: RuntimeDriveResult,
+    ) -> bool {
+        let mut yield_for_persistence = false;
         if let RuntimeDriveResult::Driven(result) = result {
-            let stop = self.emit_drive_result(result);
-            if kind.is_foreground() && stop != DriveStop::Quiescent {
-                self.finish_active_turn();
+            match result {
+                Ok(DriveOutcome::ToolStarted(output, call)) => {
+                    let _ = self
+                        .emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
+                    self.record_tool_started(call);
+                    yield_for_persistence = true;
+                }
+                Ok(DriveOutcome::Complete(output, stop)) => {
+                    let stop = self.emit_drive_result(Ok::<_, DeliverError>((output, stop)));
+                    if kind.is_foreground() && stop != DriveStop::Quiescent {
+                        self.finish_active_turn(false);
+                    }
+                }
+                Err(error) => {
+                    let stop = self.emit_drive_result(Err(error));
+                    if kind.is_foreground() && stop != DriveStop::Quiescent {
+                        self.finish_active_turn(false);
+                    }
+                }
             }
         }
         if self.requested_control.is_some() || self.close_requested || self.delete_requested {
-            self.finish_active_turn();
+            self.finish_active_turn(false);
             self.finish_control_request();
+            yield_for_persistence = false;
         }
+        yield_for_persistence
     }
 
     fn handle_idle_timeout(&mut self, output: DriveOutput) {
         let _ = self.emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
-        self.checkpoint_pending = true;
         let active_kind = self
-            .state
-            .get()
+            .turn
             .active_input_request()
             .map(|request| request.kind.clone());
         let request_is_still_current = active_kind.as_ref().is_some_and(|active_kind| {
@@ -885,7 +881,7 @@ where
                 .is_some_and(|required| required.kind() == active_kind)
         });
         if active_kind.is_some() && !request_is_still_current {
-            if let Some(request) = self.state.get_mut().cancel_input_request() {
+            if let Some(request) = self.turn.cancel_input_request() {
                 self.announced_input_request = None;
                 tracing::info!(name: "input_request_cancelled", request = %request, reason = "subagent_timeout");
             }
@@ -1058,24 +1054,26 @@ where
     if let Some(mode) = stop_mode(stop) {
         runtime.stop_turn_tasks(mode).await;
     }
-    RuntimeDriveResult::Driven(Ok((output, stop)))
+    RuntimeDriveResult::Driven(Ok(DriveOutcome::Complete(output, stop)))
 }
 
 async fn drive_root<Filesystem, Http, Timer>(
     runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
     control: &DriveControl,
     events: &EventSink,
-) -> Result<(DriveOutput, DriveStop), DeliverError>
+) -> Result<DriveOutcome, DeliverError>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    let (output, stop) = runtime.drive_root_turn(control, events).await;
-    if let Some(mode) = stop_mode(stop) {
-        runtime.stop_turn_tasks(mode).await;
+    let outcome = runtime.drive_root_turn(control, events).await;
+    if let DriveOutcome::Complete(_, stop) = &outcome {
+        if let Some(mode) = stop_mode(*stop) {
+            runtime.stop_turn_tasks(mode).await;
+        }
     }
-    Ok((output, stop))
+    Ok(outcome)
 }
 
 fn stop_mode(stop: DriveStop) -> Option<TurnStopMode> {
@@ -1093,7 +1091,7 @@ async fn resolve_pending_approval<Filesystem, Http, Timer>(
     control: &DriveControl,
     events: &EventSink,
     api_manager: &Arc<RwLock<ClawApiManager>>,
-) -> Result<(DriveOutput, DriveStop), DeliverError>
+) -> Result<DriveOutcome, DeliverError>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -1112,7 +1110,10 @@ where
             runtime
                 .stop_turn_tasks(TurnStopMode::DeleteSpawnedAgents)
                 .await;
-            return Ok((DriveOutput::default(), DriveStop::Cancelled));
+            return Ok(DriveOutcome::Complete(
+                DriveOutput::default(),
+                DriveStop::Cancelled,
+            ));
         }
         Err(error) => return Err(error.into()),
     };
@@ -1122,7 +1123,10 @@ where
             unreachable!("non-clarification resolutions map to approval decisions")
         };
         tracing::info!(name: "approval_clarification", reason = %message);
-        return Ok((DriveOutput::default(), DriveStop::Quiescent));
+        return Ok(DriveOutcome::Complete(
+            DriveOutput::default(),
+            DriveStop::Quiescent,
+        ));
     };
     runtime.resolve_required_input(decision)?;
     drive_root(runtime, control, events).await

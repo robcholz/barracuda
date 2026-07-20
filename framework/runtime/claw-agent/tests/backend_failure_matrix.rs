@@ -43,7 +43,8 @@ fn backend_csv_failure_matrix_covers_fs_http_and_timer_failures() {
         let case = field(&row, "case");
         let actual_error = match field(&row, "backend") {
             "fs_read_fail" => fs_read_failure(),
-            "fs_write_fail" => fs_checkpoint_write_failure(),
+            "fs_write_fail" => fs_persistence_write_is_deferred(),
+            "fs_write_fail_session_create" => fs_session_create_write_is_deferred(),
             "http_permanent" => http_permanent_failure(),
             "http_transient_then_success" => http_transient_then_success(case),
             "http_transient_exhausts_retries" => http_transient_exhausts_retries(),
@@ -212,7 +213,7 @@ impl ClawFs for WriteFailFs {
     }
 
     fn create(_path: &str) -> Result<Self::File, FsError> {
-        Err(FsError::io_message("checkpoint create failed"))
+        Err(FsError::io_message("persistence create failed"))
     }
 
     fn open_append(_path: &str) -> Result<Self::File, FsError> {
@@ -224,7 +225,7 @@ impl ClawFs for WriteFailFs {
     }
 
     fn create_dir_all(_path: &str) -> Result<(), FsError> {
-        Err(FsError::io_message("checkpoint mkdir failed"))
+        Ok(())
     }
 
     fn exists(_path: &str) -> bool {
@@ -240,19 +241,19 @@ impl ClawFs for WriteFailFs {
     }
 }
 
-struct CheckpointTool;
+struct PersistenceTool;
 
-impl ToolSpec for CheckpointTool {
+impl ToolSpec for PersistenceTool {
     fn name(&self) -> &str {
-        "checkpoint_probe"
+        "persistence_probe"
     }
 
     fn schema(&self) -> &str {
-        r#"{"type":"function","function":{"name":"checkpoint_probe"}}"#
+        r#"{"type":"function","function":{"name":"persistence_probe"}}"#
     }
 }
 
-impl SyncToolHandler for CheckpointTool {
+impl SyncToolHandler for PersistenceTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
         Ok(ToolOutput {
             output: call.arguments_json().to_owned(),
@@ -267,15 +268,25 @@ fn fs_read_failure() -> Option<String> {
         .map(|error| error.to_string())
 }
 
-fn fs_checkpoint_write_failure() -> Option<String> {
+fn fs_persistence_write_is_deferred() -> Option<String> {
     let system = build_fs_write_fail_system().unwrap();
+    let registered = system.tool_registry().register_group(ToolGroup::new(
+        "persistence",
+        true,
+        [Tool::from_sync(PersistenceTool)],
+    ));
+    registered.unwrap();
     system
         .tool_registry()
-        .register_group(ToolGroup::new(
-            "checkpoint",
-            true,
-            [Tool::from_sync(CheckpointTool)],
-        ))
+        .disable("persistence_probe")
+        .err()
+        .map(|error| error.to_string())
+}
+
+fn fs_session_create_write_is_deferred() -> Option<String> {
+    let system = build_fs_write_fail_system().unwrap();
+    system
+        .new_session(claw_agent::SessionPersistence::Persistent)
         .err()
         .map(|error| error.to_string())
 }
@@ -347,7 +358,9 @@ where
     Http: ClawHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.submit(Message::text(input))).unwrap();
     drain_until_turn_ended(&mut events)

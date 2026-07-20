@@ -1,15 +1,15 @@
 use core::future::Future;
 use core::task::{Context, Poll};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::Waker;
 
 use anyhow::{anyhow, Result};
-use claw_persistence::{CheckpointError, CheckpointStorageError, DurablePart};
+use claw_persistence::{DurableState, DurableStateCodec};
 use claw_tool::{
     RawToolInvocation, RetryCount, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryCheckpointError, ToolRegistryError,
-    ToolResult, ToolRunOutcome, ToolRunner, ToolSetHandle, ToolSpec,
+    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolResult,
+    ToolRunOutcome, ToolRunner, ToolSetHandle, ToolSpec,
 };
 
 #[test]
@@ -388,194 +388,46 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
 }
 
 #[test]
-fn tool_set_durable_state_tracks_tool_metadata() -> Result<()> {
+fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.start_all()?;
     let mut tool_set = registry.tool_set();
-    assert_eq!(tool_set.generation(), 0);
 
-    tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
-    assert_eq!(tool_set.generation(), 1);
-
-    tool_set.temporarily_disable_tool("echo".into())?;
-    assert_eq!(tool_set.generation(), 2);
-
-    tool_set.temporarily_disable_tool("echo".into())?;
-    assert_eq!(tool_set.generation(), 2);
-
-    let blob = tool_set.export_state()?;
-    let state: serde_json::Value = serde_json::from_slice(&blob.bytes)?;
-    assert_eq!(
-        state
-            .pointer("/registry_version")
-            .and_then(|value| value.as_u64()),
-        Some(0)
-    );
-    assert_eq!(
-        state
-            .pointer("/tools/echo/source")
-            .and_then(|value| value.as_str()),
-        Some("local")
-    );
-    assert_eq!(
-        state
-            .pointer("/tools/echo/state")
-            .and_then(|value| value.as_str()),
-        Some("temporarily_disabled")
-    );
-    assert!(state.pointer("/tools/echo/schema").is_none());
+    let _ = tool_set.begin()?;
+    assert!(tool_set.loaded_groups().is_empty());
+    assert!(tool_set.discovery().request_load("hidden"));
+    tool_set.apply_pending_tool_loads();
+    assert_eq!(tool_set.loaded_groups(), vec!["hidden"]);
     Ok(())
 }
 
 #[test]
-fn restored_tool_set_does_not_dirty_generation() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
-    let mut tool_set = registry.tool_set();
-    tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
-    tool_set.temporarily_disable_tool("echo".into())?;
-    let blob = tool_set.export_state()?;
+fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
+    let state = DurableState::new(ToolRegistryState::default());
+    let registry = ToolRegistry::from_state(state.clone());
+    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
+    registry.disable("echo")?;
 
-    let mut restored = registry.tool_set();
-    restored.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
-    restored.restore_state(blob.as_slice())?;
-    assert_eq!(restored.generation(), 0);
-
-    let handle = restored.begin()?;
-    let outcome = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
-    assert_eq!(
-        outcome,
-        ToolRunOutcome::Blocked {
-            content: "tool is temporarily unavailable: echo".into(),
-        }
-    );
-    Ok(())
-}
-
-#[test]
-fn restored_tool_set_rebuilds_the_blacklisted_registry_projection() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
-    registry.register_group(ToolGroup::new(
-        "mixed",
-        true,
-        [Tool::from_sync(EchoTool), Tool::from_sync(OtherTool)],
-    ))?;
+    let registry = Arc::new(ToolRegistry::from_state(state));
+    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
 
-    let mut original = registry.tool_set_with_blacklist(&["other"]);
-    let _ = original.begin()?;
-    let blob = original.export_state()?;
-
-    let mut restored = registry.tool_set_with_blacklist(&["other"]);
-    restored.restore_state(blob.as_slice())?;
-    let handle = restored.begin()?;
-
-    assert!(matches!(
-        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
-        ToolRunOutcome::Ran { ok: true, .. }
-    ));
-    assert_eq!(
-        run_with_default_gate(&handle, &invocation("other", "{}")?)?,
-        ToolRunOutcome::Ran {
-            content: "tool not found: other".into(),
-            ok: false,
-        }
-    );
+    let mut tool_set = registry.tool_set();
+    assert_eq!(tool_set.begin()?.schemas_json(), "no schemas");
     Ok(())
 }
 
 #[test]
-fn restored_registry_reuses_tool_state_without_dirtying_generation() -> Result<()> {
-    let registry = ToolRegistry::new();
+fn registry_state_contains_only_explicit_overrides() -> Result<()> {
+    let state = DurableState::new(ToolRegistryState::default());
+    let registry = ToolRegistry::from_state(state.clone());
     registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
+
     registry.disable("echo")?;
-
-    let blob = registry.export_state()?;
-    let restored = <ToolRegistry as DurablePart>::restore_from_state(blob.as_slice())?;
-    assert_eq!(restored.generation(), 0);
-
-    restored.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
-    assert_eq!(restored.generation(), 0);
-
-    restored.enable("echo")?;
-    assert_eq!(restored.generation(), 1);
-    Ok(())
-}
-
-#[test]
-fn registry_rolls_back_mutation_when_checkpoint_hook_fails() -> Result<()> {
-    let registry = ToolRegistry::new();
-    registry.set_checkpoint_hook(|_, _, _| {
-        Err(CheckpointError::Storage(CheckpointStorageError::EmptyRoot).into())
-    });
-
-    assert!(matches!(
-        registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)])),
-        Err(ToolRegistryError::Checkpoint(
-            ToolRegistryCheckpointError::Coordinator(_)
-        ))
-    ));
-    let blob = registry.export_state()?;
-    let state: serde_json::Value = serde_json::from_slice(&blob.bytes)?;
-    assert!(state
-        .get("tools")
-        .and_then(|value| value.as_object())
-        .filter(|tools| tools.is_empty())
-        .is_some());
-
-    assert!(matches!(
-        registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)])),
-        Err(ToolRegistryError::Checkpoint(
-            ToolRegistryCheckpointError::Coordinator(_)
-        ))
-    ));
-    Ok(())
-}
-
-#[test]
-fn registry_checkpoint_hook_receives_matching_generation_and_owned_state() -> Result<()> {
-    let snapshots = Arc::new(Mutex::new(Vec::new()));
-    let hook_snapshots = Arc::clone(&snapshots);
-    let registry = ToolRegistry::new();
-    registry.set_checkpoint_hook(move |generation, state, _| {
-        let owned = matches!(&state.bytes, std::borrow::Cow::Owned(_));
-        hook_snapshots
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push((generation, owned, state.bytes.into_owned()));
-        Ok(())
-    });
-
-    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
-    registry.disable("echo")?;
-
-    let snapshots = snapshots
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    assert_eq!(snapshots.len(), 2);
-    let registered_snapshot = snapshots
-        .first()
-        .ok_or_else(|| anyhow!("missing registered snapshot"))?;
-    assert_eq!(registered_snapshot.0, 1);
-    assert!(registered_snapshot.1);
-    let registered: serde_json::Value = serde_json::from_slice(&registered_snapshot.2)?;
-    assert_eq!(
-        registered
-            .pointer("/tools/echo")
-            .and_then(serde_json::Value::as_bool),
-        Some(true)
-    );
-
-    let disabled_snapshot = snapshots
-        .get(1)
-        .ok_or_else(|| anyhow!("missing disabled snapshot"))?;
-    assert_eq!(disabled_snapshot.0, 2);
-    assert!(disabled_snapshot.1);
-    let disabled: serde_json::Value = serde_json::from_slice(&disabled_snapshot.2)?;
-    assert_eq!(
-        disabled
-            .pointer("/tools/echo")
-            .and_then(serde_json::Value::as_bool),
-        Some(false)
-    );
+    let encoded = state.get().encode_state()?.into_owned();
+    let payload: serde_json::Value = serde_json::from_slice(&encoded.bytes)?;
+    assert_eq!(payload, serde_json::json!({"overrides": {"echo": false}}));
     Ok(())
 }
 

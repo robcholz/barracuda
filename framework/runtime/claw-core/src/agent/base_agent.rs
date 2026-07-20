@@ -10,13 +10,11 @@ mod control;
 mod iteration;
 mod mode;
 mod pending_tool_round;
-mod persistence;
 mod reducer;
 mod state;
 mod task_state;
 
 use claw_api::{ClawApiAsync, RetryPolicy};
-use claw_persistence::DurableState;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
@@ -34,6 +32,7 @@ pub(crate) use self::command::{
 pub(super) use self::construction::BaseAgentConfig;
 pub(crate) use self::control::AgentAbortHandle;
 use self::control::AgentInterruption;
+pub(crate) use self::mode::AgentMode;
 use self::state::BaseAgentState;
 
 /// A base agent that runs one task at a time as a sequence of iterations.
@@ -46,7 +45,8 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     tools: ToolSet,
     permission_policy: Arc<dyn PermissionPolicy>,
     context: Context,
-    state: DurableState<BaseAgentState>,
+    state: BaseAgentState,
+    resume_reminder: Option<String>,
     outcome: Option<TickOutcome>,
     control: ControlSink,
     adapters: Vec<Box<dyn ContextAdapter>>,

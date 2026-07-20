@@ -1,4 +1,6 @@
-use claw_context::{Block, BlockKind, Context};
+use std::borrow::Cow;
+
+use claw_context::{Band, Block, BlockKind, Context, Scope};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_tool::{RawToolInvocation, ToolGate, ToolInvocation, ToolRunner};
@@ -16,25 +18,32 @@ use super::{BaseAgent, BaseAgentBuildError, TickOutcome};
 use crate::agent::iteration_loop::{
     IterationLoop, IterationLoopError, IterationResult, IterationStep,
 };
+use crate::agent::AgentEventBoundary;
 use crate::protocol::IterationId;
 
 impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     /// Process queued commands, advance at most one iteration, and report what
     /// happened as a [`TickOutcome`].
-    pub(crate) async fn tick(&mut self, events: &EventSink) -> TickOutcome {
+    pub(crate) async fn tick(
+        &mut self,
+        events: &EventSink,
+        event_boundary: &AgentEventBoundary,
+    ) -> TickOutcome {
         self.outcome = None;
 
         let approval_resume = self.drain_inbox();
 
-        if self.state.get().task().is_running() {
+        if self.state.task().is_running() {
             match approval_resume {
                 Some(resume) => match self.resume_approval(resume).await {
                     Ok(resolved) => self.reduce_resolved_tool_round(resolved),
                     Err(error) => self.fail_with(error),
                 },
                 None => {
-                    let iteration_id = self.state.get_mut().iterations.next();
-                    let outcome = self.run_iteration(iteration_id, events).await;
+                    let iteration_id = self.state.iterations.next();
+                    let outcome = self
+                        .run_iteration(iteration_id, events, event_boundary)
+                        .await;
                     self.reduce_outcome(outcome);
                 }
             }
@@ -45,7 +54,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
         match self.outcome.take() {
             Some(outcome) => outcome,
-            None if self.state.get().task().is_running() => TickOutcome::Working,
+            None if self.state.task().is_running() => TickOutcome::Working,
             None => TickOutcome::Idle,
         }
     }
@@ -86,6 +95,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         &mut self,
         iteration_id: IterationId,
         events: &EventSink,
+        event_boundary: &AgentEventBoundary,
     ) -> IterationResult {
         // Context adapters may perform auxiliary LLM work (conversation
         // compaction and long-term-memory extraction). Keep that work in a
@@ -107,9 +117,10 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
                 .with(Block::new(
                     BlockKind::ModeFraming,
-                    self.state.get().mode.framing(),
+                    self.state.mode.framing(),
                 ))
-                .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()));
+                .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()))
+                .with_reminder(resume_reminder_kind(), self.resume_reminder.as_deref());
         });
 
         let render_span =
@@ -134,10 +145,14 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             reminders: context.reminders(),
             tools: &tools,
             gate,
+            event_boundary: Some(event_boundary),
         };
         drop(render_span);
         drop(prepare_span);
-        iteration_loop.run(step).await
+        let result = iteration_loop.run(step).await;
+        self.resume_reminder = None;
+        self.context.with_reminder(resume_reminder_kind(), None);
+        result
     }
 
     async fn resume_approval(
@@ -182,5 +197,14 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             );
             AgentRunError::TaskStateInvariant
         })
+    }
+}
+
+fn resume_reminder_kind() -> BlockKind {
+    BlockKind::Custom {
+        band: Band::Volatile,
+        scope: Scope::Agent,
+        order: 1,
+        label: Cow::Borrowed("resume"),
     }
 }

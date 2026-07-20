@@ -6,7 +6,7 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::protocol::{AgentKind, Message};
+use crate::protocol::{AgentKind, Message, TrackedToolCall};
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -95,9 +95,15 @@ impl SpawnSubagentTool {
                 ok: result.ok(),
             })
         } else {
-            let child = self
-                .control
-                .spawn_background(kind, Some(name.clone()), goal, timeout);
+            let source_call = TrackedToolCall::new(
+                call.name(),
+                call.arguments_value().unwrap_or_else(|_| {
+                    serde_json::Value::String(call.arguments_json().to_owned())
+                }),
+            );
+            let child =
+                self.control
+                    .spawn_background(kind, Some(name.clone()), goal, timeout, source_call);
             Ok(ToolOutput {
                 output: format!(
                     "Subagent {child} named '{name}' requested with a {} ms timeout; its result will be reported back when it finishes.",

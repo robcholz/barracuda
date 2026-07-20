@@ -41,7 +41,9 @@ fn nested_background_children_join_before_their_parent_reports_upward() {
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("delegate nested work"))).unwrap();

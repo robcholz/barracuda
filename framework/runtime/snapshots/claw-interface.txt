@@ -117,6 +117,9 @@ pub fn claw_interface::http::HttpStatusCode::fmt(&self, &mut core::fmt::Formatte
 pub trait claw_interface::http::ClawHttp
 pub fn claw_interface::http::ClawHttp::get_json<'a>(&'a mut self, &'a claw_interface::http::HttpGetRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
 pub fn claw_interface::http::ClawHttp::post_json<'a>(&'a mut self, &'a claw_interface::http::HttpJsonRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
+pub trait claw_interface::http::StreamingHttp
+pub type claw_interface::http::StreamingHttp::ByteStream<'a> where Self: 'a: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin + 'a
+pub fn claw_interface::http::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, &'r claw_interface::http::HttpJsonRequest<'r>, claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
 pub type claw_interface::http::HttpResponseFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>> + 'a)>>
 pub mod claw_interface::thread
 pub enum claw_interface::thread::CoreAffinity
@@ -275,5 +278,8 @@ pub trait claw_interface::ClawThread: core::marker::Send + core::marker::Sync
 pub fn claw_interface::ClawThread::spawn_worker<F>(&str, usize, claw_interface::thread::Priority, claw_interface::thread::CoreAffinity, F) -> core::io::error::Result<claw_interface::thread::WorkerHandle> where F: core::ops::function::FnOnce() + core::marker::Send + 'static
 pub trait claw_interface::ClawTimer
 pub fn claw_interface::ClawTimer::sleep<'a>(&'a mut self, core::time::Duration, claw_interface::http::Cancel<'a>) -> claw_interface::timer::TimerFuture<'a>
+pub trait claw_interface::StreamingHttp
+pub type claw_interface::StreamingHttp::ByteStream<'a> where Self: 'a: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin + 'a
+pub fn claw_interface::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, &'r claw_interface::http::HttpJsonRequest<'r>, claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
 pub type claw_interface::HttpResponseFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>> + 'a)>>
 pub type claw_interface::TimerFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = claw_interface::timer::SleepOutcome> + 'a)>>

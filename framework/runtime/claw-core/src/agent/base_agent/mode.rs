@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 const PLAN_MODE_FRAMING: &str = prompt!("plan_mode/instructions.md");
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-pub(super) enum AgentMode {
+#[serde(rename_all = "snake_case")]
+pub(crate) enum AgentMode {
     #[default]
     Normal,
     Plan,

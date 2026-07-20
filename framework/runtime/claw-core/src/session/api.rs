@@ -3,6 +3,7 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use claw_permission::PermissionLevel;
+use claw_persistence::PersistenceError;
 use futures_core::Stream;
 use strum::IntoStaticStr;
 
@@ -18,6 +19,15 @@ pub enum OpenSessionError {
     AlreadyOpen(SessionId),
     #[error("orchestrator worker is not running")]
     WorkerStopped,
+}
+
+/// Failure creating a session through the orchestrator.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionCreateError {
+    #[error("orchestrator worker is not running")]
+    WorkerStopped,
+    #[error(transparent)]
+    Persistence(#[from] PersistenceError),
 }
 
 /// Failure sending a command through a session control handle.
@@ -37,8 +47,8 @@ pub enum SessionControlError {
     },
     #[error("orchestrator worker is not running")]
     WorkerStopped,
-    #[error("failed to persist closed session state")]
-    ClosePersistence,
+    #[error("failed to update persisted session state")]
+    Persistence,
 }
 
 #[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]
@@ -222,7 +232,8 @@ impl SessionControl {
         self.send_control(ControlOp::Cancel).await
     }
 
-    /// Close this event stream and checkpoint the session. The session id stays live.
+    /// Close this event stream. The session id stays live; dirty state is
+    /// persisted by the runtime's global persistence boundary.
     pub async fn close_session(&self) -> Result<(), SessionControlError> {
         let (ack, result) = async_channel::bounded(1);
         self.commands

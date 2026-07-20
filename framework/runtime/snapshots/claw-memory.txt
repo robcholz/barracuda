@@ -73,9 +73,6 @@ pub fn claw_memory::profile::ProfileDocument::file_name(self) -> &'static str
 pub fn claw_memory::profile::ProfileDocument::id(self) -> &'static str
 impl core::fmt::Display for claw_memory::profile::ProfileDocument
 pub fn claw_memory::profile::ProfileDocument::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for claw_memory::profile::ProfileDocument
-pub type claw_memory::profile::ProfileDocument::Err = claw_memory::profile::ParseProfileDocumentError
-pub fn claw_memory::profile::ProfileDocument::from_str(&str) -> core::result::Result<Self, Self::Err>
 pub enum claw_memory::profile::ProfileError
 pub claw_memory::profile::ProfileError::File
 pub claw_memory::profile::ProfileError::File::document: claw_memory::profile::ProfileDocument
@@ -124,10 +121,10 @@ pub fn claw_memory::transcript_store::GroupGuard<F>::drop(&mut self)
 pub struct claw_memory::transcript_store::TranscriptStore<F: claw_interface::fs::ClawFs + 'static>
 impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::commit_open_turn(&self)
-pub fn claw_memory::transcript_store::TranscriptStore<F>::conversation_id(&self) -> u32
 pub fn claw_memory::transcript_store::TranscriptStore<F>::discard_open_turn(&self)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::flush(&self)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::group(&self) -> claw_memory::transcript_store::GroupGuard<F>
+pub fn claw_memory::transcript_store::TranscriptStore<F>::in_memory(u32) -> Self
 pub fn claw_memory::transcript_store::TranscriptStore<F>::last_persist_error(&self) -> core::option::Option<claw_interface::fs::FsError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::messages(&self) -> alloc::sync::Arc<serde_json::value::Value>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(u32, &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
@@ -136,6 +133,7 @@ pub fn claw_memory::transcript_store::TranscriptStore<F>::push_assistant_message
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_patch(&self, &serde_json::value::Value)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_tool_result(&self, &str, &str, bool)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_user_message(&self, impl core::convert::Into<alloc::string::String>)
+pub fn claw_memory::transcript_store::TranscriptStore<F>::transcript_id(&self) -> u32
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns_snapshot(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::version(&self) -> u64
 impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::transcript_store::TranscriptStore<F>
@@ -163,9 +161,6 @@ pub fn claw_memory::profile::ProfileDocument::file_name(self) -> &'static str
 pub fn claw_memory::profile::ProfileDocument::id(self) -> &'static str
 impl core::fmt::Display for claw_memory::profile::ProfileDocument
 pub fn claw_memory::profile::ProfileDocument::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for claw_memory::profile::ProfileDocument
-pub type claw_memory::profile::ProfileDocument::Err = claw_memory::profile::ParseProfileDocumentError
-pub fn claw_memory::profile::ProfileDocument::from_str(&str) -> core::result::Result<Self, Self::Err>
 pub enum claw_memory::ProfileError
 pub claw_memory::ProfileError::File
 pub claw_memory::ProfileError::File::document: claw_memory::profile::ProfileDocument
@@ -258,10 +253,10 @@ pub fn claw_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub struct claw_memory::TranscriptStore<F: claw_interface::fs::ClawFs + 'static>
 impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::commit_open_turn(&self)
-pub fn claw_memory::transcript_store::TranscriptStore<F>::conversation_id(&self) -> u32
 pub fn claw_memory::transcript_store::TranscriptStore<F>::discard_open_turn(&self)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::flush(&self)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::group(&self) -> claw_memory::transcript_store::GroupGuard<F>
+pub fn claw_memory::transcript_store::TranscriptStore<F>::in_memory(u32) -> Self
 pub fn claw_memory::transcript_store::TranscriptStore<F>::last_persist_error(&self) -> core::option::Option<claw_interface::fs::FsError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::messages(&self) -> alloc::sync::Arc<serde_json::value::Value>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(u32, &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
@@ -270,6 +265,7 @@ pub fn claw_memory::transcript_store::TranscriptStore<F>::push_assistant_message
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_patch(&self, &serde_json::value::Value)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_tool_result(&self, &str, &str, bool)
 pub fn claw_memory::transcript_store::TranscriptStore<F>::push_user_message(&self, impl core::convert::Into<alloc::string::String>)
+pub fn claw_memory::transcript_store::TranscriptStore<F>::transcript_id(&self) -> u32
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns_snapshot(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::version(&self) -> u64
 impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::transcript_store::TranscriptStore<F>

@@ -7,7 +7,7 @@
 - [x] cleaned up stale configuration
 - [x] cleaned up sse bad designs
 - [x] cleaned up multiagent bugs
-- [ ] efficient checkpointing system
+- [x] efficient checkpointing system
 - speeded up agent system perf
   - [x] max_token optimization (reasoning efforts), and per model
   - [x] SSE optimization

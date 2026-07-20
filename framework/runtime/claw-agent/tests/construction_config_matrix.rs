@@ -26,7 +26,9 @@ fn turn_without_linked_api_reports_not_configured() {
     let system =
         MemConstructionSystem::new::<StdThread, TokioExecutor>(mem_persistence(&root, "none"))
             .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("run without api"))).unwrap();
@@ -132,6 +134,7 @@ impl ConstructionSystem for MemConstructionSystem {
 
     fn new_session(&self) -> claw_agent::SessionId {
         self.new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap()
     }
 
     fn open_session(
@@ -154,6 +157,7 @@ impl ConstructionSystem for DiskConstructionSystem {
 
     fn new_session(&self) -> claw_agent::SessionId {
         self.new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap()
     }
 
     fn open_session(

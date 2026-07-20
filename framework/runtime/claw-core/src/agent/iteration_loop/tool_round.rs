@@ -7,7 +7,8 @@ use super::types::{
     check_preempt_at_checkpoint, AppendedMessages, InterruptionControl, IterationCheckpoint,
     IterationLoopError, PendingApproval, PreemptedOutcome, ToolRun, ToolRunDisposition,
 };
-use crate::protocol::IterationId;
+use crate::agent::AgentEventBoundary;
+use crate::protocol::{IterationId, TrackedToolCall};
 
 pub(super) enum ToolRoundResult {
     Completed { runs: Vec<ToolRun> },
@@ -38,6 +39,7 @@ pub(super) async fn run_tool_calls(
     appended: &mut AppendedMessages,
     response: &LlmResponse,
     iteration_id: IterationId,
+    event_boundary: Option<&AgentEventBoundary>,
 ) -> ToolRoundResult {
     let mut runs: Vec<ToolRun> = Vec::with_capacity(response.tool_calls.len());
 
@@ -88,6 +90,14 @@ pub(super) async fn run_tool_calls(
                 continue;
             }
         };
+        let event_call = TrackedToolCall::new(
+            call.name(),
+            call.arguments_value()
+                .unwrap_or_else(|_| serde_json::Value::String(call.arguments_json().to_owned())),
+        );
+        if let Some(event_boundary) = event_boundary {
+            event_boundary.tool_started(event_call).await;
+        }
         let outcome = runner.run(&call).instrument(span.clone()).await;
         let (content, ok, blocked, approval) = match outcome {
             ToolRunOutcome::Ran { content, ok } => (content, ok, false, None),

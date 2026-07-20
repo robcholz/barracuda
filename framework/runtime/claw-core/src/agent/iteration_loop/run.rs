@@ -273,6 +273,7 @@ async fn run_one_iteration<H: ClawHttp + StreamingHttp, Timer: ClawTimer>(
         &mut appended,
         &llm_response,
         iteration_id,
+        step.event_boundary,
     )
     .await
     {

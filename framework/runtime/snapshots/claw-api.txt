@@ -15,6 +15,7 @@ pub claw_api::ChatError::InvalidToolsJson
 impl claw_api::ChatError
 pub fn claw_api::ChatError::is_aborted(&self) -> bool
 pub fn claw_api::ChatError::is_retryable(&self) -> bool
+pub fn claw_api::ChatError::truncated_stream() -> Self
 pub enum claw_api::ChatJsonError
 pub claw_api::ChatJsonError::Chat(claw_api::ChatError)
 pub claw_api::ChatJsonError::EmptyText
@@ -55,6 +56,14 @@ pub enum claw_api::InitError
 pub claw_api::InitError::MissingApiKey
 pub claw_api::InitError::MissingBaseUrl
 pub claw_api::InitError::MissingModel
+pub enum claw_api::LlmDelta
+pub claw_api::LlmDelta::Output(alloc::string::String)
+pub claw_api::LlmDelta::Reasoning(alloc::string::String)
+pub claw_api::LlmDelta::ToolCall
+pub claw_api::LlmDelta::ToolCall::arguments: alloc::string::String
+pub claw_api::LlmDelta::ToolCall::id: alloc::string::String
+pub claw_api::LlmDelta::ToolCall::index: u32
+pub claw_api::LlmDelta::ToolCall::name: alloc::string::String
 pub enum claw_api::MediaAsset
 pub claw_api::MediaAsset::InlineBytes
 pub claw_api::MediaAsset::InlineBytes::bytes: alloc::vec::Vec<u8>
@@ -98,6 +107,12 @@ pub fn claw_api::ChatRequest<'a>::new(&'a str, &'a serde_json::value::Value) -> 
 pub fn claw_api::ChatRequest<'a>::with_reminders(self, &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatRequest<'a>::with_retry(self, claw_api::RetryPolicy) -> Self
 pub fn claw_api::ChatRequest<'a>::with_tools(self, &'a str) -> Self
+pub struct claw_api::ChatStream<S>
+impl<S> claw_api::ChatStream<S>
+pub fn claw_api::ChatStream<S>::take_response(&mut self) -> core::option::Option<core::result::Result<claw_api::LlmResponse, claw_api::ChatError>>
+impl<S> futures_core::stream::Stream for claw_api::ChatStream<S> where S: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin
+pub type claw_api::ChatStream<S>::Item = core::result::Result<claw_api::LlmDelta, claw_api::ChatError>
+pub fn claw_api::ChatStream<S>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
 pub struct claw_api::ClawApi<H: claw_interface::http::blocking::ClawHttp>
 impl<H: claw_interface::http::blocking::ClawHttp> claw_api::ClawApi<H>
 pub fn claw_api::ClawApi<H>::chat(&mut self, &claw_api::ChatRequest<'_>, &core::sync::atomic::AtomicBool) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
@@ -109,7 +124,7 @@ pub struct claw_api::ClawApiAsync<H: claw_interface::http::ClawHttp, Timer: claw
 impl<H: claw_interface::http::ClawHttp, Timer: claw_interface::timer::ClawTimer> claw_api::ClawApiAsync<H, Timer>
 pub async fn claw_api::ClawApiAsync<H, Timer>::chat(&mut self, &claw_api::ChatRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
 pub async fn claw_api::ClawApiAsync<H, Timer>::chat_json<T: serde_core::de::DeserializeOwned>(&mut self, &claw_api::ChatJsonRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::ChatJsonResponse<T>, claw_api::ChatJsonError>
-pub async fn claw_api::ClawApiAsync<H, Timer>::chat_stream<'a>(&'a mut self, &'a claw_api::ChatRequest<'_>, claw_interface::http::Cancel<'a>) -> core::result::Result<claw_api::ChatStream<<H as claw_interface::http::StreamingHttp>::ByteStream>, claw_api::ChatError> where H: claw_interface::http::StreamingHttp
+pub async fn claw_api::ClawApiAsync<H, Timer>::chat_stream<'h, 'r>(&'h mut self, &'r claw_api::ChatRequest<'r>, claw_interface::http::Cancel<'h>) -> core::result::Result<claw_api::ChatStream<<H as claw_interface::http::StreamingHttp>::ByteStream>, claw_api::ChatError> where H: claw_interface::http::StreamingHttp
 pub async fn claw_api::ClawApiAsync<H, Timer>::infer_media(&mut self, &claw_api::MediaRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<alloc::string::String, claw_api::InferMediaError>
 pub fn claw_api::ClawApiAsync<H, Timer>::new(H, Timer) -> Self
 pub fn claw_api::ClawApiAsync<H, Timer>::set_config(&mut self, claw_api::ClawApiConfig) -> core::result::Result<(), claw_api::InitError>

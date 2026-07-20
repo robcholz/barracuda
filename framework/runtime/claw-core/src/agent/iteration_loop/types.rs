@@ -1,13 +1,13 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::IntoStaticStr;
 
 use claw_api::ChatError;
 use claw_tool::{ToolGate, ToolSetError, ToolSetHandle};
 
+use crate::agent::AgentEventBoundary;
 use crate::protocol::IterationId;
 
 /// Errors from one [`super::IterationLoop::run`] step.
@@ -37,7 +37,7 @@ pub(crate) enum IterationCheckpoint {
 }
 
 /// Owned message batch appended by one completed step (assistant/tool round).
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AppendedMessages {
     messages: Vec<Value>,
 }
@@ -101,6 +101,7 @@ pub(crate) struct IterationStep<'a> {
     /// `Deny` the call is refused; on `Ask` it is held for human approval
     /// (surfaced via [`ToolRun::approval`]) and not run.
     pub gate: &'a dyn ToolGate,
+    pub event_boundary: Option<&'a AgentEventBoundary>,
 }
 
 /// Terminal outcome of exactly one [`super::IterationLoop::run`] (completed or preempted).

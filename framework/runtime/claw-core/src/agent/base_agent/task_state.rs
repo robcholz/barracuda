@@ -1,14 +1,11 @@
 use std::collections::VecDeque;
 
-use serde::{Deserialize, Serialize};
-
 use crate::agent::tools::{ControlSignal, PlanModeExitOutcome};
 use crate::protocol::Message;
 
 use super::pending_tool_round::PendingToolRound;
 use super::{AgentCommand, AgentCommandError, AgentState, ApprovalDecision};
 
-#[derive(Deserialize, Serialize)]
 enum TaskPhase {
     Idle,
     Running,
@@ -42,14 +39,12 @@ impl TaskPhaseView {
     }
 }
 
-#[derive(Deserialize, Serialize)]
 enum Inbound {
     Command(AgentCommand),
-    TaskInput(#[serde(deserialize_with = "crate::protocol::deserialize_message_or_text")] Message),
+    TaskInput(Message),
     Control(ControlSignal),
 }
 
-#[derive(Deserialize, Serialize)]
 struct TaskMailbox {
     entries: VecDeque<Inbound>,
 }
@@ -110,16 +105,7 @@ pub(super) enum TaskStateError {
     NoPendingApproval,
 }
 
-#[derive(Debug, thiserror::Error)]
-pub(super) enum TaskStateValidationError {
-    #[error(transparent)]
-    Mailbox(#[from] AgentCommandError),
-    #[error("awaiting approval phase has no pending tool call")]
-    NoPendingApproval,
-}
-
 /// Owns the one committed task phase and all accepted-but-unapplied inputs.
-#[derive(Deserialize, Serialize)]
 pub(super) struct TaskState {
     phase: TaskPhase,
     mailbox: TaskMailbox,
@@ -238,17 +224,6 @@ impl TaskState {
 
     pub(super) fn is_running(&self) -> bool {
         matches!(self.phase, TaskPhase::Running)
-    }
-
-    pub(super) fn validate(&self) -> Result<(), TaskStateValidationError> {
-        self.mailbox.projected_phase(&self.phase)?;
-        if matches!(
-            &self.phase,
-            TaskPhase::AwaitingApproval(pending) if pending.next().is_none()
-        ) {
-            return Err(TaskStateValidationError::NoPendingApproval);
-        }
-        Ok(())
     }
 }
 

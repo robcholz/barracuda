@@ -424,7 +424,7 @@ fn session_create(persistence: c_int, out_session_id: *mut u32) -> Result<(), Ca
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
     let agent = running_agent(runtime)?;
-    *out_session_id = agent.new_session(persistence).0;
+    *out_session_id = agent.new_session(persistence).map_err(CabiError::Agent)?.0;
     Ok(())
 }
 
@@ -878,7 +878,7 @@ fn session_control_error(error: SessionControlError) -> CabiError {
         | SessionControlError::NotAwaitingInput(_)
         | SessionControlError::InputRequestMismatch { .. }
         | SessionControlError::WorkerStopped
-        | SessionControlError::ClosePersistence => CabiError::InvalidState,
+        | SessionControlError::Persistence => CabiError::InvalidState,
     }
 }
 

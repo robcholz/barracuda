@@ -37,9 +37,14 @@ where
     }
 
     fn spawn_subagent(&mut self, parent: AgentId, spawn: SpawnCommand) {
-        let (id, spec, completion) = spawn.into_parts();
+        let (id, spec, completion, source_call) = spawn.into_parts();
+        if completion.is_none() && self.state.is_root(parent) {
+            if let Some(call) = source_call {
+                self.root_background_spawns.insert(id, call);
+            }
+        }
         let (kind, name, goal, timeout) = spec.into_parts();
-        if !self.state.get().contains(parent) {
+        if !self.state.contains(parent) {
             tracing::warn!(
                 name: "spawn_dropped",
                 parent_agent = %parent,
@@ -56,10 +61,9 @@ where
 
         match self.build_agent(id, &kind, goal, AgentPlacement::Child(id), Vec::new()) {
             Ok(()) => {
-                let inserted =
-                    self.state
-                        .get_mut()
-                        .insert_child(parent, id, kind.clone(), name, timeout);
+                let inserted = self
+                    .state
+                    .insert_child(parent, id, kind.clone(), name, timeout);
                 if !inserted {
                     self.slots.remove(id);
                     tracing::warn!(
@@ -131,7 +135,7 @@ where
     }
 
     fn followup_subagent(&mut self, requester: AgentId, target: AgentId, message: Message) {
-        if !self.state.get().is_strict_descendant(requester, target) {
+        if !self.state.is_strict_descendant(requester, target) {
             tracing::warn!(
                 name: "followup_ignored",
                 target_agent = %target,
@@ -179,7 +183,7 @@ where
     }
 
     fn delete_subagent(&mut self, requester: AgentId, target: AgentId) {
-        if !self.state.get().is_strict_descendant(requester, target) {
+        if !self.state.is_strict_descendant(requester, target) {
             tracing::warn!(
                 name: "delete_ignored",
                 target_agent = %target,
@@ -191,7 +195,7 @@ where
     }
 
     fn delete_subtree(&mut self, root: AgentId) {
-        let victims = self.state.get().subtree_ids(root);
+        let victims = self.state.subtree_ids(root);
         tracing::info!(
             name: "subtree_deleted",
             root_agent = %root,
@@ -209,22 +213,22 @@ where
             self.slots.remove(*victim);
         }
         self.pending_deliveries.clear_for_removed_parents(&victims);
-        self.state.get_mut().remove_agents(&victims);
+        self.state.remove_agents(&victims);
     }
 
     pub(in crate::multiagent) fn route_expired_timeouts(
         &mut self,
         mut expired: Vec<ExpiredTimeout>,
     ) -> DriveOutput {
-        expired.sort_by_key(|expired| self.state.get().depth(expired.agent).unwrap_or(u16::MAX));
+        expired.sort_by_key(|expired| self.state.depth(expired.agent).unwrap_or(u16::MAX));
         for expired in expired {
-            if !self.state.get().contains(expired.agent) {
+            if !self.state.contains(expired.agent) {
                 continue;
             }
-            let Some(parent) = self.state.get().parent(expired.agent).flatten() else {
+            let Some(parent) = self.state.parent(expired.agent).flatten() else {
                 continue;
             };
-            let victim_count = self.state.get().subtree_ids(expired.agent).len();
+            let victim_count = self.state.subtree_ids(expired.agent).len();
             let message = format!(
                 "subagent timed out after {} ms; deleted its subtree of {victim_count} agent(s)",
                 expired.timeout.millis()
@@ -260,7 +264,7 @@ where
     }
 
     pub(in crate::multiagent) fn delete_spawned_subagents(&mut self) {
-        let children = self.state.get().root_children();
+        let children = self.state.root_children();
         for child in children {
             self.delete_subtree(child);
         }
@@ -299,7 +303,7 @@ where
     }
 
     fn deliver_subagent_result(&mut self, parent: AgentId, child: AgentId, text: String, ok: bool) {
-        if !self.state.get().contains(parent) {
+        if !self.state.contains(parent) {
             return;
         }
         let result = SubagentResult::new(child, text, ok);
@@ -322,9 +326,9 @@ where
             );
             return;
         };
-        let recorded = self.pending_deliveries.record(self.state.get(), child);
+        let recorded = self.pending_deliveries.record(&self.state, child);
         debug_assert!(recorded, "background result must have live child metadata");
-        let awaiting_approval = self.state.get().is_awaiting_approval(parent);
+        let awaiting_approval = self.state.is_awaiting_approval(parent);
         tracing::info!(
             name: "result_to_parent",
             parent_agent = %parent,
@@ -336,7 +340,7 @@ where
     }
 
     fn route_yielded(&mut self, id: AgentId, text: String) -> DriveOutput {
-        let Some(parent) = self.state.get().parent(id) else {
+        let Some(parent) = self.state.parent(id) else {
             return DriveOutput::default();
         };
         let Some(parent_id) = parent else {
@@ -352,7 +356,7 @@ where
     }
 
     fn route_terminal(&mut self, id: AgentId, text: String, ok: bool) -> DriveOutput {
-        let Some(parent) = self.state.get().parent(id) else {
+        let Some(parent) = self.state.parent(id) else {
             return DriveOutput::default();
         };
         let Some(parent_id) = parent else {
@@ -368,7 +372,7 @@ where
     }
 
     fn defer_success_for_owned_work(&self, id: AgentId) -> bool {
-        let has_live_children = self.state.get().has_children(id);
+        let has_live_children = self.state.has_children(id);
         let has_pending_child_results = self.slots.has_inbox(id);
         if !has_live_children && !has_pending_child_results {
             return false;
@@ -376,14 +380,14 @@ where
         tracing::info!(
             name: "subagent_completion_deferred",
             agent = %id,
-            live_descendants = self.state.get().subtree_ids(id).len().saturating_sub(1) as u64,
+            live_descendants = self.state.subtree_ids(id).len().saturating_sub(1) as u64,
             pending_child_results = has_pending_child_results,
         );
         true
     }
 
     fn route_cancelled(&mut self, id: AgentId) -> DriveOutput {
-        if self.state.get().parent(id).flatten().is_none() {
+        if self.state.parent(id).flatten().is_none() {
             return DriveOutput::default();
         }
         self.delete_subtree(id);
@@ -434,7 +438,6 @@ mod tests {
         let root = AgentId(1);
         assert!(instance
             .state
-            .get_mut()
             .insert_root(root, agent_catalog::root_kind().clone()));
         (instance, root)
     }
@@ -473,14 +476,14 @@ mod tests {
         let (mut instance, root) = instance_with_root();
         let parent = AgentId(2);
         let child = AgentId(3);
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             root,
             parent,
             AgentKind::from_static("worker"),
             Some("epsilon".to_owned()),
             timeout(),
         ));
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             parent,
             child,
             AgentKind::from_static("worker"),
@@ -496,9 +499,9 @@ mod tests {
         );
 
         assert!(output.into_messages().is_empty());
-        assert!(instance.state.get().contains(parent));
-        assert!(instance.state.get().contains(child));
-        assert_eq!(instance.state.get().node_count(), 3);
+        assert!(instance.state.contains(parent));
+        assert!(instance.state.contains(child));
+        assert_eq!(instance.state.node_count(), 3);
     }
 
     #[test]
@@ -508,14 +511,14 @@ mod tests {
         // topology-based, never allocator/order-based.
         let parent = AgentId(3);
         let child = AgentId(2);
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             root,
             parent,
             AgentKind::from_static("worker"),
             Some("epsilon".to_owned()),
             timeout(),
         ));
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             parent,
             child,
             AgentKind::from_static("worker"),
@@ -541,9 +544,9 @@ mod tests {
         let result = results.try_recv().expect("timeout result delivered");
         assert!(!result.ok());
         assert!(result.text().contains("timed out after 60000 ms"));
-        assert!(instance.state.get().contains(root));
-        assert!(!instance.state.get().contains(parent));
-        assert!(!instance.state.get().contains(child));
+        assert!(instance.state.contains(root));
+        assert!(!instance.state.contains(parent));
+        assert!(!instance.state.contains(child));
         assert!(!instance.timeouts.has_pending());
         assert!(results.try_recv().is_err(), "timeout must report only once");
     }
@@ -563,7 +566,7 @@ mod tests {
                 Vec::new(),
             )
             .expect("parent builds");
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             root,
             parent,
             worker.clone(),
@@ -579,7 +582,7 @@ mod tests {
                 Vec::new(),
             )
             .expect("child builds");
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             parent,
             child,
             worker,
@@ -602,8 +605,8 @@ mod tests {
             },
         );
 
-        assert!(instance.state.get().contains(parent));
-        assert!(!instance.state.get().contains(child));
+        assert!(instance.state.contains(parent));
+        assert!(!instance.state.contains(child));
         assert!(instance.slots.has_inbox(parent));
         assert!(instance.slots.activate_inbox(parent));
 
@@ -613,7 +616,7 @@ mod tests {
                 text: "aggregated nested result".to_owned(),
             },
         );
-        assert!(!instance.state.get().contains(parent));
+        assert!(!instance.state.contains(parent));
         assert!(!instance.timeouts.has_pending());
     }
 
@@ -644,7 +647,7 @@ mod tests {
                 Vec::new(),
             )
             .expect("child builds");
-        assert!(instance.state.get_mut().insert_child(
+        assert!(instance.state.insert_child(
             root,
             child,
             worker,
@@ -660,7 +663,7 @@ mod tests {
         );
         instance.refresh_multiagent_snapshot();
 
-        assert!(!instance.state.get().contains(child));
+        assert!(!instance.state.contains(child));
         let pending = instance
             .multiagent
             .get(root, child)

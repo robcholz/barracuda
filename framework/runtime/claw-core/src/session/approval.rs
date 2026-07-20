@@ -241,6 +241,7 @@ where
         reminders: &reminders,
         tools: &tools,
         gate: &gate,
+        event_boundary: None,
     })
     .await;
     control.clear_cancel_hook();

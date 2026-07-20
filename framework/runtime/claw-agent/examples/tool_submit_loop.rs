@@ -100,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
     ))?;
     println!("registered tool `time_now`");
     system.start_all()?;
-    let session = system.new_session(SessionPersistence::Persistent);
+    let session = system.new_session(SessionPersistence::Persistent)?;
 
     // 2. Drive the loop: explicit session id selects the agent session.
     let (control, mut events) = system.open_session(session)?;

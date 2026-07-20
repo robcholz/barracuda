@@ -4,9 +4,7 @@ use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use claw_persistence::{
-    ChangePatternHint, CheckpointError, CheckpointStorageError, DurablePart, DurablePartError,
-    DurableState, DurableStateCodec, PartGeneration, PartStateBlob, PartStateSlice, StorageHint,
-    StorageSizeHint,
+    DurablePartError, DurableState, DurableStateCodec, SchemaVersion, StateBlob, StateSlice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -15,32 +13,17 @@ use super::tool::Tool;
 
 pub type ToolRegistryVersion = u64;
 pub type ToolGroupId = String;
-type CheckpointHook = Arc<
-    dyn Fn(
-            PartGeneration,
-            PartStateBlob<'static>,
-            StorageHint,
-        ) -> Result<(), ToolRegistryCheckpointError>
-        + Send
-        + Sync,
->;
-const TOOL_REGISTRY_STORAGE_HINT: StorageHint = StorageHint {
-    size: StorageSizeHint::Small,
-    change: ChangePatternHint::Arbitrary,
-};
 
-#[derive(Default)]
 pub struct ToolRegistry {
     inner: RwLock<ToolRegistryInner>,
 }
 
-#[derive(Default)]
 struct ToolRegistryInner {
     tools: HashMap<ToolName, Tool>,
     groups: HashMap<ToolGroupId, ToolGroupEntry>,
     state: DurableState<ToolRegistryState>,
+    started: bool,
     runtime_version: ToolRegistryVersion,
-    checkpoint_hook: Option<CheckpointHook>,
 }
 
 #[derive(Clone)]
@@ -49,42 +32,42 @@ struct ToolGroupEntry {
     tools: Vec<ToolName>,
 }
 
+#[doc(hidden)]
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct ToolRegistryState {
-    started: bool,
-    tools: BTreeMap<ToolName, bool>,
+pub struct ToolRegistryState {
+    #[serde(default)]
+    overrides: BTreeMap<ToolName, bool>,
 }
 
 impl DurableStateCodec for ToolRegistryState {
-    fn encode_state(&self) -> Result<PartStateBlob<'_>, DurablePartError> {
-        let bytes = serde_json::to_vec(self).map_err(DurablePartError::Encode)?;
-        Ok(PartStateBlob {
-            schema_version: 1,
-            bytes: Cow::Owned(bytes),
+    const SCHEMA_VERSION: SchemaVersion = 1;
+
+    fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
+        Ok(StateBlob {
+            bytes: Cow::Owned(serde_json::to_vec(self).map_err(DurablePartError::encode)?),
         })
     }
 
-    fn decode_state(state: PartStateSlice<'_>) -> Result<Self, DurablePartError> {
-        serde_json::from_slice(state.bytes).map_err(DurablePartError::Decode)
+    fn decode_state(
+        schema_version: SchemaVersion,
+        state: StateSlice<'_>,
+    ) -> Result<Self, DurablePartError> {
+        if schema_version != Self::SCHEMA_VERSION {
+            return Err(DurablePartError::InvalidState(
+                "unsupported tool registry state schema",
+            ));
+        }
+        serde_json::from_slice(state.bytes).map_err(DurablePartError::decode)
     }
 }
 
 impl ToolRegistryInner {
-    fn register_group(&mut self, group: ToolGroup) -> Result<(), ToolRegistryCheckpointError> {
-        let previous_state = self.state.clone();
-        let previous_runtime_version = self.runtime_version;
-        let previous_tools = self.tools.clone();
-        let previous_groups = self.groups.clone();
-        let mut durable_changed = false;
+    fn register_group(&mut self, group: ToolGroup) {
         let default_visibility = group.default_visibility;
         let mut names = Vec::with_capacity(group.tools.len());
 
         for tool in group.tools {
             let name = tool.name().to_owned();
-            if !self.state.get().tools.contains_key(&name) {
-                self.state.get_mut().tools.insert(name.clone(), true);
-                durable_changed = true;
-            }
             self.tools.insert(name.clone(), tool);
             names.push(name);
         }
@@ -96,66 +79,25 @@ impl ToolRegistryInner {
             },
         );
         self.bump_runtime_version();
-        if let Err(error) =
-            self.checkpoint_or_restore(durable_changed, previous_state, previous_runtime_version)
-        {
-            self.tools = previous_tools;
-            self.groups = previous_groups;
-            return Err(error);
-        }
-        Ok(())
     }
 
-    fn set_tool_enabled(
-        &mut self,
-        name: &str,
-        enabled: bool,
-    ) -> Result<(), ToolRegistryCheckpointError> {
-        let previous_state = self.state.clone();
-        let previous_runtime_version = self.runtime_version;
-        if self.state.get().tools.get(name).copied() == Some(enabled) {
-            return Ok(());
+    fn set_tool_enabled(&mut self, name: &str, enabled: bool) {
+        if self.state.get().overrides.get(name).copied() == Some(enabled) {
+            return;
         }
-        self.state.get_mut().tools.insert(name.to_owned(), enabled);
+        self.state
+            .get_mut()
+            .overrides
+            .insert(name.to_owned(), enabled);
         self.bump_runtime_version();
-        self.checkpoint_or_restore(true, previous_state, previous_runtime_version)
     }
 
-    fn set_started(&mut self, started: bool) -> Result<(), ToolRegistryCheckpointError> {
-        let previous_state = self.state.clone();
-        let previous_runtime_version = self.runtime_version;
-        if self.state.get().started == started {
-            return Ok(());
+    fn set_started(&mut self, started: bool) {
+        if self.started == started {
+            return;
         }
-        self.state.get_mut().started = started;
+        self.started = started;
         self.bump_runtime_version();
-        self.checkpoint_or_restore(true, previous_state, previous_runtime_version)
-    }
-
-    fn checkpoint(&self, durable_changed: bool) -> Result<(), ToolRegistryCheckpointError> {
-        if !durable_changed {
-            return Ok(());
-        }
-        let Some(hook) = self.checkpoint_hook.as_ref() else {
-            return Ok(());
-        };
-        let generation = self.state.generation();
-        let state = self.state.export_state()?.into_owned();
-        hook(generation, state, TOOL_REGISTRY_STORAGE_HINT)
-    }
-
-    fn checkpoint_or_restore(
-        &mut self,
-        durable_changed: bool,
-        previous_state: DurableState<ToolRegistryState>,
-        previous_runtime_version: ToolRegistryVersion,
-    ) -> Result<(), ToolRegistryCheckpointError> {
-        if let Err(error) = self.checkpoint(durable_changed) {
-            self.state = previous_state;
-            self.runtime_version = previous_runtime_version;
-            return Err(error);
-        }
-        Ok(())
     }
 
     fn bump_runtime_version(&mut self) {
@@ -163,8 +105,7 @@ impl ToolRegistryInner {
     }
 
     fn tool_projection(&self) -> ToolProjection {
-        let state = self.state.get();
-        if !state.started {
+        if !self.started {
             return ToolProjection {
                 registry_version: self.runtime_version,
                 tools: Vec::new(),
@@ -178,9 +119,10 @@ impl ToolRegistryInner {
                 group_of.insert(tool_name, (group_id, group.default_visibility));
             }
         }
+        let state = self.state.get();
         let mut tools = Vec::with_capacity(self.tools.len());
         for (name, tool) in &self.tools {
-            if state.tools.get(name).copied() != Some(true) {
+            if state.overrides.get(name).copied() == Some(false) {
                 continue;
             }
             let (group_id, default_visibility) = group_of
@@ -255,23 +197,30 @@ pub enum ToolRegistryError {
     AmbiguousName(String),
     #[error("invalid tool group: {0}")]
     InvalidGroup(ToolGroupId),
-    #[error(transparent)]
-    Checkpoint(#[from] ToolRegistryCheckpointError),
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ToolRegistryCheckpointError {
-    #[error("checkpoint storage failed: coordinator failed: {0}")]
-    Coordinator(#[from] CheckpointError),
-    #[error("checkpoint storage failed: {0}")]
-    Storage(#[from] CheckpointStorageError),
-    #[error("checkpoint durable part failed: {0}")]
-    Part(#[from] DurablePartError),
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::from_state(DurableState::new(ToolRegistryState::default()))
+    }
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[doc(hidden)]
+    pub fn from_state(state: DurableState<ToolRegistryState>) -> Self {
+        Self {
+            inner: RwLock::new(ToolRegistryInner {
+                tools: HashMap::new(),
+                groups: HashMap::new(),
+                state,
+                started: false,
+                runtime_version: 0,
+            }),
+        }
     }
 
     pub fn register_group(&self, group: ToolGroup) -> Result<(), ToolRegistryError> {
@@ -299,9 +248,7 @@ impl ToolRegistry {
             }
         }
 
-        if let Err(error) = inner.register_group(group) {
-            return Err(error.into());
-        }
+        inner.register_group(group);
         Ok(())
     }
 
@@ -311,9 +258,7 @@ impl ToolRegistry {
             return Err(ToolRegistryError::NotFound(name.to_owned()));
         }
 
-        if let Err(error) = inner.set_tool_enabled(name, true) {
-            return Err(error.into());
-        }
+        inner.set_tool_enabled(name, true);
         Ok(())
     }
 
@@ -323,25 +268,19 @@ impl ToolRegistry {
             return Err(ToolRegistryError::NotFound(name.to_owned()));
         }
 
-        if let Err(error) = inner.set_tool_enabled(name, false) {
-            return Err(error.into());
-        }
+        inner.set_tool_enabled(name, false);
         Ok(())
     }
 
     pub fn start_all(&self) -> Result<(), ToolRegistryError> {
         let mut inner = self.write_state();
-        if let Err(error) = inner.set_started(true) {
-            return Err(error.into());
-        }
+        inner.set_started(true);
         Ok(())
     }
 
     pub fn stop_all(&self) -> Result<(), ToolRegistryError> {
         let mut inner = self.write_state();
-        if let Err(error) = inner.set_started(false) {
-            return Err(error.into());
-        }
+        inner.set_started(false);
         Ok(())
     }
 
@@ -381,67 +320,19 @@ impl ToolRegistry {
     fn write_state(&self) -> RwLockWriteGuard<'_, ToolRegistryInner> {
         self.inner.write().unwrap_or_else(PoisonError::into_inner)
     }
-
-    #[doc(hidden)]
-    pub fn set_checkpoint_hook(
-        &self,
-        hook: impl Fn(
-                PartGeneration,
-                PartStateBlob<'static>,
-                StorageHint,
-            ) -> Result<(), ToolRegistryCheckpointError>
-            + Send
-            + Sync
-            + 'static,
-    ) {
-        self.write_state().checkpoint_hook = Some(Arc::new(hook));
-    }
-}
-
-impl DurablePart for ToolRegistry {
-    fn name(&self) -> &'static str {
-        "tool-registry"
-    }
-
-    fn generation(&self) -> PartGeneration {
-        self.read_state().state.generation()
-    }
-
-    fn export_state(&self) -> Result<PartStateBlob<'_>, DurablePartError> {
-        self.read_state()
-            .state
-            .export_state()
-            .map(PartStateBlob::into_owned)
-    }
-
-    fn restore_from_state(state: PartStateSlice<'_>) -> Result<Self, DurablePartError> {
-        Ok(Self {
-            inner: RwLock::new(ToolRegistryInner {
-                tools: HashMap::new(),
-                groups: HashMap::new(),
-                state: DurableState::restore_state(state)?,
-                runtime_version: 0,
-                checkpoint_hook: None,
-            }),
-        })
-    }
-
-    fn storage_hint(&self) -> StorageHint {
-        TOOL_REGISTRY_STORAGE_HINT
-    }
 }
 
 impl fmt::Debug for ToolRegistry {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let inner = self.read_state();
-        let state = inner.state.get();
+        let override_count = inner.state.get().overrides.len();
         formatter
             .debug_struct("ToolRegistry")
             .field("tools", &inner.tools.len())
             .field("groups", &inner.groups.len())
-            .field("started", &state.started)
+            .field("started", &inner.started)
             .field("runtime_version", &inner.runtime_version)
-            .field("durable_generation", &inner.state.generation())
+            .field("overrides", &override_count)
             .finish()
     }
 }

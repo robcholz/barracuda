@@ -41,7 +41,7 @@ where
         reasoning_effort: Block<'static>,
         persistence: SessionPersistence,
     ) -> Result<(), MultiagentDeliverError> {
-        match self.state.get().root() {
+        match self.state.root() {
             Some(root) => {
                 self.set_agent_context_block(root, reasoning_effort)
                     .map_err(|source| MultiagentDeliverError::Root { root, source })?;
@@ -61,7 +61,7 @@ where
                     },
                     vec![reasoning_effort],
                 )?;
-                let inserted = self.state.get_mut().insert_root(id, kind);
+                let inserted = self.state.insert_root(id, kind);
                 debug_assert!(inserted, "root insertion requires an empty graph");
                 self.enqueue(id);
                 Ok(())
@@ -73,7 +73,7 @@ where
         &mut self,
         block: Block<'static>,
     ) -> Result<(), MultiagentDeliverError> {
-        let Some(root) = self.state.get().root() else {
+        let Some(root) = self.state.root() else {
             return Ok(());
         };
         self.set_agent_context_block(root, block)
@@ -81,7 +81,7 @@ where
     }
 
     pub(crate) fn cancel_all(&mut self) {
-        let agents: Vec<AgentId> = self.state.get().agent_ids().collect();
+        let agents: Vec<AgentId> = self.state.agent_ids().collect();
         for agent_id in agents {
             let Some(agent) = self.slots.available_agent_mut(agent_id) else {
                 continue;

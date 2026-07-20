@@ -43,7 +43,7 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     pub(crate) fn required_input(&self) -> Option<MultiagentInputRequest> {
-        let (agent, summary) = self.state.get().active_approval()?;
+        let (agent, summary) = self.state.active_approval()?;
         Some(MultiagentInputRequest {
             idle_origin: TurnOrigin::Subagent { agent },
             kind: InputRequestKind::PermissionApproval {
@@ -58,7 +58,6 @@ where
     ) -> Result<(), ApprovalResolutionError> {
         let agent = self
             .state
-            .get()
             .active_approval()
             .map(|(agent, _)| agent)
             .ok_or(ApprovalResolutionError::NoActiveApproval)?;
@@ -69,7 +68,7 @@ where
             .send_command(AgentCommand::ApprovalResult(decision))
             .map_err(ApprovalResolutionError::Command)?;
 
-        let removed = self.state.get_mut().remove_approval(agent);
+        let removed = self.state.remove_approval(agent);
         debug_assert!(
             removed,
             "the active approval changed without synchronization"
@@ -84,16 +83,16 @@ where
     }
 
     pub(super) fn park_approval(&mut self, agent: AgentId, summary: String) -> DriveOutput {
-        if !self.state.get().contains(agent) {
+        if !self.state.contains(agent) {
             return DriveOutput::default();
         }
-        self.state.get_mut().park_approval(agent, summary);
+        self.state.park_approval(agent, summary);
 
         DriveOutput::default()
     }
 
     pub(super) fn has_pending_approval(&self) -> bool {
-        self.state.get().has_pending_approval()
+        self.state.has_pending_approval()
     }
 }
 
@@ -137,21 +136,14 @@ mod tests {
     fn unknown_agent_does_not_consume_active_approval() {
         let agent = AgentId(7);
         let mut instance = instance();
-        instance
-            .state
-            .get_mut()
-            .park_approval(agent, "permission".to_owned());
+        instance.state.park_approval(agent, "permission".to_owned());
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),
             Err(ApprovalResolutionError::UnknownAgent(id)) if id == agent
         ));
         assert_eq!(
-            instance
-                .state
-                .get()
-                .active_approval()
-                .map(|(agent, _)| agent),
+            instance.state.active_approval().map(|(agent, _)| agent),
             Some(agent)
         );
     }
@@ -173,11 +165,8 @@ mod tests {
                 Vec::new(),
             )
             .expect("idle test agent builds");
-        assert!(instance.state.get_mut().insert_root(agent, kind));
-        instance
-            .state
-            .get_mut()
-            .park_approval(agent, "permission".to_owned());
+        assert!(instance.state.insert_root(agent, kind));
+        instance.state.park_approval(agent, "permission".to_owned());
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),
@@ -186,11 +175,7 @@ mod tests {
             ))
         ));
         assert_eq!(
-            instance
-                .state
-                .get()
-                .active_approval()
-                .map(|(agent, _)| agent),
+            instance.state.active_approval().map(|(agent, _)| agent),
             Some(agent)
         );
     }

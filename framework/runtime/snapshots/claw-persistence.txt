@@ -1,248 +1,79 @@
 pub mod claw_persistence
-pub enum claw_persistence::ChangePatternHint
-pub claw_persistence::ChangePatternHint::AppendLikely
-pub claw_persistence::ChangePatternHint::Arbitrary
-pub enum claw_persistence::CheckpointCoordinatorInitError
-pub claw_persistence::CheckpointCoordinatorInitError::InvalidCheckpointInterval
-pub claw_persistence::CheckpointCoordinatorInitError::InvalidHistoryCheckpoints
-pub claw_persistence::CheckpointCoordinatorInitError::Storage(claw_persistence::CheckpointStorageError)
-pub enum claw_persistence::CheckpointError
-pub claw_persistence::CheckpointError::ConflictingBatchMutation
-pub claw_persistence::CheckpointError::ConflictingBatchMutation::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::ConflictingBatchMutation::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::DuplicateBatchMutation
-pub claw_persistence::CheckpointError::DuplicateBatchMutation::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::DuplicateBatchMutation::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::DuplicateSnapshotPart
-pub claw_persistence::CheckpointError::DuplicateSnapshotPart::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::DuplicateSnapshotPart::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::DuplicateSnapshotPart::part: claw_persistence::PartName
-pub claw_persistence::CheckpointError::ExportPart
-pub claw_persistence::CheckpointError::ExportPart::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::ExportPart::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::ExportPart::part: claw_persistence::PartName
-pub claw_persistence::CheckpointError::ExportPart::source: claw_persistence::DurablePartError
-pub claw_persistence::CheckpointError::MissingManagedBatch
-pub claw_persistence::CheckpointError::MissingManagedBatch::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::MissingManagedBatch::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::MissingSnapshotPart
-pub claw_persistence::CheckpointError::MissingSnapshotPart::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::MissingSnapshotPart::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::MissingSnapshotPart::part: claw_persistence::PartName
-pub claw_persistence::CheckpointError::RemovedDependency
-pub claw_persistence::CheckpointError::RemovedDependency::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::RemovedDependency::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::RemovedDependency::required: claw_persistence::BatchKey
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict::current: claw_persistence::PartGeneration
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict::incoming: claw_persistence::PartGeneration
-pub claw_persistence::CheckpointError::SnapshotGenerationConflict::part: claw_persistence::PartName
-pub claw_persistence::CheckpointError::Storage(claw_persistence::CheckpointStorageError)
-pub claw_persistence::CheckpointError::UnsatisfiedDependency
-pub claw_persistence::CheckpointError::UnsatisfiedDependency::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointError::UnsatisfiedDependency::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointError::UnsatisfiedDependency::required: claw_persistence::BatchRef
-pub claw_persistence::CheckpointError::UnsatisfiedDependency::requirement: claw_persistence::DependencyRequirement
-pub enum claw_persistence::CheckpointStorageError
-pub claw_persistence::CheckpointStorageError::BatchRemovalUnsupported
-pub claw_persistence::CheckpointStorageError::ConflictingBatchMutation
-pub claw_persistence::CheckpointStorageError::ConflictingBatchMutation::batch: claw_persistence::BatchName
-pub claw_persistence::CheckpointStorageError::ConflictingBatchMutation::id: claw_persistence::BatchId
-pub claw_persistence::CheckpointStorageError::DecodeIndex(serde_json::error::Error)
-pub claw_persistence::CheckpointStorageError::DecodeManifest(serde_json::error::Error)
-pub claw_persistence::CheckpointStorageError::EmptyRoot
-pub claw_persistence::CheckpointStorageError::EncodeIndex(serde_json::error::Error)
-pub claw_persistence::CheckpointStorageError::EncodeManifest(serde_json::error::Error)
-pub claw_persistence::CheckpointStorageError::Fs
-pub claw_persistence::CheckpointStorageError::Fs::path: alloc::string::String
-pub claw_persistence::CheckpointStorageError::Fs::source: claw_interface::fs::FsError
-pub claw_persistence::CheckpointStorageError::InvalidHistoryRetention
-pub claw_persistence::CheckpointStorageError::InvalidName(alloc::string::String)
-pub claw_persistence::CheckpointStorageError::NonIncreasingStep
-pub claw_persistence::CheckpointStorageError::NonIncreasingStep::latest: claw_persistence::CheckpointStep
-pub claw_persistence::CheckpointStorageError::NonIncreasingStep::step: claw_persistence::CheckpointStep
-pub enum claw_persistence::DependencyRequirement
-pub claw_persistence::DependencyRequirement::AtLeast
-pub claw_persistence::DependencyRequirement::AtMost
-pub claw_persistence::DependencyRequirement::Equal
 pub enum claw_persistence::DurablePartError
-pub claw_persistence::DurablePartError::Decode(serde_json::error::Error)
-pub claw_persistence::DurablePartError::Encode(serde_json::error::Error)
+pub claw_persistence::DurablePartError::Decode(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub claw_persistence::DurablePartError::Encode(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
 pub claw_persistence::DurablePartError::InvalidState(&'static str)
-pub claw_persistence::DurablePartError::UnsupportedRestore
-pub enum claw_persistence::LoadCheckpointError
-pub claw_persistence::LoadCheckpointError::DecodeIndex(serde_json::error::Error)
-pub claw_persistence::LoadCheckpointError::DecodeManifest(serde_json::error::Error)
-pub claw_persistence::LoadCheckpointError::EmptyRoot
-pub claw_persistence::LoadCheckpointError::Fs
-pub claw_persistence::LoadCheckpointError::Fs::path: alloc::string::String
-pub claw_persistence::LoadCheckpointError::Fs::source: claw_interface::fs::FsError
-pub claw_persistence::LoadCheckpointError::Integrity
-pub claw_persistence::LoadCheckpointError::Integrity::path: alloc::string::String
-pub claw_persistence::LoadCheckpointError::StepNotFound(claw_persistence::CheckpointStep)
-pub claw_persistence::LoadCheckpointError::UnsupportedEncoding(alloc::string::String)
-pub enum claw_persistence::StorageSizeHint
-pub claw_persistence::StorageSizeHint::Large
-pub claw_persistence::StorageSizeHint::Small
-pub struct claw_persistence::BatchCheckpoint
-pub claw_persistence::BatchCheckpoint::id: claw_persistence::BatchId
-pub claw_persistence::BatchCheckpoint::name: alloc::string::String
-pub claw_persistence::BatchCheckpoint::parts: alloc::vec::Vec<claw_persistence::LoadedPart>
-pub struct claw_persistence::BatchId(pub u32)
-impl claw_persistence::BatchId
-pub fn claw_persistence::BatchId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_persistence::BatchId::new(u32) -> Self
-pub fn claw_persistence::BatchId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for claw_persistence::BatchId
-pub fn claw_persistence::BatchId::from(u32) -> Self
-impl core::fmt::Display for claw_persistence::BatchId
-pub fn claw_persistence::BatchId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for claw_persistence::BatchId
-pub type claw_persistence::BatchId::Err = claw_utils::IdParseError
-pub fn claw_persistence::BatchId::from_str(&str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for claw_persistence::BatchId
-pub fn claw_persistence::BatchId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for claw_persistence::BatchId
-pub fn claw_persistence::BatchId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct claw_persistence::BatchRef
-pub claw_persistence::BatchRef::generation: claw_persistence::BatchGeneration
-pub claw_persistence::BatchRef::key: claw_persistence::BatchKey
-pub struct claw_persistence::BatchWrite<'a>
-pub claw_persistence::BatchWrite::batch: claw_persistence::BatchKey
-pub claw_persistence::BatchWrite::writes: alloc::vec::Vec<claw_persistence::PartWrite<'a>>
-pub struct claw_persistence::Checkpoint
-pub claw_persistence::Checkpoint::batches: alloc::vec::Vec<claw_persistence::BatchCheckpoint>
-pub claw_persistence::Checkpoint::step: claw_persistence::CheckpointStep
-pub struct claw_persistence::CheckpointCoordinator<S: claw_persistence::CheckpointStorage>
-impl<S: claw_persistence::CheckpointStorage> claw_persistence::CheckpointCoordinator<S>
-pub fn claw_persistence::CheckpointCoordinator<S>::add_batch(&mut self, alloc::boxed::Box<dyn claw_persistence::DurableBatch>) -> &mut Self
-pub fn claw_persistence::CheckpointCoordinator<S>::maybe_checkpoint(&mut self) -> core::result::Result<(), claw_persistence::CheckpointError>
-pub fn claw_persistence::CheckpointCoordinator<S>::new(S, claw_persistence::CheckpointStep, claw_persistence::CheckpointStep) -> core::result::Result<Self, claw_persistence::CheckpointCoordinatorInitError>
-pub fn claw_persistence::CheckpointCoordinator<S>::remove_batch(&mut self, claw_persistence::BatchKey) -> &mut Self
-pub fn claw_persistence::CheckpointCoordinator<S>::upsert_batch(&mut self, claw_persistence::DurableBatchSnapshot) -> core::result::Result<&mut Self, claw_persistence::CheckpointError>
-pub struct claw_persistence::CheckpointWrite<'a>
-pub claw_persistence::CheckpointWrite::batches: alloc::vec::Vec<claw_persistence::BatchWrite<'a>>
-pub claw_persistence::CheckpointWrite::step: claw_persistence::CheckpointStep
-pub struct claw_persistence::DurableBatchSnapshot
-impl claw_persistence::DurableBatchSnapshot
-pub fn claw_persistence::DurableBatchSnapshot::new(claw_persistence::BatchName, claw_persistence::BatchId, alloc::vec::Vec<claw_persistence::DurablePartSnapshot>) -> Self
-pub fn claw_persistence::DurableBatchSnapshot::with_dependencies(self, alloc::vec::Vec<(claw_persistence::BatchRef, claw_persistence::DependencyRequirement)>) -> Self
-impl claw_persistence::DurableBatch for claw_persistence::DurableBatchSnapshot
-pub fn claw_persistence::DurableBatchSnapshot::as_ref(&self) -> claw_persistence::BatchRef
-pub fn claw_persistence::DurableBatchSnapshot::depends_on(&self) -> alloc::vec::Vec<(claw_persistence::BatchRef, claw_persistence::DependencyRequirement)>
-pub fn claw_persistence::DurableBatchSnapshot::id(&self) -> claw_persistence::BatchId
-pub fn claw_persistence::DurableBatchSnapshot::name(&self) -> claw_persistence::BatchName
-pub fn claw_persistence::DurableBatchSnapshot::parts(&self) -> alloc::vec::Vec<&dyn claw_persistence::DurablePart>
-pub fn claw_persistence::DurableBatchSnapshot::refresh_generation(&mut self)
-pub struct claw_persistence::DurablePartSnapshot
-impl claw_persistence::DurablePartSnapshot
-pub fn claw_persistence::DurablePartSnapshot::capture(&dyn claw_persistence::DurablePart) -> core::result::Result<Self, claw_persistence::DurablePartError>
-pub fn claw_persistence::DurablePartSnapshot::new(claw_persistence::PartName, claw_persistence::PartGeneration, claw_persistence::PartStateBlob<'static>, claw_persistence::StorageHint) -> Self
-impl claw_persistence::DurablePart for claw_persistence::DurablePartSnapshot
-pub fn claw_persistence::DurablePartSnapshot::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
-pub fn claw_persistence::DurablePartSnapshot::generation(&self) -> claw_persistence::PartGeneration
-pub fn claw_persistence::DurablePartSnapshot::name(&self) -> claw_persistence::PartName
-pub fn claw_persistence::DurablePartSnapshot::restore_from_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError> where Self: core::marker::Sized
-pub fn claw_persistence::DurablePartSnapshot::storage_hint(&self) -> claw_persistence::StorageHint
-pub struct claw_persistence::DurableState<T: claw_persistence::DurableStateCodec>
-impl<T: claw_persistence::DurableStateCodec> claw_persistence::DurableState<T>
-pub fn claw_persistence::DurableState<T>::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
-pub fn claw_persistence::DurableState<T>::generation(&self) -> claw_persistence::PartGeneration
-pub fn claw_persistence::DurableState<T>::get(&self) -> &T
-pub fn claw_persistence::DurableState<T>::get_mut(&mut self) -> &mut T
+impl claw_persistence::DurablePartError
+pub fn claw_persistence::DurablePartError::decode(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_persistence::DurablePartError::encode(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub enum claw_persistence::Entry
+pub claw_persistence::Entry::Collection(alloc::string::String)
+pub claw_persistence::Entry::Singleton(alloc::string::String)
+impl claw_persistence::Entry
+pub fn claw_persistence::Entry::collection(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_persistence::Entry::name(&self) -> &str
+pub fn claw_persistence::Entry::singleton(impl core::convert::Into<alloc::string::String>) -> Self
+pub enum claw_persistence::PersistenceError
+pub claw_persistence::PersistenceError::CannotListSingleton
+pub claw_persistence::PersistenceError::CannotListSingleton::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::Codec(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub claw_persistence::PersistenceError::CorruptState(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub claw_persistence::PersistenceError::EmptyDirectory
+pub claw_persistence::PersistenceError::InvalidCollection
+pub claw_persistence::PersistenceError::InvalidCollection::namespace: alloc::string::String
+pub claw_persistence::PersistenceError::InvalidSingleton
+pub claw_persistence::PersistenceError::InvalidSingleton::key: alloc::string::String
+pub claw_persistence::PersistenceError::MissingInstanceId
+pub claw_persistence::PersistenceError::MissingInstanceId::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::StateNotFound
+pub claw_persistence::PersistenceError::StateNotFound::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::StateNotFound::instance_id: core::option::Option<claw_persistence::InstanceId>
+pub claw_persistence::PersistenceError::Storage(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub claw_persistence::PersistenceError::TemplateAlreadyExists
+pub claw_persistence::PersistenceError::TemplateAlreadyExists::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::TemplateNotFound
+pub claw_persistence::PersistenceError::TemplateNotFound::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::TypeMismatch
+pub claw_persistence::PersistenceError::TypeMismatch::actual: &'static str
+pub claw_persistence::PersistenceError::TypeMismatch::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::TypeMismatch::expected: &'static str
+pub claw_persistence::PersistenceError::UnexpectedInstanceId
+pub claw_persistence::PersistenceError::UnexpectedInstanceId::entry: claw_persistence::Entry
+pub claw_persistence::PersistenceError::UnexpectedInstanceId::instance_id: claw_persistence::InstanceId
+pub struct claw_persistence::DurableState<T>
+impl<T> claw_persistence::DurableState<T>
+pub fn claw_persistence::DurableState<T>::get(&self) -> impl core::ops::deref::Deref<Target = T> + '_
+pub fn claw_persistence::DurableState<T>::get_mut(&self) -> impl core::ops::deref::DerefMut<Target = T> + '_
 pub fn claw_persistence::DurableState<T>::new(T) -> Self
-pub fn claw_persistence::DurableState<T>::replace(&mut self, T)
-pub fn claw_persistence::DurableState<T>::restore_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError>
-impl<T: claw_persistence::DurableStateCodec> core::default::Default for claw_persistence::DurableState<T>
-pub fn claw_persistence::DurableState<T>::default() -> Self
-pub struct claw_persistence::FsCheckpointStorage<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_persistence::CheckpointStorage for claw_persistence::FsCheckpointStorage<F>
-pub fn claw_persistence::FsCheckpointStorage<F>::latest_step(&self) -> core::result::Result<core::option::Option<claw_persistence::CheckpointStep>, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::load_checkpoint(&self, claw_persistence::CheckpointStep) -> core::result::Result<claw_persistence::Checkpoint, claw_persistence::LoadCheckpointError>
-pub fn claw_persistence::FsCheckpointStorage<F>::new(alloc::string::String) -> Self
-pub fn claw_persistence::FsCheckpointStorage<F>::next_step(&mut self) -> core::result::Result<claw_persistence::CheckpointStep, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::prune_history(&mut self, claw_persistence::CheckpointStep) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::write_checkpoint(&mut self, claw_persistence::CheckpointWrite<'_>) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::write_checkpoint_with_removals(&mut self, claw_persistence::CheckpointWrite<'_>, &[claw_persistence::BatchKey]) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub struct claw_persistence::LoadedPart
-pub claw_persistence::LoadedPart::name: alloc::string::String
-pub claw_persistence::LoadedPart::state: claw_persistence::PartStateBlob<'static>
-pub struct claw_persistence::PartStateBlob<'a>
-pub claw_persistence::PartStateBlob::bytes: alloc::borrow::Cow<'a, [u8]>
-pub claw_persistence::PartStateBlob::schema_version: claw_persistence::SchemaVersion
-impl<'a> claw_persistence::PartStateBlob<'a>
-pub fn claw_persistence::PartStateBlob<'a>::as_slice(&self) -> claw_persistence::PartStateSlice<'_>
-pub fn claw_persistence::PartStateBlob<'a>::into_owned(self) -> claw_persistence::PartStateBlob<'static>
-pub struct claw_persistence::PartStateSlice<'a>
-pub claw_persistence::PartStateSlice::bytes: &'a [u8]
-pub claw_persistence::PartStateSlice::schema_version: claw_persistence::SchemaVersion
-pub struct claw_persistence::PartWrite<'a>
-pub claw_persistence::PartWrite::hint: claw_persistence::StorageHint
-pub claw_persistence::PartWrite::name: claw_persistence::PartName
-pub claw_persistence::PartWrite::state: claw_persistence::PartStateBlob<'a>
-pub struct claw_persistence::SharedCheckpointCoordinator<S: claw_persistence::CheckpointStorage>
-impl<S: claw_persistence::CheckpointStorage> claw_persistence::SharedCheckpointCoordinator<S>
-pub fn claw_persistence::SharedCheckpointCoordinator<S>::checkpoint(&self, alloc::vec::Vec<claw_persistence::DurableBatchSnapshot>) -> core::result::Result<(), claw_persistence::CheckpointError>
-pub fn claw_persistence::SharedCheckpointCoordinator<S>::checkpoint_and_remove(&self, alloc::vec::Vec<claw_persistence::DurableBatchSnapshot>, alloc::vec::Vec<claw_persistence::BatchKey>) -> core::result::Result<(), claw_persistence::CheckpointError>
-pub fn claw_persistence::SharedCheckpointCoordinator<S>::new(S, claw_persistence::CheckpointStep, claw_persistence::CheckpointStep) -> core::result::Result<Self, claw_persistence::CheckpointCoordinatorInitError>
-pub fn claw_persistence::SharedCheckpointCoordinator<S>::remove_batch(&self, claw_persistence::BatchKey) -> core::result::Result<(), claw_persistence::CheckpointError>
-impl<S: claw_persistence::CheckpointStorage> core::clone::Clone for claw_persistence::SharedCheckpointCoordinator<S>
-pub fn claw_persistence::SharedCheckpointCoordinator<S>::clone(&self) -> Self
-pub struct claw_persistence::StorageHint
-pub claw_persistence::StorageHint::change: claw_persistence::ChangePatternHint
-pub claw_persistence::StorageHint::size: claw_persistence::StorageSizeHint
-pub trait claw_persistence::CheckpointStorage
-pub fn claw_persistence::CheckpointStorage::latest_step(&self) -> core::result::Result<core::option::Option<claw_persistence::CheckpointStep>, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::CheckpointStorage::load_checkpoint(&self, claw_persistence::CheckpointStep) -> core::result::Result<claw_persistence::Checkpoint, claw_persistence::LoadCheckpointError>
-pub fn claw_persistence::CheckpointStorage::new(alloc::string::String) -> Self where Self: core::marker::Sized
-pub fn claw_persistence::CheckpointStorage::next_step(&mut self) -> core::result::Result<claw_persistence::CheckpointStep, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::CheckpointStorage::prune_history(&mut self, claw_persistence::CheckpointStep) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::CheckpointStorage::write_checkpoint(&mut self, claw_persistence::CheckpointWrite<'_>) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::CheckpointStorage::write_checkpoint_with_removals(&mut self, claw_persistence::CheckpointWrite<'_>, &[claw_persistence::BatchKey]) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-impl<F: claw_interface::fs::ClawFs> claw_persistence::CheckpointStorage for claw_persistence::FsCheckpointStorage<F>
-pub fn claw_persistence::FsCheckpointStorage<F>::latest_step(&self) -> core::result::Result<core::option::Option<claw_persistence::CheckpointStep>, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::load_checkpoint(&self, claw_persistence::CheckpointStep) -> core::result::Result<claw_persistence::Checkpoint, claw_persistence::LoadCheckpointError>
-pub fn claw_persistence::FsCheckpointStorage<F>::new(alloc::string::String) -> Self
-pub fn claw_persistence::FsCheckpointStorage<F>::next_step(&mut self) -> core::result::Result<claw_persistence::CheckpointStep, claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::prune_history(&mut self, claw_persistence::CheckpointStep) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::write_checkpoint(&mut self, claw_persistence::CheckpointWrite<'_>) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub fn claw_persistence::FsCheckpointStorage<F>::write_checkpoint_with_removals(&mut self, claw_persistence::CheckpointWrite<'_>, &[claw_persistence::BatchKey]) -> core::result::Result<(), claw_persistence::CheckpointStorageError>
-pub trait claw_persistence::DurableBatch: core::marker::Send
-pub fn claw_persistence::DurableBatch::as_ref(&self) -> claw_persistence::BatchRef
-pub fn claw_persistence::DurableBatch::depends_on(&self) -> alloc::vec::Vec<(claw_persistence::BatchRef, claw_persistence::DependencyRequirement)>
-pub fn claw_persistence::DurableBatch::id(&self) -> claw_persistence::BatchId
-pub fn claw_persistence::DurableBatch::name(&self) -> claw_persistence::BatchName
-pub fn claw_persistence::DurableBatch::parts(&self) -> alloc::vec::Vec<&dyn claw_persistence::DurablePart>
-pub fn claw_persistence::DurableBatch::refresh_generation(&mut self)
-impl claw_persistence::DurableBatch for claw_persistence::DurableBatchSnapshot
-pub fn claw_persistence::DurableBatchSnapshot::as_ref(&self) -> claw_persistence::BatchRef
-pub fn claw_persistence::DurableBatchSnapshot::depends_on(&self) -> alloc::vec::Vec<(claw_persistence::BatchRef, claw_persistence::DependencyRequirement)>
-pub fn claw_persistence::DurableBatchSnapshot::id(&self) -> claw_persistence::BatchId
-pub fn claw_persistence::DurableBatchSnapshot::name(&self) -> claw_persistence::BatchName
-pub fn claw_persistence::DurableBatchSnapshot::parts(&self) -> alloc::vec::Vec<&dyn claw_persistence::DurablePart>
-pub fn claw_persistence::DurableBatchSnapshot::refresh_generation(&mut self)
-pub trait claw_persistence::DurablePart
-pub fn claw_persistence::DurablePart::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
-pub fn claw_persistence::DurablePart::generation(&self) -> claw_persistence::PartGeneration
-pub fn claw_persistence::DurablePart::name(&self) -> claw_persistence::PartName
-pub fn claw_persistence::DurablePart::restore_from_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError> where Self: core::marker::Sized
-pub fn claw_persistence::DurablePart::storage_hint(&self) -> claw_persistence::StorageHint
-impl claw_persistence::DurablePart for claw_persistence::DurablePartSnapshot
-pub fn claw_persistence::DurablePartSnapshot::export_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
-pub fn claw_persistence::DurablePartSnapshot::generation(&self) -> claw_persistence::PartGeneration
-pub fn claw_persistence::DurablePartSnapshot::name(&self) -> claw_persistence::PartName
-pub fn claw_persistence::DurablePartSnapshot::restore_from_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError> where Self: core::marker::Sized
-pub fn claw_persistence::DurablePartSnapshot::storage_hint(&self) -> claw_persistence::StorageHint
-pub trait claw_persistence::DurableStateCodec: core::default::Default
-pub fn claw_persistence::DurableStateCodec::decode_state(claw_persistence::PartStateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError> where Self: core::marker::Sized
-pub fn claw_persistence::DurableStateCodec::encode_state(&self) -> core::result::Result<claw_persistence::PartStateBlob<'_>, claw_persistence::DurablePartError>
-pub type claw_persistence::BatchGeneration = u64
-pub type claw_persistence::BatchKey = (claw_persistence::BatchName, claw_persistence::BatchId)
-pub type claw_persistence::BatchName = &'static str
-pub type claw_persistence::CheckpointStep = u64
-pub type claw_persistence::FsCheckpointCoordinator<F> = claw_persistence::SharedCheckpointCoordinator<claw_persistence::FsCheckpointStorage<F>>
-pub type claw_persistence::PartGeneration = u64
-pub type claw_persistence::PartName = &'static str
+pub fn claw_persistence::DurableState<T>::replace(&self, T)
+impl<T> core::clone::Clone for claw_persistence::DurableState<T>
+pub fn claw_persistence::DurableState<T>::clone(&self) -> Self
+pub struct claw_persistence::InstanceId(_)
+impl claw_persistence::InstanceId
+pub fn claw_persistence::InstanceId::as_str(&self) -> &str
+pub fn claw_persistence::InstanceId::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_persistence::InvalidInstanceId>
+pub struct claw_persistence::InvalidInstanceId
+impl claw_persistence::InvalidInstanceId
+pub fn claw_persistence::InvalidInstanceId::as_str(&self) -> &str
+pub struct claw_persistence::Persistence<Filesystem: claw_interface::fs::ClawFs>
+impl<Filesystem: claw_interface::fs::ClawFs> claw_persistence::Persistence<Filesystem>
+pub fn claw_persistence::Persistence<Filesystem>::create_template<T>(&self, claw_persistence::Entry) -> core::result::Result<(), claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + core::marker::Send + 'static
+pub fn claw_persistence::Persistence<Filesystem>::get<T>(&self, &claw_persistence::Entry, core::option::Option<&claw_persistence::InstanceId>) -> core::result::Result<claw_persistence::DurableState<T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + core::marker::Send + 'static
+pub fn claw_persistence::Persistence<Filesystem>::list(&self, &claw_persistence::Entry) -> core::result::Result<alloc::vec::Vec<claw_persistence::InstanceId>, claw_persistence::PersistenceError>
+pub fn claw_persistence::Persistence<Filesystem>::maybe_persist(&self) -> core::result::Result<(), claw_persistence::PersistenceError>
+pub fn claw_persistence::Persistence<Filesystem>::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_persistence::PersistenceError>
+pub fn claw_persistence::Persistence<Filesystem>::put<T>(&self, &claw_persistence::Entry, core::option::Option<claw_persistence::InstanceId>, T) -> core::result::Result<claw_persistence::DurableState<T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + core::marker::Send + 'static
+pub fn claw_persistence::Persistence<Filesystem>::remove(&self, &claw_persistence::Entry, core::option::Option<&claw_persistence::InstanceId>) -> core::result::Result<(), claw_persistence::PersistenceError>
+pub struct claw_persistence::StateBlob<'a>
+pub claw_persistence::StateBlob::bytes: alloc::borrow::Cow<'a, [u8]>
+impl<'a> claw_persistence::StateBlob<'a>
+pub fn claw_persistence::StateBlob<'a>::as_slice(&self) -> claw_persistence::StateSlice<'_>
+pub fn claw_persistence::StateBlob<'a>::into_owned(self) -> claw_persistence::StateBlob<'static>
+pub struct claw_persistence::StateSlice<'a>
+pub claw_persistence::StateSlice::bytes: &'a [u8]
+pub trait claw_persistence::DurableStateCodec: core::marker::Sized
+pub const claw_persistence::DurableStateCodec::SCHEMA_VERSION: claw_persistence::SchemaVersion
+pub fn claw_persistence::DurableStateCodec::decode_state(claw_persistence::SchemaVersion, claw_persistence::StateSlice<'_>) -> core::result::Result<Self, claw_persistence::DurablePartError>
+pub fn claw_persistence::DurableStateCodec::encode_state(&self) -> core::result::Result<claw_persistence::StateBlob<'_>, claw_persistence::DurablePartError>
 pub type claw_persistence::SchemaVersion = u32
+pub type claw_persistence::SharedPersistence<Filesystem> = alloc::sync::Arc<claw_persistence::Persistence<Filesystem>>

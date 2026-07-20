@@ -37,15 +37,16 @@ pub struct Persistence<Filesystem: ClawFs> {
 impl<Filesystem: ClawFs> Persistence<Filesystem> {
     pub fn new(persistence_directory: impl Into<String>) -> Result<Self, PersistenceError> {
         let persistence_directory = persistence_directory.into();
-        if persistence_directory.is_empty() {
+        if persistence_directory.trim().is_empty() {
             return Err(PersistenceError::EmptyDirectory);
         }
 
         Filesystem::create_dir_all(&persistence_directory).map_err(|source| {
-            PersistenceError::CreateDirectory {
-                path: persistence_directory.clone(),
+            PersistenceError::storage(
+                "create persistence directory",
+                persistence_directory.clone(),
                 source,
-            }
+            )
         })?;
 
         Ok(Self {
@@ -140,14 +141,11 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
                     instance_id: instance_id.cloned(),
                 });
             }
-            Err(source) => return Err(PersistenceError::Read { path, source }),
+            Err(source) => return Err(PersistenceError::storage("read state", path, source)),
         };
         let (schema_version, state) = decode_file(&path, &file)?;
-        let registered =
-            (template.restore)(schema_version, state).map_err(|source| PersistenceError::Part {
-                path: path.clone(),
-                source,
-            })?;
+        let registered = (template.restore)(schema_version, state)
+            .map_err(|source| PersistenceError::codec(path.clone(), source))?;
         let durable_state = self.typed_state::<T>(entry, registered.as_ref())?;
         lock(&self.parts).insert(address, registered);
         Ok(durable_state)
@@ -163,7 +161,12 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         let _operation = lock(&self.operation_lock);
         let path = self.state_path(&address);
 
-        Filesystem::remove(&path).map_err(|source| PersistenceError::Remove { path, source })?;
+        match Filesystem::remove(&path) {
+            Ok(()) | Err(FsError::NotFound) => {}
+            Err(source) => {
+                return Err(PersistenceError::storage("remove state", path, source));
+            }
+        }
         lock(&self.parts).remove(&address);
         Ok(())
     }
@@ -182,7 +185,9 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         let entries = match Filesystem::list_dir(&path) {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
-            Err(source) => return Err(PersistenceError::List { path, source }),
+            Err(source) => {
+                return Err(PersistenceError::storage("list collection", path, source));
+            }
         };
 
         let mut instance_ids = entries
@@ -209,19 +214,16 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
 
         for (address, part) in parts {
             let path = self.state_path(&address);
-            let Some(snapshot) =
-                part.snapshot_if_dirty()
-                    .map_err(|source| PersistenceError::Part {
-                        path: path.clone(),
-                        source,
-                    })?
+            let Some(snapshot) = part
+                .snapshot_if_dirty()
+                .map_err(|source| PersistenceError::codec(path.clone(), source))?
             else {
                 continue;
             };
 
             let file = encode_file(snapshot.schema_version, snapshot.state);
             Filesystem::write_atomic(&path, &file)
-                .map_err(|source| PersistenceError::Write { path, source })?;
+                .map_err(|source| PersistenceError::storage("write state", path, source))?;
             part.mark_persisted(snapshot.generation);
         }
 
@@ -302,7 +304,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
                 }
             }
             Entry::Collection(namespace) => {
-                if !is_valid_namespace(namespace) {
+                if !is_valid_key(namespace) {
                     return Err(PersistenceError::InvalidCollection {
                         namespace: namespace.clone(),
                     });
@@ -416,14 +418,6 @@ struct PartSnapshot {
     state: StateBlob<'static>,
 }
 
-fn is_valid_namespace(namespace: &str) -> bool {
-    !namespace.is_empty()
-        && !namespace.starts_with('/')
-        && namespace
-            .split('/')
-            .all(|component| !component.is_empty() && component != "." && component != "..")
-}
-
 fn encode_file(schema_version: SchemaVersion, state: StateBlob<'_>) -> Vec<u8> {
     let mut file = Vec::with_capacity(SCHEMA_VERSION_SIZE + state.bytes.len());
     file.extend_from_slice(&schema_version.to_le_bytes());
@@ -436,10 +430,11 @@ fn decode_file<'a>(
     file: &'a [u8],
 ) -> Result<(SchemaVersion, StateSlice<'a>), PersistenceError> {
     if file.len() < SCHEMA_VERSION_SIZE {
-        return Err(PersistenceError::TruncatedFile {
-            path: path.to_owned(),
-            actual_size: file.len(),
-        });
+        return Err(PersistenceError::corrupt_state(
+            path.to_owned(),
+            SCHEMA_VERSION_SIZE,
+            file.len(),
+        ));
     }
 
     let schema_version = SchemaVersion::from_le_bytes([file[0], file[1], file[2], file[3]]);
@@ -487,46 +482,61 @@ pub enum PersistenceError {
     },
     #[error("cannot list singleton entry {entry:?}")]
     CannotListSingleton { entry: Entry },
-    #[error("failed to create persistence directory `{path}`: {source}")]
-    CreateDirectory {
-        path: String,
-        #[source]
-        source: FsError,
-    },
-    #[error("failed to read persistence file `{path}`: {source}")]
-    Read {
-        path: String,
-        #[source]
-        source: FsError,
-    },
-    #[error("failed to list persistence collection `{path}`: {source}")]
-    List {
-        path: String,
-        #[source]
-        source: FsError,
-    },
-    #[error("failed to write persistence file `{path}`: {source}")]
-    Write {
-        path: String,
-        #[source]
-        source: FsError,
-    },
-    #[error("failed to remove persistence file `{path}`: {source}")]
-    Remove {
-        path: String,
-        #[source]
-        source: FsError,
-    },
-    #[error(
-        "persistence file `{path}` is too short: expected at least 4 bytes, found {actual_size}"
-    )]
-    TruncatedFile { path: String, actual_size: usize },
-    #[error("failed to process persisted state `{path}`: {source}")]
-    Part {
-        path: String,
-        #[source]
-        source: DurablePartError,
-    },
+    #[error("{0}")]
+    Storage(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("{0}")]
+    CorruptState(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("{0}")]
+    Codec(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+impl PersistenceError {
+    fn storage(operation: &'static str, path: String, source: FsError) -> Self {
+        Self::Storage(Box::new(StorageFailure {
+            operation,
+            path,
+            source,
+        }))
+    }
+
+    fn corrupt_state(path: String, expected_size: usize, actual_size: usize) -> Self {
+        Self::CorruptState(Box::new(CorruptStateFailure {
+            path,
+            expected_size,
+            actual_size,
+        }))
+    }
+
+    fn codec(path: String, source: DurablePartError) -> Self {
+        Self::Codec(Box::new(CodecFailure { path, source }))
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to {operation} at `{path}`: {source}")]
+struct StorageFailure {
+    operation: &'static str,
+    path: String,
+    #[source]
+    source: FsError,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "persisted state `{path}` is too short: expected at least {expected_size} bytes, found {actual_size}"
+)]
+struct CorruptStateFailure {
+    path: String,
+    expected_size: usize,
+    actual_size: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("failed to process persisted state `{path}`: {source}")]
+struct CodecFailure {
+    path: String,
+    #[source]
+    source: DurablePartError,
 }
 
 #[cfg(test)]
@@ -733,6 +743,21 @@ mod tests {
     }
 
     #[test]
+    fn entry_names_are_identifiers_not_paths() {
+        let persistence = Persistence::<MemFs>::new("/claw-persistence-entry-names")
+            .expect("persistence initializes");
+
+        assert!(matches!(
+            persistence.create_template::<TestState>(Entry::singleton("nested/state")),
+            Err(PersistenceError::InvalidSingleton { .. })
+        ));
+        assert!(matches!(
+            persistence.create_template::<TestState>(Entry::collection("nested/sessions")),
+            Err(PersistenceError::InvalidCollection { .. })
+        ));
+    }
+
+    #[test]
     fn template_registration_enforces_identity_and_type() {
         let entry = Entry::singleton("state");
         let persistence = Persistence::<MemFs>::new("/claw-persistence-template-rules")
@@ -825,8 +850,11 @@ mod tests {
             .expect("state-looking file is installed");
         MemFs::write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored")
             .expect("non-state file is installed");
-        MemFs::write_atomic(&format!("{root}/sessions/nested/state.bin"), b"ignored")
-            .expect("nested state is installed");
+        MemFs::write_atomic(
+            &format!("{root}/sessions/nested/transcript.jsonl"),
+            b"ignored",
+        )
+        .expect("nested state is installed");
         MemFs::write_atomic(&format!("{root}/sessions/...bin"), b"ignored")
             .expect("invalid state-looking file is installed");
 
@@ -851,9 +879,10 @@ mod tests {
             .expect("template is created");
         MemFs::write_atomic(&path, &[1, 0, 0]).expect("truncated file is installed");
 
-        assert!(matches!(
-            persistence.get::<TestState>(&entry, None),
-            Err(PersistenceError::TruncatedFile { actual_size: 3, .. })
-        ));
+        let error = persistence
+            .get::<TestState>(&entry, None)
+            .expect_err("truncated state is rejected");
+        assert!(matches!(&error, PersistenceError::CorruptState(_)));
+        assert!(error.to_string().contains(&path));
     }
 }

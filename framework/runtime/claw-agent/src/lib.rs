@@ -8,34 +8,26 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use claw_api::{ClawApiConfig, InitError};
-use claw_persistence::{
-    BatchId, CheckpointCoordinatorInitError, CheckpointStorage, CheckpointStorageError,
-    DurableBatchSnapshot, DurablePart, DurablePartError, DurablePartSnapshot, FsCheckpointStorage,
-    LoadCheckpointError, SharedCheckpointCoordinator,
-};
 pub use claw_core::{
     AgentId, ApiUsage, InputRequestId, InputRequestKind, IterationId, Message, OpenSessionError,
-    PermissionLevel, ReasoningEffort, SessionControl, SessionControlError, SessionEvent,
-    SessionEventStream, SessionId, SessionPersistence, StreamPart, ToolCall, TurnId, TurnOrigin,
+    PermissionLevel, ReasoningEffort, SessionControl, SessionControlError, SessionCreateError,
+    SessionEvent, SessionEventStream, SessionId, SessionPersistence, StreamPart, ToolCall, TurnId,
+    TurnOrigin,
 };
 use claw_core::{Orchestrator, OrchestratorBuildError};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, FsError};
 #[cfg(feature = "host-backends")]
 use claw_interface::{DiskFs, RealHttp, TokioTimer};
-use claw_tool::{ToolRegistry, ToolRegistryError};
+use claw_persistence::{Entry, Persistence, PersistenceError, SharedPersistence};
+use claw_tool::{ToolRegistry, ToolRegistryError, ToolRegistryState};
+
+const TOOL_REGISTRY_ENTRY: &str = "tool_registry";
 
 #[cfg(feature = "host-backends")]
 pub type HostAgentSystem = AgentSystem<DiskFs, RealHttp, TokioTimer>;
 
 pub type AgentResult<T> = Result<T, AgentError>;
-
-const CHECKPOINT_DIR: &str = "checkpoint";
-const TOOL_REGISTRY_BATCH: &str = "tool-registry";
-const TOOL_REGISTRY_BATCH_ID: BatchId = BatchId::new(1);
-const TOOL_REGISTRY_PART: &str = "tool-registry";
-const CHECKPOINT_INTERVAL: u64 = 30;
-const CHECKPOINT_HISTORY: u64 = 2;
 
 /// Explicit storage root for an [`AgentSystem`], plus the skill roots the agent
 /// factory scans to populate every agent's skill catalog.
@@ -62,6 +54,9 @@ pub enum AgentError {
     /// Opening a session event stream failed.
     #[error(transparent)]
     OpenSession(#[from] OpenSessionError),
+    /// Creating a session through the orchestrator failed.
+    #[error(transparent)]
+    SessionCreate(#[from] SessionCreateError),
     /// The scratch storage root could not be cleared before startup.
     #[error("failed to clear agent storage at {path}: {source}")]
     StorageClear {
@@ -69,24 +64,9 @@ pub enum AgentError {
         #[source]
         source: FsError,
     },
-    /// Checkpoint storage metadata could not be read or written.
-    #[error("checkpoint storage failed: {0}")]
-    CheckpointStorage(#[from] CheckpointStorageError),
-    /// The shared checkpoint coordinator could not be initialized.
-    #[error("checkpoint storage failed: coordinator initialization failed: {0}")]
-    CheckpointCoordinatorInit(#[from] CheckpointCoordinatorInitError),
-    /// A checkpoint exists but cannot be loaded.
-    #[error("checkpoint load failed: {0}")]
-    CheckpointLoad(#[from] LoadCheckpointError),
-    /// A checkpoint part could not be exported or restored.
-    #[error("checkpoint durable part failed: {0}")]
-    CheckpointPart(#[from] DurablePartError),
-    /// A checkpoint exists but does not contain the expected durable part.
-    #[error("checkpoint is missing part {part} in batch {batch}")]
-    MissingCheckpointPart {
-        batch: &'static str,
-        part: &'static str,
-    },
+    /// Runtime state could not be loaded or written.
+    #[error(transparent)]
+    Persistence(#[from] PersistenceError),
 }
 
 /// A ready-to-drive agent runtime.
@@ -130,43 +110,23 @@ where
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        let persistence_root = persistence.persistence_root.trim_end_matches('/');
-        let checkpoint_root = if persistence.persistence_root == "/" {
-            format!("/{CHECKPOINT_DIR}")
-        } else if persistence_root.is_empty() {
-            CHECKPOINT_DIR.to_owned()
-        } else {
-            format!("{persistence_root}/{CHECKPOINT_DIR}")
+        let shared_persistence: SharedPersistence<Filesystem> =
+            Arc::new(Persistence::new(persistence.persistence_root.clone())?);
+        let tool_registry_entry = Entry::singleton(TOOL_REGISTRY_ENTRY);
+        shared_persistence.create_template::<ToolRegistryState>(tool_registry_entry.clone())?;
+        let tool_registry_state = match shared_persistence
+            .get::<ToolRegistryState>(&tool_registry_entry, None)
+        {
+            Ok(state) => state,
+            Err(PersistenceError::StateNotFound { .. }) => {
+                shared_persistence.put(&tool_registry_entry, None, ToolRegistryState::default())?
+            }
+            Err(error) => return Err(error.into()),
         };
-        let checkpoints = SharedCheckpointCoordinator::new(
-            FsCheckpointStorage::<Filesystem>::new(checkpoint_root.clone()),
-            CHECKPOINT_INTERVAL,
-            CHECKPOINT_HISTORY,
-        )?;
-        let tools = Arc::new(load_tool_registry::<Filesystem>(&checkpoint_root)?);
-        let tool_checkpoints = checkpoints.clone();
-        tools.set_checkpoint_hook(move |generation, state, hint| {
-            tool_checkpoints.checkpoint(vec![DurableBatchSnapshot::new(
-                TOOL_REGISTRY_BATCH,
-                TOOL_REGISTRY_BATCH_ID,
-                vec![DurablePartSnapshot::new(
-                    TOOL_REGISTRY_PART,
-                    generation,
-                    state,
-                    hint,
-                )],
-            )])?;
-            Ok(())
-        });
-        let orchestrator = Orchestrator::new_with_checkpoint_coordinator::<
-            Filesystem,
-            Http,
-            Timer,
-            Thread,
-            Executor,
-        >(
+        let tools = Arc::new(ToolRegistry::from_state(tool_registry_state));
+        let orchestrator = Orchestrator::new::<Filesystem, Http, Timer, Thread, Executor>(
             Arc::clone(&tools),
-            checkpoints,
+            shared_persistence,
             persistence.persistence_root,
             persistence.skill_roots,
         )?;
@@ -237,8 +197,15 @@ where
 
     /// Create a fresh isolated conversation session with explicit persistence.
     /// Ephemeral sessions keep their transcript only for this process.
-    pub fn new_session(&self, persistence: SessionPersistence) -> SessionId {
-        self.orchestrator.session_create(persistence)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::SessionCreate`] if persistent session state cannot
+    /// be initialized or the orchestrator worker has stopped.
+    pub fn new_session(&self, persistence: SessionPersistence) -> AgentResult<SessionId> {
+        self.orchestrator
+            .session_create(persistence)
+            .map_err(AgentError::from)
     }
 
     /// Return the live conversation sessions.
@@ -257,35 +224,5 @@ where
     /// orchestrator worker is stopped.
     pub fn delete_session(&self, session: SessionId) -> Result<(), SessionControlError> {
         self.orchestrator.session_delete(session)
-    }
-}
-
-fn load_tool_registry<Filesystem: ClawFs>(checkpoint_root: &str) -> AgentResult<ToolRegistry> {
-    let storage = FsCheckpointStorage::<Filesystem>::new(checkpoint_root.to_owned());
-    let Some(step) = storage.latest_step()? else {
-        return Ok(ToolRegistry::new());
-    };
-    let checkpoint = storage.load_checkpoint(step)?;
-    let mut saw_batch = false;
-    for batch in checkpoint.batches {
-        if batch.name != TOOL_REGISTRY_BATCH || batch.id != TOOL_REGISTRY_BATCH_ID {
-            continue;
-        }
-        saw_batch = true;
-        for part in batch.parts {
-            if part.name == TOOL_REGISTRY_PART {
-                return Ok(<ToolRegistry as DurablePart>::restore_from_state(
-                    part.state.as_slice(),
-                )?);
-            }
-        }
-    }
-    if saw_batch {
-        Err(AgentError::MissingCheckpointPart {
-            batch: TOOL_REGISTRY_BATCH,
-            part: TOOL_REGISTRY_PART,
-        })
-    } else {
-        Ok(ToolRegistry::new())
     }
 }

@@ -52,7 +52,9 @@ fn session_events_close_each_content_stream_explicitly() {
     let root = mem_root("agent-loop-stream-parts");
     let system = build_matrix_system(&root);
     apply_registry_ops(&system, "register|start", MatrixToolBehavior::Echo);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("exercise stream boundaries"))).unwrap();
@@ -120,7 +122,9 @@ fn agent_loop_csv_tool_matrix_runs_tools_and_feeds_results_to_next_iteration() {
             field(&row, "registry_ops"),
             parse_tool_behavior(field(&row, "tool_behavior")),
         );
-        let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+        let session = system
+            .new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap();
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(format!("run tool matrix {case}")))).unwrap();
@@ -186,7 +190,9 @@ fn agent_loop_csv_llm_response_matrix_reports_errors_and_bounds_reasoning() {
 
         let root = mem_root("agent-loop-llm");
         let system = build_matrix_system(&root);
-        let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+        let session = system
+            .new_session(claw_agent::SessionPersistence::Persistent)
+            .unwrap();
         let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.submit(Message::text(format!("run llm response matrix {case}")))).unwrap();
@@ -218,7 +224,9 @@ fn reasoning_effort_replaces_the_root_system_prompt_block_on_the_next_turn() {
 
     let root = mem_root("agent-loop-reasoning-effort");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.submit(Message::text("first turn"))).unwrap();
@@ -251,7 +259,9 @@ fn permission_level_changes_during_a_turn_before_the_next_action_authorization()
 
     let root = mem_root("agent-loop-live-permission-level");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Deny)).unwrap();
@@ -286,7 +296,9 @@ fn ask_permission_level_reaches_the_public_approval_flow() {
 
     let root = mem_root("agent-loop-ask-permission-level");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -352,7 +364,9 @@ fn approval_response_requires_the_pending_request_id() {
 
     let root = mem_root("agent-loop-approval-request-id");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -404,7 +418,9 @@ fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
 
     let root = mem_root("agent-loop-approval-clarification");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -457,7 +473,9 @@ fn explicit_rejection_survives_a_switch_from_ask_to_allow_all() {
 
     let root = mem_root("agent-loop-rejected-permission");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -512,7 +530,9 @@ fn each_asked_call_is_resolved_separately_while_safe_calls_keep_running() {
 
     let root = mem_root("agent-loop-distinct-approvals");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
@@ -588,7 +608,9 @@ fn permission_levels_are_isolated_between_sessions() {
     let root = mem_root("agent-loop-isolated-permission-levels");
     let system = build_matrix_system(&root);
 
-    let denied_session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let denied_session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (denied_control, mut denied_events) = system.open_session(denied_session).unwrap();
     block_on(denied_control.set_permission_level(PermissionLevel::Deny)).unwrap();
     block_on(denied_control.submit(Message::text("deny side effects"))).unwrap();
@@ -598,7 +620,9 @@ fn permission_levels_are_isolated_between_sessions() {
         vec!["denied session continued".to_string()]
     );
 
-    let default_session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let default_session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (default_control, mut default_events) = system.open_session(default_session).unwrap();
     block_on(default_control.submit(Message::text("use the default permission"))).unwrap();
     let default_events = drain_until_turn_ended(&mut default_events);
@@ -626,7 +650,9 @@ fn agent_loop_emits_provider_usage_for_cli_consumers() {
 
     let root = mem_root("agent-loop-usage");
     let system = build_matrix_system(&root);
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.submit(Message::text("report usage"))).unwrap();
     let events = drain_until_turn_ended(&mut events);

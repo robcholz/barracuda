@@ -48,7 +48,9 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     let root = TempDir::new("logical-task-trace").unwrap();
     let root = root.path().to_string_lossy().into_owned();
     let first_system = build_trace_system(&root, vec![assistant_text("done"); 8]);
-    let restored_session = first_system.new_session(claw_agent::SessionPersistence::Persistent);
+    let restored_session = first_system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = first_system.open_session(restored_session).unwrap();
 
     block_on(control.submit(Message::text("trace one agent turn"))).unwrap();
@@ -60,7 +62,9 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     drop(first_system);
 
     let second_system = build_trace_system(&root, Vec::new());
-    let created_session = second_system.new_session(claw_agent::SessionPersistence::Ephemeral);
+    let created_session = second_system
+        .new_session(claw_agent::SessionPersistence::Ephemeral)
+        .unwrap();
     let (restored_control, restored_events) = second_system.open_session(restored_session).unwrap();
     drop(restored_control);
     drop(restored_events);
@@ -95,26 +99,6 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     }
 
     let restored_session_wire = restored_session.to_wire();
-    let restore = lines
-        .iter()
-        .find(|line| {
-            line_type(line) == Some("enter")
-                && token(line, "span-name") == Some("session.restore")
-                && token(line, "session") == Some(restored_session_wire.as_str())
-        })
-        .expect("session restore enter line");
-    assert_eq!(
-        token(restore, "parent"),
-        token(orchestrators[1], "span"),
-        "{restore}"
-    );
-    let restore_span = token(restore, "span").expect("session restore span id");
-    assert!(lines.iter().any(|line| {
-        line_type(line) == Some("enter")
-            && token(line, "span-name") == Some("agent.create")
-            && token(line, "parent") == Some(restore_span)
-    }));
-
     let created_session_wire = created_session.to_wire();
     let session_create = lines
         .iter()

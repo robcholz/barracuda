@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use strum::IntoStaticStr;
 
 use claw_tool::ToolSetError;
@@ -14,14 +13,12 @@ use super::IterationLoopError;
 /// separate [`super::AgentAbortHandle`] and carries no message payload. New information
 /// arrives as [`AppendMessage`](Self::AppendMessage) only at an idle boundary;
 /// hard task termination is [`Cancel`](Self::Cancel).
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AgentCommand {
     /// Start a fresh task with a user message. This is valid only when the agent
     /// is idle; the orchestrator is responsible for deferring append delivery
     /// until that boundary.
-    AppendMessage(
-        #[serde(deserialize_with = "crate::protocol::deserialize_message_or_text")] Message,
-    ),
+    AppendMessage(Message),
     /// Abandon the current task. (Orchestrator-initiated hard stop — distinct
     /// from the agent ending itself via `conversation_end`.) Being disruptive,
     /// it discards the still-open turn instead of writing a marker, so cancelled
@@ -81,7 +78,7 @@ pub(crate) enum AgentCommandError {
 }
 
 /// A human's answer to an approval request.
-#[derive(Clone, Debug, Deserialize, IntoStaticStr, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, IntoStaticStr, PartialEq, Eq)]
 pub(crate) enum ApprovalDecision {
     /// The human approved; the agent continues.
     #[strum(serialize = "approved")]

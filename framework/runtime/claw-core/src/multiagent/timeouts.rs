@@ -24,10 +24,9 @@ pub(super) struct ExpiredTimeout {
 
 /// Process-local timers for every live non-root node.
 ///
-/// The timeout configuration itself belongs to durable graph metadata. These
-/// futures are deliberately disposable: restore re-arms a fresh full duration,
-/// and removing a subtree drops every matching future atomically with its graph
-/// nodes.
+/// Both the timeout configuration and these futures belong to the live agent
+/// graph. Removing a subtree drops every matching future with its graph nodes;
+/// the graph is not reconstructed after a process restart.
 #[derive(Default)]
 pub(super) struct AgentTimeouts {
     entries: BTreeMap<AgentId, TimeoutEntry>,

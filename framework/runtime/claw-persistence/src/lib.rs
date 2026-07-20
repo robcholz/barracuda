@@ -13,6 +13,8 @@ use std::{
 
 type Shared<T> = Arc<Mutex<T>>;
 
+pub type SharedPersistence<Filesystem> = Arc<Persistence<Filesystem>>;
+
 pub type SchemaVersion = u32;
 type PartGeneration = u32;
 
@@ -69,7 +71,7 @@ impl InvalidInstanceId {
 }
 
 pub(crate) fn is_valid_key(key: &str) -> bool {
-    !key.is_empty() && !key.contains('/') && key != "." && key != ".."
+    !key.is_empty() && !key.contains(['/', '\\', '\0']) && key != "." && key != ".."
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,7 +159,7 @@ impl<T> Clone for DurableState<T> {
 }
 
 impl<T> DurableState<T> {
-    pub(crate) fn new(value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self {
             inner: Arc::new(Mutex::new(DurableStateInner {
                 value,
@@ -288,7 +290,14 @@ mod tests {
             "session-1"
         );
 
-        for invalid in ["", ".", "..", "nested/session"] {
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "nested/session",
+            "nested\\session",
+            "nul\0key",
+        ] {
             let error = InstanceId::new(invalid).expect_err("invalid instance id is rejected");
             assert_eq!(error.as_str(), invalid);
         }

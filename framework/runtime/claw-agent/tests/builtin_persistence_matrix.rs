@@ -413,7 +413,9 @@ fn run_phase(
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
-    let session = system.new_session(claw_agent::SessionPersistence::Persistent);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.submit(Message::text(input))).unwrap();
     let events = drain_until_turn_ended(&mut events);

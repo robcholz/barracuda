@@ -8,7 +8,7 @@ mod tool;
 mod validate;
 
 pub use registry::{
-    ToolGroup, ToolRegistry, ToolRegistryCheckpointError, ToolRegistryError, ToolRegistryVersion,
+    ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolRegistryVersion,
 };
 pub use runner::{ApprovalNeeded, ToolGate, ToolRunOutcome, ToolRunner};
 pub use set::{

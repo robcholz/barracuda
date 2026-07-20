@@ -9,22 +9,11 @@ pub(super) struct NodeMeta {
     parent: Option<AgentId>,
     kind: AgentKind,
     name: Option<String>,
-    timeout: Option<SubagentTimeout>,
 }
 
 impl NodeMeta {
-    pub(super) fn new(
-        parent: Option<AgentId>,
-        kind: AgentKind,
-        name: Option<String>,
-        timeout: Option<SubagentTimeout>,
-    ) -> Self {
-        Self {
-            parent,
-            kind,
-            name,
-            timeout,
-        }
+    pub(super) fn new(parent: Option<AgentId>, kind: AgentKind, name: Option<String>) -> Self {
+        Self { parent, kind, name }
     }
 
     pub(super) fn parent(&self) -> Option<AgentId> {
@@ -37,10 +26,6 @@ impl NodeMeta {
 
     pub(super) fn name(&self) -> Option<&str> {
         self.name.as_deref()
-    }
-
-    pub(super) fn timeout(&self) -> Option<SubagentTimeout> {
-        self.timeout
     }
 }
 
@@ -56,7 +41,7 @@ pub(crate) enum MultiagentWork {
     Background,
 }
 
-/// The complete durable graph and scheduler state for one session.
+/// The complete process-local graph and scheduler state for one session.
 ///
 /// Topology, ready work, and approvals are one owner so mutations such as
 /// subtree removal cannot update only half of the runtime state.
@@ -68,6 +53,7 @@ pub(crate) struct MultiagentState {
 }
 
 impl MultiagentState {
+    #[cfg(test)]
     pub(super) fn restored(
         nodes: BTreeMap<AgentId, NodeMeta>,
         ready: VecDeque<AgentId>,
@@ -109,6 +95,7 @@ impl MultiagentState {
         self.nodes.iter().map(|(&id, meta)| (id, meta))
     }
 
+    #[cfg(test)]
     pub(super) fn node_count(&self) -> usize {
         self.nodes.len()
     }
@@ -122,7 +109,7 @@ impl MultiagentState {
         if self.root().is_some() || self.nodes.contains_key(&id) {
             return false;
         }
-        self.nodes.insert(id, NodeMeta::new(None, kind, None, None));
+        self.nodes.insert(id, NodeMeta::new(None, kind, None));
         true
     }
 
@@ -133,13 +120,13 @@ impl MultiagentState {
         id: AgentId,
         kind: AgentKind,
         name: Option<String>,
-        timeout: SubagentTimeout,
+        _timeout: SubagentTimeout,
     ) -> bool {
         if !self.nodes.contains_key(&parent) || self.nodes.contains_key(&id) {
             return false;
         }
         self.nodes
-            .insert(id, NodeMeta::new(Some(parent), kind, name, Some(timeout)));
+            .insert(id, NodeMeta::new(Some(parent), kind, name));
         true
     }
 
@@ -305,16 +292,6 @@ impl MultiagentState {
         };
         self.approvals.remove(position).is_some()
     }
-
-    pub(super) fn ready_ids(&self) -> impl Iterator<Item = AgentId> + '_ {
-        self.ready.iter().copied()
-    }
-
-    pub(super) fn approvals(&self) -> impl Iterator<Item = (AgentId, &ParkedApproval)> {
-        self.approvals
-            .iter()
-            .map(|(agent, approval)| (*agent, approval))
-    }
 }
 
 #[cfg(test)]
@@ -358,21 +335,11 @@ mod tests {
         let nodes = BTreeMap::from([
             (
                 first,
-                NodeMeta::new(
-                    Some(second),
-                    AgentKind::from_static("test"),
-                    None,
-                    Some(timeout()),
-                ),
+                NodeMeta::new(Some(second), AgentKind::from_static("test"), None),
             ),
             (
                 second,
-                NodeMeta::new(
-                    Some(first),
-                    AgentKind::from_static("test"),
-                    None,
-                    Some(timeout()),
-                ),
+                NodeMeta::new(Some(first), AgentKind::from_static("test"), None),
             ),
         ]);
         let state = MultiagentState::restored(nodes, Default::default(), Default::default());

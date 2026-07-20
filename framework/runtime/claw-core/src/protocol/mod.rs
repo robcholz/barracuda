@@ -7,16 +7,15 @@ mod event;
 mod ids;
 mod kind;
 mod message;
+mod tool;
 
 pub(crate) use event::EventSink;
 pub use event::{InputRequestKind, SessionEvent, StreamPart, ToolCall};
 pub use ids::{AgentId, InputRequestId, IterationId, SessionId, TurnId};
-pub(crate) use ids::{
-    InputRequestIdAllocator, IterationIdAllocator, SessionIdAllocator, TurnIdAllocator,
-};
+pub(crate) use ids::{InputRequestIdAllocator, IterationIdAllocator, TurnIdAllocator};
 pub(crate) use kind::AgentKind;
-pub(crate) use message::deserialize_message_or_text;
 pub use message::Message;
+pub(crate) use tool::TrackedToolCall;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,7 +42,7 @@ impl TurnOrigin {
 /// Whether a session survives a runtime restart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionPersistence {
-    /// Checkpoint session state and write the root transcript to storage.
+    /// Persist session state and write the root transcript to storage.
     Persistent,
     /// Keep session state and transcript in memory for this process only.
     Ephemeral,
