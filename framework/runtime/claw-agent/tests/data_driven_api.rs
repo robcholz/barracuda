@@ -185,10 +185,7 @@ fn construction_csv_roots_accept_tempdirs_and_reject_blank_roots() {
             assert_eq!(system.list_sessions(), vec![session], "case {case}");
             drop(system);
             assert!(
-                DiskFs::exists(&format!(
-                    "{}/session_id_allocator.bin",
-                    root.trim_end_matches('/')
-                )),
+                DiskFs::exists(&format!("{}/id_allocators.bin", root.trim_end_matches('/'))),
                 "case {case}"
             );
         } else {

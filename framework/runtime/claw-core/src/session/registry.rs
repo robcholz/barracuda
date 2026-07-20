@@ -5,21 +5,22 @@ use std::sync::{Mutex, MutexGuard};
 
 use claw_persistence::DurableState;
 
-use crate::protocol::{SessionId, SessionIdAllocator, SessionPersistence};
+use crate::orchestrator::IdAllocators;
+use crate::protocol::{SessionId, SessionPersistence};
 
 struct Registry {
-    ids: DurableState<SessionIdAllocator>,
     persistent_sessions: BTreeSet<SessionId>,
     ephemeral_sessions: BTreeSet<SessionId>,
 }
 
 pub(crate) struct SessionStore {
+    ids: DurableState<IdAllocators>,
     registry: Mutex<Registry>,
 }
 
 impl SessionStore {
     pub(crate) fn new(
-        mut ids: SessionIdAllocator,
+        ids: DurableState<IdAllocators>,
         persistent_sessions: impl IntoIterator<Item = SessionId>,
     ) -> Self {
         let persistent_sessions = persistent_sessions.into_iter().collect::<BTreeSet<_>>();
@@ -27,21 +28,15 @@ impl SessionStore {
             .last()
             .map(|session| session.0.saturating_add(1))
             .unwrap_or(1);
-        let next = ids.peek().0.max(discovered_next).max(1);
-        if ids.peek().0 != next {
-            ids = SessionIdAllocator::starting_at(SessionId::new(next));
-        }
+        ids.get_mut()
+            .ensure_next_session(SessionId::new(discovered_next));
         Self {
+            ids,
             registry: Mutex::new(Registry {
-                ids: DurableState::new(ids),
                 persistent_sessions,
                 ephemeral_sessions: BTreeSet::new(),
             }),
         }
-    }
-
-    pub(crate) fn id_state(&self) -> DurableState<SessionIdAllocator> {
-        self.lock_registry().ids.clone()
     }
 
     fn lock_registry(&self) -> MutexGuard<'_, Registry> {
@@ -53,7 +48,7 @@ impl SessionStore {
     /// Reserve the next id. The engine is the sole writer and publishes it only
     /// after the session's state has been constructed successfully.
     pub(crate) fn allocate(&self) -> SessionId {
-        self.lock_registry().ids.get_mut().next()
+        self.ids.get_mut().next_session()
     }
 
     pub(crate) fn publish(&self, id: SessionId, persistence: SessionPersistence) {

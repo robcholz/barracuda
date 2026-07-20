@@ -1,5 +1,6 @@
 use claw_persistence::DurableState;
 
+use crate::orchestrator::IdAllocators;
 use crate::protocol::AgentId;
 
 crate::define_id_allocator!(
@@ -9,29 +10,25 @@ crate::define_id_allocator!(
 
 /// Process-wide allocator shared by all multiagent runtimes.
 #[derive(Clone)]
-pub(crate) struct AgentIdAllocator(DurableState<AgentIdAllocatorState>);
+pub(crate) struct AgentIdAllocator(DurableState<IdAllocators>);
 
 impl AgentIdAllocator {
     /// Process-local allocator used by isolated unit tests.
     #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self::from_state(AgentIdAllocatorState::default())
+        Self::from_state(DurableState::new(IdAllocators::default()))
     }
 
-    pub(crate) fn from_state(state: AgentIdAllocatorState) -> Self {
-        Self(DurableState::new(state))
-    }
-
-    pub(crate) fn state(&self) -> &DurableState<AgentIdAllocatorState> {
-        &self.0
+    pub(crate) fn from_state(state: DurableState<IdAllocators>) -> Self {
+        Self(state)
     }
 
     pub(crate) fn next(&self) -> AgentId {
-        self.0.get_mut().next()
+        self.0.get_mut().next_agent()
     }
 
     pub(crate) fn peek(&self) -> AgentId {
-        self.0.get().peek()
+        self.0.get().next_agent_id()
     }
 }
 

@@ -35,8 +35,7 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
         let system = build_system(&root, Vec::new());
         system.new_session(SessionPersistence::Persistent).unwrap()
     };
-    assert!(DiskFs::exists(&format!("{root}/session_id_allocator.bin")));
-    assert!(DiskFs::exists(&format!("{root}/agent_id_allocator.bin")));
+    assert!(DiskFs::exists(&format!("{root}/id_allocators.bin")));
     assert!(DiskFs::exists(&format!("{root}/tool_registry.bin")));
     assert!(DiskFs::exists(&format!(
         "{root}/sessions/{}.bin",
@@ -51,7 +50,7 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
 }
 
 #[test]
-fn id_allocator_payloads_contain_only_their_owned_counters() {
+fn id_allocator_payload_contains_both_counters() {
     let _script = serialize_script();
     let temp = TempDir::new("runtime-payload").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
@@ -60,11 +59,11 @@ fn id_allocator_payloads_contain_only_their_owned_counters() {
         let _ = system.new_session(SessionPersistence::Persistent).unwrap();
     }
 
-    let session_ids = read_payload(&format!("{root}/session_id_allocator.bin"));
-    assert_eq!(session_ids, json!({ "next_session_id": 2 }));
-
-    let agent_ids = read_payload(&format!("{root}/agent_id_allocator.bin"));
-    assert_eq!(agent_ids, json!({ "next_agent_id": 1 }));
+    let allocators = read_payload(&format!("{root}/id_allocators.bin"));
+    assert_eq!(
+        allocators,
+        json!({ "next_session_id": 2, "next_agent_id": 1 })
+    );
 }
 
 #[test]
@@ -115,34 +114,6 @@ fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     assert!(
         completed.get("resume").is_none(),
         "a completed transcript turn settles its persisted tool calls: {completed}"
-    );
-}
-
-#[test]
-fn legacy_combined_id_allocator_dto_is_split_during_construction() {
-    let _script = serialize_script();
-    let temp = TempDir::new("legacy-id-allocator-checkpoint").unwrap();
-    let root = temp.path().to_string_lossy().into_owned();
-    write_payload(
-        &format!("{root}/id_allocators.bin"),
-        &json!({ "next_session_id": 4, "next_agent_id": 7 }),
-    );
-
-    {
-        let system = build_system(&root, Vec::new());
-        assert_eq!(
-            system.new_session(SessionPersistence::Persistent).unwrap(),
-            SessionId::new(4)
-        );
-    }
-
-    assert_eq!(
-        read_payload(&format!("{root}/session_id_allocator.bin")),
-        json!({ "next_session_id": 5 })
-    );
-    assert_eq!(
-        read_payload(&format!("{root}/agent_id_allocator.bin")),
-        json!({ "next_agent_id": 7 })
     );
 }
 

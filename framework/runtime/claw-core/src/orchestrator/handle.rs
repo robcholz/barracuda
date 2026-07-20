@@ -7,7 +7,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{
     ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, CoreAffinity, Priority, WorkerHandle,
 };
-use claw_persistence::SharedPersistence;
+use claw_persistence::{DurableState, SharedPersistence};
 use claw_tool::ToolRegistry;
 
 use crate::config::{ApiUsage, SharedApiManager};
@@ -20,8 +20,10 @@ use crate::session::{
 };
 
 use super::engine::{run_engine, Command};
-use super::id_allocators::{load_id_allocators, register_id_allocators};
-use super::{OrchestratorBuildError, ENGINE_WORKER_STACK_SIZE, SYSTEM_TRACE_SCOPE};
+use super::{
+    IdAllocators, OrchestratorBuildError, ENGINE_WORKER_STACK_SIZE, ID_ALLOCATORS_STATE_NAME,
+    SYSTEM_TRACE_SCOPE,
+};
 
 /// A `Send + Sync` handle to a running orchestrator.
 ///
@@ -51,7 +53,12 @@ impl Orchestrator {
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        let id_allocators = load_id_allocators(&persistence)?;
+        let id_allocators = {
+            let entry = persistence.singleton::<IdAllocators>(ID_ALLOCATORS_STATE_NAME)?;
+            let state = DurableState::new(entry.load()?.unwrap_or_default());
+            entry.register(&state)?;
+            state
+        };
         let persisted_sessions = {
             let session_states = persistence.collection::<SessionState>(SESSION_STATE_NAME)?;
             session_states
@@ -60,13 +67,8 @@ impl Orchestrator {
                 .map(|instance| SessionId::from_wire(instance.as_str()))
                 .collect::<Result<Vec<_>, _>>()?
         };
-        let sessions = Arc::new(SessionStore::new(
-            id_allocators.session_ids,
-            persisted_sessions,
-        ));
-        let id_allocator = AgentIdAllocator::from_state(id_allocators.agent_ids);
-        let session_id_state = sessions.id_state();
-        register_id_allocators(&persistence, &session_id_state, id_allocator.state())?;
+        let sessions = Arc::new(SessionStore::new(id_allocators.clone(), persisted_sessions));
+        let id_allocator = AgentIdAllocator::from_state(id_allocators);
         let (command_tx, command_rx) = async_channel::unbounded();
         let (init_result_tx, ready_rx) = mpsc::channel();
 
