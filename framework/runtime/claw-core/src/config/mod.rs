@@ -11,6 +11,7 @@ mod reasoning;
 pub use reasoning::ReasoningEffort;
 
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use claw_api::{ClawApiConfig, InitError};
 
@@ -26,6 +27,8 @@ pub enum ApiUsage {
     /// Session-history compaction calls.
     Compaction,
 }
+
+pub(crate) type SharedApiManager = Arc<RwLock<ClawApiManager>>;
 
 /// Registers LLM API configs per [`ApiUsage`], de-duplicated by model, with a
 /// default fallback.
@@ -44,13 +47,6 @@ pub(crate) struct ClawApiManager {
 }
 
 impl ClawApiManager {
-    /// An empty manager. [`get_api`](Self::get_api) returns `None` for every
-    /// usage until something is linked.
-    #[must_use]
-    pub(crate) fn new() -> Self {
-        Self::default()
-    }
-
     /// Register `api` for `usage`.
     ///
     /// If a config with the same `model` is already stored it is replaced, so
@@ -102,13 +98,13 @@ mod tests {
 
     #[test]
     fn empty_manager_resolves_nothing() {
-        let manager = ClawApiManager::new();
+        let manager = ClawApiManager::default();
         assert_eq!(manager.get_api(ApiUsage::RootAgent), None);
     }
 
     #[test]
     fn explicit_binding_takes_precedence_over_default() {
-        let mut manager = ClawApiManager::new();
+        let mut manager = ClawApiManager::default();
         manager
             .link_api(cfg("default-model", "k0"), ApiUsage::Memory, true)
             .unwrap();
@@ -129,7 +125,7 @@ mod tests {
 
     #[test]
     fn unbound_usage_falls_back_to_default() {
-        let mut manager = ClawApiManager::new();
+        let mut manager = ClawApiManager::default();
         manager
             .link_api(cfg("default-model", "k0"), ApiUsage::RootAgent, true)
             .unwrap();
@@ -142,7 +138,7 @@ mod tests {
 
     #[test]
     fn unbound_usage_without_default_is_none() {
-        let mut manager = ClawApiManager::new();
+        let mut manager = ClawApiManager::default();
         manager
             .link_api(cfg("root-model", "k1"), ApiUsage::RootAgent, false)
             .unwrap();
@@ -151,7 +147,7 @@ mod tests {
 
     #[test]
     fn invalid_config_is_rejected_without_mutating_bindings() {
-        let mut manager = ClawApiManager::new();
+        let mut manager = ClawApiManager::default();
         let invalid = cfg("invalid", "");
 
         assert_eq!(
@@ -163,7 +159,7 @@ mod tests {
 
     #[test]
     fn linking_same_model_replaces_and_updates_all_bindings() {
-        let mut manager = ClawApiManager::new();
+        let mut manager = ClawApiManager::default();
         manager
             .link_api(cfg("shared", "old-key"), ApiUsage::RootAgent, false)
             .unwrap();

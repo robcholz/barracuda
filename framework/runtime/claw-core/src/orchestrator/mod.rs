@@ -5,6 +5,7 @@
 
 mod engine;
 mod handle;
+mod id_allocators;
 
 use std::io;
 

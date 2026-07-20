@@ -7,7 +7,7 @@
 //! injected into the long-term memory adapter.
 
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use serde_json::{json, Value};
 
@@ -16,7 +16,7 @@ use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_memory::MemoryId;
 use tracing::Instrument as _;
 
-use crate::config::{ApiUsage, ClawApiManager};
+use crate::config::{ApiUsage, SharedApiManager};
 use crate::memory::async_llm::SharedAsyncLlm;
 
 use super::extraction::{
@@ -44,12 +44,12 @@ pub(crate) struct LlmExtractor<H: ClawHttp, Timer: ClawTimer> {
     api: SharedAsyncLlm<H, Timer>,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    api_manager: SharedApiManager,
 }
 
 impl<H: ClawHttp + Default + 'static, Timer: ClawTimer + Default + 'static> LlmExtractor<H, Timer> {
     /// Build an extractor with its own unconfigured LLM client.
-    fn new(api_manager: Arc<RwLock<ClawApiManager>>) -> Self {
+    fn new(api_manager: SharedApiManager) -> Self {
         Self {
             api: SharedAsyncLlm::new(ClawApiAsync::new(H::default(), Timer::default())),
             api_manager,
@@ -57,7 +57,7 @@ impl<H: ClawHttp + Default + 'static, Timer: ClawTimer + Default + 'static> LlmE
     }
 
     /// A ready-to-inject [`Extractor`] using `api_manager`.
-    pub(crate) fn shared(api_manager: Arc<RwLock<ClawApiManager>>) -> Arc<dyn Extractor> {
+    pub(crate) fn shared(api_manager: SharedApiManager) -> Arc<dyn Extractor> {
         Arc::new(Self::new(api_manager))
     }
 }

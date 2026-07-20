@@ -28,14 +28,14 @@ where
     pub(crate) fn new(
         session: SessionId,
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
-        agent_id_allocator: AgentIdAllocator,
+        id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         state: MultiagentState,
     ) -> Self {
         Self::new_with_resume(
             session,
             factory,
-            agent_id_allocator,
+            id_allocator,
             permission_policy,
             state,
             AgentMode::Normal,
@@ -47,13 +47,13 @@ where
     pub(crate) fn new_with_resume(
         session: SessionId,
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
-        agent_id_allocator: AgentIdAllocator,
+        id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         state: MultiagentState,
         root_mode: AgentMode,
         root_resume: Option<AgentResume>,
     ) -> Self {
-        let multiagent = Arc::new(MultiagentBridge::new(agent_id_allocator.clone()));
+        let multiagent = Arc::new(MultiagentBridge::new(id_allocator.clone()));
         Self {
             session,
             factory,
@@ -62,7 +62,7 @@ where
             root_resume,
             root_deliveries_in_turn: Vec::new(),
             root_background_spawns: BTreeMap::new(),
-            agent_id_allocator,
+            id_allocator,
             state,
             slots: AgentSlots::new(),
             timeouts: Default::default(),
@@ -137,14 +137,14 @@ where
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
     use crate::agent::FsAgentFactory;
-    use crate::config::{catalog as agent_catalog, ClawApiManager};
+    use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
     use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
@@ -160,7 +160,7 @@ mod tests {
                 Arc::new(ToolRegistry::new()),
                 "/plan-mode-tools-test".to_owned(),
                 Vec::new(),
-                Arc::new(RwLock::new(ClawApiManager::new())),
+                SharedApiManager::default(),
             )
             .expect("test factory builds"),
         );

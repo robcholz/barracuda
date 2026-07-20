@@ -1,5 +1,5 @@
 use std::{
-    any::{type_name, Any, TypeId},
+    any::{type_name, TypeId},
     collections::{hash_map::Entry as MapEntry, HashMap},
     marker::PhantomData,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -8,33 +8,70 @@ use std::{
 use claw_interface::{ClawFs, FsError};
 
 use crate::{
-    is_valid_key, DurablePart, DurablePartError, DurableState, DurableStateCodec, Entry,
-    InstanceId, PartGeneration, SchemaVersion, StateBlob, StateSlice,
+    is_valid_key, DurablePartError, DurableState, DurableStateCodec, InstanceId, PartGeneration,
+    SchemaVersion, StateBlob, StateSlice, WeakDurableState,
 };
 
 const SCHEMA_VERSION_SIZE: usize = std::mem::size_of::<SchemaVersion>();
 const FILE_EXTENSION: &str = ".bin";
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum EntryKey {
+    Singleton(String),
+    Collection(String),
+}
+
+impl EntryKey {
+    fn name(&self) -> &str {
+        match self {
+            Self::Singleton(name) | Self::Collection(name) => name,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Singleton(_) => "singleton",
+            Self::Collection(_) => "collection",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum StateAddress {
     Singleton {
-        key: String,
+        name: String,
     },
     Collection {
-        namespace: String,
+        name: String,
         instance_id: InstanceId,
     },
 }
 
+/// Filesystem-backed registry for typed durable state.
 pub struct Persistence<Filesystem: ClawFs> {
     persistence_directory: String,
-    templates: Mutex<HashMap<Entry, RegisteredTemplate>>,
+    entry_types: Mutex<HashMap<EntryKey, RegisteredEntryType>>,
     parts: Mutex<HashMap<StateAddress, Arc<dyn RegisteredPart>>>,
     operation_lock: Mutex<()>,
     filesystem: PhantomData<Filesystem>,
 }
 
+/// One typed singleton entry.
+pub struct Singleton<'a, Filesystem: ClawFs, T> {
+    persistence: &'a Persistence<Filesystem>,
+    name: String,
+    state: PhantomData<fn() -> T>,
+}
+
+/// One typed collection entry.
+pub struct Collection<'a, Filesystem: ClawFs, T> {
+    persistence: &'a Persistence<Filesystem>,
+    name: String,
+    state: PhantomData<fn() -> T>,
+}
+
 impl<Filesystem: ClawFs> Persistence<Filesystem> {
+    /// Create a persistence registry rooted at `persistence_directory`.
     pub fn new(persistence_directory: impl Into<String>) -> Result<Self, PersistenceError> {
         let persistence_directory = persistence_directory.into();
         if persistence_directory.trim().is_empty() {
@@ -51,137 +88,194 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
 
         Ok(Self {
             persistence_directory,
-            templates: Mutex::new(HashMap::new()),
+            entry_types: Mutex::new(HashMap::new()),
             parts: Mutex::new(HashMap::new()),
             operation_lock: Mutex::new(()),
             filesystem: PhantomData,
         })
     }
 
-    pub fn create_template<T>(&self, entry: Entry) -> Result<(), PersistenceError>
+    /// Open a typed singleton entry.
+    pub fn singleton<T>(
+        &self,
+        name: impl Into<String>,
+    ) -> Result<Singleton<'_, Filesystem, T>, PersistenceError>
     where
         T: DurableStateCodec + Send + 'static,
     {
-        self.validate_entry(&entry)?;
+        let name = name.into();
+        self.ensure_entry_type::<T>(&EntryKey::Singleton(name.clone()))?;
+        Ok(Singleton {
+            persistence: self,
+            name,
+            state: PhantomData,
+        })
+    }
 
-        let template = RegisteredTemplate {
+    /// Open a typed collection entry.
+    pub fn collection<T>(
+        &self,
+        name: impl Into<String>,
+    ) -> Result<Collection<'_, Filesystem, T>, PersistenceError>
+    where
+        T: DurableStateCodec + Send + 'static,
+    {
+        let name = name.into();
+        self.ensure_entry_type::<T>(&EntryKey::Collection(name.clone()))?;
+        Ok(Collection {
+            persistence: self,
+            name,
+            state: PhantomData,
+        })
+    }
+
+    /// Persist every registered state whose generation changed.
+    pub fn maybe_persist(&self) -> Result<(), PersistenceError> {
+        let _operation = lock(&self.operation_lock);
+        let parts = {
+            let parts = lock(&self.parts);
+            parts
+                .iter()
+                .map(|(address, part)| (address.clone(), Arc::clone(part)))
+                .collect::<Vec<_>>()
+        };
+        let mut dropped = Vec::new();
+
+        for (address, part) in parts {
+            let path = self.state_path(&address);
+            match part
+                .snapshot_if_dirty()
+                .map_err(|source| PersistenceError::codec(path.clone(), source))?
+            {
+                PartStatus::Dropped => dropped.push(address),
+                PartStatus::Clean => {}
+                PartStatus::Dirty(snapshot) => {
+                    let file = encode_file(snapshot.schema_version, snapshot.state);
+                    Filesystem::write_atomic(&path, &file)
+                        .map_err(|source| PersistenceError::storage("write state", path, source))?;
+                    part.mark_persisted(snapshot.generation);
+                }
+            }
+        }
+
+        if !dropped.is_empty() {
+            let mut parts = lock(&self.parts);
+            for address in dropped {
+                let should_remove = parts.get(&address).is_some_and(|part| !part.is_alive());
+                if should_remove {
+                    parts.remove(&address);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn ensure_entry_type<T>(&self, entry: &EntryKey) -> Result<(), PersistenceError>
+    where
+        T: 'static,
+    {
+        self.validate_entry(entry)?;
+        let entry_type = RegisteredEntryType {
             state_type_id: TypeId::of::<T>(),
             state_type_name: type_name::<T>(),
-            restore: restore_registered_part::<T>,
         };
-        let mut templates = lock(&self.templates);
-        match templates.entry(entry) {
+        let mut entry_types = lock(&self.entry_types);
+        match entry_types.entry(entry.clone()) {
             MapEntry::Vacant(slot) => {
-                slot.insert(template);
+                slot.insert(entry_type);
                 Ok(())
             }
-            MapEntry::Occupied(slot) => Err(PersistenceError::TemplateAlreadyExists {
-                entry: slot.key().clone(),
-            }),
-        }
-    }
-
-    pub fn put<T>(
-        &self,
-        entry: &Entry,
-        instance_id: Option<InstanceId>,
-        value: T,
-    ) -> Result<DurableState<T>, PersistenceError>
-    where
-        T: DurableStateCodec + Send + 'static,
-    {
-        let address = self.resolve(entry, instance_id.as_ref())?;
-        self.template_for::<T>(entry)?;
-        let _operation = lock(&self.operation_lock);
-        let mut parts = lock(&self.parts);
-
-        if let Some(part) = parts.get(&address) {
-            let state = self.typed_state::<T>(entry, part.as_ref())?;
-            state.replace(value);
-            return Ok(state);
-        }
-
-        let part = DurablePart::new(value);
-        let state = part.state.clone();
-        parts.insert(
-            address,
-            Arc::new(TypedRegisteredPart {
-                part,
-                persisted_generation: Mutex::new(None),
-            }),
-        );
-        Ok(state)
-    }
-
-    pub fn get<T>(
-        &self,
-        entry: &Entry,
-        instance_id: Option<&InstanceId>,
-    ) -> Result<DurableState<T>, PersistenceError>
-    where
-        T: DurableStateCodec + Send + 'static,
-    {
-        let address = self.resolve(entry, instance_id)?;
-        let template = self.template_for::<T>(entry)?;
-        let _operation = lock(&self.operation_lock);
-
-        {
-            let parts = lock(&self.parts);
-            if let Some(part) = parts.get(&address) {
-                return self.typed_state::<T>(entry, part.as_ref());
+            MapEntry::Occupied(slot) if slot.get().state_type_id == entry_type.state_type_id => {
+                Ok(())
             }
+            MapEntry::Occupied(slot) => Err(PersistenceError::TypeMismatch {
+                kind: entry.kind(),
+                name: entry.name().to_owned(),
+                expected: entry_type.state_type_name,
+                actual: slot.get().state_type_name,
+            }),
         }
+    }
 
-        let path = self.state_path(&address);
+    fn load_at<T>(&self, address: &StateAddress) -> Result<Option<T>, PersistenceError>
+    where
+        T: DurableStateCodec,
+    {
+        let _operation = lock(&self.operation_lock);
+        let path = self.state_path(address);
         let file = match Filesystem::read(&path) {
             Ok(file) => file,
-            Err(FsError::NotFound) => {
-                return Err(PersistenceError::StateNotFound {
-                    entry: entry.clone(),
-                    instance_id: instance_id.cloned(),
-                });
-            }
+            Err(FsError::NotFound) => return Ok(None),
             Err(source) => return Err(PersistenceError::storage("read state", path, source)),
         };
         let (schema_version, state) = decode_file(&path, &file)?;
-        let registered = (template.restore)(schema_version, state)
-            .map_err(|source| PersistenceError::codec(path.clone(), source))?;
-        let durable_state = self.typed_state::<T>(entry, registered.as_ref())?;
-        lock(&self.parts).insert(address, registered);
-        Ok(durable_state)
+        T::decode_state(schema_version, state)
+            .map(Some)
+            .map_err(|source| PersistenceError::codec(path, source))
     }
 
-    pub fn remove(
+    fn register_state<T>(
         &self,
-        entry: &Entry,
-        instance_id: Option<&InstanceId>,
-    ) -> Result<(), PersistenceError> {
-        let address = self.resolve(entry, instance_id)?;
-        self.ensure_template(entry)?;
-        let _operation = lock(&self.operation_lock);
-        let path = self.state_path(&address);
+        address: StateAddress,
+        name: String,
+        instance_id: Option<InstanceId>,
+        state: &DurableState<T>,
+    ) -> Result<(), PersistenceError>
+    where
+        T: DurableStateCodec + Send + 'static,
+    {
+        self.register_part(
+            address,
+            name,
+            instance_id,
+            Arc::new(StateRegisteredPart {
+                state: state.downgrade(),
+                persisted_generation: Mutex::new(None),
+            }),
+        )
+    }
 
+    fn register_part(
+        &self,
+        address: StateAddress,
+        name: String,
+        instance_id: Option<InstanceId>,
+        part: Arc<dyn RegisteredPart>,
+    ) -> Result<(), PersistenceError> {
+        let _operation = lock(&self.operation_lock);
+        let mut parts = lock(&self.parts);
+        match parts.entry(address) {
+            MapEntry::Vacant(slot) => {
+                slot.insert(part);
+                Ok(())
+            }
+            MapEntry::Occupied(mut slot) if !slot.get().is_alive() => {
+                slot.insert(part);
+                Ok(())
+            }
+            MapEntry::Occupied(_) => {
+                Err(PersistenceError::StateAlreadyRegistered { name, instance_id })
+            }
+        }
+    }
+
+    fn remove_at(&self, address: &StateAddress) -> Result<(), PersistenceError> {
+        let _operation = lock(&self.operation_lock);
+        let path = self.state_path(address);
         match Filesystem::remove(&path) {
             Ok(()) | Err(FsError::NotFound) => {}
             Err(source) => {
                 return Err(PersistenceError::storage("remove state", path, source));
             }
         }
-        lock(&self.parts).remove(&address);
+        lock(&self.parts).remove(address);
         Ok(())
     }
 
-    pub fn list(&self, entry: &Entry) -> Result<Vec<InstanceId>, PersistenceError> {
-        self.validate_entry(entry)?;
-        self.ensure_template(entry)?;
-        let Entry::Collection(namespace) = entry else {
-            return Err(PersistenceError::CannotListSingleton {
-                entry: entry.clone(),
-            });
-        };
-
+    fn list_collection(&self, name: &str) -> Result<Vec<InstanceId>, PersistenceError> {
         let _operation = lock(&self.operation_lock);
-        let path = self.join_path(namespace);
+        let path = self.join_path(name);
         let entries = match Filesystem::list_dir(&path) {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
@@ -202,127 +296,27 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         Ok(instance_ids)
     }
 
-    pub fn maybe_persist(&self) -> Result<(), PersistenceError> {
-        let _operation = lock(&self.operation_lock);
-        let parts = {
-            let parts = lock(&self.parts);
-            parts
-                .iter()
-                .map(|(address, part)| (address.clone(), Arc::clone(part)))
-                .collect::<Vec<_>>()
-        };
-
-        for (address, part) in parts {
-            let path = self.state_path(&address);
-            let Some(snapshot) = part
-                .snapshot_if_dirty()
-                .map_err(|source| PersistenceError::codec(path.clone(), source))?
-            else {
-                continue;
-            };
-
-            let file = encode_file(snapshot.schema_version, snapshot.state);
-            Filesystem::write_atomic(&path, &file)
-                .map_err(|source| PersistenceError::storage("write state", path, source))?;
-            part.mark_persisted(snapshot.generation);
+    fn validate_entry(&self, entry: &EntryKey) -> Result<(), PersistenceError> {
+        if is_valid_key(entry.name()) {
+            return Ok(());
         }
-
-        Ok(())
-    }
-
-    fn template_for<T>(&self, entry: &Entry) -> Result<RegisteredTemplate, PersistenceError>
-    where
-        T: 'static,
-    {
-        let template = self.ensure_template(entry)?;
-        if template.state_type_id != TypeId::of::<T>() {
-            return Err(PersistenceError::TypeMismatch {
-                entry: entry.clone(),
-                expected: type_name::<T>(),
-                actual: template.state_type_name,
-            });
-        }
-        Ok(template)
-    }
-
-    fn ensure_template(&self, entry: &Entry) -> Result<RegisteredTemplate, PersistenceError> {
-        lock(&self.templates).get(entry).copied().ok_or_else(|| {
-            PersistenceError::TemplateNotFound {
-                entry: entry.clone(),
-            }
-        })
-    }
-
-    fn typed_state<T>(
-        &self,
-        entry: &Entry,
-        part: &dyn RegisteredPart,
-    ) -> Result<DurableState<T>, PersistenceError>
-    where
-        T: 'static,
-    {
-        part.state()
-            .downcast_ref::<DurableState<T>>()
-            .cloned()
-            .ok_or_else(|| PersistenceError::TypeMismatch {
-                entry: entry.clone(),
-                expected: type_name::<T>(),
-                actual: part.state_type_name(),
-            })
-    }
-
-    fn resolve(
-        &self,
-        entry: &Entry,
-        instance_id: Option<&InstanceId>,
-    ) -> Result<StateAddress, PersistenceError> {
-        self.validate_entry(entry)?;
-
-        match (entry, instance_id) {
-            (Entry::Singleton(key), None) => Ok(StateAddress::Singleton { key: key.clone() }),
-            (Entry::Singleton(_), Some(instance_id)) => {
-                Err(PersistenceError::UnexpectedInstanceId {
-                    entry: entry.clone(),
-                    instance_id: instance_id.clone(),
-                })
-            }
-            (Entry::Collection(namespace), Some(instance_id)) => Ok(StateAddress::Collection {
-                namespace: namespace.clone(),
-                instance_id: instance_id.clone(),
-            }),
-            (Entry::Collection(_), None) => Err(PersistenceError::MissingInstanceId {
-                entry: entry.clone(),
-            }),
-        }
-    }
-
-    fn validate_entry(&self, entry: &Entry) -> Result<(), PersistenceError> {
         match entry {
-            Entry::Singleton(key) => {
-                if !is_valid_key(key) {
-                    return Err(PersistenceError::InvalidSingleton { key: key.clone() });
-                }
+            EntryKey::Singleton(name) => {
+                Err(PersistenceError::InvalidSingleton { name: name.clone() })
             }
-            Entry::Collection(namespace) => {
-                if !is_valid_key(namespace) {
-                    return Err(PersistenceError::InvalidCollection {
-                        namespace: namespace.clone(),
-                    });
-                }
+            EntryKey::Collection(name) => {
+                Err(PersistenceError::InvalidCollection { name: name.clone() })
             }
         }
-        Ok(())
     }
 
     fn state_path(&self, address: &StateAddress) -> String {
         let relative = match address {
-            StateAddress::Singleton { key } => format!("{key}{FILE_EXTENSION}"),
-            StateAddress::Collection {
-                namespace,
-                instance_id,
-            } => format!("{namespace}/{}{FILE_EXTENSION}", instance_id.as_str()),
+            StateAddress::Singleton { name } => format!("{name}{FILE_EXTENSION}"),
+            StateAddress::Collection { name, instance_id } => {
+                format!("{name}/{}{FILE_EXTENSION}", instance_id.as_str())
+            }
         };
-
         self.join_path(&relative)
     }
 
@@ -337,70 +331,126 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     }
 }
 
-#[derive(Clone, Copy)]
-struct RegisteredTemplate {
-    state_type_id: TypeId,
-    state_type_name: &'static str,
-    restore: RestorePart,
-}
-
-type RestorePart =
-    for<'a> fn(SchemaVersion, StateSlice<'a>) -> Result<Arc<dyn RegisteredPart>, DurablePartError>;
-
-fn restore_registered_part<T>(
-    schema_version: SchemaVersion,
-    state: StateSlice<'_>,
-) -> Result<Arc<dyn RegisteredPart>, DurablePartError>
+impl<Filesystem, T> Singleton<'_, Filesystem, T>
 where
+    Filesystem: ClawFs,
     T: DurableStateCodec + Send + 'static,
 {
-    let part = DurablePart::<T>::restore(schema_version, state)?;
-    let persisted_generation = part.generation();
-    Ok(Arc::new(TypedRegisteredPart {
-        part,
-        persisted_generation: Mutex::new(Some(persisted_generation)),
-    }))
+    /// Decode the persisted DTO, returning `None` when no state exists.
+    pub fn load(&self) -> Result<Option<T>, PersistenceError> {
+        self.persistence.load_at(&StateAddress::Singleton {
+            name: self.name.clone(),
+        })
+    }
+
+    /// Register the runtime owner's state for automatic persistence.
+    pub fn register(&self, state: &DurableState<T>) -> Result<(), PersistenceError> {
+        self.persistence.register_state(
+            StateAddress::Singleton {
+                name: self.name.clone(),
+            },
+            self.name.clone(),
+            None,
+            state,
+        )
+    }
+
+    /// Remove the persisted singleton and its live registration.
+    pub fn remove(&self) -> Result<(), PersistenceError> {
+        self.persistence.remove_at(&StateAddress::Singleton {
+            name: self.name.clone(),
+        })
+    }
+}
+
+impl<Filesystem, T> Collection<'_, Filesystem, T>
+where
+    Filesystem: ClawFs,
+    T: DurableStateCodec + Send + 'static,
+{
+    /// List the persisted instance identifiers.
+    pub fn list(&self) -> Result<Vec<InstanceId>, PersistenceError> {
+        self.persistence.list_collection(&self.name)
+    }
+
+    /// Decode one persisted DTO, returning `None` when it does not exist.
+    pub fn load(&self, instance_id: &InstanceId) -> Result<Option<T>, PersistenceError> {
+        self.persistence.load_at(&StateAddress::Collection {
+            name: self.name.clone(),
+            instance_id: instance_id.clone(),
+        })
+    }
+
+    /// Register one runtime-owned collection state for automatic persistence.
+    pub fn register(
+        &self,
+        instance_id: &InstanceId,
+        state: &DurableState<T>,
+    ) -> Result<(), PersistenceError> {
+        self.persistence.register_state(
+            StateAddress::Collection {
+                name: self.name.clone(),
+                instance_id: instance_id.clone(),
+            },
+            self.name.clone(),
+            Some(instance_id.clone()),
+            state,
+        )
+    }
+
+    /// Remove one persisted instance and its live registration.
+    pub fn remove(&self, instance_id: &InstanceId) -> Result<(), PersistenceError> {
+        self.persistence.remove_at(&StateAddress::Collection {
+            name: self.name.clone(),
+            instance_id: instance_id.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RegisteredEntryType {
+    state_type_id: TypeId,
+    state_type_name: &'static str,
 }
 
 trait RegisteredPart: Send + Sync {
-    fn state(&self) -> &(dyn Any + Send + Sync);
+    fn is_alive(&self) -> bool;
 
-    fn state_type_name(&self) -> &'static str;
-
-    fn snapshot_if_dirty(&self) -> Result<Option<PartSnapshot>, DurablePartError>;
+    fn snapshot_if_dirty(&self) -> Result<PartStatus, DurablePartError>;
 
     fn mark_persisted(&self, generation: PartGeneration);
 }
 
-struct TypedRegisteredPart<T> {
-    part: DurablePart<T>,
+struct StateRegisteredPart<T> {
+    state: WeakDurableState<T>,
     persisted_generation: Mutex<Option<PartGeneration>>,
 }
 
-impl<T> RegisteredPart for TypedRegisteredPart<T>
+impl<T> RegisteredPart for StateRegisteredPart<T>
 where
     T: DurableStateCodec + Send + 'static,
 {
-    fn state(&self) -> &(dyn Any + Send + Sync) {
-        &self.part.state
+    fn is_alive(&self) -> bool {
+        self.state.generation().is_some()
     }
 
-    fn state_type_name(&self) -> &'static str {
-        type_name::<T>()
-    }
-
-    fn snapshot_if_dirty(&self) -> Result<Option<PartSnapshot>, DurablePartError> {
+    fn snapshot_if_dirty(&self) -> Result<PartStatus, DurablePartError> {
         let persisted_generation = *lock(&self.persisted_generation);
-        if persisted_generation == Some(self.part.generation()) {
-            return Ok(None);
-        }
-
-        let (generation, schema_version, state) = self.part.export_state()?;
+        let Some(generation) = self.state.generation() else {
+            return Ok(PartStatus::Dropped);
+        };
         if persisted_generation == Some(generation) {
-            return Ok(None);
+            return Ok(PartStatus::Clean);
         }
 
-        Ok(Some(PartSnapshot {
+        let Some(snapshot) = self.state.snapshot()? else {
+            return Ok(PartStatus::Dropped);
+        };
+        let (generation, schema_version, state) = snapshot.into_parts();
+        if persisted_generation == Some(generation) {
+            return Ok(PartStatus::Clean);
+        }
+        Ok(PartStatus::Dirty(PartSnapshot {
             generation,
             schema_version,
             state,
@@ -410,6 +460,12 @@ where
     fn mark_persisted(&self, generation: PartGeneration) {
         *lock(&self.persisted_generation) = Some(generation);
     }
+}
+
+enum PartStatus {
+    Dropped,
+    Clean,
+    Dirty(PartSnapshot),
 }
 
 struct PartSnapshot {
@@ -450,38 +506,29 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Errors produced by the persistence registry.
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
     #[error("persistence directory cannot be empty")]
     EmptyDirectory,
-    #[error("invalid singleton key `{key}`")]
-    InvalidSingleton { key: String },
-    #[error("invalid collection namespace `{namespace}`")]
-    InvalidCollection { namespace: String },
-    #[error("persistence template already exists for {entry:?}")]
-    TemplateAlreadyExists { entry: Entry },
-    #[error("persistence template does not exist for {entry:?}")]
-    TemplateNotFound { entry: Entry },
-    #[error("collection entry {entry:?} requires an instance id")]
-    MissingInstanceId { entry: Entry },
-    #[error("singleton entry {entry:?} does not accept instance id {instance_id:?}")]
-    UnexpectedInstanceId {
-        entry: Entry,
-        instance_id: InstanceId,
-    },
-    #[error("persistence type mismatch for {entry:?}: requested {expected}, registered {actual}")]
+    #[error("invalid singleton name `{name}`")]
+    InvalidSingleton { name: String },
+    #[error("invalid collection name `{name}`")]
+    InvalidCollection { name: String },
+    #[error(
+        "persistence type mismatch for {kind} `{name}`: requested {expected}, registered {actual}"
+    )]
     TypeMismatch {
-        entry: Entry,
+        kind: &'static str,
+        name: String,
         expected: &'static str,
         actual: &'static str,
     },
-    #[error("persisted state does not exist for {entry:?} with instance id {instance_id:?}")]
-    StateNotFound {
-        entry: Entry,
+    #[error("persistence state `{name}` is already registered with instance id {instance_id:?}")]
+    StateAlreadyRegistered {
+        name: String,
         instance_id: Option<InstanceId>,
     },
-    #[error("cannot list singleton entry {entry:?}")]
-    CannotListSingleton { entry: Entry },
     #[error("{0}")]
     Storage(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("{0}")]
@@ -513,7 +560,7 @@ impl PersistenceError {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("failed to {operation} at `{path}`: {source}")]
+#[error("persistence storage operation failed to {operation} at `{path}`: {source}")]
 struct StorageFailure {
     operation: &'static str,
     path: String,
@@ -611,26 +658,20 @@ mod tests {
     }
 
     #[test]
-    fn singleton_put_get_persist_and_restore() {
+    fn singleton_registers_persists_and_loads() {
         let root = "/claw-persistence-singleton";
-        let entry = Entry::singleton("state");
         let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("singleton template is created");
+        let singleton = persistence
+            .singleton::<TestState>("state")
+            .expect("singleton opens");
+        assert!(singleton
+            .load()
+            .expect("missing state is readable")
+            .is_none());
 
-        let state = persistence
-            .put(&entry, None, TestState { value: 1 })
-            .expect("singleton state is put");
+        let state = DurableState::new(TestState { value: 1 });
+        singleton.register(&state).expect("state registers");
         state.get_mut().value = 2;
-        assert_eq!(
-            persistence
-                .get::<TestState>(&entry, None)
-                .expect("singleton state is available")
-                .get()
-                .value,
-            2
-        );
         persistence.maybe_persist().expect("dirty state persists");
 
         let file = MemFs::read(&format!("{root}/state.bin")).expect("state file exists");
@@ -638,250 +679,156 @@ mod tests {
         assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
 
         let restored = Persistence::<MemFs>::new(root).expect("persistence reinitializes");
-        restored
-            .create_template::<TestState>(entry.clone())
-            .expect("singleton template is recreated");
-        assert_eq!(
-            restored
-                .get::<TestState>(&entry, None)
-                .expect("singleton state restores")
-                .get()
-                .value,
-            2
-        );
+        let singleton = restored
+            .singleton::<TestState>("state")
+            .expect("singleton reopens");
+        assert_eq!(singleton.load().unwrap().unwrap().value, 2);
     }
 
     #[test]
-    fn collection_template_serves_multiple_instances() {
+    fn collection_serves_multiple_instances() {
         let root = "/claw-persistence-collection";
-        let entry = Entry::collection("sessions");
+        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
+        let collection = persistence
+            .collection::<TestState>("sessions")
+            .expect("collection opens");
         let session_2 = instance_id("session-2");
         let session_10 = instance_id("session-10");
+        let state_2 = DurableState::new(TestState { value: 2 });
+        let state_10 = DurableState::new(TestState { value: 10 });
+        collection.register(&session_2, &state_2).unwrap();
+        collection.register(&session_10, &state_10).unwrap();
+
+        assert!(collection.list().unwrap().is_empty());
+        persistence.maybe_persist().unwrap();
+        assert_eq!(
+            collection.list().unwrap(),
+            vec![session_10.clone(), session_2]
+        );
+        assert_eq!(collection.load(&session_10).unwrap().unwrap().value, 10);
+    }
+
+    #[test]
+    fn registration_is_non_owning() {
+        let root = "/claw-persistence-weak-registration";
         let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("collection template is created once");
+        let singleton = persistence.singleton::<TestState>("state").unwrap();
+        let state = DurableState::new(TestState { value: 1 });
+        singleton.register(&state).unwrap();
+        drop(state);
 
-        persistence
-            .put(&entry, Some(session_2.clone()), TestState { value: 2 })
-            .expect("first collection state is put");
-        persistence
-            .put(&entry, Some(session_10.clone()), TestState { value: 10 })
-            .expect("second collection state is put");
-
-        assert!(persistence
-            .list(&entry)
-            .expect("collection lists before persistence")
-            .is_empty());
-        persistence
-            .maybe_persist()
-            .expect("collection states persist");
-        assert_eq!(
-            persistence.list(&entry).expect("collection lists"),
-            vec![session_10.clone(), session_2.clone()]
-        );
-        assert!(MemFs::exists(&format!("{root}/sessions/session-2.bin")));
-
-        let restored = Persistence::<MemFs>::new(root).expect("persistence reinitializes");
-        restored
-            .create_template::<TestState>(entry.clone())
-            .expect("collection template is recreated");
-        assert_eq!(
-            restored
-                .get::<TestState>(&entry, Some(&session_10))
-                .expect("one collection state restores")
-                .get()
-                .value,
-            10
-        );
+        persistence.maybe_persist().unwrap();
+        assert!(!MemFs::exists(&format!("{root}/state.bin")));
     }
 
     #[test]
-    fn put_updates_the_existing_shared_state() {
-        let entry = Entry::singleton("state");
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-put-update")
-            .expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("template is created");
-        let first = persistence
-            .put(&entry, None, TestState { value: 1 })
-            .expect("state is put");
-        let second = persistence
-            .put(&entry, None, TestState { value: 2 })
-            .expect("state is updated");
+    fn a_dropped_owner_can_be_replaced_before_cleanup() {
+        let persistence = Persistence::<MemFs>::new("/claw-persistence-reregister").unwrap();
+        let singleton = persistence.singleton::<TestState>("state").unwrap();
+        let first = DurableState::new(TestState { value: 1 });
+        singleton.register(&first).unwrap();
+        drop(first);
 
-        assert_eq!(first.get().value, 2);
-        assert_eq!(second.get().value, 2);
+        let second = DurableState::new(TestState { value: 2 });
+        singleton.register(&second).unwrap();
+        persistence.maybe_persist().unwrap();
+        assert_eq!(singleton.load().unwrap().unwrap().value, 2);
     }
 
     #[test]
-    fn instance_id_rules_follow_the_entry_kind() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-instance-rules")
-            .expect("persistence initializes");
-        let singleton = Entry::singleton("state");
-        let collection = Entry::collection("sessions");
-        persistence
-            .create_template::<TestState>(singleton.clone())
-            .expect("singleton template is created");
-        persistence
-            .create_template::<TestState>(collection.clone())
-            .expect("collection template is created");
+    fn duplicate_live_registration_is_rejected() {
+        let persistence = Persistence::<MemFs>::new("/claw-persistence-duplicate").unwrap();
+        let singleton = persistence.singleton::<TestState>("state").unwrap();
+        let first = DurableState::new(TestState { value: 1 });
+        let second = DurableState::new(TestState { value: 2 });
+        singleton.register(&first).unwrap();
 
         assert!(matches!(
-            persistence.put(
-                &singleton,
-                Some(instance_id("unexpected")),
-                TestState { value: 1 }
-            ),
-            Err(PersistenceError::UnexpectedInstanceId { .. })
-        ));
-        assert!(matches!(
-            persistence.put(&collection, None, TestState { value: 1 }),
-            Err(PersistenceError::MissingInstanceId { .. })
+            singleton.register(&second),
+            Err(PersistenceError::StateAlreadyRegistered { .. })
         ));
     }
 
     #[test]
-    fn entry_names_are_identifiers_not_paths() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-entry-names")
-            .expect("persistence initializes");
-
+    fn entry_type_is_stable() {
+        let persistence = Persistence::<MemFs>::new("/claw-persistence-type").unwrap();
+        persistence.singleton::<TestState>("state").unwrap();
+        persistence.singleton::<TestState>("state").unwrap();
         assert!(matches!(
-            persistence.create_template::<TestState>(Entry::singleton("nested/state")),
-            Err(PersistenceError::InvalidSingleton { .. })
-        ));
-        assert!(matches!(
-            persistence.create_template::<TestState>(Entry::collection("nested/sessions")),
-            Err(PersistenceError::InvalidCollection { .. })
-        ));
-    }
-
-    #[test]
-    fn template_registration_enforces_identity_and_type() {
-        let entry = Entry::singleton("state");
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-template-rules")
-            .expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("template is created");
-
-        assert!(matches!(
-            persistence.create_template::<TestState>(entry.clone()),
-            Err(PersistenceError::TemplateAlreadyExists { .. })
-        ));
-        assert!(matches!(
-            persistence.put(&entry, None, OtherState),
+            persistence.singleton::<OtherState>("state"),
             Err(PersistenceError::TypeMismatch { .. })
         ));
     }
 
     #[test]
-    fn singleton_and_collection_with_the_same_name_are_distinct_templates() {
+    fn singleton_and_collection_names_do_not_collide() {
         let root = "/claw-persistence-peer-entries";
-        let singleton = Entry::singleton("sessions");
-        let collection = Entry::collection("sessions");
-        let instance_id = instance_id("session-1");
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(singleton.clone())
-            .expect("singleton template is created");
-        persistence
-            .create_template::<OtherState>(collection.clone())
-            .expect("collection template with the same name is created");
-
-        persistence
-            .put(&singleton, None, TestState { value: 1 })
-            .expect("singleton state is put");
-        persistence
-            .put(&collection, Some(instance_id), OtherState)
-            .expect("collection state is put");
-        persistence.maybe_persist().expect("both states persist");
+        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let singleton = persistence.singleton::<TestState>("sessions").unwrap();
+        let collection = persistence.collection::<OtherState>("sessions").unwrap();
+        let singleton_state = DurableState::new(TestState { value: 1 });
+        let collection_state = DurableState::new(OtherState);
+        singleton.register(&singleton_state).unwrap();
+        collection
+            .register(&instance_id("session-1"), &collection_state)
+            .unwrap();
+        persistence.maybe_persist().unwrap();
 
         assert!(MemFs::exists(&format!("{root}/sessions.bin")));
         assert!(MemFs::exists(&format!("{root}/sessions/session-1.bin")));
     }
 
     #[test]
-    fn remove_deletes_state_but_keeps_the_template() {
+    fn entry_names_are_identifiers_not_paths() {
+        let persistence = Persistence::<MemFs>::new("/claw-persistence-names").unwrap();
+        assert!(matches!(
+            persistence.singleton::<TestState>("nested/state"),
+            Err(PersistenceError::InvalidSingleton { .. })
+        ));
+        assert!(matches!(
+            persistence.collection::<TestState>("nested/sessions"),
+            Err(PersistenceError::InvalidCollection { .. })
+        ));
+    }
+
+    #[test]
+    fn remove_deletes_state_and_registration() {
         let root = "/claw-persistence-remove";
-        let entry = Entry::collection("sessions");
-        let instance_id = instance_id("session-1");
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("template is created");
-        let detached = persistence
-            .put(&entry, Some(instance_id.clone()), TestState { value: 1 })
-            .expect("state is put");
-        persistence.maybe_persist().expect("state persists");
+        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let collection = persistence.collection::<TestState>("sessions").unwrap();
+        let id = instance_id("session-1");
+        let state = DurableState::new(TestState { value: 1 });
+        collection.register(&id, &state).unwrap();
+        persistence.maybe_persist().unwrap();
+        collection.remove(&id).unwrap();
+        state.get_mut().value = 2;
+        persistence.maybe_persist().unwrap();
 
-        persistence
-            .remove(&entry, Some(&instance_id))
-            .expect("state is removed");
-        detached.get_mut().value = 2;
-        persistence
-            .maybe_persist()
-            .expect("detached state is not persisted");
+        assert!(collection.load(&id).unwrap().is_none());
         assert!(!MemFs::exists(&format!("{root}/sessions/session-1.bin")));
-        assert!(matches!(
-            persistence.get::<TestState>(&entry, Some(&instance_id)),
-            Err(PersistenceError::StateNotFound { .. })
-        ));
-
-        persistence
-            .put(&entry, Some(instance_id), TestState { value: 3 })
-            .expect("the existing template accepts a new state");
     }
 
     #[test]
-    fn list_filters_non_state_entries_and_rejects_singletons() {
+    fn list_filters_non_state_entries() {
         let root = "/claw-persistence-list";
-        let collection = Entry::collection("sessions");
-        let singleton = Entry::singleton("state");
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(collection.clone())
-            .expect("collection template is created");
-        persistence
-            .create_template::<TestState>(singleton.clone())
-            .expect("singleton template is created");
-        MemFs::write_atomic(&format!("{root}/sessions/session-1.bin"), b"state")
-            .expect("state-looking file is installed");
-        MemFs::write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored")
-            .expect("non-state file is installed");
-        MemFs::write_atomic(
-            &format!("{root}/sessions/nested/transcript.jsonl"),
-            b"ignored",
-        )
-        .expect("nested state is installed");
-        MemFs::write_atomic(&format!("{root}/sessions/...bin"), b"ignored")
-            .expect("invalid state-looking file is installed");
+        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let collection = persistence.collection::<TestState>("sessions").unwrap();
+        MemFs::write_atomic(&format!("{root}/sessions/session-1.bin"), b"state").unwrap();
+        MemFs::write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored").unwrap();
+        MemFs::write_atomic(&format!("{root}/sessions/...bin"), b"ignored").unwrap();
 
-        assert_eq!(
-            persistence.list(&collection).expect("collection lists"),
-            vec![instance_id("session-1")]
-        );
-        assert!(matches!(
-            persistence.list(&singleton),
-            Err(PersistenceError::CannotListSingleton { .. })
-        ));
+        assert_eq!(collection.list().unwrap(), vec![instance_id("session-1")]);
     }
 
     #[test]
-    fn get_rejects_a_truncated_schema_version() {
-        let root = "/claw-persistence-truncated-version";
+    fn load_rejects_a_truncated_schema_version() {
+        let root = "/claw-persistence-truncated";
         let path = format!("{root}/state.bin");
-        let entry = Entry::singleton("state");
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
-        persistence
-            .create_template::<TestState>(entry.clone())
-            .expect("template is created");
-        MemFs::write_atomic(&path, &[1, 0, 0]).expect("truncated file is installed");
+        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let singleton = persistence.singleton::<TestState>("state").unwrap();
+        MemFs::write_atomic(&path, &[1, 0, 0]).unwrap();
 
-        let error = persistence
-            .get::<TestState>(&entry, None)
-            .expect_err("truncated state is rejected");
+        let error = singleton.load().expect_err("truncated state is rejected");
         assert!(matches!(&error, PersistenceError::CorruptState(_)));
         assert!(error.to_string().contains(&path));
     }

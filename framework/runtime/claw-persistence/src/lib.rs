@@ -1,14 +1,18 @@
-//! Persistence primitives for durable runtime state.
+//! Persistence primitives for runtime-owned durable state.
+//!
+//! Callers open typed singleton or collection entries, decode persisted DTOs,
+//! construct their own [`DurableState`], and register it for observation by
+//! [`Persistence::maybe_persist`]. Normal registrations are non-owning.
 
 mod persistence;
 
-pub use persistence::{Persistence, PersistenceError};
+pub use persistence::{Collection, Persistence, PersistenceError, Singleton};
 
 use std::{
     borrow::Cow,
     error::Error,
     ops::{Deref, DerefMut},
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
+    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
 };
 
 type Shared<T> = Arc<Mutex<T>>;
@@ -16,29 +20,7 @@ type Shared<T> = Arc<Mutex<T>>;
 pub type SharedPersistence<Filesystem> = Arc<Persistence<Filesystem>>;
 
 pub type SchemaVersion = u32;
-type PartGeneration = u32;
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Entry {
-    Singleton(String),
-    Collection(String),
-}
-
-impl Entry {
-    pub fn singleton(key: impl Into<String>) -> Self {
-        Self::Singleton(key.into())
-    }
-
-    pub fn collection(namespace: impl Into<String>) -> Self {
-        Self::Collection(namespace.into())
-    }
-
-    pub fn name(&self) -> &str {
-        match self {
-            Self::Singleton(key) | Self::Collection(key) => key,
-        }
-    }
-}
+type PartGeneration = u64;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InstanceId(String);
@@ -113,9 +95,35 @@ pub trait DurableStateCodec: Sized {
     ) -> Result<Self, DurablePartError>;
 }
 
+/// An encoded snapshot of runtime-owned durable state.
+pub(crate) struct DurableStateSnapshot {
+    generation: PartGeneration,
+    schema_version: SchemaVersion,
+    state: StateBlob<'static>,
+}
+
+impl DurableStateSnapshot {
+    fn new(generation: u64, schema_version: SchemaVersion, state: StateBlob<'static>) -> Self {
+        Self {
+            generation,
+            schema_version,
+            state,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (PartGeneration, SchemaVersion, StateBlob<'static>) {
+        (self.generation, self.schema_version, self.state)
+    }
+}
+
 #[derive(Debug)]
 pub struct DurableState<T> {
     inner: Shared<DurableStateInner<T>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct WeakDurableState<T> {
+    inner: Weak<Mutex<DurableStateInner<T>>>,
 }
 
 #[derive(Debug)]
@@ -158,6 +166,14 @@ impl<T> Clone for DurableState<T> {
     }
 }
 
+impl<T> Clone for WeakDurableState<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Weak::clone(&self.inner),
+        }
+    }
+}
+
 impl<T> DurableState<T> {
     pub fn new(value: T) -> Self {
         Self {
@@ -168,6 +184,7 @@ impl<T> DurableState<T> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn generation(&self) -> PartGeneration {
         self.lock().generation
     }
@@ -188,43 +205,43 @@ impl<T> DurableState<T> {
         state.generation = state.generation.saturating_add(1);
     }
 
+    fn downgrade(&self) -> WeakDurableState<T> {
+        WeakDurableState {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, DurableStateInner<T>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct DurablePart<T> {
-    state: DurableState<T>,
-}
-
-impl<T> DurablePart<T> {
-    pub(crate) fn new(value: T) -> Self {
-        Self {
-            state: DurableState::new(value),
-        }
-    }
-
-    pub(crate) fn generation(&self) -> PartGeneration {
-        self.state.generation()
+impl<T> WeakDurableState<T> {
+    pub(crate) fn generation(&self) -> Option<PartGeneration> {
+        let inner = self.inner.upgrade()?;
+        let generation = inner
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .generation;
+        Some(generation)
     }
 }
 
-impl<T: DurableStateCodec> DurablePart<T> {
-    pub(crate) fn export_state(
-        &self,
-    ) -> Result<(PartGeneration, SchemaVersion, StateBlob<'static>), DurablePartError> {
-        let state = self.state.lock();
+impl<T> WeakDurableState<T>
+where
+    T: DurableStateCodec + Send + 'static,
+{
+    pub(crate) fn snapshot(&self) -> Result<Option<DurableStateSnapshot>, DurablePartError> {
+        let Some(inner) = self.inner.upgrade() else {
+            return Ok(None);
+        };
+        let state = inner.lock().unwrap_or_else(PoisonError::into_inner);
         let blob = state.value.encode_state()?.into_owned();
-
-        Ok((state.generation, T::SCHEMA_VERSION, blob))
-    }
-
-    pub(crate) fn restore(
-        schema_version: SchemaVersion,
-        state: StateSlice<'_>,
-    ) -> Result<Self, DurablePartError> {
-        Ok(Self::new(T::decode_state(schema_version, state)?))
+        Ok(Some(DurableStateSnapshot::new(
+            state.generation,
+            T::SCHEMA_VERSION,
+            blob,
+        )))
     }
 }
 
@@ -322,11 +339,15 @@ mod tests {
 
     #[test]
     fn export_captures_one_owned_snapshot() {
-        let part = DurablePart::new(TestState { value: 3 });
-        part.state.get_mut().value = 4;
+        let state = DurableState::new(TestState { value: 3 });
+        state.get_mut().value = 4;
 
-        let (generation, schema_version, blob) =
-            part.export_state().expect("state export succeeds");
+        let (generation, schema_version, blob) = state
+            .downgrade()
+            .snapshot()
+            .expect("state export succeeds")
+            .expect("state owner remains alive")
+            .into_parts();
 
         assert_eq!(generation, 1);
         assert_eq!(schema_version, TestState::SCHEMA_VERSION);

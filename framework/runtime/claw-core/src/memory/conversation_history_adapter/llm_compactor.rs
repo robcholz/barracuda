@@ -1,7 +1,6 @@
 //! LLM-backed transformation for one aged conversation-history window.
 
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
 
 use claw_api::{ChatRequest, ClawApiAsync};
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
@@ -9,7 +8,7 @@ use claw_memory::{CompactBackendError, CompactError, CompactFuture, Compactor};
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
-use crate::config::{ApiUsage, ClawApiManager};
+use crate::config::{ApiUsage, SharedApiManager};
 use crate::memory::async_llm::SharedAsyncLlm;
 
 const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_system.md");
@@ -18,11 +17,11 @@ const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_p
 /// A [`Compactor`] that summarizes an aged history window via the LLM client.
 pub(crate) struct LlmCompactor<H: ClawHttp, Timer: ClawTimer> {
     api: SharedAsyncLlm<H, Timer>,
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    api_manager: SharedApiManager,
 }
 
 impl<H: ClawHttp + Default, Timer: ClawTimer + Default> LlmCompactor<H, Timer> {
-    pub(crate) fn new(api_manager: Arc<RwLock<ClawApiManager>>) -> Self {
+    pub(crate) fn new(api_manager: SharedApiManager) -> Self {
         Self {
             api: SharedAsyncLlm::new(ClawApiAsync::new(H::default(), Timer::default())),
             api_manager,

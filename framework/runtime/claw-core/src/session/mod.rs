@@ -13,5 +13,5 @@ pub use api::{
     OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionEventStream,
 };
 pub(crate) use api::{SessionCommand, SessionEndpoint};
-pub(crate) use persistence::{session_entry, session_instance, SessionState};
+pub(crate) use persistence::{session_instance, SessionState, SESSION_STATE_NAME};
 pub(crate) use registry::SessionStore;

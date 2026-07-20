@@ -265,7 +265,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     fn append_task_input(&mut self, message: &Message, starts_task: bool) {
         if starts_task {
             let state = &mut self.state;
-            state.iterations = IterationIdAllocator::new();
+            state.id_allocator = IterationIdAllocator::new();
             self.outcome = None;
         }
         self.transcript.append_user(message.as_str(), starts_task);

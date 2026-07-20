@@ -1,32 +1,37 @@
 use claw_persistence::DurableState;
 
 use crate::protocol::AgentId;
-use crate::runtime_state::RuntimeState;
+
+crate::define_id_allocator!(
+    pub(crate) AgentIdAllocatorState(AgentId),
+    AgentId(1)
+);
 
 /// Process-wide allocator shared by all multiagent runtimes.
 #[derive(Clone)]
-pub(crate) struct AgentIdAllocator(DurableState<RuntimeState>);
+pub(crate) struct AgentIdAllocator(DurableState<AgentIdAllocatorState>);
 
 impl AgentIdAllocator {
     /// Process-local allocator used by isolated unit tests.
     #[cfg(test)]
     pub(crate) fn new() -> Self {
-        Self(DurableState::new(RuntimeState::default()))
+        Self::from_state(AgentIdAllocatorState::default())
     }
 
-    pub(crate) fn from_runtime(runtime: DurableState<RuntimeState>) -> Self {
-        Self(runtime)
+    pub(crate) fn from_state(state: AgentIdAllocatorState) -> Self {
+        Self(DurableState::new(state))
+    }
+
+    pub(crate) fn state(&self) -> &DurableState<AgentIdAllocatorState> {
+        &self.0
     }
 
     pub(crate) fn next(&self) -> AgentId {
-        let mut runtime = self.0.get_mut();
-        let id = AgentId::new(runtime.next_agent_id());
-        runtime.set_next_agent_id(id.0.saturating_add(1));
-        id
+        self.0.get_mut().next()
     }
 
     pub(crate) fn peek(&self) -> AgentId {
-        AgentId::new(self.0.get().next_agent_id())
+        self.0.get().peek()
     }
 }
 

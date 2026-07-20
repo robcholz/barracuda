@@ -12,7 +12,9 @@ mod tool;
 pub(crate) use event::EventSink;
 pub use event::{InputRequestKind, SessionEvent, StreamPart, ToolCall};
 pub use ids::{AgentId, InputRequestId, IterationId, SessionId, TurnId};
-pub(crate) use ids::{InputRequestIdAllocator, IterationIdAllocator, TurnIdAllocator};
+pub(crate) use ids::{
+    InputRequestIdAllocator, IterationIdAllocator, SessionIdAllocator, TurnIdAllocator,
+};
 pub(crate) use kind::AgentKind;
 pub use message::Message;
 pub(crate) use tool::TrackedToolCall;

@@ -479,7 +479,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
@@ -493,7 +493,7 @@ mod tests {
     };
     use super::DriveOutput;
     use crate::agent::FsAgentFactory;
-    use crate::config::{catalog as agent_catalog, ClawApiManager};
+    use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{
         AgentId, AgentKind, EventSink, Message, SessionId, SessionPersistence, TurnOrigin,
     };
@@ -571,7 +571,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             "/work-priority-test".to_owned(),
             Vec::new(),
-            Arc::new(RwLock::new(ClawApiManager::new())),
+            SharedApiManager::default(),
         )
         .expect("test factory builds");
         let mut runtime = MultiagentRuntime::new(

@@ -3,7 +3,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{mpsc, Arc};
 
 use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
@@ -14,13 +14,13 @@ use futures_core::Stream;
 use tracing::Instrument as _;
 
 use crate::agent::FsAgentFactory;
-use crate::config::ClawApiManager;
+use crate::config::SharedApiManager;
 use crate::multiagent::AgentIdAllocator;
 use crate::protocol::{EventSink, SessionId, SessionPersistence};
 use crate::session::{
-    session_entry, session_instance, OpenSessionError, SessionActor, SessionActorExit,
-    SessionCommand, SessionControlError, SessionCreateError, SessionEndpoint, SessionState,
-    SessionStore,
+    session_instance, OpenSessionError, SessionActor, SessionActorExit, SessionCommand,
+    SessionControlError, SessionCreateError, SessionEndpoint, SessionState, SessionStore,
+    SESSION_STATE_NAME,
 };
 
 use super::{OrchestratorBuildError, ORCHESTRATOR_TRACE_TASK, SYSTEM_TRACE_SCOPE};
@@ -59,8 +59,8 @@ where
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
     persistence: SharedPersistence<Filesystem>,
     sessions: Arc<SessionStore>,
-    agent_ids: AgentIdAllocator,
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    id_allocator: AgentIdAllocator,
+    api_manager: SharedApiManager,
     actors: HashMap<SessionId, ActorTask>,
 }
 
@@ -77,8 +77,8 @@ where
         persistence_dir: String,
         skill_roots: Vec<String>,
         sessions: Arc<SessionStore>,
-        agent_ids: AgentIdAllocator,
-        api_manager: Arc<RwLock<ClawApiManager>>,
+        id_allocator: AgentIdAllocator,
+        api_manager: SharedApiManager,
     ) -> Result<Self, OrchestratorBuildError> {
         let factory = Rc::new(FsAgentFactory::new(
             tools,
@@ -86,7 +86,7 @@ where
             skill_roots,
             Arc::clone(&api_manager),
         )?);
-        let entry = session_entry();
+        let session_states = persistence.collection::<SessionState>(SESSION_STATE_NAME)?;
         let persistent_sessions = sessions
             .list()
             .into_iter()
@@ -95,14 +95,14 @@ where
             })
             .collect::<Vec<_>>();
         for session in persistent_sessions {
-            let _ = persistence.get::<SessionState>(&entry, Some(&session_instance(session)))?;
+            let _ = session_states.load(&session_instance(session))?;
         }
 
         Ok(Self {
             factory,
             persistence,
             sessions,
-            agent_ids,
+            id_allocator,
             api_manager,
             actors: HashMap::new(),
         })
@@ -119,7 +119,14 @@ where
     fn handle_event(&mut self, event: EngineEvent, stopping: &mut bool) {
         match event {
             EngineEvent::ActorExited(exit) => {
-                self.actors.remove(&exit.session());
+                let session = exit.session();
+                self.actors.remove(&session);
+                if let SessionActorExit::Shutdown { state, .. } = exit {
+                    if let Err(error) = self.persistence.maybe_persist() {
+                        tracing::error!(name: "persistence_failed", error = %error);
+                    }
+                    drop(state);
+                }
             }
             EngineEvent::Command(Some(Command::CreateSession { persistence, ack })) => {
                 self.create_session(persistence, ack);
@@ -144,29 +151,33 @@ where
     }
 
     fn create_session(
-        &self,
+        &mut self,
         session_persistence: SessionPersistence,
         ack: Sender<Result<SessionId, SessionCreateError>>,
     ) {
         let session = self.sessions.allocate();
-        let entry = session_entry();
-        let initialized = match session_persistence {
-            SessionPersistence::Persistent => self
+        let state = DurableState::new(SessionState::default());
+        if session_persistence == SessionPersistence::Persistent {
+            let registration = self
                 .persistence
-                .put(
-                    &entry,
-                    Some(session_instance(session)),
-                    SessionState::default(),
-                )
-                .map(|_| ())
-                .map_err(SessionCreateError::from),
-            SessionPersistence::Ephemeral => Ok(()),
-        };
-        let result = initialized.map(|()| {
-            self.sessions.publish(session, session_persistence);
-            session
-        });
-        let _ = ack.try_send(result);
+                .collection::<SessionState>(SESSION_STATE_NAME)
+                .and_then(|sessions| sessions.register(&session_instance(session), &state));
+            if let Err(error) = registration {
+                let _ = ack.try_send(Err(SessionCreateError::from(error)));
+                return;
+            }
+        }
+        let actor = SessionActor::new(
+            session,
+            session_persistence,
+            Rc::clone(&self.factory),
+            self.id_allocator.clone(),
+            state,
+            Arc::clone(&self.api_manager),
+        );
+        self.spawn_actor(session, actor);
+        self.sessions.publish(session, session_persistence);
+        let _ = ack.try_send(Ok(session));
     }
 
     fn open_session(
@@ -181,11 +192,22 @@ where
         };
         if !self.actors.contains_key(&session) {
             let state = if session_persistence == SessionPersistence::Persistent {
+                let instance = session_instance(session);
                 match self
                     .persistence
-                    .get::<SessionState>(&session_entry(), Some(&session_instance(session)))
+                    .collection::<SessionState>(SESSION_STATE_NAME)
+                    .and_then(|sessions| sessions.load(&instance))
                 {
-                    Ok(state) => state,
+                    Ok(Some(dto)) => DurableState::new(dto),
+                    Ok(None) => {
+                        tracing::error!(
+                            name: "session_state_load_failed",
+                            session = %session,
+                            error = "persisted session state is missing",
+                        );
+                        let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
+                        return;
+                    }
                     Err(error) => {
                         tracing::error!(
                             name: "session_state_load_failed",
@@ -199,11 +221,26 @@ where
             } else {
                 DurableState::new(SessionState::default())
             };
+            if session_persistence == SessionPersistence::Persistent {
+                let registration = self
+                    .persistence
+                    .collection::<SessionState>(SESSION_STATE_NAME)
+                    .and_then(|sessions| sessions.register(&session_instance(session), &state));
+                if let Err(error) = registration {
+                    tracing::error!(
+                        name: "session_state_registration_failed",
+                        session = %session,
+                        error = %error,
+                    );
+                    let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
+                    return;
+                }
+            }
             let actor = SessionActor::new(
                 session,
                 session_persistence,
                 Rc::clone(&self.factory),
-                self.agent_ids.clone(),
+                self.id_allocator.clone(),
                 state,
                 Arc::clone(&self.api_manager),
             );
@@ -232,10 +269,11 @@ where
             return;
         };
         if session_persistence == SessionPersistence::Persistent {
-            if let Err(error) = self
+            let removal = self
                 .persistence
-                .remove(&session_entry(), Some(&session_instance(session)))
-            {
+                .collection::<SessionState>(SESSION_STATE_NAME)
+                .and_then(|sessions| sessions.remove(&session_instance(session)));
+            if let Err(error) = removal {
                 tracing::error!(
                     name: "session_state_remove_failed",
                     session = %session,
@@ -390,10 +428,10 @@ pub(super) fn run_engine<Filesystem, Http, Timer, Executor>(
     persistence_dir: String,
     skill_roots: Vec<String>,
     sessions: Arc<SessionStore>,
-    agent_ids: AgentIdAllocator,
+    id_allocator: AgentIdAllocator,
     command_rx: Receiver<Command>,
-    ready: mpsc::Sender<Result<(), OrchestratorBuildError>>,
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    init_result_tx: mpsc::Sender<Result<(), OrchestratorBuildError>>,
+    api_manager: SharedApiManager,
 ) where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -412,16 +450,16 @@ pub(super) fn run_engine<Filesystem, Http, Timer, Executor>(
             persistence_dir,
             skill_roots,
             sessions,
-            agent_ids,
+            id_allocator,
             api_manager,
         )
     }) {
         Ok(engine) => engine,
         Err(error) => {
-            let _ = ready.send(Err(error));
+            let _ = init_result_tx.send(Err(error));
             return;
         }
     };
-    let _ = ready.send(Ok(()));
+    let _ = init_result_tx.send(Ok(()));
     Executor::block_on(engine.run(command_rx).instrument(span));
 }

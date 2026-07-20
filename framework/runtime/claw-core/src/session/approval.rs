@@ -5,7 +5,7 @@
 //! into the internal [`ApprovalDecision`] it feeds back to the parked agent.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use claw_api::{ClawApiAsync, InitError, RetryPolicy};
 use claw_interface::http::StreamingHttp;
@@ -21,7 +21,7 @@ use crate::agent::{
     ApprovalDecision, CompletedKind, InterruptionControl, IterationLoop, IterationLoopError,
     IterationOutcome, IterationStep,
 };
-use crate::config::{ApiUsage, ClawApiManager};
+use crate::config::{ApiUsage, SharedApiManager};
 use crate::multiagent::DriveControl;
 use crate::protocol::{EventSink, IterationId};
 
@@ -179,7 +179,7 @@ impl ToolGate for AllowGate {
 }
 
 pub(crate) async fn resolve_permission_reply<H, Timer>(
-    api_manager: &Arc<RwLock<ClawApiManager>>,
+    api_manager: &SharedApiManager,
     summary: &str,
     user_reply: &str,
     control: &DriveControl,

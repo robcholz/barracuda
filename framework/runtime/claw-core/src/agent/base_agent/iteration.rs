@@ -40,7 +40,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                     Err(error) => self.fail_with(error),
                 },
                 None => {
-                    let iteration_id = self.state.iterations.next();
+                    let iteration_id = self.state.id_allocator.next();
                     let outcome = self
                         .run_iteration(iteration_id, events, event_boundary)
                         .await;

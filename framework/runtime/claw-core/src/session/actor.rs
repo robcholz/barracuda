@@ -2,7 +2,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
@@ -13,7 +13,7 @@ use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
 use crate::agent::{AgentResume, FsAgentFactory};
-use crate::config::ClawApiManager;
+use crate::config::SharedApiManager;
 use crate::multiagent::{
     AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
     MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
@@ -91,13 +91,16 @@ enum DeliverError {
 
 pub(crate) enum SessionActorExit {
     Deleted(SessionId),
-    Shutdown(SessionId),
+    Shutdown {
+        session: SessionId,
+        state: DurableState<SessionState>,
+    },
 }
 
 impl SessionActorExit {
     pub(crate) fn session(&self) -> SessionId {
         match self {
-            Self::Deleted(session) | Self::Shutdown(session) => *session,
+            Self::Deleted(session) | Self::Shutdown { session, .. } => *session,
         }
     }
 }
@@ -115,7 +118,7 @@ where
     /// Active turns and request ids are process-local and restart at boot.
     turn: TurnState,
     execution: Option<RuntimeExecution<Filesystem, Http, Timer>>,
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    api_manager: SharedApiManager,
     events: Option<EventSink>,
     active_lease: Option<u64>,
     next_lease: u64,
@@ -141,9 +144,9 @@ where
         session: SessionId,
         persistence: SessionPersistence,
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
-        agent_ids: AgentIdAllocator,
+        id_allocator: AgentIdAllocator,
         state: DurableState<SessionState>,
-        api_manager: Arc<RwLock<ClawApiManager>>,
+        api_manager: SharedApiManager,
     ) -> Self {
         let (root_mode, recovery) = {
             let state = state.get();
@@ -156,7 +159,7 @@ where
         let runtime = MultiagentRuntime::new_with_resume(
             session,
             factory,
-            agent_ids,
+            id_allocator,
             permission.clone(),
             MultiagentState::default(),
             root_mode,
@@ -234,7 +237,10 @@ where
                 if self.shutdown_requested {
                     self.record_recovery();
                     self.emit_closed();
-                    return Some(SessionActorExit::Shutdown(self.session));
+                    return Some(SessionActorExit::Shutdown {
+                        session: self.session,
+                        state: self.state.clone(),
+                    });
                 }
                 self.finish_close();
                 continue;
@@ -975,7 +981,7 @@ async fn drive_turn_input<Filesystem, Http, Timer>(
     persistence: SessionPersistence,
     events: &EventSink,
     control: &DriveControl,
-    api_manager: &Arc<RwLock<ClawApiManager>>,
+    api_manager: &SharedApiManager,
 ) -> RuntimeDriveResult
 where
     Filesystem: ClawFs + 'static,
@@ -1090,7 +1096,7 @@ async fn resolve_pending_approval<Filesystem, Http, Timer>(
     user_reply: &str,
     control: &DriveControl,
     events: &EventSink,
-    api_manager: &Arc<RwLock<ClawApiManager>>,
+    api_manager: &SharedApiManager,
 ) -> Result<DriveOutcome, DeliverError>
 where
     Filesystem: ClawFs + 'static,

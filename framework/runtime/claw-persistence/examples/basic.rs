@@ -13,8 +13,8 @@ use std::{borrow::Cow, error::Error};
 
 use claw_interface::MemFs;
 use claw_persistence::{
-    DurablePartError, DurableStateCodec, Entry, InstanceId, Persistence, SchemaVersion, StateBlob,
-    StateSlice,
+    DurablePartError, DurableState, DurableStateCodec, InstanceId, Persistence, SchemaVersion,
+    StateBlob, StateSlice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -53,30 +53,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     MemFs::new();
 
     let root = "/example";
-    let runtime_entry = Entry::singleton("runtime");
-    let sessions_entry = Entry::collection("sessions");
     let session_id = InstanceId::new("session-1")?;
 
     let persistence = Persistence::<MemFs>::new(root)?;
-    persistence.create_template::<ExampleState>(runtime_entry.clone())?;
-    persistence.create_template::<ExampleState>(sessions_entry.clone())?;
+    let runtime_entry = persistence.singleton::<ExampleState>("runtime")?;
+    let sessions_entry = persistence.collection::<ExampleState>("sessions")?;
 
-    let runtime = persistence.put(
-        &runtime_entry,
-        None,
-        ExampleState {
-            name: "runtime".to_owned(),
-            turn_count: 0,
-        },
-    )?;
-    let session = persistence.put(
-        &sessions_entry,
-        Some(session_id.clone()),
-        ExampleState {
-            name: "first session".to_owned(),
-            turn_count: 0,
-        },
-    )?;
+    let runtime = DurableState::new(ExampleState {
+        name: "runtime".to_owned(),
+        turn_count: 0,
+    });
+    let session = DurableState::new(ExampleState {
+        name: "first session".to_owned(),
+        turn_count: 0,
+    });
+    runtime_entry.register(&runtime)?;
+    sessions_entry.register(&session_id, &session)?;
 
     runtime.get_mut().turn_count += 1;
     session.get_mut().turn_count += 2;
@@ -88,19 +80,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     drop(session);
     drop(persistence);
 
-    // Templates contain runtime codec/type information, so they are recreated
-    // when the process starts again. The state itself is restored lazily by get().
+    // Typed entries are reopened when the process starts again. Loading returns
+    // only the decoded DTO; a runtime owner creates its own DurableState.
     let resumed = Persistence::<MemFs>::new(root)?;
-    resumed.create_template::<ExampleState>(runtime_entry.clone())?;
-    resumed.create_template::<ExampleState>(sessions_entry.clone())?;
+    let runtime_entry = resumed.singleton::<ExampleState>("runtime")?;
+    let sessions_entry = resumed.collection::<ExampleState>("sessions")?;
 
-    let runtime = resumed.get::<ExampleState>(&runtime_entry, None)?;
-    let session = resumed.get::<ExampleState>(&sessions_entry, Some(&session_id))?;
+    let runtime = runtime_entry.load()?.expect("runtime state was persisted");
+    let session = sessions_entry
+        .load(&session_id)?
+        .expect("session state was persisted");
 
-    println!("runtime turns: {}", runtime.get().turn_count);
-    println!("session turns: {}", session.get().turn_count);
-    println!("persisted sessions: {:?}", resumed.list(&sessions_entry)?);
+    println!("runtime turns: {}", runtime.turn_count);
+    println!("session turns: {}", session.turn_count);
+    println!("persisted sessions: {:?}", sessions_entry.list()?);
 
-    resumed.remove(&sessions_entry, Some(&session_id))?;
+    sessions_entry.remove(&session_id)?;
     Ok(())
 }

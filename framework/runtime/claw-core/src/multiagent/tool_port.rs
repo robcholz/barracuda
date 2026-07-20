@@ -67,7 +67,7 @@ struct MultiagentBridgeState {
 /// Tools can only invoke the semantic methods on this bridge. The runtime alone
 /// drains commands and publishes the inspection snapshot.
 pub(in crate::multiagent) struct MultiagentBridge {
-    agent_id_allocator: AgentIdAllocator,
+    id_allocator: AgentIdAllocator,
     state: Mutex<MultiagentBridgeState>,
 }
 
@@ -129,9 +129,9 @@ impl SubagentControl {
 }
 
 impl MultiagentBridge {
-    pub(in crate::multiagent) fn new(agent_id_allocator: AgentIdAllocator) -> Self {
+    pub(in crate::multiagent) fn new(id_allocator: AgentIdAllocator) -> Self {
         Self {
-            agent_id_allocator,
+            id_allocator,
             state: Mutex::new(MultiagentBridgeState::default()),
         }
     }
@@ -160,7 +160,7 @@ impl MultiagentBridge {
         completion: Option<Sender<SubagentResult>>,
         source_call: Option<TrackedToolCall>,
     ) -> AgentId {
-        let id = self.agent_id_allocator.next();
+        let id = self.id_allocator.next();
         self.push(MultiagentCommand::new(
             parent,
             MultiagentAction::Spawn(SpawnCommand {

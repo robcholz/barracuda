@@ -19,7 +19,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, FsError};
 #[cfg(feature = "host-backends")]
 use claw_interface::{DiskFs, RealHttp, TokioTimer};
-use claw_persistence::{Entry, Persistence, PersistenceError, SharedPersistence};
+use claw_persistence::{DurableState, Persistence, PersistenceError, SharedPersistence};
 use claw_tool::{ToolRegistry, ToolRegistryError, ToolRegistryState};
 
 const TOOL_REGISTRY_ENTRY: &str = "tool_registry";
@@ -112,17 +112,11 @@ where
     {
         let shared_persistence: SharedPersistence<Filesystem> =
             Arc::new(Persistence::new(persistence.persistence_root.clone())?);
-        let tool_registry_entry = Entry::singleton(TOOL_REGISTRY_ENTRY);
-        shared_persistence.create_template::<ToolRegistryState>(tool_registry_entry.clone())?;
-        let tool_registry_state = match shared_persistence
-            .get::<ToolRegistryState>(&tool_registry_entry, None)
-        {
-            Ok(state) => state,
-            Err(PersistenceError::StateNotFound { .. }) => {
-                shared_persistence.put(&tool_registry_entry, None, ToolRegistryState::default())?
-            }
-            Err(error) => return Err(error.into()),
-        };
+        let tool_registry =
+            shared_persistence.singleton::<ToolRegistryState>(TOOL_REGISTRY_ENTRY)?;
+        let tool_registry_dto = tool_registry.load()?.unwrap_or_default();
+        let tool_registry_state = DurableState::new(tool_registry_dto);
+        tool_registry.register(&tool_registry_state)?;
         let tools = Arc::new(ToolRegistry::from_state(tool_registry_state));
         let orchestrator = Orchestrator::new::<Filesystem, Http, Timer, Thread, Executor>(
             Arc::clone(&tools),
@@ -184,7 +178,7 @@ where
     ///
     /// De-duplicated by model; when `default` is set it becomes the fallback for
     /// usages without an explicit binding. Updates take effect at the start of the
-    /// next turn (see `ClawApiManager`), so this never disturbs an in-flight turn.
+    /// next turn, so this never disturbs an in-flight turn.
     ///
     /// # Errors
     ///

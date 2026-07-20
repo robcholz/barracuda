@@ -49,7 +49,7 @@ where
                     .map_err(|source| MultiagentDeliverError::Root { root, source })
             }
             None => {
-                let id = self.agent_id_allocator.next();
+                let id = self.id_allocator.next();
                 let kind = agent_catalog::root_kind().clone();
                 self.build_agent(
                     id,

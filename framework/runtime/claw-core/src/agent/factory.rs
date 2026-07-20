@@ -8,9 +8,9 @@ mod layout;
 mod long_term;
 
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use crate::config::ClawApiManager;
+use crate::config::SharedApiManager;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
@@ -28,7 +28,7 @@ pub(crate) struct FsAgentFactory<
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 > {
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    api_manager: SharedApiManager,
     tools: Arc<ToolRegistry>,
     _http: PhantomData<fn() -> Http>,
     _timer: PhantomData<fn() -> Timer>,

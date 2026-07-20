@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use claw_api::ClawApiConfig;
 
-use crate::config::{ApiUsage, ClawApiManager};
+use crate::config::{ApiUsage, SharedApiManager};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
@@ -46,7 +46,7 @@ impl<
         tools: Arc<ToolRegistry>,
         persistence_dir: String,
         skill_roots: Vec<String>,
-        api_manager: Arc<RwLock<ClawApiManager>>,
+        api_manager: SharedApiManager,
     ) -> Result<Self, FsAgentFactoryError> {
         let span = tracing::info_span!("agent.factory");
         let _enter = span.enter();

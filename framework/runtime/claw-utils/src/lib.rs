@@ -205,9 +205,9 @@ macro_rules! define_prefixed_id {
 /// define_prefixed_id!(WidgetId, "widget-", "widget");
 /// define_id_allocator!(WidgetIdAllocator(WidgetId), WidgetId(1));
 ///
-/// let mut alloc = WidgetIdAllocator::new();
-/// assert_eq!(alloc.next(), WidgetId(1));
-/// assert_eq!(alloc.next(), WidgetId(2));
+/// let mut id_allocator = WidgetIdAllocator::new();
+/// assert_eq!(id_allocator.next(), WidgetId(1));
+/// assert_eq!(id_allocator.next(), WidgetId(2));
 /// // To share one counter across owners, wrap it caller-side, e.g.
 /// // `Arc<Mutex<WidgetIdAllocator>>`; the macro itself stays lock-free.
 /// ```

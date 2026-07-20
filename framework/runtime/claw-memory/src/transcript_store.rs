@@ -234,7 +234,7 @@ struct StoreState {
     groups: Vec<StoredGroup>,
     /// The in-progress turn's messages — not yet committed (volatile, no id).
     open_group: Vec<Value>,
-    ids: TurnIdAllocator,
+    id_allocator: TurnIdAllocator,
 
     /// Records appended in memory but not yet written to the `.jsonl`.
     pending: Vec<Pending>,
@@ -745,7 +745,7 @@ fn commit_open_turn<F: ClawFs + 'static>(inner: &StoreInner<F>) {
             return;
         }
         let msgs = std::mem::take(&mut state.open_group);
-        let id = state.ids.next();
+        let id = state.id_allocator.next();
         // An in-memory store never flushes, so skip enqueuing a pending line that
         // would otherwise accumulate unbounded.
         if !inner.volatile {
@@ -879,7 +879,7 @@ fn write_live_set_to_files<F: ClawFs>(
     let manifest = Manifest {
         version: MANIFEST_VERSION,
         covered_len: off.as_len(),
-        next_id: state.ids.peek(),
+        next_id: state.id_allocator.peek(),
         live,
     };
     let manifest_bytes = match serde_json::to_vec(&manifest) {
@@ -952,7 +952,7 @@ fn build_manifest_bytes(state: &StoreState, transcript_id: u32) -> Option<Vec<u8
     let manifest = Manifest {
         version: MANIFEST_VERSION,
         covered_len: state.data_len,
-        next_id: state.ids.peek(),
+        next_id: state.id_allocator.peek(),
         live,
     };
     match serde_json::to_vec(&manifest) {
@@ -1097,7 +1097,8 @@ fn load_state<F: ClawFs>(data_path: &str, index_path: &str) -> Result<(StoreStat
     state.data_len = data_len;
     state.manifest_covered_len = covered_len;
     state.groups.sort_by_key(|g| g.id);
-    state.ids = TurnIdAllocator::starting_at(manifest_next_id.max(max_seen_id(&state).next()));
+    state.id_allocator =
+        TurnIdAllocator::starting_at(manifest_next_id.max(max_seen_id(&state).next()));
     Ok((state, mismatch))
 }
 

@@ -5,11 +5,10 @@ use std::sync::{Mutex, MutexGuard};
 
 use claw_persistence::DurableState;
 
-use crate::protocol::{SessionId, SessionPersistence};
-use crate::runtime_state::RuntimeState;
+use crate::protocol::{SessionId, SessionIdAllocator, SessionPersistence};
 
 struct Registry {
-    runtime: DurableState<RuntimeState>,
+    ids: DurableState<SessionIdAllocator>,
     persistent_sessions: BTreeSet<SessionId>,
     ephemeral_sessions: BTreeSet<SessionId>,
 }
@@ -20,26 +19,29 @@ pub(crate) struct SessionStore {
 
 impl SessionStore {
     pub(crate) fn new(
-        runtime: DurableState<RuntimeState>,
+        mut ids: SessionIdAllocator,
         persistent_sessions: impl IntoIterator<Item = SessionId>,
     ) -> Self {
         let persistent_sessions = persistent_sessions.into_iter().collect::<BTreeSet<_>>();
-        let persisted_next = runtime.get().next_session_id();
         let discovered_next = persistent_sessions
             .last()
             .map(|session| session.0.saturating_add(1))
             .unwrap_or(1);
-        let next = persisted_next.max(discovered_next).max(1);
-        if next != persisted_next {
-            runtime.get_mut().set_next_session_id(next);
+        let next = ids.peek().0.max(discovered_next).max(1);
+        if ids.peek().0 != next {
+            ids = SessionIdAllocator::starting_at(SessionId::new(next));
         }
         Self {
             registry: Mutex::new(Registry {
-                runtime,
+                ids: DurableState::new(ids),
                 persistent_sessions,
                 ephemeral_sessions: BTreeSet::new(),
             }),
         }
+    }
+
+    pub(crate) fn id_state(&self) -> DurableState<SessionIdAllocator> {
+        self.lock_registry().ids.clone()
     }
 
     fn lock_registry(&self) -> MutexGuard<'_, Registry> {
@@ -51,11 +53,7 @@ impl SessionStore {
     /// Reserve the next id. The engine is the sole writer and publishes it only
     /// after the session's state has been constructed successfully.
     pub(crate) fn allocate(&self) -> SessionId {
-        let registry = self.lock_registry();
-        let id = SessionId::new(registry.runtime.get().next_session_id());
-        let next = SessionId::new(id.0.saturating_add(1));
-        registry.runtime.get_mut().set_next_session_id(next.0);
-        id
+        self.lock_registry().ids.get_mut().next()
     }
 
     pub(crate) fn publish(&self, id: SessionId, persistence: SessionPersistence) {

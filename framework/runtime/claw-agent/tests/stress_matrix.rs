@@ -286,8 +286,8 @@ fn run_disk_stress_case(
         expected_outputs,
     );
     assert!(
-        DiskFs::exists(&format!("{root}/state.bin")),
-        "case {case}: runtime state missing"
+        DiskFs::exists(&format!("{root}/session_id_allocator.bin")),
+        "case {case}: session id allocator state missing"
     );
 
     if rebuild_after {

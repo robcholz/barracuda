@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use claw_permission::PermissionLevel;
 use claw_persistence::{
-    DurablePartError, DurableStateCodec, Entry, InstanceId, SchemaVersion, StateBlob, StateSlice,
+    DurablePartError, DurableStateCodec, InstanceId, SchemaVersion, StateBlob, StateSlice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use crate::agent::AgentMode;
 use crate::config::ReasoningEffort;
 use crate::protocol::{SessionId, TrackedToolCall};
 
-const SESSION_NAMESPACE: &str = "sessions";
+pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub(crate) struct SessionState {
@@ -156,10 +156,6 @@ impl DurableStateCodec for SessionState {
         }
         serde_json::from_slice(state.bytes).map_err(DurablePartError::decode)
     }
-}
-
-pub(crate) fn session_entry() -> Entry {
-    Entry::collection(SESSION_NAMESPACE)
 }
 
 pub(crate) fn session_instance(session: SessionId) -> InstanceId {

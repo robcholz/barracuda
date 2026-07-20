@@ -99,14 +99,14 @@ where
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
     use crate::agent::{AgentCommandError, ApprovalDecision, FsAgentFactory};
-    use crate::config::{catalog as agent_catalog, ClawApiManager};
+    use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
 
     use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
@@ -120,7 +120,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             "/approval-test".to_owned(),
             Vec::new(),
-            Arc::new(RwLock::new(ClawApiManager::new())),
+            SharedApiManager::default(),
         )
         .expect("test factory builds");
         MultiagentRuntime::new(

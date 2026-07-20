@@ -54,7 +54,7 @@ use self::agents::AgentSlots;
 pub(crate) use self::approval::ApprovalResolutionError;
 pub(crate) use self::drive::{DriveOutcome, DriveOutput, TurnStopMode};
 pub(crate) use self::drive_control::{DriveControl, DriveStop};
-pub(crate) use self::id_allocator::AgentIdAllocator;
+pub(crate) use self::id_allocator::{AgentIdAllocator, AgentIdAllocatorState};
 use self::model::SubagentResult;
 use self::pending_deliveries::PendingDeliveries;
 pub(crate) use self::state::{MultiagentState, MultiagentWork};
@@ -90,7 +90,7 @@ where
     root_deliveries_in_turn: Vec<AgentId>,
     root_background_spawns: BTreeMap<AgentId, TrackedToolCall>,
     /// Shared, process-wide id allocator for roots and spawned children.
-    agent_id_allocator: AgentIdAllocator,
+    id_allocator: AgentIdAllocator,
     /// Process-local graph and scheduler state. Agents are not restored.
     state: MultiagentState,
     /// Stable slots for live graph nodes. Each slot owns the agent in both its

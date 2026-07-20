@@ -1,5 +1,5 @@
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 
 use async_channel::Sender;
 use claw_api::{ClawApiConfig, InitError};
@@ -10,17 +10,17 @@ use claw_interface::{
 use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;
 
-use crate::config::{ApiUsage, ClawApiManager};
+use crate::config::{ApiUsage, SharedApiManager};
 use crate::multiagent::AgentIdAllocator;
 use crate::protocol::EventSink;
 use crate::protocol::{SessionId, SessionPersistence};
-use crate::runtime_state::load_runtime_state;
 use crate::session::{
-    session_entry, OpenSessionError, SessionControl, SessionControlError, SessionCreateError,
-    SessionEventStream, SessionState, SessionStore,
+    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionEventStream,
+    SessionState, SessionStore, SESSION_STATE_NAME,
 };
 
 use super::engine::{run_engine, Command};
+use super::id_allocators::{load_id_allocators, register_id_allocators};
 use super::{OrchestratorBuildError, ENGINE_WORKER_STACK_SIZE, SYSTEM_TRACE_SCOPE};
 
 /// A `Send + Sync` handle to a running orchestrator.
@@ -33,7 +33,7 @@ pub struct Orchestrator {
     worker: Mutex<Option<WorkerHandle>>,
     /// Shared with the engine worker: turns read the per-usage config from it at
     /// their start; this handle side updates it via [`link_api`](Self::link_api).
-    api_manager: Arc<RwLock<ClawApiManager>>,
+    api_manager: SharedApiManager,
 }
 
 impl Orchestrator {
@@ -51,20 +51,26 @@ impl Orchestrator {
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        let runtime = load_runtime_state(&persistence)?;
-        let session_entry = session_entry();
-        persistence.create_template::<SessionState>(session_entry.clone())?;
-        let persisted_sessions = persistence
-            .list(&session_entry)?
-            .into_iter()
-            .map(|instance| SessionId::from_wire(instance.as_str()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let sessions = Arc::new(SessionStore::new(runtime.clone(), persisted_sessions));
-        let agent_ids = AgentIdAllocator::from_runtime(runtime.clone());
+        let id_allocators = load_id_allocators(&persistence)?;
+        let persisted_sessions = {
+            let session_states = persistence.collection::<SessionState>(SESSION_STATE_NAME)?;
+            session_states
+                .list()?
+                .into_iter()
+                .map(|instance| SessionId::from_wire(instance.as_str()))
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let sessions = Arc::new(SessionStore::new(
+            id_allocators.session_ids,
+            persisted_sessions,
+        ));
+        let id_allocator = AgentIdAllocator::from_state(id_allocators.agent_ids);
+        let session_id_state = sessions.id_state();
+        register_id_allocators(&persistence, &session_id_state, id_allocator.state())?;
         let (command_tx, command_rx) = async_channel::unbounded();
-        let (ready_tx, ready_rx) = mpsc::channel();
+        let (init_result_tx, ready_rx) = mpsc::channel();
 
-        let api_manager = Arc::new(RwLock::new(ClawApiManager::new()));
+        let api_manager = SharedApiManager::default();
         let api_manager_engine = Arc::clone(&api_manager);
 
         let sessions_engine = Arc::clone(&sessions);
@@ -80,9 +86,9 @@ impl Orchestrator {
                     persistence_dir,
                     skill_roots,
                     sessions_engine,
-                    agent_ids,
+                    id_allocator,
                     command_rx,
-                    ready_tx,
+                    init_result_tx,
                     api_manager_engine,
                 );
             },
@@ -106,7 +112,7 @@ impl Orchestrator {
         }
     }
 
-    /// Register an LLM API config for a usage (see `ClawApiManager::link_api`).
+    /// Register an LLM API config for a usage.
     ///
     /// Takes `&self`: the manager is behind an `RwLock`, and updates are picked up
     /// at the start of the next turn (turns snapshot their config at their start),
