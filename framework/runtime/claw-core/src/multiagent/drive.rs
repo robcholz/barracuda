@@ -187,7 +187,10 @@ where
             if control.take_interrupt() {
                 interrupt_requested = true;
             }
-            let _ = control.take_wake();
+            if control.take_wake() && !cancel_requested && !interrupt_requested {
+                control.clear_cancel_hook();
+                return DriveOutcome::Complete(output, DriveStop::Woken);
+            }
 
             if !cancel_requested && !interrupt_requested {
                 self.start_ready_agent_tasks(events, false);

@@ -1,9 +1,8 @@
-use claw_context::Block;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
 use crate::agent::{AgentCommand, AgentCommandError, FsAgentCreateError};
-use crate::config::catalog as agent_catalog;
+use crate::config::{catalog as agent_catalog, ReasoningEffort};
 use crate::protocol::{AgentId, Message, SessionPersistence};
 
 use super::{AgentPlacement, MultiagentRuntime};
@@ -38,16 +37,12 @@ where
     pub(crate) fn deliver(
         &mut self,
         message: Message,
-        reasoning_effort: Block<'static>,
         persistence: SessionPersistence,
     ) -> Result<(), MultiagentDeliverError> {
         match self.state.root() {
-            Some(root) => {
-                self.set_agent_context_block(root, reasoning_effort)
-                    .map_err(|source| MultiagentDeliverError::Root { root, source })?;
-                self.deliver_message(root, message)
-                    .map_err(|source| MultiagentDeliverError::Root { root, source })
-            }
+            Some(root) => self
+                .deliver_message(root, message)
+                .map_err(|source| MultiagentDeliverError::Root { root, source }),
             None => {
                 let id = self.id_allocator.next();
                 let kind = agent_catalog::root_kind().clone();
@@ -59,7 +54,7 @@ where
                         session: self.session,
                         persistence,
                     },
-                    vec![reasoning_effort],
+                    Vec::new(),
                 )?;
                 let inserted = self.state.insert_root(id, kind);
                 debug_assert!(inserted, "root insertion requires an empty graph");
@@ -67,17 +62,6 @@ where
                 Ok(())
             }
         }
-    }
-
-    pub(crate) fn set_root_context_block(
-        &mut self,
-        block: Block<'static>,
-    ) -> Result<(), MultiagentDeliverError> {
-        let Some(root) = self.state.root() else {
-            return Ok(());
-        };
-        self.set_agent_context_block(root, block)
-            .map_err(|source| MultiagentDeliverError::Root { root, source })
     }
 
     pub(crate) fn cancel_all(&mut self) {
@@ -92,6 +76,12 @@ where
         }
     }
 
+    /// Update the session default and every currently live Agent independently.
+    pub(crate) fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
+        self.reasoning_effort = effort;
+        self.slots.broadcast_reasoning_effort(effort);
+    }
+
     fn deliver_message(
         &mut self,
         id: AgentId,
@@ -102,18 +92,6 @@ where
         };
         agent.send_command(AgentCommand::AppendMessage(message))?;
         self.enqueue(id);
-        Ok(())
-    }
-
-    fn set_agent_context_block(
-        &mut self,
-        id: AgentId,
-        block: Block<'static>,
-    ) -> Result<(), AgentMessageDeliveryError> {
-        let Some(agent) = self.slots.available_agent_mut(id) else {
-            return Err(AgentMessageDeliveryError::UnknownAgent(id));
-        };
-        agent.set_context_block(block);
         Ok(())
     }
 }

@@ -8,11 +8,11 @@ const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
 const HIGH_PROMPT: &str = prompt!("effort/high.md");
 const ULTRA_PROMPT: &str = prompt!("effort/ultra.md");
 
-/// How deliberately a session asks its root agent to orchestrate work.
+/// How deliberately an agent should reason about and orchestrate work.
 ///
 /// Higher tiers prompt more decomposition, delegation, and verification.
-/// Reconfiguring a session mid-task takes effect on its next turn, not the one
-/// already running (promoted at the session turn boundary).
+/// Reconfiguring a session updates each live Agent independently and takes
+/// effect at that Agent's next LLM iteration.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningEffort {

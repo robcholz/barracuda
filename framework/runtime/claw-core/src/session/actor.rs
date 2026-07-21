@@ -13,7 +13,7 @@ use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
 use crate::agent::{AgentResume, FsAgentFactory};
-use crate::config::SharedApiManager;
+use crate::config::{ReasoningEffort, SharedApiManager};
 use crate::multiagent::{
     AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
     MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
@@ -119,6 +119,7 @@ where
     turn: TurnState,
     execution: Option<RuntimeExecution<Filesystem, Http, Timer>>,
     api_manager: SharedApiManager,
+    pending_reasoning_effort: Option<ReasoningEffort>,
     events: Option<EventSink>,
     active_lease: Option<u64>,
     next_lease: u64,
@@ -152,11 +153,13 @@ where
         let resume = recovery
             .map(|recovery| AgentResume::new(recovery.agent_state, recovery.inflight_toolcalls));
         let permission = Arc::new(SessionPermission::new(state.clone()));
+        let reasoning_effort = state.get().reasoning_effort();
         let runtime = MultiagentRuntime::new_with_resume(
             session,
             factory,
             id_allocator,
             permission.clone(),
+            reasoning_effort,
             MultiagentState::default(),
             resume,
         );
@@ -167,6 +170,7 @@ where
             turn: TurnState::default(),
             execution: Some(RuntimeExecution::Idle(Box::new(runtime))),
             api_manager,
+            pending_reasoning_effort: None,
             events: None,
             active_lease: None,
             next_lease: 1,
@@ -276,8 +280,7 @@ where
                             .runtime()
                             .pending_root_origin()
                             .expect("root work outside a turn has a subagent origin");
-                        let effort = self.state.get().reasoning_effort();
-                        self.turn.begin_subagent_turn(origin, effort);
+                        self.turn.begin_subagent_turn(origin);
                     }
                     Some(TurnOrigin::User) if self.runtime().pending_root_origin().is_some() => {
                         self.start_pending_root_result();
@@ -334,9 +337,7 @@ where
             SessionCommand::Control { lease, op, ack } => self.control(lease, op, ack),
             SessionCommand::SetReasoningEffort { lease, effort, ack } => {
                 if self.accepts(lease) {
-                    if self.state.get().reasoning_effort() != effort {
-                        self.state.get_mut().set_reasoning_effort(effort);
-                    }
+                    self.set_reasoning_effort(effort);
                     let _ = ack.try_send(Ok(()));
                 } else {
                     self.reject_closed(ack);
@@ -411,13 +412,32 @@ where
             let _ = ack.try_send(Err(SessionControlError::Busy(self.session)));
             return;
         }
-        let effort = self.state.get().reasoning_effort();
-        self.turn.begin_user_turn(input, effort);
+        self.turn.begin_user_turn(input);
         if let Some(control) = self.driving_control() {
             control.request_wake();
         }
         tracing::info!(name: "submit_accepted", has_text, text_bytes);
         let _ = ack.try_send(Ok(()));
+    }
+
+    fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
+        if self.state.get().reasoning_effort() != effort {
+            self.state.get_mut().set_reasoning_effort(effort);
+        }
+        if self.is_driving() {
+            self.pending_reasoning_effort = Some(effort);
+            self.driving_control()
+                .expect("a driving runtime has control")
+                .request_wake();
+        } else {
+            self.runtime_mut().set_reasoning_effort(effort);
+        }
+    }
+
+    fn apply_pending_reasoning_effort(&mut self) {
+        if let Some(effort) = self.pending_reasoning_effort.take() {
+            self.runtime_mut().set_reasoning_effort(effort);
+        }
     }
 
     fn respond(
@@ -547,8 +567,7 @@ where
             return;
         };
         let (idle_origin, kind) = request.into_parts();
-        let effort = self.state.get().reasoning_effort();
-        let _ = self.turn.request_input(idle_origin, kind, effort);
+        let _ = self.turn.request_input(idle_origin, kind);
     }
 
     fn announce_input_request(&mut self) {
@@ -703,10 +722,6 @@ where
     fn start_turn_input(&mut self, input: PendingTurnInput) {
         let runtime = self.take_runtime();
         let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let effort = self
-            .turn
-            .reasoning_effort()
-            .expect("user input belongs to an active turn");
         let persistence = self.persistence;
         let api_manager = Arc::clone(&self.api_manager);
         let turn = self
@@ -721,7 +736,6 @@ where
                 let result = drive_turn_input(
                     &mut runtime,
                     input,
-                    effort,
                     persistence,
                     &events,
                     &drive_control,
@@ -742,10 +756,6 @@ where
     fn start_pending_root_result(&mut self) {
         let runtime = self.take_runtime();
         let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let effort = self
-            .turn
-            .reasoning_effort()
-            .expect("a pending root result belongs to an active turn");
         let turn = self
             .turn
             .active_turn_id()
@@ -755,8 +765,7 @@ where
         let future = Box::pin(
             async move {
                 let mut runtime = runtime;
-                let result =
-                    drive_pending_root_result(&mut runtime, effort, &events, &drive_control).await;
+                let result = drive_pending_root_result(&mut runtime, &events, &drive_control).await;
                 RuntimeCompletion { runtime, result }
             }
             .instrument(tracing::info_span!("turn", run.turn = %turn, cause = "background_result")),
@@ -834,6 +843,7 @@ where
         kind: RuntimeDriveKind,
         result: RuntimeDriveResult,
     ) -> bool {
+        self.apply_pending_reasoning_effort();
         let mut yield_for_persistence = false;
         if let RuntimeDriveResult::Driven(result) = result {
             match result {
@@ -845,7 +855,7 @@ where
                 }
                 Ok(DriveOutcome::Complete(output, stop)) => {
                     let stop = self.emit_drive_result(Ok::<_, DeliverError>((output, stop)));
-                    if kind.is_foreground() && stop != DriveStop::Quiescent {
+                    if kind.is_foreground() && stop_mode(stop).is_some() {
                         self.finish_active_turn(false);
                     }
                 }
@@ -967,7 +977,6 @@ where
 async fn drive_turn_input<Filesystem, Http, Timer>(
     runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
     input: PendingTurnInput,
-    effort: crate::config::ReasoningEffort,
     persistence: SessionPersistence,
     events: &EventSink,
     control: &DriveControl,
@@ -981,7 +990,7 @@ where
     let result = match input {
         PendingTurnInput::Submit(input) => {
             match runtime
-                .deliver(input, effort.context_block(), persistence)
+                .deliver(input, persistence)
                 .map_err(DeliverError::from)
             {
                 Ok(()) => drive_root(runtime, control, events).await,
@@ -1010,7 +1019,6 @@ where
 
 async fn drive_pending_root_result<Filesystem, Http, Timer>(
     runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    effort: crate::config::ReasoningEffort,
     events: &EventSink,
     control: &DriveControl,
 ) -> RuntimeDriveResult
@@ -1019,18 +1027,10 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    let result = if runtime.activate_pending_root_results() {
-        runtime
-            .set_root_context_block(effort.context_block())
-            .map_err(DeliverError::from)
-    } else {
+    if !runtime.activate_pending_root_results() {
         debug_assert!(false, "subagent turn requires one pending root result");
-        Ok(())
-    };
-    let result = match result {
-        Ok(()) => drive_root(runtime, control, events).await,
-        Err(error) => Err(error),
-    };
+    }
+    let result = drive_root(runtime, control, events).await;
     RuntimeDriveResult::Driven(result)
 }
 

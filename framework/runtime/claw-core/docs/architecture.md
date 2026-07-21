@@ -93,6 +93,12 @@ Sessions; a future directory cache must remain a rebuildable read model.
 - Concrete mode, conversation, profile, skill, and memory semantics live under
   `agent/context_adapters`. In particular, the BaseAgent runtime neither
   recognizes Normal/Plan nor matches on mode-specific tools.
+- Every Agent owns an independent `ReasoningEffortContextAdapter` value. The
+  durable Session setting is the default for future Agents and a Session-level
+  update is fanned out through one typed queue per live Agent; adapters do not
+  share a mutable reasoning-effort source. Each adapter creates and owns its
+  receiver, returns only the sending handle to its AgentSlot, and drains its
+  inbox when it contributes the next iteration's context.
 - `ContextAdapter` and transcript-facing traits are consumer-owned ports under
   `agent/base_agent`; `agent/context_adapters` contains implementations only.
   The concrete `TranscriptStore<F>` binding lives at the filesystem-aware
@@ -118,8 +124,9 @@ Sessions; a future directory cache must remain a rebuildable read model.
   are not wrapped in fake context adapters merely to deliver an Agent effect.
 - Factory creates one synchronous tool-to-Agent effect channel. BaseAgent owns
   its unique, non-cloneable `AgentEffectInbox`; pure tools and adapter-owned
-  tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no reverse
-  drain/message API.
+  tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no generic
+  reverse drain/message or configuration-update API; an adapter that needs
+  typed control owns its concrete inbox.
 - Tools emit typed effects while they run; BaseAgent drains and reduces them
   only after the complete tool round. The channel mutex is held only for a
   bounded emit/drain operation and never across an `await`. More than one

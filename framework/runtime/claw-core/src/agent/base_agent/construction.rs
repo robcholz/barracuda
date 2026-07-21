@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use claw_api::{ClawApiAsync, ClawApiConfig, InitError, RetryPolicy};
-use claw_context::{Block, BlockKind, Context};
+use claw_context::{Block, Context};
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 use claw_tool::ToolSet;
@@ -35,25 +35,6 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         self.llm.set_config(config)
     }
 
-    pub(crate) fn set_context_block(&mut self, block: Block<'static>) {
-        if block.kind == BlockKind::AgentInstruction {
-            self.agent_instruction = block.clone();
-        } else if let Some(index) = self
-            .inherited_context
-            .iter()
-            .position(|current| current.kind == block.kind)
-        {
-            if block.content.trim().is_empty() {
-                self.inherited_context.remove(index);
-            } else {
-                self.inherited_context[index] = block.clone();
-            }
-        } else if !block.content.trim().is_empty() {
-            self.inherited_context.push(block.clone());
-        }
-        self.context_cache.with(block);
-    }
-
     /// Project the complete typed Agent DTO without interpreting component
     /// state in BaseAgent.
     pub(crate) fn recovery_state(&self) -> AgentState {
@@ -62,25 +43,6 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             adapter.contribute_state(&mut state);
         }
         state.finish()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn exposes_tool_for_test(&mut self, name: &str) -> bool {
-        let Ok(tools) = self.tools.begin() else {
-            return false;
-        };
-        let Ok(serde_json::Value::Array(schemas)) =
-            serde_json::from_str::<serde_json::Value>(tools.schemas_json())
-        else {
-            return false;
-        };
-        schemas.iter().any(|schema| {
-            schema
-                .get("function")
-                .and_then(|function| function.get("name"))
-                .and_then(serde_json::Value::as_str)
-                == Some(name)
-        })
     }
 
     /// Assemble a runnable agent from a [`BaseAgentConfig`].

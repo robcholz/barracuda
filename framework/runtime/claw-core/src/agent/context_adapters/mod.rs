@@ -10,6 +10,7 @@ mod async_llm;
 mod conversation_history;
 mod long_term_memory;
 mod profile;
+mod reasoning_effort;
 mod resumed;
 mod skill;
 
@@ -17,5 +18,6 @@ pub(in crate::agent) use agent_mode::{AgentModeContextAdapter, AgentModeState};
 pub(in crate::agent) use conversation_history::ConversationHistoryContextAdapter;
 pub(in crate::agent) use long_term_memory::LongTermMemoryContextAdapter;
 pub(in crate::agent) use profile::ProfileContextAdapter;
+pub(crate) use reasoning_effort::{ReasoningEffortContextAdapter, ReasoningEffortHandle};
 pub(in crate::agent) use resumed::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
 pub(in crate::agent) use skill::SkillContextAdapter;

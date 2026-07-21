@@ -47,6 +47,7 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
 use crate::agent::{AgentResume, FsAgentFactory};
+use crate::config::ReasoningEffort;
 use crate::protocol::{AgentId, InflightToolCall, SessionId, SessionPersistence};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
@@ -84,6 +85,8 @@ where
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
     /// Session-owned policy propagated unchanged to every built agent.
     permission_policy: Arc<dyn PermissionPolicy>,
+    /// Session default copied into each newly assembled Agent.
+    reasoning_effort: ReasoningEffort,
     /// Complete root Agent state forwarded opaquely from the SessionActor to
     /// the Agent Factory when the root object is reconstructed.
     root_resume: Option<AgentResume>,

@@ -17,6 +17,7 @@ pub(crate) use base_agent::{
     AgentAbortHandle, AgentCommand, AgentCommandError, AgentState, ApprovalDecision, BaseAgent,
     TickOutcome,
 };
+pub(crate) use context_adapters::ReasoningEffortHandle;
 pub(crate) use event::{AgentEvent, AgentEventBoundary, AgentRun};
 pub(crate) use factory::{
     AgentEnvironment, AgentResume, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,

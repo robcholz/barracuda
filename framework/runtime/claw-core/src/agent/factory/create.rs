@@ -9,7 +9,8 @@ use crate::agent::base_agent::{AgentCommand, BaseAgent, BaseAgentConfig, Context
 use crate::agent::config::{AgentConfig, AgentConfigError};
 use crate::agent::context_adapters::{
     AgentModeContextAdapter, AgentResumeNotice, ConversationHistoryContextAdapter,
-    ProfileContextAdapter, ResumedContextAdapter, SkillContextAdapter,
+    ProfileContextAdapter, ReasoningEffortContextAdapter, ResumedContextAdapter,
+    SkillContextAdapter,
 };
 use crate::agent::effect::agent_effect_channel;
 use crate::agent::tools::internal_tools;
@@ -18,6 +19,7 @@ use crate::protocol::{AgentId, AgentKind, Message};
 
 use super::error::FsAgentCreateError;
 use super::{AgentEnvironment, FsAgentFactory};
+use crate::agent::ReasoningEffortHandle;
 
 const COMPACTION_TRIGGER_TOKENS: usize = 6000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 2000;
@@ -45,7 +47,7 @@ impl<
         kind: &AgentKind,
         goal: Message,
         environment: AgentEnvironment,
-    ) -> Result<BaseAgent<Http, Timer>, FsAgentCreateError> {
+    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), FsAgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         // The config is pure baked data. The per-kind blacklist stays attached
@@ -123,8 +125,11 @@ impl<
         // semantics do not leak into its runtime protocol. ResumedContextAdapter
         // is the boundary that contributes resume context and exposes the pure
         // discovery group implemented alongside the resumed adapter.
+        let (reasoning_effort, reasoning_effort_handle) =
+            ReasoningEffortContextAdapter::new(environment.reasoning_effort);
         let context_adapters: Vec<Box<dyn ContextAdapter>> = vec![
             Box::new(AgentModeContextAdapter::new(mode_state, effect_emitter)),
+            Box::new(reasoning_effort),
             Box::new(resumed_adapter),
             Box::new(conversation_history),
             Box::new(SkillContextAdapter::new(config.skills)),
@@ -166,7 +171,7 @@ impl<
         }
 
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
-        Ok(agent)
+        Ok((agent, reasoning_effort_handle))
     }
 
     fn resolve_config(&self, kind: &AgentKind) -> Result<AgentConfig, AgentConfigError> {

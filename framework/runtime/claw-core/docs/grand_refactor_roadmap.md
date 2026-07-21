@@ -501,6 +501,13 @@ Agent is currently driven or performing runtime checkpoints yet.
   match on concrete modes or adapters. Continue
   emitting the legacy `ToolStarted` compatibility update until Phase 7 wires
   the final durability barrier and deletes SessionActor's mirror.
+- Model reasoning effort as independent per-Agent adapter state. SessionState
+  retains the Session-wide default; changing it broadcasts an owner update to
+  all live AgentSlots through independent typed queues and supplies the initial
+  value for future Agents. ReasoningEffortContextAdapter creates its own queue
+  and returns only its sending handle to the AgentSlot. Do not bind adapters to
+  a shared reasoning-effort source or add a ReasoningEffort update method to the
+  generic ContextAdapter port.
 - Give `FsAgentFactory<F, H, T>` explicit `create_new` and `restore` entry
   points that converge on one private BaseAgent builder. Factory loads or
   initializes recovery state and assembles transcript, tools, mode, and memory

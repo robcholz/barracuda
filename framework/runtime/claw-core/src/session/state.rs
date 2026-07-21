@@ -1,4 +1,3 @@
-use crate::config::ReasoningEffort;
 use crate::protocol::{
     InflightToolCall, InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TurnId,
     TurnIdAllocator, TurnOrigin,
@@ -21,7 +20,6 @@ pub(super) enum PendingTurnInput {
 struct ActiveTurn {
     id: TurnId,
     origin: TurnOrigin,
-    reasoning_effort: ReasoningEffort,
     pending_input: Option<PendingTurnInput>,
     input_request: Option<PendingInputRequest>,
     toolcalls: Vec<InflightToolCall>,
@@ -67,32 +65,22 @@ impl TurnState {
             .is_some_and(|turn| turn.pending_input.is_some())
     }
 
-    pub(super) fn begin_user_turn(
-        &mut self,
-        input: Message,
-        reasoning_effort: ReasoningEffort,
-    ) -> TurnId {
+    pub(super) fn begin_user_turn(&mut self, input: Message) -> TurnId {
         self.begin_turn(
             TurnOrigin::User,
             Some(PendingTurnInput::Submit(input.into_user())),
-            reasoning_effort,
         )
     }
 
-    pub(super) fn begin_subagent_turn(
-        &mut self,
-        origin: TurnOrigin,
-        reasoning_effort: ReasoningEffort,
-    ) -> TurnId {
+    pub(super) fn begin_subagent_turn(&mut self, origin: TurnOrigin) -> TurnId {
         debug_assert!(matches!(origin, TurnOrigin::Subagent { .. }));
-        self.begin_turn(origin, None, reasoning_effort)
+        self.begin_turn(origin, None)
     }
 
     fn begin_turn(
         &mut self,
         origin: TurnOrigin,
         pending_input: Option<PendingTurnInput>,
-        reasoning_effort: ReasoningEffort,
     ) -> TurnId {
         debug_assert!(self.active_turn.is_none());
         let id = self.next_turn_id;
@@ -100,7 +88,6 @@ impl TurnState {
         self.active_turn = Some(ActiveTurn {
             id,
             origin,
-            reasoning_effort,
             pending_input,
             input_request: None,
             toolcalls: Vec::new(),
@@ -112,13 +99,12 @@ impl TurnState {
         &mut self,
         idle_origin: TurnOrigin,
         kind: InputRequestKind,
-        reasoning_effort: ReasoningEffort,
     ) -> Option<InputRequestId> {
         if self.has_pending_input() {
             return None;
         }
         if self.active_turn.is_none() {
-            self.begin_subagent_turn(idle_origin, reasoning_effort);
+            self.begin_subagent_turn(idle_origin);
         }
         let turn = self.active_turn.as_mut()?;
         if turn.input_request.is_some() {
@@ -162,10 +148,6 @@ impl TurnState {
 
     pub(super) fn take_pending_input(&mut self) -> Option<PendingTurnInput> {
         self.active_turn.as_mut()?.pending_input.take()
-    }
-
-    pub(super) fn reasoning_effort(&self) -> Option<ReasoningEffort> {
-        self.active_turn.as_ref().map(|turn| turn.reasoning_effort)
     }
 
     pub(super) fn record_tool_started(&mut self, call: InflightToolCall) {

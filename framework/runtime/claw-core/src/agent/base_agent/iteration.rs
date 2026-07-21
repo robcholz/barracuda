@@ -99,6 +99,12 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             adapter_count,
         );
         let tools = prepare_span.in_scope(|| self.tools.begin())?;
+        // These are authoritative BaseAgent inputs; Context is only their
+        // derived render cache.
+        self.context_cache.with(self.agent_instruction.clone());
+        for block in &self.inherited_context {
+            self.context_cache.with(block.clone());
+        }
         let history_view = self.transcript.as_history();
         Self::prepare_adapter_context(&mut self.context_adapters, history_view)
             .instrument(prepare_span.clone())

@@ -5,6 +5,7 @@ use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
 use crate::agent::AgentState;
+use crate::config::ReasoningEffort;
 use crate::protocol::InflightToolCall;
 
 pub(crate) struct AgentResume {
@@ -54,6 +55,7 @@ pub(crate) struct AgentEnvironment {
     pub(super) permission_policy: Arc<dyn PermissionPolicy>,
     pub(super) extension_tools: Vec<ToolGroup>,
     pub(super) inherited_context: Vec<Block<'static>>,
+    pub(super) reasoning_effort: ReasoningEffort,
     pub(super) resume: Option<AgentResume>,
 }
 
@@ -63,6 +65,7 @@ impl AgentEnvironment {
         permission_policy: Arc<dyn PermissionPolicy>,
         extension_tools: Vec<ToolGroup>,
         inherited_context: Vec<Block<'static>>,
+        reasoning_effort: ReasoningEffort,
         resume: Option<AgentResume>,
     ) -> Self {
         Self {
@@ -70,6 +73,7 @@ impl AgentEnvironment {
             permission_policy,
             extension_tools,
             inherited_context,
+            reasoning_effort,
             resume,
         }
     }

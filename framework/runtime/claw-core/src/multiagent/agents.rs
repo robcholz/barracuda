@@ -6,7 +6,9 @@ use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 
-use crate::agent::{AgentAbortHandle, AgentEvent, AgentRun, BaseAgent, TickOutcome};
+use crate::agent::{
+    AgentAbortHandle, AgentEvent, AgentRun, BaseAgent, ReasoningEffortHandle, TickOutcome,
+};
 use crate::protocol::{AgentId, Message, TurnOrigin};
 
 use super::drive_control::DriveControl;
@@ -51,13 +53,15 @@ enum AgentExecution<Http: ClawHttp, Timer: ClawTimer> {
 struct AgentSlot<Http: ClawHttp, Timer: ClawTimer> {
     execution: Option<AgentExecution<Http, Timer>>,
     inbox: VecDeque<Message>,
+    reasoning_effort: ReasoningEffortHandle,
 }
 
 impl<Http: ClawHttp, Timer: ClawTimer> AgentSlot<Http, Timer> {
-    fn new(agent: BaseAgent<Http, Timer>) -> Self {
+    fn new(agent: BaseAgent<Http, Timer>, reasoning_effort: ReasoningEffortHandle) -> Self {
         Self {
             execution: Some(AgentExecution::Idle(agent)),
             inbox: VecDeque::new(),
+            reasoning_effort,
         }
     }
 
@@ -167,10 +171,15 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         }
     }
 
-    pub(super) fn insert(&mut self, id: AgentId, agent: BaseAgent<Http, Timer>) {
+    pub(super) fn insert(
+        &mut self,
+        id: AgentId,
+        agent: BaseAgent<Http, Timer>,
+        reasoning_effort: ReasoningEffortHandle,
+    ) {
         match self.slots.entry(id) {
             Entry::Vacant(entry) => {
-                entry.insert(AgentSlot::new(agent));
+                entry.insert(AgentSlot::new(agent, reasoning_effort));
             }
             Entry::Occupied(_) => panic!("agent slot already exists: {id}"),
         }
@@ -284,6 +293,12 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
     pub(super) fn abort_all(&self) {
         for slot in self.slots.values() {
             slot.abort_if_running();
+        }
+    }
+
+    pub(super) fn broadcast_reasoning_effort(&self, effort: crate::config::ReasoningEffort) {
+        for slot in self.slots.values() {
+            slot.reasoning_effort.set(effort);
         }
     }
 

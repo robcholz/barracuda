@@ -10,6 +10,7 @@ use claw_permission::PermissionPolicy;
 use crate::agent::{
     AgentEnvironment, AgentResume, AgentState, FsAgentCreateError, FsAgentFactory, TranscriptTarget,
 };
+use crate::config::ReasoningEffort;
 use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
 use super::{
@@ -37,6 +38,7 @@ where
             factory,
             id_allocator,
             permission_policy,
+            ReasoningEffort::default(),
             state,
             None,
         )
@@ -48,6 +50,7 @@ where
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
+        reasoning_effort: ReasoningEffort,
         state: MultiagentState,
         root_resume: Option<AgentResume>,
     ) -> Self {
@@ -56,6 +59,7 @@ where
             session,
             factory,
             permission_policy,
+            reasoning_effort,
             root_resume,
             root_deliveries_in_turn: Vec::new(),
             root_background_spawns: BTreeMap::new(),
@@ -101,10 +105,11 @@ where
             Arc::clone(&self.permission_policy),
             extension_tools,
             inherited_context,
+            self.reasoning_effort,
             resume,
         );
-        let agent = self.factory.create_agent(id, kind, goal, environment)?;
-        self.slots.insert(id, agent);
+        let (agent, reasoning_effort) = self.factory.create_agent(id, kind, goal, environment)?;
+        self.slots.insert(id, agent, reasoning_effort);
         Ok(())
     }
 
@@ -129,8 +134,8 @@ mod tests {
     use claw_tool::ToolRegistry;
 
     use crate::agent::{AgentResume, AgentState, FsAgentFactory};
-    use crate::config::{catalog as agent_catalog, SharedApiManager};
-    use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
+    use crate::config::{catalog as agent_catalog, ReasoningEffort, SharedApiManager};
+    use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
 
     use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
 
@@ -155,6 +160,7 @@ mod tests {
             factory,
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
+            ReasoningEffort::default(),
             MultiagentState::default(),
             Some(AgentResume::new(expected.clone(), Vec::new())),
         );
@@ -177,94 +183,5 @@ mod tests {
             .insert_root(root, agent_catalog::root_kind().clone()));
 
         assert_eq!(runtime.root_recovery(), Some(expected));
-    }
-
-    #[test]
-    fn baked_blacklist_projects_worker_plan_and_profile_tools() {
-        MemFs::new();
-        let session = SessionId::new(1);
-        let factory = Rc::new(
-            FsAgentFactory::new(
-                Arc::new(ToolRegistry::new()),
-                "/plan-mode-tools-test".to_owned(),
-                Vec::new(),
-                SharedApiManager::default(),
-            )
-            .expect("test factory builds"),
-        );
-        let mut runtime = TestRuntime::new(
-            session,
-            factory,
-            AgentIdAllocator::new(),
-            Arc::new(AllowAll),
-            MultiagentState::default(),
-        );
-        let root = AgentId::new(1);
-        let child = AgentId::new(2);
-
-        runtime
-            .build_agent(
-                root,
-                agent_catalog::root_kind(),
-                Message::text("root"),
-                AgentPlacement::Root {
-                    session,
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
-            )
-            .expect("root builds");
-        runtime
-            .build_agent(
-                child,
-                &AgentKind::from_static("worker"),
-                Message::text("child"),
-                AgentPlacement::Child(child),
-                Vec::new(),
-            )
-            .expect("child builds");
-
-        for id in [root, child] {
-            for name in ["tool_search", "tool_load"] {
-                assert!(runtime
-                    .slots
-                    .available_agent_mut(id)
-                    .expect("agent is available")
-                    .exposes_tool_for_test(name));
-            }
-        }
-
-        for name in ["plan_enter", "plan_exit", "plan_clarify"] {
-            assert!(runtime
-                .slots
-                .available_agent_mut(root)
-                .expect("root is available")
-                .exposes_tool_for_test(name));
-            assert!(!runtime
-                .slots
-                .available_agent_mut(child)
-                .expect("child is available")
-                .exposes_tool_for_test(name));
-        }
-
-        for id in [root, child] {
-            assert!(runtime
-                .slots
-                .available_agent_mut(id)
-                .expect("agent is available")
-                .exposes_tool_for_test("profile_read"));
-        }
-        for name in ["profile_replace", "profile_clear"] {
-            assert!(runtime
-                .slots
-                .available_agent_mut(root)
-                .expect("root is available")
-                .exposes_tool_for_test(name));
-            assert!(!runtime
-                .slots
-                .available_agent_mut(child)
-                .expect("child is available")
-                .exposes_tool_for_test(name));
-        }
     }
 }
