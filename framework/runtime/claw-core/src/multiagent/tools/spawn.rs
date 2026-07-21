@@ -6,7 +6,7 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::protocol::{AgentKind, Message, TrackedToolCall};
+use crate::protocol::{AgentKind, InflightToolCall, Message};
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -95,7 +95,7 @@ impl SpawnSubagentTool {
                 ok: result.ok(),
             })
         } else {
-            let source_call = TrackedToolCall::new(
+            let source_call = InflightToolCall::new(
                 call.name(),
                 call.arguments_value().unwrap_or_else(|_| {
                     serde_json::Value::String(call.arguments_json().to_owned())

@@ -5,23 +5,23 @@ use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
 use crate::agent::AgentState;
-use crate::protocol::TrackedToolCall;
+use crate::protocol::InflightToolCall;
 
 pub(crate) struct AgentResume {
     state: AgentState,
-    legacy_inflight_toolcalls: Vec<TrackedToolCall>,
+    inflight_toolcalls: Vec<InflightToolCall>,
 }
 
 impl AgentResume {
-    pub(crate) fn new(state: AgentState, legacy_inflight_toolcalls: Vec<TrackedToolCall>) -> Self {
+    pub(crate) fn new(state: AgentState, inflight_toolcalls: Vec<InflightToolCall>) -> Self {
         Self {
             state,
-            legacy_inflight_toolcalls,
+            inflight_toolcalls,
         }
     }
 
-    pub(super) fn into_parts(self) -> (AgentState, Vec<TrackedToolCall>) {
-        (self.state, self.legacy_inflight_toolcalls)
+    pub(super) fn into_parts(self) -> (AgentState, Vec<InflightToolCall>) {
+        (self.state, self.inflight_toolcalls)
     }
 }
 

@@ -9,7 +9,7 @@ use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter};
-use crate::protocol::TrackedToolCall;
+use crate::protocol::InflightToolCall;
 
 use self::tools::discovery_tools;
 
@@ -47,14 +47,12 @@ pub(super) fn lock_state(state: &SharedResumedState) -> MutexGuard<'_, ResumedSt
 /// This is not durable Agent state. Factory derives it while distributing a
 /// restored AgentState to its authoritative components.
 pub(in crate::agent) struct AgentResumeNotice {
-    legacy_inflight_toolcalls: Vec<TrackedToolCall>,
+    inflight_toolcalls: Vec<InflightToolCall>,
 }
 
 impl AgentResumeNotice {
-    pub(in crate::agent) fn new(legacy_inflight_toolcalls: Vec<TrackedToolCall>) -> Self {
-        Self {
-            legacy_inflight_toolcalls,
-        }
+    pub(in crate::agent) fn new(inflight_toolcalls: Vec<InflightToolCall>) -> Self {
+        Self { inflight_toolcalls }
     }
 }
 
@@ -118,12 +116,12 @@ fn render_resume_reminder(
         ));
     }
 
-    let legacy_inflight_toolcalls = notice
-        .map(|notice| notice.legacy_inflight_toolcalls)
+    let inflight_toolcalls = notice
+        .map(|notice| notice.inflight_toolcalls)
         .unwrap_or_default();
-    let has_unsettled_toolcalls = !legacy_inflight_toolcalls.is_empty();
-    if has_unsettled_toolcalls {
-        let calls = legacy_inflight_toolcalls
+    let has_inflight_toolcalls = !inflight_toolcalls.is_empty();
+    if has_inflight_toolcalls {
+        let calls = inflight_toolcalls
             .iter()
             .map(|call| format!("{}({})", call.tool(), call.arguments()))
             .collect::<Vec<_>>()
@@ -134,8 +132,8 @@ fn render_resume_reminder(
     }
 
     (!details.is_empty()).then(|| {
-        let caution = if has_unsettled_toolcalls {
-            " Unsettled tool calls were not replayed; inspect current external state before relying on their completion."
+        let caution = if has_inflight_toolcalls {
+            " Inflight tool calls were not replayed; inspect current external state before relying on their completion."
         } else {
             ""
         };
@@ -168,7 +166,7 @@ mod tests {
 
     use super::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
     use crate::agent::base_agent::ContextAdapter;
-    use crate::protocol::TrackedToolCall;
+    use crate::protocol::InflightToolCall;
 
     #[test]
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {
@@ -176,7 +174,7 @@ mod tests {
         let mut tool_set = registry.tool_set();
         let mut adapter = ResumedContextAdapter::new(
             None,
-            Some(AgentResumeNotice::new(vec![TrackedToolCall::new(
+            Some(AgentResumeNotice::new(vec![InflightToolCall::new(
                 "profile_read",
                 json!({"document":"user"}),
             )])),

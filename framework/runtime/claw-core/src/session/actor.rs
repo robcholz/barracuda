@@ -19,8 +19,8 @@ use crate::multiagent::{
     MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
 };
 use crate::protocol::{
-    EventSink, InputRequestId, InputRequestKind, Message, SessionEvent, SessionId,
-    SessionPersistence, StreamPart, TrackedToolCall, TurnId, TurnOrigin,
+    EventSink, InflightToolCall, InputRequestId, InputRequestKind, Message, SessionEvent,
+    SessionId, SessionPersistence, StreamPart, TurnId, TurnOrigin,
 };
 
 use super::api::{
@@ -149,9 +149,8 @@ where
         api_manager: SharedApiManager,
     ) -> Self {
         let recovery = state.get().recovery();
-        let resume = recovery.map(|recovery| {
-            AgentResume::new(recovery.agent_state, recovery.legacy_inflight_toolcalls)
-        });
+        let resume = recovery
+            .map(|recovery| AgentResume::new(recovery.agent_state, recovery.inflight_toolcalls));
         let permission = Arc::new(SessionPermission::new(state.clone()));
         let runtime = MultiagentRuntime::new_with_resume(
             session,
@@ -587,12 +586,12 @@ where
         self.emit(SessionEvent::TurnEnded { turn: finished.id });
     }
 
-    fn record_tool_started(&mut self, call: TrackedToolCall) {
+    fn record_tool_started(&mut self, call: InflightToolCall) {
         self.state.get_mut().add_inflight_toolcall(&call);
         self.turn.record_tool_started(call);
     }
 
-    fn settle_persisted_toolcalls(&self, calls: &[TrackedToolCall]) {
+    fn settle_persisted_toolcalls(&self, calls: &[InflightToolCall]) {
         if calls.is_empty() {
             return;
         }

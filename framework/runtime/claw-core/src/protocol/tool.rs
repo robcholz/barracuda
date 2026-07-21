@@ -3,12 +3,12 @@ use serde_json::Value;
 
 /// Tool identity retained only while its outcome is not durably settled.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub(crate) struct TrackedToolCall {
+pub(crate) struct InflightToolCall {
     tool: String,
     arguments: Value,
 }
 
-impl TrackedToolCall {
+impl InflightToolCall {
     pub(crate) fn new(tool: impl Into<String>, arguments: Value) -> Self {
         Self {
             tool: tool.into(),

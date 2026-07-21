@@ -1,6 +1,6 @@
 use crate::config::ReasoningEffort;
 use crate::protocol::{
-    InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TrackedToolCall, TurnId,
+    InflightToolCall, InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TurnId,
     TurnIdAllocator, TurnOrigin,
 };
 
@@ -24,12 +24,12 @@ struct ActiveTurn {
     reasoning_effort: ReasoningEffort,
     pending_input: Option<PendingTurnInput>,
     input_request: Option<PendingInputRequest>,
-    toolcalls: Vec<TrackedToolCall>,
+    toolcalls: Vec<InflightToolCall>,
 }
 
 pub(super) struct FinishedTurn {
     pub(super) id: TurnId,
-    pub(super) toolcalls: Vec<TrackedToolCall>,
+    pub(super) toolcalls: Vec<InflightToolCall>,
 }
 
 pub(crate) struct TurnState {
@@ -168,7 +168,7 @@ impl TurnState {
         self.active_turn.as_ref().map(|turn| turn.reasoning_effort)
     }
 
-    pub(super) fn record_tool_started(&mut self, call: TrackedToolCall) {
+    pub(super) fn record_tool_started(&mut self, call: InflightToolCall) {
         if let Some(turn) = self.active_turn.as_mut() {
             turn.toolcalls.push(call);
         }

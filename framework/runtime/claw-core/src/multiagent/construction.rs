@@ -114,7 +114,7 @@ where
         Some(agent.recovery_state())
     }
 
-    pub(crate) fn active_root_background_spawns(&self) -> Vec<crate::protocol::TrackedToolCall> {
+    pub(crate) fn active_root_background_spawns(&self) -> Vec<crate::protocol::InflightToolCall> {
         self.root_background_spawns.values().cloned().collect()
     }
 }

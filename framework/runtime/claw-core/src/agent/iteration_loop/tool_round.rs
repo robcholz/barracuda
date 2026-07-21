@@ -8,7 +8,7 @@ use super::types::{
     IterationLoopError, PendingApproval, PreemptedOutcome, ToolRun, ToolRunDisposition,
 };
 use crate::agent::AgentEventBoundary;
-use crate::protocol::{IterationId, TrackedToolCall};
+use crate::protocol::{InflightToolCall, IterationId};
 
 pub(super) enum ToolRoundResult {
     Completed { runs: Vec<ToolRun> },
@@ -90,7 +90,7 @@ pub(super) async fn run_tool_calls(
                 continue;
             }
         };
-        let event_call = TrackedToolCall::new(
+        let event_call = InflightToolCall::new(
             call.name(),
             call.arguments_value()
                 .unwrap_or_else(|_| serde_json::Value::String(call.arguments_json().to_owned())),

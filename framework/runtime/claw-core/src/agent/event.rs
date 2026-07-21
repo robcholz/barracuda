@@ -4,7 +4,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::rc::Rc;
 
-use crate::protocol::{EventSink, TrackedToolCall};
+use crate::protocol::{EventSink, InflightToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 
@@ -12,7 +12,7 @@ use super::{BaseAgent, TickOutcome};
 
 #[derive(Clone, Debug)]
 pub(crate) enum AgentEvent {
-    ToolStarted(TrackedToolCall),
+    ToolStarted(InflightToolCall),
     TickFinished(TickOutcome),
 }
 
@@ -84,15 +84,15 @@ where
 /// the owner has observed that event and polls the tick again.
 #[derive(Clone, Default)]
 pub(crate) struct AgentEventBoundary {
-    pending: Rc<RefCell<Option<TrackedToolCall>>>,
+    pending: Rc<RefCell<Option<InflightToolCall>>>,
 }
 
 impl AgentEventBoundary {
-    pub(crate) fn take(&self) -> Option<TrackedToolCall> {
+    pub(crate) fn take(&self) -> Option<InflightToolCall> {
         self.pending.borrow_mut().take()
     }
 
-    pub(crate) async fn tool_started(&self, call: TrackedToolCall) {
+    pub(crate) async fn tool_started(&self, call: InflightToolCall) {
         let mut call = Some(call);
         poll_fn(|context| {
             let Some(call) = call.take() else {
@@ -116,12 +116,12 @@ mod tests {
     use serde_json::json;
 
     use super::AgentEventBoundary;
-    use crate::protocol::TrackedToolCall;
+    use crate::protocol::InflightToolCall;
 
     #[test]
     fn tool_start_is_observable_before_execution_resumes() {
         let boundary = AgentEventBoundary::default();
-        let call = TrackedToolCall::new("profile_read", json!({"document":"user"}));
+        let call = InflightToolCall::new("profile_read", json!({"document":"user"}));
         let mut started = pin!(boundary.tool_started(call.clone()));
         let mut context = Context::from_waker(Waker::noop());
 

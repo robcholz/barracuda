@@ -4,7 +4,7 @@ use futures_lite::future;
 
 use crate::agent::AgentEvent;
 use crate::config::ApiUsage;
-use crate::protocol::{AgentId, EventSink, TrackedToolCall, TurnOrigin};
+use crate::protocol::{AgentId, EventSink, InflightToolCall, TurnOrigin};
 
 use super::agents::{AgentTickEvent, ReadyAgent};
 use super::drive_control::{DriveControl, DriveStop};
@@ -18,12 +18,12 @@ enum RuntimeWake {
 
 struct RoutedWake {
     output: DriveOutput,
-    root_tool_started: Option<TrackedToolCall>,
+    root_tool_started: Option<InflightToolCall>,
 }
 
 pub(crate) enum DriveOutcome {
     Complete(DriveOutput, DriveStop),
-    ToolStarted(DriveOutput, TrackedToolCall),
+    ToolStarted(DriveOutput, InflightToolCall),
 }
 
 /// Messages created outside the LLM stream and still awaiting engine emission.
@@ -69,7 +69,7 @@ where
         self.multiagent.clear();
     }
 
-    pub(crate) fn commit_root_deliveries(&mut self) -> Vec<TrackedToolCall> {
+    pub(crate) fn commit_root_deliveries(&mut self) -> Vec<InflightToolCall> {
         let children = std::mem::take(&mut self.root_deliveries_in_turn);
         children
             .into_iter()

@@ -194,7 +194,7 @@ AgentState {
   creating; the component owns fresh initialization, and XxxState DTOs do not
   implement `Default`.
 - `UnsettledToolCallRecord` is a stable recovery DTO, not the transient
-  `TrackedToolCall` event type. Loaded tool groups use stable typed identities
+  `InflightToolCall` event type. Loaded tool groups use stable typed identities
   and canonical serialized order when order has no runtime meaning.
 - Filesystem remains a real static capability in Engine, Session assembly,
   Factory, transcript, and persistence stores, but it stops at the constructed
@@ -487,7 +487,7 @@ Agent is currently driven or performing runtime checkpoints yet.
 - Keep BaseAgent<H, T>. Do not add F, SharedPersistence, AgentStateStore, or a
   persistence callback to BaseAgent.
 - Add `AgentState` and stable
-  `UnsettledToolCallRecord` types. Do not persist transient `TrackedToolCall`,
+  `UnsettledToolCallRecord` types. Do not persist transient `InflightToolCall`,
   a future, Waker, RunId, or checkout state.
 - Add synchronous, I/O-free
   `BaseAgent::recovery_state(&self) -> AgentState`.
@@ -891,7 +891,7 @@ AgentState {
 - AgentId is the collection key. The stored record wraps the snapshot in an
   explicit schema version.
 - `UnsettledToolCallRecord` contains stable identity and recovery facts only.
-  Runtime `TrackedToolCall`, futures, Wakers, Scheduler state, and checkout
+  Runtime `InflightToolCall`, futures, Wakers, Scheduler state, and checkout
   state are never serialized.
 - Two calls with equal tool names and arguments remain distinct. ToolCallId is
   monotonic within AgentId. Allocation, counter increment, and unsettled

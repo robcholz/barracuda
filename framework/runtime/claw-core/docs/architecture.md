@@ -199,7 +199,7 @@ components.
 it does not decode adapter-specific state.
 
 The persisted schema is versioned. `UnsettledToolCallRecord` is a stable
-recovery record, not a transient event/future type such as `TrackedToolCall`.
+recovery record, not a transient event/future type such as `InflightToolCall`.
 `ResumedState` serializes loaded tool groups in stable canonical order.
 Conversation history is absent because the canonical transcript reconstructs
 it. Physical ToolRunner state, active futures, and scheduler state are absent

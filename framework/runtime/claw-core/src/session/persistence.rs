@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::AgentState;
 use crate::config::ReasoningEffort;
-use crate::protocol::{SessionId, TrackedToolCall};
+use crate::protocol::{InflightToolCall, SessionId};
 
 pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 
@@ -21,13 +21,13 @@ pub(crate) struct SessionState {
     /// Compatibility journal until durable ToolCallId records move into
     /// AgentState. Physical tool runners and futures are never stored here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    legacy_inflight_toolcalls: Vec<TrackedToolCall>,
+    inflight_toolcalls: Vec<InflightToolCall>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SessionRecovery {
     pub(crate) agent_state: AgentState,
-    pub(crate) legacy_inflight_toolcalls: Vec<TrackedToolCall>,
+    pub(crate) inflight_toolcalls: Vec<InflightToolCall>,
 }
 
 impl SessionState {
@@ -51,7 +51,7 @@ impl SessionState {
         let agent_state = self.agent_state.clone()?;
         Some(SessionRecovery {
             agent_state,
-            legacy_inflight_toolcalls: self.legacy_inflight_toolcalls.clone(),
+            inflight_toolcalls: self.inflight_toolcalls.clone(),
         })
     }
 
@@ -63,26 +63,26 @@ impl SessionState {
         self.agent_state.as_ref() == Some(state)
     }
 
-    fn contains_inflight_toolcall(&self, call: &TrackedToolCall) -> bool {
-        self.legacy_inflight_toolcalls
+    fn contains_inflight_toolcall(&self, call: &InflightToolCall) -> bool {
+        self.inflight_toolcalls
             .iter()
             .any(|inflight| inflight == call)
     }
 
-    pub(crate) fn add_inflight_toolcall(&mut self, call: &TrackedToolCall) {
+    pub(crate) fn add_inflight_toolcall(&mut self, call: &InflightToolCall) {
         if self.contains_inflight_toolcall(call) {
             return;
         }
-        self.legacy_inflight_toolcalls.push(call.clone());
+        self.inflight_toolcalls.push(call.clone());
     }
 
-    pub(crate) fn remove_inflight_toolcall(&mut self, call: &TrackedToolCall) -> bool {
+    pub(crate) fn remove_inflight_toolcall(&mut self, call: &InflightToolCall) -> bool {
         if let Some(index) = self
-            .legacy_inflight_toolcalls
+            .inflight_toolcalls
             .iter()
             .position(|inflight| inflight == call)
         {
-            self.legacy_inflight_toolcalls.remove(index);
+            self.inflight_toolcalls.remove(index);
             true
         } else {
             false
@@ -91,7 +91,7 @@ impl SessionState {
 }
 
 impl DurableStateCodec for SessionState {
-    const SCHEMA_VERSION: SchemaVersion = 2;
+    const SCHEMA_VERSION: SchemaVersion = 3;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -125,7 +125,7 @@ mod tests {
     use super::SessionState;
     use crate::agent::AgentState;
     use crate::config::ReasoningEffort;
-    use crate::protocol::TrackedToolCall;
+    use crate::protocol::InflightToolCall;
     use claw_permission::PermissionLevel;
 
     #[test]
@@ -138,7 +138,7 @@ mod tests {
         state.record_recovery(AgentState::normal_for_test(
             vec!["tool_group_id".to_owned()],
         ));
-        state.add_inflight_toolcall(&TrackedToolCall::new(
+        state.add_inflight_toolcall(&InflightToolCall::new(
             "subagent_spawn",
             json!({"kind":"worker","foreground":false}),
         ));
@@ -152,10 +152,7 @@ mod tests {
             json["agent_state"]["resumed"]["loaded_tool_groups"][0],
             "tool_group_id"
         );
-        assert_eq!(
-            json["legacy_inflight_toolcalls"][0]["tool"],
-            "subagent_spawn"
-        );
+        assert_eq!(json["inflight_toolcalls"][0]["tool"], "subagent_spawn");
 
         let restored = SessionState::decode_state(
             SessionState::SCHEMA_VERSION,
@@ -170,12 +167,12 @@ mod tests {
     #[test]
     fn inflight_toolcall_lifecycle_is_idempotent() {
         let mut state = SessionState::default();
-        let call = TrackedToolCall::new("profile_read", json!({"document":"user"}));
+        let call = InflightToolCall::new("profile_read", json!({"document":"user"}));
 
         state.add_inflight_toolcall(&call);
         state.add_inflight_toolcall(&call);
         assert!(state.contains_inflight_toolcall(&call));
-        assert_eq!(state.legacy_inflight_toolcalls.len(), 1);
+        assert_eq!(state.inflight_toolcalls.len(), 1);
 
         assert!(state.remove_inflight_toolcall(&call));
         assert!(!state.contains_inflight_toolcall(&call));

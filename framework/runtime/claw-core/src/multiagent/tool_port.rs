@@ -6,7 +6,7 @@ use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::protocol::{AgentId, AgentKind, Message, TrackedToolCall};
+use crate::protocol::{AgentId, AgentKind, InflightToolCall, Message};
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,
@@ -39,7 +39,7 @@ pub(super) struct SpawnCommand {
     id: AgentId,
     spec: SubagentSpec,
     completion: Option<Sender<SubagentResult>>,
-    source_call: Option<TrackedToolCall>,
+    source_call: Option<InflightToolCall>,
 }
 
 impl SpawnCommand {
@@ -49,7 +49,7 @@ impl SpawnCommand {
         AgentId,
         SubagentSpec,
         Option<Sender<SubagentResult>>,
-        Option<TrackedToolCall>,
+        Option<InflightToolCall>,
     ) {
         (self.id, self.spec, self.completion, self.source_call)
     }
@@ -91,7 +91,7 @@ impl SubagentControl {
         name: Option<String>,
         goal: Message,
         timeout: SubagentTimeout,
-        source_call: TrackedToolCall,
+        source_call: InflightToolCall,
     ) -> AgentId {
         self.bridge.spawn_background(
             self.caller,
@@ -158,7 +158,7 @@ impl MultiagentBridge {
         parent: AgentId,
         spec: SubagentSpec,
         completion: Option<Sender<SubagentResult>>,
-        source_call: Option<TrackedToolCall>,
+        source_call: Option<InflightToolCall>,
     ) -> AgentId {
         let id = self.id_allocator.next();
         self.push(MultiagentCommand::new(
@@ -209,7 +209,7 @@ impl MultiagentBridge {
         &self,
         parent: AgentId,
         spec: SubagentSpec,
-        source_call: TrackedToolCall,
+        source_call: InflightToolCall,
     ) -> AgentId {
         self.spawn(parent, spec, None, Some(source_call))
     }

@@ -17,7 +17,7 @@ pub(crate) use ids::{
 };
 pub(crate) use kind::AgentKind;
 pub use message::Message;
-pub(crate) use tool::TrackedToolCall;
+pub(crate) use tool::InflightToolCall;
 
 use serde::{Deserialize, Serialize};
 

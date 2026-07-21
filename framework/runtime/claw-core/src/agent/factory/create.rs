@@ -61,9 +61,9 @@ impl<
         })?;
         let (mode_state, resumed_state, resume_notice) = match environment.resume {
             Some(resume) => {
-                let (state, legacy_inflight_toolcalls) = resume.into_parts();
+                let (state, inflight_toolcalls) = resume.into_parts();
                 let (mode, resumed) = state.into_parts();
-                let notice = AgentResumeNotice::new(legacy_inflight_toolcalls);
+                let notice = AgentResumeNotice::new(inflight_toolcalls);
                 (Some(mode), Some(resumed), Some(notice))
             }
             None => (None, None, None),
