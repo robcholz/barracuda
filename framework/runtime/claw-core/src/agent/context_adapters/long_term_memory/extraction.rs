@@ -104,7 +104,7 @@ pub(super) type ExtractFuture<'a> =
 /// [`MemoryOp`]s.
 ///
 /// Returning an empty `Vec` is normal — most turns hold nothing worth changing.
-pub(crate) trait Extractor {
+pub(super) trait Extractor {
     /// Propose memory changes from `input` (transcript + current memory).
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a>;
 }

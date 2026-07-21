@@ -7,12 +7,12 @@ use claw_permission::PermissionPolicy;
 use claw_tool::ToolSet;
 
 use crate::agent::effect::AgentEffectInbox;
-use crate::agent::recovery::{AgentRecoverySnapshot, AgentRecoverySnapshotBuilder};
-use crate::agent::AgentResume;
 
 use super::control::AgentInterruption;
 use super::state::BaseAgentState;
-use super::{BaseAgent, BaseAgentBuildError, ContextAdapter, Transcript};
+use super::{
+    AgentState, AgentStateBuilder, BaseAgent, BaseAgentBuildError, ContextAdapter, Transcript,
+};
 
 /// All construction-time configuration for a [`BaseAgent`], consumed by
 /// [`BaseAgent::build`].
@@ -26,7 +26,6 @@ pub(in crate::agent) struct BaseAgentConfig {
     pub(in crate::agent) context_adapters: Vec<Box<dyn ContextAdapter>>,
     pub(in crate::agent) retry_policy: RetryPolicy,
     pub(in crate::agent) block_retries: u32,
-    pub(in crate::agent) resume: Option<AgentResume>,
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
@@ -55,22 +54,14 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         self.context_cache.with(block);
     }
 
-    pub(crate) fn loaded_tool_groups(&self) -> Vec<String> {
-        self.tools.loaded_groups()
-    }
-
-    /// Project durable recovery state without exposing concrete adapter state
-    /// to BaseAgent.
-    pub(crate) fn recovery_snapshot(&self) -> AgentRecoverySnapshot {
-        let mut snapshot = AgentRecoverySnapshotBuilder::new(self.loaded_tool_groups());
+    /// Project the complete typed Agent DTO without interpreting component
+    /// state in BaseAgent.
+    pub(crate) fn recovery_state(&self) -> AgentState {
+        let mut state = AgentStateBuilder::new();
         for adapter in &self.context_adapters {
-            adapter.contribute_recovery(&mut snapshot);
+            adapter.contribute_state(&mut state);
         }
-        snapshot.finish()
-    }
-
-    pub(crate) fn resume_pending(&self) -> bool {
-        self.resume_reminder.is_some()
+        state.finish()
     }
 
     #[cfg(test)]
@@ -103,13 +94,12 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         let llm = ClawApiAsync::<H, Timer>::new(H::default(), Timer::default());
 
         let mut tools = config.tools;
-        for adapter in &config.context_adapters {
+        let context_adapters = config.context_adapters;
+        for adapter in &context_adapters {
             if let Some(group) = adapter.tools() {
                 tools.add_group(group)?;
             }
         }
-        let resume_reminder = config.resume.and_then(render_resume_reminder);
-
         let mut context_cache = Context::new();
         for block in &config.inherited_context {
             context_cache.with(block.clone());
@@ -128,33 +118,8 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             inherited_context: config.inherited_context,
             context_cache,
             state: BaseAgentState::new(config.block_retries),
-            resume_reminder,
             outcome: None,
-            context_adapters: config.context_adapters,
+            context_adapters,
         })
     }
-}
-
-fn render_resume_reminder(resume: AgentResume) -> Option<String> {
-    let (loaded_groups, inflight_toolcalls) = resume.into_parts();
-    let mut details = Vec::new();
-    if let Some(detail) = ToolSet::resume_detail(loaded_groups) {
-        details.push(detail);
-    }
-    if !inflight_toolcalls.is_empty() {
-        let calls = inflight_toolcalls
-            .iter()
-            .map(|call| format!("{}({})", call.tool(), call.arguments()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        details.push(format!(
-            "tool calls with unknown completion status: {calls}"
-        ));
-    }
-    (!details.is_empty()).then(|| {
-        format!(
-            "Session resumed after a restart; {}. These runtime-only values were not restored or replayed. Inspect current state before relying on them.",
-            details.join("; ")
-        )
-    })
 }

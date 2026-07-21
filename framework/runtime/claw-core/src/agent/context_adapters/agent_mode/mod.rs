@@ -7,11 +7,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_tool::ToolGroup;
-
-use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
-use crate::agent::effect::AgentEffectEmitter;
-use crate::agent::recovery::AgentRecoverySnapshotBuilder;
 use serde::{Deserialize, Serialize};
+
+use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter, TurnLifecycle};
+use crate::agent::effect::AgentEffectEmitter;
 
 use self::tools::plan_tools;
 
@@ -19,15 +18,19 @@ mod tools;
 
 const PLAN_MODE_FRAMING: &str = prompt!("plan_mode/instructions.md");
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+/// Durable state owned by the Agent-mode context adapter.
+///
+/// This DTO deliberately has no `Default`; a missing persisted Agent state is
+/// passed to the adapter as `None`, and the adapter owns its initialization
+/// policy.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum AgentMode {
-    #[default]
+pub(in crate::agent) enum AgentModeState {
     Normal,
     Plan,
 }
 
-impl AgentMode {
+impl AgentModeState {
     fn framing(self) -> &'static str {
         match self {
             Self::Normal => "",
@@ -36,9 +39,9 @@ impl AgentMode {
     }
 }
 
-pub(super) type SharedAgentMode = Arc<Mutex<AgentMode>>;
+pub(super) type SharedAgentMode = Arc<Mutex<AgentModeState>>;
 
-pub(super) fn lock_mode(mode: &SharedAgentMode) -> MutexGuard<'_, AgentMode> {
+pub(super) fn lock_mode(mode: &SharedAgentMode) -> MutexGuard<'_, AgentModeState> {
     mode.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
@@ -49,9 +52,9 @@ pub(crate) struct AgentModeContextAdapter {
 }
 
 impl AgentModeContextAdapter {
-    pub(crate) fn new(initial: AgentMode, effects: AgentEffectEmitter) -> Self {
+    pub(crate) fn new(state: Option<AgentModeState>, effects: AgentEffectEmitter) -> Self {
         Self {
-            mode: Arc::new(Mutex::new(initial)),
+            mode: Arc::new(Mutex::new(state.unwrap_or(AgentModeState::Normal))),
             effects,
         }
     }
@@ -69,12 +72,12 @@ impl ContextAdapter for AgentModeContextAdapter {
 
     fn on_turn_lifecycle(&mut self, lifecycle: TurnLifecycle) {
         match lifecycle {
-            TurnLifecycle::Ended => *lock_mode(&self.mode) = AgentMode::Normal,
+            TurnLifecycle::Ended => *lock_mode(&self.mode) = AgentModeState::Normal,
         }
     }
 
-    fn contribute_recovery(&self, snapshot: &mut AgentRecoverySnapshotBuilder) {
-        snapshot.set_mode(*lock_mode(&self.mode));
+    fn contribute_state(&self, state: &mut AgentStateBuilder) {
+        state.set_agent_mode(*lock_mode(&self.mode));
     }
 }
 
@@ -82,13 +85,13 @@ impl ContextAdapter for AgentModeContextAdapter {
 mod tests {
     use claw_context::Context;
 
-    use super::{AgentMode, AgentModeContextAdapter};
+    use super::{AgentModeContextAdapter, AgentModeState};
     use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
     use crate::agent::effect::agent_effect_channel;
 
-    fn adapter(initial: AgentMode) -> AgentModeContextAdapter {
+    fn adapter(state: Option<AgentModeState>) -> AgentModeContextAdapter {
         let (effects, _inbox) = agent_effect_channel();
-        AgentModeContextAdapter::new(initial, effects)
+        AgentModeContextAdapter::new(state, effects)
     }
 
     fn render(adapter: &mut AgentModeContextAdapter, context: &mut Context) -> String {
@@ -102,17 +105,25 @@ mod tests {
 
     #[test]
     fn plan_mode_projects_framing() {
-        let mut adapter = adapter(AgentMode::Plan);
+        let mut adapter = adapter(Some(AgentModeState::Plan));
         let mut context = Context::new();
         assert!(render(&mut adapter, &mut context).contains("Do not implement"));
     }
 
     #[test]
     fn ended_turn_resets_adapter_owned_mode() {
-        let mut adapter = adapter(AgentMode::Plan);
+        let mut adapter = adapter(Some(AgentModeState::Plan));
         adapter.on_turn_lifecycle(TurnLifecycle::Ended);
 
         let mut context = Context::new();
+        assert_eq!(render(&mut adapter, &mut context), "");
+    }
+
+    #[test]
+    fn missing_state_uses_the_adapter_owned_initial_mode() {
+        let mut adapter = adapter(None);
+        let mut context = Context::new();
+
         assert_eq!(render(&mut adapter, &mut context), "");
     }
 }

@@ -11,13 +11,12 @@ mod effect;
 mod event;
 mod factory;
 mod iteration_loop;
-mod recovery;
 mod tools;
 
 pub(crate) use base_agent::{
-    AgentAbortHandle, AgentCommand, AgentCommandError, ApprovalDecision, BaseAgent, TickOutcome,
+    AgentAbortHandle, AgentCommand, AgentCommandError, AgentState, ApprovalDecision, BaseAgent,
+    TickOutcome,
 };
-pub(crate) use context_adapters::AgentMode;
 pub(crate) use event::{AgentEvent, AgentEventBoundary, AgentRun};
 pub(crate) use factory::{
     AgentEnvironment, AgentResume, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,

@@ -92,7 +92,7 @@ impl ToolSetEntryState {
 /// Tool handlers only have `&self`, so they cannot flip tool state directly:
 /// `tool_search` reads the `catalog` the set refreshes whenever its projection
 /// changes, and `tool_load` appends to `pending_loads`, which the set drains on
-/// the next tick in [`ToolSet::apply_pending_tool_loads`].
+/// the next [`ToolSet::begin`].
 #[derive(Default)]
 struct ToolDiscovery {
     /// Loadable groups, grouped for `tool_search` output.
@@ -322,12 +322,12 @@ impl ToolSet {
         Ok(())
     }
 
-    /// Reveal the tool groups `tool_load` requested since the last tick.
+    /// Reveal the tool groups `tool_load` requested since the last projection.
     ///
     /// Loaded tools follow the same path as [`enable_tool`](Self::enable_tool),
     /// so a group stays loaded for the lifetime of this `ToolSet`. ToolSet
     /// runtime state is not restored after a process restart.
-    pub fn apply_pending_tool_loads(&mut self) {
+    fn apply_pending_tool_loads(&mut self) {
         let pending: HashSet<ToolName> = {
             let mut discovery = self
                 .discovery
@@ -406,6 +406,7 @@ impl ToolSet {
     }
 
     pub fn begin(&mut self) -> Result<ToolSetHandle<'_>, ToolSetError> {
+        self.apply_pending_tool_loads();
         let registry_version = self.registry.tool_version();
         if !self.registry_projection_ready || self.state.registry_version != registry_version {
             self.rebuild()?;

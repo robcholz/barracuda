@@ -20,7 +20,7 @@ It includes:
 - SessionActor ownership of all logical Agents and their lifecycle metadata;
 - explicit move-in/move-out ownership for checked-out Agent runs;
 - Multiagent as a pluggable tool and domain component;
-- Agent-owned recovery semantics exported as an `AgentRecoverySnapshot`, with
+- Agent-owned recovery semantics exported as an `AgentState`, with
   durability selected and executed outside BaseAgent;
 - one Agent assembly path for roots and workers;
 - system-wide Agent overview without a second owning registry;
@@ -161,23 +161,38 @@ across these boundaries.
 
 - BaseAgent owns the generic run/snapshot protocol but no concrete mode or
   memory semantics. Authoritative recovery values stay with their components:
-  the mode adapter, ToolSet, and Agent tool-call journal. BaseAgent owns no
-  persistence manager or filesystem capability.
+  the mode adapter, resumed adapter, and Agent tool-call journal. BaseAgent
+  owns no persistence manager or filesystem capability.
 - BaseAgent exposes one synchronous, I/O-free
-  `recovery_snapshot() -> AgentRecoverySnapshot` API. The returned value is an
+  `recovery_state() -> AgentState` API. The returned value is an
   owned recovery projection because it must cross the active AgentRun boundary.
 - The recovery shape is:
 
 ~~~text
-AgentRecoverySnapshot {
-    mode: AgentMode,
-    loaded_tool_groups: Vec<ToolGroupId>,
+AgentState {
+    agent_mode: AgentModeState,
+    resumed: ResumedState,
     next_tool_call_id: ToolCallId,
     unsettled_toolcalls:
         BTreeMap<ToolCallId, UnsettledToolCallRecord>,
 }
 ~~~
 
+- Component DTOs are defined beside their owners. Context-adapter State DTOs
+  are re-exported with their adapters from `context_adapters/mod.rs`; consumers
+  do not import adapter-internal module paths. The complete aggregate and its
+  assembly sink live in `base_agent/persistence.rs`.
+- `ResumedContextAdapter` contributes the one-shot resume reminder and exposes
+  its co-located discovery ToolGroup from `context_adapters/resumed/tools.rs`.
+  `tool_load` records accepted groups into adapter-owned `ResumedState`; the
+  existing `ToolDiscoveryHandle` updates ToolSet's runtime visibility. On
+  restart those recorded groups become one-shot reminder context rather than
+  being reloaded into the fresh ToolSet. ToolSet gains no persistence DTO or
+  recovery API.
+- A materialized `AgentState` is complete: its component fields are not
+  optional. Factory passes `Some(XxxState)` when restoring and `None` when
+  creating; the component owns fresh initialization, and XxxState DTOs do not
+  implement `Default`.
 - `UnsettledToolCallRecord` is a stable recovery DTO, not the transient
   `TrackedToolCall` event type. Loaded tool groups use stable typed identities
   and canonical serialized order when order has no runtime meaning.
@@ -224,7 +239,7 @@ Engine<F, H, T> / SessionActor<F, H, T> / FsAgentFactory<F, H, T>
   types. RunId, Resident/CheckedOut, Running/Cancelling/Reaping, inboxes,
   Wakers, and physical handles are never serialized.
 - Because a running BaseAgent has moved into AgentRun, Engine cannot call
-  `recovery_snapshot()` from outside. BaseAgent calls it internally at a
+  `recovery_state()` from outside. BaseAgent calls it internally at a
   recovery boundary and emits an owned snapshot in `CheckpointRequired`.
 - Scheduler parks that run and echoes the update; Engine persists or
   acknowledges it according to the slot/run policy, then sends a matching
@@ -335,7 +350,7 @@ The implementation order is:
 ~~~text
 P0 freeze contracts and baseline
  ↓
-P1 establish Agent recovery snapshot and Factory create/restore contracts
+P1 establish AgentState and Factory create/restore contracts
  ↓
 P2 establish owned AgentRun move/return protocol
  ↓
@@ -388,8 +403,8 @@ Remove ambiguity before changing production ownership.
 - Require allocator advancement to be durable before an AgentId is exposed.
 - Freeze AgentPersistencePolicy as PersistentRoot, EphemeralRoot, and
   TransientWorker, or explicitly expand worker durability before Phase 1.
-- Freeze `BaseAgent<H, T>::recovery_snapshot()` as a synchronous, I/O-free API
-  and `AgentRecoverySnapshot` as the only aggregate Agent recovery shape.
+- Freeze `BaseAgent<H, T>::recovery_state()` as a synchronous, I/O-free API
+  and `AgentState` as the only aggregate Agent recovery shape.
 - State explicitly that BaseAgent, AgentRun, AgentSlot, and Scheduler do not
   carry filesystem type F or own SharedPersistence.
 - State that Factory performs create/restore construction while Engine performs
@@ -430,7 +445,7 @@ Remove ambiguity before changing production ownership.
 - [ ] persistence ownership is unambiguous.
 - [ ] BaseAgent has no persistence dependency and F stops at the
       construction/storage boundary.
-- [ ] the snapshot export and checkpoint park/resume dataflow is documented.
+- [ ] the AgentState export and checkpoint park/resume dataflow is documented.
 - [ ] worker durability policy is explicit.
 - [ ] Resident XOR CheckedOut is documented.
 - [ ] AgentId allocation and durable root lookup have one documented owner and
@@ -471,18 +486,19 @@ Agent is currently driven or performing runtime checkpoints yet.
 
 - Keep BaseAgent<H, T>. Do not add F, SharedPersistence, AgentStateStore, or a
   persistence callback to BaseAgent.
-- Add `AgentRecoverySnapshot` and stable
+- Add `AgentState` and stable
   `UnsettledToolCallRecord` types. Do not persist transient `TrackedToolCall`,
   a future, Waker, RunId, or checkout state.
 - Add synchronous, I/O-free
-  `BaseAgent::recovery_snapshot(&self) -> AgentRecoverySnapshot`.
+  `BaseAgent::recovery_state(&self) -> AgentState`.
 - Implement it as a projection over authoritative live components, not a second
-  mutable snapshot cache that can drift from mode, ToolSet, or the tool-call
-  journal.
+  mutable snapshot cache that can drift from mode, resumed state, or the
+  tool-call journal.
 - Make BaseAgent coordinate a generic recovery projection over authoritative
-  components: mode is owned by `AgentModeContextAdapter`, loaded groups by
-  ToolSet, and monotonic next ToolCallId/unsettled records by the Agent tool
-  runtime. BaseAgent must not match on concrete modes or adapters. Continue
+  components: `AgentModeState` is owned by `AgentModeContextAdapter`,
+  `ResumedState` by `ResumedContextAdapter`, and monotonic next
+  ToolCallId/unsettled records by the Agent tool runtime. BaseAgent must not
+  match on concrete modes or adapters. Continue
   emitting the legacy `ToolStarted` compatibility update until Phase 7 wires
   the final durability barrier and deletes SessionActor's mirror.
 - Give `FsAgentFactory<F, H, T>` explicit `create_new` and `restore` entry
@@ -561,7 +577,7 @@ AgentRunUpdate::CheckpointRequired {
     agent_id,
     checkpoint_id,
     purpose,
-    snapshot: AgentRecoverySnapshot,
+    snapshot: AgentState,
 }
 
 CheckpointResult {
@@ -844,7 +860,7 @@ persistence dependency.
 
 ### Suggested files
 
-- claw-core/src/agent/recovery.rs
+- claw-core/src/agent/base_agent/persistence.rs
 - claw-core/src/agent/base_agent.rs
 - claw-core/src/agent/base_agent/
 - claw-core/src/agent/iteration_loop/tool_round.rs
@@ -863,9 +879,9 @@ persistence dependency.
 ### Recovery schema and ownership
 
 ~~~text
-AgentRecoverySnapshot {
-    mode: AgentMode,
-    loaded_tool_groups: Vec<ToolGroupId>,
+AgentState {
+    agent_mode: AgentModeState,
+    resumed: ResumedState,
     next_tool_call_id: ToolCallId,
     unsettled_toolcalls:
         BTreeMap<ToolCallId, UnsettledToolCallRecord>,
@@ -899,7 +915,7 @@ AgentRunUpdate::CheckpointRequired {
     run_id,
     checkpoint_id,
     purpose,
-    snapshot: AgentRecoverySnapshot,
+    snapshot: AgentState,
 }
 
 CheckpointResult {
@@ -910,7 +926,7 @@ CheckpointResult {
 ~~~
 
 - Because the active BaseAgent is owned inside AgentRun, it calls
-  `recovery_snapshot()` before yielding; Engine never borrows a running Agent.
+  `recovery_state()` before yielding; Engine never borrows a running Agent.
 - `checkpoint_id` is transient and scoped to one RunId. It matches one parked run
   with one acknowledgement and is not a persisted generation.
 - BaseAgent releases every mutable borrow before emitting
@@ -939,7 +955,7 @@ CheckpointResult {
 ~~~text
 allocate ToolCallId and increment next_tool_call_id
 → insert UnsettledToolCallRecord in BaseAgent live state
-→ BaseAgent calls recovery_snapshot()
+→ BaseAgent calls recovery_state()
 → emit CheckpointRequired carrying the snapshot
 → Scheduler parks this AgentRun
 → Engine durably stores the PersistentRoot snapshot
@@ -963,7 +979,7 @@ tool body completes
 → terminal or explicit turn commit
 → fallibly checkpoint the committed transcript
 → clear calls represented by that committed turn in BaseAgent
-→ export the new AgentRecoverySnapshot
+→ export the new AgentState
 → checkpoint or acknowledge it through the same parked-run protocol
 ~~~
 
@@ -1160,7 +1176,7 @@ Phases 4–7.
 - Never hold a lock, RefCell borrow, persistence guard, or slot collection
   borrow while polling or awaiting user/tool/LLM code.
 - Move a BaseAgent across the ownership boundary; do not clone it.
-- `recovery_snapshot()` is synchronous and I/O-free. Only its owned projection
+- `recovery_state()` is synchronous and I/O-free. Only its owned projection
   crosses a running Agent boundary; Engine never borrows a checked-out Agent.
 - Keep cancellation explicit and ownership-preserving.
 - Treat all Agent/tool/LLM/persistence failures as data returned in a run
@@ -1207,7 +1223,7 @@ The grand refactor is complete only when all of the following are true:
 6. Engine owns the durable process-global AgentId allocator; Multiagent never
    allocates an ID.
 7. BaseAgent<H, T> coordinates a generic recovery projection from its
-   authoritative components and exports a complete AgentRecoverySnapshot,
+   authoritative components and exports a complete AgentState,
    while Factory/Engine own restore/checkpoint I/O and F does not propagate
    into AgentRun, AgentSlot, or Scheduler.
 8. PersistentRoot recovery follows the durable root link, while EphemeralRoot

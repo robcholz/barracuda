@@ -11,14 +11,15 @@
 mod llm_compactor;
 
 use claw_context::{BlockKind, ContextSink};
-use claw_interface::ClawFs;
+use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{Compactor, TranscriptStore, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
 use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, History};
+use crate::config::SharedApiManager;
 
-pub(crate) use llm_compactor::LlmCompactor;
+use llm_compactor::LlmCompactor;
 
 /// Rough bytes-per-token divisor for the size estimate. See
 /// [`estimate_message_tokens`].
@@ -26,7 +27,7 @@ const CHARS_PER_TOKEN: usize = 4;
 
 /// The conversation-compaction policy knobs the adapter applies.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CompactionPolicy {
+struct CompactionPolicy {
     /// Start compacting once the verbatim history past the cursor exceeds this.
     trigger_tokens: usize,
     /// Token budget for the verbatim tail kept out of every summary.
@@ -36,11 +37,7 @@ pub(crate) struct CompactionPolicy {
 }
 
 impl CompactionPolicy {
-    pub(crate) fn new(
-        trigger_tokens: usize,
-        keep_recent_tokens: usize,
-        segment_token_budget: usize,
-    ) -> Self {
+    fn new(trigger_tokens: usize, keep_recent_tokens: usize, segment_token_budget: usize) -> Self {
         Self {
             trigger_tokens,
             keep_recent_tokens,
@@ -50,7 +47,7 @@ impl CompactionPolicy {
 }
 
 /// Owns the complete request-time projection of one conversation transcript.
-pub(crate) struct ConversationHistoryContextAdapter<F: ClawFs + 'static> {
+pub(in crate::agent) struct ConversationHistoryContextAdapter<F: ClawFs + 'static> {
     /// Shared transcript source of truth. This adapter only reads it.
     transcript: TranscriptStore<F>,
     /// Transformation used to summarize one aged prefix window.
@@ -70,7 +67,7 @@ pub(crate) struct ConversationHistoryContextAdapter<F: ClawFs + 'static> {
 }
 
 impl<F: ClawFs + 'static> ConversationHistoryContextAdapter<F> {
-    pub(crate) fn new(
+    fn new(
         transcript: TranscriptStore<F>,
         compactor: Box<dyn Compactor>,
         policy: CompactionPolicy,
@@ -86,6 +83,26 @@ impl<F: ClawFs + 'static> ConversationHistoryContextAdapter<F> {
             cached_covered_through: None,
             primed: false,
         }
+    }
+
+    /// Build the configured LLM-backed conversation projection used by Agent
+    /// Factory without exposing its compactor implementation or policy type.
+    pub(in crate::agent) fn with_llm_compaction<H, Timer>(
+        transcript: TranscriptStore<F>,
+        api_manager: SharedApiManager,
+        trigger_tokens: usize,
+        keep_recent_tokens: usize,
+        segment_token_budget: usize,
+    ) -> Self
+    where
+        H: ClawHttp + Default + 'static,
+        Timer: ClawTimer + Default + 'static,
+    {
+        Self::new(
+            transcript,
+            Box::new(LlmCompactor::<H, Timer>::new(api_manager)),
+            CompactionPolicy::new(trigger_tokens, keep_recent_tokens, segment_token_budget),
+        )
     }
 
     /// Compact at most one aged prefix, then cache the exact complementary tail.

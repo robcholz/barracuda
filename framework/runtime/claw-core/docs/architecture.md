@@ -91,18 +91,31 @@ Sessions; a future directory cache must remain a rebuildable read model.
   instruction, inherited context, `Vec<Box<dyn ContextAdapter>>`, and the
   transient `AgentEffectInbox` used to reduce typed tool effects.
 - Concrete mode, conversation, profile, skill, and memory semantics live under
-  `agent/context_adapters`. In particular, `BaseAgent` neither imports
-  `AgentMode` nor recognizes Normal/Plan or mode-specific tools.
+  `agent/context_adapters`. In particular, the BaseAgent runtime neither
+  recognizes Normal/Plan nor matches on mode-specific tools.
 - `ContextAdapter` and transcript-facing traits are consumer-owned ports under
   `agent/base_agent`; `agent/context_adapters` contains implementations only.
   The concrete `TranscriptStore<F>` binding lives at the filesystem-aware
   Factory boundary.
+- Each component's durable DTO is defined beside that component:
+  `AgentModeState` beside `AgentModeContextAdapter`, and `ResumedState` beside
+  `ResumedContextAdapter`. `agent/context_adapters/mod.rs` re-exports each
+  adapter together with its State DTO so consumers never depend on
+  adapter-internal module paths. The complete aggregate `AgentState` and its
+  assembly sink live in `agent/base_agent/persistence.rs`; BaseAgent coordinates
+  collection but does not interpret component fields.
 - A ToolGroup that operates on adapter-owned state is co-located with that
   adapter (for example `context_adapters/agent_mode/tools.rs`). Only pure Agent
   tool groups with no adapter domain owner live under `agent/tools`, one group
   per file.
-- Pure ToolGroups are assembled directly into ToolSet by Factory; they are not
-  wrapped in fake context adapters merely to deliver an Agent effect.
+- `ResumedContextAdapter` owns the optional, one-shot resume reminder and
+  its `context_adapters/resumed/tools.rs` discovery group. `tool_load` records
+  accepted groups into the adapter-owned `ResumedState` while the existing
+  `ToolDiscoveryHandle` asks ToolSet to update its runtime visibility. After a
+  restart, recorded groups are rendered into the one-shot reminder; they are
+  not automatically loaded into the fresh ToolSet.
+- Other pure ToolGroups are assembled directly into ToolSet by Factory; they
+  are not wrapped in fake context adapters merely to deliver an Agent effect.
 - Factory creates one synchronous tool-to-Agent effect channel. BaseAgent owns
   its unique, non-cloneable `AgentEffectInbox`; pure tools and adapter-owned
   tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no reverse
@@ -112,8 +125,10 @@ Sessions; a future directory cache must remain a rebuildable read model.
   bounded emit/drain operation and never across an `await`. More than one
   mutually exclusive task-boundary effect in a round fails deterministically.
 - Each authoritative component owns its live recovery semantics: the mode
-  adapter owns mode, `ToolSet` owns loaded groups, and the Agent tool runtime
-  owns its monotonic counter and unsettled tool calls.
+  adapter owns mode, the resumed adapter owns loaded-group recovery state, and
+  the Agent tool runtime owns its monotonic counter and unsettled tool calls.
+  ToolSet retains only its existing runtime projection and has no persistence
+  API.
 - `ToolRunner` remains inside the Agent tool runtime. Scheduler schedules an
   entire `AgentRun`, not individual tool calls.
 - `BaseAgent` does not own `SharedPersistence`, perform storage I/O, or depend
@@ -157,38 +172,48 @@ visibility, or durability policy.
 to reconstruct it:
 
 ~~~rust
-struct AgentRecoverySnapshot {
-    mode: AgentMode,
-    loaded_tool_groups: Vec<ToolGroupId>,
+struct AgentState {
+    agent_mode: AgentModeState,
+    resumed: ResumedState,
     next_tool_call_id: ToolCallId,
     unsettled_toolcalls:
         BTreeMap<ToolCallId, UnsettledToolCallRecord>,
 }
 
 impl<H, T> BaseAgent<H, T> {
-    fn recovery_snapshot(&self) -> AgentRecoverySnapshot;
+    fn recovery_state(&self) -> AgentState;
 }
 ~~~
 
-The snapshot is a projection, not a second mutable shadow copy. Mode adapter,
-`ToolSet`, and the tool-call journal remain the authoritative live components.
-`BaseAgent::recovery_snapshot()` drives a generic snapshot sink over those
-components; it does not decode adapter-specific state.
+Every field of a materialized `AgentState` is present; the aggregate does not
+use `Option` to represent component defaults. During construction Factory
+distributes a restored aggregate as `Some(AgentModeState)` and
+`Some(ResumedState)`. For a new Agent it passes `None` to each component, and
+that component owns its explicit initialization policy. Component state DTOs
+do not implement `Default`.
+
+`AgentState` is a projection, not a second mutable shadow copy. Mode adapter,
+resumed adapter, and the tool-call journal remain the authoritative live
+components.
+`BaseAgent::recovery_state()` drives a generic state sink over those components;
+it does not decode adapter-specific state.
 
 The persisted schema is versioned. `UnsettledToolCallRecord` is a stable
 recovery record, not a transient event/future type such as `TrackedToolCall`.
-If loaded tool-group order has no semantics, serialization must use a stable
-canonical order.
+`ResumedState` serializes loaded tool groups in stable canonical order.
+Conversation history is absent because the canonical transcript reconstructs
+it. Physical ToolRunner state, active futures, and scheduler state are absent
+because they are transient.
 
 Because an active `BaseAgent` has been moved into an `AgentRun`, Engine cannot
-borrow it to call `recovery_snapshot()`. The Agent calls the method internally
+borrow it to call `recovery_state()`. The Agent calls the method internally
 at a checkpoint boundary and exports the owned snapshot through the run
 protocol:
 
 ~~~text
 BaseAgent reaches a recovery boundary
 → BaseAgent mutates its in-memory recovery state
-→ BaseAgent calls recovery_snapshot()
+→ BaseAgent calls recovery_state()
 → AgentRunUpdate::CheckpointRequired {
       agent_id, run_id, checkpoint_id, purpose, snapshot
   }
@@ -229,7 +254,7 @@ Before a persistent tool body is first polled:
 ~~~text
 allocate ToolCallId and increment next_tool_call_id
 → insert UnsettledToolCallRecord
-→ export AgentRecoverySnapshot in CheckpointRequired
+→ export AgentState in CheckpointRequired
 → Scheduler parks the AgentRun
 → Engine durably checkpoints the snapshot
 → resume and first-poll the tool body
@@ -247,7 +272,7 @@ tool body completes
 → keep the call unsettled during later iterations
 → commit and durably checkpoint the transcript turn
 → clear calls represented by that committed turn
-→ export and durably checkpoint the new AgentRecoverySnapshot
+→ export and durably checkpoint the new AgentState
 ~~~
 
 The transcript checkpoint is fallible. A call is never cleared merely because
@@ -258,7 +283,7 @@ never blindly replays an unsettled side-effecting invocation.
 
 - Durable `SessionState` plus recoverable `AgentSlot` metadata locates the root
   Agent record and independent canonical stores.
-- Agent recovery snapshots, transcripts, profiles, and long-term memory are
+- Agent states, transcripts, profiles, and long-term memory are
   separate canonical stores; snapshots do not duplicate transcript contents.
 - `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
   `RunId`, checkout state, and checkpoint waiters are transient.

@@ -4,27 +4,24 @@ use claw_context::Block;
 use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
-use crate::agent::AgentMode;
+use crate::agent::AgentState;
 use crate::protocol::TrackedToolCall;
 
 pub(crate) struct AgentResume {
-    pub(super) loaded_tool_groups: Vec<String>,
-    pub(super) inflight_toolcalls: Vec<TrackedToolCall>,
+    state: AgentState,
+    legacy_inflight_toolcalls: Vec<TrackedToolCall>,
 }
 
 impl AgentResume {
-    pub(crate) fn new(
-        loaded_tool_groups: Vec<String>,
-        inflight_toolcalls: Vec<TrackedToolCall>,
-    ) -> Self {
+    pub(crate) fn new(state: AgentState, legacy_inflight_toolcalls: Vec<TrackedToolCall>) -> Self {
         Self {
-            loaded_tool_groups,
-            inflight_toolcalls,
+            state,
+            legacy_inflight_toolcalls,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (Vec<String>, Vec<TrackedToolCall>) {
-        (self.loaded_tool_groups, self.inflight_toolcalls)
+    pub(super) fn into_parts(self) -> (AgentState, Vec<TrackedToolCall>) {
+        (self.state, self.legacy_inflight_toolcalls)
     }
 }
 
@@ -57,7 +54,6 @@ pub(crate) struct AgentEnvironment {
     pub(super) permission_policy: Arc<dyn PermissionPolicy>,
     pub(super) extension_tools: Vec<ToolGroup>,
     pub(super) inherited_context: Vec<Block<'static>>,
-    pub(super) initial_mode: AgentMode,
     pub(super) resume: Option<AgentResume>,
 }
 
@@ -67,7 +63,6 @@ impl AgentEnvironment {
         permission_policy: Arc<dyn PermissionPolicy>,
         extension_tools: Vec<ToolGroup>,
         inherited_context: Vec<Block<'static>>,
-        initial_mode: AgentMode,
         resume: Option<AgentResume>,
     ) -> Self {
         Self {
@@ -75,7 +70,6 @@ impl AgentEnvironment {
             permission_policy,
             extension_tools,
             inherited_context,
-            initial_mode,
             resume,
         }
     }

@@ -7,12 +7,17 @@ use claw_tool::{
 };
 use serde_json::json;
 
-use super::optional_string_argument;
+use crate::agent::tools::optional_string_argument;
+
+use super::{lock_state, SharedResumedState};
 
 /// Build the always-visible discovery group over a [`ToolSet`](claw_tool::ToolSet)
 /// bridge. All other registered groups remain hidden until `tool_load` reveals
 /// one for the next turn.
-pub(crate) fn discovery_tools(discovery: ToolDiscoveryHandle) -> ToolGroup {
+pub(super) fn discovery_tools(
+    discovery: ToolDiscoveryHandle,
+    state: SharedResumedState,
+) -> ToolGroup {
     ToolGroup::new(
         "tool_discovery",
         true,
@@ -20,7 +25,7 @@ pub(crate) fn discovery_tools(discovery: ToolDiscoveryHandle) -> ToolGroup {
             Tool::from_sync(ToolSearchTool {
                 discovery: discovery.clone(),
             }),
-            Tool::from_sync(ToolLoadTool { discovery }),
+            Tool::from_sync(ToolLoadTool { discovery, state }),
         ],
     )
 }
@@ -34,6 +39,7 @@ struct ToolSearchTool {
 /// Queues a group to be enabled on the next Agent tick.
 struct ToolLoadTool {
     discovery: ToolDiscoveryHandle,
+    state: SharedResumedState,
 }
 
 impl ToolSpec for ToolLoadTool {
@@ -54,6 +60,9 @@ impl SyncToolHandler for ToolLoadTool {
             })?;
 
         let loaded = self.discovery.request_load(group_id.clone());
+        if loaded {
+            lock_state(&self.state).record_loaded_tool_group(group_id.clone());
+        }
         Ok(ToolOutput {
             output: json!({
                 "group_id": group_id,
@@ -80,5 +89,73 @@ impl SyncToolHandler for ToolSearchTool {
             output: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
             ok: true,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use claw_tool::{
+        RawToolInvocation, SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput,
+        ToolRegistry, ToolResult, ToolSpec,
+    };
+
+    use super::ToolLoadTool;
+    use crate::agent::context_adapters::resumed::{lock_state, ResumedState};
+
+    #[test]
+    fn successful_load_is_recorded_in_adapter_state() {
+        let registry = Arc::new(ToolRegistry::new());
+        registry
+            .register_group(ToolGroup::new(
+                "hidden",
+                false,
+                [Tool::from_sync(HiddenTool)],
+            ))
+            .expect("hidden group registers");
+        registry.start_all().expect("registry starts");
+        let mut tool_set = registry.tool_set();
+        let discovery = tool_set.discovery();
+        {
+            let _initial_tools = tool_set.begin().expect("tool set begins");
+        }
+        let state = Arc::new(Mutex::new(ResumedState::new(Vec::new())));
+        let tool = ToolLoadTool {
+            discovery,
+            state: Arc::clone(&state),
+        };
+        let call = ToolInvocation::try_from(RawToolInvocation {
+            id: Some("call-test"),
+            name: "tool_load",
+            arguments_json: r#"{"group_id":"hidden"}"#,
+        })
+        .expect("valid invocation");
+
+        let output = tool.invoke(&call).expect("load succeeds");
+
+        assert!(output.ok);
+        assert!(lock_state(&state).loaded_tool_groups.contains("hidden"));
+    }
+
+    struct HiddenTool;
+
+    impl ToolSpec for HiddenTool {
+        fn name(&self) -> &str {
+            "hidden_test"
+        }
+
+        fn schema(&self) -> &str {
+            r#"{"type":"function","function":{"name":"hidden_test"}}"#
+        }
+    }
+
+    impl SyncToolHandler for HiddenTool {
+        fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+            Ok(ToolOutput {
+                output: "ok".to_owned(),
+                ok: true,
+            })
+        }
     }
 }

@@ -6,7 +6,7 @@ use claw_persistence::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentMode;
+use crate::agent::AgentState;
 use crate::config::ReasoningEffort;
 use crate::protocol::{SessionId, TrackedToolCall};
 
@@ -16,29 +16,18 @@ pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 pub(crate) struct SessionState {
     reasoning_effort: ReasoningEffort,
     permission_level: PermissionLevel,
-    mode: AgentMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    resume: Option<SessionResume>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-struct SessionResume {
-    #[serde(default)]
-    tool_set: ResumeToolSet,
-    #[serde(default)]
-    inflight_toolcalls: Vec<TrackedToolCall>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-struct ResumeToolSet {
-    #[serde(default)]
-    loaded_groups: Vec<String>,
+    agent_state: Option<AgentState>,
+    /// Compatibility journal until durable ToolCallId records move into
+    /// AgentState. Physical tool runners and futures are never stored here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    legacy_inflight_toolcalls: Vec<TrackedToolCall>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SessionRecovery {
-    pub(crate) loaded_tool_groups: Vec<String>,
-    pub(crate) inflight_toolcalls: Vec<TrackedToolCall>,
+    pub(crate) agent_state: AgentState,
+    pub(crate) legacy_inflight_toolcalls: Vec<TrackedToolCall>,
 }
 
 impl SessionState {
@@ -58,86 +47,51 @@ impl SessionState {
         self.permission_level = permission_level;
     }
 
-    pub(crate) fn mode(&self) -> AgentMode {
-        self.mode
-    }
-
     pub(crate) fn recovery(&self) -> Option<SessionRecovery> {
-        let resume = self.resume.as_ref()?;
+        let agent_state = self.agent_state.clone()?;
         Some(SessionRecovery {
-            loaded_tool_groups: resume.tool_set.loaded_groups.clone(),
-            inflight_toolcalls: resume.inflight_toolcalls.clone(),
+            agent_state,
+            legacy_inflight_toolcalls: self.legacy_inflight_toolcalls.clone(),
         })
     }
 
-    pub(crate) fn record_recovery(&mut self, mode: AgentMode, mut loaded_groups: Vec<String>) {
-        loaded_groups.sort_unstable();
-        loaded_groups.dedup();
-        self.mode = mode;
-
-        let inflight_toolcalls = self
-            .resume
-            .take()
-            .map(|resume| resume.inflight_toolcalls)
-            .unwrap_or_default();
-        self.resume = (!loaded_groups.is_empty() || !inflight_toolcalls.is_empty()).then_some(
-            SessionResume {
-                tool_set: ResumeToolSet { loaded_groups },
-                inflight_toolcalls,
-            },
-        );
+    pub(crate) fn record_recovery(&mut self, state: AgentState) {
+        self.agent_state = Some(state);
     }
 
-    pub(crate) fn recovery_matches(&self, mode: AgentMode, loaded_groups: &[String]) -> bool {
-        self.mode == mode
-            && self
-                .resume
-                .as_ref()
-                .map(|resume| resume.tool_set.loaded_groups.as_slice())
-                .unwrap_or_default()
-                == loaded_groups
+    pub(crate) fn recovery_matches(&self, state: &AgentState) -> bool {
+        self.agent_state.as_ref() == Some(state)
     }
 
     fn contains_inflight_toolcall(&self, call: &TrackedToolCall) -> bool {
-        self.resume.as_ref().is_some_and(|resume| {
-            resume
-                .inflight_toolcalls
-                .iter()
-                .any(|inflight| inflight == call)
-        })
+        self.legacy_inflight_toolcalls
+            .iter()
+            .any(|inflight| inflight == call)
     }
 
     pub(crate) fn add_inflight_toolcall(&mut self, call: &TrackedToolCall) {
         if self.contains_inflight_toolcall(call) {
             return;
         }
-        let resume = self.resume.get_or_insert_with(SessionResume::default);
-        resume.inflight_toolcalls.push(call.clone());
+        self.legacy_inflight_toolcalls.push(call.clone());
     }
 
     pub(crate) fn remove_inflight_toolcall(&mut self, call: &TrackedToolCall) -> bool {
-        let Some(resume) = self.resume.as_mut() else {
-            return false;
-        };
-        let removed = if let Some(index) = resume
-            .inflight_toolcalls
+        if let Some(index) = self
+            .legacy_inflight_toolcalls
             .iter()
             .position(|inflight| inflight == call)
         {
-            resume.inflight_toolcalls.remove(index);
+            self.legacy_inflight_toolcalls.remove(index);
             true
         } else {
             false
-        };
-        if resume.tool_set.loaded_groups.is_empty() && resume.inflight_toolcalls.is_empty() {
-            self.resume = None;
         }
-        removed
     }
 }
 
 impl DurableStateCodec for SessionState {
-    const SCHEMA_VERSION: SchemaVersion = 1;
+    const SCHEMA_VERSION: SchemaVersion = 2;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -169,7 +123,7 @@ mod tests {
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     use super::SessionState;
-    use crate::agent::AgentMode;
+    use crate::agent::AgentState;
     use crate::config::ReasoningEffort;
     use crate::protocol::TrackedToolCall;
     use claw_permission::PermissionLevel;
@@ -179,10 +133,11 @@ mod tests {
         let mut state = SessionState {
             reasoning_effort: ReasoningEffort::Medium,
             permission_level: PermissionLevel::Ask,
-            mode: AgentMode::Normal,
             ..SessionState::default()
         };
-        state.record_recovery(AgentMode::Normal, vec!["tool_group_id".to_owned()]);
+        state.record_recovery(AgentState::normal_for_test(
+            vec!["tool_group_id".to_owned()],
+        ));
         state.add_inflight_toolcall(&TrackedToolCall::new(
             "subagent_spawn",
             json!({"kind":"worker","foreground":false}),
@@ -192,13 +147,13 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
         assert_eq!(json["reasoning_effort"], "medium");
         assert_eq!(json["permission_level"], "ask");
-        assert_eq!(json["mode"], "normal");
+        assert_eq!(json["agent_state"]["agent_mode"], "normal");
         assert_eq!(
-            json["resume"]["tool_set"]["loaded_groups"][0],
+            json["agent_state"]["resumed"]["loaded_tool_groups"][0],
             "tool_group_id"
         );
         assert_eq!(
-            json["resume"]["inflight_toolcalls"][0]["tool"],
+            json["legacy_inflight_toolcalls"][0]["tool"],
             "subagent_spawn"
         );
 
@@ -220,15 +175,7 @@ mod tests {
         state.add_inflight_toolcall(&call);
         state.add_inflight_toolcall(&call);
         assert!(state.contains_inflight_toolcall(&call));
-        assert_eq!(
-            state
-                .resume
-                .as_ref()
-                .expect("resume exists")
-                .inflight_toolcalls
-                .len(),
-            1
-        );
+        assert_eq!(state.legacy_inflight_toolcalls.len(), 1);
 
         assert!(state.remove_inflight_toolcall(&call));
         assert!(!state.contains_inflight_toolcall(&call));

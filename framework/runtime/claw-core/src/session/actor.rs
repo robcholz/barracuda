@@ -148,12 +148,9 @@ where
         state: DurableState<SessionState>,
         api_manager: SharedApiManager,
     ) -> Self {
-        let (root_mode, recovery) = {
-            let state = state.get();
-            (state.mode(), state.recovery())
-        };
+        let recovery = state.get().recovery();
         let resume = recovery.map(|recovery| {
-            AgentResume::new(recovery.loaded_tool_groups, recovery.inflight_toolcalls)
+            AgentResume::new(recovery.agent_state, recovery.legacy_inflight_toolcalls)
         });
         let permission = Arc::new(SessionPermission::new(state.clone()));
         let runtime = MultiagentRuntime::new_with_resume(
@@ -162,7 +159,6 @@ where
             id_allocator,
             permission.clone(),
             MultiagentState::default(),
-            root_mode,
             resume,
         );
         Self {
@@ -645,18 +641,13 @@ where
     }
 
     fn record_recovery(&mut self) {
-        if self.runtime().root_resume_pending() {
-            return;
-        }
-        let Some((mode, mut loaded_groups)) = self.runtime().root_recovery() else {
+        let Some(agent_state) = self.runtime().root_recovery() else {
             return;
         };
-        loaded_groups.sort_unstable();
-        loaded_groups.dedup();
-        if self.state.get().recovery_matches(mode, &loaded_groups) {
+        if self.state.get().recovery_matches(&agent_state) {
             return;
         }
-        self.state.get_mut().record_recovery(mode, loaded_groups);
+        self.state.get_mut().record_recovery(agent_state);
     }
 
     fn runtime(&self) -> &MultiagentRuntime<Filesystem, Http, Timer> {

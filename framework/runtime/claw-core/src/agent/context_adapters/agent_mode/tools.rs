@@ -11,7 +11,7 @@ use claw_tool::{
 use crate::agent::effect::{AgentEffect, AgentEffectEmitter};
 use crate::agent::tools::optional_string_argument;
 
-use super::{lock_mode, AgentMode, SharedAgentMode};
+use super::{lock_mode, AgentModeState, SharedAgentMode};
 
 const DEFAULT_CANCEL_MESSAGE: &str = "Planning cancelled.";
 
@@ -45,7 +45,7 @@ impl ToolSpec for EnterPlanModeTool {
 
 impl SyncToolHandler for EnterPlanModeTool {
     fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        *lock_mode(&self.mode) = AgentMode::Plan;
+        *lock_mode(&self.mode) = AgentModeState::Plan;
         Ok(success("Plan Mode entered."))
     }
 }
@@ -112,7 +112,7 @@ impl SyncToolHandler for ExitPlanModeTool {
                 .into());
             }
         };
-        *lock_mode(&self.mode) = AgentMode::Normal;
+        *lock_mode(&self.mode) = AgentModeState::Normal;
         Ok(success(output))
     }
 }
@@ -161,7 +161,7 @@ mod tests {
     use claw_tool::{RawToolInvocation, SyncToolHandler, ToolInvocation};
 
     use super::{
-        AgentEffect, AgentMode, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
+        AgentEffect, AgentModeState, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
     };
     use crate::agent::effect::agent_effect_channel;
 
@@ -176,13 +176,13 @@ mod tests {
 
     #[test]
     fn enter_and_execute_exit_mutate_only_adapter_mode() {
-        let mode = Arc::new(Mutex::new(AgentMode::Normal));
+        let mode = Arc::new(Mutex::new(AgentModeState::Normal));
         EnterPlanModeTool {
             mode: Arc::clone(&mode),
         }
         .invoke(&invocation("plan_enter", "{}"))
         .expect("enter succeeds");
-        assert_eq!(*mode.lock().expect("mode lock"), AgentMode::Plan);
+        assert_eq!(*mode.lock().expect("mode lock"), AgentModeState::Plan);
 
         let (effects, _inbox) = agent_effect_channel();
         ExitPlanModeTool {
@@ -194,7 +194,7 @@ mod tests {
             r#"{"outcome":"execute","plan":"ship it"}"#,
         ))
         .expect("exit succeeds");
-        assert_eq!(*mode.lock().expect("mode lock"), AgentMode::Normal);
+        assert_eq!(*mode.lock().expect("mode lock"), AgentModeState::Normal);
     }
 
     #[test]
@@ -219,7 +219,7 @@ mod tests {
 
     #[test]
     fn cancel_exit_resets_mode_and_emits_generic_yield() {
-        let mode = Arc::new(Mutex::new(AgentMode::Plan));
+        let mode = Arc::new(Mutex::new(AgentModeState::Plan));
         let (effects, mut inbox) = agent_effect_channel();
         ExitPlanModeTool {
             mode: Arc::clone(&mode),
@@ -231,7 +231,7 @@ mod tests {
         ))
         .expect("cancel succeeds");
 
-        assert_eq!(*mode.lock().expect("mode lock"), AgentMode::Normal);
+        assert_eq!(*mode.lock().expect("mode lock"), AgentModeState::Normal);
         let mut drained = Vec::new();
         inbox.drain_into(&mut drained);
         assert_eq!(

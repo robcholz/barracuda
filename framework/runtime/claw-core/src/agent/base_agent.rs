@@ -10,6 +10,7 @@ mod context_adapter;
 mod control;
 mod iteration;
 mod pending_tool_round;
+mod persistence;
 mod reducer;
 mod state;
 mod task_state;
@@ -27,7 +28,8 @@ use claw_tool::ToolSet;
 use std::sync::Arc;
 
 pub(crate) use self::command::{
-    AgentCommand, AgentCommandError, AgentState, ApprovalDecision, BaseAgentBuildError, TickOutcome,
+    AgentCommand, AgentCommandError, AgentTaskStatus, ApprovalDecision, BaseAgentBuildError,
+    TickOutcome,
 };
 pub(super) use self::construction::BaseAgentConfig;
 pub(in crate::agent) use self::context_adapter::{
@@ -35,6 +37,8 @@ pub(in crate::agent) use self::context_adapter::{
 };
 pub(crate) use self::control::AgentAbortHandle;
 use self::control::AgentInterruption;
+pub(crate) use self::persistence::AgentState;
+pub(in crate::agent) use self::persistence::AgentStateBuilder;
 use self::state::BaseAgentState;
 pub(in crate::agent) use self::transcript::{AssistantCommit, History, Transcript};
 
@@ -54,7 +58,6 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     /// above and in `context_adapters`.
     context_cache: Context,
     state: BaseAgentState,
-    resume_reminder: Option<String>,
     outcome: Option<TickOutcome>,
     context_adapters: Vec<Box<dyn ContextAdapter>>,
 }

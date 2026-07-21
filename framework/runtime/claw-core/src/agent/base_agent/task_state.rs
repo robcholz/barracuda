@@ -4,7 +4,7 @@ use crate::agent::effect::AgentEffect;
 use crate::protocol::Message;
 
 use super::pending_tool_round::PendingToolRound;
-use super::{AgentCommand, AgentCommandError, AgentState, ApprovalDecision};
+use super::{AgentCommand, AgentCommandError, AgentTaskStatus, ApprovalDecision};
 
 enum TaskPhase {
     Idle,
@@ -30,11 +30,11 @@ impl TaskPhase {
 }
 
 impl TaskPhaseView {
-    fn public(self) -> AgentState {
+    fn public(self) -> AgentTaskStatus {
         match self {
-            Self::Idle => AgentState::Idle,
-            Self::Running => AgentState::Running,
-            Self::AwaitingApproval => AgentState::AwaitingApproval,
+            Self::Idle => AgentTaskStatus::Idle,
+            Self::Running => AgentTaskStatus::Running,
+            Self::AwaitingApproval => AgentTaskStatus::AwaitingApproval,
         }
     }
 }
@@ -89,7 +89,7 @@ pub(super) enum TaskAction {
 #[derive(Debug, thiserror::Error)]
 pub(super) enum TaskStateError {
     #[error("cannot await approval while the task is {state:?}")]
-    CannotAwaitApproval { state: AgentState },
+    CannotAwaitApproval { state: AgentTaskStatus },
     #[error("cannot await approval while task inputs are still queued")]
     PendingMailbox,
     #[error("cannot await approval without a pending tool call")]
@@ -157,12 +157,12 @@ impl TaskState {
                     TaskPhase::AwaitingApproval(pending_tools) => pending_tools,
                     TaskPhase::Idle => {
                         return Err(AgentCommandError::NotAwaitingApproval {
-                            state: AgentState::Idle,
+                            state: AgentTaskStatus::Idle,
                         });
                     }
                     TaskPhase::Running => {
                         return Err(AgentCommandError::NotAwaitingApproval {
-                            state: AgentState::Running,
+                            state: AgentTaskStatus::Running,
                         });
                     }
                 };
@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use crate::agent::base_agent::pending_tool_round::PendingToolRound;
 
-    fn projected_state(task: &TaskState) -> Result<AgentState, AgentCommandError> {
+    fn projected_state(task: &TaskState) -> Result<AgentTaskStatus, AgentCommandError> {
         task.mailbox
             .projected_phase(&task.phase)
             .map(TaskPhaseView::public)
@@ -279,11 +279,11 @@ mod tests {
             .expect("the idle task accepts its first message");
 
         assert!(matches!(task.phase, TaskPhase::Idle));
-        assert_eq!(projected_state(&task), Ok(AgentState::Running));
+        assert_eq!(projected_state(&task), Ok(AgentTaskStatus::Running));
         assert_eq!(
             task.enqueue_command(AgentCommand::AppendMessage(Message::text("second"))),
             Err(AgentCommandError::CannotAppend {
-                state: AgentState::Running,
+                state: AgentTaskStatus::Running,
             })
         );
 
@@ -311,7 +311,7 @@ mod tests {
         task.enqueue_command(AgentCommand::AppendMessage(Message::text("replacement")))
             .expect("append validates against the queued cancel");
 
-        assert_eq!(projected_state(&task), Ok(AgentState::Running));
+        assert_eq!(projected_state(&task), Ok(AgentTaskStatus::Running));
         assert!(matches!(
             task.pop_action().expect("valid queue"),
             Some(TaskAction::TaskInput {

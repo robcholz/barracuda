@@ -35,7 +35,7 @@ pub(crate) enum AgentCommand {
 /// before the first task and after one finishes (terminal outcomes leave the
 /// agent idle and reusable).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AgentState {
+pub(crate) enum AgentTaskStatus {
     /// No active iteration; waiting for an [`AppendMessage`](AgentCommand::AppendMessage).
     Idle,
     /// A task is actively iterating.
@@ -46,7 +46,7 @@ pub(crate) enum AgentState {
 }
 
 /// Rejection of an [`AgentCommand`] that is invalid for the agent's current
-/// [`AgentState`].
+/// [`AgentTaskStatus`].
 ///
 /// The agent is a state machine; not every command is meaningful in every
 /// state (e.g. [`Cancel`](AgentCommand::Cancel) while the agent is already
@@ -62,18 +62,18 @@ pub(crate) enum AgentCommandError {
     #[error("cannot append: the agent is {state:?}, not idle")]
     CannotAppend {
         /// The state the agent was in when append was rejected.
-        state: AgentState,
+        state: AgentTaskStatus,
     },
     /// [`Cancel`](AgentCommand::Cancel) has nothing to act on while
-    /// [`Idle`](AgentState::Idle).
+    /// [`Idle`](AgentTaskStatus::Idle).
     #[error("cannot cancel: the agent is idle with no active task")]
     NothingToCancel,
     /// [`ApprovalResult`](AgentCommand::ApprovalResult) is only valid while
-    /// [`AwaitingApproval`](AgentState::AwaitingApproval).
+    /// [`AwaitingApproval`](AgentTaskStatus::AwaitingApproval).
     #[error("cannot resolve approval: the agent is {state:?}, not awaiting approval")]
     NotAwaitingApproval {
         /// The state the agent was in when the approval result was rejected.
-        state: AgentState,
+        state: AgentTaskStatus,
     },
 }
 

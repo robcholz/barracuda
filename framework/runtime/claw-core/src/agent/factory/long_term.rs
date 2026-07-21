@@ -1,20 +1,24 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use claw_interface::ClawFs;
+use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{LongTermInitError, LongTermMemory};
 
-use crate::agent::context_adapters::{agent_store, global_store, Extractor};
+use crate::agent::context_adapters::LongTermMemoryContextAdapter;
+use crate::config::SharedApiManager;
 
 use super::layout::join_storage_path;
 
 const GLOBAL_LONG_TERM_DIR: &str = "global";
 const AGENT_LONG_TERM_DIR: &str = "agents";
 
+type BuildAdapter<F> =
+    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextAdapter<F>;
+
 pub(super) struct LongTermDeps<F: ClawFs + 'static> {
-    pub(super) global: LongTermMemory<F>,
+    global: LongTermMemory<F>,
     agents: AgentMemoryStores<F>,
-    pub(super) extractor: Arc<dyn Extractor>,
+    build_adapter: Arc<BuildAdapter<F>>,
 }
 
 struct AgentMemoryStores<F: ClawFs + 'static> {
@@ -40,28 +44,36 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
         }
 
         let dir = join_storage_path(&self.root_dir, kind);
-        let store = agent_store::<F>(&dir)?;
+        let store = LongTermMemoryContextAdapter::<F>::open_agent_store(&dir)?;
         stores.insert(kind.to_owned(), store.clone());
         Ok(store)
     }
 }
 
 impl<F: ClawFs + 'static> LongTermDeps<F> {
-    pub(super) fn from_root(
+    pub(super) fn from_root<H, Timer>(
         long_term_dir: &str,
-        extractor: Arc<dyn Extractor>,
-    ) -> Result<Self, LongTermInitError> {
+        api_manager: SharedApiManager,
+    ) -> Result<Self, LongTermInitError>
+    where
+        H: ClawHttp + Default + 'static,
+        Timer: ClawTimer + Default + 'static,
+    {
         let global_dir = join_storage_path(long_term_dir, GLOBAL_LONG_TERM_DIR);
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         Ok(Self {
-            global: global_store::<F>(&global_dir)?,
+            global: LongTermMemoryContextAdapter::<F>::open_global_store(&global_dir)?,
             agents: AgentMemoryStores::new(agent_root_dir),
-            extractor,
+            build_adapter: LongTermMemoryContextAdapter::<F>::llm_builder::<H, Timer>(api_manager),
         })
     }
 
-    pub(super) fn agent_store(&self, kind: &str) -> Result<LongTermMemory<F>, LongTermInitError> {
-        self.agents.get(kind)
+    pub(super) fn adapter(
+        &self,
+        kind: &str,
+    ) -> Result<LongTermMemoryContextAdapter<F>, LongTermInitError> {
+        let agent = self.agents.get(kind)?;
+        Ok((self.build_adapter)(agent, self.global.clone()))
     }
 }
 

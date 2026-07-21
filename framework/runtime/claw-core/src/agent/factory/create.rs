@@ -3,16 +3,16 @@ use std::sync::Arc;
 use claw_context::{Block, BlockKind};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
-use claw_memory::{Compactor, TranscriptStore};
+use claw_memory::TranscriptStore;
 
 use crate::agent::base_agent::{AgentCommand, BaseAgent, BaseAgentConfig, ContextAdapter};
 use crate::agent::config::{AgentConfig, AgentConfigError};
 use crate::agent::context_adapters::{
-    AgentModeContextAdapter, CompactionPolicy, ConversationHistoryContextAdapter, LlmCompactor,
-    LongTermMemoryContextAdapter, ProfileContextAdapter, SkillContextAdapter,
+    AgentModeContextAdapter, AgentResumeNotice, ConversationHistoryContextAdapter,
+    ProfileContextAdapter, ResumedContextAdapter, SkillContextAdapter,
 };
 use crate::agent::effect::agent_effect_channel;
-use crate::agent::tools::{discovery_tools, internal_tools};
+use crate::agent::tools::internal_tools;
 use crate::config::catalog as agent_catalog;
 use crate::protocol::{AgentId, AgentKind, Message};
 
@@ -59,13 +59,23 @@ impl<
             }
             FsAgentCreateError::Config(error)
         })?;
+        let (mode_state, resumed_state, resume_notice) = match environment.resume {
+            Some(resume) => {
+                let (state, legacy_inflight_toolcalls) = resume.into_parts();
+                let (mode, resumed) = state.into_parts();
+                let notice = AgentResumeNotice::new(legacy_inflight_toolcalls);
+                (Some(mode), Some(resumed), Some(notice))
+            }
+            None => (None, None, None),
+        };
         let mut tools = self.tools.tool_set_with_blacklist(config.tool_blacklist);
         let (effect_emitter, effect_inbox) = agent_effect_channel();
         tools.add_group(internal_tools(effect_emitter.clone()))?;
-        tools.add_group(discovery_tools(tools.discovery()))?;
         for extension in environment.extension_tools {
             tools.add_group(extension)?;
         }
+        let resumed_adapter =
+            ResumedContextAdapter::new(resumed_state, resume_notice, tools.discovery());
 
         // Every agent gets a transcript for context management; `persists` only
         // decides whether it is written to disk.
@@ -87,22 +97,17 @@ impl<
         };
         let conversation_history_store = store.clone();
 
-        let compactor: Box<dyn Compactor> = Box::new(LlmCompactor::<Http, Timer>::new(Arc::clone(
-            &self.api_manager,
-        )));
-        let conversation_history = ConversationHistoryContextAdapter::new(
-            conversation_history_store,
-            compactor,
-            CompactionPolicy::new(
+        let conversation_history =
+            ConversationHistoryContextAdapter::with_llm_compaction::<Http, Timer>(
+                conversation_history_store,
+                Arc::clone(&self.api_manager),
                 COMPACTION_TRIGGER_TOKENS,
                 COMPACTION_KEEP_RECENT_TOKENS,
                 COMPACTION_SEGMENT_TOKEN_BUDGET,
-            ),
-        );
+            );
         let profile_adapter = ProfileContextAdapter::new(self.profile.clone());
-        let long_term = &self.long_term;
-        let agent_memory = match long_term.agent_store(kind.as_str()) {
-            Ok(store) => store,
+        let adapter = match self.long_term.adapter(kind.as_str()) {
+            Ok(adapter) => adapter,
             Err(error) => {
                 tracing::error!(
                     name: "context_adapter_attach_failed",
@@ -113,21 +118,14 @@ impl<
                 return Err(FsAgentCreateError::LongTerm(error));
             }
         };
-        let adapter = LongTermMemoryContextAdapter::new(
-            agent_memory,
-            long_term.global.clone(),
-            Arc::clone(&long_term.extractor),
-        );
-
         // Factory is the only configured-agent assembly point. BaseAgent sees
         // one generic, immutable adapter set; concrete mode, memory, and skill
-        // semantics do not leak into its runtime protocol. Pure Agent tools
-        // were already assembled directly into ToolSet above.
+        // semantics do not leak into its runtime protocol. ResumedContextAdapter
+        // is the boundary that contributes resume context and exposes the pure
+        // discovery group implemented alongside the resumed adapter.
         let context_adapters: Vec<Box<dyn ContextAdapter>> = vec![
-            Box::new(AgentModeContextAdapter::new(
-                environment.initial_mode,
-                effect_emitter,
-            )),
+            Box::new(AgentModeContextAdapter::new(mode_state, effect_emitter)),
+            Box::new(resumed_adapter),
             Box::new(conversation_history),
             Box::new(SkillContextAdapter::new(config.skills)),
             Box::new(profile_adapter),
@@ -143,7 +141,6 @@ impl<
             context_adapters,
             retry_policy: config.retry_policy,
             block_retries: config.tool_block_retries,
-            resume: environment.resume,
         };
         let mut agent = match BaseAgent::<Http, Timer>::build(base_config) {
             Ok(agent) => agent,

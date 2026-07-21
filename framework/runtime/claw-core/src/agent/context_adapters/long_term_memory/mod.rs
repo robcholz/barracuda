@@ -6,11 +6,12 @@
 use std::sync::Arc;
 
 use claw_context::{Block, BlockKind, ContextSink};
-use claw_interface::ClawFs;
-use claw_memory::LongTermMemory;
+use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_memory::{LongTermInitError, LongTermMemory};
 use claw_tool::ToolGroup;
 
 use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, History};
+use crate::config::SharedApiManager;
 
 mod extraction;
 mod extraction_flow;
@@ -18,14 +19,15 @@ mod llm_extractor;
 mod stores;
 mod tier;
 
-use self::stores::MemoryStores;
+use self::llm_extractor::LlmExtractor;
+use self::stores::{agent_store, global_store, MemoryStores};
 use self::tools::memory_tools;
 mod tools;
-pub(crate) use extraction::Extractor;
-use extraction::{ExtractionInput, MemoryOp, MemorySnapshot};
-pub(crate) use llm_extractor::LlmExtractor;
-pub(crate) use stores::{agent_store, global_store};
+use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
+
+type AdapterBuilder<F> =
+    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextAdapter<F>;
 
 /// The adapter's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
@@ -40,7 +42,7 @@ struct CatalogCache {
 }
 
 /// A [`ContextAdapter`] over a dual-tier long-term store. See the module docs.
-pub(crate) struct LongTermMemoryContextAdapter<F: ClawFs + 'static> {
+pub(in crate::agent) struct LongTermMemoryContextAdapter<F: ClawFs + 'static> {
     stores: MemoryStores<F>,
     extractor: Arc<dyn Extractor>,
     /// Rebuilt only when a store version advances.
@@ -51,7 +53,7 @@ pub(crate) struct LongTermMemoryContextAdapter<F: ClawFs + 'static> {
 
 impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     /// Build an adapter over the two stores and an `extractor`.
-    pub(crate) fn new(
+    fn new(
         agent: LongTermMemory<F>,
         global: LongTermMemory<F>,
         extractor: Arc<dyn Extractor>,
@@ -62,6 +64,32 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
             catalog: CatalogCache::default(),
             extract_cursor: 0,
         }
+    }
+
+    /// Open the shared tier with the adapter's canonical ID namespace.
+    pub(in crate::agent) fn open_global_store(
+        dir: &str,
+    ) -> Result<LongTermMemory<F>, LongTermInitError> {
+        global_store(dir)
+    }
+
+    /// Open an Agent tier with the adapter's canonical ID namespace.
+    pub(in crate::agent) fn open_agent_store(
+        dir: &str,
+    ) -> Result<LongTermMemory<F>, LongTermInitError> {
+        agent_store(dir)
+    }
+
+    /// Build the shared LLM-backed adapter constructor used by Agent Factory.
+    pub(in crate::agent) fn llm_builder<H, Timer>(
+        api_manager: SharedApiManager,
+    ) -> Arc<AdapterBuilder<F>>
+    where
+        H: ClawHttp + Default + 'static,
+        Timer: ClawTimer + Default + 'static,
+    {
+        let extractor = LlmExtractor::<H, Timer>::shared(api_manager);
+        Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
     }
 
     fn refresh_catalog(&mut self) {

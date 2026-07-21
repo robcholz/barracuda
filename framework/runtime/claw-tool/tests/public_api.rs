@@ -351,11 +351,10 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     assert_eq!(echo.name, "echo");
     assert_eq!(echo.description, "Echoes the normalized arguments.");
 
-    // Loading the group queues it; the tool becomes callable after the set
-    // applies pending loads.
+    // Loading the group queues it; the next projection applies the request and
+    // makes the tool callable.
     assert!(discovery.request_load("hidden"));
     assert!(!discovery.request_load("nope"));
-    tool_set.apply_pending_tool_loads();
 
     let handle = tool_set.begin()?;
     let outcome = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
@@ -397,7 +396,8 @@ fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
     let _ = tool_set.begin()?;
     assert!(tool_set.loaded_groups().is_empty());
     assert!(tool_set.discovery().request_load("hidden"));
-    tool_set.apply_pending_tool_loads();
+    assert!(tool_set.loaded_groups().is_empty());
+    let _ = tool_set.begin()?;
     assert_eq!(tool_set.loaded_groups(), vec!["hidden"]);
     Ok(())
 }

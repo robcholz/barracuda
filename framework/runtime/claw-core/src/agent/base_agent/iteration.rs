@@ -1,6 +1,4 @@
-use std::borrow::Cow;
-
-use claw_context::{Band, Block, BlockKind, Context, Scope};
+use claw_context::{Block, BlockKind, Context};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_tool::{RawToolInvocation, ToolGate, ToolInvocation, ToolRunner};
@@ -49,7 +47,6 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                     self.reduce_outcome(outcome)
                 }
             };
-            self.tools.apply_pending_tool_loads();
             match effect_disposition {
                 AgentEffectDisposition::Retain => {}
                 AgentEffectDisposition::Reduce => self.drain_agent_effects(),
@@ -109,8 +106,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         prepare_span.in_scope(|| {
             self.context_cache
                 .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
-                .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()))
-                .with_reminder(resume_reminder_kind(), self.resume_reminder.as_deref());
+                .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()));
         });
 
         let render_span =
@@ -140,11 +136,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         };
         drop(render_span);
         drop(prepare_span);
-        let result = iteration_loop.run(step).await;
-        self.resume_reminder = None;
-        self.context_cache
-            .with_reminder(resume_reminder_kind(), None);
-        result
+        iteration_loop.run(step).await
     }
 
     async fn resume_approval(
@@ -189,14 +181,5 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             );
             AgentRunError::TaskStateInvariant
         })
-    }
-}
-
-fn resume_reminder_kind() -> BlockKind {
-    BlockKind::Custom {
-        band: Band::Volatile,
-        scope: Scope::Agent,
-        order: 1,
-        label: Cow::Borrowed("resume"),
     }
 }

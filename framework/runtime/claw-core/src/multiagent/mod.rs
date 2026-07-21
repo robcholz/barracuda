@@ -46,7 +46,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{AgentMode, AgentResume, FsAgentFactory};
+use crate::agent::{AgentResume, FsAgentFactory};
 use crate::protocol::{AgentId, SessionId, SessionPersistence, TrackedToolCall};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
@@ -84,8 +84,8 @@ where
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
     /// Session-owned policy propagated unchanged to every built agent.
     permission_policy: Arc<dyn PermissionPolicy>,
-    /// Session-level root state restored without restoring the old root object.
-    root_mode: AgentMode,
+    /// Complete root Agent state forwarded opaquely from the SessionActor to
+    /// the Agent Factory when the root object is reconstructed.
     root_resume: Option<AgentResume>,
     root_deliveries_in_turn: Vec<AgentId>,
     root_background_spawns: BTreeMap<AgentId, TrackedToolCall>,

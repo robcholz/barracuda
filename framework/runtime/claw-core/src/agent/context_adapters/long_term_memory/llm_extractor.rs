@@ -1,7 +1,7 @@
 //! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApiAsync`].
 //!
 //! It asks the model to read a conversation transcript and return a JSON array of
-//! durable facts. Like [`LlmCompactor`](crate::agent::context_adapters::LlmCompactor), it lives in
+//! durable facts. Like the conversation adapter's LLM compactor, it lives in
 //! `claw_core` (the agent wiring layer) rather than `claw-memory`, because the
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory adapter.
@@ -40,7 +40,7 @@ const EXTRACT_TRANSCRIPT_HEADER: &str = "CONVERSATION:";
 /// `Arc<dyn Extractor>`, while [`ClawApiAsync::chat`] needs `&mut self`, so
 /// calls borrow the client exclusively without holding a mutex while the future
 /// is running.
-pub(crate) struct LlmExtractor<H: ClawHttp, Timer: ClawTimer> {
+pub(super) struct LlmExtractor<H: ClawHttp, Timer: ClawTimer> {
     api: SharedAsyncLlm<H, Timer>,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
@@ -57,7 +57,7 @@ impl<H: ClawHttp + Default + 'static, Timer: ClawTimer + Default + 'static> LlmE
     }
 
     /// A ready-to-inject [`Extractor`] using `api_manager`.
-    pub(crate) fn shared(api_manager: SharedApiManager) -> Arc<dyn Extractor> {
+    pub(super) fn shared(api_manager: SharedApiManager) -> Arc<dyn Extractor> {
         Arc::new(Self::new(api_manager))
     }
 }

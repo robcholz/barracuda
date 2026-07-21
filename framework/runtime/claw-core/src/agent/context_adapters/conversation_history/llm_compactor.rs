@@ -15,13 +15,13 @@ const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_syst
 const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
 
 /// A [`Compactor`] that summarizes an aged history window via the LLM client.
-pub(crate) struct LlmCompactor<H: ClawHttp, Timer: ClawTimer> {
+pub(super) struct LlmCompactor<H: ClawHttp, Timer: ClawTimer> {
     api: SharedAsyncLlm<H, Timer>,
     api_manager: SharedApiManager,
 }
 
 impl<H: ClawHttp + Default, Timer: ClawTimer + Default> LlmCompactor<H, Timer> {
-    pub(crate) fn new(api_manager: SharedApiManager) -> Self {
+    pub(super) fn new(api_manager: SharedApiManager) -> Self {
         Self {
             api: SharedAsyncLlm::new(ClawApiAsync::new(H::default(), Timer::default())),
             api_manager,

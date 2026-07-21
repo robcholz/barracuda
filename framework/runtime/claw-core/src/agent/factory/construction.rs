@@ -10,8 +10,6 @@ use claw_memory::ProfileStore;
 use claw_skill::{FsSkillRegistry, SkillError};
 use claw_tool::ToolRegistry;
 
-use crate::agent::context_adapters::LlmExtractor;
-
 use super::error::FsAgentFactoryError;
 use super::layout::FsAgentFactoryLayout;
 use super::long_term::LongTermDeps;
@@ -56,9 +54,9 @@ impl<
         }
         let layout = FsAgentFactoryLayout::new(persistence_dir);
 
-        let long_term = match LongTermDeps::<Filesystem>::from_root(
+        let long_term = match LongTermDeps::<Filesystem>::from_root::<Http, Timer>(
             &layout.long_term_dir,
-            LlmExtractor::<Http, Timer>::shared(Arc::clone(&api_manager)),
+            Arc::clone(&api_manager),
         ) {
             Ok(deps) => deps,
             Err(error) => {

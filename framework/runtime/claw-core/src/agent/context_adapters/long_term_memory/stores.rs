@@ -17,7 +17,7 @@ pub(super) const AGENT_ID_PREFIX: &str = "a-";
 /// # Errors
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
-pub(crate) fn global_store<F: ClawFs + 'static>(
+pub(super) fn global_store<F: ClawFs + 'static>(
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
     LongTermMemory::new(dir, GLOBAL_ID_PREFIX)
@@ -28,7 +28,7 @@ pub(crate) fn global_store<F: ClawFs + 'static>(
 /// # Errors
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
-pub(crate) fn agent_store<F: ClawFs + 'static>(
+pub(super) fn agent_store<F: ClawFs + 'static>(
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
     LongTermMemory::new(dir, AGENT_ID_PREFIX)
@@ -36,7 +36,7 @@ pub(crate) fn agent_store<F: ClawFs + 'static>(
 
 /// The two stores, shared (by cheap clone) between the adapter and every memory
 /// tool handler.
-pub(crate) struct MemoryStores<F: ClawFs + 'static> {
+pub(super) struct MemoryStores<F: ClawFs + 'static> {
     pub(super) global: LongTermMemory<F>,
     pub(super) agent: LongTermMemory<F>,
 }

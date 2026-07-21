@@ -7,13 +7,11 @@
 //! Human approval is **not** a tool: it is raised by the permission layer (an
 //! `Ask` decision in `base_agent`), not requested or resolved by the model.
 //!
-mod discovery;
 mod internal;
 
 use claw_tool::ToolError;
 use serde_json::Value;
 
-pub(crate) use discovery::discovery_tools;
 pub(crate) use internal::internal_tools;
 
 // -- Shared argument / rendering helpers -------------------------------------
