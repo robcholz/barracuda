@@ -3,27 +3,34 @@ use std::collections::HashSet;
 use claw_interface::{ClawHttp, ClawTimer};
 use serde_json::Value;
 
+use crate::agent::effect::AgentEffect;
 use crate::agent::iteration_loop::{
     CompletedKind, CompletedOutcome, IterationOutcome, IterationResult, PreemptedOutcome, ToolRun,
     ToolsOutcome,
 };
-use crate::agent::tools::{ControlSignal, PlanModeExitOutcome};
-use crate::memory::AssistantCommit;
 use crate::protocol::Message;
 
 use super::command::{
     AgentCommand, AgentCommandError, AgentRunError, ApprovalDecision, TickOutcome,
 };
 use super::control::AgentAbortHandle;
-use super::mode::AgentMode;
 use super::pending_tool_round::PendingToolRound;
 use super::state::ToolBlockVerdict;
 use super::task_state::TaskAction;
-use super::{BaseAgent, IterationIdAllocator};
+use super::{AssistantCommit, BaseAgent, IterationIdAllocator, TurnLifecycle};
 
 pub(super) struct ApprovalResume {
     pub(super) decision: ApprovalDecision,
     pub(super) pending_tools: PendingToolRound,
+}
+
+pub(super) enum AgentEffectDisposition {
+    /// The tool round is paused for approval; keep already emitted effects.
+    Retain,
+    /// The complete tool round may now atomically reduce its effects.
+    Reduce,
+    /// The iteration did not complete a tool round; drop any emitted effects.
+    Discard,
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
@@ -67,19 +74,27 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         approval_resume
     }
 
-    pub(super) fn drain_control_signals(&mut self) {
-        let signals: Vec<ControlSignal> = {
-            let mut sink = self
-                .control
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            sink.drain(..).collect()
-        };
-        if !signals.is_empty() {
-            let state = &mut self.state;
-            for signal in signals {
-                state.task_mut().enqueue_control(signal);
-            }
+    pub(super) fn drain_agent_effects(&mut self) {
+        let mut effects = Vec::new();
+        self.effect_inbox.drain_into(&mut effects);
+        if effects.len() > 1 {
+            let count = effects.len();
+            tracing::error!(name: "agent_effect_conflict", count = count as u64);
+            self.fail_with(AgentRunError::ConflictingEffects { count });
+            return;
+        }
+        if let Some(effect) = effects.pop() {
+            self.state.task_mut().enqueue_effect(effect);
+        }
+    }
+
+    pub(super) fn discard_agent_effects(&mut self) {
+        self.effect_inbox.clear();
+    }
+
+    fn notify_turn_lifecycle(&mut self, lifecycle: TurnLifecycle) {
+        for adapter in &mut self.context_adapters {
+            adapter.on_turn_lifecycle(lifecycle);
         }
     }
 
@@ -93,9 +108,10 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 None
             }
             TaskAction::Cancel => {
+                self.discard_agent_effects();
                 self.transcript.discard_open_turn();
                 self.interruption.clear();
-                self.state.mode = AgentMode::Normal;
+                self.notify_turn_lifecycle(TurnLifecycle::Ended);
                 self.outcome = Some(TickOutcome::Cancelled);
                 None
             }
@@ -106,41 +122,22 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 decision,
                 pending_tools,
             }),
-            TaskAction::EndConversation { final_message } => {
+            TaskAction::Effect(AgentEffect::Finish { final_message }) => {
                 self.transcript.commit_ended(&final_message);
-                self.state.mode = AgentMode::Normal;
+                self.notify_turn_lifecycle(TurnLifecycle::Ended);
                 self.outcome = Some(TickOutcome::Ended { final_message });
                 None
             }
-            TaskAction::EnterPlanMode => {
-                self.state.mode = AgentMode::Plan;
-                None
-            }
-            TaskAction::RequestClarification { question } => {
-                self.transcript
-                    .commit_assistant(AssistantCommit::PlainText(&question));
-                self.outcome = Some(TickOutcome::YieldedByTool { text: question });
-                None
-            }
-            TaskAction::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Execute,
-            } => {
-                self.state.mode = AgentMode::Normal;
-                None
-            }
-            TaskAction::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Cancel { message },
-            } => {
+            TaskAction::Effect(AgentEffect::Yield { message }) => {
                 self.transcript
                     .commit_assistant(AssistantCommit::PlainText(&message));
-                self.state.mode = AgentMode::Normal;
                 self.outcome = Some(TickOutcome::YieldedByTool { text: message });
                 None
             }
         }
     }
 
-    pub(super) fn reduce_outcome(&mut self, outcome: IterationResult) {
+    pub(super) fn reduce_outcome(&mut self, outcome: IterationResult) -> AgentEffectDisposition {
         match outcome {
             Ok(IterationOutcome::Completed(CompletedOutcome { kind, .. })) => match kind {
                 CompletedKind::PlainText(answer) => {
@@ -151,17 +148,22 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                     self.transcript.commit_assistant(commit);
                     self.state.task_mut().finish_task();
                     self.outcome = Some(TickOutcome::Yielded { text: answer.text });
+                    AgentEffectDisposition::Discard
                 }
-                CompletedKind::Tools(tools) => {
-                    self.reduce_tool_round(tools);
-                }
+                CompletedKind::Tools(tools) => self.reduce_tool_round(tools),
             },
-            Ok(IterationOutcome::Preempted(outcome)) => self.merge_preempt_patch(outcome),
-            Err(error) => self.fail_with(error.into()),
+            Ok(IterationOutcome::Preempted(outcome)) => {
+                self.merge_preempt_patch(outcome);
+                AgentEffectDisposition::Discard
+            }
+            Err(error) => {
+                self.fail_with(error.into());
+                AgentEffectDisposition::Discard
+            }
         }
     }
 
-    fn reduce_tool_round(&mut self, tools: ToolsOutcome) {
+    fn reduce_tool_round(&mut self, tools: ToolsOutcome) -> AgentEffectDisposition {
         let awaits_approval = tools.next_approval().is_some();
         if awaits_approval {
             self.apply_tool_block_policy(&tools.runs);
@@ -171,17 +173,35 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                     None => self.fail_with(AgentRunError::TaskStateInvariant),
                 }
             }
+            if matches!(self.outcome.as_ref(), Some(TickOutcome::Failed(_))) {
+                AgentEffectDisposition::Discard
+            } else {
+                AgentEffectDisposition::Retain
+            }
         } else {
             let ToolsOutcome { appended, runs } = tools;
             self.transcript.append_patch(&appended.into_json_array());
             self.apply_tool_block_policy(&runs);
+            if matches!(self.outcome.as_ref(), Some(TickOutcome::Failed(_))) {
+                AgentEffectDisposition::Discard
+            } else {
+                AgentEffectDisposition::Reduce
+            }
         }
     }
 
-    pub(super) fn reduce_resolved_tool_round(&mut self, pending: PendingToolRound) {
+    pub(super) fn reduce_resolved_tool_round(
+        &mut self,
+        pending: PendingToolRound,
+    ) -> AgentEffectDisposition {
         let awaits_approval = pending.next().is_some();
         if awaits_approval {
             self.park_tool_round(pending);
+            if matches!(self.outcome.as_ref(), Some(TickOutcome::Failed(_))) {
+                AgentEffectDisposition::Discard
+            } else {
+                AgentEffectDisposition::Retain
+            }
         } else {
             // The resumed round is now complete. Only now can the assistant and
             // all matched tool messages become visible to the next iteration.
@@ -190,6 +210,11 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             if !blocked.is_empty() {
                 let blocked = blocked.iter().map(String::as_str).collect::<Vec<_>>();
                 self.apply_blocked_tool_policy(&blocked);
+            }
+            if matches!(self.outcome.as_ref(), Some(TickOutcome::Failed(_))) {
+                AgentEffectDisposition::Discard
+            } else {
+                AgentEffectDisposition::Reduce
             }
         }
     }
@@ -231,9 +256,9 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 
     pub(super) fn fail_with(&mut self, error: AgentRunError) {
-        let state = &mut self.state;
-        state.task_mut().finish_task();
-        state.mode = AgentMode::Normal;
+        self.discard_agent_effects();
+        self.state.task_mut().finish_task();
+        self.notify_turn_lifecycle(TurnLifecycle::Ended);
         self.outcome = Some(TickOutcome::Failed(error));
     }
 

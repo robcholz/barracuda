@@ -10,7 +10,7 @@ use claw_memory::ProfileStore;
 use claw_skill::{FsSkillRegistry, SkillError};
 use claw_tool::ToolRegistry;
 
-use crate::memory::LlmExtractor;
+use crate::agent::context_adapters::LlmExtractor;
 
 use super::error::FsAgentFactoryError;
 use super::layout::FsAgentFactoryLayout;

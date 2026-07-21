@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use claw_interface::ClawFs;
 use claw_memory::{LongTermInitError, LongTermMemory};
 
-use crate::memory::{agent_store, global_store, Extractor};
+use crate::agent::context_adapters::{agent_store, global_store, Extractor};
 
 use super::layout::join_storage_path;
 

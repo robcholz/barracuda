@@ -16,7 +16,7 @@ use claw_memory::{Compactor, TranscriptStore, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::memory::traits::{ContextAdapter, ContextAdapterFuture, History};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, History};
 
 pub(crate) use llm_compactor::LlmCompactor;
 

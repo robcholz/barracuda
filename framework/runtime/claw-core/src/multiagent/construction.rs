@@ -119,7 +119,7 @@ where
     pub(crate) fn root_recovery(&self) -> Option<(AgentMode, Vec<String>)> {
         let root = self.state.root()?;
         let agent = self.slots.available_agent(root)?;
-        Some((agent.mode(), agent.loaded_tool_groups()))
+        Some(agent.recovery_snapshot().into_parts())
     }
 
     pub(crate) fn root_resume_pending(&self) -> bool {

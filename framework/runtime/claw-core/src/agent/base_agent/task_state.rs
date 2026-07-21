@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use crate::agent::tools::{ControlSignal, PlanModeExitOutcome};
+use crate::agent::effect::AgentEffect;
 use crate::protocol::Message;
 
 use super::pending_tool_round::PendingToolRound;
@@ -42,7 +42,7 @@ impl TaskPhaseView {
 enum Inbound {
     Command(AgentCommand),
     TaskInput(Message),
-    Control(ControlSignal),
+    Effect(AgentEffect),
 }
 
 struct TaskMailbox {
@@ -83,16 +83,7 @@ pub(super) enum TaskAction {
         decision: ApprovalDecision,
         pending_tools: PendingToolRound,
     },
-    EndConversation {
-        final_message: String,
-    },
-    EnterPlanMode,
-    RequestClarification {
-        question: String,
-    },
-    ExitPlanMode {
-        outcome: PlanModeExitOutcome,
-    },
+    Effect(AgentEffect),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -133,8 +124,8 @@ impl TaskState {
         self.mailbox.enqueue(Inbound::TaskInput(message));
     }
 
-    pub(super) fn enqueue_control(&mut self, signal: ControlSignal) {
-        self.mailbox.enqueue(Inbound::Control(signal));
+    pub(super) fn enqueue_effect(&mut self, effect: AgentEffect) {
+        self.mailbox.enqueue(Inbound::Effect(effect));
     }
 
     pub(super) fn pop_action(&mut self) -> Result<Option<TaskAction>, AgentCommandError> {
@@ -180,20 +171,9 @@ impl TaskState {
                     pending_tools,
                 }
             }
-            Inbound::Control(ControlSignal::EndConversation { final_message }) => {
+            Inbound::Effect(effect) => {
                 self.phase = TaskPhase::Idle;
-                TaskAction::EndConversation { final_message }
-            }
-            Inbound::Control(ControlSignal::EnterPlanMode) => TaskAction::EnterPlanMode,
-            Inbound::Control(ControlSignal::RequestClarification { question }) => {
-                self.phase = TaskPhase::Idle;
-                TaskAction::RequestClarification { question }
-            }
-            Inbound::Control(ControlSignal::ExitPlanMode { outcome }) => {
-                if matches!(&outcome, PlanModeExitOutcome::Cancel { .. }) {
-                    self.phase = TaskPhase::Idle;
-                }
-                TaskAction::ExitPlanMode { outcome }
+                TaskAction::Effect(effect)
             }
         };
         Ok(Some(action))
@@ -234,19 +214,7 @@ fn transition(phase: TaskPhaseView, inbound: &Inbound) -> Result<TaskPhaseView, 
             TaskPhaseView::Idle => Ok(TaskPhaseView::Running),
             TaskPhaseView::Running | TaskPhaseView::AwaitingApproval => Ok(phase),
         },
-        Inbound::Control(
-            ControlSignal::EndConversation { .. }
-            | ControlSignal::RequestClarification { .. }
-            | ControlSignal::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Cancel { .. },
-            },
-        ) => Ok(TaskPhaseView::Idle),
-        Inbound::Control(
-            ControlSignal::EnterPlanMode
-            | ControlSignal::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Execute,
-            },
-        ) => Ok(phase),
+        Inbound::Effect(_) => Ok(TaskPhaseView::Idle),
     }
 }
 
@@ -395,24 +363,18 @@ mod tests {
     }
 
     #[test]
-    fn clarification_ends_one_task_and_the_reply_starts_the_next() {
+    fn effect_yield_ends_one_task_and_the_reply_starts_the_next() {
         let mut task = TaskState::new();
-        task.enqueue_task_input(Message::text("plan this"));
+        task.enqueue_task_input(Message::text("start"));
         let _ = task.pop_action().expect("task starts");
 
-        task.enqueue_control(ControlSignal::EnterPlanMode);
-        assert!(matches!(
-            task.pop_action().expect("enter signal is valid"),
-            Some(TaskAction::EnterPlanMode)
-        ));
-        assert!(task.is_running());
-
-        task.enqueue_control(ControlSignal::RequestClarification {
-            question: "Which board?".to_owned(),
+        task.enqueue_effect(AgentEffect::Yield {
+            message: "Which board?".to_owned(),
         });
         assert!(matches!(
-            task.pop_action().expect("clarification signal is valid"),
-            Some(TaskAction::RequestClarification { question }) if question == "Which board?"
+            task.pop_action().expect("tool effect is valid"),
+            Some(TaskAction::Effect(AgentEffect::Yield { message }))
+                if message == "Which board?"
         ));
         assert!(!task.is_running());
 
@@ -427,37 +389,20 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_exit_outcome_controls_the_task_boundary() {
-        let mut execute = TaskState::new();
-        execute.enqueue_task_input(Message::text("plan this"));
-        let _ = execute.pop_action().expect("task starts");
-        execute.enqueue_control(ControlSignal::ExitPlanMode {
-            outcome: PlanModeExitOutcome::Execute,
+    fn effect_finish_owns_the_terminal_payload() {
+        let mut task = TaskState::new();
+        task.enqueue_task_input(Message::text("start"));
+        let _ = task.pop_action().expect("task starts");
+        task.enqueue_effect(AgentEffect::Finish {
+            final_message: "Done.".to_owned(),
         });
 
         assert!(matches!(
-            execute.pop_action().expect("execute exit is valid"),
-            Some(TaskAction::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Execute,
-            })
+            task.pop_action().expect("finish is valid"),
+            Some(TaskAction::Effect(AgentEffect::Finish {
+                final_message,
+            })) if final_message == "Done."
         ));
-        assert!(execute.is_running());
-
-        let mut cancel = TaskState::new();
-        cancel.enqueue_task_input(Message::text("plan this"));
-        let _ = cancel.pop_action().expect("task starts");
-        cancel.enqueue_control(ControlSignal::ExitPlanMode {
-            outcome: PlanModeExitOutcome::Cancel {
-                message: "No changes made.".to_owned(),
-            },
-        });
-
-        assert!(matches!(
-            cancel.pop_action().expect("cancel exit is valid"),
-            Some(TaskAction::ExitPlanMode {
-                outcome: PlanModeExitOutcome::Cancel { message },
-            }) if message == "No changes made."
-        ));
-        assert!(!cancel.is_running());
+        assert!(!task.is_running());
     }
 }

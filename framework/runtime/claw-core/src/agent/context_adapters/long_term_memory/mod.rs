@@ -10,17 +10,17 @@ use claw_interface::ClawFs;
 use claw_memory::LongTermMemory;
 use claw_tool::ToolGroup;
 
-use crate::memory::traits::{ContextAdapter, ContextAdapterFuture, History};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, History};
 
 mod extraction;
 mod extraction_flow;
 mod llm_extractor;
 mod stores;
 mod tier;
-mod tools;
 
 use self::stores::MemoryStores;
 use self::tools::memory_tools;
+mod tools;
 pub(crate) use extraction::Extractor;
 use extraction::{ExtractionInput, MemoryOp, MemorySnapshot};
 pub(crate) use llm_extractor::LlmExtractor;

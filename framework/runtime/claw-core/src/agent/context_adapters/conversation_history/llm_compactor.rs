@@ -8,8 +8,8 @@ use claw_memory::{CompactBackendError, CompactError, CompactFuture, Compactor};
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
+use super::super::async_llm::SharedAsyncLlm;
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::memory::async_llm::SharedAsyncLlm;
 
 const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_system.md");
 const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");

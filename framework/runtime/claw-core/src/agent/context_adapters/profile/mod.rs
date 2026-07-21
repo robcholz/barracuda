@@ -9,11 +9,11 @@ use claw_interface::ClawFs;
 use claw_memory::{ProfileDocument, ProfileStore};
 use claw_tool::ToolGroup;
 
-use crate::memory::traits::ContextAdapter;
-
-mod tools;
+use crate::agent::base_agent::ContextAdapter;
 
 use self::tools::profile_tools;
+
+mod tools;
 
 /// Pulls global profile documents into the current agent context.
 pub(crate) struct ProfileContextAdapter<F: ClawFs + 'static> {

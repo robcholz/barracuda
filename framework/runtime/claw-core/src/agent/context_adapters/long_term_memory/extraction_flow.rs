@@ -3,7 +3,7 @@ use claw_memory::{MemoryDraft, MemoryPatch};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::memory::traits::History;
+use crate::agent::base_agent::History;
 
 use super::{ExtractionInput, LongTermMemoryContextAdapter, MemoryOp};
 

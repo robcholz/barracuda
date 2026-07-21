@@ -1,4 +1,3 @@
-use super::mode::AgentMode;
 use super::task_state::TaskState;
 use super::IterationIdAllocator;
 
@@ -38,16 +37,14 @@ pub(super) enum ToolBlockVerdict {
 pub(super) struct BaseAgentState {
     pub(super) block_policy: BlockPolicy,
     pub(super) id_allocator: IterationIdAllocator,
-    pub(super) mode: AgentMode,
     task: TaskState,
 }
 
 impl BaseAgentState {
-    pub(super) fn new(block_retries: u32, mode: AgentMode) -> Self {
+    pub(super) fn new(block_retries: u32) -> Self {
         Self {
             block_policy: BlockPolicy::new(block_retries),
             id_allocator: IterationIdAllocator::new(),
-            mode,
             task: TaskState::new(),
         }
     }

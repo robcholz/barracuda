@@ -149,6 +149,12 @@ pub(crate) enum AgentRunError {
         /// The name of the refused tool.
         name: String,
     },
+    /// More than one tool tried to affect the same task boundary.
+    #[error("multiple task effects were emitted in one tool round: {count}")]
+    ConflictingEffects {
+        /// Number of mutually exclusive effects emitted.
+        count: usize,
+    },
     /// The private task phase/mailbox invariant was violated.
     #[error("agent task state invariant violated")]
     TaskStateInvariant,

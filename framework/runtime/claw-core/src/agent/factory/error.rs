@@ -31,18 +31,12 @@ pub(crate) enum FsAgentCreateError {
     /// The transcript store for this placement could not be opened.
     #[error("failed to open transcript: {0}")]
     Transcript(#[from] TranscriptInitError),
-    /// The base agent or one of its built-in context adapters failed to build.
+    /// The base agent and its complete context-adapter set failed to build.
     #[error("failed to build agent: {0}")]
     Agent(#[from] BaseAgentBuildError),
-    /// The profile context adapter could not be attached.
-    #[error("failed to attach profile context: {0}")]
-    ProfileContext(#[source] BaseAgentBuildError),
     /// The per-agent long-term memory store could not be opened.
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),
-    /// The long-term memory context adapter could not be attached.
-    #[error("failed to attach long-term memory context: {0}")]
-    LongTermContext(#[source] BaseAgentBuildError),
     /// The initial goal could not be enqueued.
     #[error("failed to seed initial goal: {0}")]
     Goal(#[from] AgentCommandError),

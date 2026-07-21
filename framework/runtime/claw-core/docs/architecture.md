@@ -1,68 +1,351 @@
 # Architecture
 
-By Finn(Ziheng) Sheng <zsheng2@ncsu.edu> or <robcholz00@gmail.com>
+By Finn (Ziheng) Sheng <zsheng2@ncsu.edu> or <robcholz00@gmail.com>
 
-## Hard Constraints
+## Hard constraints
 
-SINGLE OS-THREAD ONLY.
+- The entire Agent system runs on exactly one OS thread.
+- There is exactly one process-global physical Agent scheduler.
+- The design provides cooperative async I/O concurrency, not preemption or
+  parallel execution of synchronous CPU work.
+- No lock, `RefCell` borrow, persistence guard, or slot borrow may be held while
+  polling or awaiting Agent, LLM, or tool code.
 
-## Overview
+## Ownership model
 
-### Data Ownerships
+~~~text
+Orchestrator / Engine<F, H, T>
+├── SharedPersistence<F> and AgentStateStore<F>
+├── process-global durable ID allocators
+├── AgentRunScheduler<H, T>
+└── SessionActors<F, H, T>
+    ├── AgentSlots<H, T>
+    ├── durable SessionState
+    ├── memory/context assembly policy
+    └── optional Multiagent domain state
 
-Agent System
-  -> Orchestrator (persists id allocators data here with claw-persistence)
-  -> Session Actor (persists session data here when creating sessions, with claw-persistence)
-    -> exposes agents_overview() so orchestrator can collect these info
-    -> owns agent instances, Vec<AgentSlot>
-    -> adds tools (Multiagent is used here. note: all the tools will be filtered by baked config here (e.g. profile write will be disabled for subagent from the baked config)), context, memories (Memory Component is used here), and inter-agent communications (use actor patterns to transfer signals between agents). (Note: persists root agent data (agent id and related transcript, agent mode, loaded tool groups, inflight toolcalls) when spwaning, and resume from here)
-    -> Moves Agents to AgentRunScheduler, at the same time AgentSlot (agent part becomes CheckedOut), the enum quite like Instance(Agent), CheckedOut
+AgentRunScheduler<H, T>
+└── AgentRun<H, T>
+    └── checked-out BaseAgent<H, T>
+~~~
 
-AgentRunScheduler
-  -> runs agents
-  -> knows no Session or Multiagent semantics\
-  -> fairly polls all checked-out AgentRuns across sessions
-  -> exactly one process-global instance
+### SessionActor and AgentSlot
 
-Multiagent: behaves like a tool
-  -> calls MultiagentBridge to get requested agent spawns (which connects to SessionActor. NOTE: SessionActor receives the commends from here, but never implements multiagent domain logics)
-  -> applies graph/scheduling semantics to the agents
-  -> calls MultiagentBrdige to let Session Actor move agent instances to AgentRunScheduler
+- `SessionActor` is the logical owner of every Agent in its Session.
+- `SessionActor` stores one authoritative `AgentSlot` for every logically live
+  Agent, keyed by the globally unique `AgentId`.
+- A resident Agent is physically stored in its slot. At checkout, the Agent is
+  moved exactly once into an `AgentRun`; it is not moved on every poll.
+- While checked out, the slot retains lifecycle and overview metadata but not a
+  second reference to the Agent.
+- Every terminal path returns the Agent exactly once before the slot is removed
+  or another run begins.
 
-Memory Components
-  -> use ContextAdapter trait to decouple from (claw-core/agent)
-  -> transcript store (transcript is a trait, the impls have durable or in-memory) (exposed in claw-core/agent, used in claw-core/memory). Use fs apis to persist.
-  -> conversation history (projection of transcripts) in (claw-core/memory)
-  -> long term memory, keep as current-is, uses claw-persistence to persist.
-  -> identity.md, soul.md, user.md, keep as current-is, also uses ContextAdapter. Use fs apis to persist.
-  -> skills (connects to claw-skill by ContextAdapter)
+~~~text
+AgentSlot<H, T>
+├── Resident {
+│     agent: BaseAgent<H, T>,
+│     metadata: AgentSlotMetadata,
+│   }
+└── CheckedOut {
+      run_id: RunId,
+      metadata: AgentSlotMetadata,
+      lifecycle: Running | Cancelling | Reaping,
+    }
+~~~
 
-Tool Registry
-  -> keep as current-is, uses claw-persistence from claw-agent
+The invariant is:
 
-### Dataflows
+~~~text
+logical Agent exists
+    => exactly one AgentSlot exists
+    => exactly one of Resident or CheckedOut is true
+~~~
 
-Orchestrator Loop
-  -> processes all incoming submits by one tick
-  -> drives all sessions by one tick
-  -> drives all agents by one tick
-  -> processes all outcoming data by one tick
+There is no second owning `AgentManager` or `AgentDirectory`.
+`agents_overview()` is projected from retained slot metadata, including checked
+out and cancelling Agents. Engine may aggregate these projections across
+Sessions; a future directory cache must remain a rebuildable read model.
 
-### Filesystem Level Organization
+### AgentRunScheduler
 
-claw-core
-  -> agent (single agent src, exposes AgentFactory to construct agents)
-  -> config (crate-level configurations)
-  -> memory (exposes memory as adapters, use traits to decouple from `agent`)
-  -> multiagent (exposes as toolcall)
-  -> scheduler (exposes AgentRunScheduler)
-  -> session (exposes SessionActor)
-  -> orchestrator (assembles all logics here and introduce persistence here)
+- Engine owns and polls exactly one `AgentRunScheduler<H, T>`.
+- Scheduler is the only component allowed to poll `AgentRun`.
+- It fairly polls all checked-out root and worker Agents across all Sessions.
+- Scheduler knows no Session, Multiagent graph, parent/child, persistence, or
+  memory semantics. It only understands the run protocol and opaque routes.
+- Scheduler owns its active queue/state machine. It is not an
+  `Arc<Mutex<AgentRunScheduler>>`; a lightweight single-thread-local submission
+  handle or mailbox may be shared.
+- One fair round polls each run eligible for that round at most once before any
+  of those runs receives a second poll.
+- Fairness exists only at poll/yield boundaries. Synchronous blocking work in a
+  poll blocks the sole OS thread and must remain bounded.
 
-### Transient vs Durable
+### BaseAgent
 
-- Checked-out `AgentRun`s and all `AgentRunScheduler` queues are transient runtime state and are never persisted.
-- Durable `SessionActor` state and persisted `AgentSlot` metadata are the recovery source for agents.
-- Transcripts, profiles, and long-term memory are independent canonical stores; session checkpoints reference their identities instead of embedding duplicate copies.
-- After a crash or restart, agents are rebuilt from durable state and canonical stores; physical checkout state and in-flight futures are never restored.
-- Agent, tool, and LLM failures are converted into run outcomes and returned to the owning `SessionActor`; they must not terminate the process-global loop or lose agent ownership.
+- `BaseAgent<H, T>` is the only concrete Agent type. There is no `GenericAgent`
+  abstraction or `dyn Agent` ownership layer.
+- `BaseAgent` owns only the generic run protocol and already assembled
+  dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
+  instruction, inherited context, `Vec<Box<dyn ContextAdapter>>`, and the
+  transient `AgentEffectInbox` used to reduce typed tool effects.
+- Concrete mode, conversation, profile, skill, and memory semantics live under
+  `agent/context_adapters`. In particular, `BaseAgent` neither imports
+  `AgentMode` nor recognizes Normal/Plan or mode-specific tools.
+- `ContextAdapter` and transcript-facing traits are consumer-owned ports under
+  `agent/base_agent`; `agent/context_adapters` contains implementations only.
+  The concrete `TranscriptStore<F>` binding lives at the filesystem-aware
+  Factory boundary.
+- A ToolGroup that operates on adapter-owned state is co-located with that
+  adapter (for example `context_adapters/agent_mode/tools.rs`). Only pure Agent
+  tool groups with no adapter domain owner live under `agent/tools`, one group
+  per file.
+- Pure ToolGroups are assembled directly into ToolSet by Factory; they are not
+  wrapped in fake context adapters merely to deliver an Agent effect.
+- Factory creates one synchronous tool-to-Agent effect channel. BaseAgent owns
+  its unique, non-cloneable `AgentEffectInbox`; pure tools and adapter-owned
+  tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no reverse
+  drain/message API.
+- Tools emit typed effects while they run; BaseAgent drains and reduces them
+  only after the complete tool round. The channel mutex is held only for a
+  bounded emit/drain operation and never across an `await`. More than one
+  mutually exclusive task-boundary effect in a round fails deterministically.
+- Each authoritative component owns its live recovery semantics: the mode
+  adapter owns mode, `ToolSet` owns loaded groups, and the Agent tool runtime
+  owns its monotonic counter and unsettled tool calls.
+- `ToolRunner` remains inside the Agent tool runtime. Scheduler schedules an
+  entire `AgentRun`, not individual tool calls.
+- `BaseAgent` does not own `SharedPersistence`, perform storage I/O, or depend
+  on the filesystem type `F`.
+
+## Identity
+
+- `AgentId`, `RunId`, and `ToolCallId` are distinct newtypes.
+- `AgentId` is globally unique within the persisted installation and is never
+  reused. Engine owns and durably checkpoints its allocator before exposing a
+  reserved ID.
+- `RunId` identifies one checkout epoch so a stale completion cannot overwrite
+  a newer slot state.
+- `ToolCallId` identifies one physical invocation. It is monotonic and
+  restart-safe within one Agent; the durable invocation identity is
+  `(AgentId, ToolCallId)`.
+- Allocating a ToolCall ID increments `next_tool_call_id` in the same in-memory
+  mutation that inserts its unsettled record. Tool name and arguments are not
+  invocation identity.
+
+## Construction and recovery
+
+`SessionActor` is the single orchestration-level assembly path for roots and
+workers. It selects Agent kind, lifecycle, baked policy, memory visibility,
+tool filtering, context, and recovery policy.
+
+`FsAgentFactory<F, H, T>` is the sole concrete constructor. It supports two
+entry paths that converge on one internal builder:
+
+- `create_new`, which initializes a fresh recovery state;
+- `restore`, which loads recovery state and canonical-store identities.
+
+Factory may use `AgentStateStore<F>` and filesystem-backed component stores
+during construction, but the resulting `BaseAgent<H, T>` does not retain them.
+Factory does not choose Session, parentage, Multiagent graph, lifecycle, memory
+visibility, or durability policy.
+
+## Recovery state and checkpoint protocol
+
+`BaseAgent` exposes a synchronous, I/O-free projection of the state necessary
+to reconstruct it:
+
+~~~rust
+struct AgentRecoverySnapshot {
+    mode: AgentMode,
+    loaded_tool_groups: Vec<ToolGroupId>,
+    next_tool_call_id: ToolCallId,
+    unsettled_toolcalls:
+        BTreeMap<ToolCallId, UnsettledToolCallRecord>,
+}
+
+impl<H, T> BaseAgent<H, T> {
+    fn recovery_snapshot(&self) -> AgentRecoverySnapshot;
+}
+~~~
+
+The snapshot is a projection, not a second mutable shadow copy. Mode adapter,
+`ToolSet`, and the tool-call journal remain the authoritative live components.
+`BaseAgent::recovery_snapshot()` drives a generic snapshot sink over those
+components; it does not decode adapter-specific state.
+
+The persisted schema is versioned. `UnsettledToolCallRecord` is a stable
+recovery record, not a transient event/future type such as `TrackedToolCall`.
+If loaded tool-group order has no semantics, serialization must use a stable
+canonical order.
+
+Because an active `BaseAgent` has been moved into an `AgentRun`, Engine cannot
+borrow it to call `recovery_snapshot()`. The Agent calls the method internally
+at a checkpoint boundary and exports the owned snapshot through the run
+protocol:
+
+~~~text
+BaseAgent reaches a recovery boundary
+→ BaseAgent mutates its in-memory recovery state
+→ BaseAgent calls recovery_snapshot()
+→ AgentRunUpdate::CheckpointRequired {
+      agent_id, run_id, checkpoint_id, purpose, snapshot
+  }
+→ Scheduler parks that AgentRun
+→ Engine applies the Agent's external recovery policy
+→ Engine returns the matching CheckpointResult
+→ Scheduler resumes or fails the AgentRun
+~~~
+
+`checkpoint_id` is transient and scoped to one `RunId`. Scheduler validates
+park/resume mechanics but never interprets or writes the snapshot. Engine owns
+the persistence operation. A checkpoint error becomes a typed Agent run outcome
+and must still return the Agent to its owning slot.
+
+Every change represented by the recovery snapshot must eventually cross an
+acknowledged checkpoint boundary. Implementations may coalesce ordinary mode or
+loaded-tool-group changes, but they must not publish a terminal run completion
+while recovery state differs from the last acknowledged snapshot. The pre-tool
+boundary is non-coalescible because it guards an external side effect.
+
+The baseline `AgentPersistencePolicy` variants are:
+
+- `PersistentRoot`: Engine durably writes every required recovery checkpoint;
+- `EphemeralRoot`: maintains the same in-memory state without a durable Agent
+  record;
+- `TransientWorker`: maintains the same in-memory state without a durable Agent
+  record.
+
+The policy is selected outside `BaseAgent` and retained with slot/run metadata.
+An ephemeral checkpoint may be acknowledged without storage, preserving one
+uniform run protocol. SessionActor authorizes permanent Agent-record deletion
+only after logical deletion is committed and physical ownership has returned.
+
+### Tool-call durability boundary
+
+Before a persistent tool body is first polled:
+
+~~~text
+allocate ToolCallId and increment next_tool_call_id
+→ insert UnsettledToolCallRecord
+→ export AgentRecoverySnapshot in CheckpointRequired
+→ Scheduler parks the AgentRun
+→ Engine durably checkpoints the snapshot
+→ resume and first-poll the tool body
+~~~
+
+If the checkpoint fails, the tool body is never polled. An active tool future is
+transient; an unsettled record means the durable outcome of a possibly
+side-effecting invocation is not yet known.
+
+Settlement order is:
+
+~~~text
+tool body completes
+→ append its outcome to the open transcript turn
+→ keep the call unsettled during later iterations
+→ commit and durably checkpoint the transcript turn
+→ clear calls represented by that committed turn
+→ export and durably checkpoint the new AgentRecoverySnapshot
+~~~
+
+The transcript checkpoint is fallible. A call is never cleared merely because
+the tool future completed or because an open turn contains a patch. Recovery
+never blindly replays an unsettled side-effecting invocation.
+
+## Canonical and transient state
+
+- Durable `SessionState` plus recoverable `AgentSlot` metadata locates the root
+  Agent record and independent canonical stores.
+- Agent recovery snapshots, transcripts, profiles, and long-term memory are
+  separate canonical stores; snapshots do not duplicate transcript contents.
+- `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
+  `RunId`, checkout state, and checkpoint waiters are transient.
+- After a crash, Factory reconstructs Agents from durable recovery state and
+  canonical stores. It never restores a physical future or checkout.
+- A crash after transcript durability but before clearing the Agent snapshot
+  may conservatively recover an invocation as unsettled; it is not replayed.
+- Agent, tool, LLM, and persistence failures are outcomes. They cannot destroy
+  the global loop or lose Agent ownership.
+
+## Multiagent
+
+- Multiagent is an optional tool/domain component, not a physical Agent owner
+  or scheduler.
+- It owns graph policy, parent/child relationships, readiness, joins,
+  follow-up/delete/cancel semantics, and timeout policy.
+- It has no dependency on `BaseAgent`, `AgentRun`, `AgentSlot`,
+  `FsAgentFactory`, `AgentRunScheduler`, `SessionActor`, or `SessionId`.
+- A `MultiagentBridge` transports typed commands and correlated results.
+  Multiagent validates domain intent and emits typed effects; SessionActor
+  executes accepted physical effects without reimplementing graph policy.
+- Root and worker construction use the same SessionActor assembly path and
+  Factory constructor with explicit policy inputs.
+
+## Memory components
+
+- Memory uses `ContextAdapter` to decouple from concrete Agent ownership.
+- Each Agent sees its own transcript and conversation-history projection unless
+  explicit spawn-time context is provided.
+- Transcript implementations may be durable or in-memory and provide the
+  fallible checkpoint used for tool settlement.
+- Profiles, identity files, skills, and long-term-memory stores remain separate
+  canonical components with explicit visibility and mutation policy.
+- Workers do not automatically see parent or sibling transcripts. Baked policy
+  filters inherited tools and write capabilities.
+
+## Runtime dataflow
+
+~~~text
+external command
+→ Engine ingress budget
+→ SessionActor command handling
+→ optional Multiagent command/effects
+→ SessionActor assembles or checks out BaseAgent
+→ Scheduler submission mailbox
+→ global Scheduler fair sweep
+→ checkpoint update or terminal completion
+→ Engine services persistence and routes opaque results
+→ SessionActor restores AgentSlot before applying terminal outcome
+→ bounded outgoing work
+~~~
+
+Engine rotates bounded budgets across ingress, SessionActors, Scheduler work,
+checkpoint/completion routing, persistence, and outgoing work. Polling a
+SessionActor never polls an `AgentRun` directly, and Engine does not return
+early merely because the first work class is ready.
+
+## Module dependency direction
+
+~~~text
+orchestrator
+├── session
+├── scheduler
+└── persistence / AgentStateStore
+
+session
+├── agent factory and Agent types
+├── scheduler submission protocol
+├── memory
+└── multiagent port/domain
+
+scheduler
+└── agent run protocol
+
+multiagent
+└── domain protocol and bridge port
+
+agent runtime
+├── context adapters
+└── tool interfaces
+~~~
+
+Forbidden reverse dependencies:
+
+- scheduler must not depend on session, multiagent, or persistence;
+- multiagent must not depend on physical Agent, scheduler, session, or
+  orchestrator types;
+- BaseAgent and the Agent iteration loop must not depend on session,
+  multiagent domain state, orchestrator, `SharedPersistence`, or filesystem
+  type `F`.

@@ -17,7 +17,6 @@ macro_rules! prompt {
 
 mod agent;
 mod config;
-mod memory;
 mod multiagent;
 mod orchestrator;
 mod protocol;

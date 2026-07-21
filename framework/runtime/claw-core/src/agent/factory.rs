@@ -6,6 +6,7 @@ mod environment;
 mod error;
 mod layout;
 mod long_term;
+mod transcript;
 
 use std::marker::PhantomData;
 use std::sync::Arc;

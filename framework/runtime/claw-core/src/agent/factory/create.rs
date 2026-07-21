@@ -5,14 +5,15 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{Compactor, TranscriptStore};
 
-use crate::agent::base_agent::{AgentCommand, BaseAgent, BaseAgentConfig};
+use crate::agent::base_agent::{AgentCommand, BaseAgent, BaseAgentConfig, ContextAdapter};
 use crate::agent::config::{AgentConfig, AgentConfigError};
-use crate::agent::tools::discovery_tools;
-use crate::config::catalog as agent_catalog;
-use crate::memory::{
-    CompactionPolicy, ConversationHistoryContextAdapter, LlmCompactor,
-    LongTermMemoryContextAdapter, ProfileContextAdapter,
+use crate::agent::context_adapters::{
+    AgentModeContextAdapter, CompactionPolicy, ConversationHistoryContextAdapter, LlmCompactor,
+    LongTermMemoryContextAdapter, ProfileContextAdapter, SkillContextAdapter,
 };
+use crate::agent::effect::agent_effect_channel;
+use crate::agent::tools::{discovery_tools, internal_tools};
+use crate::config::catalog as agent_catalog;
 use crate::protocol::{AgentId, AgentKind, Message};
 
 use super::error::FsAgentCreateError;
@@ -59,6 +60,8 @@ impl<
             FsAgentCreateError::Config(error)
         })?;
         let mut tools = self.tools.tool_set_with_blacklist(config.tool_blacklist);
+        let (effect_emitter, effect_inbox) = agent_effect_channel();
+        tools.add_group(internal_tools(effect_emitter.clone()))?;
         tools.add_group(discovery_tools(tools.discovery()))?;
         for extension in environment.extension_tools {
             tools.add_group(extension)?;
@@ -84,32 +87,6 @@ impl<
         };
         let conversation_history_store = store.clone();
 
-        // This is the single configured-agent assembly point. BaseAgent adds
-        // its invariant built-ins; the baked blacklist projects them uniformly.
-        let base_config = BaseAgentConfig {
-            store,
-            tools,
-            permission_policy: environment.permission_policy,
-            skills: config.skills,
-            agent_instruction: Block::new(BlockKind::AgentInstruction, config.system_prompt),
-            inherited_context: environment.inherited_context,
-            retry_policy: config.retry_policy,
-            block_retries: config.tool_block_retries,
-            initial_mode: environment.initial_mode,
-            resume: environment.resume,
-        };
-        let mut agent = match BaseAgent::<Http, Timer>::build(base_config) {
-            Ok(agent) => agent,
-            Err(error) => {
-                tracing::error!(
-                    name: "agent_build_failed",
-                    agent = %id,
-                    kind = %kind.as_str(),
-                );
-                return Err(FsAgentCreateError::Agent(error));
-            }
-        };
-
         let compactor: Box<dyn Compactor> = Box::new(LlmCompactor::<Http, Timer>::new(Arc::clone(
             &self.api_manager,
         )));
@@ -122,27 +99,7 @@ impl<
                 COMPACTION_SEGMENT_TOKEN_BUDGET,
             ),
         );
-        if let Err(error) = agent.register_context_adapter(Box::new(conversation_history)) {
-            tracing::error!(
-                name: "context_adapter_attach_failed",
-                agent = %id,
-                adapter = "conversation_history",
-                kind = %kind.as_str(),
-            );
-            return Err(FsAgentCreateError::Agent(error));
-        }
-
         let profile_adapter = ProfileContextAdapter::new(self.profile.clone());
-        if let Err(error) = agent.register_context_adapter(Box::new(profile_adapter)) {
-            tracing::error!(
-                name: "context_adapter_attach_failed",
-                agent = %id,
-                adapter = "profile",
-                kind = %kind.as_str(),
-            );
-            return Err(FsAgentCreateError::ProfileContext(error));
-        }
-
         let long_term = &self.long_term;
         let agent_memory = match long_term.agent_store(kind.as_str()) {
             Ok(store) => store,
@@ -161,15 +118,44 @@ impl<
             long_term.global.clone(),
             Arc::clone(&long_term.extractor),
         );
-        if let Err(error) = agent.register_context_adapter(Box::new(adapter)) {
-            tracing::error!(
-                name: "context_adapter_attach_failed",
-                agent = %id,
-                adapter = "long_term",
-                kind = %kind.as_str(),
-            );
-            return Err(FsAgentCreateError::LongTermContext(error));
-        }
+
+        // Factory is the only configured-agent assembly point. BaseAgent sees
+        // one generic, immutable adapter set; concrete mode, memory, and skill
+        // semantics do not leak into its runtime protocol. Pure Agent tools
+        // were already assembled directly into ToolSet above.
+        let context_adapters: Vec<Box<dyn ContextAdapter>> = vec![
+            Box::new(AgentModeContextAdapter::new(
+                environment.initial_mode,
+                effect_emitter,
+            )),
+            Box::new(conversation_history),
+            Box::new(SkillContextAdapter::new(config.skills)),
+            Box::new(profile_adapter),
+            Box::new(adapter),
+        ];
+        let base_config = BaseAgentConfig {
+            transcript: Box::new(store),
+            tools,
+            effect_inbox,
+            permission_policy: environment.permission_policy,
+            agent_instruction: Block::new(BlockKind::AgentInstruction, config.system_prompt),
+            inherited_context: environment.inherited_context,
+            context_adapters,
+            retry_policy: config.retry_policy,
+            block_retries: config.tool_block_retries,
+            resume: environment.resume,
+        };
+        let mut agent = match BaseAgent::<Http, Timer>::build(base_config) {
+            Ok(agent) => agent,
+            Err(error) => {
+                tracing::error!(
+                    name: "agent_build_failed",
+                    agent = %id,
+                    kind = %kind.as_str(),
+                );
+                return Err(FsAgentCreateError::Agent(error));
+            }
+        };
 
         if !goal.as_str().trim().is_empty() {
             if let Err(error) = agent.send_command(AgentCommand::AppendMessage(goal)) {

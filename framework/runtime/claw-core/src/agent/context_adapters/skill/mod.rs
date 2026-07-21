@@ -4,15 +4,16 @@
 //! the skill catalog into `BlockKind::SkillList` and exposes skill tools that
 //! read from the same buffered source.
 
-mod tools;
-
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_skill::SkillSet;
 use claw_tool::ToolGroup;
 
-use super::traits::ContextAdapter;
+use self::tools::skill_tools;
+use crate::agent::base_agent::ContextAdapter;
+
+mod tools;
 
 pub(crate) struct SkillContextAdapter {
     skills: Arc<Mutex<SkillSet>>,
@@ -34,7 +35,7 @@ impl ContextAdapter for SkillContextAdapter {
     }
 
     fn tools(&self) -> Option<ToolGroup> {
-        Some(tools::skill_tools(Arc::clone(&self.skills)))
+        Some(skill_tools(Arc::clone(&self.skills)))
     }
 }
 

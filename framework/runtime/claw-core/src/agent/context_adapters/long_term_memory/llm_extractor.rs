@@ -1,7 +1,7 @@
 //! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApiAsync`].
 //!
 //! It asks the model to read a conversation transcript and return a JSON array of
-//! durable facts. Like [`LlmCompactor`](crate::memory::LlmCompactor), it lives in
+//! durable facts. Like [`LlmCompactor`](crate::agent::context_adapters::LlmCompactor), it lives in
 //! `claw_core` (the agent wiring layer) rather than `claw-memory`, because the
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory adapter.
@@ -16,8 +16,8 @@ use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_memory::MemoryId;
 use tracing::Instrument as _;
 
+use super::super::async_llm::SharedAsyncLlm;
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::memory::async_llm::SharedAsyncLlm;
 
 use super::extraction::{
     ExtractError, ExtractFuture, ExtractedItem, ExtractionInput, Extractor, MemoryOp,
