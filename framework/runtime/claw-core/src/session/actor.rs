@@ -12,7 +12,7 @@ use futures_core::Stream;
 use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
-use crate::agent::{AgentResume, FsAgentFactory, InflightToolCall};
+use crate::agent::{AgentResume, FsAgentFactory};
 use crate::config::{ReasoningEffort, SharedApiManager};
 use crate::multiagent::{
     AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
@@ -606,12 +606,12 @@ where
         self.emit(SessionEvent::TurnEnded { turn: finished.id });
     }
 
-    fn record_tool_started(&mut self, call: InflightToolCall) {
+    fn record_tool_started(&mut self, call: ToolCall) {
         self.state.get_mut().add_inflight_toolcall(&call);
         self.turn.record_tool_started(call);
     }
 
-    fn settle_persisted_toolcalls(&self, calls: &[InflightToolCall]) {
+    fn settle_persisted_toolcalls(&self, calls: &[ToolCall]) {
         if calls.is_empty() {
             return;
         }

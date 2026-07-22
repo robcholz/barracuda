@@ -67,8 +67,8 @@ fn unsupported_tool_registry_schema_rejects_startup() {
 }
 
 #[test]
-fn corrupt_session_state_rejects_rebuild() {
-    let root = TempDir::new("claw-persistence-session-corrupt").unwrap();
+fn unsupported_session_schema_rejects_rebuild() {
+    let root = TempDir::new("claw-persistence-session-schema").unwrap();
     let root_path = root.path().to_str().unwrap();
     let session = {
         let system = build(root_path).unwrap();
@@ -76,11 +76,11 @@ fn corrupt_session_state_rejects_rebuild() {
     };
     write_state(
         &format!("{root_path}/sessions/{}.bin", session.to_wire()),
-        1,
-        b"{bad-json",
+        99,
+        b"{}",
     );
 
-    assert_startup_error(root_path, "decode durable state");
+    assert_startup_error(root_path, "unsupported session state schema");
 }
 
 fn build(root: &str) -> Result<DiskSystem, claw_agent::AgentError> {

@@ -8,11 +8,10 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
 use crate::agent::{
-    AgentEnvironment, AgentResume, AgentState, FsAgentCreateError, FsAgentFactory,
-    InflightToolCall, TranscriptTarget,
+    AgentEnvironment, AgentResume, AgentState, FsAgentCreateError, FsAgentFactory, TranscriptTarget,
 };
 use crate::config::{ApiUsage, ReasoningEffort};
-use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
+use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence, ToolCall};
 
 use super::{
     tools, AgentIdAllocator, AgentPlacement, AgentSlots, MultiagentBridge, MultiagentRuntime,
@@ -132,7 +131,7 @@ where
         Some(agent.recovery_state())
     }
 
-    pub(crate) fn active_root_background_spawns(&self) -> Vec<InflightToolCall> {
+    pub(crate) fn active_root_background_spawns(&self) -> Vec<ToolCall> {
         self.root_background_spawns.values().cloned().collect()
     }
 }

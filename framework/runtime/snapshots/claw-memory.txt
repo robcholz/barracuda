@@ -108,6 +108,7 @@ pub mod claw_memory::transcript_store
 pub enum claw_memory::transcript_store::AssistantFinish<'a>
 pub claw_memory::transcript_store::AssistantFinish::PlainText(&'a str)
 pub claw_memory::transcript_store::AssistantFinish::RawJson(&'a str)
+pub claw_memory::transcript_store::AssistantFinish::Value(serde_json::value::Value)
 pub enum claw_memory::transcript_store::TranscriptInitError
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable::path: alloc::string::String
@@ -145,6 +146,7 @@ pub fn claw_memory::transcript_store::TurnHandle::append_user(&mut self, &str) -
 pub fn claw_memory::transcript_store::TurnHandle::commit(self) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::discard(self)
 pub fn claw_memory::transcript_store::TurnHandle::finish_assistant(&mut self, claw_memory::transcript_store::AssistantFinish<'_>) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
+pub fn claw_memory::transcript_store::TurnHandle::finish_streamed_assistant(&mut self, alloc::string::String, alloc::vec::Vec<serde_json::value::Value>) -> core::result::Result<core::option::Option<alloc::string::String>, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::finish_user(&mut self) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::record_tool_result(&mut self, &str, &str, bool) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 impl core::ops::drop::Drop for claw_memory::transcript_store::TurnHandle
@@ -161,6 +163,7 @@ pub fn claw_memory::transcript_store::TranscriptStore<F>::version(&self) -> u64
 pub enum claw_memory::AssistantFinish<'a>
 pub claw_memory::AssistantFinish::PlainText(&'a str)
 pub claw_memory::AssistantFinish::RawJson(&'a str)
+pub claw_memory::AssistantFinish::Value(serde_json::value::Value)
 pub enum claw_memory::CompactError
 pub claw_memory::CompactError::Backend(claw_memory::compaction::CompactBackendError)
 pub claw_memory::CompactError::EmptySummary
@@ -293,6 +296,7 @@ pub fn claw_memory::transcript_store::TurnHandle::append_user(&mut self, &str) -
 pub fn claw_memory::transcript_store::TurnHandle::commit(self) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::discard(self)
 pub fn claw_memory::transcript_store::TurnHandle::finish_assistant(&mut self, claw_memory::transcript_store::AssistantFinish<'_>) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
+pub fn claw_memory::transcript_store::TurnHandle::finish_streamed_assistant(&mut self, alloc::string::String, alloc::vec::Vec<serde_json::value::Value>) -> core::result::Result<core::option::Option<alloc::string::String>, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::finish_user(&mut self) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TurnHandle::record_tool_result(&mut self, &str, &str, bool) -> core::result::Result<(), claw_memory::transcript_store::TurnError>
 impl core::ops::drop::Drop for claw_memory::transcript_store::TurnHandle

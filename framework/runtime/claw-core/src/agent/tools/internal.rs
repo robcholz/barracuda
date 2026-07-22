@@ -55,7 +55,7 @@ impl SyncToolHandler for EndConversationTool {
 
 #[cfg(test)]
 mod tests {
-    use claw_tool::{RawToolInvocation, SyncToolHandler, ToolInvocation};
+    use claw_tool::{SyncToolHandler, ToolInvocation};
 
     use super::{AgentEffect, EndConversationTool};
     use crate::agent::base_agent::agent_effect_channel;
@@ -63,11 +63,11 @@ mod tests {
     #[test]
     fn conversation_end_emits_a_generic_finish_effect() {
         let (effects, mut inbox) = agent_effect_channel();
-        let call = ToolInvocation::try_from(RawToolInvocation {
-            id: Some("call-test"),
-            name: "conversation_end",
-            arguments_json: r#"{"final_message":"Done."}"#,
-        })
+        let call = ToolInvocation::try_new(
+            Some("call-test"),
+            "conversation_end",
+            r#"{"final_message":"Done."}"#,
+        )
         .expect("valid invocation");
 
         EndConversationTool { effects }

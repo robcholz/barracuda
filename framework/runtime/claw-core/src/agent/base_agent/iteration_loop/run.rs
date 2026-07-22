@@ -6,47 +6,37 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
-use claw_tool::{RawToolInvocation, ToolExecution, ToolExecutor, ToolInvocation, ToolSetHandle};
+use claw_tool::{ToolExecution, ToolExecutor, ToolInvocation, ToolSetHandle};
 use claw_utils::stream::StreamPart;
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
-use super::types::{IterationLoopError, IterationLoopEvent, LlmStep};
+use super::types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
 use super::{
-    InflightToolCall, IterationEmitter, IterationLoop, IterationStream, PendingToolPermission,
-    ToolAuthorization, ToolCallId, ToolCallIdAllocator, ToolPermission, ToolPermissionPolicy,
-    ToolPermissionRequest,
+    IterationLoop, PendingToolPermission, PermissionActivation, ToolAuthorization, ToolCallId,
+    ToolCallIdAllocator, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
 };
 
-struct PreparedToolCall {
+struct ScheduledCall {
     id: ToolCallId,
-    provider_id: String,
-    name: String,
-    arguments_json: String,
+    call: ToolCall,
 }
 
-impl PreparedToolCall {
-    fn invocation(&self) -> Result<ToolInvocation<'_>, IterationLoopError> {
-        ToolInvocation::try_from(RawToolInvocation {
-            id: Some(&self.provider_id),
-            name: &self.name,
-            arguments_json: &self.arguments_json,
-        })
-        .map_err(|_| IterationLoopError::MalformedToolCall)
+impl ScheduledCall {
+    fn approval_call(&self) -> ToolCall {
+        self.call.clone()
     }
 }
 
-struct ToolCallIdentity {
-    id: ToolCallId,
-    provider_id: String,
-}
-
-struct PendingToolCall<'a> {
-    call: PreparedToolCall,
+struct PendingApproval<'a> {
+    call: ScheduledCall,
+    reason: Option<String>,
+    activate: Option<PermissionActivation<'a>>,
     permission: PendingToolPermission<'a>,
+    announced: bool,
 }
 
-type ToolRunOutput = Result<(ToolCallId, ToolExecution), IterationLoopError>;
+type ToolRunOutput = Result<(ToolCallId, String, ToolExecution), IterationLoopError>;
 type ToolRunFuture<'a> = Pin<Box<dyn Future<Output = ToolRunOutput> + 'a>>;
 
 struct ToolRuns<'a> {
@@ -55,8 +45,8 @@ struct ToolRuns<'a> {
 }
 
 struct ToolCallBatch {
-    order: Vec<ToolCallIdentity>,
-    results: BTreeMap<ToolCallId, ToolExecution>,
+    order: Vec<ToolCallId>,
+    results: BTreeMap<ToolCallId, (String, ToolExecution)>,
 }
 
 enum ToolBatchUpdate {
@@ -64,11 +54,14 @@ enum ToolBatchUpdate {
     Execution(ToolRunOutput),
 }
 
-#[derive(Debug)]
-enum ToolPhaseOutcome {
-    Tools(Vec<(String, ToolExecution)>),
-    Interrupted,
-    Cancelled,
+struct ToolPhase<'a> {
+    tools: &'a ToolSetHandle<'a>,
+    batch: Option<ToolCallBatch>,
+    runs: ToolRuns<'a>,
+    pending: VecDeque<PendingApproval<'a>>,
+    active_permission: Option<PendingApproval<'a>>,
+    ready_results: VecDeque<(String, ToolExecution)>,
+    finished: bool,
 }
 
 impl<'a, H, Timer, P> IterationLoop<'a, H, Timer, P>
@@ -77,293 +70,324 @@ where
     Timer: ClawTimer,
     P: ToolPermissionPolicy + 'a,
 {
-    /// Start one iteration and return its sole output surface.
+    /// Run one LLM/tool iteration as a directly polled stream.
     ///
-    /// Success is the stream reaching `None`; failures are emitted as one final
-    /// `Err` item. Nothing is aggregated into a terminal response value.
-    pub(crate) fn run(self, step: LlmStep<'a>) -> IterationStream<'a> {
-        let (events, receiver) = IterationStream::channel();
-        let driver_events = events.clone();
-        let driver = Box::pin(async move {
-            let span = tracing::info_span!("iteration_loop", run.iteration = %step.iteration_id);
-            if let Err(error) = run_one_iteration(self, step, &driver_events)
-                .instrument(span)
-                .await
-            {
-                driver_events.send_error(error).await;
+    /// A successful iteration ends at `None`; failures are yielded as `Err`.
+    /// Code after each `yield` cannot run until the owner polls again, making
+    /// `BeforeToolCalls` a natural execution boundary without a channel bridge.
+    pub(crate) fn run(
+        self,
+        step: LlmStep<'a>,
+    ) -> impl futures_core::Stream<Item = Result<IterationLoopEvent, IterationLoopError>> + 'a {
+        async_stream::try_stream! {
+            let loop_ = self;
+            if loop_.control.is_cancelled() {
+                tracing::warn!(name: "cancelled", checkpoint = "before_llm_http");
+                yield IterationLoopEvent::Cancelled;
+                return;
             }
-        });
-        IterationStream::new(driver, receiver)
-    }
-}
 
-async fn run_one_iteration<H, Timer, P>(
-    mut loop_: IterationLoop<'_, H, Timer, P>,
-    step: LlmStep<'_>,
-    events: &IterationEmitter,
-) -> Result<(), IterationLoopError>
-where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
-    P: ToolPermissionPolicy,
-{
-    let Some(tool_calls) = call_llm(&mut loop_, &step, events).await? else {
-        events.send(IterationLoopEvent::Cancelled).await;
-        return Ok(());
-    };
-    if tool_calls.is_empty() {
-        return Ok(());
-    }
+            let chat_request = ChatRequest {
+                system_prompt: step.system_prompt,
+                messages: step.messages,
+                reminders: step.reminders,
+                tools_json: Some(step.tools.schemas_json()),
+                retry: loop_.retry,
+            };
+            let cancel = Cancel::new(loop_.control.cancel_flag());
+            let max_attempts = 1_u64;
+            let chat_span = tracing::info_span!(
+                "api.chat",
+                purpose = "iteration",
+                max_attempts,
+                run.iteration = %step.iteration_id,
+            );
+            let stream_result = loop_
+                .llm
+                .chat_stream(&chat_request, cancel)
+                .instrument(chat_span.clone())
+                .await;
+            let mut stream = match stream_result {
+                Ok(stream) => stream,
+                Err(error) if loop_.control.is_cancelled() || error.is_aborted() => {
+                    tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
+                    yield IterationLoopEvent::Cancelled;
+                    return;
+                }
+                Err(error) => {
+                    tracing::error!(name: "chat_failed", kind = "chat");
+                    Err(IterationLoopError::Chat(error))?
+                }
+            };
 
-    events
-        .send(IterationLoopEvent::BeforeToolCalls(observable_tool_calls(
-            &tool_calls,
-        )))
-        .await;
-    match execute_tool_calls(
-        &tool_calls,
-        step.tools,
-        loop_.control,
-        loop_.permission,
-        events,
-    )
-    .await?
-    {
-        ToolPhaseOutcome::Tools(results) => {
-            for (tool_call_id, execution) in results {
-                events
-                    .send(IterationLoopEvent::ToolResult {
-                        tool_call_id,
-                        execution,
-                    })
+            let mut tool_calls = Vec::new();
+            loop {
+                let next = StreamExt::next(&mut stream)
+                    .instrument(chat_span.clone())
                     .await;
-            }
-        }
-        ToolPhaseOutcome::Interrupted => events.send(IterationLoopEvent::Interrupted).await,
-        ToolPhaseOutcome::Cancelled => events.send(IterationLoopEvent::Cancelled).await,
-    }
-    Ok(())
-}
-
-async fn call_llm<H, Timer, P>(
-    loop_: &mut IterationLoop<'_, H, Timer, P>,
-    step: &LlmStep<'_>,
-    events: &IterationEmitter,
-) -> Result<Option<Vec<ToolCall>>, IterationLoopError>
-where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
-{
-    if loop_.control.is_cancelled() {
-        tracing::warn!(name: "cancelled", checkpoint = "before_llm_http");
-        return Ok(None);
-    }
-
-    let chat_request = ChatRequest {
-        system_prompt: step.system_prompt,
-        messages: step.messages,
-        reminders: step.reminders,
-        tools_json: Some(step.tools.schemas_json()),
-        retry: loop_.retry,
-    };
-    let cancel = Cancel::new(loop_.control.cancel_flag());
-    let max_attempts = 1_u64;
-    let chat_span = tracing::info_span!("api.chat", purpose = "iteration", max_attempts);
-
-    let stream_result = loop_
-        .llm
-        .chat_stream(&chat_request, cancel)
-        .instrument(chat_span.clone())
-        .await;
-    let mut stream = match stream_result {
-        Ok(stream) => stream,
-        Err(error) => return interpret_chat_error(loop_.control.is_cancelled(), error),
-    };
-    let mut tool_calls = Vec::new();
-
-    loop {
-        let next = StreamExt::next(&mut stream)
-            .instrument(chat_span.clone())
-            .await;
-        match next {
-            Some(Ok(event)) => {
-                if let ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) = &event {
-                    tool_calls.push(call.clone());
+                match next {
+                    Some(Ok(event)) => {
+                        // The owner needs the event now and the tool phase needs
+                        // the complete call later. This is the one unavoidable
+                        // ToolCall copy with the current by-value event API.
+                        if let ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) = &event {
+                            tool_calls.push(call.clone());
+                        }
+                        yield IterationLoopEvent::Iteration(IterationEvent::Llm(event));
+                    }
+                    Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
+                        tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
+                        yield IterationLoopEvent::Cancelled;
+                        return;
+                    }
+                    Some(Err(error)) => {
+                        tracing::error!(name: "chat_failed", kind = "chat");
+                        Err(IterationLoopError::Chat(error))?;
+                    }
+                    None => break,
                 }
-                events.send(IterationLoopEvent::Llm(event)).await;
             }
-            Some(Err(error)) => {
-                return interpret_chat_error(loop_.control.is_cancelled(), error);
+
+            if loop_.control.is_cancelled() {
+                tracing::warn!(name: "cancelled", checkpoint = "after_llm");
+                yield IterationLoopEvent::Cancelled;
+                return;
             }
-            None => break,
-        }
-    }
+            if tool_calls.is_empty() {
+                return;
+            }
 
-    if loop_.control.is_cancelled() {
-        tracing::warn!(name: "cancelled", checkpoint = "after_llm");
-        Ok(None)
-    } else {
-        Ok(Some(tool_calls))
-    }
-}
-
-async fn execute_tool_calls<P>(
-    tool_calls: &[ToolCall],
-    tools: &ToolSetHandle<'_>,
-    control: &super::super::stream::RunControl,
-    permission: &P,
-    events: &IterationEmitter,
-) -> Result<ToolPhaseOutcome, IterationLoopError>
-where
-    P: ToolPermissionPolicy,
-{
-    let mut batch = ToolCallBatch::new(tool_calls.len());
-    let mut provider_ids = HashSet::with_capacity(tool_calls.len());
-    let mut tool_call_ids = ToolCallIdAllocator::new();
-    let mut calls = Vec::with_capacity(tool_calls.len());
-    for tool_call in tool_calls {
-        if tool_call.id.is_empty() {
-            return Err(IterationLoopError::MissingProviderToolCallId);
-        }
-        if !provider_ids.insert(tool_call.id.as_str()) {
-            return Err(IterationLoopError::DuplicateProviderToolCallId(
-                tool_call.id.clone(),
+            yield IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(
+                tool_calls.clone(),
             ));
+
+            let mut tools = ToolPhase::new(tool_calls, step.tools, loop_.permission)?;
+            while let Some(event) = tools.next(loop_.control).await? {
+                let terminal = matches!(
+                    event,
+                    IterationLoopEvent::Interrupted | IterationLoopEvent::Cancelled
+                );
+                yield event;
+                if terminal {
+                    return;
+                }
+            }
         }
-        let id = tool_call_ids.next();
-        batch.order.push(ToolCallIdentity {
-            id,
-            provider_id: tool_call.id.clone(),
-        });
-        calls.push((id, tool_call));
     }
+}
 
-    let executor = ToolExecutor::new(tools);
-    let mut runs = ToolRuns::new();
-    let mut pending = VecDeque::new();
-    for (id, tool_call) in calls {
-        if control.is_cancelled() {
-            return Ok(ToolPhaseOutcome::Cancelled);
+impl<'a> ToolPhase<'a> {
+    fn new<P>(
+        tool_calls: Vec<ToolCall>,
+        tools: &'a ToolSetHandle<'a>,
+        permission: &'a P,
+    ) -> Result<Self, IterationLoopError>
+    where
+        P: ToolPermissionPolicy,
+    {
+        let mut provider_ids = HashSet::with_capacity(tool_calls.len());
+        for tool_call in &tool_calls {
+            if tool_call.id.is_empty() {
+                return Err(IterationLoopError::MissingProviderToolCallId);
+            }
+            if !provider_ids.insert(tool_call.id.as_str()) {
+                return Err(IterationLoopError::DuplicateProviderToolCallId(
+                    tool_call.id.clone(),
+                ));
+            }
         }
-        let invocation = match ToolInvocation::try_from(RawToolInvocation {
-            id: Some(&tool_call.id),
-            name: &tool_call.name,
-            arguments_json: &tool_call.arguments_json,
-        }) {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                batch.collect(
-                    id,
-                    ToolExecution {
-                        content: error.to_string(),
-                        ok: false,
-                    },
-                );
-                continue;
-            }
-        };
-        let action = match tools.classify(&invocation) {
-            Ok(action) => action,
-            Err(error) => {
-                batch.collect(
-                    id,
-                    ToolExecution {
-                        content: error.to_string(),
-                        ok: false,
-                    },
-                );
-                continue;
-            }
-        };
-        let prepared = PreparedToolCall {
-            id,
-            provider_id: tool_call.id.clone(),
-            name: tool_call.name.clone(),
-            arguments_json: invocation.arguments_json().to_owned(),
-        };
 
-        match permission.authorize(
-            ToolPermissionRequest {
-                tool_call_id: id,
-                tool_call: &tool_call,
-                action: &action,
-            },
-            events,
-        ) {
-            ToolAuthorization::Allow => runs.push(execute_prepared_tool(&executor, prepared)),
-            ToolAuthorization::Deny(reason) => batch.collect(
+        let mut batch = ToolCallBatch::new(tool_calls.len());
+        let mut tool_call_ids = ToolCallIdAllocator::new();
+        let mut runs = ToolRuns::new();
+        let mut pending = VecDeque::new();
+
+        for tool_call in tool_calls {
+            let id = tool_call_ids.next();
+            batch.order.push(id);
+            let invocation = match ToolInvocation::try_new(
+                Some(&tool_call.id),
+                &tool_call.name,
+                &tool_call.arguments_json,
+            ) {
+                Ok(invocation) => invocation,
+                Err(error) => {
+                    batch.collect(
+                        id,
+                        tool_call.id,
+                        ToolExecution {
+                            content: error.to_string(),
+                            ok: false,
+                        },
+                    );
+                    continue;
+                }
+            };
+            let action = match tools.classify(&invocation) {
+                Ok(action) => action,
+                Err(error) => {
+                    batch.collect(
+                        id,
+                        tool_call.id,
+                        ToolExecution {
+                            content: error.to_string(),
+                            ok: false,
+                        },
+                    );
+                    continue;
+                }
+            };
+            let scheduled = ScheduledCall {
                 id,
-                ToolExecution {
-                    content: reason,
-                    ok: false,
-                },
-            ),
-            ToolAuthorization::Pending(permission) => {
-                pending.push_back(PendingToolCall {
-                    call: prepared,
+                call: tool_call,
+            };
+
+            match permission.authorize(ToolPermissionRequest {
+                tool_call_id: id,
+                action: &action,
+            }) {
+                ToolAuthorization::Allow => {
+                    runs.push(execute_scheduled_call(tools, scheduled));
+                }
+                ToolAuthorization::Deny(reason) => batch.collect(
+                    id,
+                    scheduled.call.id,
+                    ToolExecution {
+                        content: reason,
+                        ok: false,
+                    },
+                ),
+                ToolAuthorization::Pending {
+                    reason,
+                    activate,
                     permission,
-                });
+                } => pending.push_back(PendingApproval {
+                    call: scheduled,
+                    reason: Some(reason),
+                    activate: Some(activate),
+                    permission,
+                    announced: false,
+                }),
             }
         }
+
+        Ok(Self {
+            tools,
+            batch: Some(batch),
+            runs,
+            pending,
+            active_permission: None,
+            ready_results: VecDeque::new(),
+            finished: false,
+        })
     }
 
-    let mut active_permission = pending.pop_front();
-    while active_permission.is_some() || !runs.is_empty() {
-        if control.is_cancelled() {
-            return Ok(ToolPhaseOutcome::Cancelled);
-        }
-
-        let update = match active_permission.as_mut() {
-            Some(waiting) if !runs.is_empty() => {
-                future::or(
-                    async { ToolBatchUpdate::Permission(waiting.permission.as_mut().await) },
-                    async { ToolBatchUpdate::Execution(runs.next().await) },
-                )
-                .await
+    async fn next(
+        &mut self,
+        control: &super::super::stream::RunControl,
+    ) -> Result<Option<IterationLoopEvent>, IterationLoopError> {
+        loop {
+            if let Some((tool_call_id, execution)) = self.ready_results.pop_front() {
+                return Ok(Some(IterationLoopEvent::ToolResult {
+                    tool_call_id,
+                    execution,
+                }));
             }
-            Some(waiting) => ToolBatchUpdate::Permission(waiting.permission.as_mut().await),
-            None => ToolBatchUpdate::Execution(runs.next().await),
-        };
-
-        match update {
-            ToolBatchUpdate::Execution(result) => {
-                let (id, result) = result?;
-                batch.collect(id, result);
+            if self.finished {
+                return Ok(None);
             }
-            ToolBatchUpdate::Permission(decision) => {
-                let Some(waiting) = active_permission.take() else {
+            if control.is_cancelled() {
+                self.finished = true;
+                return Ok(Some(IterationLoopEvent::Cancelled));
+            }
+
+            if self.active_permission.is_none() {
+                self.active_permission = self.pending.pop_front();
+            }
+            if let Some(waiting) = self.active_permission.as_mut() {
+                if !waiting.announced {
+                    if let Some(activate) = waiting.activate.take() {
+                        activate();
+                    }
+                    waiting.announced = true;
+                    return Ok(Some(IterationLoopEvent::ApprovalRequired {
+                        tool_call_id: waiting.call.id,
+                        tool_call: waiting.call.approval_call(),
+                        reason: waiting.reason.take().unwrap_or_default(),
+                    }));
+                }
+            }
+
+            if self.active_permission.is_none() && self.runs.is_empty() {
+                let batch = self
+                    .batch
+                    .take()
+                    .ok_or(IterationLoopError::IncompleteToolBatch)?;
+                if !batch.is_complete() {
                     return Err(IterationLoopError::IncompleteToolBatch);
-                };
-                match decision {
-                    ToolPermission::Allow => {
-                        runs.push(execute_prepared_tool(&executor, waiting.call));
-                    }
-                    ToolPermission::Deny(reason) => {
-                        batch.collect(
-                            waiting.call.id,
-                            ToolExecution {
-                                content: reason,
-                                ok: false,
-                            },
-                        );
-                    }
-                    ToolPermission::Interrupted => return Ok(ToolPhaseOutcome::Interrupted),
-                    ToolPermission::Cancelled => {
-                        return Ok(ToolPhaseOutcome::Cancelled);
+                }
+                self.ready_results = batch.into_results();
+                self.finished = true;
+                continue;
+            }
+
+            let update = match self.active_permission.as_mut() {
+                Some(waiting) if !self.runs.is_empty() => {
+                    future::or(
+                        async { ToolBatchUpdate::Permission(waiting.permission.as_mut().await) },
+                        async { ToolBatchUpdate::Execution(self.runs.next().await) },
+                    )
+                    .await
+                }
+                Some(waiting) => ToolBatchUpdate::Permission(waiting.permission.as_mut().await),
+                None => ToolBatchUpdate::Execution(self.runs.next().await),
+            };
+
+            match update {
+                ToolBatchUpdate::Execution(result) => {
+                    let (id, provider_id, result) = result?;
+                    self.batch
+                        .as_mut()
+                        .ok_or(IterationLoopError::IncompleteToolBatch)?
+                        .collect(id, provider_id, result);
+                }
+                ToolBatchUpdate::Permission(decision) => {
+                    let waiting = self
+                        .active_permission
+                        .take()
+                        .ok_or(IterationLoopError::IncompleteToolBatch)?;
+                    match decision {
+                        ToolPermission::Allow => {
+                            self.runs
+                                .push(execute_scheduled_call(self.tools, waiting.call));
+                        }
+                        ToolPermission::Deny(reason) => {
+                            let id = waiting.call.id;
+                            self.batch
+                                .as_mut()
+                                .ok_or(IterationLoopError::IncompleteToolBatch)?
+                                .collect(
+                                    id,
+                                    waiting.call.call.id,
+                                    ToolExecution {
+                                        content: reason,
+                                        ok: false,
+                                    },
+                                );
+                        }
+                        ToolPermission::Interrupted => {
+                            self.finished = true;
+                            return Ok(Some(IterationLoopEvent::Interrupted));
+                        }
+                        ToolPermission::Cancelled => {
+                            self.finished = true;
+                            return Ok(Some(IterationLoopEvent::Cancelled));
+                        }
                     }
                 }
-                active_permission = pending.pop_front();
             }
         }
     }
-
-    if control.is_cancelled() {
-        return Ok(ToolPhaseOutcome::Cancelled);
-    }
-    if !batch.is_complete() {
-        return Err(IterationLoopError::IncompleteToolBatch);
-    }
-    Ok(ToolPhaseOutcome::Tools(batch.into_results()))
 }
 
 impl ToolCallBatch {
@@ -374,26 +398,22 @@ impl ToolCallBatch {
         }
     }
 
-    fn collect(&mut self, id: ToolCallId, execution: ToolExecution) {
-        let previous = self.results.insert(id, execution);
+    fn collect(&mut self, id: ToolCallId, provider_id: String, execution: ToolExecution) {
+        let previous = self.results.insert(id, (provider_id, execution));
         debug_assert!(previous.is_none());
     }
 
     fn is_complete(&self) -> bool {
         self.results.len() == self.order.len()
-            && self
-                .order
-                .iter()
-                .all(|call| self.results.contains_key(&call.id))
+            && self.order.iter().all(|id| self.results.contains_key(id))
     }
 
-    fn into_results(mut self) -> Vec<(String, ToolExecution)> {
-        let mut results = Vec::with_capacity(self.order.len());
-        for call in self.order {
-            let Some(execution) = self.results.remove(&call.id) else {
-                continue;
-            };
-            results.push((call.provider_id, execution));
+    fn into_results(mut self) -> VecDeque<(String, ToolExecution)> {
+        let mut results = VecDeque::with_capacity(self.order.len());
+        for id in self.order {
+            if let Some(result) = self.results.remove(&id) {
+                results.push_back(result);
+            }
         }
         results
     }
@@ -444,14 +464,32 @@ impl<'a> ToolRuns<'a> {
     }
 }
 
-async fn execute_prepared_tool(
-    executor: &ToolExecutor<'_>,
-    call: PreparedToolCall,
-) -> ToolRunOutput {
+async fn execute_scheduled_call(tools: &ToolSetHandle<'_>, call: ScheduledCall) -> ToolRunOutput {
     let id = call.id;
-    let span = tracing::info_span!("toolcall", tool = %call.name);
-    let invocation = call.invocation()?;
-    let execution = executor.execute(&invocation).instrument(span.clone()).await;
+    let span = tracing::info_span!("toolcall", tool = %call.call.name);
+    let execution = {
+        let invocation = match ToolInvocation::try_new(
+            Some(&call.call.id),
+            &call.call.name,
+            &call.call.arguments_json,
+        ) {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                return Ok((
+                    id,
+                    call.call.id,
+                    ToolExecution {
+                        content: error.to_string(),
+                        ok: false,
+                    },
+                ));
+            }
+        };
+        ToolExecutor::new(tools)
+            .execute(&invocation)
+            .instrument(span.clone())
+            .await
+    };
     span.in_scope(|| {
         if execution.ok {
             tracing::info!(name: "result", ok = true);
@@ -459,40 +497,7 @@ async fn execute_prepared_tool(
             tracing::warn!(name: "result", ok = false);
         }
     });
-    Ok((id, execution))
-}
-
-fn observable_tool_calls(tool_calls: &[ToolCall]) -> Vec<InflightToolCall> {
-    tool_calls
-        .iter()
-        .filter_map(|call| {
-            let invocation = ToolInvocation::try_from(RawToolInvocation {
-                id: Some(&call.id),
-                name: &call.name,
-                arguments_json: &call.arguments_json,
-            })
-            .ok()?;
-            Some(InflightToolCall::new(
-                invocation.name(),
-                invocation.arguments_value().unwrap_or_else(|_| {
-                    serde_json::Value::String(invocation.arguments_json().to_owned())
-                }),
-            ))
-        })
-        .collect()
-}
-
-fn interpret_chat_error(
-    cancelled: bool,
-    error: claw_api::ChatError,
-) -> Result<Option<Vec<ToolCall>>, IterationLoopError> {
-    if cancelled || error.is_aborted() {
-        tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
-        Ok(None)
-    } else {
-        tracing::error!(name: "chat_failed", kind = "chat");
-        Err(IterationLoopError::Chat(error))
-    }
+    Ok((id, call.call.id, execution))
 }
 
 #[cfg(test)]
@@ -501,9 +506,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use claw_permission::{Action, AllowAll, RiskClass};
+    use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolOutput, ToolRegistry, ToolResult, ToolSpec,
+        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
+        ToolSpec,
     };
     use futures_lite::future::block_on;
 
@@ -521,11 +527,11 @@ mod tests {
         }
 
         fn schema(&self) -> &str {
-            "{}"
+            r#"{"type":"function","function":{"name":"test","parameters":{"type":"object"}}}"#
         }
 
-        fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
-            Action::new(self.name, RiskClass::Safe)
+        fn classify(&self, _call: &ToolInvocation<'_>) -> claw_permission::Action {
+            claw_permission::Action::new(self.name, RiskClass::High)
         }
     }
 
@@ -546,35 +552,29 @@ mod tests {
     }
 
     impl ToolPermissionPolicy for SelectivePermission {
-        fn authorize<'a>(
-            &'a self,
-            request: ToolPermissionRequest<'_>,
-            _events: &IterationEmitter,
-        ) -> ToolAuthorization<'a> {
-            assert_eq!(
-                self.executions.load(Ordering::SeqCst),
-                0,
-                "every tool is classified before execution starts"
-            );
+        fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
+            assert_eq!(self.executions.load(Ordering::SeqCst), 0);
             self.checks.set(self.checks.get() + 1);
             self.ids.borrow_mut().push(request.tool_call_id);
             if request.action.verb() == "denied" {
                 let executions = Arc::clone(&self.executions);
-                ToolAuthorization::Pending(Box::pin(async move {
-                    while executions.load(Ordering::SeqCst) == 0 {
-                        futures_lite::future::yield_now().await;
-                    }
-                    ToolPermission::Deny("policy denied".to_owned())
-                }))
+                ToolAuthorization::Pending {
+                    reason: "policy check".to_owned(),
+                    activate: Box::new(|| {}),
+                    permission: Box::pin(async move {
+                        while executions.load(Ordering::SeqCst) == 0 {
+                            futures_lite::future::yield_now().await;
+                        }
+                        ToolPermission::Deny("policy denied".to_owned())
+                    }),
+                }
             } else {
                 ToolAuthorization::Allow
             }
         }
     }
 
-    #[test]
-    fn allowed_tools_run_while_permission_is_pending_and_results_keep_call_order() {
-        let executions = Arc::new(AtomicUsize::new(0));
+    fn test_tools(executions: &Arc<AtomicUsize>) -> (Arc<ToolRegistry>, claw_tool::ToolSet) {
         let registry = Arc::new(ToolRegistry::new());
         let mut tool_set = registry.tool_set();
         tool_set
@@ -584,17 +584,24 @@ mod tests {
                 [
                     Tool::from_sync(CountingTool {
                         name: "allowed",
-                        calls: Arc::clone(&executions),
+                        calls: Arc::clone(executions),
                     }),
                     Tool::from_sync(CountingTool {
                         name: "denied",
-                        calls: Arc::clone(&executions),
+                        calls: Arc::clone(executions),
                     }),
                 ],
             ))
             .expect("test tools are valid");
+        (registry, tool_set)
+    }
+
+    #[test]
+    fn allowed_tools_run_while_permission_is_pending_and_results_keep_call_order() {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let (_registry, mut tool_set) = test_tools(&executions);
         let tools = tool_set.begin().expect("test tool set starts");
-        let tool_calls = [
+        let tool_calls = vec![
             ToolCall {
                 id: "call-deny".to_owned(),
                 name: "denied".to_owned(),
@@ -607,31 +614,42 @@ mod tests {
             },
         ];
         let control = AgentStreamHandle::control();
-        let (events, _receiver) = IterationStream::channel();
         let permission = SelectivePermission {
             executions: Arc::clone(&executions),
             checks: Cell::new(0),
             ids: RefCell::new(Vec::new()),
         };
+        let mut phase = ToolPhase::new(tool_calls, &tools, &permission).expect("phase prepares");
 
-        let result = block_on(execute_tool_calls(
-            &tool_calls,
-            &tools,
-            &control,
-            &permission,
-            &events,
-        ))
-        .expect("tool calls complete");
-        let ToolPhaseOutcome::Tools(results) = result else {
-            panic!("iteration should produce tool messages");
-        };
+        let events = block_on(async {
+            let mut events = Vec::new();
+            while let Some(event) = phase.next(&control).await.expect("tool phase advances") {
+                events.push(event);
+            }
+            events
+        });
 
+        assert!(matches!(
+            events.first(),
+            Some(IterationLoopEvent::ApprovalRequired { tool_call_id, .. })
+                if *tool_call_id == ToolCallId::new(0)
+        ));
         assert_eq!(permission.checks.get(), 2);
         assert_eq!(
-            permission.ids.into_inner(),
+            permission.ids.borrow().as_slice(),
             [ToolCallId::new(0), ToolCallId::new(1)]
         );
         assert_eq!(executions.load(Ordering::SeqCst), 1);
+        let results = events
+            .into_iter()
+            .filter_map(|event| match event {
+                IterationLoopEvent::ToolResult {
+                    tool_call_id,
+                    execution,
+                } => Some((tool_call_id, execution)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
             results,
             vec![
@@ -656,20 +674,9 @@ mod tests {
     #[test]
     fn yolo_policy_rejects_duplicate_provider_ids_before_execution() {
         let executions = Arc::new(AtomicUsize::new(0));
-        let registry = Arc::new(ToolRegistry::new());
-        let mut tool_set = registry.tool_set();
-        tool_set
-            .add_group(ToolGroup::new(
-                "test",
-                true,
-                [Tool::from_sync(CountingTool {
-                    name: "allowed",
-                    calls: Arc::clone(&executions),
-                })],
-            ))
-            .expect("test tool is valid");
+        let (_registry, mut tool_set) = test_tools(&executions);
         let tools = tool_set.begin().expect("test tool set starts");
-        let tool_calls = [
+        let tool_calls = vec![
             ToolCall {
                 id: "duplicate".to_owned(),
                 name: "allowed".to_owned(),
@@ -681,19 +688,10 @@ mod tests {
                 arguments_json: "{}".to_owned(),
             },
         ];
-        let control = AgentStreamHandle::control();
-        let permission = AllowAll;
-        let (events, _receiver) = IterationStream::channel();
 
-        let error = block_on(execute_tool_calls(
-            &tool_calls,
-            &tools,
-            &control,
-            &permission,
-            &events,
-        ))
-        .expect_err("duplicate ids fail the iteration");
-
+        let error = ToolPhase::new(tool_calls, &tools, &AllowAll)
+            .err()
+            .expect("duplicate ids fail the iteration");
         assert_eq!(
             error,
             IterationLoopError::DuplicateProviderToolCallId("duplicate".to_owned())

@@ -1,7 +1,6 @@
-use crate::agent::InflightToolCall;
 use crate::protocol::{
-    InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TurnId, TurnIdAllocator,
-    TurnOrigin,
+    InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, ToolCall, TurnId,
+    TurnIdAllocator, TurnOrigin,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,12 +22,12 @@ struct ActiveTurn {
     origin: TurnOrigin,
     pending_input: Option<PendingTurnInput>,
     input_request: Option<PendingInputRequest>,
-    toolcalls: Vec<InflightToolCall>,
+    toolcalls: Vec<ToolCall>,
 }
 
 pub(super) struct FinishedTurn {
     pub(super) id: TurnId,
-    pub(super) toolcalls: Vec<InflightToolCall>,
+    pub(super) toolcalls: Vec<ToolCall>,
 }
 
 pub(crate) struct TurnState {
@@ -151,7 +150,7 @@ impl TurnState {
         self.active_turn.as_mut()?.pending_input.take()
     }
 
-    pub(super) fn record_tool_started(&mut self, call: InflightToolCall) {
+    pub(super) fn record_tool_started(&mut self, call: ToolCall) {
         if let Some(turn) = self.active_turn.as_mut() {
             turn.toolcalls.push(call);
         }

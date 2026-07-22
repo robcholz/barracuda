@@ -17,9 +17,8 @@ use crate::protocol::Message;
 use super::context::ContextAdapter;
 use super::effect::{AgentEffect, AgentEffectInbox};
 use super::iteration_loop::{
-    IterationEmitter, IterationEvent, IterationIdAllocator, IterationLoop, IterationLoopError,
-    IterationLoopEvent, LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy,
-    ToolPermissionRequest,
+    IterationEvent, IterationIdAllocator, IterationLoop, IterationLoopError, IterationLoopEvent,
+    LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
 };
 use super::persistence::{AgentState as RecoveryState, AgentStateBuilder};
 use super::stream::{
@@ -288,45 +287,25 @@ enum ContentPhase {
 #[derive(Default)]
 struct AssistantDraft {
     reasoning: String,
-    message: String,
+    response: Option<String>,
     tool_calls: Vec<ToolCall>,
 }
 
 impl AssistantDraft {
-    fn raw_message_json(&self) -> Result<String, AgentError> {
-        let mut message = serde_json::Map::new();
-        message.insert("role".to_owned(), serde_json::json!("assistant"));
-        if !self.message.is_empty() {
-            message.insert("content".to_owned(), serde_json::json!(self.message));
-        }
-        if !self.reasoning.is_empty() {
-            message.insert(
-                "reasoning_content".to_owned(),
-                serde_json::json!(self.reasoning),
-            );
-        }
-        if !self.tool_calls.is_empty() {
-            message.insert(
-                "tool_calls".to_owned(),
-                serde_json::Value::Array(
-                    self.tool_calls
-                        .iter()
-                        .map(|call| {
-                            serde_json::json!({
-                                "id": call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": call.name,
-                                    "arguments": call.arguments_json,
-                                },
-                            })
-                        })
-                        .collect(),
-                ),
-            );
-        }
-        serde_json::to_string(&serde_json::Value::Object(message))
-            .map_err(|_| AgentError::MalformedAssistantMessage)
+    fn take_tool_calls_json(&mut self) -> Vec<serde_json::Value> {
+        std::mem::take(&mut self.tool_calls)
+            .into_iter()
+            .map(|call| {
+                serde_json::json!({
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments_json,
+                    },
+                })
+            })
+            .collect()
     }
 }
 
@@ -367,7 +346,7 @@ impl<'a> IterationConsumer<'a> {
             ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)) => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
                 self.draft.reasoning.push_str(&fragment);
-                self.reasoning_progress(&fragment)
+                self.reasoning_progress(fragment)
             }
             ChatStreamEvent::Reasoning(StreamPart::End) => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
@@ -379,7 +358,6 @@ impl<'a> IterationConsumer<'a> {
                 // Mutate the transcript first. If that fails, the fragment must
                 // not appear on the owner-facing stream as if it were durable.
                 self.turn.append_assistant(&fragment)?;
-                self.draft.message.push_str(&fragment);
                 Some(ChatStreamEvent::Output(StreamPart::Delta(fragment)))
             }
             ChatStreamEvent::Output(StreamPart::End) => {
@@ -404,7 +382,7 @@ impl<'a> IterationConsumer<'a> {
         Ok(progress)
     }
 
-    fn reasoning_progress(&mut self, fragment: &str) -> Option<ChatStreamEvent> {
+    fn reasoning_progress(&mut self, mut fragment: String) -> Option<ChatStreamEvent> {
         debug_assert_eq!(self.phase, ContentPhase::Reasoning);
         if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
             return None;
@@ -418,9 +396,8 @@ impl<'a> IterationConsumer<'a> {
             return None;
         }
         self.reasoning_bytes += end;
-        Some(ChatStreamEvent::Reasoning(StreamPart::Delta(
-            fragment[..end].to_owned(),
-        )))
+        fragment.truncate(end);
+        Some(ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)))
     }
 
     fn finish_content(&mut self) -> Vec<ChatStreamEvent> {
@@ -444,12 +421,13 @@ impl<'a> IterationConsumer<'a> {
         self.finish_assistant()?;
         if self.saw_tool_calls {
             Ok(IterationCompletion::Tools)
-        } else if !self.draft.message.is_empty() {
-            Ok(IterationCompletion::Response(std::mem::take(
-                &mut self.draft.message,
-            )))
         } else {
-            Err(AgentError::MalformedAssistantMessage)
+            self.draft
+                .response
+                .take()
+                .filter(|message| !message.is_empty())
+                .map(IterationCompletion::Response)
+                .ok_or(AgentError::MalformedAssistantMessage)
         }
     }
 
@@ -457,8 +435,11 @@ impl<'a> IterationConsumer<'a> {
         if self.assistant_finished {
             return Ok(());
         }
-        let raw = self.draft.raw_message_json()?;
-        self.turn.finish_assistant(AssistantFinish::RawJson(&raw))?;
+        let tool_calls = self.draft.take_tool_calls_json();
+        self.saw_tool_calls = !tool_calls.is_empty();
+        self.draft.response = self
+            .turn
+            .finish_streamed_assistant(std::mem::take(&mut self.draft.reasoning), tool_calls)?;
         self.assistant_finished = true;
         Ok(())
     }
@@ -509,11 +490,7 @@ struct BaseAgentPermissionPolicy<'a> {
 }
 
 impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
-    fn authorize<'a>(
-        &'a self,
-        request: ToolPermissionRequest<'_>,
-        events: &IterationEmitter,
-    ) -> ToolAuthorization<'a> {
+    fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
         match self
             .policy
             .evaluate(&PermissionRequest::new(request.action))
@@ -522,28 +499,24 @@ impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
             PermissionDecision::Deny { reason } => ToolAuthorization::Deny(reason),
             PermissionDecision::Ask { reason } => {
                 let tool_call_id = request.tool_call_id;
-                let tool_call = request.tool_call.clone();
-                let events = events.clone();
-                ToolAuthorization::Pending(Box::pin(async move {
-                    self.control.begin_approval(tool_call_id);
-                    events
-                        .send(IterationLoopEvent::ApprovalRequired {
-                            tool_call_id,
-                            tool_call,
-                            reason,
-                        })
-                        .await;
-                    match self.control.approval().await {
-                        ApprovalOutcome::Decision(decision) => match decision {
-                            super::stream::ApprovalDecision::Approved => ToolPermission::Allow,
-                            super::stream::ApprovalDecision::Rejected(reason) => {
-                                ToolPermission::Deny(reason)
-                            }
-                        },
-                        ApprovalOutcome::Interrupted => ToolPermission::Interrupted,
-                        ApprovalOutcome::Cancelled => ToolPermission::Cancelled,
-                    }
-                }))
+                let activate_control = self.control;
+                let decision_control = self.control;
+                ToolAuthorization::Pending {
+                    reason,
+                    activate: Box::new(move || activate_control.begin_approval(tool_call_id)),
+                    permission: Box::pin(async move {
+                        match decision_control.approval().await {
+                            ApprovalOutcome::Decision(decision) => match decision {
+                                super::stream::ApprovalDecision::Approved => ToolPermission::Allow,
+                                super::stream::ApprovalDecision::Rejected(reason) => {
+                                    ToolPermission::Deny(reason)
+                                }
+                            },
+                            ApprovalOutcome::Interrupted => ToolPermission::Interrupted,
+                            ApprovalOutcome::Cancelled => ToolPermission::Cancelled,
+                        }
+                    }),
+                }
             }
         }
     }
@@ -636,13 +609,13 @@ where
                     policy: self.agent.permission_policy.as_ref(),
                     control: &control,
                 };
-                let mut iteration = IterationLoop {
+                let mut iteration = Box::pin(IterationLoop {
                     llm: &mut self.agent.llm,
                     control: &control,
                     permission: &permission,
                     retry: self.agent.retry_policy,
                 }
-                .run(step);
+                .run(step));
                 let turn = self
                     .agent
                     .active_turn
@@ -664,7 +637,7 @@ where
                         }
                     };
                     match event {
-                        IterationLoopEvent::Llm(event) => match consumer.consume_chat_event(event) {
+                        IterationLoopEvent::Iteration(IterationEvent::Llm(event)) => match consumer.consume_chat_event(event) {
                             Ok(Some(event)) => yield Ok(AgentEvent::Iteration(StreamPart::Delta(
                                 IterationEvent::Llm(event),
                             ))),
@@ -674,7 +647,7 @@ where
                                 break;
                             }
                         },
-                        IterationLoopEvent::BeforeToolCalls(calls) => {
+                        IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
                             for event in consumer.finish_content() {
                                 yield Ok(AgentEvent::Iteration(StreamPart::Delta(
                                     IterationEvent::Llm(event),
@@ -684,10 +657,12 @@ where
                                 result = Some(Err(error));
                                 break;
                             }
-                            consumer.saw_tool_calls = true;
                             yield Ok(AgentEvent::Iteration(StreamPart::Delta(
                                 IterationEvent::BeforeToolCalls(calls),
                             )));
+                        }
+                        IterationLoopEvent::Iteration(event) => {
+                            yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
                         }
                         IterationLoopEvent::ApprovalRequired {
                             tool_call_id,
@@ -830,21 +805,37 @@ mod tests {
 
     #[test]
     fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
-        let draft = AssistantDraft {
-            reasoning: "think".to_owned(),
-            message: "answer".to_owned(),
-            tool_calls: vec![ToolCall {
+        let transcript = TranscriptStore::<MemFs>::in_memory(2);
+        let mut turn = transcript.open_turn().expect("turn opens");
+        turn.append_user("hello").expect("user fragment appends");
+        turn.finish_user().expect("user message finishes");
+        let mut consumer = IterationConsumer::new(&mut turn);
+        let events = [
+            ChatStreamEvent::Reasoning(StreamPart::Delta("think".to_owned())),
+            ChatStreamEvent::Reasoning(StreamPart::End),
+            ChatStreamEvent::Output(StreamPart::Delta("answer".to_owned())),
+            ChatStreamEvent::Output(StreamPart::End),
+            ChatStreamEvent::ToolCalls(StreamPart::Delta(ToolCall {
                 id: "call-1".to_owned(),
                 name: "search".to_owned(),
                 arguments_json: r#"{"query":"rust"}"#.to_owned(),
-            }],
-        };
+            })),
+            ChatStreamEvent::ToolCalls(StreamPart::End),
+        ];
+        for event in events {
+            consumer
+                .consume_chat_event(event)
+                .expect("assistant event is valid");
+        }
+        assert!(matches!(
+            consumer.finish_iteration().expect("iteration finishes"),
+            IterationCompletion::Tools
+        ));
+        drop(consumer);
 
+        let turns = transcript.turns();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(
-                &draft.raw_message_json().expect("draft is serializable")
-            )
-            .expect("assistant JSON is valid"),
+            turns.last().expect("open turn is visible").messages[1],
             json!({
                 "role": "assistant",
                 "content": "answer",
@@ -859,6 +850,7 @@ mod tests {
                 }],
             })
         );
+        turn.discard();
     }
 
     fn assistant_content(transcript: &TranscriptStore<MemFs>) -> Option<String> {

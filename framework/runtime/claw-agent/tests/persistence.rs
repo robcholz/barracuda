@@ -97,10 +97,11 @@ fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     let path = format!("{root}/sessions/{}.bin", session.to_wire());
     let inflight = read_payload(&path);
     assert_eq!(
-        inflight["resume"]["inflight_toolcalls"],
+        inflight["inflight_toolcalls"],
         json!([{
-            "tool": "blocking_tool",
-            "arguments": { "value": "held" }
+            "id": "call_persistence_1",
+            "name": "blocking_tool",
+            "arguments_json": r#"{"value":"held"}"#
         }])
     );
 
@@ -112,7 +113,7 @@ fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
 
     let completed = read_payload(&path);
     assert!(
-        completed.get("resume").is_none(),
+        completed.get("inflight_toolcalls").is_none(),
         "a completed transcript turn settles its persisted tool calls: {completed}"
     );
 }
@@ -128,11 +129,13 @@ fn session_payload_contains_only_restart_relevant_state() {
     };
 
     let json = read_payload(&format!("{root}/sessions/{}.bin", session.to_wire()));
-    assert_eq!(json["reasoning_effort"], "medium");
-    assert_eq!(json["permission_level"], "allow_all");
-    assert_eq!(json["mode"], "normal");
-    assert!(json.get("resume").is_none());
-    assert!(json.get("active_turn").is_none());
+    assert_eq!(
+        json,
+        json!({
+            "reasoning_effort": "medium",
+            "permission_level": "allow_all"
+        })
+    );
 }
 
 #[test]
@@ -217,9 +220,9 @@ fn unopened_session_does_not_consume_its_recovery_journal() {
     };
     let path = format!("{root}/sessions/{}.bin", session.to_wire());
     let mut payload = read_payload(&path);
-    payload["resume"] = json!({
-        "tool_set": { "loaded_groups": ["profile"] },
-        "inflight_toolcalls": []
+    payload["agent_state"] = json!({
+        "agent_mode": "normal",
+        "resumed": { "loaded_tool_groups": ["profile"] }
     });
     write_payload(&path, &payload);
 
@@ -229,7 +232,7 @@ fn unopened_session_does_not_consume_its_recovery_journal() {
     }
 
     assert_eq!(
-        read_payload(&path)["resume"]["tool_set"]["loaded_groups"],
+        read_payload(&path)["agent_state"]["resumed"]["loaded_tool_groups"],
         json!(["profile"])
     );
 }
@@ -245,9 +248,9 @@ fn opening_without_a_turn_does_not_consume_the_recovery_reminder() {
     };
     let path = format!("{root}/sessions/{}.bin", session.to_wire());
     let mut payload = read_payload(&path);
-    payload["resume"] = json!({
-        "tool_set": { "loaded_groups": ["profile"] },
-        "inflight_toolcalls": []
+    payload["agent_state"] = json!({
+        "agent_mode": "normal",
+        "resumed": { "loaded_tool_groups": ["profile"] }
     });
     write_payload(&path, &payload);
 
@@ -258,7 +261,7 @@ fn opening_without_a_turn_does_not_consume_the_recovery_reminder() {
     }
 
     assert_eq!(
-        read_payload(&path)["resume"]["tool_set"]["loaded_groups"],
+        read_payload(&path)["agent_state"]["resumed"]["loaded_tool_groups"],
         json!(["profile"])
     );
 }
@@ -270,7 +273,7 @@ fn read_payload(path: &str) -> Value {
 }
 
 fn write_payload(path: &str, payload: &Value) {
-    let mut bytes = 1u32.to_le_bytes().to_vec();
+    let mut bytes = 4u32.to_le_bytes().to_vec();
     bytes.extend(serde_json::to_vec(payload).unwrap());
     DiskFs::write_atomic(path, &bytes).unwrap();
 }

@@ -8,9 +8,7 @@
 //! It does not read, format, or return interrupt message content — upper layers
 //! own pending input and context rebuild.
 
-mod inflight_tool_call;
 mod run;
-mod stream;
 mod types;
 
 use core::future::Future;
@@ -18,13 +16,11 @@ use core::pin::Pin;
 
 use claw_permission::Action;
 
-use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
+use claw_api::{ClawApiAsync, RetryPolicy};
 use claw_interface::{ClawHttp, ClawTimer};
 
 use super::stream::RunControl;
 
-pub(crate) use inflight_tool_call::InflightToolCall;
-pub(crate) use stream::{IterationEmitter, IterationStream};
 pub(crate) use types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
 
 crate::define_prefixed_id!(IterationId, "iteration-", "iteration");
@@ -42,7 +38,6 @@ crate::define_id_allocator!(
 
 pub(super) struct ToolPermissionRequest<'a> {
     pub(super) tool_call_id: ToolCallId,
-    pub(super) tool_call: &'a ToolCall,
     pub(super) action: &'a Action,
 }
 
@@ -54,11 +49,16 @@ pub(super) enum ToolPermission {
 }
 
 pub(super) type PendingToolPermission<'a> = Pin<Box<dyn Future<Output = ToolPermission> + 'a>>;
+pub(super) type PermissionActivation<'a> = Box<dyn FnOnce() + 'a>;
 
 pub(super) enum ToolAuthorization<'a> {
     Allow,
     Deny(String),
-    Pending(PendingToolPermission<'a>),
+    Pending {
+        reason: String,
+        activate: PermissionActivation<'a>,
+        permission: PendingToolPermission<'a>,
+    },
 }
 
 /// Statically dispatched permission seam for one prepared tool call.
@@ -67,21 +67,13 @@ pub(super) enum ToolAuthorization<'a> {
 /// can start allowed tools without waiting for unrelated approvals. Only a
 /// genuinely pending permission carries a future.
 pub(super) trait ToolPermissionPolicy {
-    fn authorize<'a>(
-        &'a self,
-        request: ToolPermissionRequest<'_>,
-        events: &IterationEmitter,
-    ) -> ToolAuthorization<'a>;
+    fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a>;
 }
 
 /// [`claw_permission::AllowAll`] is the YOLO policy for callers that
 /// intentionally run every valid tool call without an approval boundary.
 impl ToolPermissionPolicy for claw_permission::AllowAll {
-    fn authorize(
-        &self,
-        _request: ToolPermissionRequest<'_>,
-        _events: &IterationEmitter,
-    ) -> ToolAuthorization<'_> {
+    fn authorize(&self, _request: ToolPermissionRequest<'_>) -> ToolAuthorization<'_> {
         ToolAuthorization::Allow
     }
 }

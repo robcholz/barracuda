@@ -8,7 +8,8 @@ use claw_context::{Band, BlockKind, ContextSink, Scope};
 use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter, InflightToolCall};
+use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter};
+use crate::protocol::ToolCall;
 
 use self::tools::discovery_tools;
 
@@ -46,11 +47,11 @@ pub(super) fn lock_state(state: &SharedResumedState) -> MutexGuard<'_, ResumedSt
 /// This is not durable Agent state. Factory derives it while distributing a
 /// restored AgentState to its authoritative components.
 pub(in crate::agent) struct AgentResumeNotice {
-    inflight_toolcalls: Vec<InflightToolCall>,
+    inflight_toolcalls: Vec<ToolCall>,
 }
 
 impl AgentResumeNotice {
-    pub(in crate::agent) fn new(inflight_toolcalls: Vec<InflightToolCall>) -> Self {
+    pub(in crate::agent) fn new(inflight_toolcalls: Vec<ToolCall>) -> Self {
         Self { inflight_toolcalls }
     }
 }
@@ -122,7 +123,7 @@ fn render_resume_reminder(
     if has_inflight_toolcalls {
         let calls = inflight_toolcalls
             .iter()
-            .map(|call| format!("{}({})", call.tool(), call.arguments()))
+            .map(|call| format!("{}({})", call.name, call.arguments_json))
             .collect::<Vec<_>>()
             .join(", ");
         details.push(format!(
@@ -156,15 +157,14 @@ fn resume_reminder_kind() -> BlockKind {
 mod tests {
     use std::sync::Arc;
 
+    use super::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
+    use crate::agent::base_agent::ContextAdapter;
+    use crate::protocol::ToolCall;
     use claw_context::Context;
     use claw_tool::{
         SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
         ToolSpec,
     };
-    use serde_json::json;
-
-    use super::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
-    use crate::agent::base_agent::{ContextAdapter, InflightToolCall};
 
     #[test]
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {
@@ -172,10 +172,11 @@ mod tests {
         let mut tool_set = registry.tool_set();
         let mut adapter = ResumedContextAdapter::new(
             None,
-            Some(AgentResumeNotice::new(vec![InflightToolCall::new(
-                "profile_read",
-                json!({"document":"user"}),
-            )])),
+            Some(AgentResumeNotice::new(vec![ToolCall {
+                id: "call-1".to_owned(),
+                name: "profile_read".to_owned(),
+                arguments_json: r#"{"document":"user"}"#.to_owned(),
+            }])),
             tool_set.discovery(),
         );
         tool_set

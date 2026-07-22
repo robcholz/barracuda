@@ -10,13 +10,6 @@ use super::validate;
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RawToolInvocation<'a> {
-    pub id: Option<&'a str>,
-    pub name: &'a str,
-    pub arguments_json: &'a str,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolInvocation<'a> {
     id: Option<&'a str>,
@@ -24,20 +17,20 @@ pub struct ToolInvocation<'a> {
     arguments_json: &'a str,
 }
 
-impl<'a> TryFrom<RawToolInvocation<'a>> for ToolInvocation<'a> {
-    type Error = ToolInvokeError;
-
-    fn try_from(raw: RawToolInvocation<'a>) -> Result<Self, Self::Error> {
-        let arguments_json = validate::normalize_arguments_json(raw.arguments_json)?;
+impl<'a> ToolInvocation<'a> {
+    pub fn try_new(
+        id: Option<&'a str>,
+        name: &'a str,
+        arguments_json: &'a str,
+    ) -> ToolResult<Self> {
+        let arguments_json = validate::normalize_arguments_json(arguments_json)?;
         Ok(Self {
-            id: raw.id,
-            name: raw.name,
+            id,
+            name,
             arguments_json,
         })
     }
-}
 
-impl<'a> ToolInvocation<'a> {
     pub fn id(&self) -> Option<&str> {
         self.id
     }

@@ -4,23 +4,24 @@ use claw_context::Block;
 use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
-use crate::agent::{AgentState, InflightToolCall};
+use crate::agent::AgentState;
 use crate::config::{ApiUsage, ReasoningEffort};
+use crate::protocol::ToolCall;
 
 pub(crate) struct AgentResume {
     state: AgentState,
-    inflight_toolcalls: Vec<InflightToolCall>,
+    inflight_toolcalls: Vec<ToolCall>,
 }
 
 impl AgentResume {
-    pub(crate) fn new(state: AgentState, inflight_toolcalls: Vec<InflightToolCall>) -> Self {
+    pub(crate) fn new(state: AgentState, inflight_toolcalls: Vec<ToolCall>) -> Self {
         Self {
             state,
             inflight_toolcalls,
         }
     }
 
-    pub(super) fn into_parts(self) -> (AgentState, Vec<InflightToolCall>) {
+    pub(super) fn into_parts(self) -> (AgentState, Vec<ToolCall>) {
         (self.state, self.inflight_toolcalls)
     }
 }

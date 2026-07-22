@@ -427,10 +427,12 @@ pub trait Transcript {
 }
 
 /// The authoritative assistant message used to finish a streamed draft.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AssistantFinish<'a> {
     /// A complete backend-shaped assistant message object.
     RawJson(&'a str),
+    /// A complete backend-shaped assistant message object.
+    Value(Value),
     /// A complete plain-text assistant message.
     PlainText(&'a str),
 }
@@ -721,11 +723,52 @@ impl TurnHandle {
                 self.poisoned = true;
                 TurnError::InvalidAssistantJson(error.to_string())
             })?,
+            AssistantFinish::Value(message) => message,
             AssistantFinish::PlainText(content) => {
                 json!({ "role": "assistant", "content": content })
             }
         };
         self.mutate(TurnMutation::FinishAssistant(message))
+    }
+
+    /// Finish a streamed assistant draft without serializing its final shape.
+    ///
+    /// The text accumulated by [`append_assistant`](Self::append_assistant) is
+    /// moved into the transcript. When the response contains no tool calls, a
+    /// copy is returned for the task-completion event; tool rounds return
+    /// `None` because their text is not a terminal response.
+    pub fn finish_streamed_assistant(
+        &mut self,
+        reasoning_content: String,
+        tool_calls: Vec<Value>,
+    ) -> Result<Option<String>, TurnError> {
+        self.mutate_with(move |turn| {
+            let content = match turn.draft.take() {
+                Some(MessageDraft::Assistant(content)) => content,
+                Some(draft @ MessageDraft::User(_)) => {
+                    turn.draft = Some(draft);
+                    return Err(TurnError::UserMessageOpen);
+                }
+                None => String::new(),
+            };
+            let response = tool_calls.is_empty().then(|| content.clone());
+            let mut message = serde_json::Map::new();
+            message.insert("role".to_owned(), json!("assistant"));
+            if !content.is_empty() {
+                message.insert("content".to_owned(), Value::String(content));
+            }
+            if !reasoning_content.is_empty() {
+                message.insert(
+                    "reasoning_content".to_owned(),
+                    Value::String(reasoning_content),
+                );
+            }
+            if !tool_calls.is_empty() {
+                message.insert("tool_calls".to_owned(), Value::Array(tool_calls));
+            }
+            turn.messages.push(Value::Object(message));
+            Ok(response)
+        })
     }
 
     /// Record one complete tool result in the current turn.
@@ -771,6 +814,13 @@ impl TurnHandle {
     }
 
     fn mutate(&mut self, mutation: TurnMutation<'_>) -> Result<(), TurnError> {
+        self.mutate_with(|turn| apply_turn_mutation(turn, mutation))
+    }
+
+    fn mutate_with<T>(
+        &mut self,
+        apply: impl FnOnce(&mut OpenTurn) -> Result<T, TurnError>,
+    ) -> Result<T, TurnError> {
         if !self.active {
             return Err(TurnError::Inactive);
         }
@@ -779,7 +829,7 @@ impl TurnHandle {
             let Some(turn) = state.open_turn.as_mut() else {
                 return Err(TurnError::Inactive);
             };
-            let result = apply_turn_mutation(turn, mutation);
+            let result = apply(turn);
             if result.is_ok() {
                 state.mark_changed();
             }

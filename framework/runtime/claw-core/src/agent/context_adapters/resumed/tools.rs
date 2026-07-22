@@ -97,8 +97,8 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use claw_tool::{
-        RawToolInvocation, SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput,
-        ToolRegistry, ToolResult, ToolSpec,
+        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
+        ToolSpec,
     };
 
     use super::ToolLoadTool;
@@ -125,12 +125,9 @@ mod tests {
             discovery,
             state: Arc::clone(&state),
         };
-        let call = ToolInvocation::try_from(RawToolInvocation {
-            id: Some("call-test"),
-            name: "tool_load",
-            arguments_json: r#"{"group_id":"hidden"}"#,
-        })
-        .expect("valid invocation");
+        let call =
+            ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
+                .expect("valid invocation");
 
         let output = tool.invoke(&call).expect("load succeeds");
 

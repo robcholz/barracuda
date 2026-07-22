@@ -12,8 +12,8 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, RawToolInvocation, SyncToolHandler, Tool, ToolError, ToolExecutor, ToolGroup,
-    ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolSetError, ToolSpec,
+    tool_metadata, SyncToolHandler, Tool, ToolError, ToolExecutor, ToolGroup, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolRegistry, ToolSetError, ToolSpec,
 };
 use serde_json::{json, Value};
 
@@ -245,11 +245,11 @@ where
 
     let executor = ToolExecutor::new(&tools);
     for tool_call in &response.tool_calls {
-        let call = ToolInvocation::try_from(RawToolInvocation {
-            id: Some(&tool_call.id),
-            name: &tool_call.name,
-            arguments_json: &tool_call.arguments_json,
-        })
+        let call = ToolInvocation::try_new(
+            Some(&tool_call.id),
+            &tool_call.name,
+            &tool_call.arguments_json,
+        )
         .map_err(|_| ApprovalResolverError::MalformedToolCall)?;
         let _ = executor.execute(&call).await;
     }

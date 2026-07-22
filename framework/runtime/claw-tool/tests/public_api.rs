@@ -7,8 +7,8 @@ use std::task::Waker;
 use anyhow::{anyhow, Result};
 use claw_persistence::{DurableState, DurableStateCodec};
 use claw_tool::{
-    RawToolInvocation, RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolExecutor,
-    ToolGroup, ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError,
+    RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolExecutor, ToolGroup,
+    ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError,
     ToolRegistryState, ToolResult, ToolSetHandle, ToolSpec,
 };
 
@@ -434,22 +434,14 @@ fn registry_state_contains_only_explicit_overrides() -> Result<()> {
 
 #[test]
 fn invocation_normalizes_empty_arguments() {
-    let call = ToolInvocation::try_from(RawToolInvocation {
-        id: None,
-        name: "demo",
-        arguments_json: "  ",
-    });
+    let call = ToolInvocation::try_new(None, "demo", "  ");
 
     assert!(matches!(call, Ok(call) if call.arguments_json() == "{}"));
 }
 
 #[test]
 fn invocation_rejects_non_object_arguments() {
-    let call = ToolInvocation::try_from(RawToolInvocation {
-        id: None,
-        name: "demo",
-        arguments_json: "[]",
-    });
+    let call = ToolInvocation::try_new(None, "demo", "[]");
 
     assert!(matches!(
         call,
@@ -575,12 +567,7 @@ impl SyncToolHandler for FailBeforeSuccess {
 }
 
 fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolInvocation<'static>> {
-    ToolInvocation::try_from(RawToolInvocation {
-        id: None,
-        name,
-        arguments_json,
-    })
-    .map_err(|error| anyhow!("{error:?}"))
+    ToolInvocation::try_new(None, name, arguments_json).map_err(|error| anyhow!("{error:?}"))
 }
 
 fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation<'_>) -> Result<ToolExecution> {

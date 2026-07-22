@@ -6,8 +6,7 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::agent::InflightToolCall;
-use crate::protocol::{AgentKind, Message};
+use crate::protocol::{AgentKind, Message, ToolCall};
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -96,12 +95,11 @@ impl SpawnSubagentTool {
                 ok: result.ok(),
             })
         } else {
-            let source_call = InflightToolCall::new(
-                call.name(),
-                call.arguments_value().unwrap_or_else(|_| {
-                    serde_json::Value::String(call.arguments_json().to_owned())
-                }),
-            );
+            let source_call = ToolCall {
+                id: call.id().unwrap_or_default().to_owned(),
+                name: call.name().to_owned(),
+                arguments_json: call.arguments_json().to_owned(),
+            };
             let child =
                 self.control
                     .spawn_background(kind, Some(name.clone()), goal, timeout, source_call);

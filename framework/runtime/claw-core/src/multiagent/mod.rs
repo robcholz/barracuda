@@ -46,8 +46,9 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{AgentResume, FsAgentFactory, InflightToolCall};
+use crate::agent::{AgentResume, FsAgentFactory};
 use crate::config::ReasoningEffort;
+use crate::protocol::ToolCall;
 use crate::protocol::{AgentId, SessionId, SessionPersistence};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
@@ -91,7 +92,7 @@ where
     /// the Agent Factory when the root object is reconstructed.
     root_resume: Option<AgentResume>,
     root_deliveries_in_turn: Vec<AgentId>,
-    root_background_spawns: BTreeMap<AgentId, InflightToolCall>,
+    root_background_spawns: BTreeMap<AgentId, ToolCall>,
     /// Shared, process-wide id allocator for roots and spawned children.
     id_allocator: AgentIdAllocator,
     /// Process-local graph and scheduler state. Agents are not restored.

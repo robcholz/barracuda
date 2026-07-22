@@ -5,8 +5,8 @@ use futures_lite::future;
 use claw_api::ChatStreamEvent;
 use claw_utils::stream::StreamPart;
 
-use crate::agent::{AgentEvent, InflightToolCall, IterationEvent};
-use crate::protocol::{AgentId, EventSink, SessionEvent, TurnOrigin};
+use crate::agent::{AgentEvent, IterationEvent};
+use crate::protocol::{AgentId, EventSink, SessionEvent, ToolCall, TurnOrigin};
 use crate::scheduler::AgentRun;
 
 use super::agents::{AgentRunEvent, AgentSlotEvent, ReadyAgent};
@@ -21,12 +21,12 @@ enum RuntimeWake {
 
 struct RoutedWake {
     output: DriveOutput,
-    root_tool_calls: Option<Vec<InflightToolCall>>,
+    root_tool_calls: Option<Vec<ToolCall>>,
 }
 
 pub(crate) enum DriveOutcome {
     Complete(DriveOutput, DriveStop),
-    BeforeToolCalls(DriveOutput, Vec<InflightToolCall>),
+    BeforeToolCalls(DriveOutput, Vec<ToolCall>),
 }
 
 /// Messages created outside the LLM stream and still awaiting engine emission.
@@ -72,7 +72,7 @@ where
         self.multiagent.clear();
     }
 
-    pub(crate) fn commit_root_deliveries(&mut self) -> Vec<InflightToolCall> {
+    pub(crate) fn commit_root_deliveries(&mut self) -> Vec<ToolCall> {
         let children = std::mem::take(&mut self.root_deliveries_in_turn);
         children
             .into_iter()
@@ -497,10 +497,6 @@ fn emit_iteration_event(events: &EventSink, progress: &StreamPart<IterationEvent
         StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
             SessionEvent::ToolCalls(part.clone())
         }
-        #[cfg(feature = "cache_profile")]
-        StreamPart::Delta(IterationEvent::Usage(usage)) => SessionEvent::Usage {
-            usage: usage.clone(),
-        },
         StreamPart::Delta(IterationEvent::BeforeToolCalls(_)) => return,
         StreamPart::End => SessionEvent::IterationEnded,
     };

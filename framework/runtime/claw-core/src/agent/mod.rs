@@ -13,7 +13,7 @@ mod tools;
 pub use base_agent::IterationId;
 pub(crate) use base_agent::{
     AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
-    AgentState, ApprovalDecision, BaseAgent, InflightToolCall, IterationEvent, ToolCallId,
+    AgentState, ApprovalDecision, BaseAgent, IterationEvent, ToolCallId,
 };
 pub(crate) use context_adapters::ReasoningEffortHandle;
 pub(crate) use factory::{

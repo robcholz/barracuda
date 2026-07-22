@@ -6,9 +6,9 @@ use claw_persistence::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{AgentState, InflightToolCall};
+use crate::agent::AgentState;
 use crate::config::ReasoningEffort;
-use crate::protocol::SessionId;
+use crate::protocol::{SessionId, ToolCall};
 
 pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 
@@ -18,16 +18,16 @@ pub(crate) struct SessionState {
     permission_level: PermissionLevel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_state: Option<AgentState>,
-    /// Legacy compatibility journal. Iteration-local ToolCallIds, physical
-    /// tool runners, and futures are never stored here.
+    /// Calls that crossed the durable pre-execution boundary but have not yet
+    /// reached a durably settled outcome.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    inflight_toolcalls: Vec<InflightToolCall>,
+    inflight_toolcalls: Vec<ToolCall>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SessionRecovery {
     pub(crate) agent_state: AgentState,
-    pub(crate) inflight_toolcalls: Vec<InflightToolCall>,
+    pub(crate) inflight_toolcalls: Vec<ToolCall>,
 }
 
 impl SessionState {
@@ -63,20 +63,20 @@ impl SessionState {
         self.agent_state.as_ref() == Some(state)
     }
 
-    fn contains_inflight_toolcall(&self, call: &InflightToolCall) -> bool {
+    fn contains_inflight_toolcall(&self, call: &ToolCall) -> bool {
         self.inflight_toolcalls
             .iter()
             .any(|inflight| inflight == call)
     }
 
-    pub(crate) fn add_inflight_toolcall(&mut self, call: &InflightToolCall) {
+    pub(crate) fn add_inflight_toolcall(&mut self, call: &ToolCall) {
         if self.contains_inflight_toolcall(call) {
             return;
         }
         self.inflight_toolcalls.push(call.clone());
     }
 
-    pub(crate) fn remove_inflight_toolcall(&mut self, call: &InflightToolCall) -> bool {
+    pub(crate) fn remove_inflight_toolcall(&mut self, call: &ToolCall) -> bool {
         if let Some(index) = self
             .inflight_toolcalls
             .iter()
@@ -91,7 +91,7 @@ impl SessionState {
 }
 
 impl DurableStateCodec for SessionState {
-    const SCHEMA_VERSION: SchemaVersion = 3;
+    const SCHEMA_VERSION: SchemaVersion = 4;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -123,8 +123,9 @@ mod tests {
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     use super::SessionState;
-    use crate::agent::{AgentState, InflightToolCall};
+    use crate::agent::AgentState;
     use crate::config::ReasoningEffort;
+    use crate::protocol::ToolCall;
     use claw_permission::PermissionLevel;
 
     #[test]
@@ -140,10 +141,11 @@ mod tests {
         }))
         .expect("test AgentState is valid");
         state.record_recovery(agent_state);
-        state.add_inflight_toolcall(&InflightToolCall::new(
-            "subagent_spawn",
-            json!({"kind":"worker","foreground":false}),
-        ));
+        state.add_inflight_toolcall(&ToolCall {
+            id: "call-1".to_owned(),
+            name: "subagent_spawn".to_owned(),
+            arguments_json: r#"{"kind":"worker","foreground":false}"#.to_owned(),
+        });
 
         let encoded = state.encode_state().unwrap().into_owned();
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
@@ -154,7 +156,7 @@ mod tests {
             json["agent_state"]["resumed"]["loaded_tool_groups"][0],
             "tool_group_id"
         );
-        assert_eq!(json["inflight_toolcalls"][0]["tool"], "subagent_spawn");
+        assert_eq!(json["inflight_toolcalls"][0]["name"], "subagent_spawn");
 
         let restored = SessionState::decode_state(
             SessionState::SCHEMA_VERSION,
@@ -169,7 +171,11 @@ mod tests {
     #[test]
     fn inflight_toolcall_lifecycle_is_idempotent() {
         let mut state = SessionState::default();
-        let call = InflightToolCall::new("profile_read", json!({"document":"user"}));
+        let call = ToolCall {
+            id: "call-1".to_owned(),
+            name: "profile_read".to_owned(),
+            arguments_json: r#"{"document":"user"}"#.to_owned(),
+        };
 
         state.add_inflight_toolcall(&call);
         state.add_inflight_toolcall(&call);

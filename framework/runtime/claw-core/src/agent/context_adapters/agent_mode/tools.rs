@@ -158,7 +158,7 @@ fn success(output: &str) -> ToolOutput {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use claw_tool::{RawToolInvocation, SyncToolHandler, ToolInvocation};
+    use claw_tool::{SyncToolHandler, ToolInvocation};
 
     use super::{
         AgentEffect, AgentModeState, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
@@ -166,12 +166,7 @@ mod tests {
     use crate::agent::base_agent::agent_effect_channel;
 
     fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation<'a> {
-        ToolInvocation::try_from(RawToolInvocation {
-            id: Some("call-test"),
-            name,
-            arguments_json,
-        })
-        .expect("valid invocation")
+        ToolInvocation::try_new(Some("call-test"), name, arguments_json).expect("valid invocation")
     }
 
     #[test]

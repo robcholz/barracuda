@@ -3,7 +3,7 @@ use claw_tool::{ToolExecution, ToolSetError, ToolSetHandle};
 use serde_json::Value;
 use strum::IntoStaticStr;
 
-use super::{InflightToolCall, IterationId, ToolCallId};
+use super::{IterationId, ToolCallId};
 
 /// Errors from one [`super::IterationLoop::run`] step.
 #[derive(Clone, Debug, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
@@ -14,9 +14,6 @@ pub(crate) enum IterationLoopError {
     #[strum(serialize = "duplicate_provider_tool_call_id")]
     #[error("LLM returned duplicate provider tool call id {0}")]
     DuplicateProviderToolCallId(String),
-    #[strum(serialize = "malformed_tool_call")]
-    #[error("prepared tool call is no longer valid")]
-    MalformedToolCall,
     #[strum(serialize = "incomplete_tool_batch")]
     #[error("tool batch ended before every tool call id produced a result")]
     IncompleteToolBatch,
@@ -45,11 +42,9 @@ pub(crate) struct LlmStep<'a> {
 pub(crate) enum IterationEvent {
     Started(IterationId),
     Llm(ChatStreamEvent),
-    #[cfg(feature = "cache_profile")]
-    Usage(claw_api::ApiUsage),
     /// The calls are now visible to the owner. They cannot execute until the
     /// owner polls the stream again.
-    BeforeToolCalls(Vec<InflightToolCall>),
+    BeforeToolCalls(Vec<ToolCall>),
 }
 
 /// One internal item produced by an [`super::IterationLoop`].
@@ -59,10 +54,9 @@ pub(crate) enum IterationEvent {
 /// because they carry distinct control semantics for `BaseAgent`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationLoopEvent {
-    Llm(ChatStreamEvent),
-    /// The complete calls are now visible to the owner. Tool execution cannot
-    /// start until the consumer polls the iteration stream again.
-    BeforeToolCalls(Vec<InflightToolCall>),
+    /// An owner-visible iteration event. BaseAgent may tap its payload for
+    /// transcript durability before forwarding it.
+    Iteration(IterationEvent),
     ApprovalRequired {
         tool_call_id: ToolCallId,
         tool_call: ToolCall,

@@ -22,4 +22,4 @@ pub(crate) use self::stream::{
     ApprovalDecision,
 };
 pub use iteration_loop::IterationId;
-pub(crate) use iteration_loop::{InflightToolCall, IterationEvent, ToolCallId};
+pub(crate) use iteration_loop::{IterationEvent, ToolCallId};
