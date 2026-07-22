@@ -91,10 +91,18 @@ typedef struct {
 } claw_agent_turn_started_event_t;
 
 typedef struct {
+    /* All three strings are owned and contain one complete tool call. */
+    char *id;
+    char *name;
+    char *arguments_json;
+} claw_agent_tool_call_event_t;
+
+typedef struct {
     uint32_t request_id;
     claw_agent_input_request_kind_t kind;
-    /* Owned UTF-8 semantic summary. */
-    char *summary;
+    claw_agent_tool_call_event_t tool_call;
+    /* Owned UTF-8 reason supplied by the permission policy. */
+    char *reason;
 } claw_agent_input_requested_event_t;
 
 typedef struct {
@@ -105,13 +113,6 @@ typedef struct {
     /* Owned UTF-8 append fragment. */
     char *text;
 } claw_agent_text_delta_event_t;
-
-typedef struct {
-    /* All three strings are owned and contain one complete tool call. */
-    char *id;
-    char *name;
-    char *arguments_json;
-} claw_agent_tool_call_event_t;
 
 typedef struct {
     uint32_t turn_id;

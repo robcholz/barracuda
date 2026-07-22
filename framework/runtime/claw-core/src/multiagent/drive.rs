@@ -2,8 +2,11 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use futures_lite::future;
 
-use crate::agent::AgentProgress;
-use crate::protocol::{AgentId, EventSink, InflightToolCall, SessionEvent, StreamPart, TurnOrigin};
+use claw_api::ChatStreamEvent;
+use claw_utils::stream::StreamPart;
+
+use crate::agent::{AgentEvent, InflightToolCall, IterationEvent};
+use crate::protocol::{AgentId, EventSink, SessionEvent, TurnOrigin};
 use crate::scheduler::AgentRun;
 
 use super::agents::{AgentRunEvent, AgentSlotEvent, ReadyAgent};
@@ -23,7 +26,7 @@ struct RoutedWake {
 
 pub(crate) enum DriveOutcome {
     Complete(DriveOutput, DriveStop),
-    ToolCalls(DriveOutput, Vec<InflightToolCall>),
+    BeforeToolCalls(DriveOutput, Vec<InflightToolCall>),
 }
 
 /// Messages created outside the LLM stream and still awaiting engine emission.
@@ -224,7 +227,7 @@ where
             output.absorb(routed.output);
             if let Some(calls) = routed.root_tool_calls {
                 control.clear_cancel_hook();
-                return DriveOutcome::ToolCalls(output, calls);
+                return DriveOutcome::BeforeToolCalls(output, calls);
             }
             if self.has_pending_approval() {
                 // A foreground root tool may still be waiting on the child
@@ -395,37 +398,27 @@ where
                 continue;
             }
             match event {
-                AgentSlotEvent::Progress(progress) => {
+                AgentSlotEvent::Event(item) => {
                     if self.state.is_root(id) {
-                        match &progress {
-                            AgentProgress::ToolCalls(calls) => {
+                        match &item {
+                            Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                IterationEvent::BeforeToolCalls(calls),
+                            ))) => {
                                 debug_assert!(root_tool_calls.is_none());
                                 root_tool_calls = Some(calls.clone());
                             }
-                            AgentProgress::IterationStarted(_)
-                            | AgentProgress::ReasoningDelta(_)
-                            | AgentProgress::ReasoningEnded
-                            | AgentProgress::OutputDelta(_)
-                            | AgentProgress::OutputEnded
-                            | AgentProgress::ToolCall(_)
-                            | AgentProgress::ToolCallsEnded
-                            | AgentProgress::IterationEnded => {
-                                emit_agent_progress(output_events, &progress);
+                            Ok(AgentEvent::Iteration(event)) => {
+                                emit_iteration_event(output_events, event);
                             }
-                            #[cfg(feature = "cache_profile")]
-                            AgentProgress::Usage(_) => {
-                                emit_agent_progress(output_events, &progress);
-                            }
-                            AgentProgress::ApprovalRequired { .. }
-                            | AgentProgress::Yielded { .. }
-                            | AgentProgress::YieldedByTool { .. }
-                            | AgentProgress::Ended { .. }
-                            | AgentProgress::Interrupted
-                            | AgentProgress::Cancelled
-                            | AgentProgress::Failed(_) => {}
+                            Ok(AgentEvent::InputRequired(_))
+                            | Ok(AgentEvent::Finished(_))
+                            | Err(_) => {}
                         }
                     }
-                    output.absorb(self.route_progress(id, progress));
+                    output.absorb(match item {
+                        Ok(event) => self.route_event(id, event),
+                        Err(error) => self.route_error(id, error),
+                    });
                 }
                 AgentSlotEvent::Returned => {}
             }
@@ -490,32 +483,26 @@ where
     }
 }
 
-fn emit_agent_progress(events: &EventSink, progress: &AgentProgress) {
+fn emit_iteration_event(events: &EventSink, progress: &StreamPart<IterationEvent>) {
     let event = match progress {
-        AgentProgress::IterationStarted(iteration) => SessionEvent::IterationStarted {
+        StreamPart::Delta(IterationEvent::Started(iteration)) => SessionEvent::IterationStarted {
             iteration: *iteration,
         },
-        AgentProgress::ReasoningDelta(text) => {
-            SessionEvent::Reasoning(StreamPart::Delta(text.clone()))
+        StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Reasoning(part))) => {
+            SessionEvent::Reasoning(part.clone())
         }
-        AgentProgress::ReasoningEnded => SessionEvent::Reasoning(StreamPart::End),
-        AgentProgress::OutputDelta(text) => SessionEvent::Output(StreamPart::Delta(text.clone())),
-        AgentProgress::OutputEnded => SessionEvent::Output(StreamPart::End),
-        AgentProgress::ToolCall(call) => SessionEvent::ToolCalls(StreamPart::Delta(call.clone())),
-        AgentProgress::ToolCallsEnded => SessionEvent::ToolCalls(StreamPart::End),
+        StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Output(part))) => {
+            SessionEvent::Output(part.clone())
+        }
+        StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
+            SessionEvent::ToolCalls(part.clone())
+        }
         #[cfg(feature = "cache_profile")]
-        AgentProgress::Usage(usage) => SessionEvent::Usage {
+        StreamPart::Delta(IterationEvent::Usage(usage)) => SessionEvent::Usage {
             usage: usage.clone(),
         },
-        AgentProgress::IterationEnded => SessionEvent::IterationEnded,
-        AgentProgress::ToolCalls(_)
-        | AgentProgress::ApprovalRequired { .. }
-        | AgentProgress::Yielded { .. }
-        | AgentProgress::YieldedByTool { .. }
-        | AgentProgress::Ended { .. }
-        | AgentProgress::Interrupted
-        | AgentProgress::Cancelled
-        | AgentProgress::Failed(_) => return,
+        StreamPart::Delta(IterationEvent::BeforeToolCalls(_)) => return,
+        StreamPart::End => SessionEvent::IterationEnded,
     };
     events.emit(event);
 }

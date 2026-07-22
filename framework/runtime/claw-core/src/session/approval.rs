@@ -7,7 +7,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use claw_api::{ChatError, ChatRequest, ClawApiAsync, InitError, RetryPolicy};
+use claw_api::{ChatError, ChatRequest, ClawApiAsync, InitError, RetryPolicy, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_permission::{Action, RiskClass};
@@ -164,7 +164,8 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
 
 pub(crate) async fn resolve_permission_reply<H, Timer>(
     api_manager: &SharedApiManager,
-    summary: &str,
+    tool_call: &ToolCall,
+    reason: &str,
     user_reply: &str,
     control: &DriveControl,
 ) -> Result<PermissionReplyResolution, ApprovalResolverError>
@@ -203,7 +204,10 @@ where
         {
             "role": "user",
             "content": format!(
-                "Pending permission request:\n{summary}\n\nUser reply:\n{user_reply}"
+                "Pending tool call:\nID: {}\nName: {}\nArguments JSON: {}\n\nPermission reason:\n{reason}\n\nUser reply:\n{user_reply}",
+                tool_call.id,
+                tool_call.name,
+                tool_call.arguments_json,
             )
         }
     ]);

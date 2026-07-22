@@ -4,9 +4,8 @@ use claw_context::Block;
 use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
-use crate::agent::AgentState;
+use crate::agent::{AgentState, InflightToolCall};
 use crate::config::{ApiUsage, ReasoningEffort};
-use crate::protocol::InflightToolCall;
 
 pub(crate) struct AgentResume {
     state: AgentState,

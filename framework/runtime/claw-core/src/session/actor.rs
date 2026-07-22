@@ -12,16 +12,17 @@ use futures_core::Stream;
 use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
-use crate::agent::{AgentResume, FsAgentFactory};
+use crate::agent::{AgentResume, FsAgentFactory, InflightToolCall};
 use crate::config::{ReasoningEffort, SharedApiManager};
 use crate::multiagent::{
     AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
     MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
 };
 use crate::protocol::{
-    EventSink, InflightToolCall, InputRequestId, InputRequestKind, Message, SessionEvent,
-    SessionId, SessionPersistence, StreamPart, TurnId, TurnOrigin,
+    EventSink, InputRequestId, InputRequestKind, Message, SessionEvent, SessionId,
+    SessionPersistence, ToolCall, TurnId, TurnOrigin,
 };
+use crate::stream::StreamPart;
 
 use super::api::{
     ControlOp, OpenSessionError, SessionCommand, SessionControlError, SessionEndpoint,
@@ -847,7 +848,7 @@ where
         let mut yield_for_persistence = false;
         if let RuntimeDriveResult::Driven(result) = result {
             match result {
-                Ok(DriveOutcome::ToolCalls(output, calls)) => {
+                Ok(DriveOutcome::BeforeToolCalls(output, calls)) => {
                     let _ = self
                         .emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
                     for call in calls {
@@ -1000,14 +1001,15 @@ where
             }
         }
         PendingTurnInput::Response {
-            kind: InputRequestKind::PermissionApproval { summary },
+            kind: InputRequestKind::PermissionApproval { tool_call, reason },
             message,
         } => {
             // The request may belong to a child while a foreground root tool is
             // still running. Approval resolution does not mutate agent context.
             resolve_pending_approval(
                 runtime,
-                &summary,
+                &tool_call,
+                &reason,
                 message.as_str(),
                 control,
                 events,
@@ -1084,7 +1086,8 @@ fn stop_mode(stop: DriveStop) -> Option<TurnStopMode> {
 
 async fn resolve_pending_approval<Filesystem, Http, Timer>(
     runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    summary: &str,
+    tool_call: &ToolCall,
+    reason: &str,
     user_reply: &str,
     control: &DriveControl,
     events: &EventSink,
@@ -1097,7 +1100,8 @@ where
 {
     let resolution = match approval::resolve_permission_reply::<Http, Timer>(
         api_manager,
-        summary,
+        tool_call,
+        reason,
         user_reply,
         control,
     )

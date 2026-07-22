@@ -1,9 +1,7 @@
 use claw_interface::ClawFs;
-use claw_memory::{MemoryDraft, MemoryPatch};
+use claw_memory::{MemoryDraft, MemoryPatch, Transcript};
 use serde_json::Value;
 use tracing::Instrument as _;
-
-use crate::agent::base_agent::History;
 
 use super::{ExtractionInput, LongTermMemoryContextAdapter, MemoryOp};
 
@@ -17,8 +15,8 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     /// Pull, not push: called from `prepare` at the iteration boundary, it self-detects
     /// new conversation via the transcript version. Store dedup absorbs facts
     /// re-extracted across turns.
-    pub(super) async fn maybe_schedule_extraction(&mut self, history: &dyn History) {
-        let version = history.version();
+    pub(super) async fn maybe_schedule_extraction(&mut self, transcript: &dyn Transcript) {
+        let version = transcript.version();
         if version == self.extract_cursor {
             return; // transcript unchanged since the last extraction
         }
@@ -28,8 +26,8 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
             return;
         }
 
-        let snapshot = history.messages();
-        let transcript = flatten_transcript(&snapshot);
+        let turns = transcript.turns();
+        let transcript = flatten_transcript(turns.iter().flat_map(|turn| turn.messages.iter()));
         if transcript.trim().is_empty() {
             return;
         }
@@ -108,15 +106,12 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     }
 }
 
-/// Flatten a transcript snapshot (a JSON array of chat messages) into the
-/// role-prefixed plain text an extractor reads. Messages without string content
-/// (e.g. an assistant turn carrying only `tool_calls`) are skipped.
-fn flatten_transcript(messages: &Value) -> String {
-    let Some(items) = messages.as_array() else {
-        return String::new();
-    };
+/// Flatten a sequence of chat messages into the role-prefixed plain text an
+/// extractor reads. Messages without string content (e.g. an assistant turn
+/// carrying only `tool_calls`) are skipped.
+fn flatten_transcript<'a>(messages: impl Iterator<Item = &'a Value>) -> String {
     let mut out = String::new();
-    for message in items {
+    for message in messages {
         let Some(role) = message.get("role").and_then(Value::as_str) else {
             continue;
         };

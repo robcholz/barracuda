@@ -3,36 +3,20 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::{BTreeMap, HashSet, VecDeque};
 
-use claw_api::{ChatRequest, LlmDelta, LlmResponse, ToolCall};
+use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_tool::{RawToolInvocation, ToolExecution, ToolExecutor, ToolInvocation, ToolSetHandle};
+use claw_utils::stream::StreamPart;
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
-use super::super::stream::{AgentProgress, ProgressEmitter};
-use super::types::{
-    AppendedMessages, IterationLoopError, IterationOutcome, IterationResult, LlmStep,
-};
+use super::types::{IterationLoopError, IterationLoopEvent, LlmStep};
 use super::{
-    IterationLoop, PendingToolPermission, ToolAuthorization, ToolCallId, ToolCallIdAllocator,
-    ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
+    InflightToolCall, IterationEmitter, IterationLoop, IterationStream, PendingToolPermission,
+    ToolAuthorization, ToolCallId, ToolCallIdAllocator, ToolPermission, ToolPermissionPolicy,
+    ToolPermissionRequest,
 };
-use crate::protocol::InflightToolCall;
-
-struct IterationOutput<'a> {
-    progress: &'a ProgressEmitter,
-    phase: ContentPhase,
-    reasoning_bytes: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ContentPhase {
-    Reasoning,
-    Output,
-    ToolCalls,
-    Ended,
-}
 
 struct PreparedToolCall {
     id: ToolCallId,
@@ -52,11 +36,6 @@ impl PreparedToolCall {
     }
 }
 
-struct ToolCallResult {
-    content: String,
-    ok: bool,
-}
-
 struct ToolCallIdentity {
     id: ToolCallId,
     provider_id: String,
@@ -67,7 +46,7 @@ struct PendingToolCall<'a> {
     permission: PendingToolPermission<'a>,
 }
 
-type ToolRunOutput = Result<(ToolCallId, ToolCallResult), IterationLoopError>;
+type ToolRunOutput = Result<(ToolCallId, ToolExecution), IterationLoopError>;
 type ToolRunFuture<'a> = Pin<Box<dyn Future<Output = ToolRunOutput> + 'a>>;
 
 struct ToolRuns<'a> {
@@ -76,9 +55,8 @@ struct ToolRuns<'a> {
 }
 
 struct ToolCallBatch {
-    messages: AppendedMessages,
     order: Vec<ToolCallIdentity>,
-    results: BTreeMap<ToolCallId, ToolCallResult>,
+    results: BTreeMap<ToolCallId, ToolExecution>,
 }
 
 enum ToolBatchUpdate {
@@ -86,131 +64,92 @@ enum ToolBatchUpdate {
     Execution(ToolRunOutput),
 }
 
-impl<'a> IterationOutput<'a> {
-    fn new(progress: &'a ProgressEmitter) -> Self {
-        Self {
-            progress,
-            phase: ContentPhase::Reasoning,
-            reasoning_bytes: 0,
-        }
-    }
-
-    async fn emit_reasoning(&mut self, fragment: &str) {
-        debug_assert_eq!(self.phase, ContentPhase::Reasoning);
-        if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
-            return;
-        }
-        let remaining = reasoning_limit() - self.reasoning_bytes;
-        let mut end = remaining.min(fragment.len());
-        while end > 0 && !fragment.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == 0 {
-            return;
-        }
-        self.reasoning_bytes += end;
-        self.progress
-            .send(AgentProgress::ReasoningDelta(fragment[..end].to_owned()))
-            .await;
-    }
-
-    async fn emit_output(&mut self, text: String) {
-        self.finish_reasoning().await;
-        debug_assert_eq!(self.phase, ContentPhase::Output);
-        self.progress.send(AgentProgress::OutputDelta(text)).await;
-    }
-
-    async fn emit_tool_call(&mut self, call: ToolCall) {
-        self.finish_reasoning().await;
-        self.finish_output().await;
-        debug_assert_eq!(self.phase, ContentPhase::ToolCalls);
-        self.progress.send(AgentProgress::ToolCall(call)).await;
-    }
-
-    async fn finish(&mut self) {
-        self.finish_reasoning().await;
-        self.finish_output().await;
-        self.finish_tool_calls().await;
-    }
-
-    async fn finish_reasoning(&mut self) {
-        if self.phase == ContentPhase::Reasoning {
-            self.progress.send(AgentProgress::ReasoningEnded).await;
-            self.phase = ContentPhase::Output;
-        }
-    }
-
-    async fn finish_output(&mut self) {
-        if self.phase == ContentPhase::Output {
-            self.progress.send(AgentProgress::OutputEnded).await;
-            self.phase = ContentPhase::ToolCalls;
-        }
-    }
-
-    async fn finish_tool_calls(&mut self) {
-        if self.phase == ContentPhase::ToolCalls {
-            self.progress.send(AgentProgress::ToolCallsEnded).await;
-            self.phase = ContentPhase::Ended;
-        }
-    }
+#[derive(Debug)]
+enum ToolPhaseOutcome {
+    Tools(Vec<(String, ToolExecution)>),
+    Interrupted,
+    Cancelled,
 }
 
-impl<H, Timer, P> IterationLoop<'_, H, Timer, P>
+impl<'a, H, Timer, P> IterationLoop<'a, H, Timer, P>
 where
     H: ClawHttp + StreamingHttp,
     Timer: ClawTimer,
-    P: ToolPermissionPolicy,
+    P: ToolPermissionPolicy + 'a,
 {
-    pub(crate) async fn run(self, step: LlmStep<'_>) -> IterationResult {
-        let span = tracing::info_span!("iteration_loop", run.iteration = %step.iteration_id);
-        run_one_iteration(self, step).instrument(span).await
+    /// Start one iteration and return its sole output surface.
+    ///
+    /// Success is the stream reaching `None`; failures are emitted as one final
+    /// `Err` item. Nothing is aggregated into a terminal response value.
+    pub(crate) fn run(self, step: LlmStep<'a>) -> IterationStream<'a> {
+        let (events, receiver) = IterationStream::channel();
+        let driver_events = events.clone();
+        let driver = Box::pin(async move {
+            let span = tracing::info_span!("iteration_loop", run.iteration = %step.iteration_id);
+            if let Err(error) = run_one_iteration(self, step, &driver_events)
+                .instrument(span)
+                .await
+            {
+                driver_events.send_error(error).await;
+            }
+        });
+        IterationStream::new(driver, receiver)
     }
 }
 
 async fn run_one_iteration<H, Timer, P>(
     mut loop_: IterationLoop<'_, H, Timer, P>,
     step: LlmStep<'_>,
-) -> IterationResult
+    events: &IterationEmitter,
+) -> Result<(), IterationLoopError>
 where
     H: ClawHttp + StreamingHttp,
     Timer: ClawTimer,
     P: ToolPermissionPolicy,
 {
-    loop_
-        .progress
-        .send(AgentProgress::IterationStarted(step.iteration_id))
+    let Some(tool_calls) = call_llm(&mut loop_, &step, events).await? else {
+        events.send(IterationLoopEvent::Cancelled).await;
+        return Ok(());
+    };
+    if tool_calls.is_empty() {
+        return Ok(());
+    }
+
+    events
+        .send(IterationLoopEvent::BeforeToolCalls(observable_tool_calls(
+            &tool_calls,
+        )))
         .await;
-    let response = {
-        let mut output = IterationOutput::new(loop_.progress);
-        let response = call_llm(&mut loop_, &step, &mut output).await;
-        output.finish().await;
-        response
-    };
-
-    let result = match response {
-        Ok(Some(response)) if response.tool_calls.is_empty() => {
-            Ok(IterationOutcome::Response(response))
+    match execute_tool_calls(
+        &tool_calls,
+        step.tools,
+        loop_.control,
+        loop_.permission,
+        events,
+    )
+    .await?
+    {
+        ToolPhaseOutcome::Tools(results) => {
+            for (tool_call_id, execution) in results {
+                events
+                    .send(IterationLoopEvent::ToolResult {
+                        tool_call_id,
+                        execution,
+                    })
+                    .await;
+            }
         }
-        Ok(Some(response)) => {
-            loop_
-                .progress
-                .send(AgentProgress::ToolCalls(observable_tool_calls(&response)))
-                .await;
-            execute_tool_calls(&response, step.tools, loop_.control, loop_.permission).await
-        }
-        Ok(None) => Ok(IterationOutcome::Cancelled(AppendedMessages::empty())),
-        Err(error) => Err(error),
-    };
-
-    loop_.progress.send(AgentProgress::IterationEnded).await;
-    result
+        ToolPhaseOutcome::Interrupted => events.send(IterationLoopEvent::Interrupted).await,
+        ToolPhaseOutcome::Cancelled => events.send(IterationLoopEvent::Cancelled).await,
+    }
+    Ok(())
 }
 
 async fn call_llm<H, Timer, P>(
     loop_: &mut IterationLoop<'_, H, Timer, P>,
     step: &LlmStep<'_>,
-    output: &mut IterationOutput<'_>,
-) -> Result<Option<LlmResponse>, IterationLoopError>
+    events: &IterationEmitter,
+) -> Result<Option<Vec<ToolCall>>, IterationLoopError>
 where
     H: ClawHttp + StreamingHttp,
     Timer: ClawTimer,
@@ -240,27 +179,18 @@ where
         Ok(stream) => stream,
         Err(error) => return interpret_chat_error(loop_.control.is_cancelled(), error),
     };
+    let mut tool_calls = Vec::new();
 
     loop {
         let next = StreamExt::next(&mut stream)
             .instrument(chat_span.clone())
             .await;
         match next {
-            Some(Ok(LlmDelta::Reasoning(text))) => output.emit_reasoning(&text).await,
-            Some(Ok(LlmDelta::Output(text))) => output.emit_output(text).await,
-            Some(Ok(LlmDelta::ToolCall {
-                id,
-                name,
-                arguments,
-                ..
-            })) => {
-                output
-                    .emit_tool_call(ToolCall {
-                        id,
-                        name,
-                        arguments_json: arguments,
-                    })
-                    .await;
+            Some(Ok(event)) => {
+                if let ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) = &event {
+                    tool_calls.push(call.clone());
+                }
+                events.send(IterationLoopEvent::Llm(event)).await;
             }
             Some(Err(error)) => {
                 return interpret_chat_error(loop_.control.is_cancelled(), error);
@@ -269,44 +199,29 @@ where
         }
     }
 
-    let response = match stream.take_response() {
-        Some(Ok(response)) => response,
-        Some(Err(error)) => return interpret_chat_error(loop_.control.is_cancelled(), error),
-        None => {
-            return interpret_chat_error(
-                loop_.control.is_cancelled(),
-                claw_api::ChatError::truncated_stream(),
-            );
-        }
-    };
-
-    #[cfg(feature = "cache_profile")]
-    if let Some(usage) = response.usage {
-        output.progress.send(AgentProgress::Usage(usage)).await;
-    }
-
     if loop_.control.is_cancelled() {
         tracing::warn!(name: "cancelled", checkpoint = "after_llm");
         Ok(None)
     } else {
-        Ok(Some(response))
+        Ok(Some(tool_calls))
     }
 }
 
 async fn execute_tool_calls<P>(
-    response: &LlmResponse,
+    tool_calls: &[ToolCall],
     tools: &ToolSetHandle<'_>,
     control: &super::super::stream::RunControl,
     permission: &P,
-) -> IterationResult
+    events: &IterationEmitter,
+) -> Result<ToolPhaseOutcome, IterationLoopError>
 where
     P: ToolPermissionPolicy,
 {
-    let mut batch = ToolCallBatch::new(response)?;
-    let mut provider_ids = HashSet::with_capacity(response.tool_calls.len());
+    let mut batch = ToolCallBatch::new(tool_calls.len());
+    let mut provider_ids = HashSet::with_capacity(tool_calls.len());
     let mut tool_call_ids = ToolCallIdAllocator::new();
-    let mut calls = Vec::with_capacity(response.tool_calls.len());
-    for tool_call in &response.tool_calls {
+    let mut calls = Vec::with_capacity(tool_calls.len());
+    for tool_call in tool_calls {
         if tool_call.id.is_empty() {
             return Err(IterationLoopError::MissingProviderToolCallId);
         }
@@ -328,7 +243,7 @@ where
     let mut pending = VecDeque::new();
     for (id, tool_call) in calls {
         if control.is_cancelled() {
-            return Ok(IterationOutcome::Cancelled(batch.into_messages()));
+            return Ok(ToolPhaseOutcome::Cancelled);
         }
         let invocation = match ToolInvocation::try_from(RawToolInvocation {
             id: Some(&tool_call.id),
@@ -337,14 +252,26 @@ where
         }) {
             Ok(invocation) => invocation,
             Err(error) => {
-                batch.collect(id, error.to_string(), false);
+                batch.collect(
+                    id,
+                    ToolExecution {
+                        content: error.to_string(),
+                        ok: false,
+                    },
+                );
                 continue;
             }
         };
         let action = match tools.classify(&invocation) {
             Ok(action) => action,
             Err(error) => {
-                batch.collect(id, error.to_string(), false);
+                batch.collect(
+                    id,
+                    ToolExecution {
+                        content: error.to_string(),
+                        ok: false,
+                    },
+                );
                 continue;
             }
         };
@@ -355,12 +282,22 @@ where
             arguments_json: invocation.arguments_json().to_owned(),
         };
 
-        match permission.authorize(ToolPermissionRequest {
-            tool_call_id: id,
-            action: &action,
-        }) {
+        match permission.authorize(
+            ToolPermissionRequest {
+                tool_call_id: id,
+                tool_call: &tool_call,
+                action: &action,
+            },
+            events,
+        ) {
             ToolAuthorization::Allow => runs.push(execute_prepared_tool(&executor, prepared)),
-            ToolAuthorization::Deny(reason) => batch.collect(id, reason, false),
+            ToolAuthorization::Deny(reason) => batch.collect(
+                id,
+                ToolExecution {
+                    content: reason,
+                    ok: false,
+                },
+            ),
             ToolAuthorization::Pending(permission) => {
                 pending.push_back(PendingToolCall {
                     call: prepared,
@@ -373,7 +310,7 @@ where
     let mut active_permission = pending.pop_front();
     while active_permission.is_some() || !runs.is_empty() {
         if control.is_cancelled() {
-            return Ok(IterationOutcome::Cancelled(batch.into_messages()));
+            return Ok(ToolPhaseOutcome::Cancelled);
         }
 
         let update = match active_permission.as_mut() {
@@ -391,7 +328,7 @@ where
         match update {
             ToolBatchUpdate::Execution(result) => {
                 let (id, result) = result?;
-                batch.collect(id, result.content, result.ok);
+                batch.collect(id, result);
             }
             ToolBatchUpdate::Permission(decision) => {
                 let Some(waiting) = active_permission.take() else {
@@ -402,11 +339,17 @@ where
                         runs.push(execute_prepared_tool(&executor, waiting.call));
                     }
                     ToolPermission::Deny(reason) => {
-                        batch.collect(waiting.call.id, reason, false);
+                        batch.collect(
+                            waiting.call.id,
+                            ToolExecution {
+                                content: reason,
+                                ok: false,
+                            },
+                        );
                     }
-                    ToolPermission::Interrupted => return Ok(IterationOutcome::Interrupted),
+                    ToolPermission::Interrupted => return Ok(ToolPhaseOutcome::Interrupted),
                     ToolPermission::Cancelled => {
-                        return Ok(IterationOutcome::Cancelled(batch.into_messages()));
+                        return Ok(ToolPhaseOutcome::Cancelled);
                     }
                 }
                 active_permission = pending.pop_front();
@@ -415,27 +358,24 @@ where
     }
 
     if control.is_cancelled() {
-        return Ok(IterationOutcome::Cancelled(batch.into_messages()));
+        return Ok(ToolPhaseOutcome::Cancelled);
     }
     if !batch.is_complete() {
         return Err(IterationLoopError::IncompleteToolBatch);
     }
-    Ok(IterationOutcome::Tools(batch.into_messages()))
+    Ok(ToolPhaseOutcome::Tools(batch.into_results()))
 }
 
 impl ToolCallBatch {
-    fn new(response: &LlmResponse) -> Result<Self, IterationLoopError> {
-        let mut messages = AppendedMessages::empty();
-        append_assistant_tool_calls(&mut messages, response)?;
-        Ok(Self {
-            messages,
-            order: Vec::with_capacity(response.tool_calls.len()),
+    fn new(capacity: usize) -> Self {
+        Self {
+            order: Vec::with_capacity(capacity),
             results: BTreeMap::new(),
-        })
+        }
     }
 
-    fn collect(&mut self, id: ToolCallId, content: String, ok: bool) {
-        let previous = self.results.insert(id, ToolCallResult { content, ok });
+    fn collect(&mut self, id: ToolCallId, execution: ToolExecution) {
+        let previous = self.results.insert(id, execution);
         debug_assert!(previous.is_none());
     }
 
@@ -447,19 +387,15 @@ impl ToolCallBatch {
                 .all(|call| self.results.contains_key(&call.id))
     }
 
-    fn into_messages(mut self) -> AppendedMessages {
+    fn into_results(mut self) -> Vec<(String, ToolExecution)> {
+        let mut results = Vec::with_capacity(self.order.len());
         for call in self.order {
-            let Some(result) = self.results.remove(&call.id) else {
+            let Some(execution) = self.results.remove(&call.id) else {
                 continue;
             };
-            self.messages.push(serde_json::json!({
-                "role": "tool",
-                "tool_call_id": call.provider_id,
-                "content": result.content,
-                "is_error": !result.ok,
-            }));
+            results.push((call.provider_id, execution));
         }
-        self.messages
+        results
     }
 }
 
@@ -515,38 +451,19 @@ async fn execute_prepared_tool(
     let id = call.id;
     let span = tracing::info_span!("toolcall", tool = %call.name);
     let invocation = call.invocation()?;
-    let ToolExecution { content, ok } =
-        executor.execute(&invocation).instrument(span.clone()).await;
+    let execution = executor.execute(&invocation).instrument(span.clone()).await;
     span.in_scope(|| {
-        if ok {
-            tracing::info!(name: "result", ok);
+        if execution.ok {
+            tracing::info!(name: "result", ok = true);
         } else {
-            tracing::warn!(name: "result", ok);
+            tracing::warn!(name: "result", ok = false);
         }
     });
-    Ok((id, ToolCallResult { content, ok }))
+    Ok((id, execution))
 }
 
-fn append_assistant_tool_calls(
-    messages: &mut AppendedMessages,
-    response: &LlmResponse,
-) -> Result<(), IterationLoopError> {
-    let Some(raw) = response
-        .raw_message_json
-        .as_deref()
-        .filter(|message| !message.is_empty())
-    else {
-        return Err(IterationLoopError::MissingAssistantMessage);
-    };
-    let assistant =
-        serde_json::from_str(raw).map_err(|_| IterationLoopError::MalformedAssistantMessage)?;
-    messages.push(assistant);
-    Ok(())
-}
-
-fn observable_tool_calls(response: &LlmResponse) -> Vec<InflightToolCall> {
-    response
-        .tool_calls
+fn observable_tool_calls(tool_calls: &[ToolCall]) -> Vec<InflightToolCall> {
+    tool_calls
         .iter()
         .filter_map(|call| {
             let invocation = ToolInvocation::try_from(RawToolInvocation {
@@ -568,32 +485,13 @@ fn observable_tool_calls(response: &LlmResponse) -> Vec<InflightToolCall> {
 fn interpret_chat_error(
     cancelled: bool,
     error: claw_api::ChatError,
-) -> Result<Option<LlmResponse>, IterationLoopError> {
+) -> Result<Option<Vec<ToolCall>>, IterationLoopError> {
     if cancelled || error.is_aborted() {
         tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
         Ok(None)
     } else {
         tracing::error!(name: "chat_failed", kind = "chat");
         Err(IterationLoopError::Chat(error))
-    }
-}
-
-const fn reasoning_limit() -> usize {
-    #[cfg(feature = "reasoning_short")]
-    {
-        2_000
-    }
-    #[cfg(all(feature = "reasoning_medium", not(feature = "reasoning_short")))]
-    {
-        8_000
-    }
-    #[cfg(all(
-        feature = "reasoning_long",
-        not(feature = "reasoning_short"),
-        not(feature = "reasoning_medium")
-    ))]
-    {
-        32_000
     }
 }
 
@@ -608,7 +506,6 @@ mod tests {
         SyncToolHandler, Tool, ToolGroup, ToolOutput, ToolRegistry, ToolResult, ToolSpec,
     };
     use futures_lite::future::block_on;
-    use serde_json::json;
 
     use super::*;
     use crate::agent::base_agent::stream::AgentStreamHandle;
@@ -649,7 +546,11 @@ mod tests {
     }
 
     impl ToolPermissionPolicy for SelectivePermission {
-        fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
+        fn authorize<'a>(
+            &'a self,
+            request: ToolPermissionRequest<'_>,
+            _events: &IterationEmitter,
+        ) -> ToolAuthorization<'a> {
             assert_eq!(
                 self.executions.load(Ordering::SeqCst),
                 0,
@@ -693,7 +594,7 @@ mod tests {
             ))
             .expect("test tools are valid");
         let tools = tool_set.begin().expect("test tool set starts");
-        let response = response([
+        let tool_calls = [
             ToolCall {
                 id: "call-deny".to_owned(),
                 name: "denied".to_owned(),
@@ -704,17 +605,24 @@ mod tests {
                 name: "allowed".to_owned(),
                 arguments_json: "{}".to_owned(),
             },
-        ]);
+        ];
         let control = AgentStreamHandle::control();
+        let (events, _receiver) = IterationStream::channel();
         let permission = SelectivePermission {
             executions: Arc::clone(&executions),
             checks: Cell::new(0),
             ids: RefCell::new(Vec::new()),
         };
 
-        let result = block_on(execute_tool_calls(&response, &tools, &control, &permission))
-            .expect("tool calls complete");
-        let IterationOutcome::Tools(messages) = result else {
+        let result = block_on(execute_tool_calls(
+            &tool_calls,
+            &tools,
+            &control,
+            &permission,
+            &events,
+        ))
+        .expect("tool calls complete");
+        let ToolPhaseOutcome::Tools(results) = result else {
             panic!("iteration should produce tool messages");
         };
 
@@ -725,28 +633,23 @@ mod tests {
         );
         assert_eq!(executions.load(Ordering::SeqCst), 1);
         assert_eq!(
-            messages.into_json_array(),
-            json!([
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        { "id": "call-deny" },
-                        { "id": "call-allow" }
-                    ]
-                },
-                {
-                    "role": "tool",
-                    "tool_call_id": "call-deny",
-                    "content": "policy denied",
-                    "is_error": true
-                },
-                {
-                    "role": "tool",
-                    "tool_call_id": "call-allow",
-                    "content": "allowed",
-                    "is_error": false
-                }
-            ])
+            results,
+            vec![
+                (
+                    "call-deny".to_owned(),
+                    ToolExecution {
+                        content: "policy denied".to_owned(),
+                        ok: false,
+                    },
+                ),
+                (
+                    "call-allow".to_owned(),
+                    ToolExecution {
+                        content: "allowed".to_owned(),
+                        ok: true,
+                    },
+                ),
+            ]
         );
     }
 
@@ -766,7 +669,7 @@ mod tests {
             ))
             .expect("test tool is valid");
         let tools = tool_set.begin().expect("test tool set starts");
-        let response = response([
+        let tool_calls = [
             ToolCall {
                 id: "duplicate".to_owned(),
                 name: "allowed".to_owned(),
@@ -777,80 +680,24 @@ mod tests {
                 name: "allowed".to_owned(),
                 arguments_json: "{}".to_owned(),
             },
-        ]);
+        ];
         let control = AgentStreamHandle::control();
         let permission = AllowAll;
+        let (events, _receiver) = IterationStream::channel();
 
-        let error = block_on(execute_tool_calls(&response, &tools, &control, &permission))
-            .expect_err("duplicate ids fail the iteration");
+        let error = block_on(execute_tool_calls(
+            &tool_calls,
+            &tools,
+            &control,
+            &permission,
+            &events,
+        ))
+        .expect_err("duplicate ids fail the iteration");
 
         assert_eq!(
             error,
             IterationLoopError::DuplicateProviderToolCallId("duplicate".to_owned())
         );
         assert_eq!(executions.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn iteration_output_closes_skipped_content_streams_in_order() {
-        let (progress, receiver) = AgentStreamHandle::channel();
-        let producer = async {
-            let mut output = IterationOutput::new(&progress);
-            output.emit_reasoning("thinking").await;
-            output
-                .emit_tool_call(ToolCall {
-                    id: "call-1".to_owned(),
-                    name: "search".to_owned(),
-                    arguments_json: r#"{"query":"rust"}"#.to_owned(),
-                })
-                .await;
-            output.finish().await;
-        };
-        let consumer = async {
-            let mut actual = Vec::new();
-            for _ in 0..5 {
-                let envelope = receiver.recv().await.expect("output remains open");
-                actual.push(envelope.progress);
-                envelope
-                    .resume
-                    .send(())
-                    .await
-                    .expect("producer remains open");
-            }
-            actual
-        };
-
-        let (_, actual) = block_on(futures_lite::future::zip(producer, consumer));
-        assert_eq!(
-            actual,
-            vec![
-                AgentProgress::ReasoningDelta("thinking".to_owned()),
-                AgentProgress::ReasoningEnded,
-                AgentProgress::OutputEnded,
-                AgentProgress::ToolCall(ToolCall {
-                    id: "call-1".to_owned(),
-                    name: "search".to_owned(),
-                    arguments_json: r#"{"query":"rust"}"#.to_owned(),
-                }),
-                AgentProgress::ToolCallsEnded,
-            ]
-        );
-    }
-
-    fn response<const N: usize>(tool_calls: [ToolCall; N]) -> LlmResponse {
-        LlmResponse {
-            raw_message_json: Some(
-                json!({
-                    "role": "assistant",
-                    "tool_calls": tool_calls
-                        .iter()
-                        .map(|call| json!({ "id": &call.id }))
-                        .collect::<Vec<_>>()
-                })
-                .to_string(),
-            ),
-            tool_calls: tool_calls.into(),
-            ..LlmResponse::default()
-        }
     }
 }

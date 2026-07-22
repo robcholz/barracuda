@@ -1,3 +1,4 @@
+use claw_api::ToolCall;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
@@ -47,7 +48,8 @@ where
         Some(MultiagentInputRequest {
             idle_origin: TurnOrigin::Subagent { agent },
             kind: InputRequestKind::PermissionApproval {
-                summary: approval.summary.clone(),
+                tool_call: approval.tool_call.clone(),
+                reason: approval.reason.clone(),
             },
         })
     }
@@ -84,12 +86,14 @@ where
         &mut self,
         agent: AgentId,
         tool_call_id: ToolCallId,
-        summary: String,
+        tool_call: ToolCall,
+        reason: String,
     ) -> DriveOutput {
         if !self.state.contains(agent) {
             return DriveOutput::default();
         }
-        self.state.park_approval(agent, tool_call_id, summary);
+        self.state
+            .park_approval(agent, tool_call_id, tool_call, reason);
 
         DriveOutput::default()
     }
@@ -104,13 +108,12 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
+    use claw_api::ToolCall;
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{
-        AgentApprovalError, ApprovalDecision, FsAgentFactory, ToolCallId,
-    };
+    use crate::agent::{AgentApprovalError, ApprovalDecision, FsAgentFactory, ToolCallId};
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
 
@@ -141,9 +144,12 @@ mod tests {
     fn unknown_agent_does_not_consume_active_approval() {
         let agent = AgentId(7);
         let mut instance = instance();
-        instance
-            .state
-            .park_approval(agent, ToolCallId::new(0), "permission".to_owned());
+        instance.state.park_approval(
+            agent,
+            ToolCallId::new(0),
+            ToolCall::default(),
+            "permission".to_owned(),
+        );
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),
@@ -173,9 +179,12 @@ mod tests {
             )
             .expect("idle test agent builds");
         assert!(instance.state.insert_root(agent, kind));
-        instance
-            .state
-            .park_approval(agent, ToolCallId::new(0), "permission".to_owned());
+        instance.state.park_approval(
+            agent,
+            ToolCallId::new(0),
+            ToolCall::default(),
+            "permission".to_owned(),
+        );
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),

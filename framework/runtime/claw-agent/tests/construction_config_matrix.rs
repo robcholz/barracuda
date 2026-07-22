@@ -5,7 +5,7 @@ use support::Sse;
 
 use std::collections::BTreeMap;
 
-use claw_agent::{AgentPersistenceConfig, AgentSystem, Message, SessionEvent, StreamPart};
+use claw_agent::{stream::StreamPart, AgentPersistenceConfig, AgentSystem, Message, SessionEvent};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{
     Cancel, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,

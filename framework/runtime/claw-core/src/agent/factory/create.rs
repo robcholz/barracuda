@@ -95,11 +95,10 @@ impl<
         } else {
             TranscriptStore::<Filesystem>::in_memory(transcript_id)
         };
-        let conversation_history_store = store.clone();
-
+        // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
+        // adapters read it through the `&dyn Transcript` lent to `prepare`.
         let conversation_history =
             ConversationHistoryContextAdapter::with_llm_compaction::<Http, Timer>(
-                conversation_history_store,
                 Arc::clone(&self.api_manager),
                 COMPACTION_TRIGGER_TOKENS,
                 COMPACTION_KEEP_RECENT_TOKENS,

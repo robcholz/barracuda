@@ -83,7 +83,7 @@ Sessions; a future directory cache must remain a rebuildable read model.
   poll blocks the sole OS thread and must remain bounded.
 - `AgentRun` is a Scheduler-private ownership/poll wrapper around a checked-out
   BaseAgent and that Agent's `AgentStreamHandle`. It must not define a second
-  progress or outcome protocol. It forwards `AgentProgress` unchanged and
+  event or outcome protocol. It forwards `Result<AgentEvent, AgentError>` unchanged and
   retains the completed BaseAgent until its owner takes it back exactly once.
 
 ### BaseAgent
@@ -97,15 +97,15 @@ Sessions; a future directory cache must remain a rebuildable read model.
   state machine.
 - `BaseAgent::submit(&mut self, Message)` is the only task-entry API. It returns
   an `AgentStreamHandle<'_>` that exclusively borrows the BaseAgent for the
-  task and implements `Stream<Item = AgentProgress>`. The handle is the only
-  progress and control surface; there is no public tick API, output sender, or
+  task and implements `Stream<Item = Result<AgentEvent, AgentError>>`. The handle is the only
+  event and control surface; there is no public tick API, output sender, or
   separate terminal-outcome protocol.
 - The handle owns `interrupt`, `cancel`, and `resolve_approval`. Dropping it
   before terminal completion cancels the active task and leaves BaseAgent in a
-  stopped state. The private mechanism used to bridge the borrowed HTTP stream
-  into `AgentProgress` is not an architectural queue or a second protocol.
+  stopped state. BaseAgent directly consumes the borrowed HTTP stream, updates
+  its transcript, and yields each corresponding `AgentEvent`.
 - After the LLM stream completes, `IterationLoop` emits the aggregate
-  `AgentProgress::ToolCalls` boundary and suspends until the owner polls again.
+  `IterationEvent::BeforeToolCalls` boundary and suspends until the owner polls again.
   It then continues directly into permission and execution; BaseAgent stores no
   duplicate tool-call substate. There is no `ToolCallObserver`, `ToolStartYield`,
   or hand-built observer barrier.

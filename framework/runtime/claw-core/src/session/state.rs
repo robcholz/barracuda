@@ -1,6 +1,7 @@
+use crate::agent::InflightToolCall;
 use crate::protocol::{
-    InflightToolCall, InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TurnId,
-    TurnIdAllocator, TurnOrigin,
+    InputRequestId, InputRequestIdAllocator, InputRequestKind, Message, TurnId, TurnIdAllocator,
+    TurnOrigin,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

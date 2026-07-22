@@ -8,11 +8,11 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use claw_api::{ClawApiConfig, InitError};
+pub use claw_core::stream;
 pub use claw_core::{
     AgentId, ApiUsage, InputRequestId, InputRequestKind, IterationId, Message, OpenSessionError,
     PermissionLevel, ReasoningEffort, SessionControl, SessionControlError, SessionCreateError,
-    SessionEvent, SessionEventStream, SessionId, SessionPersistence, StreamPart, ToolCall, TurnId,
-    TurnOrigin,
+    SessionEvent, SessionEventStream, SessionId, SessionPersistence, ToolCall, TurnId, TurnOrigin,
 };
 use claw_core::{Orchestrator, OrchestratorBuildError};
 use claw_interface::http::StreamingHttp;

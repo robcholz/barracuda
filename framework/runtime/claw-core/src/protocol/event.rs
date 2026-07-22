@@ -9,9 +9,12 @@
 //!
 //! See `.agents/design/sse.md` for the full model (ordering, SSE forward-compat).
 
+use claw_utils::stream::StreamPart;
 use serde::{Deserialize, Serialize};
 
-use super::{InputRequestId, IterationId, TurnId, TurnOrigin};
+use crate::agent::IterationId;
+
+use super::{InputRequestId, TurnId, TurnOrigin};
 
 pub use claw_api::ToolCall;
 
@@ -36,19 +39,6 @@ compile_error!(
     "enable only one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
 );
 
-/// One incremental part of a typed content stream.
-///
-/// [`Delta`](Self::Delta) carries one append fragment or one complete item.
-/// [`End`](Self::End) explicitly closes that content stream, including streams
-/// that emitted no deltas.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum StreamPart<T> {
-    /// One incremental fragment or complete list item.
-    Delta(T),
-    /// No more deltas will be emitted for this content stream.
-    End,
-}
-
 /// Semantic input the active turn needs from its caller.
 ///
 /// Callers choose how to present this request. A chat adapter may render it as
@@ -58,8 +48,10 @@ pub enum StreamPart<T> {
 pub enum InputRequestKind {
     /// A tool action is waiting for human permission.
     PermissionApproval {
-        /// Policy-provided description of the action awaiting approval.
-        summary: String,
+        /// The complete model-requested call awaiting authorization.
+        tool_call: ToolCall,
+        /// Policy-provided reason why this call requires approval.
+        reason: String,
     },
 }
 

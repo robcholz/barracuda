@@ -23,14 +23,16 @@ mod protocol;
 mod scheduler;
 mod session;
 
+pub use claw_utils::stream;
 pub(crate) use claw_utils::{define_id_allocator, define_prefixed_id};
 
+pub use agent::IterationId;
 pub use claw_permission::PermissionLevel;
 pub use config::{ApiUsage, ReasoningEffort};
 pub use orchestrator::{Orchestrator, OrchestratorBuildError};
 pub use protocol::{
-    AgentId, InputRequestId, InputRequestKind, IterationId, Message, SessionEvent, SessionId,
-    SessionPersistence, StreamPart, ToolCall, TurnId, TurnOrigin,
+    AgentId, InputRequestId, InputRequestKind, Message, SessionEvent, SessionId,
+    SessionPersistence, ToolCall, TurnId, TurnOrigin,
 };
 pub use session::{
     OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionEventStream,

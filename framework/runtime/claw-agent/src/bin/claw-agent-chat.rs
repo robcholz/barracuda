@@ -22,9 +22,9 @@ use std::path::Path;
 use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
-    AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind, Message,
-    PermissionLevel, SessionControl, SessionEvent, SessionEventStream, SessionPersistence,
-    StreamPart, ToolCall, TurnOrigin,
+    stream::StreamPart, AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind,
+    Message, PermissionLevel, SessionControl, SessionEvent, SessionEventStream, SessionPersistence,
+    ToolCall, TurnOrigin,
 };
 use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
 use claw_interface::{StdThread, TokioExecutor};
@@ -427,9 +427,10 @@ fn permission_level_name(level: PermissionLevel) -> &'static str {
 
 fn format_input_request(kind: &InputRequestKind) -> String {
     match kind {
-        InputRequestKind::PermissionApproval { summary } => {
-            format!("Permission approval needed:\n{summary}\n\nReply with approval or rejection.")
-        }
+        InputRequestKind::PermissionApproval { tool_call, reason } => format!(
+            "Permission approval needed:\nTool call ID: {}\nTool: {}\nArguments: {}\nReason: {}\n\nReply with approval or rejection.",
+            tool_call.id, tool_call.name, tool_call.arguments_json, reason
+        ),
     }
 }
 
@@ -726,9 +727,14 @@ mod tests {
     fn permission_request_rendering_belongs_to_the_cli() {
         assert_eq!(
             format_input_request(&InputRequestKind::PermissionApproval {
-                summary: "'skill_reload' is a High-risk action and needs approval.".to_owned(),
+                tool_call: claw_agent::ToolCall {
+                    id: "call-1".to_owned(),
+                    name: "skill_reload".to_owned(),
+                    arguments_json: r#"{"name":"demo"}"#.to_owned(),
+                },
+                reason: "'skill_reload' is a High-risk action and needs approval.".to_owned(),
             }),
-            "Permission approval needed:\n'skill_reload' is a High-risk action and needs approval.\n\nReply with approval or rejection."
+            "Permission approval needed:\nTool call ID: call-1\nTool: skill_reload\nArguments: {\"name\":\"demo\"}\nReason: 'skill_reload' is a High-risk action and needs approval.\n\nReply with approval or rejection."
         );
     }
 }

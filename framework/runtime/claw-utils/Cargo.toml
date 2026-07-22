@@ -3,7 +3,7 @@ name = "claw-utils"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Shared utilities: log-safe text truncation and the prefixed-id newtype macro"
+description = "Shared utilities: stream parts, log-safe text truncation, and prefixed ids"
 
 [lib]
 name = "claw_utils"

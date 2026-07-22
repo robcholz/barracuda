@@ -6,7 +6,7 @@ use support::Sse;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
-use claw_agent::{AgentSystem, Message, SessionEvent, StreamPart};
+use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent};
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture,
     HttpStatusCode, ImmediateTimer, StdThread, TokioExecutor,

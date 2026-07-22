@@ -6,7 +6,8 @@ use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::protocol::{AgentId, AgentKind, InflightToolCall, Message};
+use crate::agent::InflightToolCall;
+use crate::protocol::{AgentId, AgentKind, Message};
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,

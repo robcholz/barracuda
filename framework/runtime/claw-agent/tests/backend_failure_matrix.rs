@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use claw_agent::{AgentError, AgentSystem, Message, SessionEvent, StreamPart};
+use claw_agent::{stream::StreamPart, AgentError, AgentSystem, Message, SessionEvent};
 use claw_interface::{
     Cancel, ClawFile, ClawFs, ClawHttp, ClawTimer, FsError, HttpError, HttpJsonRequest,
     HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFs,

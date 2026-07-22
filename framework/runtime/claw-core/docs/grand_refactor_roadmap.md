@@ -490,10 +490,11 @@ path, without performing runtime checkpoints yet.
   components: `AgentModeState` is owned by `AgentModeContextAdapter`,
   and `ResumedState` by `ResumedContextAdapter`. BaseAgent must not match on
   concrete modes or adapters. Preserve the direct
-  `AgentProgress::ToolCalls` stream boundary without an observer inside the
+  `IterationEvent::BeforeToolCalls` stream boundary without an observer inside the
   tool executor.
 - Make `BaseAgent::submit(&mut self, Message)` return the sole
-  `AgentStreamHandle<'_>`. The handle implements `Stream<Item = AgentProgress>`
+  `AgentStreamHandle<'_>`. The handle implements
+  `Stream<Item = Result<AgentEvent, AgentError>>`
   and owns interrupt, cancel, and approval resolution for that task. Delete the
   old tick, output-channel, and terminal-outcome protocols.
 - Keep owner message queues outside BaseAgent. A factory constructs a stopped
@@ -529,7 +530,7 @@ path, without performing runtime checkpoints yet.
 - Mark any legacy SessionState-to-snapshot restoration adapter for deletion or
   schema migration in Phase 7.
 - Keep the temporary direct driver as a Scheduler-local ownership adapter over
-  `AgentStreamHandle`; it must forward `AgentProgress` unchanged rather than
+  `AgentStreamHandle`; it must forward `Result<AgentEvent, AgentError>` unchanged rather than
   inventing another Agent protocol.
 
 ### Gate

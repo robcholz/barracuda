@@ -7,17 +7,13 @@ mod event;
 mod ids;
 mod kind;
 mod message;
-mod tool;
 
 pub(crate) use event::EventSink;
-pub use event::{InputRequestKind, SessionEvent, StreamPart, ToolCall};
-pub use ids::{AgentId, InputRequestId, IterationId, SessionId, TurnId};
-pub(crate) use ids::{
-    InputRequestIdAllocator, IterationIdAllocator, SessionIdAllocator, TurnIdAllocator,
-};
+pub use event::{InputRequestKind, SessionEvent, ToolCall};
+pub use ids::{AgentId, InputRequestId, SessionId, TurnId};
+pub(crate) use ids::{InputRequestIdAllocator, SessionIdAllocator, TurnIdAllocator};
 pub(crate) use kind::AgentKind;
 pub use message::Message;
-pub(crate) use tool::InflightToolCall;
 
 use serde::{Deserialize, Serialize};
 

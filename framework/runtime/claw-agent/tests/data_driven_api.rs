@@ -6,8 +6,8 @@ use support::Sse;
 use std::collections::BTreeMap;
 
 use claw_agent::{
-    AgentError, AgentSystem, IterationId, Message, OpenSessionError, SessionControlError,
-    SessionEvent, SessionEventStream, SessionId, StreamPart, TurnId, TurnOrigin,
+    stream::StreamPart, AgentError, AgentSystem, IterationId, Message, OpenSessionError,
+    SessionControlError, SessionEvent, SessionEventStream, SessionId, TurnId, TurnOrigin,
 };
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,

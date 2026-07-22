@@ -7,8 +7,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use claw_agent::{
+    stream::StreamPart, SessionEvent, SessionEventStream, SessionId, TurnId, TurnOrigin,
+};
 use claw_agent::{AgentError, AgentSystem, Message, OpenSessionError, SessionControlError};
-use claw_agent::{SessionEvent, SessionEventStream, SessionId, StreamPart, TurnId, TurnOrigin};
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
     ImmediateTimer, MemFs, SharedScriptHttp, StdThread, TokioExecutor,

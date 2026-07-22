@@ -18,7 +18,7 @@ Use `ClawApi` with `http::blocking::ClawHttp`, or `ClawApiAsync` with
 | `ClawApi::chat_json` | `ChatJsonRequest` | `ChatJsonResponse` (parsed `T` + tool calls) |
 | `ClawApi::infer_media` | `MediaRequest` | `String` (model text about the image) |
 | `ClawApiAsync::chat` | `ChatRequest` | async `LlmResponse` |
-| `ClawApiAsync::chat_stream` | `ChatRequest` | `ChatStream` of `LlmDelta` values; the stream exclusively borrows the HTTP transport until Drop |
+| `ClawApiAsync::chat_stream` | `ChatRequest` | `ChatStream` of `ChatStreamEvent` values containing `claw_utils::stream::StreamPart`; the stream exclusively borrows the HTTP transport until Drop |
 | `ClawApiAsync::chat_json` / `infer_media` | corresponding request | async buffered response |
 
 Both `openai_compatible` and `anthropic_compatible` backends are supported; the
@@ -59,7 +59,7 @@ pipeline, retry loop — are private):
 - Config / requests: `ClawApiConfig`, `BackendKind`, `ChatRequest`, `ChatJsonRequest`,
   `MediaRequest`, `RetryPolicy`, `StaticOutputSchema`
 - Responses / values: `LlmResponse`, `ChatJsonResponse`, `ChatStream`,
-  `LlmDelta`, `ToolCall`, `MediaAsset`
+  `ChatStreamEvent`, `ToolCall`, `MediaAsset`
 - Errors: `ClawApiError`, `ChatError`, `ChatJsonError`, `InferMediaError`,
   `InitError`, `ParseBackendKindError`
 
@@ -76,7 +76,7 @@ schema). The crate-level rustdoc has the same flow with line-by-line commentary.
 ## Where it fits
 
 A pure-Rust core crate depending on `claw-interface` (the buffered and streaming HTTP seams),
-`serde`/`serde_json`, `base64`, and `thiserror`. It is consumed by `claw_core`,
+`claw-utils` (shared stream parts), `serde`/`serde_json`, `base64`, and `thiserror`. It is consumed by `claw_core`,
 `claw-memory` (default `llm` feature), and LLM-inspection capabilities. The
 `#[ignore]`d live integration tests under `tests/` use `claw-interface`'s
 `realhttp` transport against a mock endpoint.

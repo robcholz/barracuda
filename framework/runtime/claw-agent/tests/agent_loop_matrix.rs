@@ -9,8 +9,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::task::{Poll, Waker};
 
 use claw_agent::{
-    AgentSystem, InputRequestId, InputRequestKind, IterationId, Message, PermissionLevel,
-    ReasoningEffort, SessionControlError, SessionEvent, StreamPart, ToolCall, TurnId, TurnOrigin,
+    stream::StreamPart, AgentSystem, InputRequestId, InputRequestKind, IterationId, Message,
+    PermissionLevel, ReasoningEffort, SessionControlError, SessionEvent, ToolCall, TurnId,
+    TurnOrigin,
 };
 #[cfg(feature = "cache_profile")]
 use claw_api::ApiUsage;
@@ -307,8 +308,11 @@ fn ask_permission_level_reaches_the_public_approval_flow() {
     assert_eq!(request, InputRequestId(1));
     assert!(matches!(
         kind,
-        InputRequestKind::PermissionApproval { summary }
-            if summary.contains("'conversation_end'")
+        InputRequestKind::PermissionApproval { tool_call, reason }
+            if tool_call.id == "call_matrix_1"
+                && tool_call.name == "conversation_end"
+                && tool_call.arguments_json == arguments
+                && reason.contains("'conversation_end'")
     ));
     assert!(
         output_fragments(&request_events).is_empty(),

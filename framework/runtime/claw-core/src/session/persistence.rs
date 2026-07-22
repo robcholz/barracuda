@@ -6,9 +6,9 @@ use claw_persistence::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentState;
+use crate::agent::{AgentState, InflightToolCall};
 use crate::config::ReasoningEffort;
-use crate::protocol::{InflightToolCall, SessionId};
+use crate::protocol::SessionId;
 
 pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 
@@ -123,9 +123,8 @@ mod tests {
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     use super::SessionState;
-    use crate::agent::AgentState;
+    use crate::agent::{AgentState, InflightToolCall};
     use crate::config::ReasoningEffort;
-    use crate::protocol::InflightToolCall;
     use claw_permission::PermissionLevel;
 
     #[test]

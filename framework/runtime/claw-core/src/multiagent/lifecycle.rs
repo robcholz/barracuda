@@ -5,7 +5,7 @@ use core::task::{Context, Poll};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::AgentProgress;
+use crate::agent::{AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome};
 use crate::protocol::{AgentId, Message};
 
 use super::agent_control::AgentMessageDeliveryError;
@@ -278,36 +278,35 @@ where
         }
     }
 
-    pub(in crate::multiagent) fn route_progress(
+    pub(in crate::multiagent) fn route_event(
         &mut self,
         id: AgentId,
-        progress: AgentProgress,
+        event: AgentEvent,
     ) -> DriveOutput {
-        match progress {
-            AgentProgress::ApprovalRequired {
+        match event {
+            AgentEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id,
-                summary,
-            } => self.park_approval(id, tool_call_id, summary),
-            AgentProgress::Yielded { text } => self.route_yielded(id, text),
-            AgentProgress::YieldedByTool { text } => self.route_terminal(id, text, true),
-            AgentProgress::Ended { final_message } => self.route_terminal(id, final_message, true),
-            AgentProgress::Interrupted => DriveOutput::default(),
-            AgentProgress::Cancelled => self.route_cancelled(id),
-            AgentProgress::Failed(error) => {
-                self.route_terminal(id, format!("[failed: {error:?}]"), false)
+                tool_call,
+                reason,
+            }) => self.park_approval(id, tool_call_id, tool_call, reason),
+            AgentEvent::Finished(AgentOutcome::Completed(AgentCompletion::Streamed(text))) => {
+                self.route_yielded(id, text)
             }
-            AgentProgress::IterationStarted(_)
-            | AgentProgress::ReasoningDelta(_)
-            | AgentProgress::ReasoningEnded
-            | AgentProgress::OutputDelta(_)
-            | AgentProgress::OutputEnded
-            | AgentProgress::ToolCall(_)
-            | AgentProgress::ToolCallsEnded
-            | AgentProgress::IterationEnded
-            | AgentProgress::ToolCalls(_) => DriveOutput::default(),
-            #[cfg(feature = "cache_profile")]
-            AgentProgress::Usage(_) => DriveOutput::default(),
+            AgentEvent::Finished(AgentOutcome::Completed(AgentCompletion::Synthesized(text))) => {
+                self.route_terminal(id, text, true)
+            }
+            AgentEvent::Finished(AgentOutcome::Interrupted) => DriveOutput::default(),
+            AgentEvent::Finished(AgentOutcome::Cancelled) => self.route_cancelled(id),
+            AgentEvent::Iteration(_) => DriveOutput::default(),
         }
+    }
+
+    pub(in crate::multiagent) fn route_error(
+        &mut self,
+        id: AgentId,
+        error: AgentError,
+    ) -> DriveOutput {
+        self.route_terminal(id, format!("[failed: {error:?}]"), false)
     }
 
     fn deliver_subagent_result(&mut self, parent: AgentId, child: AgentId, text: String, ok: bool) {
@@ -412,7 +411,7 @@ mod tests {
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{AgentProgress, FsAgentFactory};
+    use crate::agent::{AgentCompletion, AgentEvent, AgentOutcome, FsAgentFactory};
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
@@ -424,6 +423,18 @@ mod tests {
 
     fn timeout() -> SubagentTimeout {
         SubagentTimeout::from_millis(60_000).expect("non-zero timeout")
+    }
+
+    fn streamed(text: &str) -> AgentEvent {
+        AgentEvent::Finished(AgentOutcome::Completed(AgentCompletion::Streamed(
+            text.to_owned(),
+        )))
+    }
+
+    fn synthesized(text: &str) -> AgentEvent {
+        AgentEvent::Finished(AgentOutcome::Completed(AgentCompletion::Synthesized(
+            text.to_owned(),
+        )))
     }
 
     #[allow(clippy::arc_with_non_send_sync)]
@@ -467,28 +478,13 @@ mod tests {
     fn only_root_terminal_results_request_engine_emission() {
         let (mut instance, root) = instance_with_root();
 
-        let yielded = instance.route_progress(
-            root,
-            AgentProgress::Yielded {
-                text: "streamed".to_owned(),
-            },
-        );
+        let yielded = instance.route_event(root, streamed("streamed"));
         assert!(yielded.into_messages().is_empty());
 
-        let tool_yielded = instance.route_progress(
-            root,
-            AgentProgress::YieldedByTool {
-                text: "question".to_owned(),
-            },
-        );
+        let tool_yielded = instance.route_event(root, synthesized("question"));
         assert_eq!(tool_yielded.into_messages(), vec!["question".to_owned()]);
 
-        let ended = instance.route_progress(
-            root,
-            AgentProgress::Ended {
-                final_message: "finished".to_owned(),
-            },
-        );
+        let ended = instance.route_event(root, synthesized("finished"));
         assert_eq!(ended.into_messages(), vec!["finished".to_owned()]);
     }
 
@@ -512,11 +508,9 @@ mod tests {
             timeout(),
         ));
 
-        let output = instance.route_progress(
+        let output = instance.route_event(
             parent,
-            AgentProgress::Yielded {
-                text: "children spawned; waiting for their results".to_owned(),
-            },
+            streamed("children spawned; waiting for their results"),
         );
 
         assert!(output.into_messages().is_empty());
@@ -613,18 +607,8 @@ mod tests {
         instance.timeouts.arm::<ImmediateTimer>(parent, timeout());
         instance.timeouts.arm::<ImmediateTimer>(child, timeout());
 
-        instance.route_progress(
-            child,
-            AgentProgress::Yielded {
-                text: "nested work complete".to_owned(),
-            },
-        );
-        instance.route_progress(
-            parent,
-            AgentProgress::Yielded {
-                text: "waiting for nested work".to_owned(),
-            },
-        );
+        instance.route_event(child, streamed("nested work complete"));
+        instance.route_event(parent, streamed("waiting for nested work"));
 
         assert!(instance.state.contains(parent));
         assert!(!instance.state.contains(child));
@@ -635,12 +619,7 @@ mod tests {
             .take_ready(parent)
             .expect("the activated child result is checked out with its agent");
 
-        instance.route_progress(
-            parent,
-            AgentProgress::Yielded {
-                text: "aggregated nested result".to_owned(),
-            },
-        );
+        instance.route_event(parent, streamed("aggregated nested result"));
         assert!(!instance.state.contains(parent));
         assert!(!instance.timeouts.has_pending());
     }
@@ -667,12 +646,7 @@ mod tests {
             timeout(),
         ));
 
-        instance.route_progress(
-            child,
-            AgentProgress::Yielded {
-                text: "finished".to_owned(),
-            },
-        );
+        instance.route_event(child, streamed("finished"));
         instance.refresh_multiagent_snapshot();
 
         assert!(!instance.state.contains(child));

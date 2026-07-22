@@ -10,12 +10,13 @@ use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
 
 use crate::agent::{
-    AgentApprovalError, AgentProgress, ApprovalDecision, BaseAgent, ToolCallId,
+    AgentApprovalError, AgentError, AgentEvent, AgentInputRequest, ApprovalDecision, BaseAgent,
+    ToolCallId,
 };
 use crate::protocol::Message;
 
-pub(crate) enum AgentEvent {
-    Progress(AgentProgress),
+pub(crate) enum AgentRunItem {
+    Event(Result<AgentEvent, AgentError>),
     Returned,
 }
 
@@ -73,7 +74,7 @@ impl AgentRunControl {
 }
 
 struct ProgressEnvelope {
-    progress: AgentProgress,
+    item: Result<AgentEvent, AgentError>,
     resume: Sender<()>,
 }
 
@@ -125,7 +126,7 @@ where
         self.control.clone()
     }
 
-    pub(crate) fn poll_event(&mut self, context: &mut Context<'_>) -> Poll<AgentEvent> {
+    pub(crate) fn poll_event(&mut self, context: &mut Context<'_>) -> Poll<AgentRunItem> {
         Pin::new(self)
             .poll_next(context)
             .map(|event| event.expect("AgentRun ends after returning its BaseAgent"))
@@ -135,11 +136,11 @@ where
         self.returned.then(|| self.agent.take()).flatten()
     }
 
-    fn take_progress(&mut self, context: &mut Context<'_>) -> Poll<Option<AgentEvent>> {
+    fn take_progress(&mut self, context: &mut Context<'_>) -> Poll<Option<AgentRunItem>> {
         match self.progress.as_mut().poll_next(context) {
             Poll::Ready(Some(envelope)) => {
                 self.resume = Some(envelope.resume);
-                Poll::Ready(Some(AgentEvent::Progress(envelope.progress)))
+                Poll::Ready(Some(AgentRunItem::Event(envelope.item)))
             }
             Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
@@ -151,7 +152,7 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    type Item = AgentEvent;
+    type Item = AgentRunItem;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -172,7 +173,7 @@ where
                 this.future = None;
                 this.agent = Some(agent);
                 this.returned = true;
-                return Poll::Ready(Some(AgentEvent::Returned));
+                return Poll::Ready(Some(AgentRunItem::Returned));
             }
         }
 
@@ -197,12 +198,12 @@ where
 
     loop {
         enum Wake {
-            Progress(Option<AgentProgress>),
+            Event(Option<Result<AgentEvent, AgentError>>),
             Command(Option<RunCommand>),
         }
 
         let wake = future::or(async { Wake::Command(commands.recv().await.ok()) }, async {
-            Wake::Progress(stream.next().await)
+            Wake::Event(stream.next().await)
         })
         .await;
 
@@ -216,23 +217,21 @@ where
                 let _ = stream.resolve_approval(tool_call_id, decision);
             }
             Wake::Command(None) => stream.cancel(),
-            Wake::Progress(Some(item)) => {
+            Wake::Event(Some(item)) => {
                 let pending = match &item {
-                    AgentProgress::ApprovalRequired { tool_call_id, .. } => {
-                        Some(*tool_call_id)
-                    }
+                    Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
+                        tool_call_id,
+                        ..
+                    })) => Some(*tool_call_id),
                     _ => None,
                 };
                 *awaiting_approval
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = pending;
-                let terminal = item.is_terminal();
+                let terminal = matches!(&item, Ok(AgentEvent::Finished(_)) | Err(_));
                 let (resume, resumed) = async_channel::bounded(1);
                 if progress
-                    .send(ProgressEnvelope {
-                        progress: item,
-                        resume,
-                    })
+                    .send(ProgressEnvelope { item, resume })
                     .await
                     .is_err()
                 {
@@ -245,7 +244,7 @@ where
                     break;
                 }
             }
-            Wake::Progress(None) => break,
+            Wake::Event(None) => break,
         }
     }
 

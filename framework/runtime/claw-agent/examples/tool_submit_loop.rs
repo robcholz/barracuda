@@ -17,7 +17,7 @@
 //!   --target x86_64-unknown-linux-gnu
 //! ```
 
-use claw_agent::{AgentSystem, Message, SessionEvent, SessionPersistence, StreamPart};
+use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, SessionPersistence};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{
     BlockingHttpAdapter, ImmediateTimer, MemFs, SharedScriptHttp, StdThread, TokioExecutor,

@@ -1,23 +1,23 @@
-use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
+use claw_memory::TurnError;
+use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use futures_lite::future;
 
-use crate::protocol::{InflightToolCall, IterationId};
-
-use super::iteration_loop::{IterationLoopError, ToolCallId};
+use super::iteration_loop::{IterationEvent, IterationLoopError, ToolCallId};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum AgentSubmitError {
     #[error("cannot submit a message while the agent is running")]
     Running,
+    #[error(transparent)]
+    Transcript(#[from] TurnError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -43,85 +43,46 @@ pub(crate) enum ApprovalDecision {
 pub(crate) enum AgentError {
     #[error(transparent)]
     Iteration(#[from] IterationLoopError),
+    #[error(transparent)]
+    Transcript(#[from] TurnError),
     #[error("multiple task effects were emitted in one tool round: {count}")]
     ConflictingEffects { count: usize },
+    #[error("LLM assistant message cannot be reconstructed from streamed deltas")]
+    MalformedAssistantMessage,
     #[error("agent run-state invariant violated")]
     StateInvariant,
 }
 
-/// Every observable value produced by one submitted Agent task.
+/// One observable event produced by a submitted Agent task.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum AgentProgress {
-    IterationStarted(IterationId),
-    ReasoningDelta(String),
-    ReasoningEnded,
-    OutputDelta(String),
-    OutputEnded,
-    ToolCall(ToolCall),
-    ToolCallsEnded,
-    #[cfg(feature = "cache_profile")]
-    Usage(claw_api::ApiUsage),
-    IterationEnded,
-    /// The calls are now visible to the owner. They cannot execute until the
-    /// owner polls the stream again.
-    ToolCalls(Vec<InflightToolCall>),
-    ApprovalRequired {
+pub(crate) enum AgentEvent {
+    Iteration(StreamPart<IterationEvent>),
+    InputRequired(AgentInputRequest),
+    Finished(AgentOutcome),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AgentInputRequest {
+    Approval {
         tool_call_id: ToolCallId,
-        summary: String,
+        tool_call: ToolCall,
+        reason: String,
     },
-    Yielded {
-        text: String,
-    },
-    YieldedByTool {
-        text: String,
-    },
-    Ended {
-        final_message: String,
-    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum AgentOutcome {
+    Completed(AgentCompletion),
     Interrupted,
     Cancelled,
-    Failed(AgentError),
 }
 
-impl AgentProgress {
-    pub(crate) fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            Self::Yielded { .. }
-                | Self::YieldedByTool { .. }
-                | Self::Ended { .. }
-                | Self::Interrupted
-                | Self::Cancelled
-                | Self::Failed(_)
-        )
-    }
-}
-
-pub(super) struct ProgressEnvelope {
-    pub(super) progress: AgentProgress,
-    pub(super) resume: Sender<()>,
-}
-
-#[derive(Clone)]
-pub(super) struct ProgressEmitter {
-    sender: Sender<ProgressEnvelope>,
-}
-
-impl ProgressEmitter {
-    /// Emit exactly one stream item and wait until the consumer asks for the
-    /// next item. This makes semantic boundaries real: tools cannot start in
-    /// the same poll that exposes their calls.
-    pub(super) async fn send(&self, progress: AgentProgress) {
-        let (resume, resumed) = async_channel::bounded(1);
-        if self
-            .sender
-            .send(ProgressEnvelope { progress, resume })
-            .await
-            .is_ok()
-        {
-            let _ = resumed.recv().await;
-        }
-    }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AgentCompletion {
+    /// A model response already exposed through `Llm(Output(_))` events.
+    Streamed(String),
+    /// A final message synthesized by an Agent effect and not streamed before.
+    Synthesized(String),
 }
 
 #[derive(Clone)]
@@ -265,33 +226,21 @@ impl RunControl {
     }
 }
 
-type AgentDriver<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
-
 /// The unique mutable capability for one submitted BaseAgent task.
 pub(crate) struct AgentStreamHandle<'a> {
-    driver: Option<AgentDriver<'a>>,
-    progress: Pin<Box<Receiver<ProgressEnvelope>>>,
-    resume: Option<Sender<()>>,
+    stream: Pin<Box<dyn Stream<Item = Result<AgentEvent, AgentError>> + 'a>>,
     control: RunControl,
 }
 
 impl<'a> AgentStreamHandle<'a> {
     pub(super) fn new(
-        driver: AgentDriver<'a>,
-        progress: Receiver<ProgressEnvelope>,
+        stream: impl Stream<Item = Result<AgentEvent, AgentError>> + 'a,
         control: RunControl,
     ) -> Self {
         Self {
-            driver: Some(driver),
-            progress: Box::pin(progress),
-            resume: None,
+            stream: Box::pin(stream),
             control,
         }
-    }
-
-    pub(super) fn channel() -> (ProgressEmitter, Receiver<ProgressEnvelope>) {
-        let (sender, receiver) = async_channel::bounded(1);
-        (ProgressEmitter { sender }, receiver)
     }
 
     pub(super) fn control() -> RunControl {
@@ -313,49 +262,19 @@ impl<'a> AgentStreamHandle<'a> {
     ) -> Result<(), AgentApprovalError> {
         self.control.resolve_approval(tool_call_id, decision)
     }
-
-    fn take_progress(&mut self, context: &mut Context<'_>) -> Poll<Option<AgentProgress>> {
-        match self.progress.as_mut().poll_next(context) {
-            Poll::Ready(Some(envelope)) => {
-                self.resume = Some(envelope.resume);
-                Poll::Ready(Some(envelope.progress))
-            }
-            Poll::Ready(None) if self.driver.is_none() => Poll::Ready(None),
-            Poll::Ready(None) | Poll::Pending => Poll::Pending,
-        }
-    }
 }
 
 impl Stream for AgentStreamHandle<'_> {
-    type Item = AgentProgress;
+    type Item = Result<AgentEvent, AgentError>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-
-        if let Some(resume) = this.resume.take() {
-            let _ = resume.try_send(());
-        }
-
-        if let Poll::Ready(progress) = this.take_progress(context) {
-            return Poll::Ready(progress);
-        }
-
-        if let Some(driver) = this.driver.as_mut() {
-            if driver.as_mut().poll(context).is_ready() {
-                this.driver = None;
-            }
-        }
-
-        this.take_progress(context)
+        self.get_mut().stream.as_mut().poll_next(context)
     }
 }
 
 impl Drop for AgentStreamHandle<'_> {
     fn drop(&mut self) {
         self.control.cancel();
-        if let Some(resume) = self.resume.take() {
-            let _ = resume.try_send(());
-        }
     }
 }
 
@@ -371,26 +290,32 @@ mod tests {
 
     #[test]
     fn progress_is_a_real_poll_boundary() {
-        let (progress, receiver) = AgentStreamHandle::channel();
         let control = AgentStreamHandle::control();
         let phase = Rc::new(Cell::new(0));
         let producer_phase = Rc::clone(&phase);
-        let driver = Box::pin(async move {
-            progress.send(AgentProgress::ToolCalls(Vec::new())).await;
+        let progress = async_stream::stream! {
+            yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                IterationEvent::BeforeToolCalls(Vec::new()),
+            )));
             producer_phase.set(1);
-            progress.send(AgentProgress::Cancelled).await;
+            yield Ok(AgentEvent::Finished(AgentOutcome::Cancelled));
             producer_phase.set(2);
-        });
-        let mut stream = AgentStreamHandle::new(driver, receiver, control);
+        };
+        let mut stream = AgentStreamHandle::new(progress, control);
 
         block_on(async {
             assert_eq!(
                 stream.next().await,
-                Some(AgentProgress::ToolCalls(Vec::new()))
+                Some(Ok(AgentEvent::Iteration(StreamPart::Delta(
+                    IterationEvent::BeforeToolCalls(Vec::new())
+                ))))
             );
             assert_eq!(phase.get(), 0, "producer remains parked at the boundary");
 
-            assert_eq!(stream.next().await, Some(AgentProgress::Cancelled));
+            assert_eq!(
+                stream.next().await,
+                Some(Ok(AgentEvent::Finished(AgentOutcome::Cancelled)))
+            );
             assert_eq!(phase.get(), 1, "the next poll resumes the producer once");
 
             assert_eq!(stream.next().await, None);
@@ -400,45 +325,59 @@ mod tests {
 
     #[test]
     fn approval_is_resolved_through_the_stream_handle() {
-        let (progress, receiver) = AgentStreamHandle::channel();
         let control = AgentStreamHandle::control();
         let driver_control = control.clone();
-        let driver = Box::pin(async move {
+        let progress = async_stream::stream! {
             driver_control.begin_approval(ToolCallId::new(0));
-            progress
-                .send(AgentProgress::ApprovalRequired {
-                    tool_call_id: ToolCallId::new(0),
-                    summary: "run tool".to_owned(),
-                })
-                .await;
+            yield Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
+                tool_call_id: ToolCallId::new(0),
+                tool_call: ToolCall::default(),
+                reason: "run tool".to_owned(),
+            }));
             let terminal = match driver_control.approval().await {
-                ApprovalOutcome::Decision(ApprovalDecision::Approved) => AgentProgress::Ended {
-                    final_message: "approved".to_owned(),
-                },
-                ApprovalOutcome::Decision(ApprovalDecision::Rejected(_)) => {
-                    AgentProgress::Cancelled
+                ApprovalOutcome::Decision(ApprovalDecision::Approved) => {
+                    AgentOutcome::Completed(AgentCompletion::Synthesized("approved".to_owned()))
                 }
-                ApprovalOutcome::Interrupted => AgentProgress::Interrupted,
-                ApprovalOutcome::Cancelled => AgentProgress::Cancelled,
+                ApprovalOutcome::Decision(ApprovalDecision::Rejected(_)) => {
+                    AgentOutcome::Cancelled
+                }
+                ApprovalOutcome::Interrupted => AgentOutcome::Interrupted,
+                ApprovalOutcome::Cancelled => AgentOutcome::Cancelled,
             };
-            progress.send(terminal).await;
-        });
-        let mut stream = AgentStreamHandle::new(driver, receiver, control);
+            yield Ok(AgentEvent::Finished(terminal));
+        };
+        let mut stream = AgentStreamHandle::new(progress, control);
 
         block_on(async {
             assert!(matches!(
                 stream.next().await,
-                Some(AgentProgress::ApprovalRequired { .. })
+                Some(Ok(AgentEvent::InputRequired(
+                    AgentInputRequest::Approval { .. }
+                )))
             ));
             stream
                 .resolve_approval(ToolCallId::new(0), ApprovalDecision::Approved)
                 .expect("the visible approval is active");
             assert_eq!(
                 stream.next().await,
-                Some(AgentProgress::Ended {
-                    final_message: "approved".to_owned(),
-                })
+                Some(Ok(AgentEvent::Finished(AgentOutcome::Completed(
+                    AgentCompletion::Synthesized("approved".to_owned())
+                ))))
             );
+            assert_eq!(stream.next().await, None);
+        });
+    }
+
+    #[test]
+    fn execution_error_is_an_err_item_followed_by_stream_end() {
+        let control = AgentStreamHandle::control();
+        let events = async_stream::stream! {
+            yield Err(AgentError::StateInvariant);
+        };
+        let mut stream = AgentStreamHandle::new(events, control);
+
+        block_on(async {
+            assert_eq!(stream.next().await, Some(Err(AgentError::StateInvariant)));
             assert_eq!(stream.next().await, None);
         });
     }

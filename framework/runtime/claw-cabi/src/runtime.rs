@@ -12,9 +12,9 @@ use std::task::Waker;
 use std::time::Duration;
 
 use claw_agent::{
-    AgentError, AgentPersistenceConfig, AgentSystem, ApiUsage, InputRequestId, InputRequestKind,
-    Message, OpenSessionError, SessionControl, SessionControlError, SessionEvent,
-    SessionEventStream, SessionId, SessionPersistence, StreamPart, TurnOrigin,
+    stream::StreamPart, AgentError, AgentPersistenceConfig, AgentSystem, ApiUsage, InputRequestId,
+    InputRequestKind, Message, OpenSessionError, SessionControl, SessionControlError, SessionEvent,
+    SessionEventStream, SessionId, SessionPersistence, TurnOrigin,
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
@@ -655,17 +655,28 @@ fn write_event(out_event: &mut ClawAgentEvent, event: SessionEvent) -> Result<()
         }
         SessionEvent::InputRequested {
             request,
-            kind: InputRequestKind::PermissionApproval { summary },
-        } => ClawAgentEvent {
-            kind: CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED,
-            data: ClawAgentEventData {
-                input_requested: ClawAgentInputRequestedEvent {
-                    request_id: request.0,
-                    kind: CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
-                    summary: cstring(&summary)?.into_raw(),
+            kind: InputRequestKind::PermissionApproval { tool_call, reason },
+        } => {
+            let id = cstring(&tool_call.id)?;
+            let name = cstring(&tool_call.name)?;
+            let arguments_json = cstring(&tool_call.arguments_json)?;
+            let reason = cstring(&reason)?;
+            ClawAgentEvent {
+                kind: CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED,
+                data: ClawAgentEventData {
+                    input_requested: ClawAgentInputRequestedEvent {
+                        request_id: request.0,
+                        kind: CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
+                        tool_call: ClawAgentToolCallEvent {
+                            id: id.into_raw(),
+                            name: name.into_raw(),
+                            arguments_json: arguments_json.into_raw(),
+                        },
+                        reason: reason.into_raw(),
+                    },
                 },
-            },
-        },
+            }
+        }
         SessionEvent::IterationStarted { iteration } => ClawAgentEvent {
             kind: CLAW_AGENT_EVENT_KIND_ITERATION_STARTED,
             data: ClawAgentEventData {
@@ -738,7 +749,11 @@ fn free_event(event: *mut ClawAgentEvent) {
     };
     match event.kind {
         CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED => {
-            free_cstring(unsafe { event.data.input_requested.summary });
+            let input = unsafe { event.data.input_requested };
+            free_cstring(input.tool_call.id);
+            free_cstring(input.tool_call.name);
+            free_cstring(input.tool_call.arguments_json);
+            free_cstring(input.reason);
         }
         CLAW_AGENT_EVENT_KIND_REASONING_DELTA | CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA => {
             free_cstring(unsafe { event.data.text_delta.text });

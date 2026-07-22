@@ -14,9 +14,9 @@ use claw_interface::http::{
     blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpHeader, StreamingHttp,
 };
 
+use super::super::chat_stream::{drain_body, ChatStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
 use super::super::media::prepare_asset;
-use super::super::stream::{drain_body, ChatStream};
 use super::super::types::{
     ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest, ToolCall,
 };

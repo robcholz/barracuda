@@ -46,9 +46,9 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{AgentResume, FsAgentFactory};
+use crate::agent::{AgentResume, FsAgentFactory, InflightToolCall};
 use crate::config::ReasoningEffort;
-use crate::protocol::{AgentId, InflightToolCall, SessionId, SessionPersistence};
+use crate::protocol::{AgentId, SessionId, SessionPersistence};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
 use self::agents::AgentSlots;

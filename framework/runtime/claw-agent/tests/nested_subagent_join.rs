@@ -5,7 +5,7 @@ use support::Sse;
 
 use std::sync::Mutex;
 
-use claw_agent::{AgentSystem, Message, SessionEvent, StreamPart, TurnOrigin};
+use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, TurnOrigin};
 use claw_interface::{
     Cancel, ClawHttp, ClawTimer, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
     MemFs, StdThread, TimerFuture, TokioExecutor,

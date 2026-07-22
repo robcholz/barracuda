@@ -8,7 +8,9 @@
 //! It does not read, format, or return interrupt message content — upper layers
 //! own pending input and context rebuild.
 
+mod inflight_tool_call;
 mod run;
+mod stream;
 mod types;
 
 use core::future::Future;
@@ -16,14 +18,22 @@ use core::pin::Pin;
 
 use claw_permission::Action;
 
-use claw_api::{ClawApiAsync, RetryPolicy};
+use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
 use claw_interface::{ClawHttp, ClawTimer};
 
-use super::stream::{ProgressEmitter, RunControl};
+use super::stream::RunControl;
 
-pub(crate) use types::{AppendedMessages, IterationLoopError, IterationOutcome, LlmStep};
+pub(crate) use inflight_tool_call::InflightToolCall;
+pub(crate) use stream::{IterationEmitter, IterationStream};
+pub(crate) use types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
 
+crate::define_prefixed_id!(IterationId, "iteration-", "iteration");
 crate::define_prefixed_id!(ToolCallId, "tool-call-", "tool call");
+crate::define_id_allocator!(
+    /// Reset for each agent task.
+    pub(super) IterationIdAllocator(IterationId),
+    IterationId(0)
+);
 crate::define_id_allocator!(
     /// Reset for each iteration; never persisted.
     pub(super) ToolCallIdAllocator(ToolCallId),
@@ -32,6 +42,7 @@ crate::define_id_allocator!(
 
 pub(super) struct ToolPermissionRequest<'a> {
     pub(super) tool_call_id: ToolCallId,
+    pub(super) tool_call: &'a ToolCall,
     pub(super) action: &'a Action,
 }
 
@@ -56,13 +67,21 @@ pub(super) enum ToolAuthorization<'a> {
 /// can start allowed tools without waiting for unrelated approvals. Only a
 /// genuinely pending permission carries a future.
 pub(super) trait ToolPermissionPolicy {
-    fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a>;
+    fn authorize<'a>(
+        &'a self,
+        request: ToolPermissionRequest<'_>,
+        events: &IterationEmitter,
+    ) -> ToolAuthorization<'a>;
 }
 
 /// [`claw_permission::AllowAll`] is the YOLO policy for callers that
 /// intentionally run every valid tool call without an approval boundary.
 impl ToolPermissionPolicy for claw_permission::AllowAll {
-    fn authorize(&self, _request: ToolPermissionRequest<'_>) -> ToolAuthorization<'_> {
+    fn authorize(
+        &self,
+        _request: ToolPermissionRequest<'_>,
+        _events: &IterationEmitter,
+    ) -> ToolAuthorization<'_> {
         ToolAuthorization::Allow
     }
 }
@@ -78,5 +97,4 @@ pub(crate) struct IterationLoop<'a, H: ClawHttp, Timer: ClawTimer, P> {
     pub permission: &'a P,
     /// Retry policy applied to this iteration's LLM call (see [`RetryPolicy`]).
     pub retry: RetryPolicy,
-    pub progress: &'a ProgressEmitter,
 }

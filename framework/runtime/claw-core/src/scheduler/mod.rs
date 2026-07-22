@@ -2,4 +2,4 @@
 
 mod run;
 
-pub(crate) use run::{AgentEvent, AgentRun, AgentRunControl};
+pub(crate) use run::{AgentRun, AgentRunControl, AgentRunItem};

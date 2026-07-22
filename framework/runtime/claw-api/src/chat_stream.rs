@@ -1,9 +1,8 @@
 //! [`ChatStream`]: the streaming counterpart of [`crate::ClawApiAsync::chat`].
 //!
 //! Wraps a transport byte stream ([`StreamingHttp::ByteStream`](claw_interface::http::StreamingHttp::ByteStream))
-//! with a provider SSE parser and yields ordered [`LlmDelta`]s as tokens arrive.
-//! Once drained, [`ChatStream::take_response`] returns the fully-accumulated
-//! [`LlmResponse`] (text + reasoning + tool calls + reconstructed message JSON).
+//! with a provider SSE parser and yields ordered [`ChatStreamEvent`]s as they
+//! arrive.
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -16,25 +15,26 @@ use claw_interface::http::HttpError;
 
 use crate::backends::sse::ProviderSse;
 use crate::errors::{ChatError, ClawApiError};
-use crate::types::{LlmDelta, LlmResponse};
+use crate::types::ChatStreamEvent;
 
 /// A streaming chat completion.
 ///
-/// Implements [`Stream`] over `Result<LlmDelta, ChatError>`: `Reasoning` /
-/// `Output` fragments then complete `ToolCall`s, in that order. Drive it to
-/// completion (a `None` item), then call [`take_response`](Self::take_response)
-/// for the assembled [`LlmResponse`]. The request's cancellation token remains
-/// active during body reads; dropping the stream cancels them as well.
+/// Implements [`Stream`] over `Result<ChatStreamEvent, ChatError>`. Reasoning,
+/// output, and tool-call logical streams each carry
+/// [`StreamPart`](claw_utils::stream::StreamPart) values and an explicit `End`.
+/// Normal provider completion then yields `None`; parse, transport,
+/// cancellation, and premature EOF failures are yielded as an `Err` item before
+/// the stream ends. The request's cancellation token remains active during body
+/// reads; dropping the stream cancels them as well.
 ///
 /// `S` is the transport's byte stream and retains that transport's exclusive
 /// mutable borrow; it (and therefore `ChatStream`) is `Unpin`, so no pinning
 /// gymnastics are needed at the call site.
 pub struct ChatStream<S> {
     bytes: S,
-    /// `None` after the byte stream ends and the response has been assembled.
+    /// `None` once the stream has completed or yielded a terminal error.
     parser: Option<ProviderSse>,
-    queue: VecDeque<LlmDelta>,
-    response: Option<Result<LlmResponse, ChatError>>,
+    queue: VecDeque<Result<ChatStreamEvent, ChatError>>,
 }
 
 impl<S> ChatStream<S> {
@@ -43,14 +43,7 @@ impl<S> ChatStream<S> {
             bytes,
             parser: Some(parser),
             queue: VecDeque::new(),
-            response: None,
         }
-    }
-
-    /// The assembled response, available once the stream has been drained to its
-    /// end. Returns `None` if called before the stream finishes (or twice).
-    pub fn take_response(&mut self) -> Option<Result<LlmResponse, ChatError>> {
-        self.response.take()
     }
 }
 
@@ -58,36 +51,41 @@ impl<S> Stream for ChatStream<S>
 where
     S: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin,
 {
-    type Item = Result<LlmDelta, ChatError>;
+    type Item = Result<ChatStreamEvent, ChatError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // ChatStream is Unpin (all fields are), so project by plain &mut.
         let this = self.get_mut();
         loop {
-            if let Some(delta) = this.queue.pop_front() {
-                return Poll::Ready(Some(Ok(delta)));
+            if let Some(item) = this.queue.pop_front() {
+                return Poll::Ready(Some(item));
+            }
+            if this.parser.is_none() {
+                return Poll::Ready(None);
             }
             match Pin::new(&mut this.bytes).poll_next(cx) {
                 Poll::Ready(Some(Ok(chunk))) => {
-                    if let Some(parser) = &mut this.parser {
-                        let mut out = Vec::new();
-                        if let Err(error) = parser.push(&chunk, &mut out) {
-                            return Poll::Ready(Some(Err(error)));
-                        }
-                        this.queue.extend(out);
+                    let mut deltas = Vec::new();
+                    let Some(parser) = this.parser.as_mut() else {
+                        return Poll::Ready(None);
+                    };
+                    let result = parser.push(&chunk, &mut deltas);
+                    let done = parser.is_done();
+                    this.queue.extend(deltas.into_iter().map(Ok));
+                    if let Err(error) = result {
+                        this.parser = None;
+                        this.queue.push_back(Err(error));
+                    } else if done {
+                        this.parser = None;
                     }
-                    // Loop back to drain any deltas this chunk produced.
                 }
                 Poll::Ready(Some(Err(error))) => {
+                    this.parser = None;
                     return Poll::Ready(Some(Err(read_error(error))));
                 }
                 Poll::Ready(None) => {
-                    if this.response.is_none() {
-                        if let Some(parser) = this.parser.take() {
-                            this.response = Some(parser.finish());
-                        }
-                    }
-                    return Poll::Ready(None);
+                    this.parser = None;
+                    return Poll::Ready(Some(Err(ChatError::truncated_stream())));
                 }
                 Poll::Pending => return Poll::Pending,
             }

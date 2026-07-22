@@ -7,11 +7,11 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 
 use crate::agent::{
-    AgentApprovalError, AgentProgress, ApprovalDecision, BaseAgent, ReasoningEffortHandle,
+    AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, BaseAgent, ReasoningEffortHandle,
     ToolCallId,
 };
 use crate::protocol::{AgentId, Message, TurnOrigin};
-use crate::scheduler::{AgentEvent, AgentRun, AgentRunControl};
+use crate::scheduler::{AgentRun, AgentRunControl, AgentRunItem};
 
 use super::drive_control::DriveControl;
 use super::model::{SubagentResult, TranscriptText};
@@ -38,7 +38,7 @@ pub(super) struct AgentRunEvent {
 }
 
 pub(super) enum AgentSlotEvent {
-    Progress(AgentProgress),
+    Event(Result<AgentEvent, AgentError>),
     Returned,
 }
 
@@ -406,10 +406,10 @@ where
                         running.run.poll_event(context)
                     };
                     match event {
-                        Poll::Ready(AgentEvent::Progress(progress)) => {
-                            Some((AgentSlotEvent::Progress(progress), None))
+                        Poll::Ready(AgentRunItem::Event(event)) => {
+                            Some((AgentSlotEvent::Event(event), None))
                         }
-                        Poll::Ready(AgentEvent::Returned) => {
+                        Poll::Ready(AgentRunItem::Returned) => {
                             let agent = running
                                 .run
                                 .take_completed_agent()

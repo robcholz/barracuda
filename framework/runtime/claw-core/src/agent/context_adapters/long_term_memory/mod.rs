@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
-use claw_memory::{LongTermInitError, LongTermMemory};
+use claw_memory::{LongTermInitError, LongTermMemory, Transcript};
 use claw_tool::ToolGroup;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, History};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture};
 use crate::config::SharedApiManager;
 
 mod extraction;
@@ -113,11 +113,11 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
 }
 
 impl<F: ClawFs + 'static> ContextAdapter for LongTermMemoryContextAdapter<F> {
-    fn prepare<'a>(&'a mut self, history: &'a dyn History) -> ContextAdapterFuture<'a> {
+    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextAdapterFuture<'a> {
         Box::pin(async move {
             // Pull, not push: reading the transcript here is where this adapter
             // decides whether new conversation warrants extraction.
-            self.maybe_schedule_extraction(history).await;
+            self.maybe_schedule_extraction(transcript).await;
             self.refresh_catalog();
         })
     }

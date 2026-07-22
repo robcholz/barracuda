@@ -6,7 +6,8 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::protocol::{AgentKind, InflightToolCall, Message};
+use crate::agent::InflightToolCall;
+use crate::protocol::{AgentKind, Message};
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;

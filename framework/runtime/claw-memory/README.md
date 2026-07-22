@@ -26,9 +26,10 @@ fully host-testable.
 
 | Item | Role |
 |---|---|
-| `TranscriptStore` | The per-conversation verbatim transcript. `TranscriptStore::<F>::new(id, dir)`, `group()`, `messages()`, `turns_snapshot()`, `open_turn_messages()`, `version()`, `flush()`. Pure append-only — never compacts. |
-| `Turn` / `TurnId` | A committed turn (`id` + `messages`) and its monotonic logical id, exposed by `turns_snapshot()` so adapters can read committed turns. |
-| `GroupGuard` | One turn, returned by `group()`. `append_user`, `append_assistant`, `append_tool_result`, `append_patch`. Commits the whole turn as one record on drop. |
+| `Transcript` | The sole type-erased transcript interface used by the agent runtime. It hides the concrete filesystem-backed store type: `open_turn()`, `turns()`, `version()`. |
+| `TranscriptStore<F>` | The concrete per-conversation verbatim store for filesystem `F`, constructed with `new(id, dir)`. Persistence is automatic (debounced writes plus a best-effort flush on drop); all reads go through the `Transcript` trait. |
+| `Turn` / `TurnId` | One turn (`id: Option<TurnId>` + `messages`) yielded by `turns()`, and its monotonic logical id. Committed turns carry `Some(id)`; the trailing open turn carries `None`. |
+| `TurnHandle` | The concrete, non-generic RAII writer returned by `open_turn()`. Streams user/assistant fragments, records complete tool results, commits on drop, and supports explicit `commit`/`discard`. |
 | `Compactor` / `CompactError` | The summarization seam: fold an aged message window into a shorter summary. Driven by the agent layer, **not** the store. |
 | `ProfileStore` and friends | Editable global profile documents: `Soul`, assistant identity, and user profile. Pure whole-file storage over `ClawFs`; projected into context by `claw-core`. |
 | `LongTermMemory` and friends | Durable per-agent / global fact storage. |
@@ -36,16 +37,19 @@ fully host-testable.
 
 ### How a turn flows
 
-1. Call `store.group()` to open a turn; append user / assistant / tool-result
-   messages to the returned `GroupGuard`.
-2. When the guard drops, the whole turn is committed as a single record and
-   `version()` advances.
-3. `store.messages()` returns the full verbatim transcript (committed turns plus
-   the open one) — no summaries spliced in; the store keeps everything.
-4. `store.flush()` forces a checkpoint (e.g. on clean shutdown).
+1. Call `store.open_turn()` and stream messages through the returned `TurnHandle`.
+2. Each fragment immediately advances `version()` and is visible through
+   `turns()` as the trailing open turn (`id == None`); when the handle drops, the
+   whole turn is committed as one durable record.
+3. `store.turns()` is the sole read surface: committed turns (`id == Some(_)`)
+   followed by any open turn. The full verbatim transcript you feed to the model
+   is `turns().iter().flat_map(|t| &t.messages)` — no summaries spliced in; the
+   store keeps everything.
+4. Persistence is automatic — debounced writes plus a best-effort flush when the
+   store is dropped; no explicit checkpoint call.
 
 **Compaction is not the store's concern.** In `claw-core`, a
-`RollingSummaryContextAdapter` reads aged turns via `turns_snapshot()`,
+`RollingSummaryContextAdapter` reads aged turns via `turns()`,
 summarizes them through an injected `Compactor`, and a
 `RecentMessagesContextAdapter` renders the verbatim tail. The two coordinate
 through a shared cursor marking the boundary between the summarized prefix and

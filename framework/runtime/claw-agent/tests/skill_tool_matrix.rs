@@ -7,8 +7,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use claw_agent::{
-    AgentPersistenceConfig, AgentSystem, IterationId, Message, SessionEvent, StreamPart, TurnId,
-    TurnOrigin,
+    stream::StreamPart, AgentPersistenceConfig, AgentSystem, IterationId, Message, SessionEvent,
+    TurnId, TurnOrigin,
 };
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture,

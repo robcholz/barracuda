@@ -23,8 +23,8 @@ use claw_interface::http::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::chat_stream::ChatStream;
 use super::errors::{ChatError, InferMediaError, InitError};
-use super::stream::ChatStream;
 use super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 
 /// Failed to parse a string backend id into [`BackendKind`].

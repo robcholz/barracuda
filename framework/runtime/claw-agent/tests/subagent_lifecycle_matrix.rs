@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use claw_agent::{
-    AgentId, AgentSystem, InputRequestId, InputRequestKind, IterationId, Message, PermissionLevel,
-    SessionEvent, StreamPart, TurnId, TurnOrigin,
+    stream::StreamPart, AgentId, AgentSystem, InputRequestId, InputRequestKind, IterationId,
+    Message, PermissionLevel, SessionEvent, TurnId, TurnOrigin,
 };
 use claw_interface::{
     Cancel, ClawHttp, ClawTimer, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
@@ -229,16 +229,16 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     let (root_approval, root_kind) = block_on(wait_for_input_request(&mut events));
     assert!(matches!(
         root_kind,
-        InputRequestKind::PermissionApproval { summary }
-            if summary.contains("subagent_spawn")
+        InputRequestKind::PermissionApproval { tool_call, reason }
+            if tool_call.name == "subagent_spawn" && reason.contains("subagent_spawn")
     ));
     block_on(control.respond(root_approval, Message::text("approve"))).unwrap();
 
     let (child_approval, child_kind) = block_on(wait_for_input_request(&mut events));
     assert!(matches!(
         child_kind,
-        InputRequestKind::PermissionApproval { summary }
-            if summary.contains("conversation_end")
+        InputRequestKind::PermissionApproval { tool_call, reason }
+            if tool_call.name == "conversation_end" && reason.contains("conversation_end")
     ));
     block_on(control.respond(child_approval, Message::text("approve"))).unwrap();
 
@@ -299,8 +299,8 @@ fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() 
     let (_child_approval, child_kind) = block_on(wait_for_input_request(&mut events));
     assert!(matches!(
         child_kind,
-        InputRequestKind::PermissionApproval { summary }
-            if summary.contains("conversation_end")
+        InputRequestKind::PermissionApproval { tool_call, reason }
+            if tool_call.name == "conversation_end" && reason.contains("conversation_end")
     ));
 
     release_timers();

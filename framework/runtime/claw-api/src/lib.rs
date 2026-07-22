@@ -16,7 +16,7 @@
 //! | [`ClawApi::chat`] | [`ChatRequest`] | [`LlmResponse`] (text + tool calls) |
 //! | [`ClawApi::chat_json`] | [`ChatJsonRequest`] | [`ChatJsonResponse`] (parsed `T` + tool calls) |
 //! | [`ClawApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
-//! | [`ClawApiAsync::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`LlmDelta`] values |
+//! | [`ClawApiAsync::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
 //! Networking is **injected**: `claw-api` never opens sockets itself. On device
 //! the espidf layer implements [`ClawHttp`](claw_interface::http::ClawHttp) and
@@ -103,20 +103,21 @@
 // re-exports below. The backend registry, media-prep pipeline, prompt helpers,
 // and retry loop are internal details, not part of the end-user API.
 mod backends;
+mod chat_stream;
 mod client;
 mod errors;
 mod media;
 mod retry;
-mod stream;
 mod types;
 
 pub use backends::{BackendKind, ParseBackendKindError};
+pub use chat_stream::ChatStream;
+pub use claw_utils::stream;
 pub use client::{ClawApi, ClawApiAsync};
 pub use errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
-pub use stream::ChatStream;
 #[cfg(feature = "cache_profile")]
 pub use types::ApiUsage;
 pub use types::{
-    ChatJsonRequest, ChatJsonResponse, ChatRequest, ClawApiConfig, LlmDelta, LlmResponse,
+    ChatJsonRequest, ChatJsonResponse, ChatRequest, ChatStreamEvent, ClawApiConfig, LlmResponse,
     MediaAsset, MediaRequest, RetryPolicy, StaticOutputSchema, ToolCall,
 };

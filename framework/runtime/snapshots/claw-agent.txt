@@ -15,10 +15,10 @@ pub use claw_agent::SessionEvent
 pub use claw_agent::SessionEventStream
 pub use claw_agent::SessionId
 pub use claw_agent::SessionPersistence
-pub use claw_agent::StreamPart
 pub use claw_agent::ToolCall
 pub use claw_agent::TurnId
 pub use claw_agent::TurnOrigin
+pub use claw_agent::stream
 pub enum claw_agent::AgentError
 pub claw_agent::AgentError::LlmConfig(claw_api::errors::InitError)
 pub claw_agent::AgentError::OpenSession(claw_core::session::api::OpenSessionError)

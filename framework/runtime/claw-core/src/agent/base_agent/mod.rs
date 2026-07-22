@@ -13,11 +13,13 @@ mod stream;
 
 pub(crate) use self::agent::BaseAgent;
 pub(super) use self::agent::BaseAgentConfig;
-pub(in crate::agent) use self::context::{
-    AssistantCommit, ContextAdapter, ContextAdapterFuture, History, Transcript, TurnLifecycle,
-};
+pub(in crate::agent) use self::context::{ContextAdapter, ContextAdapterFuture, TurnLifecycle};
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
 pub(crate) use self::persistence::AgentState;
 pub(in crate::agent) use self::persistence::AgentStateBuilder;
-pub(crate) use self::stream::{AgentApprovalError, AgentProgress, ApprovalDecision};
-pub(crate) use iteration_loop::ToolCallId;
+pub(crate) use self::stream::{
+    AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
+    ApprovalDecision,
+};
+pub use iteration_loop::IterationId;
+pub(crate) use iteration_loop::{InflightToolCall, IterationEvent, ToolCallId};

@@ -13,11 +13,9 @@
 //! }
 //! ```
 //!
-//! The store owns, oldest-to-newest:
-//! - `turns` — committed turns kept verbatim, each stamped with a monotonic
-//!   [`TurnId`] so its chronological position is stable across reloads.
-//! - the **open turn** — the in-progress turn (see [`GroupGuard`]), volatile and
-//!   not yet stamped.
+//! The store owns only committed turns, oldest-to-newest, each stamped with a
+//! monotonic [`TurnId`]. An in-progress turn belongs exclusively to its
+//! [`TurnHandle`] and is invisible to store readers until the handle commits.
 //!
 //! # It does not compact
 //!
@@ -25,7 +23,7 @@
 //! context window — is **not** this store's job. Compaction is a property of the
 //! *LLM request*, not of the record: the summary is a derived artifact assembled
 //! at request time by the agent layer's rolling-summary context adapter, which
-//! *reads* this store ([`turns_snapshot`](TranscriptStore::turns_snapshot)) and
+//! *reads* this store ([`turns`](Transcript::turns)) and
 //! keeps its own summary. This store never deletes a turn, never folds turns into
 //! a summary, and has no token budget. It just stores and replays the verbatim
 //! transcript. (Bounding on-disk growth, if ever needed, is a separate retention
@@ -33,17 +31,12 @@
 //!
 //! # Turns are built through a guard
 //!
-//! Transcript content is appended through either:
-//! - a [`GroupGuard`] from [`group`](TranscriptStore::group), for RAII turn
-//!   grouping; or
-//! - the direct `push_*` methods plus [`commit_open_turn`](TranscriptStore::commit_open_turn),
-//!   for an agent loop that already owns the turn lifecycle.
-//!
-//! Both paths write the same open turn and commit it as a single record, so readers
-//! see one transcript regardless of the writer style.
-//! A hard cancellation can instead call
-//! [`discard_open_turn`](TranscriptStore::discard_open_turn) to drop the volatile
-//! open turn without committing it.
+//! Transcript content is buffered through the unique [`TurnHandle`] returned by
+//! [`open_turn`](TranscriptStore::open_turn). User and assistant text may arrive
+//! as fragments, but neither fragments nor finished messages become visible
+//! through the store until the whole turn commits. Dropping an active handle
+//! finishes its current draft and commits the turn. A hard cancellation calls
+//! [`discard`](TurnHandle::discard) instead.
 //!
 //! # Threading
 //!
@@ -90,7 +83,7 @@ const MANIFEST_VERSION: u32 = 1;
 /// Fixes chronological order and gives compaction (in the agent layer) a stable
 /// handle for "the summary covers turns up to here". A distinct type from byte
 /// offsets/lengths so the two can never be swapped: ordering is keyed on
-/// `TurnId`, addressing on [`ByteOffset`].
+/// `TurnId`, addressing on `ByteOffset`.
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -171,16 +164,19 @@ impl ByteLen {
 
 /// One committed turn, lent read-only to context adapters.
 ///
-/// Returned (as a shared snapshot) by
-/// [`turns_snapshot`](TranscriptStore::turns_snapshot). Carries the turn's stable
-/// [`TurnId`] alongside its verbatim messages, so an adapter computing a
+/// Returned (as one element of the shared snapshot) by
+/// [`turns`](Transcript::turns). Carries the turn's messages plus, for a
+/// committed turn, its stable [`TurnId`], so an adapter computing a
 /// summarization boundary or a recent-tail cutoff can reason about *which* turns
-/// it has covered. The volatile open turn is **not** here (see
-/// [`open_turn_messages`](TranscriptStore::open_turn_messages)).
+/// it has covered.
+///
+/// The in-progress open turn appears as the trailing element with `id == None`
+/// (volatile, unstamped); every earlier element is a committed turn with
+/// `id == Some(_)`.
 #[derive(Clone, Debug)]
 pub struct Turn {
-    /// This turn's stable chronological id.
-    pub id: TurnId,
+    /// The turn's stable chronological id, or `None` for the open turn.
+    pub id: Option<TurnId>,
     /// The turn's messages, oldest-to-newest.
     pub messages: Vec<Value>,
 }
@@ -221,6 +217,57 @@ struct StoredGroup {
     loc: Option<(ByteOffset, ByteLen)>,
 }
 
+/// One message currently being assembled from streaming fragments.
+enum MessageDraft {
+    User(String),
+    Assistant(String),
+}
+
+impl MessageDraft {
+    fn into_message(self) -> Value {
+        match self {
+            Self::User(content) => json!({ "role": "user", "content": content }),
+            Self::Assistant(content) => json!({ "role": "assistant", "content": content }),
+        }
+    }
+
+    fn message(&self) -> Value {
+        match self {
+            Self::User(content) => json!({ "role": "user", "content": content }),
+            Self::Assistant(content) => json!({ "role": "assistant", "content": content }),
+        }
+    }
+}
+
+/// Volatile contents owned by the one live [`TurnHandle`].
+#[derive(Default)]
+struct OpenTurn {
+    messages: Vec<Value>,
+    draft: Option<MessageDraft>,
+}
+
+impl OpenTurn {
+    fn finish_draft(&mut self) {
+        if let Some(draft) = self.draft.take() {
+            self.messages.push(draft.into_message());
+        }
+    }
+
+    fn snapshot(&self) -> Vec<Value> {
+        let mut messages = self.messages.clone();
+        if let Some(draft) = &self.draft {
+            messages.push(draft.message());
+        }
+        messages
+    }
+
+    /// Whether the open turn has produced no content yet (no finished messages
+    /// and no draft in progress).
+    fn is_empty(&self) -> bool {
+        self.messages.is_empty() && self.draft.is_none()
+    }
+}
+
 /// A serialized data line awaiting its append, tagged with the turn it belongs
 /// to so its `loc` can be written back once appended.
 struct Pending {
@@ -232,8 +279,10 @@ struct Pending {
 #[derive(Default)]
 struct StoreState {
     groups: Vec<StoredGroup>,
-    /// The in-progress turn's messages — not yet committed (volatile, no id).
-    open_group: Vec<Value>,
+    /// The one in-progress turn, owned here while a [`TurnHandle`] is live.
+    /// `Some` from [`TranscriptStore::open_turn`] until the handle commits or
+    /// discards; the handle is only a token that mutates this buffer.
+    open_turn: Option<OpenTurn>,
     id_allocator: TurnIdAllocator,
 
     /// Records appended in memory but not yet written to the `.jsonl`.
@@ -243,17 +292,13 @@ struct StoreState {
     /// Data length the on-disk manifest currently describes.
     manifest_covered_len: ByteLen,
 
-    /// Cached flat snapshot returned by [`TranscriptStore::messages`] (committed
-    /// turns + open turn, in order). Rebuilt lazily and shared as an `Arc`;
-    /// invalidated whenever content changes.
-    messages_cache: Option<Arc<Value>>,
-    /// Cached committed-turn snapshot returned by
-    /// [`TranscriptStore::turns_snapshot`]. Rebuilt lazily and shared as an `Arc`;
-    /// invalidated whenever content changes.
+    /// Cached snapshot returned by [`TranscriptStore::turns`] (committed turns
+    /// plus the open turn). Rebuilt lazily and shared as an `Arc`; invalidated
+    /// whenever content changes.
     turns_cache: Option<Arc<Vec<Turn>>>,
-    /// Monotonic content version, bumped whenever either cache is invalidated (an
-    /// open-turn append or a commit). A pull-based reader caches work keyed on
-    /// this and recomputes only when it advances — see
+    /// Monotonic content version, bumped on any content change (an open-turn
+    /// append/finish or a commit/discard). A pull-based reader caches work keyed
+    /// on this and recomputes only when it advances — see
     /// [`TranscriptStore::version`].
     version: u64,
 
@@ -264,19 +309,12 @@ struct StoreState {
     /// but a caller can observe a failed write via
     /// [`TranscriptStore::last_persist_error`] instead of only a log line.
     last_persist_error: Option<FsError>,
-
-    /// Whether a [`GroupGuard`] currently holds an open turn. Guards the
-    /// single-open-turn invariant: two live guards would interleave their
-    /// messages in the one `open_group` buffer. Set in [`TranscriptStore::group`],
-    /// cleared when the guard commits/drops.
-    turn_open: bool,
 }
 
 impl StoreState {
-    /// Content changed: drop both cached snapshots and bump the version so
-    /// pull-based readers (and the next `messages`/`turns_snapshot`) rebuild.
+    /// Content changed: drop the cached snapshot and bump the version so
+    /// pull-based readers rebuild.
     fn mark_changed(&mut self) {
-        self.messages_cache = None;
         self.turns_cache = None;
         self.version = self.version.saturating_add(1);
     }
@@ -284,7 +322,22 @@ impl StoreState {
 
 /// Shared inner state — held behind an `Arc` so a context adapter can keep its
 /// own clone of the store and read the same transcript the agent writes.
-struct StoreInner<F: ClawFs + 'static> {
+#[derive(Clone, Copy)]
+struct PersistenceFns {
+    append: fn(&str, &[u8]) -> Result<(), FsError>,
+    write_atomic: fn(&str, &[u8]) -> Result<(), FsError>,
+}
+
+impl PersistenceFns {
+    fn new<F: ClawFs>() -> Self {
+        Self {
+            append: F::append,
+            write_atomic: F::write_atomic,
+        }
+    }
+}
+
+struct StoreInner {
     transcript_id: u32,
     data_path: String,
     index_path: String,
@@ -292,41 +345,126 @@ struct StoreInner<F: ClawFs + 'static> {
     /// and every persist is a no-op, so it never touches the filesystem. The
     /// paths are unused (left empty) in this mode.
     volatile: bool,
+    persistence: PersistenceFns,
     state: Mutex<StoreState>,
-    _fs: PhantomData<fn() -> F>,
+}
+
+impl Drop for StoreInner {
+    /// Best-effort final checkpoint: when the last store clone (and any live
+    /// [`TurnHandle`], which holds its own `Arc<StoreInner>`) is gone, flush any
+    /// debounced-but-unwritten committed turns. A no-op for a volatile store or
+    /// when nothing is pending.
+    fn drop(&mut self) {
+        persist(self, true);
+    }
 }
 
 /// The agent's complete transcript: an append-only, verbatim record
 /// of every turn. See the module docs for the storage layout.
 ///
-/// Build one with [`new`](Self::new), append turns through the [`GroupGuard`]
-/// returned by [`group`](Self::group), read the model-ready transcript with
-/// [`messages`](Self::messages) (or the turn-structured
-/// [`turns_snapshot`](Self::turns_snapshot)), and checkpoint with
-/// [`flush`](Self::flush). Drive a single store from one thread.
+/// Build one with [`new`](Self::new), append turns through the [`TurnHandle`]
+/// returned by [`open_turn`](Self::open_turn), and read the turn-structured
+/// transcript with [`turns`](Self::turns). Persistence is automatic (debounced,
+/// with a best-effort flush when the store is dropped). Drive a single store
+/// from one thread.
 ///
 /// # Examples
 ///
 /// ```
 /// # use claw_interface::MemFs;
-/// # use claw_memory::TranscriptStore;
+/// # use claw_memory::{AssistantFinish, TranscriptStore};
 /// MemFs::new();
-/// let mut store = TranscriptStore::<MemFs>::new(42, "/data/transcripts")
+/// let store = TranscriptStore::<MemFs>::new(42, "/data/transcripts")
 ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
 ///
-/// // One turn = one `group()`; the whole turn commits when the guard drops.
+/// // One turn = one handle; the whole turn commits when the handle drops.
 /// {
-///     let turn = store.group();
-///     turn.append_user("what's the weather?");
-///     turn.append_assistant(r#"{"role":"assistant","content":"Sunny."}"#);
+///     let mut turn = store.open_turn().unwrap();
+///     turn.append_user("what's the weather?").unwrap();
+///     turn.finish_user().unwrap();
+///     turn.append_assistant("Sunny.").unwrap();
+///     turn.finish_assistant(AssistantFinish::PlainText("Sunny.")).unwrap();
 /// }
 ///
-/// let rendered = store.messages();
-/// assert_eq!(rendered.as_array().map(|m| m.len()), Some(2));
-/// store.flush(); // checkpoint, e.g. on a clean shutdown
+/// // One committed turn carrying its two messages.
+/// let turns = store.turns();
+/// assert_eq!(turns.len(), 1);
+/// assert_eq!(turns[0].messages.len(), 2);
 /// ```
 pub struct TranscriptStore<F: ClawFs + 'static> {
-    inner: Arc<StoreInner<F>>,
+    inner: Arc<StoreInner>,
+    _fs: PhantomData<fn() -> F>,
+}
+
+/// Type-erased transcript boundary used by the agent runtime.
+///
+/// The concrete [`TranscriptStore<F>`] keeps its filesystem type parameter;
+/// callers that do not care which filesystem backs it can own `dyn Transcript`.
+/// Opening a turn returns one concrete, non-generic [`TurnHandle`].
+pub trait Transcript {
+    /// Open the transcript's unique writable turn.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TurnError::AlreadyOpen`] while another live handle owns it.
+    fn open_turn(&self) -> Result<TurnHandle, TurnError>;
+
+    /// A read-only snapshot of every turn, oldest-to-newest.
+    ///
+    /// Each committed turn is a [`Turn`] with `id == Some(_)`; the in-progress
+    /// open turn, if it has any content, is the trailing element with
+    /// `id == None`. Callers derive everything from this: the flat model-facing
+    /// transcript is `turns().iter().flat_map(|t| &t.messages)`, the committed
+    /// turns are those with an id, and the volatile tail is the `None` entry.
+    ///
+    /// Shared as an `Arc`; gate calls on [`version`](Self::version) to rebuild
+    /// only when the transcript changed.
+    fn turns(&self) -> Arc<Vec<Turn>>;
+
+    /// Monotonic content version, bumped on any change (open-turn append/finish
+    /// or commit/discard). Used by pull-based readers to cache work.
+    fn version(&self) -> u64;
+}
+
+/// The authoritative assistant message used to finish a streamed draft.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AssistantFinish<'a> {
+    /// A complete backend-shaped assistant message object.
+    RawJson(&'a str),
+    /// A complete plain-text assistant message.
+    PlainText(&'a str),
+}
+
+/// Failure opening or mutating a transcript turn.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum TurnError {
+    /// A live handle already owns this store's uncommitted turn.
+    #[error("a transcript turn is already open")]
+    AlreadyOpen,
+    /// The handle has already committed or discarded its turn.
+    #[error("the transcript turn is no longer active")]
+    Inactive,
+    /// A user fragment was supplied while an assistant draft was open.
+    #[error("cannot append user content while an assistant message is open")]
+    UserWhileAssistantOpen,
+    /// An assistant fragment was supplied while a user draft was open.
+    #[error("cannot append assistant content while a user message is open")]
+    AssistantWhileUserOpen,
+    /// No user draft exists to finish.
+    #[error("no user message is open")]
+    NoUserMessage,
+    /// A user draft is open where an assistant message must be finished.
+    #[error("cannot finish an assistant message while a user message is open")]
+    UserMessageOpen,
+    /// A complete tool result cannot be inserted in the middle of a draft.
+    #[error("cannot record a tool result while a message is open")]
+    MessageOpenForToolResult,
+    /// The backend-shaped assistant message was not valid JSON.
+    #[error("invalid assistant message json: {0}")]
+    InvalidAssistantJson(String),
+    /// An earlier mutation failed, so committing could preserve an invalid turn.
+    #[error("the transcript turn is poisoned")]
+    Poisoned,
 }
 
 /// Failure building a [`TranscriptStore`] from its on-disk log.
@@ -355,6 +493,7 @@ impl<F: ClawFs + 'static> Clone for TranscriptStore<F> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            _fs: PhantomData,
         }
     }
 }
@@ -375,8 +514,7 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     /// MemFs::new();
     /// let store = TranscriptStore::<MemFs>::new(7, "/data/transcripts")
     ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
-    /// assert_eq!(store.transcript_id(), 7);
-    /// assert!(store.messages().as_array().unwrap().is_empty()); // missing files start empty
+    /// assert!(store.turns().is_empty()); // missing files start empty
     /// ```
     ///
     /// # Errors
@@ -403,9 +541,10 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
                 data_path,
                 index_path,
                 volatile: false,
+                persistence: PersistenceFns::new::<F>(),
                 state: Mutex::new(state),
-                _fs: PhantomData,
             }),
+            _fs: PhantomData,
         })
     }
 
@@ -422,200 +561,81 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
                 data_path: String::new(),
                 index_path: String::new(),
                 volatile: true,
+                persistence: PersistenceFns::new::<F>(),
                 state: Mutex::new(StoreState::default()),
-                _fs: PhantomData,
             }),
+            _fs: PhantomData,
         }
     }
 
-    /// This store's transcript id.
-    pub fn transcript_id(&self) -> u32 {
-        self.inner.transcript_id
-    }
-
     /// A monotonic counter bumped whenever the transcript content changes (an
-    /// open-turn append or a turn commit).
+    /// open-turn append/finish or a commit/discard).
     ///
     /// Lets a pull-based reader cache output keyed on the transcript and rebuild
-    /// only when this advances, without diffing [`messages`](Self::messages) or
-    /// [`turns_snapshot`](Self::turns_snapshot).
+    /// only when this advances, without diffing [`turns`](Self::turns).
     pub fn version(&self) -> u64 {
         self.lock_state().version
     }
 
-    /// Open a turn. Append its messages through the returned [`GroupGuard`]; the
-    /// whole turn is committed as one group when the guard drops.
+    /// Open a turn. Append streaming message fragments through the returned
+    /// [`TurnHandle`]; the whole turn is committed as one group when the handle
+    /// drops unless it is explicitly discarded.
     ///
     /// Takes `&self` (the open turn buffers in the `Arc`-backed state), but a
     /// single store must be driven from one thread.
     ///
-    /// Only one turn may be open at a time: a second overlapping `group()` would
-    /// interleave its messages into the single `open_group` buffer. That is a
-    /// caller bug (turns are opened and driven sequentially), caught by a
-    /// `debug_assert!` and logged in release rather than silently corrupting the
-    /// turn.
-    pub fn group(&self) -> GroupGuard<F> {
-        {
-            let mut state = self.lock_state();
-            debug_assert!(
-                !state.turn_open,
-                "transcript {}: group() called while a turn is already open",
-                self.inner.transcript_id
-            );
-            if state.turn_open {
-                log::warn!(
-                    "transcript {}: group() called while a turn is already open; \
-                     messages will interleave",
-                    self.inner.transcript_id
-                );
-            }
-            state.turn_open = true;
-        }
-        GroupGuard {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-
-    /// The last persistence failure, if any.
+    /// Only one turn may be open at a time. A second overlapping call returns
+    /// [`TurnError::AlreadyOpen`] rather than permitting messages to interleave.
     ///
-    /// Data/index writes are best-effort: a failure leaves the in-memory turns
-    /// authoritative and logs, but the write did not land. This exposes that
-    /// failure so a caller can react (retry [`flush`](Self::flush), warn) instead
-    /// of discovering the loss only on the next reboot. Cleared on the next
-    /// successful persist.
-    pub fn last_persist_error(&self) -> Option<FsError> {
-        self.lock_state().last_persist_error.clone()
-    }
-
-    /// Append a user message to the current open turn.
+    /// # Errors
     ///
-    /// This is the direct writer form for callers that already own turn lifetime.
-    /// Call [`commit_open_turn`](Self::commit_open_turn) when the turn boundary is
-    /// reached. For RAII grouping, prefer [`group`](Self::group).
-    pub fn push_user_message(&self, content: impl Into<String>) {
-        push_open(
-            &self.inner,
-            json!({ "role": "user", "content": content.into() }),
-        );
-    }
-
-    /// Append a raw assistant message object to the current open turn.
-    ///
-    /// `raw_message_json` is the backend-shaped assistant message object; an
-    /// unparseable value is logged and dropped rather than corrupting the turn.
-    pub fn push_assistant_message(&self, raw_message_json: &str) {
-        push_assistant_message(&self.inner, raw_message_json);
-    }
-
-    /// Append a tool result to the current open turn.
-    ///
-    /// Set `is_error` when the tool failed, so the model can see the call did not
-    /// succeed.
-    pub fn push_tool_result(&self, tool_call_id: &str, content: &str, is_error: bool) {
-        push_open(
-            &self.inner,
-            json!({
-                "role": "tool",
-                "tool_call_id": tool_call_id,
-                "content": content,
-                "is_error": is_error,
-            }),
-        );
-    }
-
-    /// Append a whole batch of messages to the current open turn.
-    ///
-    /// `messages` must be a JSON array; a non-array value is logged and ignored.
-    pub fn push_patch(&self, messages: &Value) {
-        push_patch(&self.inner, messages);
-    }
-
-    /// Commit the current open turn as one group record, then persist if due.
-    ///
-    /// No-ops when the open turn is empty.
-    pub fn commit_open_turn(&self) {
-        commit_open_turn(&self.inner);
-    }
-
-    /// Discard the current open turn without committing or persisting it.
-    ///
-    /// No-ops when the open turn is empty. This is for hard cancellation paths
-    /// where partially materialized user/assistant/tool messages must not become
-    /// part of transcript history.
-    pub fn discard_open_turn(&self) {
-        discard_open_turn(&self.inner);
-    }
-
-    /// The current messages, ready to send to the model in chronological order:
-    /// every committed turn's messages followed by the in-progress open turn.
-    /// Returns a shared, internally consistent JSON array snapshot.
-    ///
-    /// This is the **full verbatim transcript** — the source of truth, with no
-    /// summarization applied (summarization happens in the agent layer at request
-    /// time, never here). The snapshot is cached and shared as an `Arc`: repeated
-    /// calls between mutations return a cheap refcount bump rather than
-    /// rebuilding/cloning the transcript.
-    pub fn messages(&self) -> Arc<Value> {
+    /// Returns [`TurnError::AlreadyOpen`] while another live handle owns the
+    /// volatile turn.
+    pub fn open_turn(&self) -> Result<TurnHandle, TurnError> {
         let mut state = self.lock_state();
-        if let Some(cached) = &state.messages_cache {
-            return Arc::clone(cached);
+        if state.open_turn.is_some() {
+            return Err(TurnError::AlreadyOpen);
         }
-        let mut out = Vec::new();
-        for group in &state.groups {
-            out.extend(group.msgs.iter().cloned());
-        }
-        out.extend(state.open_group.iter().cloned());
-        let snapshot = Arc::new(Value::Array(out));
-        state.messages_cache = Some(Arc::clone(&snapshot));
-        snapshot
+        state.open_turn = Some(OpenTurn::default());
+        Ok(TurnHandle {
+            inner: Arc::clone(&self.inner),
+            active: true,
+            poisoned: false,
+        })
     }
 
-    /// A turn-structured snapshot of the **committed** turns, oldest-to-newest,
-    /// each carrying its stable [`TurnId`].
+    /// A read-only snapshot of every turn, oldest-to-newest: each committed turn
+    /// (`id == Some(_)`) followed by the in-progress open turn (`id == None`)
+    /// when it has any content.
     ///
-    /// This is what a context adapter reads to reason about turn boundaries (e.g.
-    /// "summarize turns up to id N", "keep the newest turns verbatim"). The
-    /// volatile open turn is excluded — read it separately with
-    /// [`open_turn_messages`](Self::open_turn_messages). Cached and shared as an
-    /// `Arc`; gate calls on [`version`](Self::version) to rebuild only when the
-    /// transcript changed.
-    pub fn turns_snapshot(&self) -> Arc<Vec<Turn>> {
+    /// This is the sole read surface. The full verbatim model-facing transcript
+    /// is `turns().iter().flat_map(|t| &t.messages)`; turn-boundary logic filters
+    /// on `id`. Cached and shared as an `Arc`: repeated calls between mutations
+    /// return a cheap refcount bump rather than rebuilding/cloning the transcript.
+    pub fn turns(&self) -> Arc<Vec<Turn>> {
         let mut state = self.lock_state();
         if let Some(cached) = &state.turns_cache {
             return Arc::clone(cached);
         }
-        let turns: Vec<Turn> = state
+        let mut turns: Vec<Turn> = state
             .groups
             .iter()
             .map(|group| Turn {
-                id: group.id,
+                id: Some(group.id),
                 messages: group.msgs.clone(),
             })
             .collect();
+        if let Some(open_turn) = &state.open_turn {
+            if !open_turn.is_empty() {
+                turns.push(Turn {
+                    id: None,
+                    messages: open_turn.snapshot(),
+                });
+            }
+        }
         let snapshot = Arc::new(turns);
         state.turns_cache = Some(Arc::clone(&snapshot));
         snapshot
-    }
-
-    /// The in-progress open turn's messages, oldest-to-newest (empty when no turn
-    /// is open).
-    ///
-    /// Volatile and unstamped: it is not part of [`turns_snapshot`](Self::turns_snapshot)
-    /// (which is committed turns only) but a reader rendering the verbatim recent
-    /// tail must include it, since it is always the newest content.
-    pub fn open_turn_messages(&self) -> Vec<Value> {
-        self.lock_state().open_group.clone()
-    }
-
-    /// Force pending changes to disk now (ignoring the debounce) and refresh the
-    /// index manifest.
-    ///
-    /// Persists only **committed** turns; an open turn is committed when its
-    /// [`GroupGuard`] drops. The clean-shutdown order is therefore "drop the
-    /// guard, then `flush`". This is the manual, immediate form of the automatic
-    /// debounced persistence — same writes, just now.
-    pub fn flush(&self) {
-        persist(&self.inner, true);
     }
 
     fn lock_state(&self) -> MutexGuard<'_, StoreState> {
@@ -623,128 +643,257 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     }
 }
 
-/// An open turn. Append messages through it; the turn is committed as one group
-/// record when the guard drops (or on an explicit [`commit`](Self::commit)).
+impl<F: ClawFs + 'static> Transcript for TranscriptStore<F> {
+    fn open_turn(&self) -> Result<TurnHandle, TurnError> {
+        TranscriptStore::open_turn(self)
+    }
+
+    fn turns(&self) -> Arc<Vec<Turn>> {
+        TranscriptStore::turns(self)
+    }
+
+    fn version(&self) -> u64 {
+        TranscriptStore::version(self)
+    }
+}
+
+/// The unique writer for one open transcript turn.
 ///
-/// Obtained from [`TranscriptStore::group`]. Holds an `Arc` into the store's
+/// Obtained from [`TranscriptStore::open_turn`]. Holds an `Arc` into the store's
 /// inner state so it carries no lifetime and can be stored across async
-/// boundaries or inside structs like `BaseAgent`. Only one turn should be open at
-/// a time per store instance; behaviour is unspecified if two live `GroupGuard`s
-/// share the same store (their messages interleave in the single `open_group`
-/// buffer).
+/// boundaries or inside structs like `BaseAgent`. Every method locks only for
+/// the short in-memory mutation and never carries a lock across an await point.
+/// Dropping an active, valid handle finishes its current draft and commits the
+/// turn. [`discard`](Self::discard) is the explicit cancellation path.
 ///
 /// # Examples
 ///
 /// ```
 /// # use claw_interface::MemFs;
-/// # use claw_memory::TranscriptStore;
-/// # use serde_json::json;
+/// # use claw_memory::{AssistantFinish, TranscriptStore};
 /// # MemFs::new();
 /// # let store = TranscriptStore::<MemFs>::new(1, "/data/transcripts").unwrap();
-/// let turn = store.group();
-/// turn.append_user("call the weather tool");
-/// turn.append_patch(&json!([
-///     { "role": "assistant", "content": "calling tool" },
-///     { "role": "tool", "tool_call_id": "c1", "content": "{\"temp_c\":21}" },
-/// ]));
-/// // Reads see the open turn before it commits.
-/// assert_eq!(store.messages().as_array().map(|m| m.len()), Some(3));
-/// turn.commit(); // or just let it drop
+/// let mut turn = store.open_turn().unwrap();
+/// turn.append_user("call the weather tool").unwrap();
+/// turn.finish_user().unwrap();
+/// turn.finish_assistant(AssistantFinish::RawJson(
+///     r#"{"role":"assistant","tool_calls":[{"id":"c1"}]}"#,
+/// )).unwrap();
+/// turn.record_tool_result("c1", "{\"temp_c\":21}", false).unwrap();
+/// // Reads see the open turn (id == None) before it commits.
+/// let turns = store.turns();
+/// assert_eq!(turns.last().map(|t| (t.id, t.messages.len())), Some((None, 3)));
+/// turn.commit().unwrap(); // or just let it drop
 /// ```
-pub struct GroupGuard<F: ClawFs + 'static> {
-    inner: Arc<StoreInner<F>>,
+#[must_use = "dropping an active turn commits it; call discard for cancellation"]
+pub struct TurnHandle {
+    inner: Arc<StoreInner>,
+    active: bool,
+    poisoned: bool,
 }
 
-impl<F: ClawFs + 'static> GroupGuard<F> {
-    /// Append a user (or addon) message to the open turn.
-    pub fn append_user(&self, content: impl Into<String>) {
-        push_open(
-            &self.inner,
-            json!({ "role": "user", "content": content.into() }),
-        );
+impl TurnHandle {
+    /// Append one fragment to the current user message, opening its draft when
+    /// necessary.
+    pub fn append_user(&mut self, fragment: &str) -> Result<(), TurnError> {
+        self.mutate(TurnMutation::AppendUser(fragment))
     }
 
-    /// Append a raw assistant message (plain text and/or `tool_calls`).
-    ///
-    /// `raw_message_json` is the backend-shaped assistant message object; an
-    /// unparseable value is logged and dropped rather than corrupting the turn.
-    pub fn append_assistant(&self, raw_message_json: &str) {
-        push_assistant_message(&self.inner, raw_message_json);
+    /// Finish the current user draft as one complete transcript message.
+    pub fn finish_user(&mut self) -> Result<(), TurnError> {
+        self.mutate(TurnMutation::FinishUser)
     }
 
-    /// Append a tool result for the call `tool_call_id` to the open turn.
+    /// Append one fragment to the current assistant message, opening its draft
+    /// when necessary.
+    pub fn append_assistant(&mut self, fragment: &str) -> Result<(), TurnError> {
+        self.mutate(TurnMutation::AppendAssistant(fragment))
+    }
+
+    /// Finish the assistant message with its authoritative final shape.
     ///
-    /// Set `is_error` when the tool failed, so the model can see the call did not
-    /// succeed.
-    pub fn append_tool_result(&self, tool_call_id: &str, content: &str, is_error: bool) {
-        push_open(
-            &self.inner,
-            json!({
+    /// A raw finish preserves provider-specific reasoning/tool-call fields. A
+    /// plain-text finish is used for synthesized terminal messages. Either form
+    /// may finish a message that emitted no visible deltas.
+    pub fn finish_assistant(&mut self, finish: AssistantFinish<'_>) -> Result<(), TurnError> {
+        let message = match finish {
+            AssistantFinish::RawJson(raw) => serde_json::from_str(raw).map_err(|error| {
+                self.poisoned = true;
+                TurnError::InvalidAssistantJson(error.to_string())
+            })?,
+            AssistantFinish::PlainText(content) => {
+                json!({ "role": "assistant", "content": content })
+            }
+        };
+        self.mutate(TurnMutation::FinishAssistant(message))
+    }
+
+    /// Record one complete tool result in the current turn.
+    pub fn record_tool_result(
+        &mut self,
+        tool_call_id: &str,
+        content: &str,
+        is_error: bool,
+    ) -> Result<(), TurnError> {
+        self.mutate(TurnMutation::RecordToolResult {
+            tool_call_id,
+            content,
+            is_error,
+        })
+    }
+
+    /// Finish any remaining draft and commit this turn as one persisted group.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TurnError::Poisoned`] after any earlier invalid mutation; the
+    /// turn is discarded in that case.
+    pub fn commit(mut self) -> Result<(), TurnError> {
+        if !self.active {
+            return Err(TurnError::Inactive);
+        }
+        if self.poisoned {
+            discard_open_turn(&self.inner);
+            self.active = false;
+            return Err(TurnError::Poisoned);
+        }
+        commit_open_turn(&self.inner);
+        self.active = false;
+        Ok(())
+    }
+
+    /// Discard this volatile turn without committing or persisting it.
+    pub fn discard(mut self) {
+        if self.active {
+            discard_open_turn(&self.inner);
+            self.active = false;
+        }
+    }
+
+    fn mutate(&mut self, mutation: TurnMutation<'_>) -> Result<(), TurnError> {
+        if !self.active {
+            return Err(TurnError::Inactive);
+        }
+        let result = {
+            let mut state = lock_state(&self.inner);
+            let Some(turn) = state.open_turn.as_mut() else {
+                return Err(TurnError::Inactive);
+            };
+            let result = apply_turn_mutation(turn, mutation);
+            if result.is_ok() {
+                state.mark_changed();
+            }
+            result
+        };
+        if result.is_err() {
+            self.poisoned = true;
+        }
+        result
+    }
+}
+
+impl Drop for TurnHandle {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        if self.poisoned {
+            discard_open_turn(&self.inner);
+        } else {
+            commit_open_turn(&self.inner);
+        }
+        self.active = false;
+    }
+}
+
+enum TurnMutation<'a> {
+    AppendUser(&'a str),
+    FinishUser,
+    AppendAssistant(&'a str),
+    FinishAssistant(Value),
+    RecordToolResult {
+        tool_call_id: &'a str,
+        content: &'a str,
+        is_error: bool,
+    },
+}
+
+fn apply_turn_mutation(turn: &mut OpenTurn, mutation: TurnMutation<'_>) -> Result<(), TurnError> {
+    match mutation {
+        TurnMutation::AppendUser(fragment) => match turn.draft.as_mut() {
+            Some(MessageDraft::User(content)) => {
+                content.push_str(fragment);
+                Ok(())
+            }
+            Some(MessageDraft::Assistant(_)) => Err(TurnError::UserWhileAssistantOpen),
+            None => {
+                turn.draft = Some(MessageDraft::User(fragment.to_owned()));
+                Ok(())
+            }
+        },
+        TurnMutation::FinishUser => match turn.draft.take() {
+            Some(MessageDraft::User(content)) => {
+                turn.messages
+                    .push(json!({ "role": "user", "content": content }));
+                Ok(())
+            }
+            Some(draft @ MessageDraft::Assistant(_)) => {
+                turn.draft = Some(draft);
+                Err(TurnError::NoUserMessage)
+            }
+            None => Err(TurnError::NoUserMessage),
+        },
+        TurnMutation::AppendAssistant(fragment) => match turn.draft.as_mut() {
+            Some(MessageDraft::Assistant(content)) => {
+                content.push_str(fragment);
+                Ok(())
+            }
+            Some(MessageDraft::User(_)) => Err(TurnError::AssistantWhileUserOpen),
+            None => {
+                turn.draft = Some(MessageDraft::Assistant(fragment.to_owned()));
+                Ok(())
+            }
+        },
+        TurnMutation::FinishAssistant(message) => match turn.draft.take() {
+            Some(draft @ MessageDraft::User(_)) => {
+                turn.draft = Some(draft);
+                Err(TurnError::UserMessageOpen)
+            }
+            Some(MessageDraft::Assistant(_)) | None => {
+                turn.messages.push(message);
+                Ok(())
+            }
+        },
+        TurnMutation::RecordToolResult {
+            tool_call_id,
+            content,
+            is_error,
+        } => {
+            if turn.draft.is_some() {
+                return Err(TurnError::MessageOpenForToolResult);
+            }
+            turn.messages.push(json!({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "content": content,
                 "is_error": is_error,
-            }),
-        );
-    }
-
-    /// Append a whole batch of messages to the open turn (e.g. one tool round).
-    ///
-    /// `messages` must be a JSON array; a non-array value is logged and ignored.
-    pub fn append_patch(&self, messages: &Value) {
-        push_patch(&self.inner, messages);
-    }
-
-    /// Commit the open turn now as one group record, then persist if due.
-    pub fn commit(&self) {
-        commit_open_turn(&self.inner);
+            }));
+            Ok(())
+        }
     }
 }
 
-impl<F: ClawFs + 'static> Drop for GroupGuard<F> {
-    fn drop(&mut self) {
-        self.commit();
-        // Release the single-open-turn claim so the next `group()` is valid.
-        lock_state(&self.inner).turn_open = false;
-    }
-}
-
-fn push_assistant_message<F: ClawFs + 'static>(inner: &StoreInner<F>, raw_message_json: &str) {
-    match serde_json::from_str::<Value>(raw_message_json) {
-        Ok(message) => push_open(inner, message),
-        Err(err) => log::warn!(
-            "transcript {}: invalid assistant json: {err}",
-            inner.transcript_id
-        ),
-    }
-}
-
-fn push_patch<F: ClawFs + 'static>(inner: &StoreInner<F>, messages: &Value) {
-    let Some(items) = messages.as_array() else {
-        log::warn!(
-            "transcript {}: append_patch expected a JSON array",
-            inner.transcript_id
-        );
-        return;
-    };
-    for message in items {
-        push_open(inner, message.clone());
-    }
-}
-
-fn push_open<F: ClawFs + 'static>(inner: &StoreInner<F>, message: Value) {
-    let mut state = lock_state(inner);
-    state.open_group.push(message);
-    state.mark_changed();
-}
-
-fn commit_open_turn<F: ClawFs + 'static>(inner: &StoreInner<F>) {
+fn commit_open_turn(inner: &StoreInner) {
     let due = {
         let mut state = lock_state(inner);
-        if state.open_group.is_empty() {
+        let Some(mut open_turn) = state.open_turn.take() else {
+            return;
+        };
+        open_turn.finish_draft();
+        if open_turn.messages.is_empty() {
             return;
         }
-        let msgs = std::mem::take(&mut state.open_group);
+        let msgs = open_turn.messages;
         let id = state.id_allocator.next();
         // An in-memory store never flushes, so skip enqueuing a pending line that
         // would otherwise accumulate unbounded.
@@ -766,13 +915,14 @@ fn commit_open_turn<F: ClawFs + 'static>(inner: &StoreInner<F>) {
     }
 }
 
-fn discard_open_turn<F: ClawFs + 'static>(inner: &StoreInner<F>) {
+fn discard_open_turn(inner: &StoreInner) {
     let mut state = lock_state(inner);
-    if state.open_group.is_empty() {
+    let Some(open_turn) = state.open_turn.take() else {
         return;
+    };
+    if !open_turn.is_empty() {
+        state.mark_changed();
     }
-    state.open_group.clear();
-    state.mark_changed();
 }
 
 /// Serialize a group record to a data line and queue it for the next append.
@@ -788,7 +938,7 @@ fn enqueue(state: &mut StoreState, id: TurnId, msgs: Vec<Value>, transcript_id: 
 }
 
 /// Flush pending records (one `append`) and, when needed, rewrite the manifest.
-fn persist<F: ClawFs + 'static>(inner: &StoreInner<F>, force_manifest: bool) {
+fn persist(inner: &StoreInner, force_manifest: bool) {
     // An in-memory store keeps everything in `state`; it never writes files.
     if inner.volatile {
         return;
@@ -813,7 +963,7 @@ fn persist<F: ClawFs + 'static>(inner: &StoreInner<F>, force_manifest: bool) {
             locs.push((pending.id, off, len));
             off = off.advance(len);
         }
-        if let Err(err) = F::append(&inner.data_path, &data_buf) {
+        if let Err(err) = (inner.persistence.append)(&inner.data_path, &data_buf) {
             log::warn!(
                 "transcript {}: data append failed: {err}",
                 inner.transcript_id
@@ -830,7 +980,7 @@ fn persist<F: ClawFs + 'static>(inner: &StoreInner<F>, force_manifest: bool) {
     state.last_persist = Some(Instant::now());
 
     if let Some(bytes) = build_manifest_bytes(&state, inner.transcript_id) {
-        match F::write_atomic(&inner.index_path, &bytes) {
+        match (inner.persistence.write_atomic)(&inner.index_path, &bytes) {
             Ok(()) => {
                 state.manifest_covered_len = state.data_len;
                 state.last_persist_error = None;
@@ -1164,7 +1314,7 @@ fn transcript_path(dir: &str, transcript_id: u32, ext: &str) -> String {
     format!("{}/{transcript_id}{ext}", dir.trim_end_matches('/'))
 }
 
-fn lock_state<F: ClawFs + 'static>(inner: &StoreInner<F>) -> MutexGuard<'_, StoreState> {
+fn lock_state(inner: &StoreInner) -> MutexGuard<'_, StoreState> {
     inner
         .state
         .lock()
@@ -1184,16 +1334,26 @@ mod tests {
 
         let store = TranscriptStore::<MemFs>::new(1, dir).unwrap();
         {
-            let turn = store.group();
-            turn.append_user("persisted user");
-            turn.append_assistant(r#"{"role":"assistant","content":"persisted reply"}"#);
+            let mut turn = store.open_turn().unwrap();
+            turn.append_user("persisted user").unwrap();
+            turn.finish_user().unwrap();
+            turn.finish_assistant(AssistantFinish::RawJson(
+                r#"{"role":"assistant","content":"persisted reply"}"#,
+            ))
+            .unwrap();
         }
-        store.flush();
+        // The first commit persists immediately (no debounce yet), so the data
+        // log and manifest are already on disk here.
         assert!(serde_json::from_slice::<Manifest>(&MemFs::read(&index_path).unwrap()).is_ok());
 
         MemFs::write_atomic(&index_path, b"{not valid json").unwrap();
         let rebuilt = TranscriptStore::<MemFs>::new(1, dir).unwrap();
-        let messages = rebuilt.messages().to_string();
+        let messages: String = rebuilt
+            .turns()
+            .iter()
+            .flat_map(|turn| turn.messages.iter())
+            .map(Value::to_string)
+            .collect();
         assert!(messages.contains("persisted user"));
         assert!(messages.contains("persisted reply"));
         assert!(serde_json::from_slice::<Manifest>(&MemFs::read(&index_path).unwrap()).is_ok());

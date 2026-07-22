@@ -1,26 +1,30 @@
 use std::sync::Arc;
 
-use claw_api::{ClawApiAsync, RetryPolicy};
+use claw_api::{ChatStreamEvent, ClawApiAsync, RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind, Context};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
+use claw_memory::{AssistantFinish, Transcript, TurnHandle};
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_tool::ToolSet;
+use claw_utils::stream::StreamPart;
+use futures_lite::StreamExt as _;
 use tracing::Instrument as _;
 
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::protocol::{IterationId, IterationIdAllocator, Message};
+use crate::protocol::Message;
 
-use super::context::{AssistantCommit, ContextAdapter, Transcript};
+use super::context::ContextAdapter;
 use super::effect::{AgentEffect, AgentEffectInbox};
 use super::iteration_loop::{
-    AppendedMessages, IterationLoop, IterationLoopError, IterationOutcome, LlmStep,
-    ToolAuthorization, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
+    IterationEmitter, IterationEvent, IterationIdAllocator, IterationLoop, IterationLoopError,
+    IterationLoopEvent, LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy,
+    ToolPermissionRequest,
 };
 use super::persistence::{AgentState as RecoveryState, AgentStateBuilder};
 use super::stream::{
-    AgentError, AgentProgress, AgentStreamHandle, AgentSubmitError, ApprovalOutcome,
-    ProgressEmitter, RunControl,
+    AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome, AgentStreamHandle,
+    AgentSubmitError, ApprovalOutcome, RunControl,
 };
 use super::TurnLifecycle;
 
@@ -52,6 +56,13 @@ enum AgentState {
     Stopped(StopReason),
 }
 
+enum IterationCompletion {
+    Response(String),
+    Tools,
+    Interrupted,
+    Cancelled,
+}
+
 /// One configured Agent and its complete single-Agent state machine.
 pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     llm: ClawApiAsync<H, Timer>,
@@ -59,6 +70,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     api_usage: ApiUsage,
     retry_policy: RetryPolicy,
     transcript: Box<dyn Transcript>,
+    active_turn: Option<TurnHandle>,
     tools: ToolSet,
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
@@ -93,6 +105,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             api_usage: config.api_usage,
             retry_policy: config.retry_policy,
             transcript: config.transcript,
+            active_turn: None,
             tools,
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
@@ -112,10 +125,15 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         self.begin(message)?;
 
         let control = AgentStreamHandle::control();
-        let (progress, receiver) = AgentStreamHandle::channel();
-        let active = ActiveRun::new(self);
-        let driver = Box::pin(active.drive(progress, control.clone()));
-        Ok(AgentStreamHandle::new(driver, receiver, control))
+        let stream = self.run_stream(control.clone());
+        Ok(AgentStreamHandle::new(stream, control))
+    }
+
+    fn run_stream(
+        &mut self,
+        control: RunControl,
+    ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + '_ {
+        ActiveRunGuard::new(self).into_stream(control)
     }
 
     pub(crate) fn recovery_state(&self) -> RecoveryState {
@@ -132,184 +150,108 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         };
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
         self.iteration_ids = IterationIdAllocator::new();
-        self.transcript.append_user(message.as_str(), true);
+        let mut turn = self.transcript.open_turn()?;
+        turn.append_user(message.as_str())?;
+        turn.finish_user()?;
+        self.active_turn = Some(turn);
         self.state = AgentState::Running;
         Ok(())
     }
 
-    async fn drive(&mut self, progress: &ProgressEmitter, control: &RunControl) {
-        loop {
-            let next = match &self.state {
-                AgentState::Stopped(_) => Some(self.fail(AgentError::StateInvariant)),
-                AgentState::Running => {
-                    if control.take_interrupt() {
-                        self.stop(StopReason::Interrupted);
-                        Some(AgentProgress::Interrupted)
-                    } else {
-                        let iteration = self.iteration_ids.next();
-                        let result = self.run_iteration(iteration, progress, control).await;
-                        self.reduce_iteration(result, control)
-                    }
-                }
-            };
-
-            if let Some(next) = next {
-                let terminal = next.is_terminal();
-                progress.send(next).await;
-                if terminal {
-                    return;
-                }
-            }
-        }
-    }
-
-    async fn run_iteration(
-        &mut self,
-        iteration_id: IterationId,
-        progress: &ProgressEmitter,
-        control: &RunControl,
-    ) -> Result<IterationOutcome, IterationLoopError> {
-        self.refresh_llm_config();
-
-        let adapter_count = self.context_adapters.len() as u64;
-        let prepare_span = tracing::info_span!(
-            "iteration.prepare",
-            run.iteration = %iteration_id,
-            adapter_count,
-        );
-        self.prepare_adapter_context()
-            .instrument(prepare_span.clone())
-            .await;
-
-        let render_span =
-            prepare_span.in_scope(|| tracing::info_span!("context.render", adapter_count));
-        let history = render_span.in_scope(|| self.render_adapter_context());
-        let tools = render_span.in_scope(|| self.tools.begin())?;
-        render_span.in_scope(|| {
-            self.context
-                .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
-                .with_reminder(BlockKind::ToolReminder, Some(tools.extra_tool_context()));
-        });
-
-        let context = render_span.in_scope(|| self.context.request(&history));
-        let step = LlmStep {
-            iteration_id,
-            system_prompt: context.system(),
-            messages: context.history(),
-            reminders: context.reminders(),
-            tools: &tools,
-        };
-        drop(render_span);
-        drop(prepare_span);
-
-        let permission = BaseAgentPermissionPolicy {
-            policy: self.permission_policy.as_ref(),
-            progress,
-            control,
-        };
-        IterationLoop {
-            llm: &mut self.llm,
-            control,
-            permission: &permission,
-            retry: self.retry_policy,
-            progress,
-        }
-        .run(step)
-        .await
-    }
-
     fn reduce_iteration(
         &mut self,
-        result: Result<IterationOutcome, IterationLoopError>,
+        result: Result<IterationCompletion, AgentError>,
         control: &RunControl,
-    ) -> Option<AgentProgress> {
-        match result {
-            Ok(IterationOutcome::Response(response)) => {
-                let Some(text) = response.text else {
-                    return Some(self.fail(AgentError::from(
-                        IterationLoopError::MalformedAssistantMessage,
-                    )));
-                };
-                let commit = match response.raw_message_json.as_deref() {
-                    Some(raw) => AssistantCommit::RawJson(raw),
-                    None => AssistantCommit::PlainText(&text),
-                };
-                self.transcript.commit_assistant(commit);
+    ) -> Result<Option<AgentEvent>, AgentError> {
+        Ok(match result? {
+            IterationCompletion::Response(text) => {
+                self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
-                Some(AgentProgress::Yielded { text })
+                Some(AgentEvent::Finished(AgentOutcome::Completed(
+                    AgentCompletion::Streamed(text),
+                )))
             }
-            Ok(IterationOutcome::Tools(appended)) => {
-                self.transcript.append_patch(&appended.into_json_array());
-                if let Some(progress) = self.reduce_agent_effects() {
-                    return Some(progress);
+            IterationCompletion::Tools => {
+                if let Some(event) = self.reduce_agent_effects()? {
+                    return Ok(Some(event));
                 }
                 if control.take_interrupt() {
+                    self.abandon_open_task();
                     self.stop(StopReason::Interrupted);
-                    return Some(AgentProgress::Interrupted);
+                    return Ok(Some(AgentEvent::Finished(AgentOutcome::Interrupted)));
                 }
                 None
             }
-            Ok(IterationOutcome::Interrupted) => {
+            IterationCompletion::Interrupted => {
                 self.abandon_open_task();
                 self.stop(StopReason::Interrupted);
-                Some(AgentProgress::Interrupted)
+                Some(AgentEvent::Finished(AgentOutcome::Interrupted))
             }
-            Ok(IterationOutcome::Cancelled(produced)) => {
-                self.merge_cancelled_patch(produced);
+            IterationCompletion::Cancelled => {
+                self.abandon_open_task();
                 self.stop(StopReason::Cancelled);
-                Some(AgentProgress::Cancelled)
+                Some(AgentEvent::Finished(AgentOutcome::Cancelled))
             }
-            Err(error) => Some(self.fail(error.into())),
-        }
+        })
     }
 
-    fn reduce_agent_effects(&mut self) -> Option<AgentProgress> {
+    fn reduce_agent_effects(&mut self) -> Result<Option<AgentEvent>, AgentError> {
         let mut effects = self.effect_inbox.drain();
         if effects.len() > 1 {
             let count = effects.len();
             tracing::error!(name: "agent_effect_conflict", count = count as u64);
-            return Some(self.fail(AgentError::ConflictingEffects { count }));
+            return Err(AgentError::ConflictingEffects { count });
         }
-        effects.pop().map(|effect| self.reduce_tool_effect(effect))
+        effects
+            .pop()
+            .map(|effect| self.reduce_tool_effect(effect))
+            .transpose()
     }
 
-    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> AgentProgress {
-        match effect {
+    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<AgentEvent, AgentError> {
+        let message = match effect {
             AgentEffect::Finish { final_message } => {
-                self.transcript.commit_ended(&final_message);
+                self.finish_synthesized_assistant(&final_message)?;
+                self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
-                AgentProgress::Ended { final_message }
+                final_message
             }
             AgentEffect::Yield { message } => {
-                self.transcript
-                    .commit_assistant(AssistantCommit::PlainText(&message));
+                self.finish_synthesized_assistant(&message)?;
+                self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
-                AgentProgress::YieldedByTool { text: message }
+                message
             }
-        }
-    }
-
-    fn fail(&mut self, error: AgentError) -> AgentProgress {
-        self.effect_inbox.clear();
-        self.stop(StopReason::Failed);
-        AgentProgress::Failed(error)
-    }
-
-    fn merge_cancelled_patch(&mut self, produced: AppendedMessages) {
-        if produced.is_empty() {
-            return;
-        }
-        let Some(patch) = produced.into_complete_json_array() else {
-            tracing::warn!(name = "cancelled_patch_dropped");
-            return;
         };
-        self.transcript.append_patch(&patch);
+        Ok(AgentEvent::Finished(AgentOutcome::Completed(
+            AgentCompletion::Synthesized(message),
+        )))
+    }
+
+    fn fail(&mut self, error: AgentError) -> AgentError {
+        self.abandon_open_task();
+        self.stop(StopReason::Failed);
+        error
+    }
+
+    fn finish_synthesized_assistant(&mut self, message: &str) -> Result<(), AgentError> {
+        let turn = self
+            .active_turn
+            .as_mut()
+            .ok_or(AgentError::StateInvariant)?;
+        turn.finish_assistant(AssistantFinish::PlainText(message))?;
+        Ok(())
+    }
+
+    fn commit_active_turn(&mut self) -> Result<(), AgentError> {
+        let turn = self.active_turn.take().ok_or(AgentError::StateInvariant)?;
+        turn.commit()?;
+        Ok(())
     }
 
     async fn prepare_adapter_context(&mut self) {
-        let history = self.transcript.as_history();
         for adapter in &mut self.context_adapters {
-            adapter.prepare(history).await;
+            adapter.prepare(self.transcript.as_ref()).await;
         }
     }
 
@@ -335,6 +277,212 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ContentPhase {
+    Reasoning,
+    Output,
+    ToolCalls,
+    Ended,
+}
+
+#[derive(Default)]
+struct AssistantDraft {
+    reasoning: String,
+    message: String,
+    tool_calls: Vec<ToolCall>,
+}
+
+impl AssistantDraft {
+    fn raw_message_json(&self) -> Result<String, AgentError> {
+        let mut message = serde_json::Map::new();
+        message.insert("role".to_owned(), serde_json::json!("assistant"));
+        if !self.message.is_empty() {
+            message.insert("content".to_owned(), serde_json::json!(self.message));
+        }
+        if !self.reasoning.is_empty() {
+            message.insert(
+                "reasoning_content".to_owned(),
+                serde_json::json!(self.reasoning),
+            );
+        }
+        if !self.tool_calls.is_empty() {
+            message.insert(
+                "tool_calls".to_owned(),
+                serde_json::Value::Array(
+                    self.tool_calls
+                        .iter()
+                        .map(|call| {
+                            serde_json::json!({
+                                "id": call.id,
+                                "type": "function",
+                                "function": {
+                                    "name": call.name,
+                                    "arguments": call.arguments_json,
+                                },
+                            })
+                        })
+                        .collect(),
+                ),
+            );
+        }
+        serde_json::to_string(&serde_json::Value::Object(message))
+            .map_err(|_| AgentError::MalformedAssistantMessage)
+    }
+}
+
+/// BaseAgent's consuming half of an iteration.
+///
+/// It is deliberately the only place that knows both transcript semantics and
+/// owner-facing progress semantics: each chat stream event is incorporated into the
+/// active turn before the corresponding progress item is forwarded.
+struct IterationConsumer<'a> {
+    turn: &'a mut TurnHandle,
+    draft: AssistantDraft,
+    phase: ContentPhase,
+    reasoning_bytes: usize,
+    assistant_finished: bool,
+    saw_tool_calls: bool,
+}
+
+impl<'a> IterationConsumer<'a> {
+    fn new(turn: &'a mut TurnHandle) -> Self {
+        Self {
+            turn,
+            draft: AssistantDraft::default(),
+            phase: ContentPhase::Reasoning,
+            reasoning_bytes: 0,
+            assistant_finished: false,
+            saw_tool_calls: false,
+        }
+    }
+
+    /// Apply one backend event to the transcript before returning the matching
+    /// owner-facing item. `None` means the event was intentionally suppressed.
+    fn consume_chat_event(
+        &mut self,
+        event: ChatStreamEvent,
+    ) -> Result<Option<ChatStreamEvent>, AgentError> {
+        debug_assert!(!self.assistant_finished);
+        let progress = match event {
+            ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)) => {
+                debug_assert_eq!(self.phase, ContentPhase::Reasoning);
+                self.draft.reasoning.push_str(&fragment);
+                self.reasoning_progress(&fragment)
+            }
+            ChatStreamEvent::Reasoning(StreamPart::End) => {
+                debug_assert_eq!(self.phase, ContentPhase::Reasoning);
+                self.phase = ContentPhase::Output;
+                Some(ChatStreamEvent::Reasoning(StreamPart::End))
+            }
+            ChatStreamEvent::Output(StreamPart::Delta(fragment)) => {
+                debug_assert_eq!(self.phase, ContentPhase::Output);
+                // Mutate the transcript first. If that fails, the fragment must
+                // not appear on the owner-facing stream as if it were durable.
+                self.turn.append_assistant(&fragment)?;
+                self.draft.message.push_str(&fragment);
+                Some(ChatStreamEvent::Output(StreamPart::Delta(fragment)))
+            }
+            ChatStreamEvent::Output(StreamPart::End) => {
+                debug_assert_eq!(self.phase, ContentPhase::Output);
+                self.phase = ContentPhase::ToolCalls;
+                Some(ChatStreamEvent::Output(StreamPart::End))
+            }
+            ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) => {
+                debug_assert_eq!(self.phase, ContentPhase::ToolCalls);
+                self.draft.tool_calls.push(call.clone());
+                Some(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))
+            }
+            ChatStreamEvent::ToolCalls(StreamPart::End) => {
+                debug_assert_eq!(self.phase, ContentPhase::ToolCalls);
+                // At this boundary the complete backend-shaped assistant
+                // message is known. Finish it before exposing the End marker.
+                self.finish_assistant()?;
+                self.phase = ContentPhase::Ended;
+                Some(ChatStreamEvent::ToolCalls(StreamPart::End))
+            }
+        };
+        Ok(progress)
+    }
+
+    fn reasoning_progress(&mut self, fragment: &str) -> Option<ChatStreamEvent> {
+        debug_assert_eq!(self.phase, ContentPhase::Reasoning);
+        if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
+            return None;
+        }
+        let remaining = reasoning_limit() - self.reasoning_bytes;
+        let mut end = remaining.min(fragment.len());
+        while end > 0 && !fragment.is_char_boundary(end) {
+            end -= 1;
+        }
+        if end == 0 {
+            return None;
+        }
+        self.reasoning_bytes += end;
+        Some(ChatStreamEvent::Reasoning(StreamPart::Delta(
+            fragment[..end].to_owned(),
+        )))
+    }
+
+    fn finish_content(&mut self) -> Vec<ChatStreamEvent> {
+        let mut progress = Vec::with_capacity(3);
+        if self.phase == ContentPhase::Reasoning {
+            progress.push(ChatStreamEvent::Reasoning(StreamPart::End));
+            self.phase = ContentPhase::Output;
+        }
+        if self.phase == ContentPhase::Output {
+            progress.push(ChatStreamEvent::Output(StreamPart::End));
+            self.phase = ContentPhase::ToolCalls;
+        }
+        if self.phase == ContentPhase::ToolCalls {
+            progress.push(ChatStreamEvent::ToolCalls(StreamPart::End));
+            self.phase = ContentPhase::Ended;
+        }
+        progress
+    }
+
+    fn finish_iteration(&mut self) -> Result<IterationCompletion, AgentError> {
+        self.finish_assistant()?;
+        if self.saw_tool_calls {
+            Ok(IterationCompletion::Tools)
+        } else if !self.draft.message.is_empty() {
+            Ok(IterationCompletion::Response(std::mem::take(
+                &mut self.draft.message,
+            )))
+        } else {
+            Err(AgentError::MalformedAssistantMessage)
+        }
+    }
+
+    fn finish_assistant(&mut self) -> Result<(), AgentError> {
+        if self.assistant_finished {
+            return Ok(());
+        }
+        let raw = self.draft.raw_message_json()?;
+        self.turn.finish_assistant(AssistantFinish::RawJson(&raw))?;
+        self.assistant_finished = true;
+        Ok(())
+    }
+}
+
+const fn reasoning_limit() -> usize {
+    #[cfg(feature = "reasoning_short")]
+    {
+        2_000
+    }
+    #[cfg(all(feature = "reasoning_medium", not(feature = "reasoning_short")))]
+    {
+        8_000
+    }
+    #[cfg(all(
+        feature = "reasoning_long",
+        not(feature = "reasoning_short"),
+        not(feature = "reasoning_medium")
+    ))]
+    {
+        32_000
+    }
+}
+
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     pub(crate) fn is_stopped(&self) -> bool {
         matches!(self.state, AgentState::Stopped(_))
@@ -349,18 +497,23 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
     fn abandon_open_task(&mut self) {
         self.effect_inbox.clear();
-        self.transcript.discard_open_turn();
+        if let Some(turn) = self.active_turn.take() {
+            turn.discard();
+        }
     }
 }
 
 struct BaseAgentPermissionPolicy<'a> {
     policy: &'a dyn PermissionPolicy,
-    progress: &'a ProgressEmitter,
     control: &'a RunControl,
 }
 
 impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
-    fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
+    fn authorize<'a>(
+        &'a self,
+        request: ToolPermissionRequest<'_>,
+        events: &IterationEmitter,
+    ) -> ToolAuthorization<'a> {
         match self
             .policy
             .evaluate(&PermissionRequest::new(request.action))
@@ -369,12 +522,15 @@ impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
             PermissionDecision::Deny { reason } => ToolAuthorization::Deny(reason),
             PermissionDecision::Ask { reason } => {
                 let tool_call_id = request.tool_call_id;
+                let tool_call = request.tool_call.clone();
+                let events = events.clone();
                 ToolAuthorization::Pending(Box::pin(async move {
                     self.control.begin_approval(tool_call_id);
-                    self.progress
-                        .send(AgentProgress::ApprovalRequired {
+                    events
+                        .send(IterationLoopEvent::ApprovalRequired {
                             tool_call_id,
-                            summary: reason,
+                            tool_call,
+                            reason,
                         })
                         .await;
                     match self.control.approval().await {
@@ -393,35 +549,321 @@ impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
     }
 }
 
-struct ActiveRun<'a, H: ClawHttp, Timer: ClawTimer> {
+/// Restores BaseAgent's stopped-state invariant if its borrowing stream is
+/// dropped before producing a terminal event or error.
+struct ActiveRunGuard<'a, H: ClawHttp, Timer: ClawTimer> {
     agent: &'a mut BaseAgent<H, Timer>,
-    finished: bool,
 }
 
-impl<'a, H, Timer> ActiveRun<'a, H, Timer>
+impl<'a, H, Timer> ActiveRunGuard<'a, H, Timer>
 where
     H: ClawHttp + StreamingHttp,
     Timer: ClawTimer,
 {
     fn new(agent: &'a mut BaseAgent<H, Timer>) -> Self {
-        Self {
-            agent,
-            finished: false,
-        }
+        Self { agent }
     }
 
-    async fn drive(mut self, progress: ProgressEmitter, control: RunControl) {
-        self.agent.drive(&progress, &control).await;
-        self.finished = true;
+    fn into_stream(
+        self,
+        control: RunControl,
+    ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + 'a {
+        async_stream::stream! {
+            loop {
+                if !matches!(self.agent.state, AgentState::Running) {
+                    yield Err(self.agent.fail(AgentError::StateInvariant));
+                    break;
+                }
+                if control.take_interrupt() {
+                    self.agent.abandon_open_task();
+                    self.agent.stop(StopReason::Interrupted);
+                    yield Ok(AgentEvent::Finished(AgentOutcome::Interrupted));
+                    break;
+                }
+
+                let iteration_id = self.agent.iteration_ids.next();
+                self.agent.refresh_llm_config();
+                if self.agent.active_turn.is_none() {
+                    yield Err(self.agent.fail(AgentError::StateInvariant));
+                    break;
+                }
+
+                let adapter_count = self.agent.context_adapters.len() as u64;
+                let prepare_span = tracing::info_span!(
+                    "iteration.prepare",
+                    run.iteration = %iteration_id,
+                    adapter_count,
+                );
+                self.agent
+                    .prepare_adapter_context()
+                    .instrument(prepare_span.clone())
+                    .await;
+
+                let render_span = prepare_span
+                    .in_scope(|| tracing::info_span!("context.render", adapter_count));
+                let history = render_span.in_scope(|| self.agent.render_adapter_context());
+                let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
+                    Ok(tools) => tools,
+                    Err(error) => {
+                        yield Err(self.agent.fail(AgentError::from(
+                            IterationLoopError::from(error),
+                        )));
+                        break;
+                    }
+                };
+                render_span.in_scope(|| {
+                    self.agent
+                        .context
+                        .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
+                        .with_reminder(
+                            BlockKind::ToolReminder,
+                            Some(tools.extra_tool_context()),
+                        );
+                });
+
+                let context = render_span.in_scope(|| self.agent.context.request(&history));
+                let step = LlmStep {
+                    iteration_id,
+                    system_prompt: context.system(),
+                    messages: context.history(),
+                    reminders: context.reminders(),
+                    tools: &tools,
+                };
+                drop(render_span);
+                drop(prepare_span);
+
+                let permission = BaseAgentPermissionPolicy {
+                    policy: self.agent.permission_policy.as_ref(),
+                    control: &control,
+                };
+                let mut iteration = IterationLoop {
+                    llm: &mut self.agent.llm,
+                    control: &control,
+                    permission: &permission,
+                    retry: self.agent.retry_policy,
+                }
+                .run(step);
+                let turn = self
+                    .agent
+                    .active_turn
+                    .as_mut()
+                    .expect("active turn checked before borrowing iteration fields");
+                let mut consumer = IterationConsumer::new(turn);
+
+                yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                    IterationEvent::Started(iteration_id),
+                )));
+
+                let mut result = None;
+                while let Some(item) = iteration.next().await {
+                    let event = match item {
+                        Ok(event) => event,
+                        Err(error) => {
+                            result = Some(Err(AgentError::from(error)));
+                            break;
+                        }
+                    };
+                    match event {
+                        IterationLoopEvent::Llm(event) => match consumer.consume_chat_event(event) {
+                            Ok(Some(event)) => yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                IterationEvent::Llm(event),
+                            ))),
+                            Ok(None) => {}
+                            Err(error) => {
+                                result = Some(Err(error));
+                                break;
+                            }
+                        },
+                        IterationLoopEvent::BeforeToolCalls(calls) => {
+                            for event in consumer.finish_content() {
+                                yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                    IterationEvent::Llm(event),
+                                )));
+                            }
+                            if let Err(error) = consumer.finish_assistant() {
+                                result = Some(Err(error));
+                                break;
+                            }
+                            consumer.saw_tool_calls = true;
+                            yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                IterationEvent::BeforeToolCalls(calls),
+                            )));
+                        }
+                        IterationLoopEvent::ApprovalRequired {
+                            tool_call_id,
+                            tool_call,
+                            reason,
+                        } => {
+                            yield Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
+                                tool_call_id,
+                                tool_call,
+                                reason,
+                            }));
+                        }
+                        IterationLoopEvent::ToolResult {
+                            tool_call_id,
+                            execution,
+                        } => {
+                            if let Err(error) = consumer.turn.record_tool_result(
+                                &tool_call_id,
+                                &execution.content,
+                                !execution.ok,
+                            ) {
+                                result = Some(Err(AgentError::from(error)));
+                                break;
+                            }
+                        }
+                        IterationLoopEvent::Interrupted => {
+                            result = Some(Ok(IterationCompletion::Interrupted));
+                            break;
+                        }
+                        IterationLoopEvent::Cancelled => {
+                            result = Some(Ok(IterationCompletion::Cancelled));
+                            break;
+                        }
+                    }
+                }
+
+                for event in consumer.finish_content() {
+                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                        IterationEvent::Llm(event),
+                    )));
+                }
+                let result = result.unwrap_or_else(|| consumer.finish_iteration());
+                drop(consumer);
+                drop(iteration);
+                drop(permission);
+                drop(tools);
+
+                yield Ok(AgentEvent::Iteration(StreamPart::End));
+
+                match self.agent.reduce_iteration(result, &control) {
+                    Ok(Some(event @ AgentEvent::Finished(_))) => {
+                        yield Ok(event);
+                        break;
+                    }
+                    Ok(Some(event)) => yield Ok(event),
+                    Ok(None) => {}
+                    Err(error) => {
+                        yield Err(self.agent.fail(error));
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveRun<'_, H, Timer> {
+impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveRunGuard<'_, H, Timer> {
     fn drop(&mut self) {
-        if self.finished || self.agent.is_stopped() {
+        if self.agent.is_stopped() {
             return;
         }
         self.agent.abandon_open_task();
         self.agent.stop(StopReason::Cancelled);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use claw_interface::MemFs;
+    use claw_memory::TranscriptStore;
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn streamed_output_reaches_the_transcript_before_progress() {
+        let transcript = TranscriptStore::<MemFs>::in_memory(1);
+        let mut turn = transcript.open_turn().expect("turn opens");
+        turn.append_user("hello").expect("user fragment appends");
+        turn.finish_user().expect("user message finishes");
+
+        let events = [
+            ChatStreamEvent::Reasoning(StreamPart::End),
+            ChatStreamEvent::Output(StreamPart::Delta("Hel".to_owned())),
+            ChatStreamEvent::Output(StreamPart::Delta("lo".to_owned())),
+            ChatStreamEvent::Output(StreamPart::End),
+            ChatStreamEvent::ToolCalls(StreamPart::End),
+        ];
+        let mut consumer = IterationConsumer::new(&mut turn);
+        let mut actual = Vec::new();
+        for event in events {
+            let event = consumer
+                .consume_chat_event(event)
+                .expect("chat event is valid")
+                .expect("test event is visible");
+            match &event {
+                ChatStreamEvent::Output(StreamPart::Delta(fragment)) if fragment == "Hel" => {
+                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hel"));
+                }
+                ChatStreamEvent::Output(StreamPart::Delta(fragment)) if fragment == "lo" => {
+                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hello"));
+                }
+                ChatStreamEvent::ToolCalls(StreamPart::End) => {
+                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hello"));
+                }
+                _ => {}
+            }
+            actual.push(event);
+        }
+        actual.extend(consumer.finish_content());
+        let completion = consumer.finish_iteration();
+        drop(consumer);
+
+        assert!(matches!(
+            completion.expect("iteration is valid"),
+            IterationCompletion::Response(text) if text == "Hello"
+        ));
+        assert_eq!(
+            actual,
+            vec![
+                ChatStreamEvent::Reasoning(StreamPart::End),
+                ChatStreamEvent::Output(StreamPart::Delta("Hel".to_owned())),
+                ChatStreamEvent::Output(StreamPart::Delta("lo".to_owned())),
+                ChatStreamEvent::Output(StreamPart::End),
+                ChatStreamEvent::ToolCalls(StreamPart::End),
+            ]
+        );
+        turn.discard();
+    }
+
+    #[test]
+    fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
+        let draft = AssistantDraft {
+            reasoning: "think".to_owned(),
+            message: "answer".to_owned(),
+            tool_calls: vec![ToolCall {
+                id: "call-1".to_owned(),
+                name: "search".to_owned(),
+                arguments_json: r#"{"query":"rust"}"#.to_owned(),
+            }],
+        };
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(
+                &draft.raw_message_json().expect("draft is serializable")
+            )
+            .expect("assistant JSON is valid"),
+            json!({
+                "role": "assistant",
+                "content": "answer",
+                "reasoning_content": "think",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "search",
+                        "arguments": r#"{"query":"rust"}"#,
+                    },
+                }],
+            })
+        );
+    }
+
+    fn assistant_content(transcript: &TranscriptStore<MemFs>) -> Option<String> {
+        let turns = transcript.turns();
+        let assistant = turns.last()?.messages.get(1)?;
+        assistant.get("content")?.as_str().map(str::to_owned)
     }
 }

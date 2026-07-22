@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claw_agent::{
-    AgentSystem, Message, SessionControl, SessionControlError, SessionEvent, SessionEventStream,
-    SessionId, StreamPart,
+    stream::StreamPart, AgentSystem, Message, SessionControl, SessionControlError, SessionEvent,
+    SessionEventStream, SessionId,
 };
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpError, HttpJsonRequest, HttpResponse, HttpResponseFuture,

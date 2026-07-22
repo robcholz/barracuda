@@ -1,6 +1,7 @@
 pub mod claw_core
 pub use claw_core::PermissionLevel
 pub use claw_core::ToolCall
+pub use claw_core::stream
 pub enum claw_core::ApiUsage
 pub claw_core::ApiUsage::Compaction
 pub claw_core::ApiUsage::Memory
@@ -8,7 +9,8 @@ pub claw_core::ApiUsage::RootAgent
 pub claw_core::ApiUsage::SubAgent
 pub enum claw_core::InputRequestKind
 pub claw_core::InputRequestKind::PermissionApproval
-pub claw_core::InputRequestKind::PermissionApproval::summary: alloc::string::String
+pub claw_core::InputRequestKind::PermissionApproval::reason: alloc::string::String
+pub claw_core::InputRequestKind::PermissionApproval::tool_call: claw_api::types::ToolCall
 pub enum claw_core::OpenSessionError
 pub claw_core::OpenSessionError::AlreadyOpen(claw_core::SessionId)
 pub claw_core::OpenSessionError::SessionNotFound(claw_core::SessionId)
@@ -49,9 +51,9 @@ pub claw_core::SessionEvent::InputRequested::request: claw_core::InputRequestId
 pub claw_core::SessionEvent::IterationEnded
 pub claw_core::SessionEvent::IterationStarted
 pub claw_core::SessionEvent::IterationStarted::iteration: claw_core::IterationId
-pub claw_core::SessionEvent::Output(claw_core::StreamPart<alloc::string::String>)
-pub claw_core::SessionEvent::Reasoning(claw_core::StreamPart<alloc::string::String>)
-pub claw_core::SessionEvent::ToolCalls(claw_core::StreamPart<claw_api::types::ToolCall>)
+pub claw_core::SessionEvent::Output(claw_utils::stream::StreamPart<alloc::string::String>)
+pub claw_core::SessionEvent::Reasoning(claw_utils::stream::StreamPart<alloc::string::String>)
+pub claw_core::SessionEvent::ToolCalls(claw_utils::stream::StreamPart<claw_api::types::ToolCall>)
 pub claw_core::SessionEvent::TurnEnded
 pub claw_core::SessionEvent::TurnEnded::turn: claw_core::TurnId
 pub claw_core::SessionEvent::TurnStarted
@@ -60,9 +62,6 @@ pub claw_core::SessionEvent::TurnStarted::turn: claw_core::TurnId
 pub enum claw_core::SessionPersistence
 pub claw_core::SessionPersistence::Ephemeral
 pub claw_core::SessionPersistence::Persistent
-pub enum claw_core::StreamPart<T>
-pub claw_core::StreamPart::Delta(T)
-pub claw_core::StreamPart::End
 pub enum claw_core::TurnOrigin
 pub claw_core::TurnOrigin::Subagent
 pub claw_core::TurnOrigin::Subagent::agent: claw_core::AgentId
@@ -121,6 +120,7 @@ pub fn claw_core::Message::text(impl core::convert::Into<alloc::string::String>)
 pub struct claw_core::Orchestrator
 impl claw_core::Orchestrator
 pub fn claw_core::Orchestrator::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiUsage, bool) -> core::result::Result<(), claw_api::errors::InitError>
+pub fn claw_core::Orchestrator::new<Filesystem, Http, Timer, Thread, Executor>(alloc::sync::Arc<claw_tool::registry::ToolRegistry>, claw_persistence::SharedPersistence<Filesystem>, alloc::string::String, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, claw_core::OrchestratorBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static, Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub fn claw_core::Orchestrator::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionEventStream), claw_core::OpenSessionError>
 pub fn claw_core::Orchestrator::session_create(&self, claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>
 pub fn claw_core::Orchestrator::session_delete(&self, claw_core::SessionId) -> core::result::Result<(), claw_core::SessionControlError>

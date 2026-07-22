@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use claw_api::ToolCall;
+
 use crate::agent::ToolCallId;
 use crate::protocol::{AgentId, AgentKind};
 
@@ -33,7 +35,8 @@ impl NodeMeta {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ParkedApproval {
     pub(super) tool_call_id: ToolCallId,
-    pub(super) summary: String,
+    pub(super) tool_call: ToolCall,
+    pub(super) reason: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -265,11 +268,13 @@ impl MultiagentState {
         &mut self,
         agent: AgentId,
         tool_call_id: ToolCallId,
-        summary: String,
+        tool_call: ToolCall,
+        reason: String,
     ) {
         let replacement = ParkedApproval {
             tool_call_id,
-            summary,
+            tool_call,
+            reason,
         };
         if let Some((_, pending)) = self
             .approvals
@@ -303,6 +308,8 @@ impl MultiagentState {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    use claw_api::ToolCall;
 
     use crate::agent::ToolCallId;
     use crate::protocol::{AgentId, AgentKind};
@@ -375,18 +382,29 @@ mod tests {
         let first = AgentId(1);
         let second = AgentId(2);
         let mut state = MultiagentState::default();
-        state.park_approval(first, ToolCallId::new(0), "first".to_owned());
-        state.park_approval(second, ToolCallId::new(1), "second".to_owned());
+        state.park_approval(
+            first,
+            ToolCallId::new(0),
+            ToolCall::default(),
+            "first".to_owned(),
+        );
+        state.park_approval(
+            second,
+            ToolCallId::new(1),
+            ToolCall::default(),
+            "second".to_owned(),
+        );
 
         let (agent, approval) = state.active_approval().expect("first approval is active");
         assert_eq!(agent, first);
         assert_eq!(approval.tool_call_id, ToolCallId::new(0));
-        assert_eq!(approval.summary, "first");
+        assert_eq!(approval.tool_call, ToolCall::default());
+        assert_eq!(approval.reason, "first");
         assert!(state.has_pending_approval());
         assert!(state.remove_approval(first));
         let (agent, approval) = state.active_approval().expect("second approval is active");
         assert_eq!(agent, second);
         assert_eq!(approval.tool_call_id, ToolCallId::new(1));
-        assert_eq!(approval.summary, "second");
+        assert_eq!(approval.reason, "second");
     }
 }

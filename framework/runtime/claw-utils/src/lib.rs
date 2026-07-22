@@ -1,11 +1,13 @@
-//! Shared helpers for the claw Rust crates: log-safe text truncation, the
-//! prefixed-id newtype macro ([`define_prefixed_id`]), and the id-allocator
-//! macro.
+//! Shared helpers for the claw Rust crates: logical [`stream`] parts, log-safe
+//! text truncation, the prefixed-id newtype macro ([`define_prefixed_id`]), and
+//! the id-allocator macro.
 //!
 //! Async primitives (channels, `block_on`) are intentionally NOT provided here:
 //! use vetted crates instead — `async-channel` for channels and
 //! `futures_lite::future::block_on` / `edge_executor::block_on` for driving a
 //! future to completion.
+
+pub mod stream;
 
 use core::fmt;
 

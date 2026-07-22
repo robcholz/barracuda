@@ -27,7 +27,7 @@
 //!
 //! ```no_run
 //! use claw_interface::MemFs;
-//! use claw_memory::TranscriptStore;
+//! use claw_memory::{AssistantFinish, Transcript, TranscriptStore};
 //!
 //! // A filesystem for persistence. On device this is the espidf `ClawFs` over
 //! // the DATA root; here it is the in-memory host double. The store holds the
@@ -36,23 +36,29 @@
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
 //! let transcript_id = 42;
-//! let mut store = TranscriptStore::<MemFs>::new(transcript_id, "/data/transcripts")
+//! let store = TranscriptStore::<MemFs>::new(transcript_id, "/data/transcripts")
 //!     .expect("a fresh MemFs has no data log, so the transcript starts empty");
+//! let transcript: &dyn Transcript = &store;
 //!
-//! // Drive it from the agent loop. One turn = one `group()`; the whole turn is
-//! // committed as a single record when the guard drops.
+//! // One handle owns the turn; dropping it commits the turn as one record.
 //! {
-//!     let turn = store.group();
-//!     turn.append_user("what's the weather?");
-//!     turn.append_assistant(r#"{"role":"assistant","content":"Sunny."}"#);
-//!     turn.append_tool_result("call_1", "{\"temp_c\":21}", false);
+//!     let mut turn = transcript.open_turn().expect("the store has no active turn");
+//!     turn.append_user("what's the weather?").unwrap();
+//!     turn.finish_user().unwrap();
+//!     turn.append_assistant("Sun").unwrap();
+//!     turn.append_assistant("ny.").unwrap();
+//!     turn
+//!         .finish_assistant(AssistantFinish::PlainText("Sunny."))
+//!         .unwrap();
 //!
-//!     // store.messages() includes the open turn; feed to the model.
-//!     let messages = store.messages();
-//!     let _ = messages;
+//!     // turns() includes the open turn (id == None) as the trailing element;
+//!     // the flat model-facing transcript is its messages flattened.
+//!     let turns = transcript.turns();
+//!     let _messages: Vec<_> = turns.iter().flat_map(|t| &t.messages).collect();
 //! } // drop → the turn is committed
 //!
-//! store.flush(); // force a checkpoint, e.g. on a clean shutdown
+//! // Persistence is automatic: debounced writes plus a best-effort flush when
+//! // the store is dropped.
 //! ```
 
 pub mod compaction;
@@ -71,4 +77,7 @@ pub use profile::{
     ParseProfileDocumentError, ProfileDocument, ProfileError, ProfileSnapshot, ProfileStore,
     ASSISTANT_IDENTITY_FILE, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES, SOUL_FILE, USER_PROFILE_FILE,
 };
-pub use transcript_store::{GroupGuard, TranscriptInitError, TranscriptStore, Turn, TurnId};
+pub use transcript_store::{
+    AssistantFinish, Transcript, TranscriptInitError, TranscriptStore, Turn, TurnError, TurnHandle,
+    TurnId,
+};

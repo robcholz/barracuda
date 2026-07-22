@@ -15,9 +15,9 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 
 use super::backends::Backend;
+use super::chat_stream::ChatStream;
 use super::errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
 use super::retry::{run_with_retry, sleep_abortable_async};
-use super::stream::ChatStream;
 use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest,
 };
@@ -436,12 +436,13 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
 
     /// Streaming chat completion over [`StreamingHttp`].
     ///
-    /// Yields [`LlmDelta`](crate::LlmDelta) fragments as tokens arrive — reasoning,
-    /// then output, then complete tool calls. Drain it to the end, then call
-    /// [`ChatStream::take_response`] for the assembled [`LlmResponse`]. Unlike
-    /// [`chat`](Self::chat) it does not retry: a stream cannot be resumed
-    /// mid-body, so a failure is surfaced to the caller. `cancel` remains active
-    /// for the full body stream, not only the send/header phase.
+    /// Yields [`ChatStreamEvent`](crate::ChatStreamEvent) values as reasoning,
+    /// output, and tool-call logical streams of
+    /// [`StreamPart`](claw_utils::stream::StreamPart). Unlike
+    /// [`chat`](Self::chat), it never assembles an [`LlmResponse`] and does not
+    /// retry: a stream cannot be resumed mid-body, so every parse, transport, or
+    /// premature-end failure is yielded directly by the stream. `cancel`
+    /// remains active for the full body stream, not only the send/header phase.
     pub async fn chat_stream<'h, 'r>(
         &'h mut self,
         request: &'r ChatRequest<'r>,

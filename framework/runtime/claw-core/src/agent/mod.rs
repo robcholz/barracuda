@@ -10,8 +10,10 @@ mod context_adapters;
 mod factory;
 mod tools;
 
+pub use base_agent::IterationId;
 pub(crate) use base_agent::{
-    AgentApprovalError, AgentProgress, AgentState, ApprovalDecision, BaseAgent, ToolCallId,
+    AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
+    AgentState, ApprovalDecision, BaseAgent, InflightToolCall, IterationEvent, ToolCallId,
 };
 pub(crate) use context_adapters::ReasoningEffortHandle;
 pub(crate) use factory::{

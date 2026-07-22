@@ -82,7 +82,8 @@ pub struct ClawAgentTurnStartedEvent {
 pub struct ClawAgentInputRequestedEvent {
     pub request_id: u32,
     pub kind: c_int,
-    pub summary: *mut c_char,
+    pub tool_call: ClawAgentToolCallEvent,
+    pub reason: *mut c_char,
 }
 
 #[repr(C)]

@@ -1,4 +1,8 @@
 pub mod claw_utils
+pub mod claw_utils::stream
+pub enum claw_utils::stream::StreamPart<T>
+pub claw_utils::stream::StreamPart::Delta(T)
+pub claw_utils::stream::StreamPart::End
 pub macro claw_utils::define_id_allocator!
 pub macro claw_utils::define_prefixed_id!
 pub enum claw_utils::IdParseError

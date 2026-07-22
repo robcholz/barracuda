@@ -12,7 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claw_agent::{AgentSystem, Message, SessionEvent, StreamPart, TurnId, TurnOrigin};
+use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, TurnId, TurnOrigin};
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, FsError, HttpError, HttpJsonRequest, HttpResponse,
     HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFile, MemFs, StdThread, TokioExecutor,

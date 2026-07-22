@@ -8,8 +8,7 @@ use claw_context::{Band, BlockKind, ContextSink, Scope};
 use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter};
-use crate::protocol::InflightToolCall;
+use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter, InflightToolCall};
 
 use self::tools::discovery_tools;
 
@@ -165,8 +164,7 @@ mod tests {
     use serde_json::json;
 
     use super::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
-    use crate::agent::base_agent::ContextAdapter;
-    use crate::protocol::InflightToolCall;
+    use crate::agent::base_agent::{ContextAdapter, InflightToolCall};
 
     #[test]
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {

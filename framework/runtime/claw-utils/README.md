@@ -1,13 +1,29 @@
 # claw-utils
 
-Small, dependency-light helpers shared across the claw Rust crates. Two things
-live here, both used widely enough to deserve a single home rather than being
+Small, dependency-light helpers shared across the claw Rust crates. Three things
+live here, all used widely enough to deserve a single home rather than being
 copied per crate:
 
-1. **`TruncatedText`** — log-safe text truncation.
-2. **`define_prefixed_id!`** — the strongly typed, wire-prefixed id newtype macro.
+1. **`stream::StreamPart`** — shared `Delta`/`End` vocabulary for logical streams.
+2. **`TruncatedText`** — log-safe text truncation.
+3. **`define_prefixed_id!`** — the strongly typed, wire-prefixed id newtype macro.
 
 The crate name is `claw-utils`; the library is imported as `claw_utils`.
+
+## `stream::StreamPart<T>` — logical stream parts
+
+Use `StreamPart` when a larger event stream multiplexes a logical incremental
+stream that needs its own explicit boundary:
+
+```rust
+use claw_utils::stream::StreamPart;
+
+let fragment = StreamPart::Delta("hello");
+let end: StreamPart<&str> = StreamPart::End;
+```
+
+A plain Rust `Stream` whose `None` is the only relevant boundary does not need
+this wrapper.
 
 ## `TruncatedText<T>` — log-safe truncation
 

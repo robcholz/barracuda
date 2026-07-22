@@ -8,9 +8,9 @@ use claw_interface::http::{
     blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, StreamingHttp,
 };
 
+use super::super::chat_stream::{drain_body, ChatStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
 use super::super::media::prepare_asset;
-use super::super::stream::{drain_body, ChatStream};
 use super::super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 use super::shared::{
     insert_tools_into_body, map_http_error, parse_openai_chat_response, post_json, post_json_async,
