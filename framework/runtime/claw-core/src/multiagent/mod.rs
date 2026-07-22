@@ -3,10 +3,10 @@
 //! Each session owns one [`MultiagentRuntime`]. It holds:
 //! - runtime graph state — root plus node topology and lifecycle metadata;
 //! - runtime scheduler state — ready work and approvals;
-//! - stable agent slots — each slot owns its idle agent or its running tick;
+//! - stable agent slots — each slot owns its resident agent or its checked-out run;
 //! - one subagent host that owns tool commands and the inspection read model.
 //!
-//! Responsibility line: the instance decides *when* agents run, *what* their tick
+//! Responsibility line: the instance decides *when* agents run, *what* their run
 //! outcomes mean (bubble a subagent result to its parent vs. surface a root
 //! reply), and *what happens to their lifetimes*. Agent slots only store; agents
 //! only compute.

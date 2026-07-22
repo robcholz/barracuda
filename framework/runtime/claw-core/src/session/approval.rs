@@ -7,23 +7,19 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
-use claw_api::{ClawApiAsync, InitError, RetryPolicy};
+use claw_api::{ChatError, ChatRequest, ClawApiAsync, InitError, RetryPolicy};
 use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawHttp, ClawTimer};
-use claw_permission::{Action, PermissionDecision, RiskClass};
+use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolError, ToolGate, ToolGroup, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolSetError, ToolSpec,
+    tool_metadata, RawToolInvocation, SyncToolHandler, Tool, ToolError, ToolExecutor, ToolGroup,
+    ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolSetError, ToolSpec,
 };
 use serde_json::{json, Value};
 
-use crate::agent::{
-    ApprovalDecision, CompletedKind, InterruptionControl, IterationLoop, IterationLoopError,
-    IterationOutcome, IterationStep,
-};
+use crate::agent::ApprovalDecision;
 use crate::config::{ApiUsage, SharedApiManager};
 use crate::multiagent::DriveControl;
-use crate::protocol::{EventSink, IterationId};
 
 const APPROVAL_RESOLVER_PROMPT: &str = prompt!("approval/resolver_system.md");
 
@@ -58,7 +54,9 @@ pub(crate) enum ApprovalResolverError {
     #[error(transparent)]
     ToolSet(#[from] ToolSetError),
     #[error(transparent)]
-    Iteration(#[from] IterationLoopError),
+    Chat(#[from] ChatError),
+    #[error("approval resolver returned a malformed tool call")]
+    MalformedToolCall,
 }
 
 struct ApprovalResolverControl {
@@ -74,12 +72,6 @@ impl ApprovalResolverControl {
 
     fn cancel_handle(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.interrupt)
-    }
-}
-
-impl InterruptionControl for ApprovalResolverControl {
-    fn interrupt_flag(&self) -> &Arc<AtomicBool> {
-        &self.interrupt
     }
 }
 
@@ -170,14 +162,6 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
     }
 }
 
-struct AllowGate;
-
-impl ToolGate for AllowGate {
-    fn decide(&self, _action: &Action) -> PermissionDecision {
-        PermissionDecision::Allow
-    }
-}
-
 pub(crate) async fn resolve_permission_reply<H, Timer>(
     api_manager: &SharedApiManager,
     summary: &str,
@@ -209,7 +193,6 @@ where
         ))],
     ))?;
     let tools = tools.begin()?;
-    let gate = AllowGate;
     let resolver_control = ApprovalResolverControl::new();
     let cancel_handle = resolver_control.cancel_handle();
     control.set_cancel_hook(move || {
@@ -224,47 +207,51 @@ where
             )
         }
     ]);
-    let reminders: [Value; 0] = [];
-    // The approval resolver is an internal one-shot, not a visible root iteration,
-    // so its iteration events are dropped.
-    let events = EventSink::disabled();
-    let outcome = IterationLoop {
-        llm: &mut llm,
-        interruption: &resolver_control,
-        retry: RetryPolicy::none(),
-        events: &events,
-    }
-    .run(IterationStep {
-        iteration_id: IterationId(1),
+    let request = ChatRequest {
         system_prompt: APPROVAL_RESOLVER_PROMPT,
         messages: &messages,
-        reminders: &reminders,
-        tools: &tools,
-        gate: &gate,
-        event_boundary: None,
-    })
-    .await;
+        reminders: &[],
+        tools_json: Some(tools.schemas_json()),
+        retry: RetryPolicy::none(),
+    };
+    let response = llm
+        .chat(&request, Cancel::new(resolver_control.interrupt.as_ref()))
+        .await;
     control.clear_cancel_hook();
 
-    match outcome? {
-        IterationOutcome::Preempted(_) => Err(ApprovalResolverError::Cancelled),
-        IterationOutcome::Completed(completed) => match completed.kind {
-            CompletedKind::Tools(_) => resolution
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .clone()
-                .ok_or_else(|| IterationLoopError::MalformedAssistantMessage.into()),
-            CompletedKind::PlainText(text) => {
-                let text = text.text.trim();
-                Ok(PermissionReplyResolution::Clarify(
-                    if text.is_empty() {
-                        DEFAULT_CLARIFICATION
-                    } else {
-                        text
-                    }
-                    .to_string(),
-                ))
+    let response = match response {
+        Ok(response) => response,
+        Err(error) if resolver_control.interrupt.load(Ordering::Acquire) || error.is_aborted() => {
+            return Err(ApprovalResolverError::Cancelled)
+        }
+        Err(error) => return Err(error.into()),
+    };
+
+    if response.tool_calls.is_empty() {
+        let text = response.text.as_deref().unwrap_or_default().trim();
+        return Ok(PermissionReplyResolution::Clarify(
+            if text.is_empty() {
+                DEFAULT_CLARIFICATION
+            } else {
+                text
             }
-        },
+            .to_owned(),
+        ));
     }
+
+    let executor = ToolExecutor::new(&tools);
+    for tool_call in &response.tool_calls {
+        let call = ToolInvocation::try_from(RawToolInvocation {
+            id: Some(&tool_call.id),
+            name: &tool_call.name,
+            arguments_json: &tool_call.arguments_json,
+        })
+        .map_err(|_| ApprovalResolverError::MalformedToolCall)?;
+        let _ = executor.execute(&call).await;
+    }
+    let resolved = resolution
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clone();
+    resolved.ok_or(ApprovalResolverError::MalformedToolCall)
 }

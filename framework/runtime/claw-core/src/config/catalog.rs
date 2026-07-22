@@ -34,7 +34,6 @@ impl AgentCatalogEntry {
 /// Configuration needed to construct one agent in isolation.
 pub(crate) struct AgentRuntimeManifest {
     retries: u32,
-    tool_block_retries: u32,
     tool_blacklist: &'static [&'static str],
     instructions: &'static str,
 }
@@ -42,10 +41,6 @@ pub(crate) struct AgentRuntimeManifest {
 impl AgentRuntimeManifest {
     pub(crate) fn retries(&self) -> u32 {
         self.retries
-    }
-
-    pub(crate) fn tool_block_retries(&self) -> u32 {
-        self.tool_block_retries
     }
 
     pub(crate) fn tool_blacklist(&self) -> &'static [&'static str] {

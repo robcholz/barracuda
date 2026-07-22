@@ -14,7 +14,7 @@ const EXTRACT_MIN_VERSION_DELTA: u64 = 8;
 impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     /// Run extraction when the transcript has advanced.
     ///
-    /// Pull, not push: called from `prepare` on the tick thread, it self-detects
+    /// Pull, not push: called from `prepare` at the iteration boundary, it self-detects
     /// new conversation via the transcript version. Store dedup absorbs facts
     /// re-extracted across turns.
     pub(super) async fn maybe_schedule_extraction(&mut self, history: &dyn History) {

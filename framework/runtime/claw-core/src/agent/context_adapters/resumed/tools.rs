@@ -36,7 +36,7 @@ struct ToolSearchTool {
     discovery: ToolDiscoveryHandle,
 }
 
-/// Queues a group to be enabled on the next Agent tick.
+/// Queues a group to be enabled when ToolSet begins the next iteration.
 struct ToolLoadTool {
     discovery: ToolDiscoveryHandle,
     state: SharedResumedState,

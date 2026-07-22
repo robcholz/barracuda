@@ -9,8 +9,8 @@ use claw_context::{Block, BlockKind, ContextSink};
 use claw_tool::ToolGroup;
 use serde::{Deserialize, Serialize};
 
+use crate::agent::base_agent::AgentEffectEmitter;
 use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter, TurnLifecycle};
-use crate::agent::effect::AgentEffectEmitter;
 
 use self::tools::plan_tools;
 
@@ -86,8 +86,8 @@ mod tests {
     use claw_context::Context;
 
     use super::{AgentModeContextAdapter, AgentModeState};
+    use crate::agent::base_agent::agent_effect_channel;
     use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
-    use crate::agent::effect::agent_effect_channel;
 
     fn adapter(state: Option<AgentModeState>) -> AgentModeContextAdapter {
         let (effects, _inbox) = agent_effect_channel();

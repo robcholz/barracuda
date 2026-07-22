@@ -34,8 +34,6 @@ pub(crate) struct SpawnJson {
 pub(crate) struct RuntimeJson {
     /// LLM retry count per iteration.
     pub(crate) retries: u32,
-    /// Consecutive gating-blocked tool rounds to tolerate.
-    pub(crate) tool_block_retries: u32,
 }
 
 /// `tools/tools.json` — exact tool-group ids and tool names denied to this kind.

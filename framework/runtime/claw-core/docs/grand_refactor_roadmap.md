@@ -99,12 +99,11 @@ logical Agent exists
 - RunId identifies one checkout epoch of one Agent. It is required even though
   AgentId is globally unique, because a late completion from an earlier run
   must not overwrite a newer checkout.
-- ToolCallId identifies one physical tool invocation. Tool name and arguments
-  are not an identity and cannot deduplicate parallel identical calls.
-- ToolCallId is monotonic and restart-safe within one Agent. The durable
-  identity of an invocation is (AgentId, ToolCallId). Allocation increments the
-  Agent-owned next_tool_call_id counter in the same mutation that inserts the
-  unsettled call, so recovery never resets or reuses it.
+- ToolCallId is a `u32` newtype scoped to one iteration. A fresh allocator
+  starts at zero for every iteration and assigns IDs in provider call order.
+  It is never persisted or compared across iterations.
+- Provider tool-call IDs remain separate strings used for LLM transcript
+  correlation. They are not the iteration-local scheduling/approval identity.
 
 Prefer newtypes for all three IDs. Do not interchange raw integers or strings
 across these boundaries.
@@ -161,8 +160,8 @@ across these boundaries.
 
 - BaseAgent owns the generic run/snapshot protocol but no concrete mode or
   memory semantics. Authoritative recovery values stay with their components:
-  the mode adapter, resumed adapter, and Agent tool-call journal. BaseAgent
-  owns no persistence manager or filesystem capability.
+  the mode adapter and resumed adapter. BaseAgent owns no persistence manager
+  or filesystem capability.
 - BaseAgent exposes one synchronous, I/O-free
   `recovery_state() -> AgentState` API. The returned value is an
   owned recovery projection because it must cross the active AgentRun boundary.
@@ -172,9 +171,6 @@ across these boundaries.
 AgentState {
     agent_mode: AgentModeState,
     resumed: ResumedState,
-    next_tool_call_id: ToolCallId,
-    unsettled_toolcalls:
-        BTreeMap<ToolCallId, UnsettledToolCallRecord>,
 }
 ~~~
 
@@ -193,9 +189,10 @@ AgentState {
   optional. Factory passes `Some(XxxState)` when restoring and `None` when
   creating; the component owns fresh initialization, and XxxState DTOs do not
   implement `Default`.
-- `UnsettledToolCallRecord` is a stable recovery DTO, not the transient
-  `InflightToolCall` event type. Loaded tool groups use stable typed identities
-  and canonical serialized order when order has no runtime meaning.
+- `ToolCallId`, `InflightToolCall`, active futures, and physical executor state
+  are transient and absent from `AgentState`. Loaded tool groups use stable
+  typed identities and canonical serialized order when order has no runtime
+  meaning.
 - Filesystem remains a real static capability in Engine, Session assembly,
   Factory, transcript, and persistence stores, but it stops at the constructed
   Agent boundary:
@@ -244,16 +241,11 @@ Engine<F, H, T> / SessionActor<F, H, T> / FsAgentFactory<F, H, T>
 - Scheduler parks that run and echoes the update; Engine persists or
   acknowledges it according to the slot/run policy, then sends a matching
   `CheckpointResult`. Scheduler never interprets the snapshot.
-- For PersistentRoot, before a tool body is first polled, its unsettled record
-  must pass a durable checkpoint. EphemeralRoot and TransientWorker record the
-  same state and may receive an immediate non-durable acknowledgement.
-- A persistent tool call is cleared from unsettled state only after its
-  containing transcript turn is committed and durably checkpointed.
-- Recovery reports an uncertain interrupted invocation as Unknown/unsettled. It
-  must not blindly replay a side-effecting tool.
 - No persistence guard or mutable borrow may be held across await.
-- ToolRunner remains inside BaseAgent. It is not split out merely to observe
-  unsettled tool calls.
+- `ToolExecutor` remains a pure invocation mechanism and is not split out merely
+  to observe transient tool calls. The iteration tool round receives permission
+  through a statically dispatched policy; BaseAgent's implementation owns any
+  approval wait.
 - The migration baseline is PersistentRoot recovery plus EphemeralRoot and
   TransientWorker non-recovery. Durable worker tool journals or complete worker
   recovery are separate features unless Phase 0 explicitly expands the scope.
@@ -386,7 +378,7 @@ Remove ambiguity before changing production ownership.
 ### Changes
 
 - Update architecture.md so SessionActor no longer claims ownership of Agent
-  mode, loaded tool groups, or unsettled tool calls.
+  mode or loaded tool groups.
 - Replace “Orchestrator drives all agents” with:
   - Orchestrator polls SessionActors by a bounded budget;
   - Orchestrator polls the global Scheduler by a bounded tick;
@@ -420,8 +412,8 @@ Remove ambiguity before changing production ownership.
 - Correct canonical-store descriptions to match their actual persistence seam;
   in particular, long-term memory currently uses claw-memory over ClawFs rather
   than the claw-persistence state collection.
-- Add the persistent tool durability barrier and the distinction between a
-  transient active future and a durable unsettled invocation.
+- Specify that ToolCallId is reset for every iteration and never appears in a
+  persistence DTO; preserve provider IDs separately for transcript correlation.
 - Record the exact commit, toolchain, commands, results, and known pre-existing
   failures for every baseline suite.
 - Add or identify characterization coverage for externally observable behavior:
@@ -429,8 +421,8 @@ Remove ambiguity before changing production ownership.
   - foreground/background spawn, result delivery, follow-up, delete, timeout,
     cancel, interrupt, and nested join semantics;
   - SessionEvent and turn/input-request ordering;
-  - the current ToolStarted-before-tool-body persistence boundary;
-  - persistent root recovery of mode, loaded tool groups, and uncertain calls;
+  - the ToolCalls stream boundary before tool execution;
+  - persistent root recovery of mode and loaded tool groups;
   - current root/worker transcript, context, profile, long-term-memory, skill,
     and tool visibility.
 - Characterization tests assert public/domain behavior, not current module
@@ -467,15 +459,14 @@ compatibility contract. No production behavior changes in this phase.
 
 ### Goal
 
-Give the bottom-level ownership object its final in-memory recovery semantics
-and give Factory one create/restore construction path, without changing how an
-Agent is currently driven or performing runtime checkpoints yet.
+Give the bottom-level ownership object its final linear stream contract and
+in-memory recovery semantics, and give Factory one create/restore construction
+path, without performing runtime checkpoints yet.
 
 ### Primary files
 
-- claw-core/src/agent/base_agent.rs
 - claw-core/src/agent/base_agent/
-- claw-core/src/agent/event.rs
+- claw-core/src/scheduler/run.rs
 - claw-core/src/agent/factory/
 - claw-core/src/protocol/
 - claw-core/src/session/actor.rs
@@ -486,21 +477,28 @@ Agent is currently driven or performing runtime checkpoints yet.
 
 - Keep BaseAgent<H, T>. Do not add F, SharedPersistence, AgentStateStore, or a
   persistence callback to BaseAgent.
-- Add `AgentState` and stable
-  `UnsettledToolCallRecord` types. Do not persist transient `InflightToolCall`,
-  a future, Waker, RunId, or checkout state.
+- Inject `SharedApiManager` and the Agent's `ApiUsage` into BaseAgent. Refresh
+  the main LLM client at each iteration boundary without holding the manager
+  lock across an await; remove API selection and LLM mutation from Multiagent.
+- Add `AgentState`. Do not persist `ToolCallId`, transient
+  `InflightToolCall`, a future, Waker, RunId, or checkout state.
 - Add synchronous, I/O-free
   `BaseAgent::recovery_state(&self) -> AgentState`.
 - Implement it as a projection over authoritative live components, not a second
-  mutable snapshot cache that can drift from mode, resumed state, or the
-  tool-call journal.
+  mutable snapshot cache that can drift from mode or resumed state.
 - Make BaseAgent coordinate a generic recovery projection over authoritative
   components: `AgentModeState` is owned by `AgentModeContextAdapter`,
-  `ResumedState` by `ResumedContextAdapter`, and monotonic next
-  ToolCallId/unsettled records by the Agent tool runtime. BaseAgent must not
-  match on concrete modes or adapters. Continue
-  emitting the legacy `ToolStarted` compatibility update until Phase 7 wires
-  the final durability barrier and deletes SessionActor's mirror.
+  and `ResumedState` by `ResumedContextAdapter`. BaseAgent must not match on
+  concrete modes or adapters. Preserve the direct
+  `AgentProgress::ToolCalls` stream boundary without an observer inside the
+  tool executor.
+- Make `BaseAgent::submit(&mut self, Message)` return the sole
+  `AgentStreamHandle<'_>`. The handle implements `Stream<Item = AgentProgress>`
+  and owns interrupt, cancel, and approval resolution for that task. Delete the
+  old tick, output-channel, and terminal-outcome protocols.
+- Keep owner message queues outside BaseAgent. A factory constructs a stopped
+  Agent; the owning AgentSlot queues the initial or follow-up Message and passes
+  exactly one Message to `submit` at checkout.
 - Model reasoning effort as independent per-Agent adapter state. SessionState
   retains the Session-wide default; changing it broadcasts an owner update to
   all live AgentSlots through independent typed queues and supplies the initial
@@ -530,15 +528,17 @@ Agent is currently driven or performing runtime checkpoints yet.
   activate until Phase 7.
 - Mark any legacy SessionState-to-snapshot restoration adapter for deletion or
   schema migration in Phase 7.
-- Do not change direct-drive behavior in this phase.
+- Keep the temporary direct driver as a Scheduler-local ownership adapter over
+  `AgentStreamHandle`; it must forward `AgentProgress` unchanged rather than
+  inventing another Agent protocol.
 
 ### Gate
 
 - [ ] MemFs and disk-backed F can both create and restore BaseAgent<H, T>.
 - [ ] BaseAgent, AgentRun, and the temporary slot chain have no F or
       SharedPersistence generic/dependency.
-- [ ] A snapshot round trip preserves mode, loaded tool groups,
-      next_tool_call_id, and every unsettled record.
+- [ ] A snapshot round trip preserves mode and loaded tool groups, and contains
+      no iteration-local ToolCallId.
 - [ ] Snapshot serialization is deterministic where collection ordering has no
       semantic meaning.
 - [ ] Factory create_new and restore share one invariant builder.
@@ -600,9 +600,11 @@ the original request, including its Agent.
 
 ### Changes
 
-- Add or normalize AgentId, RunId, and ToolCallId newtypes.
+- Add or normalize AgentId and RunId newtypes. Define ToolCallId inside
+  iteration_loop because its lifetime is one iteration, not global protocol.
 - Introduce explicit request, update, completion, and submit-error types.
-- Preserve ToolStarted as a compatibility update until Phase 7.
+- Preserve the SessionActor inflight-call mirror from the direct `ToolCalls`
+  boundary until Phase 7; do not restore `ToolStarted` observers inside tools.
 - Define the typed, snapshot-carrying `CheckpointRequired` update plus
   resume/fail control in the run protocol. This phase defines ownership
   behavior only; BaseAgent does not begin emitting the final tool durability
@@ -712,8 +714,8 @@ Make the global Scheduler the only physical Agent driver.
 
 Phase 4 preserves the observable rule that a tool body does not continue in the
 same top-level poll that reports ToolStarted. It does not yet delete
-SessionActor's legacy unsettled persistence mirror. Phase 7 replaces this
-compatibility path with Agent-exported CheckpointRequired barriers.
+SessionActor's legacy inflight compatibility mirror. That mirror must not be
+migrated into AgentState by persisting the iteration-local ToolCallId.
 
 ### Gate
 
@@ -862,15 +864,14 @@ and submits the physical run.
 ### Goal
 
 Connect the recovery state established in Phase 1 to the parked-run protocol
-and make interrupted tool-call reasoning durable without giving BaseAgent a
-persistence dependency.
+without giving BaseAgent a persistence dependency.
 
 ### Suggested files
 
 - claw-core/src/agent/base_agent/persistence.rs
 - claw-core/src/agent/base_agent.rs
 - claw-core/src/agent/base_agent/
-- claw-core/src/agent/iteration_loop/tool_round.rs
+- claw-core/src/agent/base_agent/iteration_loop/run.rs
 - claw-core/src/agent/event.rs
 - claw-core/src/agent/factory/
 - claw-core/src/agent/base_agent/context_adapter.rs
@@ -889,20 +890,13 @@ persistence dependency.
 AgentState {
     agent_mode: AgentModeState,
     resumed: ResumedState,
-    next_tool_call_id: ToolCallId,
-    unsettled_toolcalls:
-        BTreeMap<ToolCallId, UnsettledToolCallRecord>,
 }
 ~~~
 
 - AgentId is the collection key. The stored record wraps the snapshot in an
   explicit schema version.
-- `UnsettledToolCallRecord` contains stable identity and recovery facts only.
-  Runtime `InflightToolCall`, futures, Wakers, Scheduler state, and checkout
-  state are never serialized.
-- Two calls with equal tool names and arguments remain distinct. ToolCallId is
-  monotonic within AgentId. Allocation, counter increment, and unsettled
-  insertion are one in-memory transition before snapshot export.
+- `ToolCallId`, runtime `InflightToolCall`, futures, Wakers, Scheduler state,
+  and checkout state are never serialized.
 - BaseAgent coordinates the generic snapshot export. Each component mutates and
   contributes its own live semantics; BaseAgent does not inspect concrete
   adapter state. It owns no SharedPersistence, DurableState, AgentStateStore,
@@ -946,8 +940,7 @@ CheckpointResult {
 - Every recovery-relevant mutation must eventually be covered by an
   acknowledgement. Ordinary mode/loaded-group updates may be coalesced, but an
   AgentRun cannot publish terminal completion while its recovery state differs
-  from the last acknowledged snapshot. The pre-tool checkpoint cannot be
-  coalesced past the first tool-body poll.
+  from the last acknowledged snapshot.
 - A failed batched flush conservatively fails every barrier included in that
   flush. It does not fail unrelated later barriers.
 - Stale RunId/checkpoint_id acknowledgements are rejected.
@@ -957,57 +950,17 @@ CheckpointResult {
   AgentStateStore own persistence policy and flush semantics. Do not add a
   PersistenceCoordinator solely for this flow.
 
-### Persistent tool start order
+### Iteration-local tool-call identity
 
-~~~text
-allocate ToolCallId and increment next_tool_call_id
-→ insert UnsettledToolCallRecord in BaseAgent live state
-→ BaseAgent calls recovery_state()
-→ emit CheckpointRequired carrying the snapshot
-→ Scheduler parks this AgentRun
-→ Engine durably stores the PersistentRoot snapshot
-→ matching CheckpointResult succeeds
-→ resume and first-poll the tool body
-~~~
+`IterationLoop` constructs a fresh `ToolCallIdAllocator` at the beginning of
+each tool-call batch. Local numeric IDs start at zero and are used for
+permission, approval, and result collection only. Provider IDs remain separate
+for transcript correlation. Neither ID is added to `AgentState`. If durable
+side-effect reconciliation is introduced later, it requires a separately named
+durable invocation identity and a separate spec.
 
-If the checkpoint fails, the tool body is never polled. EphemeralRoot and
-TransientWorker perform the same state transition and yield boundary but Engine
-acknowledges it without a durable Agent write.
-
-### Tool outcome and transcript settlement
-
-The transcript groups intermediate tool patches inside one open turn. An open
-turn is not a durable settlement boundary:
-
-~~~text
-tool body completes
-→ append tool outcome to the open transcript turn
-→ keep the call unsettled across later LLM/tool iterations
-→ terminal or explicit turn commit
-→ fallibly checkpoint the committed transcript
-→ clear calls represented by that committed turn in BaseAgent
-→ export the new AgentState
-→ checkpoint or acknowledge it through the same parked-run protocol
-~~~
-
-- Extend Transcript with a fallible checkpoint API that guarantees committed
-  records through the requested transcript version are durable.
-- Best-effort flush or later inspection of `last_persist_error` is insufficient
-  for settlement.
-- Do not force an intermediate transcript commit merely to clear a tool call.
-- If the turn is cancelled/discarded after a tool body ran, its persistent
-  unsettled record remains Unknown until explicit recovery/reconciliation.
-- A crash after transcript durability but before the final Agent snapshot is
-  durable may conservatively recover the call as unsettled; it is never replayed
-  blindly.
-
-- Keep ToolRunner internal to BaseAgent. Remove SessionActor
-  `record_tool_started`, add/remove inflight bookkeeping, the Phase 1 legacy
-  mirror, and turn-end settlement heuristics.
-- Use “active/inflight” only for transient futures and “unsettled” for the
-  recovery fact that a side-effect outcome is not durably known.
-- Preserve transcript, profile, and long-term memory as separate canonical
-  stores.
+Keep the pure ToolExecutor on the Agent execution path. Preserve transcript,
+profile, and long-term memory as separate canonical stores.
 
 ### Creation, migration, deletion, and rollback
 
@@ -1035,35 +988,26 @@ tool body completes
 
 ### Gate
 
-- [ ] Two identical tool name/argument calls receive distinct ToolCallIds and
-      are independently tracked.
+- [ ] Calls in one iteration receive ToolCallIds `0..N` in provider order, and
+      the next iteration starts again at zero.
+- [ ] Provider IDs, not ToolCallIds, correlate transcript tool-result messages.
 - [ ] BaseAgent, AgentRun, AgentSlot, and Scheduler contain no F,
       SharedPersistence, DurableState, or AgentStateStore dependency.
-- [ ] ToolCallId is not reset or reused after PersistentRoot restart.
-- [ ] If the pre-execution checkpoint fails, the tool body is polled zero times.
 - [ ] A stale checkpoint acknowledgement cannot resume a run.
-- [ ] A failed batched flush fails every participating waiter without polling
-      any affected tool body.
-- [ ] A crash after start checkpoint but before durable outcome recovers
-      Unknown/unsettled and does not auto-replay.
-- [ ] Intermediate open-turn patches do not clear unsettled calls.
-- [ ] Transcript checkpoint failure leaves calls unsettled.
-- [ ] A call is cleared only after its committed turn is durably checkpointed.
 - [ ] A mode or loaded-group change with no following tool is checkpointed
       before terminal completion.
 - [ ] Persistence failure returns the Agent and does not break global progress.
 - [ ] The checkpoint API structurally releases mutable borrows before yielding,
       and Engine holds no persistence guard while polling Agent code.
-- [ ] SessionState no longer owns Agent mode, loaded groups, or unsettled calls.
+- [ ] SessionState no longer owns Agent mode or loaded groups.
 - [ ] Old SessionState migration is idempotent after a crash at every migration
       write boundary.
 - [ ] A dangling root link is a typed error; an unreferenced Agent record is
       reconciled as garbage.
 - [ ] Permanent Session deletion removes PersistentRoot Agent state.
 - [ ] EphemeralRoot and TransientWorker create no durable Agent record.
-- [ ] Crash-window tests cover: before start checkpoint; after start/before tool;
-      after side effect/before turn commit; after transcript commit/before clear;
-      and after the final Agent-state checkpoint.
+- [ ] Crash-window tests cover Agent-state checkpoint and root-link publication
+      ordering.
 - [ ] Root recovery remains compatible with the policy frozen in Phase 0.
 
 ## 13. Phase 8 — Close overview, assembly, and memory boundaries
@@ -1136,8 +1080,8 @@ The following are Phase 9 entry conditions, not work deferred to Phase 9:
 - Phase 6 already removed Multiagent-owned FsAgentFactory/physical scheduling,
   AgentId allocation, duplicate root/worker assembly, and all
   RuntimeExecution/take_runtime wrappers;
-- Phase 7 already removed SessionActor inflight/unsettled bookkeeping and
-  turn-end settlement heuristics.
+- Any retained SessionActor inflight compatibility bookkeeping is explicitly
+  separated from AgentState and iteration-local ToolCallId.
 
 Phase 9 fails immediately if any item above remains. It may delete only residual
 non-owning compatibility machinery whose earlier gate explicitly allowed it to

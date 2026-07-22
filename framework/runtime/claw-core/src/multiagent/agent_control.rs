@@ -1,7 +1,7 @@
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::{AgentCommand, AgentCommandError, FsAgentCreateError};
+use crate::agent::FsAgentCreateError;
 use crate::config::{catalog as agent_catalog, ReasoningEffort};
 use crate::protocol::{AgentId, Message, SessionPersistence};
 
@@ -23,8 +23,6 @@ pub(crate) enum MultiagentDeliverError {
 pub(crate) enum AgentMessageDeliveryError {
     #[error("no such agent: {0}")]
     UnknownAgent(AgentId),
-    #[error(transparent)]
-    Command(#[from] AgentCommandError),
 }
 
 impl<Filesystem, Http, Timer> MultiagentRuntime<Filesystem, Http, Timer>
@@ -65,15 +63,7 @@ where
     }
 
     pub(crate) fn cancel_all(&mut self) {
-        let agents: Vec<AgentId> = self.state.agent_ids().collect();
-        for agent_id in agents {
-            let Some(agent) = self.slots.available_agent_mut(agent_id) else {
-                continue;
-            };
-            if agent.send_command(AgentCommand::Cancel).is_ok() {
-                self.enqueue(agent_id);
-            }
-        }
+        self.slots.cancel_all();
     }
 
     /// Update the session default and every currently live Agent independently.
@@ -87,10 +77,9 @@ where
         id: AgentId,
         message: Message,
     ) -> Result<(), AgentMessageDeliveryError> {
-        let Some(agent) = self.slots.available_agent_mut(id) else {
+        if !self.slots.queue_message(id, message) {
             return Err(AgentMessageDeliveryError::UnknownAgent(id));
-        };
-        agent.send_command(AgentCommand::AppendMessage(message))?;
+        }
         self.enqueue(id);
         Ok(())
     }

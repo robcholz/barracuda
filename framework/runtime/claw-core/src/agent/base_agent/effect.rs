@@ -57,13 +57,13 @@ impl AgentEffectEmitter {
 }
 
 impl AgentEffectInbox {
-    pub(in crate::agent) fn drain_into(&mut self, output: &mut Vec<AgentEffect>) {
+    pub(in crate::agent) fn drain(&mut self) -> Vec<AgentEffect> {
         let mut effects = self
             .inner
             .effects
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        output.extend(effects.drain(..));
+        effects.drain(..).collect()
     }
 
     pub(in crate::agent) fn clear(&mut self) {
@@ -91,8 +91,7 @@ mod tests {
             final_message: "second".to_owned(),
         });
 
-        let mut effects = Vec::new();
-        inbox.drain_into(&mut effects);
+        let effects = inbox.drain();
         assert_eq!(
             effects,
             vec![

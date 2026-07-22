@@ -7,23 +7,14 @@
 mod base_agent;
 mod config;
 mod context_adapters;
-mod effect;
-mod event;
 mod factory;
-mod iteration_loop;
 mod tools;
 
 pub(crate) use base_agent::{
-    AgentAbortHandle, AgentCommand, AgentCommandError, AgentState, ApprovalDecision, BaseAgent,
-    TickOutcome,
+    AgentApprovalError, AgentProgress, AgentState, ApprovalDecision, BaseAgent, ToolCallId,
 };
 pub(crate) use context_adapters::ReasoningEffortHandle;
-pub(crate) use event::{AgentEvent, AgentEventBoundary, AgentRun};
 pub(crate) use factory::{
     AgentEnvironment, AgentResume, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,
     TranscriptTarget,
-};
-pub(crate) use iteration_loop::{
-    CompletedKind, InterruptionControl, IterationLoop, IterationLoopError, IterationOutcome,
-    IterationStep,
 };

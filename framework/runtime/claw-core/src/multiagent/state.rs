@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use crate::agent::ToolCallId;
 use crate::protocol::{AgentId, AgentKind};
 
 use super::model::{SubagentStatus, SubagentTimeout};
@@ -31,6 +32,7 @@ impl NodeMeta {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ParkedApproval {
+    pub(super) tool_call_id: ToolCallId,
     pub(super) summary: String,
 }
 
@@ -98,10 +100,6 @@ impl MultiagentState {
     #[cfg(test)]
     pub(super) fn node_count(&self) -> usize {
         self.nodes.len()
-    }
-
-    pub(super) fn agent_ids(&self) -> impl Iterator<Item = AgentId> + '_ {
-        self.nodes.keys().copied()
     }
 
     #[must_use]
@@ -258,13 +256,21 @@ impl MultiagentState {
         !self.approvals.is_empty()
     }
 
-    pub(super) fn active_approval(&self) -> Option<(AgentId, &str)> {
+    pub(super) fn active_approval(&self) -> Option<(AgentId, &ParkedApproval)> {
         let (agent, pending) = self.approvals.front()?;
-        Some((*agent, pending.summary.as_str()))
+        Some((*agent, pending))
     }
 
-    pub(super) fn park_approval(&mut self, agent: AgentId, summary: String) {
-        let replacement = ParkedApproval { summary };
+    pub(super) fn park_approval(
+        &mut self,
+        agent: AgentId,
+        tool_call_id: ToolCallId,
+        summary: String,
+    ) {
+        let replacement = ParkedApproval {
+            tool_call_id,
+            summary,
+        };
         if let Some((_, pending)) = self
             .approvals
             .iter_mut()
@@ -298,6 +304,7 @@ impl MultiagentState {
 mod tests {
     use std::collections::BTreeMap;
 
+    use crate::agent::ToolCallId;
     use crate::protocol::{AgentId, AgentKind};
 
     use super::super::model::SubagentTimeout;
@@ -368,12 +375,18 @@ mod tests {
         let first = AgentId(1);
         let second = AgentId(2);
         let mut state = MultiagentState::default();
-        state.park_approval(first, "first".to_owned());
-        state.park_approval(second, "second".to_owned());
+        state.park_approval(first, ToolCallId::new(0), "first".to_owned());
+        state.park_approval(second, ToolCallId::new(1), "second".to_owned());
 
-        assert_eq!(state.active_approval(), Some((first, "first")));
+        let (agent, approval) = state.active_approval().expect("first approval is active");
+        assert_eq!(agent, first);
+        assert_eq!(approval.tool_call_id, ToolCallId::new(0));
+        assert_eq!(approval.summary, "first");
         assert!(state.has_pending_approval());
         assert!(state.remove_approval(first));
-        assert_eq!(state.active_approval(), Some((second, "second")));
+        let (agent, approval) = state.active_approval().expect("second approval is active");
+        assert_eq!(agent, second);
+        assert_eq!(approval.tool_call_id, ToolCallId::new(1));
+        assert_eq!(approval.summary, "second");
     }
 }

@@ -15,7 +15,6 @@ pub(super) struct AgentConfig {
     pub(in crate::agent) skills: SkillSet,
     pub(in crate::agent) tool_blacklist: &'static [&'static str],
     pub(in crate::agent) retry_policy: RetryPolicy,
-    pub(in crate::agent) tool_block_retries: u32,
 }
 
 impl AgentConfig {
@@ -28,7 +27,6 @@ impl AgentConfig {
             skills,
             tool_blacklist: manifest.tool_blacklist(),
             retry_policy: RetryPolicy::new(manifest.retries()),
-            tool_block_retries: manifest.tool_block_retries(),
         }
     }
 }

@@ -448,8 +448,6 @@ span-name: `iteration_loop`
 `chat_failed`: LLM chat failed for a non-interrupt reason.
 `tool_calls`: LLM requested one or more tool calls.
 `assistant_tool_calls_invalid`: Assistant tool-call message was missing, malformed, or could not be appended.
-`tool_round_completed`: Tool round completed and produced tool messages.
-`tool_round_failed`: Tool round failed before a valid patch could be produced.
 
 ### Event Fields
 
@@ -458,8 +456,6 @@ span-name: `iteration_loop`
 `chat_failed`: `kind`.
 `tool_calls`: `count`.
 `assistant_tool_calls_invalid`: `kind`.
-`tool_round_completed`: `count`.
-`tool_round_failed`: `kind`.
 
 ## Skill Related
 

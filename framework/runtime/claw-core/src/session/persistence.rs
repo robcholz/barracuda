@@ -18,8 +18,8 @@ pub(crate) struct SessionState {
     permission_level: PermissionLevel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_state: Option<AgentState>,
-    /// Compatibility journal until durable ToolCallId records move into
-    /// AgentState. Physical tool runners and futures are never stored here.
+    /// Legacy compatibility journal. Iteration-local ToolCallIds, physical
+    /// tool runners, and futures are never stored here.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     inflight_toolcalls: Vec<InflightToolCall>,
 }
@@ -135,9 +135,12 @@ mod tests {
             permission_level: PermissionLevel::Ask,
             ..SessionState::default()
         };
-        state.record_recovery(AgentState::normal_for_test(
-            vec!["tool_group_id".to_owned()],
-        ));
+        let agent_state: AgentState = serde_json::from_value(json!({
+            "agent_mode": "normal",
+            "resumed": { "loaded_tool_groups": ["tool_group_id"] },
+        }))
+        .expect("test AgentState is valid");
+        state.record_recovery(agent_state);
         state.add_inflight_toolcall(&InflightToolCall::new(
             "subagent_spawn",
             json!({"kind":"worker","foreground":false}),

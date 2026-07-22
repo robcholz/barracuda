@@ -2,9 +2,20 @@
 
 ## BaseAgent
 
-pub(in crate::agent) store: TranscriptStore<F>,
-pub(in crate::agent) tools: ToolSet,
-pub(in crate::agent) permission_policy: Arc<dyn PermissionPolicy>,
-pub(in crate::agent) agent_instruction: Block<'static>,
-pub(in crate::agent) inherited_context: Vec<Block<'static>>,
-Vec<dyn ContextAdapters>
+`BaseAgent<H, T>` owns the assembled single-Agent runtime only:
+
+- `Box<dyn Transcript>`
+- `ToolSet`
+- `Arc<dyn PermissionPolicy>`
+- assembled `Context`
+- `SharedApiManager` and this Agent's `ApiUsage`
+- `Vec<Box<dyn ContextAdapter>>`
+- `AgentEffectInbox`
+
+For each tool round, BaseAgent statically injects its permission implementation
+into the iteration loop. The implementation alone owns approval emission and
+waiting; `ToolExecutor` receives only authorized calls.
+
+`BaseAgent::submit(&mut self, Message)` returns the sole
+`AgentStreamHandle<'_>`. Message queues, session state, multiagent graph state,
+filesystem persistence, and scheduling ownership remain outside BaseAgent.

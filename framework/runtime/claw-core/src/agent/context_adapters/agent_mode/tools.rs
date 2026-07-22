@@ -8,7 +8,7 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::agent::effect::{AgentEffect, AgentEffectEmitter};
+use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
 use crate::agent::tools::optional_string_argument;
 
 use super::{lock_mode, AgentModeState, SharedAgentMode};
@@ -163,7 +163,7 @@ mod tests {
     use super::{
         AgentEffect, AgentModeState, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
     };
-    use crate::agent::effect::agent_effect_channel;
+    use crate::agent::base_agent::agent_effect_channel;
 
     fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation<'a> {
         ToolInvocation::try_from(RawToolInvocation {
@@ -207,8 +207,7 @@ mod tests {
             ))
             .expect("clarification succeeds");
 
-        let mut drained = Vec::new();
-        inbox.drain_into(&mut drained);
+        let drained = inbox.drain();
         assert_eq!(
             drained,
             vec![AgentEffect::Yield {
@@ -232,8 +231,7 @@ mod tests {
         .expect("cancel succeeds");
 
         assert_eq!(*mode.lock().expect("mode lock"), AgentModeState::Normal);
-        let mut drained = Vec::new();
-        inbox.drain_into(&mut drained);
+        let drained = inbox.drain();
         assert_eq!(
             drained,
             vec![AgentEffect::Yield {

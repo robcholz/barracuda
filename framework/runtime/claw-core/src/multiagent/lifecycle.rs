@@ -5,7 +5,7 @@ use core::task::{Context, Poll};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::{AgentCommand, TickOutcome};
+use crate::agent::AgentProgress;
 use crate::protocol::{AgentId, Message};
 
 use super::agent_control::AgentMessageDeliveryError;
@@ -143,7 +143,7 @@ where
             );
             return;
         }
-        if self.slots.abort_if_running(target) {
+        if self.slots.cancel_if_running(target) {
             tracing::info!(
                 name: "followup_deferred",
                 target_agent = %target,
@@ -172,11 +172,9 @@ where
         id: AgentId,
         message: Message,
     ) -> Result<(), AgentMessageDeliveryError> {
-        let Some(agent) = self.slots.available_agent_mut(id) else {
+        if !self.slots.queue_message(id, message) {
             return Err(AgentMessageDeliveryError::UnknownAgent(id));
-        };
-        let _ = agent.send_command(AgentCommand::Cancel);
-        agent.send_command(AgentCommand::AppendMessage(message))?;
+        }
         self.enqueue(id);
         tracing::info!(name: "followup_delivered", target_agent = %id);
         Ok(())
@@ -280,25 +278,35 @@ where
         }
     }
 
-    pub(in crate::multiagent) fn route_outcome(
+    pub(in crate::multiagent) fn route_progress(
         &mut self,
         id: AgentId,
-        outcome: TickOutcome,
+        progress: AgentProgress,
     ) -> DriveOutput {
-        match outcome {
-            TickOutcome::Working => {
-                self.enqueue(id);
-                DriveOutput::default()
-            }
-            TickOutcome::Idle => DriveOutput::default(),
-            TickOutcome::AwaitingApproval { summary } => self.park_approval(id, summary),
-            TickOutcome::Yielded { text } => self.route_yielded(id, text),
-            TickOutcome::YieldedByTool { text } => self.route_terminal(id, text, true),
-            TickOutcome::Ended { final_message } => self.route_terminal(id, final_message, true),
-            TickOutcome::Cancelled => self.route_cancelled(id),
-            TickOutcome::Failed(error) => {
+        match progress {
+            AgentProgress::ApprovalRequired {
+                tool_call_id,
+                summary,
+            } => self.park_approval(id, tool_call_id, summary),
+            AgentProgress::Yielded { text } => self.route_yielded(id, text),
+            AgentProgress::YieldedByTool { text } => self.route_terminal(id, text, true),
+            AgentProgress::Ended { final_message } => self.route_terminal(id, final_message, true),
+            AgentProgress::Interrupted => DriveOutput::default(),
+            AgentProgress::Cancelled => self.route_cancelled(id),
+            AgentProgress::Failed(error) => {
                 self.route_terminal(id, format!("[failed: {error:?}]"), false)
             }
+            AgentProgress::IterationStarted(_)
+            | AgentProgress::ReasoningDelta(_)
+            | AgentProgress::ReasoningEnded
+            | AgentProgress::OutputDelta(_)
+            | AgentProgress::OutputEnded
+            | AgentProgress::ToolCall(_)
+            | AgentProgress::ToolCallsEnded
+            | AgentProgress::IterationEnded
+            | AgentProgress::ToolCalls(_) => DriveOutput::default(),
+            #[cfg(feature = "cache_profile")]
+            AgentProgress::Usage(_) => DriveOutput::default(),
         }
     }
 
@@ -404,7 +412,7 @@ mod tests {
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{FsAgentFactory, TickOutcome};
+    use crate::agent::{AgentProgress, FsAgentFactory};
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
@@ -428,14 +436,27 @@ mod tests {
             SharedApiManager::default(),
         )
         .expect("test factory builds");
+        let session = SessionId::new(1);
         let mut instance = MultiagentRuntime::new(
-            SessionId::new(1),
+            session,
             Rc::new(factory),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             MultiagentState::default(),
         );
         let root = AgentId(1);
+        instance
+            .build_agent(
+                root,
+                agent_catalog::root_kind(),
+                Message::text(""),
+                AgentPlacement::Root {
+                    session,
+                    persistence: SessionPersistence::Ephemeral,
+                },
+                Vec::new(),
+            )
+            .expect("root builds");
         assert!(instance
             .state
             .insert_root(root, agent_catalog::root_kind().clone()));
@@ -446,25 +467,25 @@ mod tests {
     fn only_root_terminal_results_request_engine_emission() {
         let (mut instance, root) = instance_with_root();
 
-        let yielded = instance.route_outcome(
+        let yielded = instance.route_progress(
             root,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "streamed".to_owned(),
             },
         );
         assert!(yielded.into_messages().is_empty());
 
-        let tool_yielded = instance.route_outcome(
+        let tool_yielded = instance.route_progress(
             root,
-            TickOutcome::YieldedByTool {
+            AgentProgress::YieldedByTool {
                 text: "question".to_owned(),
             },
         );
         assert_eq!(tool_yielded.into_messages(), vec!["question".to_owned()]);
 
-        let ended = instance.route_outcome(
+        let ended = instance.route_progress(
             root,
-            TickOutcome::Ended {
+            AgentProgress::Ended {
                 final_message: "finished".to_owned(),
             },
         );
@@ -491,9 +512,9 @@ mod tests {
             timeout(),
         ));
 
-        let output = instance.route_outcome(
+        let output = instance.route_progress(
             parent,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "children spawned; waiting for their results".to_owned(),
             },
         );
@@ -561,7 +582,7 @@ mod tests {
             .build_agent(
                 parent,
                 &worker,
-                Message::text("spawn children"),
+                Message::text(""),
                 AgentPlacement::Child(parent),
                 Vec::new(),
             )
@@ -577,7 +598,7 @@ mod tests {
             .build_agent(
                 child,
                 &worker,
-                Message::text("nested work"),
+                Message::text(""),
                 AgentPlacement::Child(child),
                 Vec::new(),
             )
@@ -592,15 +613,15 @@ mod tests {
         instance.timeouts.arm::<ImmediateTimer>(parent, timeout());
         instance.timeouts.arm::<ImmediateTimer>(child, timeout());
 
-        instance.route_outcome(
+        instance.route_progress(
             child,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "nested work complete".to_owned(),
             },
         );
-        instance.route_outcome(
+        instance.route_progress(
             parent,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "waiting for nested work".to_owned(),
             },
         );
@@ -609,10 +630,14 @@ mod tests {
         assert!(!instance.state.contains(child));
         assert!(instance.slots.has_inbox(parent));
         assert!(instance.slots.activate_inbox(parent));
+        let _ = instance
+            .slots
+            .take_ready(parent)
+            .expect("the activated child result is checked out with its agent");
 
-        instance.route_outcome(
+        instance.route_progress(
             parent,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "aggregated nested result".to_owned(),
             },
         );
@@ -624,25 +649,12 @@ mod tests {
     fn completed_background_child_remains_inspectable_until_root_consumes_its_result() {
         let (mut instance, root) = instance_with_root();
         let child = AgentId(2);
-        let root_kind = agent_catalog::root_kind().clone();
         let worker = AgentKind::from_static("worker");
-        instance
-            .build_agent(
-                root,
-                &root_kind,
-                Message::text("root"),
-                AgentPlacement::Root {
-                    session: SessionId::new(1),
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
-            )
-            .expect("root builds");
         instance
             .build_agent(
                 child,
                 &worker,
-                Message::text("work"),
+                Message::text(""),
                 AgentPlacement::Child(child),
                 Vec::new(),
             )
@@ -655,9 +667,9 @@ mod tests {
             timeout(),
         ));
 
-        instance.route_outcome(
+        instance.route_progress(
             child,
-            TickOutcome::Yielded {
+            AgentProgress::Yielded {
                 text: "finished".to_owned(),
             },
         );

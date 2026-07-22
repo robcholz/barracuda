@@ -1,16 +1,16 @@
 #[cfg(feature = "build-support")]
 pub mod bake;
+mod executor;
 mod registry;
-mod runner;
 mod set;
 #[allow(clippy::module_inception)]
 mod tool;
 mod validate;
 
+pub use executor::{ToolExecution, ToolExecutor};
 pub use registry::{
     ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolRegistryVersion,
 };
-pub use runner::{ApprovalNeeded, ToolGate, ToolRunOutcome, ToolRunner};
 pub use set::{
     ToolCatalogEntry, ToolDiscoveryHandle, ToolGroupCatalog, ToolName, ToolSet, ToolSetError,
     ToolSetHandle,

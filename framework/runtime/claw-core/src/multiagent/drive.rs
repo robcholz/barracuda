@@ -2,28 +2,28 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use futures_lite::future;
 
-use crate::agent::AgentEvent;
-use crate::config::ApiUsage;
-use crate::protocol::{AgentId, EventSink, InflightToolCall, TurnOrigin};
+use crate::agent::AgentProgress;
+use crate::protocol::{AgentId, EventSink, InflightToolCall, SessionEvent, StreamPart, TurnOrigin};
+use crate::scheduler::AgentRun;
 
-use super::agents::{AgentTickEvent, ReadyAgent};
+use super::agents::{AgentRunEvent, AgentSlotEvent, ReadyAgent};
 use super::drive_control::{DriveControl, DriveStop};
 use super::timeouts::ExpiredTimeout;
 use super::{MultiagentRuntime, MultiagentWork};
 
 enum RuntimeWake {
-    Agents(Vec<AgentTickEvent>),
+    Agents(Vec<AgentRunEvent>),
     Timeouts(Vec<ExpiredTimeout>),
 }
 
 struct RoutedWake {
     output: DriveOutput,
-    root_tool_started: Option<InflightToolCall>,
+    root_tool_calls: Option<Vec<InflightToolCall>>,
 }
 
 pub(crate) enum DriveOutcome {
     Complete(DriveOutput, DriveStop),
-    ToolStarted(DriveOutput, InflightToolCall),
+    ToolCalls(DriveOutput, Vec<InflightToolCall>),
 }
 
 /// Messages created outside the LLM stream and still awaiting engine emission.
@@ -141,11 +141,10 @@ where
     /// in-flight futures, then reset to idle through their normal cancel reducer.
     /// The caller chooses whether the process-local graph is preserved or pruned.
     pub(crate) async fn stop_turn_tasks(&mut self, mode: TurnStopMode) {
-        let events = EventSink::disabled();
         let control = DriveControl::new();
 
         self.cancel_foreground_results();
-        self.slots.abort_all();
+        self.slots.cancel_all();
         while self.slots.has_running() {
             let _ = self.slots.next_events(&control).await;
         }
@@ -153,7 +152,7 @@ where
         self.clear_turn_work();
         self.cancel_all();
         while self.has_ready() || self.slots.has_running() {
-            self.start_ready_agent_tasks(&events, true);
+            self.start_ready_agent_tasks(true);
             if !self.slots.has_running() {
                 continue;
             }
@@ -186,14 +185,15 @@ where
             }
             if control.take_interrupt() {
                 interrupt_requested = true;
+                self.slots.interrupt_all();
             }
             if control.take_wake() && !cancel_requested && !interrupt_requested {
                 control.clear_cancel_hook();
                 return DriveOutcome::Complete(output, DriveStop::Woken);
             }
 
-            if !cancel_requested && !interrupt_requested {
-                self.start_ready_agent_tasks(events, false);
+            if !cancel_requested {
+                self.start_ready_agent_tasks(false);
             }
 
             if cancel_requested {
@@ -220,11 +220,11 @@ where
             self.set_cancel_hook(control);
 
             let wake = self.next_runtime_wake(control).await;
-            let routed = self.route_runtime_wake(wake);
+            let routed = self.route_runtime_wake(wake, events);
             output.absorb(routed.output);
-            if let Some(call) = routed.root_tool_started {
+            if let Some(calls) = routed.root_tool_calls {
                 control.clear_cancel_hook();
-                return DriveOutcome::ToolStarted(output, call);
+                return DriveOutcome::ToolCalls(output, calls);
             }
             if self.has_pending_approval() {
                 // A foreground root tool may still be waiting on the child
@@ -266,7 +266,7 @@ where
                 return (output, DriveStop::Quiescent);
             }
 
-            self.start_ready_agent_tasks(events, false);
+            self.start_ready_agent_tasks(false);
             if self.pending_root_origin().is_some()
                 || self.has_root_work()
                 || self.has_pending_approval()
@@ -285,8 +285,8 @@ where
             self.set_cancel_hook(control);
 
             let wake = self.next_runtime_wake(control).await;
-            let routed = self.route_runtime_wake(wake);
-            debug_assert!(routed.root_tool_started.is_none());
+            let routed = self.route_runtime_wake(wake, events);
+            debug_assert!(routed.root_tool_calls.is_none());
             output.absorb(routed.output);
             if self.has_pending_approval() {
                 control.clear_cancel_hook();
@@ -298,10 +298,10 @@ where
     }
 
     fn set_cancel_hook(&self, control: &DriveControl) {
-        let abort_handles = self.slots.abort_handles();
+        let controls = self.slots.controls();
         control.set_cancel_hook(move || {
-            for handle in &abort_handles {
-                handle.abort();
+            for agent in &controls {
+                agent.cancel();
             }
         });
     }
@@ -334,7 +334,7 @@ where
             .await;
         }
 
-        // `or` is left-biased: when a tick and its deadline become ready at
+        // `or` is left-biased: when a run and its deadline become ready at
         // the same scheduling boundary, committed agent completion wins.
         future::or(
             async {
@@ -350,36 +350,16 @@ where
     }
 
     /// Start every currently-ready agent in its stable slot.
-    fn start_ready_agent_tasks(&mut self, events: &EventSink, include_root_inbox: bool) {
+    fn start_ready_agent_tasks(&mut self, include_root_inbox: bool) {
         self.schedule_pending_inboxes(include_root_inbox);
         let ready = self.drain_ready_agents();
         if ready.is_empty() {
             return;
         }
 
-        for mut ready in ready {
+        for ready in ready {
             let id = ready.id;
             let is_root = ready.is_root;
-            // Snapshot this turn's config for the agent's usage (root vs sub),
-            // resolved from the shared manager. A turn thus runs on one config
-            // even if it is updated mid-turn. `None` (nothing linked) or an
-            // invalid config leaves the agent on its current client.
-            let usage = if is_root {
-                ApiUsage::RootAgent
-            } else {
-                ApiUsage::SubAgent
-            };
-            if let Some(config) = self.factory.config_for(usage) {
-                if ready.agent.set_llm_config(config).is_err() {
-                    tracing::error!(name: "llm_config_invalid", agent = %id);
-                }
-            }
-            let abort = ready.agent.abort_handle();
-            let sink = if ready.is_root {
-                events.clone()
-            } else {
-                EventSink::disabled()
-            };
             let meta = self
                 .state
                 .node(id)
@@ -394,48 +374,78 @@ where
                     .depth(id)
                     .expect("live graph topology is valid") as u64,
             );
-            self.slots
-                .start(id, is_root, abort, span, ready.agent.run(sink));
+            let run = AgentRun::start(ready.agent, ready.message);
+            let control = run.control();
+            self.slots.start(id, is_root, control, span, run);
         }
         self.refresh_multiagent_snapshot();
     }
 
-    /// Apply subagent commands, then route events from running agent ticks.
-    fn route_agent_events(&mut self, events: Vec<AgentTickEvent>) -> RoutedWake {
+    /// Apply subagent commands, then route events from running Agents.
+    fn route_agent_events(
+        &mut self,
+        agent_events: Vec<AgentRunEvent>,
+        output_events: &EventSink,
+    ) -> RoutedWake {
         let mut output = DriveOutput::default();
-        let mut root_tool_started = None;
+        let mut root_tool_calls = None;
         self.apply_multiagent_commands();
-        for AgentTickEvent { id, event } in events {
+        for AgentRunEvent { id, event } in agent_events {
             if !self.state.contains(id) {
                 continue;
             }
             match event {
-                AgentEvent::ToolStarted(call) if self.state.is_root(id) => {
-                    debug_assert!(root_tool_started.is_none());
-                    root_tool_started = Some(call);
+                AgentSlotEvent::Progress(progress) => {
+                    if self.state.is_root(id) {
+                        match &progress {
+                            AgentProgress::ToolCalls(calls) => {
+                                debug_assert!(root_tool_calls.is_none());
+                                root_tool_calls = Some(calls.clone());
+                            }
+                            AgentProgress::IterationStarted(_)
+                            | AgentProgress::ReasoningDelta(_)
+                            | AgentProgress::ReasoningEnded
+                            | AgentProgress::OutputDelta(_)
+                            | AgentProgress::OutputEnded
+                            | AgentProgress::ToolCall(_)
+                            | AgentProgress::ToolCallsEnded
+                            | AgentProgress::IterationEnded => {
+                                emit_agent_progress(output_events, &progress);
+                            }
+                            #[cfg(feature = "cache_profile")]
+                            AgentProgress::Usage(_) => {
+                                emit_agent_progress(output_events, &progress);
+                            }
+                            AgentProgress::ApprovalRequired { .. }
+                            | AgentProgress::Yielded { .. }
+                            | AgentProgress::YieldedByTool { .. }
+                            | AgentProgress::Ended { .. }
+                            | AgentProgress::Interrupted
+                            | AgentProgress::Cancelled
+                            | AgentProgress::Failed(_) => {}
+                        }
+                    }
+                    output.absorb(self.route_progress(id, progress));
                 }
-                AgentEvent::ToolStarted(_) => {}
-                AgentEvent::TickFinished(outcome) => {
-                    output.absorb(self.route_outcome(id, outcome));
-                }
+                AgentSlotEvent::Returned => {}
             }
         }
         self.refresh_multiagent_snapshot();
         RoutedWake {
             output,
-            root_tool_started,
+            root_tool_calls,
         }
     }
 
-    fn route_runtime_wake(&mut self, wake: RuntimeWake) -> RoutedWake {
+    fn route_runtime_wake(&mut self, wake: RuntimeWake, events: &EventSink) -> RoutedWake {
         match wake {
-            RuntimeWake::Agents(events) => self.route_agent_events(events),
+            RuntimeWake::Agents(agent_events) => self.route_agent_events(agent_events, events),
             RuntimeWake::Timeouts(expired) => {
                 let output = self.route_expired_timeouts(expired);
                 self.refresh_multiagent_snapshot();
                 RoutedWake {
                     output,
-                    root_tool_started: None,
+                    root_tool_calls: None,
                 }
             }
         }
@@ -447,13 +457,14 @@ where
             if !self.state.contains(id) {
                 continue;
             }
-            let Some(agent) = self.slots.take_idle(id) else {
+            let Some((agent, message)) = self.slots.take_ready(id) else {
                 continue;
             };
             ready_agents.push(ReadyAgent {
                 id,
                 is_root: self.state.is_root(id),
                 agent,
+                message,
             });
         }
         ready_agents
@@ -477,6 +488,36 @@ where
     fn pop_ready(&mut self) -> Option<AgentId> {
         self.state.pop_ready()
     }
+}
+
+fn emit_agent_progress(events: &EventSink, progress: &AgentProgress) {
+    let event = match progress {
+        AgentProgress::IterationStarted(iteration) => SessionEvent::IterationStarted {
+            iteration: *iteration,
+        },
+        AgentProgress::ReasoningDelta(text) => {
+            SessionEvent::Reasoning(StreamPart::Delta(text.clone()))
+        }
+        AgentProgress::ReasoningEnded => SessionEvent::Reasoning(StreamPart::End),
+        AgentProgress::OutputDelta(text) => SessionEvent::Output(StreamPart::Delta(text.clone())),
+        AgentProgress::OutputEnded => SessionEvent::Output(StreamPart::End),
+        AgentProgress::ToolCall(call) => SessionEvent::ToolCalls(StreamPart::Delta(call.clone())),
+        AgentProgress::ToolCallsEnded => SessionEvent::ToolCalls(StreamPart::End),
+        #[cfg(feature = "cache_profile")]
+        AgentProgress::Usage(usage) => SessionEvent::Usage {
+            usage: usage.clone(),
+        },
+        AgentProgress::IterationEnded => SessionEvent::IterationEnded,
+        AgentProgress::ToolCalls(_)
+        | AgentProgress::ApprovalRequired { .. }
+        | AgentProgress::Yielded { .. }
+        | AgentProgress::YieldedByTool { .. }
+        | AgentProgress::Ended { .. }
+        | AgentProgress::Interrupted
+        | AgentProgress::Cancelled
+        | AgentProgress::Failed(_) => return,
+    };
+    events.emit(event);
 }
 
 #[cfg(test)]
@@ -530,7 +571,7 @@ mod tests {
     }
 
     #[test]
-    fn activating_root_inbox_drains_every_queued_result() {
+    fn activating_root_inbox_delivers_one_message_at_a_time() {
         let (mut runtime, root, child) = runtime_with_root_and_child();
         for index in 0..3 {
             assert!(runtime
@@ -543,7 +584,7 @@ mod tests {
         }
 
         assert!(runtime.activate_pending_root_results());
-        assert!(!runtime.slots.has_inbox(root));
+        assert!(runtime.slots.has_inbox(root));
     }
 
     #[test]
@@ -592,7 +633,7 @@ mod tests {
             .build_agent(
                 root,
                 &root_kind,
-                Message::text("root"),
+                Message::text(""),
                 AgentPlacement::Root {
                     session,
                     persistence: SessionPersistence::Ephemeral,
@@ -605,7 +646,7 @@ mod tests {
             .build_agent(
                 child,
                 &child_kind,
-                Message::text("child"),
+                Message::text(""),
                 AgentPlacement::Child(child),
                 Vec::new(),
             )

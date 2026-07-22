@@ -847,10 +847,12 @@ where
         let mut yield_for_persistence = false;
         if let RuntimeDriveResult::Driven(result) = result {
             match result {
-                Ok(DriveOutcome::ToolStarted(output, call)) => {
+                Ok(DriveOutcome::ToolCalls(output, calls)) => {
                     let _ = self
                         .emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
-                    self.record_tool_started(call);
+                    for call in calls {
+                        self.record_tool_started(call);
+                    }
                     yield_for_persistence = true;
                 }
                 Ok(DriveOutcome::Complete(output, stop)) => {

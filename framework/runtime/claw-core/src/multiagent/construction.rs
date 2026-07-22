@@ -10,7 +10,7 @@ use claw_permission::PermissionPolicy;
 use crate::agent::{
     AgentEnvironment, AgentResume, AgentState, FsAgentCreateError, FsAgentFactory, TranscriptTarget,
 };
-use crate::config::ReasoningEffort;
+use crate::config::{ApiUsage, ReasoningEffort};
 use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
 
 use super::{
@@ -84,32 +84,44 @@ where
         let extension_tools = tools::tool_group(id, kind, Arc::clone(&self.multiagent))
             .into_iter()
             .collect();
-        let (transcript, resume) = match placement {
+        let (transcript, api_usage, resume) = match placement {
             AgentPlacement::Root {
                 session,
                 persistence,
             } => match persistence {
                 SessionPersistence::Persistent => (
                     TranscriptTarget::Persistent(session.0),
+                    ApiUsage::RootAgent,
                     self.root_resume.take(),
                 ),
                 SessionPersistence::Ephemeral => (
                     TranscriptTarget::InMemory(session.0),
+                    ApiUsage::RootAgent,
                     self.root_resume.take(),
                 ),
             },
-            AgentPlacement::Child(child) => (TranscriptTarget::InMemory(child.0), None),
+            AgentPlacement::Child(child) => (
+                TranscriptTarget::InMemory(child.0),
+                ApiUsage::SubAgent,
+                None,
+            ),
         };
         let environment = AgentEnvironment::new(
             transcript,
+            api_usage,
             Arc::clone(&self.permission_policy),
             extension_tools,
             inherited_context,
             self.reasoning_effort,
             resume,
         );
-        let (agent, reasoning_effort) = self.factory.create_agent(id, kind, goal, environment)?;
+        let has_goal = !goal.as_str().trim().is_empty();
+        let (agent, reasoning_effort) = self.factory.create_agent(id, kind, environment)?;
         self.slots.insert(id, agent, reasoning_effort);
+        if has_goal {
+            let queued = self.slots.queue_message(id, goal);
+            debug_assert!(queued, "a newly inserted agent has a live slot");
+        }
         Ok(())
     }
 
@@ -132,6 +144,7 @@ mod tests {
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
+    use serde_json::json;
 
     use crate::agent::{AgentResume, AgentState, FsAgentFactory};
     use crate::config::{catalog as agent_catalog, ReasoningEffort, SharedApiManager};
@@ -154,7 +167,11 @@ mod tests {
             )
             .expect("test factory builds"),
         );
-        let expected = AgentState::plan_for_test(Vec::new());
+        let expected: AgentState = serde_json::from_value(json!({
+            "agent_mode": "plan",
+            "resumed": { "loaded_tool_groups": [] },
+        }))
+        .expect("test AgentState is valid");
         let mut runtime = TestRuntime::new_with_resume(
             session,
             factory,

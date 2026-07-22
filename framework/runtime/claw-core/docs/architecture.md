@@ -81,15 +81,49 @@ Sessions; a future directory cache must remain a rebuildable read model.
   of those runs receives a second poll.
 - Fairness exists only at poll/yield boundaries. Synchronous blocking work in a
   poll blocks the sole OS thread and must remain bounded.
+- `AgentRun` is a Scheduler-private ownership/poll wrapper around a checked-out
+  BaseAgent and that Agent's `AgentStreamHandle`. It must not define a second
+  progress or outcome protocol. It forwards `AgentProgress` unchanged and
+  retains the completed BaseAgent until its owner takes it back exactly once.
 
 ### BaseAgent
 
 - `BaseAgent<H, T>` is the only concrete Agent type. There is no `GenericAgent`
   abstraction or `dyn Agent` ownership layer.
+- BaseAgent has only `Running` or `Stopped(reason)`. While running, one
+  `IterationLoop<P>` owns the linear `LLM stream -> ToolCalls boundary ->
+  permission -> tool execution -> all-ID join` flow. Waiting for approval
+  suspends the injected BaseAgent permission future; it is not a second Agent
+  state machine.
+- `BaseAgent::submit(&mut self, Message)` is the only task-entry API. It returns
+  an `AgentStreamHandle<'_>` that exclusively borrows the BaseAgent for the
+  task and implements `Stream<Item = AgentProgress>`. The handle is the only
+  progress and control surface; there is no public tick API, output sender, or
+  separate terminal-outcome protocol.
+- The handle owns `interrupt`, `cancel`, and `resolve_approval`. Dropping it
+  before terminal completion cancels the active task and leaves BaseAgent in a
+  stopped state. The private mechanism used to bridge the borrowed HTTP stream
+  into `AgentProgress` is not an architectural queue or a second protocol.
+- After the LLM stream completes, `IterationLoop` emits the aggregate
+  `AgentProgress::ToolCalls` boundary and suspends until the owner polls again.
+  It then continues directly into permission and execution; BaseAgent stores no
+  duplicate tool-call substate. There is no `ToolCallObserver`, `ToolStartYield`,
+  or hand-built observer barrier.
+- BaseAgent accepts a new `Message` through `submit` only while stopped. Its
+  owner retains all message queuing policy. `interrupt` requests a stop at the
+  end of the current LLM/tool loop boundary; `cancel` wakes and cooperatively
+  aborts current async work.
 - `BaseAgent` owns only the generic run protocol and already assembled
   dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
-  instruction, inherited context, `Vec<Box<dyn ContextAdapter>>`, and the
-  transient `AgentEffectInbox` used to reduce typed tool effects.
+  instruction, inherited context, `SharedApiManager` plus its Agent `ApiUsage`,
+  `Vec<Box<dyn ContextAdapter>>`, and the transient `AgentEffectInbox` used to
+  reduce typed tool effects.
+- At the beginning of every LLM iteration, BaseAgent snapshots its current API
+  config from `SharedApiManager`, drops the manager lock, and applies that
+  config directly to its LLM client. BaseAgent retains no shadow copy of the
+  applied config. Multiagent never resolves `ApiUsage` or configures a BaseAgent
+  LLM. Memory extraction and transcript compaction keep their own manager
+  clones and dedicated usages.
 - Concrete mode, conversation, profile, skill, and memory semantics live under
   `agent/context_adapters`. In particular, the BaseAgent runtime neither
   recognizes Normal/Plan nor matches on mode-specific tools.
@@ -132,29 +166,35 @@ Sessions; a future directory cache must remain a rebuildable read model.
   bounded emit/drain operation and never across an `await`. More than one
   mutually exclusive task-boundary effect in a round fails deterministically.
 - Each authoritative component owns its live recovery semantics: the mode
-  adapter owns mode, the resumed adapter owns loaded-group recovery state, and
-  the Agent tool runtime owns its monotonic counter and unsettled tool calls.
+  adapter owns mode and the resumed adapter owns loaded-group recovery state.
   ToolSet retains only its existing runtime projection and has no persistence
   API.
-- `ToolRunner` remains inside the Agent tool runtime. Scheduler schedules an
-  entire `AgentRun`, not individual tool calls.
+- Tool execution and permission are separate. `ToolExecutor` only invokes an
+  already-authorized call. The iteration tool round is generic over a statically
+  dispatched `ToolPermissionPolicy`; `AllowAll` is the YOLO implementation,
+  while BaseAgent injects the implementation that evaluates its configured
+  policy, emits `ApprovalRequired`, and awaits its stream handle. The iteration
+  loop contains no pending-approval or approval-resolution protocol.
+- Scheduler schedules an entire `AgentRun`, not individual tool calls.
 - `BaseAgent` does not own `SharedPersistence`, perform storage I/O, or depend
   on the filesystem type `F`.
 
 ## Identity
 
-- `AgentId`, `RunId`, and `ToolCallId` are distinct newtypes.
+- `AgentId`, `RunId`, and `ToolCallId` are distinct newtypes with different
+  scopes.
 - `AgentId` is globally unique within the persisted installation and is never
   reused. Engine owns and durably checkpoints its allocator before exposing a
   reserved ID.
 - `RunId` identifies one checkout epoch so a stale completion cannot overwrite
   a newer slot state.
-- `ToolCallId` identifies one physical invocation. It is monotonic and
-  restart-safe within one Agent; the durable invocation identity is
-  `(AgentId, ToolCallId)`.
-- Allocating a ToolCall ID increments `next_tool_call_id` in the same in-memory
-  mutation that inserts its unsettled record. Tool name and arguments are not
-  invocation identity.
+- `ToolCallId(u32)` identifies one call only inside one iteration. A fresh
+  allocator starts at zero for every iteration and assigns IDs in provider call
+  order. It is transient: it is never serialized, checkpointed, restored, or
+  compared across iterations.
+- The provider's string call ID remains separate. It is validated for presence
+  and uniqueness within the response and is used only to correlate assistant
+  tool calls with transcript tool-result messages.
 
 ## Construction and recovery
 
@@ -182,9 +222,6 @@ to reconstruct it:
 struct AgentState {
     agent_mode: AgentModeState,
     resumed: ResumedState,
-    next_tool_call_id: ToolCallId,
-    unsettled_toolcalls:
-        BTreeMap<ToolCallId, UnsettledToolCallRecord>,
 }
 
 impl<H, T> BaseAgent<H, T> {
@@ -199,18 +236,16 @@ distributes a restored aggregate as `Some(AgentModeState)` and
 that component owns its explicit initialization policy. Component state DTOs
 do not implement `Default`.
 
-`AgentState` is a projection, not a second mutable shadow copy. Mode adapter,
-resumed adapter, and the tool-call journal remain the authoritative live
-components.
+`AgentState` is a projection, not a second mutable shadow copy. Mode adapter
+and resumed adapter remain the authoritative live components.
 `BaseAgent::recovery_state()` drives a generic state sink over those components;
 it does not decode adapter-specific state.
 
-The persisted schema is versioned. `UnsettledToolCallRecord` is a stable
-recovery record, not a transient event/future type such as `InflightToolCall`.
-`ResumedState` serializes loaded tool groups in stable canonical order.
-Conversation history is absent because the canonical transcript reconstructs
-it. Physical ToolRunner state, active futures, and scheduler state are absent
-because they are transient.
+The persisted schema is versioned. `ResumedState` serializes loaded tool groups
+in stable canonical order. Conversation history is absent because the
+canonical transcript reconstructs it. `ToolCallId`, physical tool-executor
+state, active futures, and scheduler state are absent because they are
+transient.
 
 Because an active `BaseAgent` has been moved into an `AgentRun`, Engine cannot
 borrow it to call `recovery_state()`. The Agent calls the method internally
@@ -238,8 +273,7 @@ and must still return the Agent to its owning slot.
 Every change represented by the recovery snapshot must eventually cross an
 acknowledged checkpoint boundary. Implementations may coalesce ordinary mode or
 loaded-tool-group changes, but they must not publish a terminal run completion
-while recovery state differs from the last acknowledged snapshot. The pre-tool
-boundary is non-coalescible because it guards an external side effect.
+while recovery state differs from the last acknowledged snapshot.
 
 The baseline `AgentPersistencePolicy` variants are:
 
@@ -254,37 +288,15 @@ An ephemeral checkpoint may be acknowledged without storage, preserving one
 uniform run protocol. SessionActor authorizes permanent Agent-record deletion
 only after logical deletion is committed and physical ownership has returned.
 
-### Tool-call durability boundary
+### Tool-call identity boundary
 
-Before a persistent tool body is first polled:
-
-~~~text
-allocate ToolCallId and increment next_tool_call_id
-→ insert UnsettledToolCallRecord
-→ export AgentState in CheckpointRequired
-→ Scheduler parks the AgentRun
-→ Engine durably checkpoints the snapshot
-→ resume and first-poll the tool body
-~~~
-
-If the checkpoint fails, the tool body is never polled. An active tool future is
-transient; an unsettled record means the durable outcome of a possibly
-side-effecting invocation is not yet known.
-
-Settlement order is:
-
-~~~text
-tool body completes
-→ append its outcome to the open transcript turn
-→ keep the call unsettled during later iterations
-→ commit and durably checkpoint the transcript turn
-→ clear calls represented by that committed turn
-→ export and durably checkpoint the new AgentState
-~~~
-
-The transcript checkpoint is fallible. A call is never cleared merely because
-the tool future completed or because an open turn contains a patch. Recovery
-never blindly replays an unsettled side-effecting invocation.
+At the start of each iteration, `IterationLoop` constructs a fresh
+`ToolCallIdAllocator`. After validating every provider call ID, it assigns local
+numeric IDs in response order. Permission decisions, approval correlation, and
+the iteration result collector use those local IDs. Transcript messages use the
+provider IDs. Neither identity is added to `AgentState`; a future durable
+side-effect journal, if required, must define a separate durable invocation ID
+rather than changing the scope of `ToolCallId`.
 
 ## Canonical and transient state
 
@@ -296,8 +308,6 @@ never blindly replays an unsettled side-effecting invocation.
   `RunId`, checkout state, and checkpoint waiters are transient.
 - After a crash, Factory reconstructs Agents from durable recovery state and
   canonical stores. It never restores a physical future or checkout.
-- A crash after transcript durability but before clearing the Agent snapshot
-  may conservatively recover an invocation as unsettled; it is not replayed.
 - Agent, tool, LLM, and persistence failures are outcomes. They cannot destroy
   the global loop or lose Agent ownership.
 

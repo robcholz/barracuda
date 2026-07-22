@@ -187,7 +187,7 @@ impl MultiagentBridge {
         state.waiter = None;
     }
 
-    /// Register the drive waiting for an in-flight tick. Returns `true` when a
+    /// Register the drive waiting for an in-flight run. Returns `true` when a
     /// command is already queued and the caller should apply it immediately.
     pub(in crate::multiagent) fn register_waiter(&self, waiter: &Waker) -> bool {
         let mut state = self.state();

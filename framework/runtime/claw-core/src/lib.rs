@@ -20,6 +20,7 @@ mod config;
 mod multiagent;
 mod orchestrator;
 mod protocol;
+mod scheduler;
 mod session;
 
 pub(crate) use claw_utils::{define_id_allocator, define_prefixed_id};

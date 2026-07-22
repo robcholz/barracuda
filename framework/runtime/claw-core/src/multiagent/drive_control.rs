@@ -92,7 +92,7 @@ impl DriveControl {
     }
 
     /// Whether a wake, interrupt, or cancel is pending. Used by the in-flight
-    /// tick waiter so session commands can break a background wait.
+    /// run waiter so session commands can break a background wait.
     pub(crate) fn has_signal(&self) -> bool {
         self.inner.wake.load(Ordering::Acquire)
             || self.inner.interrupt.load(Ordering::Acquire)
@@ -114,7 +114,7 @@ impl DriveControl {
         self.inner.cancel.swap(false, Ordering::AcqRel)
     }
 
-    /// Store the waker for the current in-flight tick wait.
+    /// Store the waker for the current in-flight run wait.
     pub(crate) fn set_waker(&self, waker: Waker) {
         *self
             .inner

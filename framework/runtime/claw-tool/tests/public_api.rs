@@ -7,9 +7,9 @@ use std::task::Waker;
 use anyhow::{anyhow, Result};
 use claw_persistence::{DurableState, DurableStateCodec};
 use claw_tool::{
-    RawToolInvocation, RetryCount, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolResult,
-    ToolRunOutcome, ToolRunner, ToolSetHandle, ToolSpec,
+    RawToolInvocation, RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolExecutor,
+    ToolGroup, ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError,
+    ToolRegistryState, ToolResult, ToolSetHandle, ToolSpec,
 };
 
 #[test]
@@ -26,11 +26,11 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
     assert_eq!(handle.tool_context(), "Echoes the normalized arguments.");
 
     let call = invocation("echo", r#" { "message": "hi" } "#)?;
-    let outcome = run_with_default_gate(&handle, &call)?;
+    let outcome = execute_tool(&handle, &call)?;
 
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: r#"{ "message": "hi" }"#.into(),
             ok: true,
         }
@@ -57,7 +57,7 @@ fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
 }
 
 #[test]
-fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
+fn temporary_disable_blocks_executor_but_keeps_tool_context() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
     let mut tool_set = registry.tool_set();
     tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
@@ -76,11 +76,12 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
         );
 
         let call = invocation("echo", "{}")?;
-        let outcome = run_with_default_gate(&handle, &call)?;
+        let outcome = execute_tool(&handle, &call)?;
         assert_eq!(
             outcome,
-            ToolRunOutcome::Blocked {
-                content: "tool is temporarily unavailable: echo".into(),
+            ToolExecution {
+                content: "tool invocation rejected: tool is temporarily unavailable: echo".into(),
+                ok: false,
             }
         );
     }
@@ -91,10 +92,10 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     assert_eq!(handle.extra_tool_context(), "no extra tool context");
 
     let call = invocation("echo", "{}")?;
-    let outcome = run_with_default_gate(&handle, &call)?;
+    let outcome = execute_tool(&handle, &call)?;
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "{}".into(),
             ok: true,
         }
@@ -113,10 +114,10 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
         assert_eq!(handle.schemas_json(), "no schemas");
 
         let call = invocation("echo", "{}")?;
-        let outcome = run_with_default_gate(&handle, &call)?;
+        let outcome = execute_tool(&handle, &call)?;
         assert_eq!(
             outcome,
-            ToolRunOutcome::Ran {
+            ToolExecution {
                 content: "tool not found: echo".into(),
                 ok: false,
             }
@@ -132,10 +133,10 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
     );
 
     let call = invocation("echo", "{}")?;
-    let outcome = run_with_default_gate(&handle, &call)?;
+    let outcome = execute_tool(&handle, &call)?;
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "{}".into(),
             ok: true,
         }
@@ -192,19 +193,19 @@ fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let mut tool_set = registry.tool_set_with_blacklist(&["blocked"]);
     let handle = tool_set.begin()?;
 
-    let allowed = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
+    let allowed = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         allowed,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "{}".into(),
             ok: true,
         }
     );
 
-    let blocked = run_with_default_gate(&handle, &invocation("other", "{}")?)?;
+    let blocked = execute_tool(&handle, &invocation("other", "{}")?)?;
     assert_eq!(
         blocked,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "tool not found: other".into(),
             ok: false,
         }
@@ -226,12 +227,12 @@ fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
     let handle = tool_set.begin()?;
 
     assert!(matches!(
-        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
-        ToolRunOutcome::Ran { ok: true, .. }
+        execute_tool(&handle, &invocation("echo", "{}")?)?,
+        ToolExecution { ok: true, .. }
     ));
     assert_eq!(
-        run_with_default_gate(&handle, &invocation("other", "{}")?)?,
-        ToolRunOutcome::Ran {
+        execute_tool(&handle, &invocation("other", "{}")?)?,
+        ToolExecution {
             content: "tool not found: other".into(),
             ok: false,
         }
@@ -249,8 +250,8 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
     let handle = tool_set.begin()?;
     assert_eq!(handle.schemas_json(), "no schemas");
     assert_eq!(
-        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
-        ToolRunOutcome::Ran {
+        execute_tool(&handle, &invocation("echo", "{}")?)?,
+        ToolExecution {
             content: "tool not found: echo".into(),
             ok: false,
         }
@@ -267,8 +268,8 @@ fn blacklist_does_not_interpret_wildcards() -> Result<()> {
 
     let handle = tool_set.begin()?;
     assert!(matches!(
-        run_with_default_gate(&handle, &invocation("echo", "{}")?)?,
-        ToolRunOutcome::Ran { ok: true, .. }
+        execute_tool(&handle, &invocation("echo", "{}")?)?,
+        ToolExecution { ok: true, .. }
     ));
     Ok(())
 }
@@ -294,10 +295,10 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
 
     let mut tool_set = registry.tool_set();
     let handle = tool_set.begin()?;
-    let outcome = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
+    let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "tool not found: echo".into(),
             ok: false,
         }
@@ -327,10 +328,10 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
             handle.schemas_json(),
             r#"[{"type":"function","function":{"name":"other"}}]"#
         );
-        let blocked = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
+        let blocked = execute_tool(&handle, &invocation("echo", "{}")?)?;
         assert_eq!(
             blocked,
-            ToolRunOutcome::Ran {
+            ToolExecution {
                 content: "tool not found: echo".into(),
                 ok: false,
             }
@@ -357,10 +358,10 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     assert!(!discovery.request_load("nope"));
 
     let handle = tool_set.begin()?;
-    let outcome = run_with_default_gate(&handle, &invocation("echo", "{}")?)?;
+    let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "{}".into(),
             ok: true,
         }
@@ -457,13 +458,13 @@ fn invocation_rejects_non_object_arguments() {
 }
 
 #[test]
-fn runner_retries_tool_according_to_retry_count() -> Result<()> {
+fn executor_retries_tool_according_to_retry_count() -> Result<()> {
     let attempts = Arc::new(AtomicU32::new(0));
     let outcome = run_retry_tool(RetryCount::extra(1), Arc::clone(&attempts))?;
 
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "ok".into(),
             ok: true,
         }
@@ -473,13 +474,13 @@ fn runner_retries_tool_according_to_retry_count() -> Result<()> {
 }
 
 #[test]
-fn runner_does_not_retry_by_default() -> Result<()> {
+fn executor_does_not_retry_by_default() -> Result<()> {
     let attempts = Arc::new(AtomicU32::new(0));
     let outcome = run_retry_tool(RetryCount::none(), Arc::clone(&attempts))?;
 
     assert_eq!(
         outcome,
-        ToolRunOutcome::Ran {
+        ToolExecution {
             content: "tool invocation rejected: try again".into(),
             ok: false,
         }
@@ -582,15 +583,12 @@ fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolIn
     .map_err(|error| anyhow!("{error:?}"))
 }
 
-fn run_with_default_gate(
-    handle: &ToolSetHandle<'_>,
-    call: &ToolInvocation<'_>,
-) -> Result<ToolRunOutcome> {
-    let runner = ToolRunner::new(handle, None);
-    poll_ready(runner.run(call))
+fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation<'_>) -> Result<ToolExecution> {
+    let executor = ToolExecutor::new(handle);
+    poll_ready(executor.execute(call))
 }
 
-fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolRunOutcome> {
+fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolExecution> {
     let registry = Arc::new(ToolRegistry::new());
     let mut tool_set = registry.tool_set();
     tool_set.add_group(ToolGroup::new(
@@ -603,7 +601,7 @@ fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<T
     ))?;
     let handle = tool_set.begin()?;
     let call = invocation("retry_demo", "{}")?;
-    run_with_default_gate(&handle, &call)
+    execute_tool(&handle, &call)
 }
 
 fn poll_ready<T>(future: impl Future<Output = T>) -> Result<T> {

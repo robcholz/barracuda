@@ -20,7 +20,6 @@ pub(crate) struct ParsedKind {
     pub(crate) spawn_enabled: bool,
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
-    pub(crate) tool_block_retries: u32,
     pub(crate) tool_blacklist: Vec<String>,
     /// Absolute path to `instructions.md`, embedded via `include_str!` in the
     /// generated code so the bytes are not duplicated into the generated source.
@@ -36,7 +35,6 @@ pub(crate) struct ParsedManifest {
     pub(crate) spawn_enabled: bool,
     pub(crate) allowed_kinds: Vec<String>,
     pub(crate) retries: u32,
-    pub(crate) tool_block_retries: u32,
     pub(crate) tool_blacklist: Vec<String>,
     /// Absolute path to `instructions.md`, embedded via `include_str!` in the
     /// generated code so the bytes are not duplicated into the generated source.
@@ -160,7 +158,6 @@ pub(crate) fn parse_kind(dir: &Path) -> Result<ParsedKind> {
         spawn_enabled: agent.spawn.enabled,
         allowed_kinds: agent.spawn.allowed_kinds,
         retries: agent.runtime.retries,
-        tool_block_retries: agent.runtime.tool_block_retries,
         tool_blacklist: tools.tool_blacklist,
         instructions_path,
     })

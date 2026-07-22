@@ -1,7 +1,7 @@
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::{AgentCommand, AgentCommandError, ApprovalDecision};
+use crate::agent::{AgentApprovalError, ApprovalDecision, ToolCallId};
 use crate::protocol::{AgentId, InputRequestKind, TurnOrigin};
 
 use super::{DriveOutput, MultiagentRuntime};
@@ -33,7 +33,7 @@ pub(crate) enum ApprovalResolutionError {
     #[error("no agent {0} to resolve approval for")]
     UnknownAgent(AgentId),
     #[error(transparent)]
-    Command(AgentCommandError),
+    Input(AgentApprovalError),
 }
 
 impl<Filesystem, Http, Timer> MultiagentRuntime<Filesystem, Http, Timer>
@@ -43,11 +43,11 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     pub(crate) fn required_input(&self) -> Option<MultiagentInputRequest> {
-        let (agent, summary) = self.state.active_approval()?;
+        let (agent, approval) = self.state.active_approval()?;
         Some(MultiagentInputRequest {
             idle_origin: TurnOrigin::Subagent { agent },
             kind: InputRequestKind::PermissionApproval {
-                summary: summary.to_owned(),
+                summary: approval.summary.clone(),
             },
         })
     }
@@ -56,17 +56,16 @@ where
         &mut self,
         decision: ApprovalDecision,
     ) -> Result<(), ApprovalResolutionError> {
-        let agent = self
+        let (agent, tool_call_id) = self
             .state
             .active_approval()
-            .map(|(agent, _)| agent)
+            .map(|(agent, approval)| (agent, approval.tool_call_id))
             .ok_or(ApprovalResolutionError::NoActiveApproval)?;
         let decision_name: &'static str = (&decision).into();
         self.slots
-            .available_agent_mut(agent)
+            .resolve_approval(agent, tool_call_id, decision)
             .ok_or(ApprovalResolutionError::UnknownAgent(agent))?
-            .send_command(AgentCommand::ApprovalResult(decision))
-            .map_err(ApprovalResolutionError::Command)?;
+            .map_err(ApprovalResolutionError::Input)?;
 
         let removed = self.state.remove_approval(agent);
         debug_assert!(
@@ -78,15 +77,19 @@ where
             agent = %agent,
             decision = decision_name,
         );
-        self.enqueue(agent);
         Ok(())
     }
 
-    pub(super) fn park_approval(&mut self, agent: AgentId, summary: String) -> DriveOutput {
+    pub(super) fn park_approval(
+        &mut self,
+        agent: AgentId,
+        tool_call_id: ToolCallId,
+        summary: String,
+    ) -> DriveOutput {
         if !self.state.contains(agent) {
             return DriveOutput::default();
         }
-        self.state.park_approval(agent, summary);
+        self.state.park_approval(agent, tool_call_id, summary);
 
         DriveOutput::default()
     }
@@ -105,7 +108,9 @@ mod tests {
     use claw_permission::AllowAll;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{AgentCommandError, ApprovalDecision, FsAgentFactory};
+    use crate::agent::{
+        AgentApprovalError, ApprovalDecision, FsAgentFactory, ToolCallId,
+    };
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
 
@@ -136,7 +141,9 @@ mod tests {
     fn unknown_agent_does_not_consume_active_approval() {
         let agent = AgentId(7);
         let mut instance = instance();
-        instance.state.park_approval(agent, "permission".to_owned());
+        instance
+            .state
+            .park_approval(agent, ToolCallId::new(0), "permission".to_owned());
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),
@@ -166,12 +173,14 @@ mod tests {
             )
             .expect("idle test agent builds");
         assert!(instance.state.insert_root(agent, kind));
-        instance.state.park_approval(agent, "permission".to_owned());
+        instance
+            .state
+            .park_approval(agent, ToolCallId::new(0), "permission".to_owned());
 
         assert!(matches!(
             instance.resolve_required_input(ApprovalDecision::Approved),
-            Err(ApprovalResolutionError::Command(
-                AgentCommandError::NotAwaitingApproval { .. }
+            Err(ApprovalResolutionError::Input(
+                AgentApprovalError::NotAwaitingApproval
             ))
         ));
         assert_eq!(

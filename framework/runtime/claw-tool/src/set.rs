@@ -691,7 +691,8 @@ impl<'a> ToolSetHandle<'a> {
         }
     }
 
-    pub(crate) fn classify(&self, call: &ToolInvocation<'_>) -> ToolResult<Action> {
+    /// Classify one call for a caller-owned permission evaluation phase.
+    pub fn classify(&self, call: &ToolInvocation<'_>) -> ToolResult<Action> {
         match (self.tools.get(call.name()), self.states.get(call.name())) {
             (Some(tool), Some(entry))
                 if matches!(

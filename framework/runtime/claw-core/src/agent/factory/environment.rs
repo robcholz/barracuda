@@ -5,7 +5,7 @@ use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
 use crate::agent::AgentState;
-use crate::config::ReasoningEffort;
+use crate::config::{ApiUsage, ReasoningEffort};
 use crate::protocol::InflightToolCall;
 
 pub(crate) struct AgentResume {
@@ -52,6 +52,7 @@ impl TranscriptTarget {
 /// boundary.
 pub(crate) struct AgentEnvironment {
     pub(super) transcript: TranscriptTarget,
+    pub(super) api_usage: ApiUsage,
     pub(super) permission_policy: Arc<dyn PermissionPolicy>,
     pub(super) extension_tools: Vec<ToolGroup>,
     pub(super) inherited_context: Vec<Block<'static>>,
@@ -62,6 +63,7 @@ pub(crate) struct AgentEnvironment {
 impl AgentEnvironment {
     pub(crate) fn new(
         transcript: TranscriptTarget,
+        api_usage: ApiUsage,
         permission_policy: Arc<dyn PermissionPolicy>,
         extension_tools: Vec<ToolGroup>,
         inherited_context: Vec<Block<'static>>,
@@ -70,6 +72,7 @@ impl AgentEnvironment {
     ) -> Self {
         Self {
             transcript,
+            api_usage,
             permission_policy,
             extension_tools,
             inherited_context,

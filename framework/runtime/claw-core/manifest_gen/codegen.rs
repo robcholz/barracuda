@@ -40,7 +40,6 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
     let spawn_enabled = kind.spawn_enabled;
     let allowed_kinds = kind.allowed_kinds.iter();
     let retries = kind.retries;
-    let tool_block_retries = kind.tool_block_retries;
     let tool_blacklist = kind.tool_blacklist.iter();
     let instructions = render_instructions(kind);
 
@@ -50,7 +49,6 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
             description: #description,
             runtime: AgentRuntimeManifest {
                 retries: #retries,
-                tool_block_retries: #tool_block_retries,
                 tool_blacklist: &[#(#tool_blacklist),*],
                 instructions: #instructions,
             },

@@ -2,7 +2,6 @@ use claw_memory::{LongTermInitError, TranscriptInitError};
 use claw_skill::SkillError;
 use claw_tool::ToolSetError;
 
-use crate::agent::base_agent::{AgentCommandError, BaseAgentBuildError};
 use crate::agent::config::AgentConfigError;
 
 /// What can go wrong while building an [`super::FsAgentFactory`].
@@ -31,13 +30,7 @@ pub(crate) enum FsAgentCreateError {
     /// The transcript store for this placement could not be opened.
     #[error("failed to open transcript: {0}")]
     Transcript(#[from] TranscriptInitError),
-    /// The base agent and its complete context-adapter set failed to build.
-    #[error("failed to build agent: {0}")]
-    Agent(#[from] BaseAgentBuildError),
     /// The per-agent long-term memory store could not be opened.
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),
-    /// The initial goal could not be enqueued.
-    #[error("failed to seed initial goal: {0}")]
-    Goal(#[from] AgentCommandError),
 }

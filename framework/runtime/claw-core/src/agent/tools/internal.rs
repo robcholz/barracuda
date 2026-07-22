@@ -5,7 +5,7 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::agent::effect::{AgentEffect, AgentEffectEmitter};
+use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
 use crate::agent::tools::optional_string_argument;
 
 /// Build the always-visible core Agent control group.
@@ -58,7 +58,7 @@ mod tests {
     use claw_tool::{RawToolInvocation, SyncToolHandler, ToolInvocation};
 
     use super::{AgentEffect, EndConversationTool};
-    use crate::agent::effect::agent_effect_channel;
+    use crate::agent::base_agent::agent_effect_channel;
 
     #[test]
     fn conversation_end_emits_a_generic_finish_effect() {
@@ -74,8 +74,7 @@ mod tests {
             .invoke(&call)
             .expect("conversation_end succeeds");
 
-        let mut emitted = Vec::new();
-        inbox.drain_into(&mut emitted);
+        let emitted = inbox.drain();
         assert_eq!(
             emitted,
             vec![AgentEffect::Finish {

@@ -1,9 +1,7 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use claw_api::ClawApiConfig;
-
-use crate::config::{ApiUsage, SharedApiManager};
+use crate::config::SharedApiManager;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
@@ -21,17 +19,6 @@ impl<
         Timer: ClawTimer + Default + 'static,
     > FsAgentFactory<Filesystem, Http, Timer>
 {
-    /// Build a factory over one persistence root and a shared API manager.
-    ///
-    /// The config to run `usage` on this turn, resolved from the shared manager
-    /// (its explicit binding, else the default). `None` only if nothing is linked.
-    pub(crate) fn config_for(&self, usage: ApiUsage) -> Option<ClawApiConfig> {
-        self.api_manager
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_api(usage)
-    }
-
     /// The factory owns the memory layout below `persistence_dir`: transcripts,
     /// editable profile documents, and long-term memory. `Filesystem` selects
     /// the static filesystem HAL backend used by those stores.

@@ -36,23 +36,6 @@ compile_error!(
     "enable only one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
 );
 
-/// Byte budget for a [`SessionEvent::Reasoning`] payload.
-///
-/// Reasoning text can be very long; the stream truncates it to this cap to keep
-/// event payloads bounded. Output is never truncated. The cap is chosen at
-/// compile time by the reasoning tier feature (`reasoning_short` = 2000,
-/// `reasoning_medium` = 8000, `reasoning_long` = 32000 bytes).
-#[cfg(feature = "reasoning_short")]
-const REASONING_EVENT_LIMIT: usize = 2_000;
-#[cfg(all(feature = "reasoning_medium", not(feature = "reasoning_short")))]
-const REASONING_EVENT_LIMIT: usize = 8_000;
-#[cfg(all(
-    feature = "reasoning_long",
-    not(feature = "reasoning_short"),
-    not(feature = "reasoning_medium"),
-))]
-const REASONING_EVENT_LIMIT: usize = 32_000;
-
 /// One incremental part of a typed content stream.
 ///
 /// [`Delta`](Self::Delta) carries one append fragment or one complete item.
@@ -155,8 +138,7 @@ pub(crate) struct EventSink {
 }
 
 impl EventSink {
-    /// A sink that forwards events to `tx`, truncating reasoning to
-    /// [`REASONING_EVENT_LIMIT`].
+    /// A sink that forwards events to `tx`.
     pub(crate) fn new(tx: async_channel::Sender<SessionEvent>) -> Self {
         Self { tx: Some(tx) }
     }
@@ -171,27 +153,5 @@ impl EventSink {
         if let Some(tx) = &self.tx {
             let _ = tx.try_send(event);
         }
-    }
-
-    /// Emit one streamed reasoning fragment, enforcing [`REASONING_EVENT_LIMIT`]
-    /// on the **accumulated** length across fragments. `emitted` is the running
-    /// byte count for the current iteration (the caller owns it, resetting it per
-    /// iteration). A no-op once the cap is reached, when disabled, or empty.
-    pub(crate) fn emit_reasoning_fragment(&self, fragment: &str, emitted: &mut usize) {
-        if self.tx.is_none() || fragment.is_empty() || *emitted >= REASONING_EVENT_LIMIT {
-            return;
-        }
-        let remaining = REASONING_EVENT_LIMIT - *emitted;
-        let mut end = remaining.min(fragment.len());
-        while end > 0 && !fragment.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == 0 {
-            return;
-        }
-        *emitted += end;
-        self.emit(SessionEvent::Reasoning(StreamPart::Delta(
-            fragment[..end].to_string(),
-        )));
     }
 }

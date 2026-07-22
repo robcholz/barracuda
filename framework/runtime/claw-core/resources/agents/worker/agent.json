@@ -7,7 +7,6 @@
     "allowed_kinds": ["worker"]
   },
   "runtime": {
-    "retries": 2,
-    "tool_block_retries": 1
+    "retries": 2
   }
 }

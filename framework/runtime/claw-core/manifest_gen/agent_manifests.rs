@@ -122,7 +122,6 @@ fn inherit_base(kind: ParsedKind, common: &CommonBase) -> ParsedManifest {
         spawn_enabled: kind.spawn_enabled,
         allowed_kinds: kind.allowed_kinds,
         retries: kind.retries,
-        tool_block_retries: kind.tool_block_retries,
         tool_blacklist: merge_unique(&common.tool_blacklist, &kind.tool_blacklist),
         instructions_path: kind.instructions_path,
         common_instructions_path: common.instructions_path.clone(),

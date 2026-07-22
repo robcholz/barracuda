@@ -9,9 +9,8 @@ use crate::agent::context_adapters::{AgentModeState, ResumedState};
 
 /// Complete currently implemented Agent recovery DTO.
 ///
-/// Tool-call journal fields join this DTO when the runtime owns a monotonic
-/// `ToolCallId` and stable unsettled-call records. Conversation history is not
-/// included: it is a projection of the canonical transcript store.
+/// Conversation history is not included: it is a projection of the canonical
+/// transcript store. Iteration-local tool-call IDs are never persisted here.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(crate) struct AgentState {
     agent_mode: AgentModeState,
@@ -19,7 +18,7 @@ pub(crate) struct AgentState {
 }
 
 impl AgentState {
-    pub(in crate::agent) fn from_parts(agent_mode: AgentModeState, resumed: ResumedState) -> Self {
+    fn from_parts(agent_mode: AgentModeState, resumed: ResumedState) -> Self {
         Self {
             agent_mode,
             resumed,
@@ -28,19 +27,6 @@ impl AgentState {
 
     pub(in crate::agent) fn into_parts(self) -> (AgentModeState, ResumedState) {
         (self.agent_mode, self.resumed)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn normal_for_test(loaded_tool_groups: Vec<String>) -> Self {
-        Self::from_parts(
-            AgentModeState::Normal,
-            ResumedState::new(loaded_tool_groups),
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn plan_for_test(loaded_tool_groups: Vec<String>) -> Self {
-        Self::from_parts(AgentModeState::Plan, ResumedState::new(loaded_tool_groups))
     }
 }
 
@@ -73,7 +59,7 @@ pub(in crate::agent) struct AgentStateBuilder {
 }
 
 impl AgentStateBuilder {
-    pub(in crate::agent) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             agent_mode: None,
             resumed: None,
@@ -100,7 +86,7 @@ impl AgentStateBuilder {
         }
     }
 
-    pub(in crate::agent) fn finish(self) -> AgentState {
+    pub(super) fn finish(self) -> AgentState {
         AgentState::from_parts(
             self.agent_mode
                 .expect("configured AgentModeContextAdapter must contribute AgentModeState"),
