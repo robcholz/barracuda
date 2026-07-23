@@ -3,8 +3,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use claw_interface::ClawFs;
 use claw_persistence::{
-    DurablePartError, DurableState, DurableStateCodec, SchemaVersion, StateBlob, StateSlice,
+    DurablePartError, DurableState, DurableStateCodec, PersistenceError, SchemaVersion,
+    SharedPersistence, StateBlob, StateSlice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,8 @@ use super::tool::Tool;
 
 pub type ToolRegistryVersion = u64;
 pub type ToolGroupId = String;
+
+const TOOL_REGISTRY_STATE_NAME: &str = "tool_registry";
 
 pub struct ToolRegistry {
     inner: RwLock<ToolRegistryInner>,
@@ -32,9 +36,8 @@ struct ToolGroupEntry {
     tools: Vec<ToolName>,
 }
 
-#[doc(hidden)]
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-pub struct ToolRegistryState {
+struct ToolRegistryState {
     #[serde(default)]
     overrides: BTreeMap<ToolName, bool>,
 }
@@ -199,19 +202,26 @@ pub enum ToolRegistryError {
     InvalidGroup(ToolGroupId),
 }
 
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::from_state(DurableState::new(ToolRegistryState::default()))
-    }
-}
-
 impl ToolRegistry {
-    pub fn new() -> Self {
-        Self::default()
+    /// Load and register the durable state owned by this registry.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PersistenceError`] when the state cannot be loaded or
+    /// registered.
+    pub fn new<Filesystem>(
+        persistence: SharedPersistence<Filesystem>,
+    ) -> Result<Self, PersistenceError>
+    where
+        Filesystem: ClawFs,
+    {
+        let entry = persistence.singleton::<ToolRegistryState>(TOOL_REGISTRY_STATE_NAME)?;
+        let state = DurableState::new(entry.load()?.unwrap_or_default());
+        entry.register(&state)?;
+        Ok(Self::from_state(state))
     }
 
-    #[doc(hidden)]
-    pub fn from_state(state: DurableState<ToolRegistryState>) -> Self {
+    fn from_state(state: DurableState<ToolRegistryState>) -> Self {
         Self {
             inner: RwLock::new(ToolRegistryInner {
                 tools: HashMap::new(),
@@ -285,7 +295,7 @@ impl ToolRegistry {
     }
 
     pub fn tool_set(self: &Arc<Self>) -> ToolSet {
-        ToolSet::new(self.clone(), &[])
+        ToolSet::from_registry(self.clone(), &[])
     }
 
     /// Create one per-agent tool projection governed by a firmware-baked
@@ -294,7 +304,7 @@ impl ToolRegistry {
         self: &Arc<Self>,
         blacklist: &'static [&'static str],
     ) -> ToolSet {
-        ToolSet::new(self.clone(), blacklist)
+        ToolSet::from_registry(self.clone(), blacklist)
     }
 
     pub fn tool_version(&self) -> ToolRegistryVersion {
@@ -334,5 +344,22 @@ impl fmt::Debug for ToolRegistry {
             .field("runtime_version", &inner.runtime_version)
             .field("overrides", &override_count)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_contains_only_explicit_overrides() -> anyhow::Result<()> {
+        let mut state = ToolRegistryState::default();
+        state.overrides.insert("echo".to_owned(), false);
+
+        let encoded = state.encode_state()?.into_owned();
+        let payload: serde_json::Value = serde_json::from_slice(&encoded.bytes)?;
+
+        assert_eq!(payload, serde_json::json!({"overrides": {"echo": false}}));
+        Ok(())
     }
 }

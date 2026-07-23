@@ -40,13 +40,13 @@ pub(super) struct EnterPlanModeTool {
 impl ToolSpec for EnterPlanModeTool {
     tool_metadata!("plan_enter");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for EnterPlanModeTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         self.state.get_mut().set_mode(AgentMode::Plan);
         Ok(success("Plan Mode entered."))
     }
@@ -59,13 +59,13 @@ pub(super) struct RequestClarificationTool {
 impl ToolSpec for RequestClarificationTool {
     tool_metadata!("plan_clarify");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for RequestClarificationTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let question = non_blank_argument(&args, "question")?;
         self.effects.emit(AgentEffect::Yield { message: question });
@@ -81,13 +81,13 @@ pub(super) struct ExitPlanModeTool {
 impl ToolSpec for ExitPlanModeTool {
     tool_metadata!("plan_exit");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for ExitPlanModeTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let outcome = non_blank_argument(&args, "outcome")?;
         let output = match outcome.as_str() {
@@ -139,7 +139,7 @@ fn optional_non_empty_string_argument(
 
 fn success(output: &str) -> ToolOutput {
     ToolOutput {
-        output: output.to_owned(),
+        content: output.to_owned(),
         ok: true,
     }
 }
@@ -155,7 +155,7 @@ mod tests {
     use crate::agent::base_agent::agent_effect_channel;
     use crate::agent::{AgentKind, BaseAgentState};
 
-    fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation<'a> {
+    fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation {
         ToolInvocation::try_new(Some("call-test"), name, arguments_json).expect("valid invocation")
     }
 

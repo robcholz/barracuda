@@ -5,17 +5,17 @@ use std::sync::Arc;
 use std::task::Waker;
 
 use anyhow::{anyhow, Result};
-use claw_persistence::{DurableState, DurableStateCodec};
+use claw_interface::MemFs;
+use claw_persistence::{Persistence, SharedPersistence};
 use claw_tool::{
-    RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolGroup, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolResult,
-    ToolRunInvocation, ToolRunResult, ToolRunner, ToolSetHandle, ToolSpec,
+    RetryCount, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
+    ToolOutput, ToolRegistry, ToolRegistryError, ToolResult, ToolRunner, ToolSetHandle, ToolSpec,
 };
 use futures_lite::StreamExt as _;
 
 #[test]
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set();
     tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
 
@@ -31,7 +31,7 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
 
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: r#"{ "message": "hi" }"#.into(),
             ok: true,
         }
@@ -41,7 +41,7 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
 
 #[test]
 fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set();
 
     let error = match tool_set.add_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)]))
@@ -59,7 +59,7 @@ fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
 
 #[test]
 fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set();
     tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
 
@@ -80,7 +80,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
         let outcome = execute_tool(&handle, &call)?;
         assert_eq!(
             outcome,
-            ToolExecution {
+            ToolOutput {
                 content: "tool invocation rejected: tool is temporarily unavailable: echo".into(),
                 ok: false,
             }
@@ -96,7 +96,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     let outcome = execute_tool(&handle, &call)?;
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "{}".into(),
             ok: true,
         }
@@ -106,7 +106,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
 
 #[test]
 fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
     let mut tool_set = registry.tool_set();
 
@@ -118,7 +118,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
         let outcome = execute_tool(&handle, &call)?;
         assert_eq!(
             outcome,
-            ToolExecution {
+            ToolOutput {
                 content: "tool not found: echo".into(),
                 ok: false,
             }
@@ -137,7 +137,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
     let outcome = execute_tool(&handle, &call)?;
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "{}".into(),
             ok: true,
         }
@@ -147,7 +147,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 
 #[test]
 fn registry_rejects_duplicate_tools_across_groups() -> Result<()> {
-    let registry = ToolRegistry::new();
+    let registry = registry()?;
 
     registry.register_group(ToolGroup::new("first", true, [Tool::from_sync(EchoTool)]))?;
     let err = match registry.register_group(ToolGroup::new(
@@ -165,7 +165,7 @@ fn registry_rejects_duplicate_tools_across_groups() -> Result<()> {
 
 #[test]
 fn registry_rejects_a_group_id_that_is_also_a_tool_name() -> Result<()> {
-    let registry = ToolRegistry::new();
+    let registry = registry()?;
 
     let error =
         match registry.register_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)])) {
@@ -182,7 +182,7 @@ fn registry_rejects_a_group_id_that_is_also_a_tool_name() -> Result<()> {
 
 #[test]
 fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new("allowed", true, [Tool::from_sync(EchoTool)]))?;
     registry.register_group(ToolGroup::new(
         "blocked",
@@ -197,7 +197,7 @@ fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let allowed = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         allowed,
-        ToolExecution {
+        ToolOutput {
             content: "{}".into(),
             ok: true,
         }
@@ -206,7 +206,7 @@ fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let blocked = execute_tool(&handle, &invocation("other", "{}")?)?;
     assert_eq!(
         blocked,
-        ToolExecution {
+        ToolOutput {
             content: "tool not found: other".into(),
             ok: false,
         }
@@ -216,7 +216,7 @@ fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
 
 #[test]
 fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new(
         "mixed",
         true,
@@ -229,11 +229,11 @@ fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
 
     assert!(matches!(
         execute_tool(&handle, &invocation("echo", "{}")?)?,
-        ToolExecution { ok: true, .. }
+        ToolOutput { ok: true, .. }
     ));
     assert_eq!(
         execute_tool(&handle, &invocation("other", "{}")?)?,
-        ToolExecution {
+        ToolOutput {
             content: "tool not found: other".into(),
             ok: false,
         }
@@ -243,7 +243,7 @@ fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
 
 #[test]
 fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["plan"]);
 
     tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
@@ -252,7 +252,7 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
     assert_eq!(handle.schemas_json(), "no schemas");
     assert_eq!(
         execute_tool(&handle, &invocation("echo", "{}")?)?,
-        ToolExecution {
+        ToolOutput {
             content: "tool not found: echo".into(),
             ok: false,
         }
@@ -262,7 +262,7 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
 
 #[test]
 fn blacklist_does_not_interpret_wildcards() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["plan_*"]);
 
     tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
@@ -270,14 +270,14 @@ fn blacklist_does_not_interpret_wildcards() -> Result<()> {
     let handle = tool_set.begin()?;
     assert!(matches!(
         execute_tool(&handle, &invocation("echo", "{}")?)?,
-        ToolExecution { ok: true, .. }
+        ToolOutput { ok: true, .. }
     ));
     Ok(())
 }
 
 #[test]
 fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["late"]);
 
     registry.register_group(ToolGroup::new("late", true, [Tool::from_sync(EchoTool)]))?;
@@ -290,7 +290,7 @@ fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
 
 #[test]
 fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
 
@@ -299,7 +299,7 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
     let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "tool not found: echo".into(),
             ok: false,
         }
@@ -309,7 +309,7 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
 
 #[test]
 fn hidden_group_is_searchable_then_loadable() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new(
         "visible",
         true,
@@ -332,7 +332,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
         let blocked = execute_tool(&handle, &invocation("echo", "{}")?)?;
         assert_eq!(
             blocked,
-            ToolExecution {
+            ToolOutput {
                 content: "tool not found: echo".into(),
                 ok: false,
             }
@@ -362,7 +362,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "{}".into(),
             ok: true,
         }
@@ -374,7 +374,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
 
 #[test]
 fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
 
@@ -390,7 +390,7 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
 
 #[test]
 fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
-    let registry = Arc::new(ToolRegistry::new());
+    let registry = registry()?;
     registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
     let mut tool_set = registry.tool_set();
@@ -406,30 +406,19 @@ fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
 
 #[test]
 fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
-    let state = DurableState::new(ToolRegistryState::default());
-    let registry = ToolRegistry::from_state(state.clone());
+    let persistence = persistence()?;
+    let registry = ToolRegistry::new(Arc::clone(&persistence))?;
     registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
     registry.disable("echo")?;
+    persistence.maybe_persist()?;
+    drop(registry);
 
-    let registry = Arc::new(ToolRegistry::from_state(state));
+    let registry = Arc::new(ToolRegistry::new(persistence)?);
     registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set();
     assert_eq!(tool_set.begin()?.schemas_json(), "no schemas");
-    Ok(())
-}
-
-#[test]
-fn registry_state_contains_only_explicit_overrides() -> Result<()> {
-    let state = DurableState::new(ToolRegistryState::default());
-    let registry = ToolRegistry::from_state(state.clone());
-    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
-
-    registry.disable("echo")?;
-    let encoded = state.get().encode_state()?.into_owned();
-    let payload: serde_json::Value = serde_json::from_slice(&encoded.bytes)?;
-    assert_eq!(payload, serde_json::json!({"overrides": {"echo": false}}));
     Ok(())
 }
 
@@ -457,7 +446,7 @@ fn runner_retries_tool_according_to_retry_count() -> Result<()> {
 
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "ok".into(),
             ok: true,
         }
@@ -473,7 +462,7 @@ fn runner_does_not_retry_by_default() -> Result<()> {
 
     assert_eq!(
         outcome,
-        ToolExecution {
+        ToolOutput {
             content: "tool invocation rejected: try again".into(),
             ok: false,
         }
@@ -499,12 +488,12 @@ impl ToolSpec for EchoTool {
 }
 
 impl SyncToolHandler for EchoTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         if call.name() != self.name() {
             return Err(ToolError::NotFound(call.name().to_owned()).into());
         }
         Ok(ToolOutput {
-            output: call.arguments_json().to_owned(),
+            content: call.arguments_json().to_owned(),
             ok: true,
         })
     }
@@ -523,12 +512,12 @@ impl ToolSpec for OtherTool {
 }
 
 impl SyncToolHandler for OtherTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         if call.name() != self.name() {
             return Err(ToolError::NotFound(call.name().to_owned()).into());
         }
         Ok(ToolOutput {
-            output: "other".into(),
+            content: "other".into(),
             ok: true,
         })
     }
@@ -554,25 +543,25 @@ impl ToolSpec for FailBeforeSuccess {
 }
 
 impl SyncToolHandler for FailBeforeSuccess {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
         if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
             return Err(ToolInvokeError::new(ToolError::InvokeRejected(
                 "try again".into(),
             )));
         }
         Ok(ToolOutput {
-            output: "ok".into(),
+            content: "ok".into(),
             ok: true,
         })
     }
 }
 
-fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolInvocation<'static>> {
+fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolInvocation> {
     ToolInvocation::try_new(None, name, arguments_json).map_err(|error| anyhow!("{error:?}"))
 }
 
-fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation<'_>) -> Result<ToolExecution> {
-    let call = ToolRunInvocation::try_new(call.id(), call.name(), call.arguments_json())
+fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<ToolOutput> {
+    let call = ToolInvocation::try_new(call.id(), call.name(), call.arguments_json())
         .map_err(|error| anyhow!("{error:?}"))?;
     let (mut join, detached) = ToolRunner::new(handle).run(vec![call]);
     if detached.is_some() {
@@ -581,15 +570,13 @@ fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation<'_>) -> Result
     poll_ready(async move {
         join.next()
             .await
-            .map(ToolRunResult::into_parts)
-            .map(|(_, execution)| execution)
+            .map(|(_, output)| output)
             .ok_or_else(|| anyhow!("join stream ended without a result"))
     })?
 }
 
-fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolExecution> {
-    let registry = Arc::new(ToolRegistry::new());
-    let mut tool_set = registry.tool_set();
+fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolOutput> {
+    let mut tool_set = claw_tool::ToolSet::empty();
     tool_set.add_group(ToolGroup::new(
         "retry",
         true,
@@ -601,6 +588,15 @@ fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<T
     let handle = tool_set.begin()?;
     let call = invocation("retry_demo", "{}")?;
     execute_tool(&handle, &call)
+}
+
+fn persistence() -> Result<SharedPersistence<MemFs>> {
+    MemFs::new();
+    Ok(Arc::new(Persistence::new("/claw-tool-tests")?))
+}
+
+fn registry() -> Result<Arc<ToolRegistry>> {
+    Ok(Arc::new(ToolRegistry::new(persistence()?)?))
 }
 
 fn poll_ready<T>(future: impl Future<Output = T>) -> Result<T> {

@@ -517,11 +517,12 @@ path, without performing runtime checkpoints yet.
   tool executor.
 - Keep `BaseAgent::submit(&mut self, Message)` as the crate-private single-task
   stream. `Agent::submit(&mut self, Message)` is the slot/Scheduler-facing
-  stream and owns turn brackets, later-message queuing, interrupt, cancel,
-  approval forwarding, and detached completions. Delete the old tick,
-  output-channel, and terminal-outcome protocols.
+  stream and returns a separate control handle for one idle dispatch,
+  interrupt, cancel, approval forwarding, and detached completions. Delete the
+  old tick, output-channel, and terminal-outcome protocols.
 - Keep cross-task message queues outside BaseAgent. SessionActor accepts
-  messages; a checked-out Agent may queue later messages as later turns.
+  and queues messages. A checked-out Agent accepts exactly one dispatch while
+  idle between turns and never owns a second message queue.
 - Model reasoning effort as independent per-Agent adapter state.
   `SessionPersistentState` retains the Session-wide default; changing it
   broadcasts an owner update to
@@ -552,6 +553,9 @@ path, without performing runtime checkpoints yet.
 - Keep the temporary direct driver as a Scheduler-local ownership adapter over
   `AgentStream`; it must forward `Result<AgentEvent, AgentError>` unchanged
   rather than inventing another semantic Agent protocol.
+- Expose one `AgentRunPort` to each logical Agent owner. It combines scheduler
+  submission, the opaque return route, and returned outputs so SessionActor
+  never stores those three pieces independently.
 
 ### Gate
 

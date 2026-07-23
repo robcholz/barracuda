@@ -51,8 +51,8 @@ fn session_events_close_each_content_stream_explicitly() {
     ]);
 
     let root = mem_root("agent-loop-stream-parts");
-    let system = build_matrix_system(&root);
-    apply_registry_ops(&system, "register|start", MatrixToolBehavior::Echo);
+    let system = build_matrix_system_with_tool(&root, MatrixToolBehavior::Echo);
+    apply_registry_ops(&system, "register|start");
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
@@ -128,12 +128,9 @@ fn agent_loop_csv_tool_matrix_runs_tools_and_feeds_results_to_next_iteration() {
         ]);
 
         let root = mem_root("agent-loop-tools");
-        let system = build_matrix_system(&root);
-        apply_registry_ops(
-            &system,
-            field(&row, "registry_ops"),
-            parse_tool_behavior(field(&row, "tool_behavior")),
-        );
+        let behavior = parse_tool_behavior(field(&row, "tool_behavior"));
+        let system = build_matrix_system_with_tool(&root, behavior);
+        apply_registry_ops(&system, field(&row, "registry_ops"));
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
@@ -668,14 +665,17 @@ fn agent_loop_emits_provider_usage_for_cli_consumers() {
     block_on(control.append(Message::text("report usage"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
-    assert!(events.contains(&SessionEvent::Usage {
-        usage: ApiUsage {
-            input_tokens: Some(21),
-            output_tokens: Some(4),
-            cache_read_tokens: Some(13),
-            cache_write_tokens: None,
-        },
-    }));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Usage {
+            usage: ApiUsage {
+                input_tokens: Some(21),
+                output_tokens: Some(4),
+                cache_read_tokens: Some(13),
+                cache_write_tokens: None,
+            },
+        }))
+    )));
 }
 
 #[derive(Default)]
@@ -731,18 +731,18 @@ impl ToolSpec for MatrixTool {
 }
 
 impl SyncToolHandler for MatrixTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         TOOL_INVOCATIONS.fetch_add(1, Ordering::SeqCst);
         match self.behavior {
             MatrixToolBehavior::Echo => Ok(ToolOutput {
-                output: format!("tool-output:{}", call.arguments_json()),
+                content: format!("tool-output:{}", call.arguments_json()),
                 ok: true,
             }),
             MatrixToolBehavior::Reject => Err(ToolInvokeError::new(ToolError::InvokeRejected(
                 "denied-by-test".to_string(),
             ))),
             MatrixToolBehavior::OkFalse => Ok(ToolOutput {
-                output: "soft-failed".to_string(),
+                content: "soft-failed".to_string(),
                 ok: false,
             }),
         }
@@ -750,28 +750,44 @@ impl SyncToolHandler for MatrixTool {
 }
 
 fn build_matrix_system(root: &str) -> MatrixAgentSystem {
-    let system = MatrixAgentSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    build_matrix_system_with_tool_groups(root, std::iter::empty())
+}
+
+fn build_matrix_system_with_tool(root: &str, behavior: MatrixToolBehavior) -> MatrixAgentSystem {
+    build_matrix_system_with_tool_groups(
+        root,
+        [ToolGroup::new(
+            "matrix",
+            true,
+            [Tool::from_sync(MatrixTool { behavior })],
+        )],
+    )
+}
+
+fn build_matrix_system_with_tool_groups(
+    root: &str,
+    tool_groups: impl IntoIterator<Item = ToolGroup>,
+) -> MatrixAgentSystem {
+    let system = MatrixAgentSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        persistence(root),
+        tool_groups,
+    )
+    .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
     system
 }
 
-fn apply_registry_ops(system: &MatrixAgentSystem, operations: &str, behavior: MatrixToolBehavior) {
+fn apply_registry_ops(system: &MatrixAgentSystem, operations: &str) {
     for operation in operations.split('|') {
         match operation {
-            "register" => system
-                .tool_registry()
-                .register_group(ToolGroup::new(
-                    "matrix",
-                    true,
-                    [Tool::from_sync(MatrixTool { behavior })],
-                ))
-                .unwrap(),
+            // Registration is now a construction-time operation.
+            "register" => {}
             "start" => system.start_all().unwrap(),
             "stop" => system.stop_all().unwrap(),
-            "enable" => system.tool_registry().enable("matrix_echo").unwrap(),
-            "disable" => system.tool_registry().disable("matrix_echo").unwrap(),
+            "enable" => system.enable_tool("matrix_echo").unwrap(),
+            "disable" => system.disable_tool("matrix_echo").unwrap(),
             other => panic!("unknown registry op in fixture: {other}"),
         }
     }

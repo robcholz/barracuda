@@ -20,7 +20,7 @@ pub(super) fn required_agent_id(args: &Value, tool: &str) -> Result<AgentId, Too
 pub(super) fn action_with_agent_resource(
     name: &'static str,
     risk: RiskClass,
-    call: &ToolInvocation<'_>,
+    call: &ToolInvocation,
 ) -> Action {
     let action = Action::new(name, risk);
     let Some(resource) = call

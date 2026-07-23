@@ -28,7 +28,7 @@ impl ToolSpec for EndConversationTool {
 }
 
 impl SyncToolHandler for EndConversationTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let Some(final_message) = optional_string_argument(&args, "final_message")? else {
             return Err(ToolError::InvalidArguments(
@@ -47,7 +47,7 @@ impl SyncToolHandler for EndConversationTool {
             final_message: final_message.to_string(),
         });
         Ok(ToolOutput {
-            output: "Conversation ended.".to_string(),
+            content: "Conversation ended.".to_string(),
             ok: true,
         })
     }

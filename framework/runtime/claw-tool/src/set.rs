@@ -51,7 +51,7 @@ pub enum ToolSetError {
 }
 
 pub struct ToolSet {
-    registry: Arc<ToolRegistry>,
+    registry: Option<Arc<ToolRegistry>>,
     blacklist: &'static [&'static str],
     local_group_ids: HashSet<String>,
     local_tool_names: HashSet<ToolName>,
@@ -148,7 +148,20 @@ pub struct ToolCatalogEntry {
 }
 
 impl ToolSet {
-    pub(super) fn new(registry: Arc<ToolRegistry>, blacklist: &'static [&'static str]) -> Self {
+    /// Create an isolated set containing no registry tools.
+    pub fn empty() -> Self {
+        Self::new(None, &[])
+    }
+
+    pub(super) fn from_registry(
+        registry: Arc<ToolRegistry>,
+        blacklist: &'static [&'static str],
+    ) -> Self {
+        Self::new(Some(registry), blacklist)
+    }
+
+    fn new(registry: Option<Arc<ToolRegistry>>, blacklist: &'static [&'static str]) -> Self {
+        let registry_projection_ready = registry.is_none();
         Self {
             registry,
             blacklist,
@@ -158,7 +171,7 @@ impl ToolSet {
             state: ToolSetState::default(),
             cache: ToolSetCache::default(),
             discovery: Arc::new(Mutex::new(ToolDiscovery::default())),
-            registry_projection_ready: false,
+            registry_projection_ready,
             should_rebuild_temporary_tool: false,
             should_rebuild_tool: false,
         }
@@ -177,10 +190,10 @@ impl ToolSet {
         if group_id.is_empty() || tools.is_empty() {
             return Err(ToolSetError::InvalidGroup(group_id));
         }
-        if self.local_group_ids.contains(&group_id) || self.registry.contains_group(&group_id) {
+        if self.local_group_ids.contains(&group_id) || self.registry_contains_group(&group_id) {
             return Err(ToolSetError::GroupAlreadyExists(group_id));
         }
-        if self.local_tool_names.contains(&group_id) || self.registry.contains_tool(&group_id) {
+        if self.local_tool_names.contains(&group_id) || self.registry_contains_tool(&group_id) {
             return Err(ToolSetError::AmbiguousName(group_id));
         }
         let mut names = HashSet::with_capacity(tools.len());
@@ -191,12 +204,12 @@ impl ToolSet {
             }
             if name == group_id.as_str()
                 || self.local_group_ids.contains(name)
-                || self.registry.contains_group(name)
+                || self.registry_contains_group(name)
             {
                 return Err(ToolSetError::AmbiguousName(name.to_owned()));
             }
             if self.local_tool_names.contains(name)
-                || self.registry.contains_tool(name)
+                || self.registry_contains_tool(name)
                 || !names.insert(name.to_owned())
             {
                 return Err(ToolSetError::AlreadyExists(name.to_owned()));
@@ -407,9 +420,12 @@ impl ToolSet {
 
     pub fn begin(&mut self) -> Result<ToolSetHandle<'_>, ToolSetError> {
         self.apply_pending_tool_loads();
-        let registry_version = self.registry.tool_version();
-        if !self.registry_projection_ready || self.state.registry_version != registry_version {
-            self.rebuild()?;
+        let should_rebuild_registry = self.registry.as_ref().is_some_and(|registry| {
+            !self.registry_projection_ready
+                || self.state.registry_version != registry.tool_version()
+        });
+        if should_rebuild_registry {
+            self.rebuild_registry()?;
         } else if self.should_rebuild_tool {
             self.rebuild_cache();
         } else if self.should_rebuild_temporary_tool {
@@ -422,8 +438,11 @@ impl ToolSet {
         })
     }
 
-    fn rebuild(&mut self) -> Result<(), ToolSetError> {
-        let projection = self.registry.tool_projection();
+    fn rebuild_registry(&mut self) -> Result<(), ToolSetError> {
+        let Some(registry) = self.registry.as_ref() else {
+            return Ok(());
+        };
+        let projection = registry.tool_projection();
         self.validate_registry_namespace(&projection)?;
         let registry_names = projection
             .tools
@@ -490,6 +509,18 @@ impl ToolSet {
         self.rebuild_cache();
         self.registry_projection_ready = true;
         Ok(())
+    }
+
+    fn registry_contains_group(&self, id: &str) -> bool {
+        self.registry
+            .as_ref()
+            .is_some_and(|registry| registry.contains_group(id))
+    }
+
+    fn registry_contains_tool(&self, name: &str) -> bool {
+        self.registry
+            .as_ref()
+            .is_some_and(|registry| registry.contains_tool(name))
     }
 
     fn is_blacklisted(&self, group_id: &str, tool_name: &str) -> bool {
@@ -692,7 +723,7 @@ impl<'a> ToolSetHandle<'a> {
     }
 
     /// Classify one call for a caller-owned permission evaluation phase.
-    pub fn classify(&self, call: &ToolInvocation<'_>) -> ToolResult<Action> {
+    pub fn classify(&self, call: &ToolInvocation) -> ToolResult<Action> {
         match (self.tools.get(call.name()), self.states.get(call.name())) {
             (Some(tool), Some(entry))
                 if matches!(
@@ -709,7 +740,7 @@ impl<'a> ToolSetHandle<'a> {
         }
     }
 
-    pub(crate) fn runnable_tool(&self, call: &ToolInvocation<'_>) -> ToolResult<Tool> {
+    pub(crate) fn runnable_tool(&self, call: &ToolInvocation) -> ToolResult<Tool> {
         match (self.tools.get(call.name()), self.states.get(call.name())) {
             (Some(tool), Some(entry))
                 if matches!(

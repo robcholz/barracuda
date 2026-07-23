@@ -20,7 +20,7 @@ use futures_lite::future::block_on;
 use futures_lite::StreamExt;
 use support::{
     assistant_text, build_mem_system, csv_dicts, drain_until_turn_ended, install_script,
-    llm_config, mem_root, persistence, serialize_script,
+    llm_config, mem_root, persistence, serialize_script, try_build_mem_system_with_tool_groups,
 };
 use tempdir::TempDir;
 
@@ -123,21 +123,21 @@ fn prefixed_ids_reject_csv_invalid_wire_cases() {
 }
 
 #[test]
-fn tool_registry_csv_mutations_report_versions_and_errors() {
+fn tool_configuration_csv_cases_report_public_errors() {
     let _script = serialize_script();
 
     for row in csv_dicts(include_str!("fixtures/tool_registry_cases.csv")) {
         let case = field(&row, "case");
         let root = mem_root("csv-tools");
-        let system = build_mem_system(&root, Vec::new());
-
-        let actual_error = apply_tool_operations(&system, field(&row, "operations"));
-
-        assert_eq!(
-            system.tool_registry().tool_version(),
-            field(&row, "expected_version").parse::<u64>().unwrap(),
-            "case {case}"
-        );
+        let operations = field(&row, "operations");
+        let actual_error = match try_build_mem_system_with_tool_groups(
+            &root,
+            Vec::new(),
+            tool_groups_from_operations(operations),
+        ) {
+            Ok(system) => apply_tool_operations(&system, operations),
+            Err(error) => Some(error.to_string()),
+        };
         assert_expected_error(actual_error.as_deref(), field(&row, "error_contains"), case);
     }
 }
@@ -234,9 +234,9 @@ impl ToolSpec for CsvTool {
 }
 
 impl SyncToolHandler for CsvTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         Ok(ToolOutput {
-            output: call.arguments_json().to_owned(),
+            content: call.arguments_json().to_owned(),
             ok: true,
         })
     }
@@ -346,37 +346,18 @@ fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
 }
 
 fn apply_tool_operations(system: &support::MemAgentSystem, operations: &str) -> Option<String> {
-    let mut group_sequence = 0_u64;
-
     for operation in operations.split('|') {
         let result = match operation {
             "start" => system.start_all().map_err(|error| error.to_string()),
             "stop" => system.stop_all().map_err(|error| error.to_string()),
-            _ if operation.starts_with("register:") => {
-                let name = &operation["register:".len()..];
-                group_sequence = group_sequence.saturating_add(1);
-                system
-                    .tool_registry()
-                    .register_group(ToolGroup::new(
-                        format!("csv-group-{group_sequence}"),
-                        true,
-                        [Tool::from_sync(CsvTool::new(name))],
-                    ))
-                    .map_err(|error| error.to_string())
-            }
+            _ if operation.starts_with("register:") => Ok(()),
             _ if operation.starts_with("enable:") => {
                 let name = &operation["enable:".len()..];
-                system
-                    .tool_registry()
-                    .enable(name)
-                    .map_err(|error| error.to_string())
+                system.enable_tool(name).map_err(|error| error.to_string())
             }
             _ if operation.starts_with("disable:") => {
                 let name = &operation["disable:".len()..];
-                system
-                    .tool_registry()
-                    .disable(name)
-                    .map_err(|error| error.to_string())
+                system.disable_tool(name).map_err(|error| error.to_string())
             }
             other => panic!("unknown tool operation in fixture: {other}"),
         };
@@ -386,6 +367,21 @@ fn apply_tool_operations(system: &support::MemAgentSystem, operations: &str) -> 
         }
     }
     None
+}
+
+fn tool_groups_from_operations(operations: &str) -> Vec<ToolGroup> {
+    operations
+        .split('|')
+        .filter_map(|operation| operation.strip_prefix("register:").map(str::to_owned))
+        .enumerate()
+        .map(|(index, name)| {
+            ToolGroup::new(
+                format!("csv-group-{}", index.saturating_add(1)),
+                true,
+                [Tool::from_sync(CsvTool::new(&name))],
+            )
+        })
+        .collect()
 }
 
 fn assert_expected_error(actual: Option<&str>, expected_contains: &str, case: &str) {

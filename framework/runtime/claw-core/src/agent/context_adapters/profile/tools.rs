@@ -40,18 +40,18 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReadTool<F> {
         true
     }
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         profile_action(call, "profile_read", RiskClass::Safe, &self.store)
     }
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileReadTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         match self.store.read(document) {
             Ok(Some(content)) => Ok(ToolOutput {
-                output: if content.trim().is_empty() {
+                content: if content.trim().is_empty() {
                     format!("Profile document {document} is empty.")
                 } else {
                     format!("Profile document {document}:\n{content}")
@@ -59,11 +59,11 @@ impl<F: ClawFs + 'static> SyncToolHandler for ProfileReadTool<F> {
                 ok: true,
             }),
             Ok(None) => Ok(ToolOutput {
-                output: format!("Profile document {document} does not exist."),
+                content: format!("Profile document {document} does not exist."),
                 ok: true,
             }),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not read profile document {document}: {error}."),
+                content: format!("Could not read profile document {document}: {error}."),
                 ok: false,
             }),
         }
@@ -77,13 +77,13 @@ struct ProfileReplaceTool<F: ClawFs + 'static> {
 impl<F: ClawFs + 'static> ToolSpec for ProfileReplaceTool<F> {
     tool_metadata!("profile_replace");
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         profile_action(call, "profile_replace", RiskClass::High, &self.store)
     }
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileReplaceTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
@@ -93,11 +93,11 @@ impl<F: ClawFs + 'static> SyncToolHandler for ProfileReplaceTool<F> {
         })?;
         match self.store.replace(document, content) {
             Ok(()) => Ok(ToolOutput {
-                output: format!("Replaced profile document {document}."),
+                content: format!("Replaced profile document {document}."),
                 ok: true,
             }),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not replace profile document {document}: {error}."),
+                content: format!("Could not replace profile document {document}: {error}."),
                 ok: false,
             }),
         }
@@ -111,22 +111,22 @@ struct ProfileClearTool<F: ClawFs + 'static> {
 impl<F: ClawFs + 'static> ToolSpec for ProfileClearTool<F> {
     tool_metadata!("profile_clear");
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         profile_action(call, "profile_clear", RiskClass::High, &self.store)
     }
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileClearTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         match self.store.clear(document) {
             Ok(()) => Ok(ToolOutput {
-                output: format!("Cleared profile document {document}."),
+                content: format!("Cleared profile document {document}."),
                 ok: true,
             }),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not clear profile document {document}: {error}."),
+                content: format!("Could not clear profile document {document}: {error}."),
                 ok: false,
             }),
         }
@@ -134,7 +134,7 @@ impl<F: ClawFs + 'static> SyncToolHandler for ProfileClearTool<F> {
 }
 
 fn profile_action<F: ClawFs + 'static>(
-    call: &ToolInvocation<'_>,
+    call: &ToolInvocation,
     verb: &str,
     risk: RiskClass,
     store: &ProfileStore<F>,

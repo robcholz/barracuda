@@ -1,4 +1,3 @@
-use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
@@ -11,49 +10,79 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
-use tracing::Instrument as _;
 
 use super::agent_slot::{AgentSlot, AgentSlotUpdate};
 use super::approval_resolver::{
-    self, ApprovalControl, ApprovalResolverError, PermissionReplyResolution,
+    ApprovalCompletion, ApprovalFlow, ApprovalResolverError, ApprovalRespondError,
 };
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SharedAgentManager};
 use super::permission::SessionPermission;
 use super::state::{next_agent, SessionManagerState, SessionPersistentState};
 use super::{
-    InputRequestId, InputRequestKind, IterationEvent, Message, SessionCloseReason, SessionError,
-    SessionEvent, SessionEventError, SessionId, SessionInputError, SessionPersistence,
-    SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin,
+    InputRequestId, IterationEvent, Message, SessionCloseReason, SessionEvent, SessionEventError,
+    SessionId, SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError,
+    TurnId, TurnOrigin,
 };
 use crate::agent::{
-    AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest, AgentIterationEvent,
+    AgentCompletion, AgentCreateError, AgentEvent, AgentInputRequest, AgentIterationEvent,
     AgentOutcome, AgentTurnOrigin, PersistenceConfig, ReasoningEffort, ToolCallId,
 };
 use crate::config::SharedApiManager;
-use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
+use crate::scheduler::{AgentRunPort, AgentRunSchedulerHandle};
 
-type ApprovalFuture =
-    Pin<Box<dyn Future<Output = Result<PermissionReplyResolution, ApprovalResolverError>>>>;
-
-struct PendingApproval {
-    request: InputRequestId,
-    tool_call_id: ToolCallId,
-    tool_call: ToolCall,
-    reason: String,
+struct OpenSession {
+    lease: u64,
+    events: Sender<SessionEvent>,
 }
 
-struct ApprovalTask {
-    control: ApprovalControl,
-    future: ApprovalFuture,
-    request: InputRequestId,
-    tool_call_id: ToolCallId,
-    tool_call: ToolCall,
-    reason: String,
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum StopReason {
+    Close,
+    Shutdown,
+    Delete,
 }
 
-struct ActiveTurn {
-    id: TurnId,
+struct Stopping {
+    reason: StopReason,
+    close_acks: Vec<Sender<Result<(), SessionControlError>>>,
+}
+
+enum ActorLifecycle {
+    Running,
+    Stopping(Stopping),
+}
+
+impl ActorLifecycle {
+    fn is_running(&self) -> bool {
+        matches!(self, Self::Running)
+    }
+
+    fn stop(
+        &mut self,
+        reason: StopReason,
+        close_ack: Option<Sender<Result<(), SessionControlError>>>,
+    ) {
+        match self {
+            Self::Running => {
+                *self = Self::Stopping(Stopping {
+                    reason,
+                    close_acks: close_ack.into_iter().collect(),
+                });
+            }
+            Self::Stopping(stopping) => {
+                stopping.reason = stopping.reason.max(reason);
+                stopping.close_acks.extend(close_ack);
+            }
+        }
+    }
+
+    fn reason(&self) -> Option<StopReason> {
+        match self {
+            Self::Running => None,
+            Self::Stopping(stopping) => Some(stopping.reason),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -101,32 +130,20 @@ where
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
     agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
-    permission: Arc<SessionPermission>,
-    api_manager: SharedApiManager,
 
     root: Option<AgentSlot<Http, Timer>>,
-    restored_root: Option<AgentId>,
     inbox: VecDeque<Message>,
-    active_turn: Option<ActiveTurn>,
+    active_turn: Option<TurnId>,
     next_turn: u32,
-    next_iteration: u32,
-    next_input_request: u32,
-    pending_approval: Option<PendingApproval>,
-    approval: Option<ApprovalTask>,
+    approval: ApprovalFlow,
 
-    scheduler: AgentRunSchedulerHandle<Http, Timer>,
-    run_route: AgentRunRoute<Http, Timer>,
-    run_outputs: AgentRunReceiver<Http, Timer>,
+    runs: AgentRunPort<Http, Timer>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
     next_source: PollSource,
 
-    events: Option<Sender<Result<SessionEvent, SessionError>>>,
-    active_lease: Option<u64>,
+    client: Option<OpenSession>,
     next_lease: u64,
-    close_requested: bool,
-    close_acks: Vec<Sender<Result<(), SessionControlError>>>,
-    delete_requested: bool,
-    shutdown_requested: bool,
+    lifecycle: ActorLifecycle,
 }
 
 impl<Filesystem, Http, Timer> SessionActor<Filesystem, Http, Timer>
@@ -145,40 +162,23 @@ where
         scheduler: AgentRunSchedulerHandle<Http, Timer>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = async_channel::unbounded();
-        let (run_route, run_outputs) = agent_run_route();
-        let restored_root = (persistence == SessionPersistence::Persistent)
-            .then(|| state.get().root_agent)
-            .flatten();
-        let permission = Arc::new(SessionPermission::new(state.clone()));
         (
             Self {
                 session,
                 persistence,
                 state,
                 agent_manager,
-                permission,
-                api_manager,
                 root: None,
-                restored_root,
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
-                next_iteration: 0,
-                next_input_request: 1,
-                pending_approval: None,
-                approval: None,
-                scheduler,
-                run_route,
-                run_outputs,
+                approval: ApprovalFlow::new(api_manager),
+                runs: AgentRunPort::new(scheduler),
                 commands: Box::pin(commands),
                 next_source: PollSource::Command,
-                events: None,
-                active_lease: None,
+                client: None,
                 next_lease: 1,
-                close_requested: false,
-                close_acks: Vec::new(),
-                delete_requested: false,
-                shutdown_requested: false,
+                lifecycle: ActorLifecycle::Running,
             },
             command_sender,
         )
@@ -207,21 +207,13 @@ where
                     }
                 }
                 PollSource::Approval => {
-                    if let Some(task) = &mut self.approval {
-                        if let Poll::Ready(result) = task.future.as_mut().poll(context) {
-                            let task = self
-                                .approval
-                                .take()
-                                .expect("a ready approval task remains installed");
-                            self.handle_approval_result(task, result);
-                            return Poll::Ready(SessionActorStatus::Progress);
-                        }
+                    if let Poll::Ready(Some(completion)) = self.approval.poll(context) {
+                        self.handle_approval_result(completion);
+                        return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
                 PollSource::Agent => {
-                    if let Poll::Ready(Some(output)) =
-                        Pin::new(&mut self.run_outputs).poll_next(context)
-                    {
+                    if let Poll::Ready(Some(output)) = Pin::new(&mut self.runs).poll_next(context) {
                         self.handle_agent_output(output);
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
@@ -272,21 +264,13 @@ where
         }
     }
 
-    pub(super) fn open(
-        &mut self,
-        events: Sender<Result<SessionEvent, SessionError>>,
-    ) -> Result<u64, OpenSessionError> {
-        if self.active_lease.is_some()
-            || self.close_requested
-            || self.delete_requested
-            || self.shutdown_requested
-        {
+    pub(super) fn open(&mut self, events: Sender<SessionEvent>) -> Result<u64, OpenSessionError> {
+        if self.client.is_some() || !self.lifecycle.is_running() {
             return Err(OpenSessionError::AlreadyOpen(self.session));
         }
         let lease = self.next_lease;
         self.next_lease = self.next_lease.saturating_add(1);
-        self.active_lease = Some(lease);
-        self.events = Some(events);
+        self.client = Some(OpenSession { lease, events });
         Ok(lease)
     }
 
@@ -315,53 +299,22 @@ where
             self.reject_closed(ack);
             return;
         }
-        if self.approval.is_some() {
-            let _ = ack.try_send(Err(SessionControlError::NotAwaitingInput(self.session)));
-            return;
-        }
-        let Some(pending) = self.pending_approval.take() else {
-            let _ = ack.try_send(Err(SessionControlError::NotAwaitingInput(self.session)));
-            return;
-        };
-        if pending.request != request {
-            let expected = pending.request;
-            self.pending_approval = Some(pending);
-            let _ = ack.try_send(Err(SessionControlError::InputRequestMismatch {
-                session: self.session,
-                expected,
-                received: request,
-            }));
-            return;
-        }
-
-        let control = ApprovalControl::new();
-        let task_control = control.clone();
-        let api_manager = Arc::clone(&self.api_manager);
-        let tool_call = pending.tool_call.clone();
-        let reason = pending.reason.clone();
-        let user_reply = message.as_str().to_owned();
-        let future = Box::pin(
-            async move {
-                approval_resolver::resolve_permission_reply::<Http, Timer>(
-                    &api_manager,
-                    &tool_call,
-                    &reason,
-                    &user_reply,
-                    &task_control,
-                )
-                .await
-            }
-            .instrument(tracing::info_span!("approval.resolve")),
-        );
-        self.approval = Some(ApprovalTask {
-            control,
-            future,
-            request: pending.request,
-            tool_call_id: pending.tool_call_id,
-            tool_call: pending.tool_call,
-            reason: pending.reason,
-        });
-        let _ = ack.try_send(Ok(()));
+        let result = self
+            .approval
+            .respond::<Http, Timer>(request, message)
+            .map_err(|error| match error {
+                ApprovalRespondError::NotWaiting | ApprovalRespondError::Resolving => {
+                    SessionControlError::NotAwaitingInput(self.session)
+                }
+                ApprovalRespondError::RequestMismatch { expected } => {
+                    SessionControlError::InputRequestMismatch {
+                        session: self.session,
+                        expected,
+                        received: request,
+                    }
+                }
+            });
+        let _ = ack.try_send(result);
     }
 
     fn control(&mut self, lease: u64, op: ControlOp, ack: Sender<Result<(), SessionControlError>>) {
@@ -381,10 +334,7 @@ where
                 }
             }
         }
-        if let Some(approval) = &self.approval {
-            approval.control.cancel();
-        }
-        self.pending_approval = None;
+        self.approval.cancel();
         let _ = ack.try_send(Ok(()));
     }
 
@@ -393,27 +343,23 @@ where
             self.reject_closed(ack);
             return;
         }
-        self.close_requested = true;
-        self.close_acks.push(ack);
+        self.lifecycle.stop(StopReason::Close, Some(ack));
         self.stop_current_run(false);
     }
 
     pub(super) fn request_delete(&mut self) {
-        self.delete_requested = true;
+        self.lifecycle.stop(StopReason::Delete, None);
         self.stop_current_run(true);
     }
 
     pub(super) fn request_shutdown(&mut self) {
-        self.shutdown_requested = true;
+        self.lifecycle.stop(StopReason::Shutdown, None);
         self.stop_current_run(false);
     }
 
     fn stop_current_run(&mut self, reaping: bool) {
         self.inbox.clear();
-        self.pending_approval = None;
-        if let Some(approval) = self.approval.take() {
-            approval.control.cancel();
-        }
+        self.approval.cancel();
         if let Some(root) = &mut self.root {
             if reaping {
                 root.begin_reaping();
@@ -424,49 +370,59 @@ where
     }
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
-        if !(self.close_requested || self.delete_requested || self.shutdown_requested) {
-            return None;
-        }
+        let reason = self.lifecycle.reason()?;
         if self.root.as_ref().is_some_and(AgentSlot::is_in_flight) {
             return None;
         }
         self.finish_turn();
 
-        if self.delete_requested {
-            if let Err(error) = self.delete_root_agent() {
-                self.emit_event_error(SessionEventError::DeleteFailed { source: error });
-                self.delete_requested = false;
-                return None;
-            }
-            self.emit_closed(SessionCloseReason::Deleted);
-            self.complete_close_requests();
-            return Some(SessionActorExit::Deleted {
-                session: self.session,
-            });
-        }
-        if self.shutdown_requested {
-            self.emit_closed(SessionCloseReason::RuntimeShutdown);
-            self.complete_close_requests();
-            return Some(SessionActorExit::Shutdown {
-                session: self.session,
-            });
-        }
+        let ActorLifecycle::Stopping(stopping) =
+            std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running)
+        else {
+            unreachable!("a stop reason comes only from a stopping lifecycle")
+        };
 
-        self.emit_closed(SessionCloseReason::Requested);
-        self.active_lease = None;
-        self.close_requested = false;
-        self.complete_close_requests();
-        None
+        match reason {
+            StopReason::Delete => {
+                if let Err(error) = self.delete_root_agent() {
+                    self.emit_event_error(SessionEventError::DeleteFailed { source: error });
+                    if !stopping.close_acks.is_empty() {
+                        self.lifecycle = ActorLifecycle::Stopping(Stopping {
+                            reason: StopReason::Close,
+                            close_acks: stopping.close_acks,
+                        });
+                    }
+                    return None;
+                }
+                self.emit_closed(SessionCloseReason::Deleted);
+                Self::complete_close_requests(stopping.close_acks);
+                Some(SessionActorExit::Deleted {
+                    session: self.session,
+                })
+            }
+            StopReason::Shutdown => {
+                self.emit_closed(SessionCloseReason::RuntimeShutdown);
+                Self::complete_close_requests(stopping.close_acks);
+                Some(SessionActorExit::Shutdown {
+                    session: self.session,
+                })
+            }
+            StopReason::Close => {
+                self.emit_closed(SessionCloseReason::Requested);
+                Self::complete_close_requests(stopping.close_acks);
+                None
+            }
+        }
     }
 
-    fn complete_close_requests(&mut self) {
-        for ack in std::mem::take(&mut self.close_acks) {
+    fn complete_close_requests(acks: Vec<Sender<Result<(), SessionControlError>>>) {
+        for ack in acks {
             let _ = ack.try_send(Ok(()));
         }
     }
 
     fn start_next_message(&mut self, manager_state: &DurableState<SessionManagerState>) -> bool {
-        if self.close_requested || self.delete_requested || self.shutdown_requested {
+        if !self.lifecycle.is_running() {
             return false;
         }
         if self.active_turn.is_some() || self.inbox.is_empty() {
@@ -504,24 +460,24 @@ where
             trace.task = %agent,
             run.agent = %agent,
         );
-        root.dispatch(message, &self.scheduler, self.run_route.clone(), span)
+        root.dispatch(message, &self.runs, span)
     }
 
     fn delete_root_agent(&mut self) -> Result<(), AgentCreateError> {
-        let root_agent = self.root.as_ref().map(AgentSlot::id).or(self.restored_root);
+        let root_agent = self
+            .root
+            .as_ref()
+            .map(AgentSlot::id)
+            .or_else(|| self.state.get().root_agent);
         // Drop every live component handle before deleting its canonical
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
         self.root = None;
         if self.persistence == SessionPersistence::Persistent {
             if let Some(root_agent) = root_agent {
-                if let Err(error) = self.agent_manager.remove(root_agent) {
-                    self.restored_root = Some(root_agent);
-                    return Err(error);
-                }
+                self.agent_manager.remove(root_agent)?;
             }
         }
-        self.restored_root = None;
         self.state.get_mut().clear_root();
         Ok(())
     }
@@ -534,11 +490,13 @@ where
             return Ok(());
         }
         let reasoning_effort = self.state.get().reasoning_effort;
-        let (id, agent, reasoning_handle) = if let Some(id) = self.restored_root.take() {
+        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let root_agent = self.state.get().root_agent;
+        let (id, agent, reasoning_handle) = if let Some(id) = root_agent {
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
-                Arc::clone(&self.permission) as Arc<_>,
+                Arc::clone(&permission) as Arc<_>,
                 reasoning_effort,
                 Vec::new(),
             )?;
@@ -554,7 +512,7 @@ where
                 id,
                 kind,
                 true,
-                Arc::clone(&self.permission) as Arc<_>,
+                Arc::clone(&permission) as Arc<_>,
                 reasoning_effort,
                 persistence,
                 Vec::new(),
@@ -603,8 +561,7 @@ where
                 if let AgentOutcome::Completed(AgentCompletion::Synthesized(message)) = outcome {
                     self.emit_text(message);
                 }
-                self.pending_approval = None;
-                self.approval = None;
+                self.approval.cancel();
                 self.finish_turn();
             }
         }
@@ -612,9 +569,7 @@ where
 
     fn emit_iteration(&mut self, progress: StreamPart<AgentIterationEvent>) {
         let event = match progress {
-            StreamPart::Delta(AgentIterationEvent::Started(_)) => {
-                let iteration = crate::agent::IterationId::new(self.next_iteration);
-                self.next_iteration = self.next_iteration.saturating_add(1);
+            StreamPart::Delta(AgentIterationEvent::Started(iteration)) => {
                 IterationEvent::Started { iteration }
             }
             StreamPart::Delta(AgentIterationEvent::Reasoning(part)) => {
@@ -630,49 +585,32 @@ where
     }
 
     fn request_approval(&mut self, tool_call_id: ToolCallId, tool_call: ToolCall, reason: String) {
-        let request = InputRequestId(self.next_input_request);
-        self.next_input_request = self.next_input_request.saturating_add(1);
-        let kind = InputRequestKind::PermissionApproval {
-            tool_call: tool_call.clone(),
-            reason: reason.clone(),
-        };
-        self.pending_approval = Some(PendingApproval {
-            request,
-            tool_call_id,
-            tool_call,
-            reason,
-        });
+        let (request, kind) = self.approval.request(tool_call_id, tool_call, reason);
         self.emit_turn(TurnEvent::InputRequested { request, kind });
     }
 
-    fn handle_approval_result(
-        &mut self,
-        task: ApprovalTask,
-        result: Result<PermissionReplyResolution, ApprovalResolverError>,
-    ) {
+    fn handle_approval_result(&mut self, completion: ApprovalCompletion) {
+        let (request, tool_call_id, tool_call, reason, result) = completion.into_parts();
         let resolution = match result {
             Ok(resolution) => resolution,
             Err(ApprovalResolverError::Cancelled) => return,
             Err(error) => {
-                self.emit_input_error(task.request, error.into());
-                self.request_approval(task.tool_call_id, task.tool_call, task.reason);
+                self.emit_input_error(request, error.into());
+                self.request_approval(tool_call_id, tool_call, reason);
                 return;
             }
         };
-        let Some(decision) = resolution.clone().into_decision() else {
-            let PermissionReplyResolution::Clarify(_) = resolution else {
-                unreachable!("non-clarification resolutions map to decisions")
-            };
-            self.request_approval(task.tool_call_id, task.tool_call, task.reason);
+        let Some(decision) = resolution.into_decision() else {
+            self.request_approval(tool_call_id, tool_call, reason);
             return;
         };
         let resolution = self
             .root
             .as_ref()
             .ok_or(crate::agent::AgentApprovalError::NotAwaitingApproval)
-            .and_then(|root| root.resolve_approval(task.tool_call_id, decision));
+            .and_then(|root| root.resolve_approval(tool_call_id, decision));
         if let Err(error) = resolution {
-            self.emit_input_error(task.request, error.into());
+            self.emit_input_error(request, error.into());
             if let Some(root) = &mut self.root {
                 root.cancel();
             }
@@ -683,7 +621,7 @@ where
         debug_assert!(self.active_turn.is_none());
         let turn = TurnId(self.next_turn);
         self.next_turn = self.next_turn.saturating_add(1);
-        self.active_turn = Some(ActiveTurn { id: turn });
+        self.active_turn = Some(turn);
         self.emit_turn(TurnEvent::Started { turn, origin });
     }
 
@@ -691,7 +629,7 @@ where
         let Some(turn) = self.active_turn.take() else {
             return;
         };
-        self.emit_turn(TurnEvent::Ended { turn: turn.id });
+        self.emit_turn(TurnEvent::Ended { turn });
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
@@ -704,10 +642,11 @@ where
     }
 
     fn accepts(&self, lease: u64) -> bool {
-        self.active_lease == Some(lease)
-            && !self.close_requested
-            && !self.delete_requested
-            && !self.shutdown_requested
+        self.lifecycle.is_running()
+            && self
+                .client
+                .as_ref()
+                .is_some_and(|client| client.lease == lease)
     }
 
     fn reject_closed(&self, ack: Sender<Result<(), SessionControlError>>) {
@@ -743,15 +682,14 @@ where
     }
 
     fn emit_closed(&mut self, reason: SessionCloseReason) {
-        if self.events.is_some() {
-            self.emit(SessionEvent::Closed(reason));
-            self.events = None;
+        if let Some(client) = self.client.take() {
+            let _ = client.events.try_send(SessionEvent::Closed(reason));
         }
     }
 
     fn emit(&self, event: SessionEvent) {
-        if let Some(events) = &self.events {
-            let _ = events.try_send(Ok(event));
+        if let Some(client) = &self.client {
+            let _ = client.events.try_send(event);
         }
     }
 }

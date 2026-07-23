@@ -81,17 +81,16 @@ fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     ]);
 
     let gate = Arc::new(ToolGate::default());
-    let system = build_configured_system(&root);
-    system
-        .tool_registry()
-        .register_group(ToolGroup::new(
+    let system = build_configured_system_with_tool_groups(
+        &root,
+        [ToolGroup::new(
             "test",
             true,
             [Tool::from_async(BlockingTool {
                 gate: Arc::clone(&gate),
             })],
-        ))
-        .unwrap();
+        )],
+    );
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
@@ -130,17 +129,16 @@ fn deleting_an_inflight_session_removes_its_root_agent_and_transcript() {
     ]);
 
     let gate = Arc::new(ToolGate::default());
-    let system = Arc::new(build_configured_system(&root));
-    system
-        .tool_registry()
-        .register_group(ToolGroup::new(
+    let system = Arc::new(build_configured_system_with_tool_groups(
+        &root,
+        [ToolGroup::new(
             "test",
             true,
             [Tool::from_async(BlockingTool {
                 gate: Arc::clone(&gate),
             })],
-        ))
-        .unwrap();
+        )],
+    ));
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
@@ -295,19 +293,19 @@ fn explicit_tool_override_survives_rebuild() {
     let root = temp.path().to_string_lossy().into_owned();
 
     {
-        let system = build_system(&root, Vec::new());
-        system
-            .tool_registry()
-            .register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))
-            .unwrap();
-        system.tool_registry().disable("echo").unwrap();
+        install_script(Vec::new());
+        let system = build_configured_system_with_tool_groups(
+            &root,
+            [ToolGroup::new("test", true, [Tool::from_sync(EchoTool)])],
+        );
+        system.disable_tool("echo").unwrap();
     }
 
-    let system = build_system(&root, Vec::new());
-    system
-        .tool_registry()
-        .register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))
-        .unwrap();
+    install_script(Vec::new());
+    let system = build_configured_system_with_tool_groups(
+        &root,
+        [ToolGroup::new("test", true, [Tool::from_sync(EchoTool)])],
+    );
     system.start_all().unwrap();
 
     let json = read_payload(&format!("{root}/tool_registry.bin"));
@@ -358,10 +356,20 @@ fn build_system(root: &str, bodies: Vec<String>) -> DiskSystem {
 }
 
 fn build_configured_system(root: &str) -> DiskSystem {
-    let system = DiskSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
-        persistence_root: root.to_owned(),
-        skill_roots: Vec::new(),
-    })
+    build_configured_system_with_tool_groups(root, std::iter::empty())
+}
+
+fn build_configured_system_with_tool_groups(
+    root: &str,
+    tool_groups: impl IntoIterator<Item = ToolGroup>,
+) -> DiskSystem {
+    let system = DiskSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        AgentPersistenceConfig {
+            persistence_root: root.to_owned(),
+            skill_roots: Vec::new(),
+        },
+        tool_groups,
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
@@ -424,12 +432,12 @@ impl ToolSpec for BlockingTool {
 }
 
 impl AsyncToolHandler for BlockingTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation<'_>) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(poll_fn(move |context| {
             self.gate.started.store(true, Ordering::SeqCst);
             if self.gate.released.load(Ordering::SeqCst) {
                 return Poll::Ready(Ok(ToolOutput {
-                    output: "released".to_owned(),
+                    content: "released".to_owned(),
                     ok: true,
                 }));
             }
@@ -464,9 +472,9 @@ impl ToolSpec for EchoTool {
 }
 
 impl SyncToolHandler for EchoTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         Ok(ToolOutput {
-            output: call.arguments_json().to_owned(),
+            content: call.arguments_json().to_owned(),
             ok: true,
         })
     }

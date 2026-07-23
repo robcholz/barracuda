@@ -45,7 +45,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryStoreTool<F> {
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryStoreTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let content = required_string(&args, "content")?;
         let draft = MemoryDraft::new(content)
@@ -59,7 +59,10 @@ impl<F: ClawFs + 'static> SyncToolHandler for MemoryStoreTool<F> {
                 format!("Already remembered (as {}); nothing changed.", item.id)
             }
         };
-        Ok(ToolOutput { output, ok: true })
+        Ok(ToolOutput {
+            content: output,
+            ok: true,
+        })
     }
 }
 
@@ -72,7 +75,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryRecallTool<F> {
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryRecallTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let labels = string_array(&args, "labels")?;
         let query = optional_string(&args, "query")?;
@@ -80,7 +83,7 @@ impl<F: ClawFs + 'static> SyncToolHandler for MemoryRecallTool<F> {
 
         let items = self.stores.recall(&labels, query.as_deref(), limit);
         Ok(ToolOutput {
-            output: render_items("Recalled memories", &items),
+            content: render_items("Recalled memories", &items),
             ok: true,
         })
     }
@@ -95,13 +98,13 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryListTool<F> {
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryListTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let limit = optional_limit(&args)?;
         let mut items = self.stores.list();
         items.truncate(limit);
         Ok(ToolOutput {
-            output: render_items("All memories", &items),
+            content: render_items("All memories", &items),
             ok: true,
         })
     }
@@ -116,7 +119,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryUpdateTool<F> {
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryUpdateTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let id = MemoryId::from(required_string(&args, "id")?.as_str());
         let patch = MemoryPatch {
@@ -126,11 +129,11 @@ impl<F: ClawFs + 'static> SyncToolHandler for MemoryUpdateTool<F> {
         };
         match self.stores.update(&id, patch) {
             Ok(item) => Ok(ToolOutput {
-                output: format!("Updated memory {}.", item.id),
+                content: format!("Updated memory {}.", item.id),
                 ok: true,
             }),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not update {id}: {error}."),
+                content: format!("Could not update {id}: {error}."),
                 ok: false,
             }),
         }
@@ -146,16 +149,16 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryForgetTool<F> {
 }
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryForgetTool<F> {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let id = MemoryId::from(required_string(&args, "id")?.as_str());
         match self.stores.forget(&id) {
             Ok(()) => Ok(ToolOutput {
-                output: format!("Forgot memory {id}."),
+                content: format!("Forgot memory {id}."),
                 ok: true,
             }),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not forget {id}: {error}."),
+                content: format!("Could not forget {id}: {error}."),
                 ok: false,
             }),
         }

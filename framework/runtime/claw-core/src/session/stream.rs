@@ -12,7 +12,7 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
-use claw_tool::ToolExecution;
+use claw_tool::ToolOutput;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -135,7 +135,7 @@ pub enum IterationEvent {
     Output(StreamPart<String>),
     /// Completed tool executions. Each delta contains the original request and
     /// its result; `End` means no more results will be emitted this iteration.
-    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
+    ToolResult(StreamPart<(ToolCall, ToolOutput)>),
     /// Provider token/cache counters for the completed LLM iteration.
     #[cfg(feature = "cache_profile")]
     Usage {
@@ -226,7 +226,7 @@ pub enum SessionError {
 pub struct SessionStream {
     lease: u64,
     commands: Sender<SessionCommand>,
-    events: Pin<Box<Receiver<Result<SessionEvent, SessionError>>>>,
+    events: Pin<Box<Receiver<SessionEvent>>>,
     terminated: bool,
 }
 
@@ -234,7 +234,7 @@ impl SessionStream {
     pub(super) fn new(
         lease: u64,
         commands: Sender<SessionCommand>,
-        events: Receiver<Result<SessionEvent, SessionError>>,
+        events: Receiver<SessionEvent>,
     ) -> Self {
         Self {
             lease,
@@ -253,11 +253,11 @@ impl Stream for SessionStream {
             return Poll::Ready(None);
         }
         match self.events.as_mut().poll_next(context) {
-            Poll::Ready(Some(item)) => {
-                if matches!(&item, Ok(SessionEvent::Closed(_)) | Err(_)) {
+            Poll::Ready(Some(event)) => {
+                if matches!(&event, SessionEvent::Closed(_)) {
                     self.terminated = true;
                 }
-                Poll::Ready(Some(item))
+                Poll::Ready(Some(Ok(event)))
             }
             Poll::Ready(None) => {
                 self.terminated = true;

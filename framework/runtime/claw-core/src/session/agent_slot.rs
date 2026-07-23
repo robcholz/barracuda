@@ -6,9 +6,7 @@ use crate::agent::{
     Agent, AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, ReasoningEffort,
     ReasoningEffortHandle, ToolCallId,
 };
-use crate::scheduler::{
-    AgentRunOutput, AgentRunOutputItem, AgentRunRoute, AgentRunSchedulerHandle, RunControl, RunId,
-};
+use crate::scheduler::{AgentRunOutput, AgentRunOutputItem, AgentRunPort, RunControl, RunId};
 
 use super::Message;
 
@@ -77,14 +75,13 @@ where
     pub(super) fn start(
         &mut self,
         message: Message,
-        scheduler: &AgentRunSchedulerHandle<Http, Timer>,
-        route: AgentRunRoute<Http, Timer>,
+        runs: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
     ) {
         let Some(Execution::Resident(agent)) = self.execution.take() else {
             panic!("only a resident Agent can start a run");
         };
-        let scheduled = scheduler.submit(self.id, agent, message, route, span);
+        let scheduled = runs.submit(self.id, agent, message, span);
         self.execution = Some(Execution::InFlight(InFlight {
             run: scheduled.run,
             control: scheduled.control,
@@ -96,8 +93,7 @@ where
     pub(super) fn dispatch(
         &mut self,
         message: Message,
-        scheduler: &AgentRunSchedulerHandle<Http, Timer>,
-        route: AgentRunRoute<Http, Timer>,
+        runs: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
     ) -> Result<(), Message> {
         match self.execution.as_mut() {
@@ -106,7 +102,7 @@ where
                 in_flight.control.dispatch(message).map_err(|_| retry)
             }
             Some(Execution::Resident(_)) => {
-                self.start(message, scheduler, route, span);
+                self.start(message, runs, span);
                 Ok(())
             }
             None => Err(message),

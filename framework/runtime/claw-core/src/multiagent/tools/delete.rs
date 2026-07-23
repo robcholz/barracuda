@@ -19,24 +19,24 @@ struct DeleteSubagentTool {
 impl ToolSpec for DeleteSubagentTool {
     tool_metadata!("subagent_delete");
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         action_with_agent_resource("subagent_delete", RiskClass::High, call)
     }
 }
 
 impl SyncToolHandler for DeleteSubagentTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let target = required_agent_id(&args, "subagent_delete")?;
         if self.control.get(target).is_none() {
             return Ok(ToolOutput {
-                output: format!("Cannot delete {target}: it is not a subagent in your subtree."),
+                content: format!("Cannot delete {target}: it is not a subagent in your subtree."),
                 ok: false,
             });
         }
         self.control.delete(target);
         Ok(ToolOutput {
-            output: format!("Subagent {target} and its subtree scheduled for deletion."),
+            content: format!("Subagent {target} and its subtree scheduled for deletion."),
             ok: true,
         })
     }

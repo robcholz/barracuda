@@ -4,8 +4,7 @@ use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_tool::{
-    ToolDetachHandle, ToolExecution, ToolJoinHandle, ToolRunInvocation, ToolRunResult, ToolRunner,
-    ToolSetHandle,
+    ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
 };
 use claw_utils::stream::StreamPart;
 use futures_lite::{future, StreamExt};
@@ -19,7 +18,7 @@ use super::{
 
 struct ScheduledCall {
     id: ToolCallId,
-    invocation: ToolRunInvocation,
+    invocation: ToolInvocation,
 }
 
 impl ScheduledCall {
@@ -46,7 +45,7 @@ struct PendingApproval<'a> {
 
 enum ToolBatchUpdate {
     Permission(ToolPermission),
-    Execution(Option<ToolRunResult>),
+    Execution(Option<(ToolInvocation, ToolOutput)>),
 }
 
 struct ToolPhase<'a> {
@@ -55,7 +54,7 @@ struct ToolPhase<'a> {
     detached: VecDeque<ToolDetachHandle>,
     pending: VecDeque<PendingApproval<'a>>,
     active_permission: Option<PendingApproval<'a>>,
-    ready_results: VecDeque<(ToolCall, ToolExecution)>,
+    ready_results: VecDeque<(ToolCall, ToolOutput)>,
     remaining_results: usize,
     results_ended: bool,
 }
@@ -203,7 +202,7 @@ impl<'a> ToolPhase<'a> {
 
         for tool_call in tool_calls {
             let id = tool_call_ids.next();
-            let invocation = match ToolRunInvocation::try_new(
+            let invocation = match ToolInvocation::try_new(
                 Some(&tool_call.id),
                 &tool_call.name,
                 &tool_call.arguments_json,
@@ -212,7 +211,7 @@ impl<'a> ToolPhase<'a> {
                 Err(error) => {
                     ready_results.push_back((
                         tool_call,
-                        ToolExecution {
+                        ToolOutput {
                             content: error.to_string(),
                             ok: false,
                         },
@@ -220,25 +219,12 @@ impl<'a> ToolPhase<'a> {
                     continue;
                 }
             };
-            let borrowed = match invocation.as_invocation() {
-                Ok(invocation) => invocation,
-                Err(error) => {
-                    ready_results.push_back((
-                        tool_call,
-                        ToolExecution {
-                            content: error.to_string(),
-                            ok: false,
-                        },
-                    ));
-                    continue;
-                }
-            };
-            let action = match tools.classify(&borrowed) {
+            let action = match tools.classify(&invocation) {
                 Ok(action) => action,
                 Err(error) => {
                     ready_results.push_back((
                         tool_call,
-                        ToolExecution {
+                        ToolOutput {
                             content: error.to_string(),
                             ok: false,
                         },
@@ -255,7 +241,7 @@ impl<'a> ToolPhase<'a> {
                 ToolAuthorization::Allow => allowed.push(scheduled),
                 ToolAuthorization::Deny(reason) => ready_results.push_back((
                     scheduled.tool_call(),
-                    ToolExecution {
+                    ToolOutput {
                         content: reason,
                         ok: false,
                     },
@@ -295,8 +281,8 @@ impl<'a> ToolPhase<'a> {
             if let Some(detached) = self.detached.pop_front() {
                 return Ok(Some(IterationLoopEvent::Detached(detached)));
             }
-            if let Some((call, execution)) = self.ready_results.pop_front() {
-                return self.tool_result(call, execution).map(Some);
+            if let Some((call, output)) = self.ready_results.pop_front() {
+                return self.tool_result(call, output).map(Some);
             }
             if self.results_ended {
                 return Ok(None);
@@ -350,8 +336,8 @@ impl<'a> ToolPhase<'a> {
 
             match update {
                 ToolBatchUpdate::Execution(Some(result)) => {
-                    let (call, execution) = tool_result_parts(result);
-                    return self.tool_result(call, execution).map(Some);
+                    let (call, output) = tool_result_parts(result);
+                    return self.tool_result(call, output).map(Some);
                 }
                 ToolBatchUpdate::Execution(None) => self.joined = None,
                 ToolBatchUpdate::Permission(decision) => {
@@ -370,7 +356,7 @@ impl<'a> ToolPhase<'a> {
                             return self
                                 .tool_result(
                                     waiting.call.tool_call(),
-                                    ToolExecution {
+                                    ToolOutput {
                                         content: reason,
                                         ok: false,
                                     },
@@ -394,14 +380,14 @@ impl<'a> ToolPhase<'a> {
     fn tool_result(
         &mut self,
         call: ToolCall,
-        execution: ToolExecution,
+        output: ToolOutput,
     ) -> Result<IterationLoopEvent, IterationLoopError> {
         self.remaining_results = self
             .remaining_results
             .checked_sub(1)
             .ok_or(IterationLoopError::IncompleteToolBatch)?;
         Ok(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
-            StreamPart::Delta((call, execution)),
+            StreamPart::Delta((call, output)),
         )))
     }
 
@@ -431,15 +417,14 @@ fn dispatch_scheduled_calls(
     (Some(joined), detached)
 }
 
-fn tool_result_parts(result: ToolRunResult) -> (ToolCall, ToolExecution) {
-    let (invocation, execution) = result.into_parts();
+fn tool_result_parts((invocation, output): (ToolInvocation, ToolOutput)) -> (ToolCall, ToolOutput) {
     (
         ToolCall {
             id: invocation.id().unwrap_or_default().to_owned(),
             name: invocation.name().to_owned(),
             arguments_json: invocation.arguments_json().to_owned(),
         },
-        execution,
+        output,
     )
 }
 
@@ -451,8 +436,7 @@ mod tests {
 
     use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
-        ToolSpec,
+        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
     };
     use futures_lite::future::block_on;
 
@@ -473,16 +457,16 @@ mod tests {
             r#"{"type":"function","function":{"name":"test","parameters":{"type":"object"}}}"#
         }
 
-        fn classify(&self, _call: &ToolInvocation<'_>) -> claw_permission::Action {
+        fn classify(&self, _call: &ToolInvocation) -> claw_permission::Action {
             claw_permission::Action::new(self.name, RiskClass::High)
         }
     }
 
     impl SyncToolHandler for CountingTool {
-        fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(ToolOutput {
-                output: self.name.to_owned(),
+                content: self.name.to_owned(),
                 ok: true,
             })
         }
@@ -517,9 +501,8 @@ mod tests {
         }
     }
 
-    fn test_tools(executions: &Arc<AtomicUsize>) -> (Arc<ToolRegistry>, claw_tool::ToolSet) {
-        let registry = Arc::new(ToolRegistry::new());
-        let mut tool_set = registry.tool_set();
+    fn test_tools(executions: &Arc<AtomicUsize>) -> ToolSet {
+        let mut tool_set = ToolSet::empty();
         tool_set
             .add_group(ToolGroup::new(
                 "test",
@@ -536,13 +519,13 @@ mod tests {
                 ],
             ))
             .expect("test tools are valid");
-        (registry, tool_set)
+        tool_set
     }
 
     #[test]
     fn allowed_tools_run_while_permission_is_pending_and_results_use_completion_order() {
         let executions = Arc::new(AtomicUsize::new(0));
-        let (_registry, mut tool_set) = test_tools(&executions);
+        let mut tool_set = test_tools(&executions);
         let tools = tool_set.begin().expect("test tool set starts");
         let tool_calls = vec![
             ToolCall {
@@ -594,8 +577,8 @@ mod tests {
             .filter_map(|event| match event {
                 IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::Delta((
                     call,
-                    execution,
-                )))) => Some((call.id, execution)),
+                    output,
+                )))) => Some((call.id, output)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -604,14 +587,14 @@ mod tests {
             vec![
                 (
                     "call-allow".to_owned(),
-                    ToolExecution {
+                    ToolOutput {
                         content: "allowed".to_owned(),
                         ok: true,
                     },
                 ),
                 (
                     "call-deny".to_owned(),
-                    ToolExecution {
+                    ToolOutput {
                         content: "policy denied".to_owned(),
                         ok: false,
                     },
@@ -623,7 +606,7 @@ mod tests {
     #[test]
     fn yolo_policy_rejects_duplicate_provider_ids_before_execution() {
         let executions = Arc::new(AtomicUsize::new(0));
-        let (_registry, mut tool_set) = test_tools(&executions);
+        let mut tool_set = test_tools(&executions);
         let tools = tool_set.begin().expect("test tool set starts");
         let tool_calls = vec![
             ToolCall {

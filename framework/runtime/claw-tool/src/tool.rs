@@ -19,46 +19,42 @@ pub struct ToolConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolInvocation<'a> {
-    id: Option<&'a str>,
-    name: &'a str,
-    arguments_json: &'a str,
+pub struct ToolInvocation {
+    id: Option<String>,
+    name: String,
+    arguments_json: String,
 }
 
-impl<'a> ToolInvocation<'a> {
-    pub fn try_new(
-        id: Option<&'a str>,
-        name: &'a str,
-        arguments_json: &'a str,
-    ) -> ToolResult<Self> {
+impl ToolInvocation {
+    pub fn try_new(id: Option<&str>, name: &str, arguments_json: &str) -> ToolResult<Self> {
         let arguments_json = validate::normalize_arguments_json(arguments_json)?;
         Ok(Self {
-            id,
-            name,
-            arguments_json,
+            id: id.map(str::to_owned),
+            name: name.to_owned(),
+            arguments_json: arguments_json.to_owned(),
         })
     }
 
     pub fn id(&self) -> Option<&str> {
-        self.id
+        self.id.as_deref()
     }
 
     pub fn name(&self) -> &str {
-        self.name
+        &self.name
     }
 
     pub fn arguments_json(&self) -> &str {
-        self.arguments_json
+        &self.arguments_json
     }
 
     pub fn arguments_value(&self) -> ToolResult<serde_json::Value> {
-        validate::parse_arguments_json(self.arguments_json)
+        validate::parse_arguments_json(&self.arguments_json)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolOutput {
-    pub output: String,
+    pub content: String,
     pub ok: bool,
 }
 
@@ -139,17 +135,17 @@ pub trait ToolSpec: Send + Sync {
         RetryCount::none()
     }
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::High)
     }
 }
 
 pub trait SyncToolHandler: ToolSpec {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput>;
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput>;
 }
 
 pub trait AsyncToolHandler: ToolSpec {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation<'_>) -> ToolFuture<'a>;
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
 }
 
 #[macro_export]
@@ -231,14 +227,11 @@ impl Tool {
         self.spec().usage()
     }
 
-    pub(crate) fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    pub(crate) fn classify(&self, call: &ToolInvocation) -> Action {
         self.spec().classify(call)
     }
 
-    pub(crate) async fn invoke<'a>(
-        &'a self,
-        call: &'a ToolInvocation<'_>,
-    ) -> ToolResult<ToolOutput> {
+    pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         let mut remaining = self.spec().retry_count().extra_attempts();
         loop {
             match self.invoke_once(call).await {
@@ -251,7 +244,7 @@ impl Tool {
         }
     }
 
-    async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         match self.inner.as_ref() {
             ToolInner::Sync(handler) => handler.invoke(call),
             ToolInner::Async(handler) => handler.invoke(call).await,

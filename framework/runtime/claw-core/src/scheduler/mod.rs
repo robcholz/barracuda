@@ -44,7 +44,7 @@ struct RouteState<Http: ClawHttp, Timer: ClawTimer> {
 }
 
 /// Opaque scheduler return route. It carries no Session or Multiagent identity.
-pub(crate) struct AgentRunRoute<Http: ClawHttp, Timer: ClawTimer> {
+struct AgentRunRoute<Http: ClawHttp, Timer: ClawTimer> {
     state: Rc<RefCell<RouteState<Http, Timer>>>,
 }
 
@@ -56,12 +56,11 @@ impl<Http: ClawHttp, Timer: ClawTimer> Clone for AgentRunRoute<Http, Timer> {
     }
 }
 
-pub(crate) struct AgentRunReceiver<Http: ClawHttp, Timer: ClawTimer> {
+struct AgentRunReceiver<Http: ClawHttp, Timer: ClawTimer> {
     state: Rc<RefCell<RouteState<Http, Timer>>>,
 }
 
-pub(crate) fn agent_run_route<Http, Timer>(
-) -> (AgentRunRoute<Http, Timer>, AgentRunReceiver<Http, Timer>)
+fn agent_run_route<Http, Timer>() -> (AgentRunRoute<Http, Timer>, AgentRunReceiver<Http, Timer>)
 where
     Http: ClawHttp,
     Timer: ClawTimer,
@@ -137,9 +136,52 @@ impl<Http: ClawHttp, Timer: ClawTimer> Clone for AgentRunSchedulerHandle<Http, T
     }
 }
 
+/// One logical owner's connection to the process-global Agent scheduler.
+///
+/// The port hides submission routing and return delivery behind one value.
+pub(crate) struct AgentRunPort<Http: ClawHttp, Timer: ClawTimer> {
+    scheduler: AgentRunSchedulerHandle<Http, Timer>,
+    route: AgentRunRoute<Http, Timer>,
+    outputs: AgentRunReceiver<Http, Timer>,
+}
+
 pub(crate) struct ScheduledAgent {
     pub(crate) run: RunId,
     pub(crate) control: AgentRunControl,
+}
+
+impl<Http, Timer> AgentRunPort<Http, Timer>
+where
+    Http: ClawHttp + StreamingHttp + 'static,
+    Timer: ClawTimer + 'static,
+{
+    pub(crate) fn new(scheduler: AgentRunSchedulerHandle<Http, Timer>) -> Self {
+        let (route, outputs) = agent_run_route();
+        Self {
+            scheduler,
+            route,
+            outputs,
+        }
+    }
+
+    pub(crate) fn submit(
+        &self,
+        agent_id: AgentId,
+        agent: Agent<Http, Timer>,
+        message: Message,
+        span: tracing::Span,
+    ) -> ScheduledAgent {
+        self.scheduler
+            .submit(agent_id, agent, message, self.route.clone(), span)
+    }
+}
+
+impl<Http: ClawHttp, Timer: ClawTimer> Stream for AgentRunPort<Http, Timer> {
+    type Item = AgentRunOutput<Http, Timer>;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.get_mut().outputs).poll_next(context)
+    }
 }
 
 impl<Http, Timer> AgentRunSchedulerHandle<Http, Timer>
@@ -147,7 +189,7 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    pub(crate) fn submit(
+    fn submit(
         &self,
         agent_id: AgentId,
         agent: Agent<Http, Timer>,

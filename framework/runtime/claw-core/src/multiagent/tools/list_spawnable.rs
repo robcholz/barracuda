@@ -21,7 +21,7 @@ impl ToolSpec for ListSpawnableAgentsTool {
 }
 
 impl SyncToolHandler for ListSpawnableAgentsTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let kinds: Vec<serde_json::Value> = self
             .policy
             .catalog()
@@ -31,7 +31,7 @@ impl SyncToolHandler for ListSpawnableAgentsTool {
             })
             .collect();
         Ok(ToolOutput {
-            output: serde_json::json!({ "spawnable_agents": kinds }).to_string(),
+            content: serde_json::json!({ "spawnable_agents": kinds }).to_string(),
             ok: true,
         })
     }

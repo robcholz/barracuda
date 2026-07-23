@@ -1,11 +1,11 @@
+use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::collections::VecDeque;
 
 use futures_core::Stream;
 
-use super::{
-    Tool, ToolFuture, ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSetHandle,
-};
+use super::{Tool, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle};
 
 const DETACHED_ACCEPTED: &str = concat!(
     "[detached:accepted]\n",
@@ -13,88 +13,16 @@ const DETACHED_ACCEPTED: &str = concat!(
     "Its result will be delivered automatically."
 );
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolExecution {
-    pub content: String,
-    pub ok: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolRunInvocation {
-    id: Option<String>,
-    name: String,
-    arguments_json: String,
-}
-
-impl ToolRunInvocation {
-    pub fn try_new(id: Option<&str>, name: &str, arguments_json: &str) -> ToolResult<Self> {
-        let invocation = ToolInvocation::try_new(id, name, arguments_json)?;
-        Ok(Self {
-            id: invocation.id().map(str::to_owned),
-            name: invocation.name().to_owned(),
-            arguments_json: invocation.arguments_json().to_owned(),
-        })
-    }
-
-    pub fn id(&self) -> Option<&str> {
-        self.id.as_deref()
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn arguments_json(&self) -> &str {
-        &self.arguments_json
-    }
-
-    pub fn as_invocation(&self) -> Result<ToolInvocation<'_>, ToolInvokeError> {
-        ToolInvocation::try_new(
-            self.id.as_deref(),
-            self.name.as_str(),
-            self.arguments_json.as_str(),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToolRunResult {
-    invocation: ToolRunInvocation,
-    execution: ToolExecution,
-}
-
-impl ToolRunResult {
-    pub fn into_parts(self) -> (ToolRunInvocation, ToolExecution) {
-        (self.invocation, self.execution)
-    }
-}
-
-#[derive(Debug)]
-pub struct ToolDetachCompletion {
-    invocation: ToolRunInvocation,
-    execution: ToolExecution,
-}
-
-impl ToolDetachCompletion {
-    pub fn into_parts(self) -> (ToolRunInvocation, ToolExecution) {
-        (self.invocation, self.execution)
-    }
-}
-
-struct PendingToolRun {
-    invocation: ToolRunInvocation,
-    future: ToolFuture<'static>,
-}
+type ToolRunFuture = Pin<Box<dyn Future<Output = (ToolInvocation, ToolOutput)> + Send + 'static>>;
 
 #[derive(Default)]
 struct ToolRuns {
-    runs: Vec<PendingToolRun>,
-    cursor: usize,
+    runs: VecDeque<ToolRunFuture>,
 }
 
 impl ToolRuns {
-    fn push(&mut self, invocation: ToolRunInvocation, future: ToolFuture<'static>) {
-        self.runs.push(PendingToolRun { invocation, future });
+    fn push(&mut self, future: ToolRunFuture) {
+        self.runs.push_back(future);
     }
 
     fn append(&mut self, other: &mut Self) {
@@ -105,33 +33,26 @@ impl ToolRuns {
         self.runs.is_empty()
     }
 
-    fn poll_next(&mut self, context: &mut Context<'_>) -> Poll<Option<ToolRunResult>> {
+    fn poll_next(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<(ToolInvocation, ToolOutput)>> {
         let count = self.runs.len();
-        if count == 0 {
-            return Poll::Ready(None);
+        for _ in 0..count {
+            let Some(mut future) = self.runs.pop_front() else {
+                return Poll::Ready(None);
+            };
+            match future.as_mut().poll(context) {
+                Poll::Ready(result) => return Poll::Ready(Some(result)),
+                Poll::Pending => self.runs.push_back(future),
+            }
         }
 
-        let start = self.cursor % count;
-        for offset in 0..count {
-            let index = (start + offset) % count;
-            let output = match self.runs[index].future.as_mut().poll(context) {
-                Poll::Ready(output) => output,
-                Poll::Pending => continue,
-            };
-            let run = self.runs.swap_remove(index);
-            self.cursor = if self.runs.is_empty() {
-                0
-            } else {
-                index % self.runs.len()
-            };
-            return Poll::Ready(Some(ToolRunResult {
-                invocation: run.invocation,
-                execution: execution(output),
-            }));
+        if self.runs.is_empty() {
+            Poll::Ready(None)
+        } else {
+            Poll::Pending
         }
-
-        self.cursor = (start + 1) % count;
-        Poll::Pending
     }
 }
 
@@ -150,7 +71,7 @@ impl ToolJoinHandle {
 }
 
 impl Stream for ToolJoinHandle {
-    type Item = ToolRunResult;
+    type Item = (ToolInvocation, ToolOutput);
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.runs.poll_next(context)
@@ -163,20 +84,10 @@ pub struct ToolDetachHandle {
 }
 
 impl Stream for ToolDetachHandle {
-    type Item = ToolDetachCompletion;
+    type Item = (ToolInvocation, ToolOutput);
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.runs.poll_next(context) {
-            Poll::Ready(Some(result)) => {
-                let (invocation, execution) = result.into_parts();
-                Poll::Ready(Some(ToolDetachCompletion {
-                    invocation,
-                    execution,
-                }))
-            }
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+        self.runs.poll_next(context)
     }
 }
 
@@ -190,33 +101,23 @@ impl<'a> ToolRunner<'a> {
         Self { tools }
     }
 
-    pub fn run(&self, calls: Vec<ToolRunInvocation>) -> (ToolJoinHandle, Option<ToolDetachHandle>) {
+    pub fn run(&self, calls: Vec<ToolInvocation>) -> (ToolJoinHandle, Option<ToolDetachHandle>) {
         let mut joined = ToolRuns::default();
         let mut detached = ToolRuns::default();
 
-        for call in calls {
-            let invocation = call;
-            let borrowed = match invocation.as_invocation() {
-                Ok(call) => call,
-                Err(error) => {
-                    joined.push(invocation, ready(Err(error)));
-                    continue;
-                }
-            };
-            let tool = match self.tools.runnable_tool(&borrowed) {
+        for invocation in calls {
+            let tool = match self.tools.runnable_tool(&invocation) {
                 Ok(tool) => tool,
                 Err(error) => {
-                    joined.push(invocation, ready(Err(error)));
+                    joined.push(ready(invocation, Err(error)));
                     continue;
                 }
             };
-            let is_detached = tool.config().detached;
-            let future = owned_tool_future(tool, invocation.clone());
-            if is_detached {
-                joined.push(invocation.clone(), ready(Ok(detached_accepted())));
-                detached.push(invocation, future);
+            if tool.config().detached {
+                joined.push(ready(invocation.clone(), Ok(detached_accepted())));
+                detached.push(run(tool, invocation));
             } else {
-                joined.push(invocation, future);
+                joined.push(run(tool, invocation));
             }
         }
 
@@ -225,31 +126,28 @@ impl<'a> ToolRunner<'a> {
     }
 }
 
-fn ready(output: ToolResult<ToolOutput>) -> ToolFuture<'static> {
-    Box::pin(async move { output })
+fn ready(invocation: ToolInvocation, output: ToolResult<ToolOutput>) -> ToolRunFuture {
+    Box::pin(async move { (invocation, settle(output)) })
+}
+
+fn run(tool: Tool, invocation: ToolInvocation) -> ToolRunFuture {
+    Box::pin(async move {
+        let output = tool.invoke(&invocation).await;
+        (invocation, settle(output))
+    })
 }
 
 fn detached_accepted() -> ToolOutput {
     ToolOutput {
-        output: DETACHED_ACCEPTED.to_owned(),
+        content: DETACHED_ACCEPTED.to_owned(),
         ok: true,
     }
 }
 
-fn owned_tool_future(tool: Tool, invocation: ToolRunInvocation) -> ToolFuture<'static> {
-    Box::pin(async move {
-        let call = invocation.as_invocation()?;
-        tool.invoke(&call).await
-    })
-}
-
-fn execution(output: ToolResult<ToolOutput>) -> ToolExecution {
+fn settle(output: ToolResult<ToolOutput>) -> ToolOutput {
     match output {
-        Ok(output) => ToolExecution {
-            content: output.output,
-            ok: output.ok,
-        },
-        Err(error) => ToolExecution {
+        Ok(output) => output,
+        Err(error) => ToolOutput {
             content: error.to_string(),
             ok: false,
         },
@@ -258,13 +156,11 @@ fn execution(output: ToolResult<ToolOutput>) -> ToolExecution {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use futures_lite::future::block_on;
     use futures_lite::StreamExt as _;
 
     use super::*;
-    use crate::{SyncToolHandler, ToolConfig, ToolGroup, ToolRegistry, ToolSpec};
+    use crate::{SyncToolHandler, ToolConfig, ToolGroup, ToolSet, ToolSpec};
 
     struct EchoTool {
         name: &'static str,
@@ -281,9 +177,9 @@ mod tests {
     }
 
     impl SyncToolHandler for EchoTool {
-        fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
             Ok(ToolOutput {
-                output: self.name.to_owned(),
+                content: self.name.to_owned(),
                 ok: true,
             })
         }
@@ -291,8 +187,7 @@ mod tests {
 
     #[test]
     fn run_splits_one_batch_into_join_and_detach_streams() {
-        let registry = Arc::new(ToolRegistry::new());
-        let mut tools = registry.tool_set();
+        let mut tools = ToolSet::empty();
         let added = tools.add_group(ToolGroup::new(
             "test",
             true,
@@ -311,9 +206,9 @@ mod tests {
         let Ok(tools) = started else {
             return;
         };
-        let joined = ToolRunInvocation::try_new(Some("call-1"), "joined", "{}");
-        let detached_a = ToolRunInvocation::try_new(Some("call-2"), "detached_a", "{}");
-        let detached_b = ToolRunInvocation::try_new(Some("call-3"), "detached_b", "{}");
+        let joined = ToolInvocation::try_new(Some("call-1"), "joined", "{}");
+        let detached_a = ToolInvocation::try_new(Some("call-2"), "detached_a", "{}");
+        let detached_b = ToolInvocation::try_new(Some("call-3"), "detached_b", "{}");
         assert!(joined.is_ok());
         assert!(detached_a.is_ok());
         assert!(detached_b.is_ok());
@@ -324,32 +219,27 @@ mod tests {
         let (join, detach) = ToolRunner::new(&tools).run(vec![joined, detached_a, detached_b]);
         let joined = block_on(join.collect::<Vec<_>>());
         assert_eq!(joined.len(), 3);
-        assert!(joined.iter().any(|result| {
-            result.invocation.id() == Some("call-1") && result.execution.content == "joined"
+        assert!(joined.iter().any(|(invocation, output)| {
+            invocation.id() == Some("call-1") && output.content == "joined"
         }));
-        assert!(joined.iter().any(|result| {
-            result.invocation.id() == Some("call-2")
-                && result.execution.content.starts_with("[detached:accepted]")
+        assert!(joined.iter().any(|(invocation, output)| {
+            invocation.id() == Some("call-2") && output.content.starts_with("[detached:accepted]")
         }));
-        assert!(joined.iter().any(|result| {
-            result.invocation.id() == Some("call-3")
-                && result.execution.content.starts_with("[detached:accepted]")
+        assert!(joined.iter().any(|(invocation, output)| {
+            invocation.id() == Some("call-3") && output.content.starts_with("[detached:accepted]")
         }));
 
         assert!(detach.is_some());
         let Some(detach) = detach else {
             return;
         };
-        let detached = block_on(detach.collect::<Vec<_>>())
-            .into_iter()
-            .map(ToolDetachCompletion::into_parts)
-            .collect::<Vec<_>>();
+        let detached = block_on(detach.collect::<Vec<_>>());
         assert_eq!(detached.len(), 2);
-        assert!(detached.iter().any(|(invocation, execution)| {
-            invocation.id() == Some("call-2") && execution.content == "detached_a" && execution.ok
+        assert!(detached.iter().any(|(invocation, output)| {
+            invocation.id() == Some("call-2") && output.content == "detached_a" && output.ok
         }));
-        assert!(detached.iter().any(|(invocation, execution)| {
-            invocation.id() == Some("call-3") && execution.content == "detached_b" && execution.ok
+        assert!(detached.iter().any(|(invocation, output)| {
+            invocation.id() == Some("call-3") && output.content == "detached_b" && output.ok
         }));
     }
 }

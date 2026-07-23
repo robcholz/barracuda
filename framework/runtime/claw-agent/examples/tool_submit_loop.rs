@@ -89,9 +89,9 @@ impl ToolSpec for TimeNowTool {
 }
 
 impl SyncToolHandler for TimeNowTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
         Ok(ToolOutput {
-            output: "2026-06-29T17:00:00Z".into(),
+            content: "2026-06-29T17:00:00Z".into(),
             ok: true,
         })
     }
@@ -129,20 +129,22 @@ async fn main() -> anyhow::Result<()> {
         "Hello from the agent — the local time is 2026-06-29T17:00:00Z.",
     )]);
 
-    let system =
-        AgentSystem::<MemFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>, ImmediateTimer>::new::<
-            StdThread,
-            TokioExecutor,
-        >(claw_agent::AgentPersistenceConfig {
+    let system = AgentSystem::<
+        MemFs,
+        Sse<BlockingHttpAdapter<SharedScriptHttp>>,
+        ImmediateTimer,
+    >::with_tool_groups::<StdThread, TokioExecutor>(
+        claw_agent::AgentPersistenceConfig {
             persistence_root: "/mem".to_string(),
             skill_roots: Vec::new(),
-        })?;
+        },
+        [ToolGroup::new(
+            "example",
+            true,
+            [Tool::from_sync(TimeNowTool)],
+        )],
+    )?;
     system.link_api(scripted_llm(), claw_agent::ApiUsage::RootAgent, true)?;
-    system.tool_registry().register_group(ToolGroup::new(
-        "example",
-        true,
-        [Tool::from_sync(TimeNowTool)],
-    ))?;
     println!("registered tool `time_now`");
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;
@@ -169,12 +171,12 @@ async fn main() -> anyhow::Result<()> {
                 StreamPart::Delta(text),
             ))) => println!("  [thinking] {text}"),
             SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
-                StreamPart::Delta((call, execution)),
+                StreamPart::Delta((call, output)),
             ))) => {
                 println!(
                     "  [tool] {}: {}",
                     call.name,
-                    if execution.ok { "ok" } else { "failed" }
+                    if output.ok { "ok" } else { "failed" }
                 )
             }
             SessionEvent::Turn(TurnEvent::Iteration(

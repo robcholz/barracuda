@@ -117,6 +117,9 @@ across Sessions; a future directory cache must remain a rebuildable read model.
 - Scheduler owns its active queue/state machine. It is not an
   `Arc<Mutex<AgentRunScheduler>>`; a lightweight single-thread-local submission
   handle or mailbox may be shared.
+- Each logical Agent owner holds one `AgentRunPort`. The port combines the
+  shared submission handle with its opaque return route and output stream;
+  SessionActor and AgentSlot never manage those scheduler internals separately.
 - One fair round polls each run eligible for that round at most once before any
   of those runs receives a second poll.
 - Fairness exists only at poll/yield boundaries. Synchronous blocking work in a
@@ -133,14 +136,16 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   `AgentSlot`, and checked out by the Scheduler. It is a small, non-polymorphic
   lifecycle wrapper around `BaseAgent<H, T>`; there is no `GenericAgent` or
   `dyn Agent` ownership layer.
-- `Agent` owns only cross-task runtime semantics: its BaseAgent, queued
-  messages accepted while checked out, and transient detached-tool runs and
-  completions. `BaseAgent` remains the single-task LLM/tool execution core.
-- `Agent::submit(&mut self, Message)` returns one borrowing `AgentStream<'_>`.
-  The stream emits turn brackets and BaseAgent progress, while its control
-  surface accepts later messages, interrupt, cancel, and approval resolution.
-  A later message is queued as another Agent turn; it is never appended
-  directly into a running BaseAgent task.
+- `Agent` owns only cross-task runtime semantics: its BaseAgent and transient
+  detached-tool runs and completions. `BaseAgent` remains the single-task
+  LLM/tool execution core; SessionActor remains the only message-queue owner.
+- `Agent::submit(&mut self, Message)` returns a borrowing `AgentStream<'_>` and
+  an independent `AgentHandle`. The stream emits turn brackets and BaseAgent
+  progress. The handle provides interrupt, cancel, approval resolution, and an
+  internal `dispatch(Message)` operation.
+- `dispatch` accepts exactly one message only while Agent is idle between
+  turns. It never queues a second message and never appends directly into a
+  running BaseAgent task.
 - Framework-configured detached tools return an immediate accepted tool result
   through the batch `ToolJoinHandle` stream. Before BaseAgent consumes that
   stream, it moves the optional batch `ToolDetachHandle` stream through its
@@ -151,9 +156,9 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   and keeps the same Agent turn. If it arrives while BaseAgent is stopped,
   Agent opens a new `ToolCall`-origin turn. SessionActor only translates these
   brackets; it does not own, poll, join, or persist detached tool futures.
-- Detached runs, ready completions, stream controls, and message queues inside a
-  checked-out Agent are ephemeral. Cancel/drop discards them, and recovery
-  never reconstructs their futures.
+- Detached runs, ready completions, stream controls, and the single accepted
+  between-turn dispatch inside a checked-out Agent are ephemeral. Cancel/drop
+  discards them, and recovery never reconstructs their futures.
 - BaseAgent has only `Running` or `Stopped(reason)`. While running, one
   `IterationLoop<P>` owns the linear `LLM stream -> ToolCalls boundary ->
   permission -> tool execution -> all-ID join` flow. Waiting for approval
@@ -171,10 +176,10 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   It then continues directly into permission and execution; BaseAgent stores no
   duplicate tool-call substate. There is no `ToolCallObserver`, `ToolStartYield`,
   or hand-built observer barrier.
-- BaseAgent accepts a new task through `submit` only while stopped. Agent owns
-  cross-task message queuing. `interrupt` requests a stop at the end of the
-  current LLM/tool loop boundary; `cancel` wakes and cooperatively aborts
-  current async work.
+- BaseAgent accepts a new task through `submit` only while stopped. SessionActor
+  owns cross-task message queuing; Agent only accepts one idle dispatch.
+  `interrupt` requests a stop at the end of the current LLM/tool loop boundary;
+  `cancel` wakes and cooperatively aborts current async work.
 - `BaseAgent` owns only the generic run protocol and already assembled
   dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
   instruction, inherited context, `SharedApiManager` plus its Agent `ApiUsage`,
@@ -341,7 +346,7 @@ rather than changing the scope of `ToolCallId`.
 - Agent states, transcripts, profiles, and long-term memory are
   separate canonical stores; snapshots do not duplicate transcript contents.
 - `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
-  detached-tool futures/completions, queued checked-out Agent messages, `RunId`,
+  detached-tool futures/completions, an accepted idle Agent dispatch, `RunId`,
   checkout state, and checkpoint waiters are transient.
 - After a crash, Manager reconstructs Agents from durable recovery state and
   canonical stores. It never restores a physical future or checkout.
@@ -356,9 +361,11 @@ rather than changing the scope of `ToolCallId`.
 - `append(Message)` only appends to the SessionActor's FIFO inbox. It does not
   poll the Agent and does not wait for the resulting turn to finish.
 - SessionActor starts a resident root by moving it into the global Scheduler.
-  While the same Agent remains checked out, later messages may be forwarded to
-  its control capability and queued by Agent as later turns. SessionActor never
-  mutates BaseAgent's active task.
+  If that Agent remains checked out for detached work after a turn ends,
+  SessionActor removes exactly one message from its FIFO only when the Agent's
+  control capability accepts an idle dispatch. A busy rejection leaves the
+  message at the front of the Session inbox. Agent contains no second message
+  queue, and SessionActor never mutates BaseAgent's active task.
 - `interrupt` affects the current Agent turn. `cancel` ends the checked-out
   Agent stream and discards its transient detached runtime. Neither operation
   removes messages still waiting in the SessionActor inbox. Queue ownership and

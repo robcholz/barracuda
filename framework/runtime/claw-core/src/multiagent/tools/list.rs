@@ -23,9 +23,9 @@ impl ToolSpec for ListSubagentsTool {
 }
 
 impl SyncToolHandler for ListSubagentsTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         Ok(ToolOutput {
-            output: serde_json::json!({ "subagents": self.control.list() }).to_string(),
+            content: serde_json::json!({ "subagents": self.control.list() }).to_string(),
             ok: true,
         })
     }

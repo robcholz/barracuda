@@ -29,25 +29,25 @@ struct SpawnSubagentTool {
 impl ToolSpec for SpawnSubagentTool {
     tool_metadata!("subagent_spawn");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new("subagent_spawn", RiskClass::Moderate)
     }
 }
 
 impl AsyncToolHandler for SpawnSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation<'_>) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(async move { self.invoke_inner(call).await })
     }
 }
 
 impl SpawnSubagentTool {
-    async fn invoke_inner(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    async fn invoke_inner(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let kind = AgentKind::new(non_blank_argument(&args, "kind")?);
         if !self.policy.allows(&kind) {
             tracing::warn!(name: "spawn_kind_rejected", kind = %kind.as_str());
             return Ok(ToolOutput {
-                output: format!(
+                content: format!(
                     "subagent_spawn: kind '{kind}' is not permitted for this agent. \
                      Allowed: {}. This is a policy restriction, not a transient error: \
                      pick a permitted kind or handle the work yourself.",
@@ -72,7 +72,7 @@ impl SpawnSubagentTool {
                 available
             };
             return Ok(ToolOutput {
-                output: format!(
+                content: format!(
                     "subagent_spawn: '{kind}' is not a known agent kind, so it cannot be \
                      created. Spawnable kinds: {available}. Call subagent_list_spawnable to see \
                      what you can spawn."
@@ -94,7 +94,7 @@ impl SpawnSubagentTool {
                 Ok(spawn) => spawn,
                 Err(message) => {
                     return Ok(ToolOutput {
-                        output: message,
+                        content: message,
                         ok: false,
                     });
                 }
@@ -103,7 +103,7 @@ impl SpawnSubagentTool {
                 ToolError::InvokeRejected("foreground subagent result channel closed".to_owned())
             })?;
             Ok(ToolOutput {
-                output: result.text(),
+                content: result.text(),
                 ok: result.ok(),
             })
         } else {
@@ -120,13 +120,13 @@ impl SpawnSubagentTool {
                 Ok(child) => child,
                 Err(message) => {
                     return Ok(ToolOutput {
-                        output: message,
+                        content: message,
                         ok: false,
                     });
                 }
             };
             Ok(ToolOutput {
-                output: format!(
+                content: format!(
                     "Subagent {child} named '{name}' requested with a {} ms timeout; its result will be reported back when it finishes.",
                     timeout.millis()
                 ),

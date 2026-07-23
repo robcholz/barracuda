@@ -3,7 +3,9 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use claw_agent::{AgentPersistenceConfig, AgentSystem, SessionEvent, SessionStream};
+use claw_agent::{
+    AgentError, AgentPersistenceConfig, AgentSystem, SessionEvent, SessionStream, ToolGroup,
+};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::http::{
     Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
@@ -131,12 +133,21 @@ pub fn mem_root(name: &str) -> String {
 }
 
 pub fn build_mem_system(root: &str, bodies: Vec<String>) -> MemAgentSystem {
+    try_build_mem_system_with_tool_groups(root, bodies, std::iter::empty()).unwrap()
+}
+
+pub fn try_build_mem_system_with_tool_groups(
+    root: &str,
+    bodies: Vec<String>,
+    tool_groups: impl IntoIterator<Item = ToolGroup>,
+) -> Result<MemAgentSystem, AgentError> {
     install_script(bodies);
-    let system = MemAgentSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
-    system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
-        .unwrap();
-    system
+    let system = MemAgentSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        persistence(root),
+        tool_groups,
+    )?;
+    system.link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)?;
+    Ok(system)
 }
 
 pub fn assistant_text(text: &str) -> String {

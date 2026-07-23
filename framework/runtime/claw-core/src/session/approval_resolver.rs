@@ -4,8 +4,11 @@
 //! text, and the SessionActor runs one short LLM/tool round to classify that text
 //! into the internal [`ApprovalDecision`] it feeds back to the parked agent.
 
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 
 use claw_api::{ChatError, ChatRequest, ClawApiAsync, InitError, RetryPolicy, ToolCall};
 use claw_interface::http::StreamingHttp;
@@ -13,20 +16,179 @@ use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolRegistry, ToolRunInvocation, ToolRunner, ToolSetError, ToolSpec,
+    ToolOutput, ToolRunner, ToolSet, ToolSetError, ToolSpec,
 };
 use futures_lite::StreamExt as _;
 use serde_json::{json, Value};
+use tracing::Instrument as _;
 
-use crate::agent::ApprovalDecision;
+use crate::agent::{ApprovalDecision, ToolCallId};
 use crate::config::{ApiUsage, SharedApiManager};
+
+use super::{InputRequestId, InputRequestKind, Message};
 
 const APPROVAL_RESOLVER_PROMPT: &str = prompt!("approval/resolver_system.md");
 
 const DEFAULT_CLARIFICATION: &str = "Please clearly reply with approval or rejection.";
 const DEFAULT_REJECTION: &str = "rejected";
-static APPROVAL_TOOL_PARENT: LazyLock<Arc<ToolRegistry>> =
-    LazyLock::new(|| Arc::new(ToolRegistry::new()));
+
+type ApprovalFuture =
+    Pin<Box<dyn Future<Output = Result<PermissionReplyResolution, ApprovalResolverError>>>>;
+
+struct ApprovalRequest {
+    request: InputRequestId,
+    tool_call_id: ToolCallId,
+    tool_call: ToolCall,
+    reason: String,
+}
+
+enum ApprovalState {
+    Waiting(ApprovalRequest),
+    Resolving {
+        request: ApprovalRequest,
+        control: ApprovalControl,
+        future: ApprovalFuture,
+    },
+}
+
+pub(super) struct ApprovalCompletion {
+    request: ApprovalRequest,
+    result: Result<PermissionReplyResolution, ApprovalResolverError>,
+}
+
+impl ApprovalCompletion {
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        InputRequestId,
+        ToolCallId,
+        ToolCall,
+        String,
+        Result<PermissionReplyResolution, ApprovalResolverError>,
+    ) {
+        (
+            self.request.request,
+            self.request.tool_call_id,
+            self.request.tool_call,
+            self.request.reason,
+            self.result,
+        )
+    }
+}
+
+pub(super) enum ApprovalRespondError {
+    NotWaiting,
+    Resolving,
+    RequestMismatch { expected: InputRequestId },
+}
+
+pub(super) struct ApprovalFlow {
+    api_manager: SharedApiManager,
+    next_request: u32,
+    state: Option<ApprovalState>,
+}
+
+impl ApprovalFlow {
+    pub(super) fn new(api_manager: SharedApiManager) -> Self {
+        Self {
+            api_manager,
+            next_request: 1,
+            state: None,
+        }
+    }
+
+    pub(super) fn request(
+        &mut self,
+        tool_call_id: ToolCallId,
+        tool_call: ToolCall,
+        reason: String,
+    ) -> (InputRequestId, InputRequestKind) {
+        let request = InputRequestId(self.next_request);
+        self.next_request = self.next_request.saturating_add(1);
+        let kind = InputRequestKind::PermissionApproval {
+            tool_call: tool_call.clone(),
+            reason: reason.clone(),
+        };
+        self.state = Some(ApprovalState::Waiting(ApprovalRequest {
+            request,
+            tool_call_id,
+            tool_call,
+            reason,
+        }));
+        (request, kind)
+    }
+
+    pub(super) fn respond<H, Timer>(
+        &mut self,
+        received: InputRequestId,
+        message: Message,
+    ) -> Result<(), ApprovalRespondError>
+    where
+        H: ClawHttp + StreamingHttp + Default + 'static,
+        Timer: ClawTimer + Default + 'static,
+    {
+        let Some(state) = self.state.take() else {
+            return Err(ApprovalRespondError::NotWaiting);
+        };
+        let request = match state {
+            ApprovalState::Waiting(request) => request,
+            resolving @ ApprovalState::Resolving { .. } => {
+                self.state = Some(resolving);
+                return Err(ApprovalRespondError::Resolving);
+            }
+        };
+        if request.request != received {
+            let expected = request.request;
+            self.state = Some(ApprovalState::Waiting(request));
+            return Err(ApprovalRespondError::RequestMismatch { expected });
+        }
+
+        let control = ApprovalControl::new();
+        let task_control = control.clone();
+        let api_manager = Arc::clone(&self.api_manager);
+        let tool_call = request.tool_call.clone();
+        let reason = request.reason.clone();
+        let user_reply = message.as_str().to_owned();
+        let future = Box::pin(
+            async move {
+                resolve_permission_reply::<H, Timer>(
+                    &api_manager,
+                    &tool_call,
+                    &reason,
+                    &user_reply,
+                    &task_control,
+                )
+                .await
+            }
+            .instrument(tracing::info_span!("approval.resolve")),
+        );
+        self.state = Some(ApprovalState::Resolving {
+            request,
+            control,
+            future,
+        });
+        Ok(())
+    }
+
+    pub(super) fn poll(&mut self, context: &mut Context<'_>) -> Poll<Option<ApprovalCompletion>> {
+        let Some(ApprovalState::Resolving { future, .. }) = self.state.as_mut() else {
+            return Poll::Pending;
+        };
+        let Poll::Ready(result) = future.as_mut().poll(context) else {
+            return Poll::Pending;
+        };
+        let Some(ApprovalState::Resolving { request, .. }) = self.state.take() else {
+            unreachable!("a ready approval remains in the resolving state")
+        };
+        Poll::Ready(Some(ApprovalCompletion { request, result }))
+    }
+
+    pub(super) fn cancel(&mut self) {
+        if let Some(ApprovalState::Resolving { control, .. }) = self.state.take() {
+            control.cancel();
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum PermissionReplyResolution {
@@ -60,18 +222,18 @@ pub enum ApprovalResolverError {
 }
 
 #[derive(Clone)]
-pub(super) struct ApprovalControl {
+struct ApprovalControl {
     cancelled: Arc<AtomicBool>,
 }
 
 impl ApprovalControl {
-    pub(super) fn new() -> Self {
+    fn new() -> Self {
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub(super) fn cancel(&self) {
+    fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
     }
 
@@ -93,13 +255,13 @@ impl ResolvePermissionReplyTool {
 impl ToolSpec for ResolvePermissionReplyTool {
     tool_metadata!("permission_resolve_reply");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new("permission_resolve_reply", RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for ResolvePermissionReplyTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args: Value = serde_json::from_str(call.arguments_json()).map_err(|error| {
             ToolError::InvalidArgumentsJson(format!("invalid tool arguments JSON: {error}"))
         })?;
@@ -161,13 +323,13 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner()) = Some(resolution);
         Ok(ToolOutput {
-            output: "approval reply resolved".to_string(),
+            content: "approval reply resolved".to_string(),
             ok: true,
         })
     }
 }
 
-pub(super) async fn resolve_permission_reply<H, Timer>(
+async fn resolve_permission_reply<H, Timer>(
     api_manager: &SharedApiManager,
     tool_call: &ToolCall,
     reason: &str,
@@ -190,7 +352,7 @@ where
     }
     let resolution = Arc::new(Mutex::new(None));
     // Approval classification uses an isolated local tool set.
-    let mut tools = APPROVAL_TOOL_PARENT.tool_set();
+    let mut tools = ToolSet::empty();
     tools.add_group(ToolGroup::new(
         "permission",
         true,
@@ -243,7 +405,7 @@ where
 
     let runner = ToolRunner::new(&tools);
     for tool_call in &response.tool_calls {
-        let call = ToolRunInvocation::try_new(
+        let call = ToolInvocation::try_new(
             Some(&tool_call.id),
             &tool_call.name,
             &tool_call.arguments_json,

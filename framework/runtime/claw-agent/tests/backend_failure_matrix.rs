@@ -256,9 +256,9 @@ impl ToolSpec for PersistenceTool {
 }
 
 impl SyncToolHandler for PersistenceTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         Ok(ToolOutput {
-            output: call.arguments_json().to_owned(),
+            content: call.arguments_json().to_owned(),
             ok: true,
         })
     }
@@ -271,16 +271,14 @@ fn fs_read_failure() -> Option<String> {
 }
 
 fn fs_persistence_write_is_deferred() -> Option<String> {
-    let system = build_fs_write_fail_system().unwrap();
-    let registered = system.tool_registry().register_group(ToolGroup::new(
+    let system = build_fs_write_fail_system_with_tool_groups([ToolGroup::new(
         "persistence",
         true,
         [Tool::from_sync(PersistenceTool)],
-    ));
-    registered.unwrap();
+    )])
+    .unwrap();
     system
-        .tool_registry()
-        .disable("persistence_probe")
+        .disable_tool("persistence_probe")
         .err()
         .map(|error| error.to_string())
 }
@@ -344,7 +342,16 @@ fn build_fs_read_fail_system() -> Result<FsReadFailSystem, AgentError> {
 }
 
 fn build_fs_write_fail_system() -> Result<FsWriteFailSystem, AgentError> {
-    let system = FsWriteFailSystem::new::<StdThread, TokioExecutor>(persistence("/fs-write-fail"))?;
+    build_fs_write_fail_system_with_tool_groups(std::iter::empty())
+}
+
+fn build_fs_write_fail_system_with_tool_groups(
+    tool_groups: impl IntoIterator<Item = ToolGroup>,
+) -> Result<FsWriteFailSystem, AgentError> {
+    let system = FsWriteFailSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        persistence("/fs-write-fail"),
+        tool_groups,
+    )?;
     system
         .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();

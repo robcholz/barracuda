@@ -45,13 +45,13 @@ struct ToolLoadTool {
 impl ToolSpec for ToolLoadTool {
     tool_metadata!("tool_load");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for ToolLoadTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let group_id = optional_string_argument(&args, "group_id")?
             .map(|group_id| group_id.trim().to_owned())
@@ -67,7 +67,7 @@ impl SyncToolHandler for ToolLoadTool {
                 .record_loaded_tool_group(group_id.clone());
         }
         Ok(ToolOutput {
-            output: json!({
+            content: json!({
                 "group_id": group_id,
                 "loaded": loaded,
                 "available_next_turn": loaded,
@@ -81,15 +81,15 @@ impl SyncToolHandler for ToolLoadTool {
 impl ToolSpec for ToolSearchTool {
     tool_metadata!("tool_search");
 
-    fn classify(&self, _call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::Safe)
     }
 }
 
 impl SyncToolHandler for ToolSearchTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         Ok(ToolOutput {
-            output: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
+            content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
             ok: true,
         })
     }
@@ -97,12 +97,9 @@ impl SyncToolHandler for ToolSearchTool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use claw_persistence::DurableState;
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
-        ToolSpec,
+        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
     };
 
     use super::ToolLoadTool;
@@ -110,16 +107,14 @@ mod tests {
 
     #[test]
     fn successful_load_is_recorded_in_agent_state() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry
-            .register_group(ToolGroup::new(
+        let mut tool_set = ToolSet::empty();
+        tool_set
+            .add_group(ToolGroup::new(
                 "hidden",
                 false,
                 [Tool::from_sync(HiddenTool)],
             ))
             .expect("hidden group registers");
-        registry.start_all().expect("registry starts");
-        let mut tool_set = registry.tool_set();
         let discovery = tool_set.discovery();
         {
             let _initial_tools = tool_set.begin().expect("tool set begins");
@@ -152,9 +147,9 @@ mod tests {
     }
 
     impl SyncToolHandler for HiddenTool {
-        fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
             Ok(ToolOutput {
-                output: "ok".to_owned(),
+                content: "ok".to_owned(),
                 ok: true,
             })
         }

@@ -23,13 +23,9 @@ pub(crate) enum CapToolError {
     InvalidDescriptor,
     #[error("invalid capability schema: {0}")]
     InvalidSchema(String),
-    #[error("tool registry failed: {0}")]
-    Registry(#[from] claw_tool::ToolRegistryError),
 }
 
-pub(crate) fn register_capability_tools(
-    registry: &claw_tool::ToolRegistry,
-) -> Result<(), CapToolError> {
+pub(crate) fn capability_tool_groups() -> Result<Vec<ToolGroup>, CapToolError> {
     let list = unsafe { claw_cap_list() };
     if list.count > 0 && list.items.is_null() {
         return Err(CapToolError::InvalidList);
@@ -51,10 +47,10 @@ pub(crate) fn register_capability_tools(
             .or_default()
             .push(Tool::from_sync(CapTool::try_from(descriptor)?));
     }
-    for (group_id, tools) in groups {
-        registry.register_group(ToolGroup::new(group_id, false, tools))?;
-    }
-    Ok(())
+    Ok(groups
+        .into_iter()
+        .map(|(group_id, tools)| ToolGroup::new(group_id, false, tools))
+        .collect())
 }
 
 fn is_available_to_root_agent(descriptor: &ClawCapDescriptor) -> Result<bool, CapToolError> {
@@ -151,7 +147,7 @@ impl ToolSpec for CapTool {
 }
 
 impl SyncToolHandler for CapTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
         if call.name() != self.name {
             return Err(ToolError::NotFound(call.name().to_owned()).into());
         }
@@ -175,7 +171,10 @@ pub(crate) fn call_capability(name: &str, arguments_json: &str) -> ToolResult<To
     };
     let output = c_buffer_to_string(&output);
     if err == ESP_OK {
-        Ok(ToolOutput { output, ok: true })
+        Ok(ToolOutput {
+            content: output,
+            ok: true,
+        })
     } else {
         Err(ToolError::InvokeRejected(output).into())
     }

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use claw_api::ToolCall;
 use claw_memory::TurnError;
-use claw_tool::{ToolDetachHandle, ToolExecution};
+use claw_tool::{ToolDetachHandle, ToolOutput};
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use futures_lite::future;
@@ -70,7 +70,7 @@ pub(crate) enum AgentIterationEvent {
     Started(IterationId),
     Reasoning(StreamPart<String>),
     Output(StreamPart<String>),
-    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
+    ToolResult(StreamPart<(ToolCall, ToolOutput)>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

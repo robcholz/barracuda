@@ -22,7 +22,7 @@ use super::state::{
     ensure_next_agent, ensure_next_session, next_session, SessionManagerState,
     SessionPersistentState,
 };
-use super::{SessionError, SessionStream};
+use super::{SessionEvent, SessionStream};
 
 pub(super) type SharedAgentManager<Filesystem, Http, Timer> =
     Rc<AgentManager<Filesystem, Http, Timer>>;
@@ -215,7 +215,7 @@ where
             return Err(OpenSessionError::SessionNotFound(session));
         }
         self.ensure_actor(session);
-        let (events, receiver) = async_channel::unbounded::<Result<_, SessionError>>();
+        let (events, receiver) = async_channel::unbounded::<SessionEvent>();
         let task = self
             .sessions
             .get_mut(&session)
@@ -253,7 +253,7 @@ where
         self.actor_poll_queue.is_empty()
     }
 
-    pub(crate) fn purge_dead(&mut self) -> Result<(), AgentCreateError> {
+    fn purge_dead(&mut self) -> Result<(), AgentCreateError> {
         let persisted_agents = self.agent_manager.list_persisted_agents()?;
         let next_agent_id = persisted_agents
             .iter()

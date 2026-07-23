@@ -41,7 +41,7 @@ use crate::abi::{
     ESP_ERR_INVALID_SIZE, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FOUND, ESP_ERR_TIMEOUT, ESP_FAIL,
     ESP_OK,
 };
-use crate::tool::register_capability_tools;
+use crate::tool::capability_tool_groups;
 
 /// The device agent runtime. `AgentSystem` is now backend-erased and
 /// `Send + Sync` (its `Orchestrator` handle owns the drive worker), so it is held
@@ -322,11 +322,12 @@ fn build_agent(
     api: Option<ClawApiConfig>,
     persistence: AgentPersistenceConfig,
 ) -> Result<DeviceAgent, CabiError> {
-    let agent = DeviceAgent::new::<EspIdfThread, EspIdfExecutor>(persistence)?;
+    let tool_groups = capability_tool_groups()?;
+    let agent =
+        DeviceAgent::with_tool_groups::<EspIdfThread, EspIdfExecutor>(persistence, tool_groups)?;
     if let Some(api) = api {
         agent.link_api(api, ApiUsage::RootAgent, true)?;
     }
-    register_capability_tools(agent.tool_registry())?;
     Ok(agent)
 }
 

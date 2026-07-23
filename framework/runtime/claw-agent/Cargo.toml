@@ -10,8 +10,8 @@ name = "claw_agent"
 path = "src/lib.rs"
 
 # A minimal REPL that drives the whole agent system against a live LLM with
-# on-disk memory. It uses the host-target backends (`AgentSystem::on_disk`) and
-# dev workflow dependencies plus cache profiling, so both features are required.
+# on-disk memory. It uses host-target backends, dev workflow dependencies, and
+# cache profiling, so both features are required.
 [[bin]]
 name = "claw-agent-chat"
 path = "src/bin/claw-agent-chat.rs"
@@ -27,8 +27,7 @@ required-features = ["dev"]
 # - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
 #   feature. The firmware path reaches ESP-IDF implementations through
 #   `claw-cabi` + `claw-sys`.
-# - `host-backends` enables host-target concrete implementations and the
-#   `AgentSystem::on_disk` constructor.
+# - `host-backends` enables host-target concrete implementations for host tools.
 # - `dev` is the shared local workflow bundle for examples and host tools.
 # - `cache_profile` forwards provider usage support; `claw-agent-chat` requires it.
 #

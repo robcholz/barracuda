@@ -15,20 +15,14 @@ pub use claw_core::{
     OpenSessionError, PermissionLevel, ReasoningEffort, SessionCloseReason, SessionControl,
     SessionControlError, SessionCreateError, SessionError, SessionEvent, SessionEventError,
     SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall,
-    ToolCallId, ToolExecution, TurnEvent, TurnEventError, TurnId, TurnOrigin,
+    ToolCallId, ToolOutput, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, FsError};
-#[cfg(feature = "host-backends")]
-use claw_interface::{DiskFs, RealHttp, TokioTimer};
-use claw_persistence::{DurableState, Persistence, PersistenceError, SharedPersistence};
-use claw_tool::{ToolRegistry, ToolRegistryError, ToolRegistryState};
-
-const TOOL_REGISTRY_ENTRY: &str = "tool_registry";
-
-#[cfg(feature = "host-backends")]
-pub type HostAgentSystem = AgentSystem<DiskFs, RealHttp, TokioTimer>;
+use claw_persistence::{Persistence, PersistenceError, SharedPersistence};
+pub use claw_tool::ToolGroup;
+use claw_tool::{ToolRegistry, ToolRegistryError};
 
 pub type AgentResult<T> = Result<T, AgentError>;
 
@@ -113,14 +107,33 @@ where
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
+        Self::with_tool_groups::<Thread, Executor>(persistence, std::iter::empty::<ToolGroup>())
+    }
+
+    /// Build a fully injectable agent system with its initial tool groups.
+    ///
+    /// The tool registry and runtime are bound to the same persistence owner.
+    /// Registering groups during construction keeps that ownership relationship
+    /// internal while still allowing host and device adapters to supply tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError`] when persistence, tool registration, or runtime
+    /// construction fails.
+    pub fn with_tool_groups<Thread, Executor>(
+        persistence: AgentPersistenceConfig,
+        tool_groups: impl IntoIterator<Item = ToolGroup>,
+    ) -> AgentResult<Self>
+    where
+        Thread: ClawThread,
+        Executor: ClawExecutor + 'static,
+    {
         let shared_persistence: SharedPersistence<Filesystem> =
             Arc::new(Persistence::new(persistence.persistence_root.clone())?);
-        let tool_registry =
-            shared_persistence.singleton::<ToolRegistryState>(TOOL_REGISTRY_ENTRY)?;
-        let tool_registry_dto = tool_registry.load()?.unwrap_or_default();
-        let tool_registry_state = DurableState::new(tool_registry_dto);
-        tool_registry.register(&tool_registry_state)?;
-        let tools = Arc::new(ToolRegistry::from_state(tool_registry_state));
+        let tools = Arc::new(ToolRegistry::new(Arc::clone(&shared_persistence))?);
+        for group in tool_groups {
+            tools.register_group(group)?;
+        }
         let runtime = AgentRuntime::new::<Filesystem, Http, Timer, Thread, Executor>(
             Arc::clone(&tools),
             shared_persistence,
@@ -135,9 +148,24 @@ where
         })
     }
 
-    /// Tool registry used by this system.
-    pub fn tool_registry(&self) -> &ToolRegistry {
-        &self.tools
+    /// Enable a registered tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::Tool`] when the tool is not registered.
+    pub fn enable_tool(&self, name: &str) -> AgentResult<()> {
+        self.tools.enable(name)?;
+        Ok(())
+    }
+
+    /// Disable a registered tool.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AgentError::Tool`] when the tool is not registered.
+    pub fn disable_tool(&self, name: &str) -> AgentResult<()> {
+        self.tools.disable(name)?;
+        Ok(())
     }
 
     /// Start every registered tool.

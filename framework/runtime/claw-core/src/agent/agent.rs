@@ -11,7 +11,7 @@ use claw_context::Context as AgentContext;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
-use claw_tool::{ToolDetachCompletion, ToolDetachHandle, ToolExecution};
+use claw_tool::{ToolDetachHandle, ToolInvocation, ToolOutput};
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
 
@@ -27,19 +27,18 @@ use crate::session::Message;
 #[derive(Clone)]
 struct DetachedCompletion {
     call: ToolCall,
-    execution: ToolExecution,
+    output: ToolOutput,
 }
 
 impl DetachedCompletion {
-    fn from_tool(completion: ToolDetachCompletion) -> Self {
-        let (invocation, execution) = completion.into_parts();
+    fn from_tool((invocation, output): (ToolInvocation, ToolOutput)) -> Self {
         Self {
             call: ToolCall {
                 id: invocation.id().unwrap_or_default().to_owned(),
                 name: invocation.name().to_owned(),
                 arguments_json: invocation.arguments_json().to_owned(),
             },
-            execution,
+            output,
         }
     }
 }
@@ -384,7 +383,7 @@ fn detached_turn(completions: &mut VecDeque<DetachedCompletion>) -> Option<Pendi
 fn render_completions(completions: &[DetachedCompletion]) -> String {
     let mut message = String::from("[detached:results]");
     for completion in completions {
-        let (status, label) = if completion.execution.ok {
+        let (status, label) = if completion.output.ok {
             ("completed", "result")
         } else {
             ("failed", "error")
@@ -392,7 +391,7 @@ fn render_completions(completions: &[DetachedCompletion]) -> String {
         let _ = write!(
             message,
             "\n\n[detached:{status}]\ntool: {}\ncall_id: {}\n{label}:\n{}",
-            completion.call.name, completion.call.id, completion.execution.content,
+            completion.call.name, completion.call.id, completion.output.content,
         );
     }
     message

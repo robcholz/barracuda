@@ -41,24 +41,23 @@ fn detached_completion_opens_a_tool_call_turn_after_the_root_becomes_idle() {
     ]);
 
     let gate = Arc::new(ToolGate::default());
-    let system = TestSystem::new::<StdThread, TokioExecutor>(claw_agent::AgentPersistenceConfig {
-        persistence_root: root,
-        skill_roots: Vec::new(),
-    })
-    .unwrap();
-    system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
-        .unwrap();
-    system
-        .tool_registry()
-        .register_group(ToolGroup::new(
+    let system = TestSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        claw_agent::AgentPersistenceConfig {
+            persistence_root: root,
+            skill_roots: Vec::new(),
+        },
+        [ToolGroup::new(
             "background",
             true,
             [Tool::from_async(BackgroundTool {
                 gate: Arc::clone(&gate),
             })
             .with_config(ToolConfig { detached: true })],
-        ))
+        )],
+    )
+    .unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
         .unwrap();
     system.start_all().unwrap();
 
@@ -181,12 +180,12 @@ impl ToolSpec for BackgroundTool {
 }
 
 impl AsyncToolHandler for BackgroundTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation<'_>) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(poll_fn(move |context| {
             self.gate.started.store(true, Ordering::SeqCst);
             if self.gate.released.load(Ordering::SeqCst) {
                 return Poll::Ready(Ok(ToolOutput {
-                    output: "background result".to_owned(),
+                    content: "background result".to_owned(),
                     ok: true,
                 }));
             }

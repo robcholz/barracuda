@@ -22,25 +22,25 @@ struct FollowupSubagentTool {
 impl ToolSpec for FollowupSubagentTool {
     tool_metadata!("subagent_followup");
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         action_with_agent_resource("subagent_followup", RiskClass::Moderate, call)
     }
 }
 
 impl SyncToolHandler for FollowupSubagentTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let target = required_agent_id(&args, "subagent_followup")?;
         let message = Message::text(non_blank_argument(&args, "message")?);
         if self.control.get(target).is_none() {
             return Ok(ToolOutput {
-                output: format!("Cannot follow up {target}: it is not a subagent in your subtree."),
+                content: format!("Cannot follow up {target}: it is not a subagent in your subtree."),
                 ok: false,
             });
         }
         self.control.followup(target, message);
         Ok(ToolOutput {
-            output: format!("Subagent {target} retasked with new input."),
+            content: format!("Subagent {target} retasked with new input."),
             ok: true,
         })
     }

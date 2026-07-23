@@ -24,18 +24,18 @@ impl ToolSpec for WatchSubagentTool {
         true
     }
 
-    fn classify(&self, call: &ToolInvocation<'_>) -> Action {
+    fn classify(&self, call: &ToolInvocation) -> Action {
         action_with_agent_resource("subagent_watch", RiskClass::Safe, call)
     }
 }
 
 impl SyncToolHandler for WatchSubagentTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let target = required_agent_id(&args, "subagent_watch")?;
         match self.control.get(target) {
             Some(snapshot) => Ok(ToolOutput {
-                output: serde_json::to_string(&snapshot).map_err(|error| {
+                content: serde_json::to_string(&snapshot).map_err(|error| {
                     ToolError::InvokeRejected(format!(
                         "failed to serialize subagent snapshot: {error}"
                     ))
@@ -43,7 +43,7 @@ impl SyncToolHandler for WatchSubagentTool {
                 ok: true,
             }),
             None => Ok(ToolOutput {
-                output: format!(
+                content: format!(
                     "No subagent {target} in your subtree (unknown id, or not one of yours)."
                 ),
                 ok: false,

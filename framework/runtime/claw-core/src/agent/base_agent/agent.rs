@@ -679,15 +679,15 @@ where
                         }
                         IterationLoopEvent::Iteration(IterationEvent::ToolResult(part)) => {
                             match part {
-                                StreamPart::Delta((call, execution)) => {
+                                StreamPart::Delta((call, output)) => {
                                     if tool_results_ended {
                                         result = Some(Err(AgentError::StateInvariant));
                                         break;
                                     }
                                     if let Err(error) = consumer.turn.record_tool_result(
                                         &call.id,
-                                        &execution.content,
-                                        !execution.ok,
+                                        &output.content,
+                                        !output.ok,
                                     ) {
                                         result = Some(Err(AgentError::from(error)));
                                         break;
@@ -699,7 +699,7 @@ where
                                     yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                                         AgentIterationEvent::ToolResult(StreamPart::Delta((
                                             call,
-                                            execution,
+                                            output,
                                         ))),
                                     )));
                                 }

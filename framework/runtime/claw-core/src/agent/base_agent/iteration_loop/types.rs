@@ -1,5 +1,5 @@
 use claw_api::{ChatError, ToolCall};
-use claw_tool::{ToolDetachHandle, ToolExecution, ToolSetError, ToolSetHandle};
+use claw_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
 use claw_utils::stream::StreamPart;
 use serde_json::Value;
 use strum::IntoStaticStr;
@@ -46,7 +46,7 @@ pub(crate) enum IterationEvent {
     /// BaseAgent records these calls before polling the iteration again and
     /// allowing tool execution to begin.
     BeforeToolCalls(Vec<ToolCall>),
-    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
+    ToolResult(StreamPart<(ToolCall, ToolOutput)>),
 }
 
 /// One internal item produced by an [`super::IterationLoop`].

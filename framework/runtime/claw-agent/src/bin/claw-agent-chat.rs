@@ -22,12 +22,12 @@ use std::path::Path;
 use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
-    stream::StreamPart, AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind,
+    stream::StreamPart, AgentPersistenceConfig, AgentSystem, InputRequestId, InputRequestKind,
     IterationEvent, Message, PermissionLevel, SessionControl, SessionError, SessionEvent,
-    SessionPersistence, SessionStream, ToolCall, ToolExecution, TurnEvent, TurnOrigin,
+    SessionPersistence, SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
 use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
-use claw_interface::{StdThread, TokioExecutor};
+use claw_interface::{DiskFs, RealHttp, StdThread, TokioExecutor, TokioTimer};
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use futures_lite::StreamExt;
 
@@ -252,12 +252,12 @@ impl ContentRenderer {
 
     fn tool_result(
         &mut self,
-        part: StreamPart<(ToolCall, ToolExecution)>,
+        part: StreamPart<(ToolCall, ToolOutput)>,
         editor: &mut ChatLineEditor,
     ) -> Result<()> {
         self.finish(editor)?;
-        if let StreamPart::Delta((call, execution)) = part {
-            let status = if execution.ok { "ok" } else { "failed" };
+        if let StreamPart::Delta((call, output)) = part {
+            let status = if output.ok { "ok" } else { "failed" };
             self.event(
                 editor,
                 "tool",
@@ -531,7 +531,8 @@ async fn run() -> Result<()> {
         required("CLAW_LLM_BASE_URL")?,
     );
     llm_config.timeout_ms = 60_000;
-    let system = HostAgentSystem::new::<StdThread, TokioExecutor>(persistence)?;
+    let system =
+        AgentSystem::<DiskFs, RealHttp, TokioTimer>::new::<StdThread, TokioExecutor>(persistence)?;
     system.link_api(llm_config, claw_agent::ApiUsage::RootAgent, true)?;
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;

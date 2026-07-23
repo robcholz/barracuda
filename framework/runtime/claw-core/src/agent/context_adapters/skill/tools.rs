@@ -37,18 +37,21 @@ impl ToolSpec for ListSkillTool {
 }
 
 impl SyncToolHandler for ListSkillTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let mut skills = lock_skill_set(&self.skills);
         let output = match skills.list_skill() {
             Ok(output) => output.to_owned(),
             Err(error) => {
                 return Ok(ToolOutput {
-                    output: format!("Could not list skills: {error}"),
+                    content: format!("Could not list skills: {error}"),
                     ok: false,
                 });
             }
         };
-        Ok(ToolOutput { output, ok: true })
+        Ok(ToolOutput {
+            content: output,
+            ok: true,
+        })
     }
 }
 
@@ -62,7 +65,7 @@ impl ToolSpec for ActivateSkillTool {
 }
 
 impl SyncToolHandler for ActivateSkillTool {
-    fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let args = call.arguments_value()?;
         let skill_id = match args.get("skill_id") {
             Some(Value::String(skill_id)) => skill_id.trim(),
@@ -88,7 +91,7 @@ impl SyncToolHandler for ActivateSkillTool {
         let mut skills = lock_skill_set(&self.skills);
         match skills.activate_skill(&SkillId::new(skill_id)) {
             Ok(document) => Ok(ToolOutput {
-                output: document.into_content(),
+                content: document.into_content(),
                 ok: true,
             }),
             Err(SkillError::NotFound(_)) => Err(ToolError::InvokeRejected(format!(
@@ -96,7 +99,7 @@ impl SyncToolHandler for ActivateSkillTool {
             ))
             .into()),
             Err(error) => Ok(ToolOutput {
-                output: format!("Could not activate skill \"{skill_id}\": {error}"),
+                content: format!("Could not activate skill \"{skill_id}\": {error}"),
                 ok: false,
             }),
         }
@@ -113,16 +116,16 @@ impl ToolSpec for ReloadSkillsTool {
 }
 
 impl SyncToolHandler for ReloadSkillsTool {
-    fn invoke(&self, _call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
+    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
         let skills = lock_skill_set(&self.skills);
         if let Err(error) = skills.reload() {
             return Ok(ToolOutput {
-                output: format!("Could not refresh skills from disk: {error}"),
+                content: format!("Could not refresh skills from disk: {error}"),
                 ok: false,
             });
         }
         Ok(ToolOutput {
-            output: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
+            content: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
             ok: true,
         })
     }

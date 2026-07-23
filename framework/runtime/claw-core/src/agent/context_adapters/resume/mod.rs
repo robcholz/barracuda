@@ -97,8 +97,6 @@ fn resume_reminder_kind() -> BlockKind {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::ResumeContextAdapter;
     use crate::agent::base_agent::ContextAdapter;
     use crate::agent::{AgentKind, BaseAgentState};
@@ -106,14 +104,12 @@ mod tests {
     use claw_context::Context;
     use claw_persistence::DurableState;
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
-        ToolSpec,
+        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
     };
 
     #[test]
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {
-        let registry = Arc::new(ToolRegistry::new());
-        let mut tool_set = registry.tool_set();
+        let mut tool_set = ToolSet::empty();
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state.get_mut().record_inflight_toolcalls(vec![ToolCall {
             id: "call-1".to_owned(),
@@ -151,16 +147,14 @@ mod tests {
 
     #[test]
     fn restored_tool_groups_are_reminded_without_loading_tools() {
-        let registry = Arc::new(ToolRegistry::new());
-        registry
-            .register_group(ToolGroup::new(
+        let mut tool_set = ToolSet::empty();
+        tool_set
+            .add_group(ToolGroup::new(
                 "hidden",
                 false,
                 [Tool::from_sync(HiddenTool)],
             ))
             .expect("hidden group registers");
-        registry.start_all().expect("registry starts");
-        let mut tool_set = registry.tool_set();
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state
             .get_mut()
@@ -197,9 +191,9 @@ mod tests {
     }
 
     impl SyncToolHandler for HiddenTool {
-        fn invoke(&self, _call: &ToolInvocation<'_>) -> ToolResult<ToolOutput> {
+        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
             Ok(ToolOutput {
-                output: "ok".to_owned(),
+                content: "ok".to_owned(),
                 ok: true,
             })
         }
