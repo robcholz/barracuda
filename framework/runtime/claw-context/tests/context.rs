@@ -2,6 +2,32 @@ use claw_context::{Block, BlockKind, Context, ContextItem};
 use serde_json::Value;
 
 #[test]
+fn fork_blocks_returns_only_global_and_session_context_in_wire_order() {
+    let mut context = Context::new();
+    context
+        .with(Block::new(BlockKind::RecentContext, "RECENT"))
+        .with(Block::new(BlockKind::AgentInstruction, "AGENT"))
+        .with(Block::new(BlockKind::SessionContext, "SESSION"))
+        .with(Block::new(BlockKind::UserProfile, "USER"));
+    let version = context.version();
+
+    let blocks = context
+        .fork_blocks()
+        .into_iter()
+        .map(|block| (block.kind, block.content.into_owned()))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        blocks,
+        vec![
+            (BlockKind::UserProfile, "USER".to_owned()),
+            (BlockKind::SessionContext, "SESSION".to_owned()),
+        ]
+    );
+    assert_eq!(context.version(), version);
+}
+
+#[test]
 fn blocks_render_in_wire_order_regardless_of_declaration_order() {
     let mut context = Context::new();
     context

@@ -111,11 +111,14 @@ mod tests {
     use claw_api::ToolCall;
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
+    use claw_persistence::Persistence;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{AgentApprovalError, ApprovalDecision, FsAgentFactory, ToolCallId};
+    use crate::agent::{
+        AgentApprovalError, ApprovalDecision, FsAgentFactory, PersistenceConfig, ToolCallId,
+    };
     use crate::config::{catalog as agent_catalog, SharedApiManager};
-    use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
+    use crate::protocol::{AgentId, Message};
 
     use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
     use super::ApprovalResolutionError;
@@ -126,13 +129,15 @@ mod tests {
         MemFs::new();
         let factory = FsAgentFactory::new(
             Arc::new(ToolRegistry::new()),
-            "/approval-test".to_owned(),
+            Arc::new(
+                Persistence::<MemFs>::new("/approval-test/state").expect("test persistence builds"),
+            ),
+            "/approval-test/memory".to_owned(),
             Vec::new(),
             SharedApiManager::default(),
         )
         .expect("test factory builds");
         MultiagentRuntime::new(
-            SessionId::new(1),
             Rc::new(factory),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
@@ -171,11 +176,7 @@ mod tests {
                 agent,
                 &kind,
                 Message::text(""),
-                AgentPlacement::Root {
-                    session: SessionId::new(1),
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
+                AgentPlacement::FreshRoot(PersistenceConfig::InMemory),
             )
             .expect("idle test agent builds");
         assert!(instance.state.insert_root(agent, kind));

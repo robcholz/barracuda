@@ -6,13 +6,15 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_memory::{AssistantFinish, Transcript, TurnHandle};
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
+use claw_persistence::DurableState;
 use claw_tool::ToolSet;
 use claw_utils::stream::StreamPart;
 use futures_lite::StreamExt as _;
+use getset::Getters;
 use tracing::Instrument as _;
 
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::protocol::Message;
+use crate::protocol::{AgentKind, Message};
 
 use super::context::ContextAdapter;
 use super::effect::{AgentEffect, AgentEffectInbox};
@@ -29,6 +31,7 @@ use super::TurnLifecycle;
 
 /// All construction-time dependencies for one fully assembled BaseAgent.
 pub(in crate::agent) struct BaseAgentConfig {
+    pub(in crate::agent) kind: AgentKind,
     pub(in crate::agent) transcript: Box<dyn Transcript>,
     pub(in crate::agent) agent_instruction: Block<'static>,
     pub(in crate::agent) inherited_context: Vec<Block<'static>>,
@@ -63,7 +66,10 @@ enum IterationCompletion {
 }
 
 /// One configured Agent and its complete single-Agent state machine.
+#[derive(Getters)]
 pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
+    kind: AgentKind,
+    recovery_state: DurableState<RecoveryState>,
     llm: ClawApiAsync<H, Timer>,
     api_manager: SharedApiManager,
     api_usage: ApiUsage,
@@ -73,6 +79,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     tools: ToolSet,
     effect_inbox: AgentEffectInbox,
     permission_policy: Arc<dyn PermissionPolicy>,
+    #[getset(get = "pub(crate)")]
     context: Context,
     state: AgentState,
     iteration_ids: IterationIdAllocator,
@@ -98,7 +105,14 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         }
         context.with(config.agent_instruction);
 
+        let recovery_state = DurableState::new(Self::collect_recovery_state(
+            config.kind.clone(),
+            &config.context_adapters,
+        ));
+
         Ok(Self {
+            kind: config.kind,
+            recovery_state,
             llm: ClawApiAsync::new(H::default(), Timer::default()),
             api_manager: config.api_manager,
             api_usage: config.api_usage,
@@ -135,14 +149,6 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         ActiveRunGuard::new(self).into_stream(control)
     }
 
-    pub(crate) fn recovery_state(&self) -> RecoveryState {
-        let mut state = AgentStateBuilder::new();
-        for adapter in &self.context_adapters {
-            adapter.contribute_state(&mut state);
-        }
-        state.finish()
-    }
-
     fn begin(&mut self, message: Message) -> Result<(), AgentSubmitError> {
         let AgentState::Stopped(previous) = self.state else {
             return Err(AgentSubmitError::Running);
@@ -171,6 +177,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 )))
             }
             IterationCompletion::Tools => {
+                self.refresh_recovery_state();
                 if let Some(event) = self.reduce_agent_effects()? {
                     return Ok(Some(event));
                 }
@@ -465,6 +472,34 @@ const fn reasoning_limit() -> usize {
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
+    pub(crate) fn kind(&self) -> &AgentKind {
+        &self.kind
+    }
+
+    pub(crate) fn recovery_state(&self) -> &DurableState<RecoveryState> {
+        self.refresh_recovery_state();
+        &self.recovery_state
+    }
+
+    fn collect_recovery_state(
+        kind: AgentKind,
+        adapters: &[Box<dyn ContextAdapter>],
+    ) -> RecoveryState {
+        let mut state = AgentStateBuilder::new(kind);
+        for adapter in adapters {
+            adapter.contribute_state(&mut state);
+        }
+        state.finish()
+    }
+
+    fn refresh_recovery_state(&self) {
+        let next = Self::collect_recovery_state(self.kind.clone(), &self.context_adapters);
+        let changed = self.recovery_state.get().ne(&next);
+        if changed {
+            self.recovery_state.replace(next);
+        }
+    }
+
     pub(crate) fn is_stopped(&self) -> bool {
         matches!(self.state, AgentState::Stopped(_))
     }
@@ -474,6 +509,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         for adapter in &mut self.context_adapters {
             adapter.on_turn_lifecycle(TurnLifecycle::Ended);
         }
+        self.refresh_recovery_state();
     }
 
     fn abandon_open_task(&mut self) {
@@ -575,6 +611,7 @@ where
                 let render_span = prepare_span
                     .in_scope(|| tracing::info_span!("context.render", adapter_count));
                 let history = render_span.in_scope(|| self.agent.render_adapter_context());
+                self.agent.refresh_recovery_state();
                 let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
                     Ok(tools) => tools,
                     Err(error) => {
@@ -710,6 +747,7 @@ where
                 drop(permission);
                 drop(tools);
 
+                self.agent.refresh_recovery_state();
                 yield Ok(AgentEvent::Iteration(StreamPart::End));
 
                 match self.agent.reduce_iteration(result, &control) {

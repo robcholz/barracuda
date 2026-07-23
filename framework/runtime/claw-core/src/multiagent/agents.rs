@@ -205,10 +205,6 @@ impl<Http: ClawHttp, Timer: ClawTimer> AgentSlots<Http, Timer> {
         }
     }
 
-    pub(super) fn available_agent(&self, id: AgentId) -> Option<&BaseAgent<Http, Timer>> {
-        self.slots.get(&id)?.idle_agent()
-    }
-
     pub(super) fn remove(&mut self, id: AgentId) -> bool {
         if let Some(slot) = self.slots.remove(&id) {
             slot.cancel_if_running();

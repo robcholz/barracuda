@@ -2,16 +2,13 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use claw_context::Block;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{
-    AgentEnvironment, AgentResume, AgentState, FsAgentCreateError, FsAgentFactory, TranscriptTarget,
-};
-use crate::config::{ApiUsage, ReasoningEffort};
-use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence, ToolCall};
+use crate::agent::{FsAgentCreateError, FsAgentFactory, PersistenceConfig};
+use crate::config::ReasoningEffort;
+use crate::protocol::{AgentId, AgentKind, Message, ToolCall};
 
 use super::{
     tools, AgentIdAllocator, AgentPlacement, AgentSlots, MultiagentBridge, MultiagentRuntime,
@@ -24,17 +21,15 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    /// Create an empty instance for `session`.
+    /// Create an empty runtime.
     #[cfg(test)]
     pub(crate) fn new(
-        session: SessionId,
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         state: MultiagentState,
     ) -> Self {
-        Self::new_with_resume(
-            session,
+        Self::new_with_root(
             factory,
             id_allocator,
             permission_policy,
@@ -45,22 +40,20 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_with_resume(
-        session: SessionId,
+    pub(crate) fn new_with_root(
         factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         reasoning_effort: ReasoningEffort,
         state: MultiagentState,
-        root_resume: Option<AgentResume>,
+        restored_root: Option<AgentId>,
     ) -> Self {
         let multiagent = Arc::new(MultiagentBridge::new(id_allocator.clone()));
         Self {
-            session,
             factory,
             permission_policy,
             reasoning_effort,
-            root_resume,
+            restored_root,
             root_deliveries_in_turn: Vec::new(),
             root_background_spawns: BTreeMap::new(),
             id_allocator,
@@ -79,56 +72,50 @@ where
         kind: &AgentKind,
         goal: Message,
         placement: AgentPlacement,
-        inherited_context: Vec<Block<'static>>,
-    ) -> Result<(), FsAgentCreateError> {
+    ) -> Result<AgentKind, FsAgentCreateError> {
         let extension_tools = tools::tool_group(id, kind, Arc::clone(&self.multiagent))
             .into_iter()
             .collect();
-        let (transcript, api_usage, resume) = match placement {
-            AgentPlacement::Root {
-                session,
+        let (agent, reasoning_effort) = match placement {
+            AgentPlacement::FreshRoot(persistence) => self.factory.create(
+                id,
+                kind,
+                true,
+                Arc::clone(&self.permission_policy),
+                self.reasoning_effort,
                 persistence,
-            } => match persistence {
-                SessionPersistence::Persistent => (
-                    TranscriptTarget::Persistent(session.0),
-                    ApiUsage::RootAgent,
-                    self.root_resume.take(),
-                ),
-                SessionPersistence::Ephemeral => (
-                    TranscriptTarget::InMemory(session.0),
-                    ApiUsage::RootAgent,
-                    self.root_resume.take(),
-                ),
-            },
-            AgentPlacement::Child(child) => (
-                TranscriptTarget::InMemory(child.0),
-                ApiUsage::SubAgent,
+                extension_tools,
+            )?,
+            AgentPlacement::RestoredRoot => self.factory.resume_from(
+                id,
+                true,
+                Arc::clone(&self.permission_policy),
+                self.reasoning_effort,
+                extension_tools,
                 None,
-            ),
+            )?,
+            AgentPlacement::Child => self.factory.create(
+                id,
+                kind,
+                false,
+                Arc::clone(&self.permission_policy),
+                self.reasoning_effort,
+                PersistenceConfig::InMemory,
+                extension_tools,
+            )?,
         };
-        let environment = AgentEnvironment::new(
-            transcript,
-            api_usage,
-            Arc::clone(&self.permission_policy),
-            extension_tools,
-            inherited_context,
-            self.reasoning_effort,
-            resume,
-        );
+        let actual_kind = agent.kind().clone();
         let has_goal = !goal.as_str().trim().is_empty();
-        let (agent, reasoning_effort) = self.factory.create_agent(id, kind, environment)?;
         self.slots.insert(id, agent, reasoning_effort);
         if has_goal {
             let queued = self.slots.queue_message(id, goal);
             debug_assert!(queued, "a newly inserted agent has a live slot");
         }
-        Ok(())
+        Ok(actual_kind)
     }
 
-    pub(crate) fn root_recovery(&self) -> Option<AgentState> {
-        let root = self.state.root()?;
-        let agent = self.slots.available_agent(root)?;
-        Some(agent.recovery_state())
+    pub(crate) fn root_id(&self) -> Option<AgentId> {
+        self.state.root()
     }
 
     pub(crate) fn active_root_background_spawns(&self) -> Vec<ToolCall> {
@@ -143,62 +130,64 @@ mod tests {
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
+    use claw_persistence::Persistence;
     use claw_tool::ToolRegistry;
-    use serde_json::json;
 
-    use crate::agent::{AgentResume, AgentState, FsAgentFactory};
-    use crate::config::{catalog as agent_catalog, ReasoningEffort, SharedApiManager};
-    use crate::protocol::{AgentId, Message, SessionId, SessionPersistence};
+    use crate::agent::{FsAgentFactory, PersistenceConfig};
+    use crate::config::SharedApiManager;
+    use crate::protocol::Message;
 
-    use super::super::{AgentIdAllocator, AgentPlacement, MultiagentRuntime, MultiagentState};
+    use super::super::{AgentIdAllocator, MultiagentRuntime, MultiagentState};
 
     type TestRuntime = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
 
     #[test]
-    fn root_agent_state_is_forwarded_opaquely_and_restored_by_the_factory() {
+    fn durable_root_is_restored_by_identity() {
         MemFs::new();
-        let session = SessionId::new(1);
+        let persistence = Arc::new(
+            Persistence::<MemFs>::new("/agent-state-restore-test/state")
+                .expect("test persistence builds"),
+        );
         let factory = Rc::new(
             FsAgentFactory::new(
                 Arc::new(ToolRegistry::new()),
-                "/agent-state-restore-test".to_owned(),
+                Arc::clone(&persistence),
+                "/agent-state-restore-test/memory".to_owned(),
                 Vec::new(),
                 SharedApiManager::default(),
             )
             .expect("test factory builds"),
         );
-        let expected: AgentState = serde_json::from_value(json!({
-            "agent_mode": "plan",
-            "resumed": { "loaded_tool_groups": [] },
-        }))
-        .expect("test AgentState is valid");
-        let mut runtime = TestRuntime::new_with_resume(
-            session,
+        let mut runtime = TestRuntime::new(
+            Rc::clone(&factory),
+            AgentIdAllocator::new(),
+            Arc::new(AllowAll),
+            MultiagentState::default(),
+        );
+        runtime
+            .deliver(Message::text("fresh root"), PersistenceConfig::Persistent)
+            .expect("persistent root builds");
+        let root = runtime.root_id().expect("root was inserted");
+        persistence
+            .maybe_persist()
+            .expect("persistent root state is flushed");
+        drop(runtime);
+
+        let mut restored = TestRuntime::new_with_root(
             factory,
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
-            ReasoningEffort::default(),
+            Default::default(),
             MultiagentState::default(),
-            Some(AgentResume::new(expected.clone(), Vec::new())),
+            Some(root),
         );
-        let root = AgentId::new(1);
-
-        runtime
-            .build_agent(
-                root,
-                agent_catalog::root_kind(),
+        restored
+            .deliver(
                 Message::text("restored root"),
-                AgentPlacement::Root {
-                    session,
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
+                PersistenceConfig::Persistent,
             )
-            .expect("restored root builds");
-        assert!(runtime
-            .state
-            .insert_root(root, agent_catalog::root_kind().clone()));
+            .expect("persistent root restores");
 
-        assert_eq!(runtime.root_recovery(), Some(expected));
+        assert_eq!(restored.root_id(), Some(root));
     }
 }

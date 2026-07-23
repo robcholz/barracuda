@@ -1,8 +1,10 @@
-use claw_memory::{LongTermInitError, TranscriptInitError};
+use claw_memory::{LongTermInitError, TranscriptDeleteError, TranscriptInitError};
+use claw_persistence::PersistenceError;
 use claw_skill::SkillError;
 use claw_tool::ToolSetError;
 
 use crate::agent::config::AgentConfigError;
+use crate::protocol::AgentId;
 
 /// What can go wrong while building an [`super::FsAgentFactory`].
 #[derive(Debug, thiserror::Error)]
@@ -21,6 +23,18 @@ pub(crate) enum FsAgentFactoryError {
 /// What can go wrong while building one concrete agent from the factory.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FsAgentCreateError {
+    /// The Agent recovery collection could not be accessed or registered.
+    #[error("failed to access persisted agent state: {0}")]
+    Persistence(#[from] PersistenceError),
+    /// No persisted Agent record exists for the requested id.
+    #[error("persisted agent not found: {0}")]
+    AgentNotFound(AgentId),
+    /// Creating a fresh persistent Agent would overwrite an existing record.
+    #[error("persisted agent already exists: {0}")]
+    AgentAlreadyExists(AgentId),
+    /// An entry in the Agent collection did not use an AgentId wire key.
+    #[error("invalid persisted agent id: {0}")]
+    InvalidPersistedAgentId(String),
     /// The baked manifest could not be resolved into an agent config.
     #[error("failed to resolve agent config: {0}")]
     Config(#[from] AgentConfigError),
@@ -30,6 +44,9 @@ pub(crate) enum FsAgentCreateError {
     /// The transcript store for this placement could not be opened.
     #[error("failed to open transcript: {0}")]
     Transcript(#[from] TranscriptInitError),
+    /// The persisted transcript could not be deleted.
+    #[error("failed to delete transcript: {0}")]
+    TranscriptDelete(#[from] TranscriptDeleteError),
     /// The per-agent long-term memory store could not be opened.
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),

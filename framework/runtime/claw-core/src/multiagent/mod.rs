@@ -46,10 +46,10 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{AgentResume, FsAgentFactory};
+use crate::agent::{FsAgentFactory, PersistenceConfig};
 use crate::config::ReasoningEffort;
+use crate::protocol::AgentId;
 use crate::protocol::ToolCall;
-use crate::protocol::{AgentId, SessionId, SessionPersistence};
 
 pub(crate) use self::agent_control::MultiagentDeliverError;
 use self::agents::AgentSlots;
@@ -67,11 +67,9 @@ use self::tool_port::MultiagentBridge;
 /// construction. This orchestration type never enters `crate::agent`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AgentPlacement {
-    Root {
-        session: SessionId,
-        persistence: SessionPersistence,
-    },
-    Child(AgentId),
+    FreshRoot(PersistenceConfig),
+    RestoredRoot,
+    Child,
 }
 
 /// One session's agent store, graph, scheduler, and root.
@@ -81,16 +79,14 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    session: SessionId,
     /// Builds agents (root and children). Owned here; slots only store.
     factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
     /// Session-owned policy propagated unchanged to every built agent.
     permission_policy: Arc<dyn PermissionPolicy>,
     /// Session default copied into each newly assembled Agent.
     reasoning_effort: ReasoningEffort,
-    /// Complete root Agent state forwarded opaquely from the SessionActor to
-    /// the Agent Factory when the root object is reconstructed.
-    root_resume: Option<AgentResume>,
+    /// Durable root identity waiting to be materialized by the Agent Factory.
+    restored_root: Option<AgentId>,
     root_deliveries_in_turn: Vec<AgentId>,
     root_background_spawns: BTreeMap<AgentId, ToolCall>,
     /// Shared, process-wide id allocator for roots and spawned children.

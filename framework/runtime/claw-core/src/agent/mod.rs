@@ -17,6 +17,6 @@ pub(crate) use base_agent::{
 };
 pub(crate) use context_adapters::ReasoningEffortHandle;
 pub(crate) use factory::{
-    AgentEnvironment, AgentResume, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,
-    TranscriptTarget,
+    AdditionalAgentState, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,
+    PersistenceConfig,
 };

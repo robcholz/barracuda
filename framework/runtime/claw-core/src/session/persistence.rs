@@ -6,9 +6,8 @@ use claw_persistence::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentState;
 use crate::config::ReasoningEffort;
-use crate::protocol::{SessionId, ToolCall};
+use crate::protocol::{AgentId, SessionId, ToolCall};
 
 pub(crate) const SESSION_STATE_NAME: &str = "sessions";
 
@@ -17,17 +16,11 @@ pub(crate) struct SessionState {
     reasoning_effort: ReasoningEffort,
     permission_level: PermissionLevel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    agent_state: Option<AgentState>,
+    root_agent: Option<AgentId>,
     /// Calls that crossed the durable pre-execution boundary but have not yet
     /// reached a durably settled outcome.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     inflight_toolcalls: Vec<ToolCall>,
-}
-
-#[derive(Clone)]
-pub(crate) struct SessionRecovery {
-    pub(crate) agent_state: AgentState,
-    pub(crate) inflight_toolcalls: Vec<ToolCall>,
 }
 
 impl SessionState {
@@ -47,20 +40,12 @@ impl SessionState {
         self.permission_level = permission_level;
     }
 
-    pub(crate) fn recovery(&self) -> Option<SessionRecovery> {
-        let agent_state = self.agent_state.clone()?;
-        Some(SessionRecovery {
-            agent_state,
-            inflight_toolcalls: self.inflight_toolcalls.clone(),
-        })
+    pub(crate) fn root_agent(&self) -> Option<AgentId> {
+        self.root_agent
     }
 
-    pub(crate) fn record_recovery(&mut self, state: AgentState) {
-        self.agent_state = Some(state);
-    }
-
-    pub(crate) fn recovery_matches(&self, state: &AgentState) -> bool {
-        self.agent_state.as_ref() == Some(state)
+    pub(crate) fn set_root_agent(&mut self, agent: AgentId) {
+        self.root_agent = Some(agent);
     }
 
     fn contains_inflight_toolcall(&self, call: &ToolCall) -> bool {
@@ -91,7 +76,7 @@ impl SessionState {
 }
 
 impl DurableStateCodec for SessionState {
-    const SCHEMA_VERSION: SchemaVersion = 4;
+    const SCHEMA_VERSION: SchemaVersion = 5;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -118,14 +103,11 @@ pub(crate) fn session_instance(session: SessionId) -> InstanceId {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     use super::SessionState;
-    use crate::agent::AgentState;
     use crate::config::ReasoningEffort;
-    use crate::protocol::ToolCall;
+    use crate::protocol::{AgentId, ToolCall};
     use claw_permission::PermissionLevel;
 
     #[test]
@@ -135,12 +117,7 @@ mod tests {
             permission_level: PermissionLevel::Ask,
             ..SessionState::default()
         };
-        let agent_state: AgentState = serde_json::from_value(json!({
-            "agent_mode": "normal",
-            "resumed": { "loaded_tool_groups": ["tool_group_id"] },
-        }))
-        .expect("test AgentState is valid");
-        state.record_recovery(agent_state);
+        state.set_root_agent(AgentId::new(7));
         state.add_inflight_toolcall(&ToolCall {
             id: "call-1".to_owned(),
             name: "subagent_spawn".to_owned(),
@@ -151,11 +128,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
         assert_eq!(json["reasoning_effort"], "medium");
         assert_eq!(json["permission_level"], "ask");
-        assert_eq!(json["agent_state"]["agent_mode"], "normal");
-        assert_eq!(
-            json["agent_state"]["resumed"]["loaded_tool_groups"][0],
-            "tool_group_id"
-        );
+        assert_eq!(json["root_agent"], "agent-7");
         assert_eq!(json["inflight_toolcalls"][0]["name"], "subagent_spawn");
 
         let restored = SessionState::decode_state(

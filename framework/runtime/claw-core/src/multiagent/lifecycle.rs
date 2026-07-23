@@ -59,8 +59,8 @@ where
             return;
         }
 
-        match self.build_agent(id, &kind, goal, AgentPlacement::Child(id), Vec::new()) {
-            Ok(()) => {
+        match self.build_agent(id, &kind, goal, AgentPlacement::Child) {
+            Ok(kind) => {
                 let inserted = self
                     .state
                     .insert_child(parent, id, kind.clone(), name, timeout);
@@ -409,11 +409,14 @@ mod tests {
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
+    use claw_persistence::Persistence;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{AgentCompletion, AgentEvent, AgentOutcome, FsAgentFactory};
+    use crate::agent::{
+        AgentCompletion, AgentEvent, AgentOutcome, FsAgentFactory, PersistenceConfig,
+    };
     use crate::config::{catalog as agent_catalog, SharedApiManager};
-    use crate::protocol::{AgentId, AgentKind, Message, SessionId, SessionPersistence};
+    use crate::protocol::{AgentId, AgentKind, Message};
 
     use super::super::model::{SubagentTimeout, TranscriptText};
     use super::super::timeouts::ExpiredTimeout;
@@ -442,14 +445,15 @@ mod tests {
         MemFs::new();
         let factory = FsAgentFactory::new(
             Arc::new(ToolRegistry::new()),
-            "/output-test".to_owned(),
+            Arc::new(
+                Persistence::<MemFs>::new("/output-test/state").expect("test persistence builds"),
+            ),
+            "/output-test/memory".to_owned(),
             Vec::new(),
             SharedApiManager::default(),
         )
         .expect("test factory builds");
-        let session = SessionId::new(1);
         let mut instance = MultiagentRuntime::new(
-            session,
             Rc::new(factory),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
@@ -461,11 +465,7 @@ mod tests {
                 root,
                 agent_catalog::root_kind(),
                 Message::text(""),
-                AgentPlacement::Root {
-                    session,
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
+                AgentPlacement::FreshRoot(PersistenceConfig::InMemory),
             )
             .expect("root builds");
         assert!(instance
@@ -573,13 +573,7 @@ mod tests {
         let child = AgentId(3);
         let worker = AgentKind::from_static("worker");
         instance
-            .build_agent(
-                parent,
-                &worker,
-                Message::text(""),
-                AgentPlacement::Child(parent),
-                Vec::new(),
-            )
+            .build_agent(parent, &worker, Message::text(""), AgentPlacement::Child)
             .expect("parent builds");
         assert!(instance.state.insert_child(
             root,
@@ -589,13 +583,7 @@ mod tests {
             timeout(),
         ));
         instance
-            .build_agent(
-                child,
-                &worker,
-                Message::text(""),
-                AgentPlacement::Child(child),
-                Vec::new(),
-            )
+            .build_agent(child, &worker, Message::text(""), AgentPlacement::Child)
             .expect("child builds");
         assert!(instance.state.insert_child(
             parent,
@@ -630,13 +618,7 @@ mod tests {
         let child = AgentId(2);
         let worker = AgentKind::from_static("worker");
         instance
-            .build_agent(
-                child,
-                &worker,
-                Message::text(""),
-                AgentPlacement::Child(child),
-                Vec::new(),
-            )
+            .build_agent(child, &worker, Message::text(""), AgentPlacement::Child)
             .expect("child builds");
         assert!(instance.state.insert_child(
             root,

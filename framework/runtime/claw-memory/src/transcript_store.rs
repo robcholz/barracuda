@@ -489,6 +489,20 @@ pub enum TranscriptInitError {
     },
 }
 
+/// Failure deleting one persisted transcript file.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TranscriptDeleteError {
+    /// A transcript file could not be removed.
+    #[error("failed to delete transcript file {path}: {source}")]
+    Delete {
+        /// The file that could not be removed.
+        path: String,
+        /// The underlying filesystem error.
+        #[source]
+        source: FsError,
+    },
+}
+
 // Manual `Clone`: only the `Arc` is cloned, so this is cheap and does **not**
 // require `F: Clone` (a `#[derive(Clone)]` would wrongly add that bound).
 impl<F: ClawFs + 'static> Clone for TranscriptStore<F> {
@@ -568,6 +582,21 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
             }),
             _fs: PhantomData,
         }
+    }
+
+    /// Delete the persisted files for `transcript_id`.
+    ///
+    /// The index is removed before the data log. Missing files are treated as
+    /// already deleted. Callers must first drop every live store for this id;
+    /// a live store may otherwise persist again and recreate the files.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TranscriptDeleteError`] when either existing file cannot be
+    /// removed.
+    pub fn delete(transcript_id: u32, dir: &str) -> Result<(), TranscriptDeleteError> {
+        delete_transcript_file::<F>(transcript_path(dir, transcript_id, INDEX_EXT))?;
+        delete_transcript_file::<F>(transcript_path(dir, transcript_id, DATA_EXT))
     }
 
     /// A monotonic counter bumped whenever the transcript content changes (an
@@ -1364,6 +1393,13 @@ fn transcript_path(dir: &str, transcript_id: u32, ext: &str) -> String {
     format!("{}/{transcript_id}{ext}", dir.trim_end_matches('/'))
 }
 
+fn delete_transcript_file<F: ClawFs>(path: String) -> Result<(), TranscriptDeleteError> {
+    match F::remove(&path) {
+        Ok(()) | Err(FsError::NotFound) => Ok(()),
+        Err(source) => Err(TranscriptDeleteError::Delete { path, source }),
+    }
+}
+
 fn lock_state(inner: &StoreInner) -> MutexGuard<'_, StoreState> {
     inner
         .state
@@ -1407,5 +1443,31 @@ mod tests {
         assert!(messages.contains("persisted user"));
         assert!(messages.contains("persisted reply"));
         assert!(serde_json::from_slice::<Manifest>(&MemFs::read(&index_path).unwrap()).is_ok());
+    }
+
+    #[test]
+    fn delete_removes_both_transcript_files_and_is_idempotent() {
+        MemFs::new();
+        let dir = "/transcript-delete";
+        let data_path = transcript_path(dir, 7, DATA_EXT);
+        let index_path = transcript_path(dir, 7, INDEX_EXT);
+
+        let store = TranscriptStore::<MemFs>::new(7, dir).unwrap();
+        {
+            let mut turn = store.open_turn().unwrap();
+            turn.append_user("delete me").unwrap();
+            turn.finish_user().unwrap();
+            turn.finish_assistant(AssistantFinish::PlainText("deleted"))
+                .unwrap();
+        }
+        drop(store);
+        assert!(MemFs::exists(&data_path));
+        assert!(MemFs::exists(&index_path));
+
+        TranscriptStore::<MemFs>::delete(7, dir).unwrap();
+        assert!(!MemFs::exists(&data_path));
+        assert!(!MemFs::exists(&index_path));
+
+        TranscriptStore::<MemFs>::delete(7, dir).unwrap();
     }
 }

@@ -1,9 +1,9 @@
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::FsAgentCreateError;
+use crate::agent::{FsAgentCreateError, PersistenceConfig};
 use crate::config::{catalog as agent_catalog, ReasoningEffort};
-use crate::protocol::{AgentId, Message, SessionPersistence};
+use crate::protocol::{AgentId, Message};
 
 use super::{AgentPlacement, MultiagentRuntime};
 
@@ -35,25 +35,23 @@ where
     pub(crate) fn deliver(
         &mut self,
         message: Message,
-        persistence: SessionPersistence,
+        persistence: PersistenceConfig,
     ) -> Result<(), MultiagentDeliverError> {
         match self.state.root() {
             Some(root) => self
                 .deliver_message(root, message)
                 .map_err(|source| MultiagentDeliverError::Root { root, source }),
             None => {
-                let id = self.id_allocator.next();
+                let (id, placement) = match self.restored_root {
+                    Some(id) => (id, AgentPlacement::RestoredRoot),
+                    None => (
+                        self.id_allocator.next(),
+                        AgentPlacement::FreshRoot(persistence),
+                    ),
+                };
                 let kind = agent_catalog::root_kind().clone();
-                self.build_agent(
-                    id,
-                    &kind,
-                    message,
-                    AgentPlacement::Root {
-                        session: self.session,
-                        persistence,
-                    },
-                    Vec::new(),
-                )?;
+                let kind = self.build_agent(id, &kind, message, placement)?;
+                self.restored_root = None;
                 let inserted = self.state.insert_root(id, kind);
                 debug_assert!(inserted, "root insertion requires an empty graph");
                 self.enqueue(id);

@@ -16,7 +16,7 @@ use tracing::Instrument as _;
 use crate::agent::FsAgentFactory;
 use crate::config::SharedApiManager;
 use crate::multiagent::AgentIdAllocator;
-use crate::protocol::{EventSink, SessionId, SessionPersistence};
+use crate::protocol::{AgentId, EventSink, SessionId, SessionPersistence};
 use crate::session::{
     session_instance, OpenSessionError, SessionActor, SessionActorExit, SessionCommand,
     SessionControlError, SessionCreateError, SessionEndpoint, SessionState, SessionStore,
@@ -82,6 +82,7 @@ where
     ) -> Result<Self, OrchestratorBuildError> {
         let factory = Rc::new(FsAgentFactory::new(
             tools,
+            Arc::clone(&persistence),
             persistence_dir,
             skill_roots,
             Arc::clone(&api_manager),
@@ -121,11 +122,16 @@ where
             EngineEvent::ActorExited(exit) => {
                 let session = exit.session();
                 self.actors.remove(&session);
-                if let SessionActorExit::Shutdown { state, .. } = exit {
-                    if let Err(error) = self.persistence.maybe_persist() {
-                        tracing::error!(name: "persistence_failed", error = %error);
+                match exit {
+                    SessionActorExit::Deleted {
+                        root_agent, acks, ..
+                    } => self.finish_session_deletion(session, root_agent, acks),
+                    SessionActorExit::Shutdown { state, .. } => {
+                        if let Err(error) = self.persistence.maybe_persist() {
+                            tracing::error!(name: "persistence_failed", error = %error);
+                        }
+                        drop(state);
                     }
-                    drop(state);
                 }
             }
             EngineEvent::Command(Some(Command::CreateSession { persistence, ack })) => {
@@ -264,28 +270,20 @@ where
     }
 
     fn delete_session(&mut self, session: SessionId, ack: Sender<Result<(), SessionControlError>>) {
-        let Some(session_persistence) = self.sessions.persistence(session) else {
+        let Some(persistence) = self.sessions.persistence(session) else {
             let _ = ack.try_send(Err(SessionControlError::SessionClosed(session)));
             return;
         };
-        if session_persistence == SessionPersistence::Persistent {
-            let removal = self
-                .persistence
-                .collection::<SessionState>(SESSION_STATE_NAME)
-                .and_then(|sessions| sessions.remove(&session_instance(session)));
-            if let Err(error) = removal {
-                tracing::error!(
-                    name: "session_state_remove_failed",
-                    session = %session,
-                    error = %error,
-                );
-                let _ = ack.try_send(Err(SessionControlError::Persistence));
-                return;
-            }
-        }
-        self.sessions.delete(session);
+
         let Some(task) = self.actors.get(&session) else {
-            let _ = ack.try_send(Ok(()));
+            let root_agent = match self.load_root_agent(session, persistence) {
+                Ok(root_agent) => root_agent,
+                Err(error) => {
+                    let _ = ack.try_send(Err(error));
+                    return;
+                }
+            };
+            self.finish_session_deletion(session, root_agent, vec![ack]);
             return;
         };
         if task
@@ -295,6 +293,86 @@ where
         {
             let _ = ack.try_send(Err(SessionControlError::WorkerStopped));
         }
+    }
+
+    fn load_root_agent(
+        &self,
+        session: SessionId,
+        persistence: SessionPersistence,
+    ) -> Result<Option<AgentId>, SessionControlError> {
+        if persistence == SessionPersistence::Ephemeral {
+            return Ok(None);
+        }
+        self.persistence
+            .collection::<SessionState>(SESSION_STATE_NAME)
+            .and_then(|sessions| sessions.load(&session_instance(session)))
+            .map_err(|error| {
+                tracing::error!(
+                    name: "session_state_load_failed",
+                    session = %session,
+                    error = %error,
+                );
+                SessionControlError::Persistence
+            })?
+            .map(|state| state.root_agent())
+            .ok_or_else(|| {
+                tracing::error!(
+                    name: "session_state_load_failed",
+                    session = %session,
+                    error = "persisted session state is missing",
+                );
+                SessionControlError::Persistence
+            })
+    }
+
+    fn finish_session_deletion(
+        &mut self,
+        session: SessionId,
+        root_agent: Option<AgentId>,
+        acks: Vec<Sender<Result<(), SessionControlError>>>,
+    ) {
+        let result = self.remove_session_storage(session, root_agent);
+        if result.is_ok() {
+            self.sessions.delete(session);
+        }
+        for ack in acks {
+            let _ = ack.try_send(result.clone());
+        }
+    }
+
+    fn remove_session_storage(
+        &self,
+        session: SessionId,
+        root_agent: Option<AgentId>,
+    ) -> Result<(), SessionControlError> {
+        let Some(persistence) = self.sessions.persistence(session) else {
+            return Err(SessionControlError::SessionClosed(session));
+        };
+        if persistence == SessionPersistence::Ephemeral {
+            return Ok(());
+        }
+        if let Some(root_agent) = root_agent {
+            self.factory.remove(root_agent).map_err(|error| {
+                tracing::error!(
+                    name: "root_agent_remove_failed",
+                    session = %session,
+                    agent = %root_agent,
+                    error = %error,
+                );
+                SessionControlError::Persistence
+            })?;
+        }
+        self.persistence
+            .collection::<SessionState>(SESSION_STATE_NAME)
+            .and_then(|sessions| sessions.remove(&session_instance(session)))
+            .map_err(|error| {
+                tracing::error!(
+                    name: "session_state_remove_failed",
+                    session = %session,
+                    error = %error,
+                );
+                SessionControlError::Persistence
+            })
     }
 
     fn spawn_actor(&mut self, session: SessionId, actor: SessionActor<Filesystem, Http, Timer>) {

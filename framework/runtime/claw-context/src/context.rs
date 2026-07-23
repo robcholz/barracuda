@@ -19,11 +19,12 @@
 //! change, and never re-rendering when nothing changed.
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::block::{Block, BlockKind};
+use crate::block::{Block, BlockKind, Scope};
 use crate::reminder::Reminders;
 
 /// Separator inserted between rendered blocks: a blank line keeps sections
@@ -155,6 +156,21 @@ impl Context {
         ContextSink::new(self)
     }
 
+    /// Return the context blocks inherited by a forked agent in wire order.
+    ///
+    /// Forks inherit global and session context. Agent, conversation, and turn
+    /// context belong to the source agent and are rebuilt for the fork.
+    pub fn fork_blocks(&self) -> Vec<Block<'static>> {
+        let mut blocks = self
+            .blocks
+            .iter()
+            .filter(|(kind, _)| matches!(kind.scope(), Scope::Global | Scope::Session))
+            .map(|(kind, content)| Block::new(kind.clone(), content.clone()))
+            .collect::<Vec<_>>();
+        blocks.sort_by(|left, right| block_order(&left.kind, &right.kind));
+        blocks
+    }
+
     /// The system-prefix version: a counter that advances only when a block's
     /// content actually changed. Stable across re-declarations of identical
     /// content, so it is a cheap, collision-free key for LLM prefix-cache
@@ -181,11 +197,7 @@ impl Context {
         let mut entries: Vec<(&BlockKind, &String)> = self.blocks.iter().collect();
         // Sort by the wire-order key; the full `BlockKind` Ord breaks ties between
         // custom blocks sharing a key, keeping the render deterministic.
-        entries.sort_by(|a, b| {
-            a.0.sort_key()
-                .cmp(&b.0.sort_key())
-                .then_with(|| a.0.cmp(b.0))
-        });
+        entries.sort_by(|left, right| block_order(left.0, right.0));
 
         let mut buffer = std::mem::take(&mut self.rendered);
         buffer.clear();
@@ -197,6 +209,12 @@ impl Context {
         }
         self.rendered = buffer;
     }
+}
+
+fn block_order(left: &BlockKind, right: &BlockKind) -> Ordering {
+    left.sort_key()
+        .cmp(&right.sort_key())
+        .then_with(|| left.cmp(right))
 }
 
 /// One context contribution before it is rendered into its target request

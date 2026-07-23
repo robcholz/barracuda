@@ -78,6 +78,6 @@ pub use profile::{
     ASSISTANT_IDENTITY_FILE, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES, SOUL_FILE, USER_PROFILE_FILE,
 };
 pub use transcript_store::{
-    AssistantFinish, Transcript, TranscriptInitError, TranscriptStore, Turn, TurnError, TurnHandle,
-    TurnId,
+    AssistantFinish, Transcript, TranscriptDeleteError, TranscriptInitError, TranscriptStore, Turn,
+    TurnError, TurnHandle, TurnId,
 };

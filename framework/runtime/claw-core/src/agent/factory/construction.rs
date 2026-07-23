@@ -5,6 +5,7 @@ use crate::config::SharedApiManager;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
+use claw_persistence::SharedPersistence;
 use claw_skill::{FsSkillRegistry, SkillError};
 use claw_tool::ToolRegistry;
 
@@ -29,17 +30,18 @@ impl<
     /// persistence root is blank.
     pub(crate) fn new(
         tools: Arc<ToolRegistry>,
-        persistence_dir: String,
+        persistence: SharedPersistence<Filesystem>,
+        memory_directory: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
     ) -> Result<Self, FsAgentFactoryError> {
         let span = tracing::info_span!("agent.factory");
         let _enter = span.enter();
-        if persistence_dir.trim().is_empty() {
+        if memory_directory.trim().is_empty() {
             tracing::error!(name: "missing_persistence_dir", reason = "empty");
             return Err(FsAgentFactoryError::MissingPersistenceDir);
         }
-        let layout = FsAgentFactoryLayout::new(persistence_dir);
+        let layout = FsAgentFactoryLayout::new(memory_directory);
 
         let long_term = match LongTermDeps::<Filesystem>::from_root::<Http, Timer>(
             &layout.long_term_dir,
@@ -56,6 +58,7 @@ impl<
         let skills = build_skill_registry::<Filesystem>(skill_roots)?;
 
         Ok(Self {
+            persistence,
             api_manager,
             tools,
             _http: PhantomData,

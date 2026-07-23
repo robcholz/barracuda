@@ -510,6 +510,7 @@ mod tests {
 
     use claw_interface::{ImmediateTimer, MemFs, RealHttp};
     use claw_permission::AllowAll;
+    use claw_persistence::Persistence;
     use claw_tool::ToolRegistry;
     use futures_lite::future::block_on;
 
@@ -519,11 +520,9 @@ mod tests {
         MultiagentWork,
     };
     use super::DriveOutput;
-    use crate::agent::FsAgentFactory;
+    use crate::agent::{FsAgentFactory, PersistenceConfig};
     use crate::config::{catalog as agent_catalog, SharedApiManager};
-    use crate::protocol::{
-        AgentId, AgentKind, EventSink, Message, SessionId, SessionPersistence, TurnOrigin,
-    };
+    use crate::protocol::{AgentId, AgentKind, EventSink, Message, TurnOrigin};
 
     type TestRuntime = MultiagentRuntime<MemFs, RealHttp, ImmediateTimer>;
 
@@ -593,16 +592,18 @@ mod tests {
     #[allow(clippy::arc_with_non_send_sync)]
     fn runtime_with_root_and_child() -> (TestRuntime, AgentId, AgentId) {
         MemFs::new();
-        let session = SessionId::new(1);
         let factory = FsAgentFactory::new(
             Arc::new(ToolRegistry::new()),
-            "/work-priority-test".to_owned(),
+            Arc::new(
+                Persistence::<MemFs>::new("/work-priority-test/state")
+                    .expect("test persistence builds"),
+            ),
+            "/work-priority-test/memory".to_owned(),
             Vec::new(),
             SharedApiManager::default(),
         )
         .expect("test factory builds");
         let mut runtime = MultiagentRuntime::new(
-            session,
             Rc::new(factory),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
@@ -617,22 +618,12 @@ mod tests {
                 root,
                 &root_kind,
                 Message::text(""),
-                AgentPlacement::Root {
-                    session,
-                    persistence: SessionPersistence::Ephemeral,
-                },
-                Vec::new(),
+                AgentPlacement::FreshRoot(PersistenceConfig::InMemory),
             )
             .expect("root builds");
         assert!(runtime.state.insert_root(root, root_kind));
         runtime
-            .build_agent(
-                child,
-                &child_kind,
-                Message::text(""),
-                AgentPlacement::Child(child),
-                Vec::new(),
-            )
+            .build_agent(child, &child_kind, Message::text(""), AgentPlacement::Child)
             .expect("child builds");
         assert!(runtime.state.insert_child(
             root,
