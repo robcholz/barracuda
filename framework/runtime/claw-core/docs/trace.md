@@ -182,7 +182,6 @@ span-name: `turn`
 `input_delivered`: User input was delivered to the root agent.
 `background_result`: Background subagent work made the root ready again.
 `approval_resolved`: User reply resolved a pending approval.
-`approval_clarification`: Approval resolver asked the user for clarification.
 `output`: Root-visible text was emitted to the session stream.
 `error`: Turn drive failed and emitted a session error.
 `cancelled_cleanup`: A cancelled turn ran cleanup before ending.
@@ -191,7 +190,6 @@ span-name: `turn`
 
 `input_delivered`: `has_text`, `text_bytes`, `attachment_count`, `attachment_kinds`.
 `approval_resolved`: `decision`, optionally `approval`.
-`approval_clarification`: `reason`.
 `output`: `text_bytes`.
 `error`: `kind`.
 

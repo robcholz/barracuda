@@ -6,10 +6,9 @@ use support::Sse;
 use std::collections::BTreeMap;
 
 use claw_agent::{
-    stream::StreamPart, AgentPersistenceConfig, AgentSystem, IterationEvent, Message, SessionEvent,
-    TurnEvent,
+    stream::StreamPart, AgentPersistenceConfig, AgentSystem, BackendKind, ClawApiConfig,
+    IterationEvent, Message, SessionEvent, TurnEvent,
 };
-use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{
     Cancel, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
     ImmediateTimer, MemFs, StdThread, TokioExecutor,
@@ -134,7 +133,7 @@ impl ConstructionSystem for MemConstructionSystem {
         persistence: AgentPersistenceConfig,
     ) -> Result<Self, claw_agent::AgentError> {
         let system = Self::new::<StdThread, TokioExecutor>(persistence)?;
-        system.link_api(config, claw_agent::ApiUsage::RootAgent, true)?;
+        system.link_api(config, claw_agent::ApiPurpose::RootAgent, true)?;
         Ok(system)
     }
 
@@ -157,7 +156,7 @@ impl ConstructionSystem for DiskConstructionSystem {
         persistence: AgentPersistenceConfig,
     ) -> Result<Self, claw_agent::AgentError> {
         let system = Self::new::<StdThread, TokioExecutor>(persistence)?;
-        system.link_api(config, claw_agent::ApiUsage::RootAgent, true)?;
+        system.link_api(config, claw_agent::ApiPurpose::RootAgent, true)?;
         Ok(system)
     }
 

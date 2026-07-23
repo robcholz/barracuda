@@ -164,7 +164,7 @@ fn build_trace_system(root: &str, bodies: Vec<String>) -> TraceAgentSystem {
     })
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
 }

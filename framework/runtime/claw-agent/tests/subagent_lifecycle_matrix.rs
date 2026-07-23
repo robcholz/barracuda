@@ -85,7 +85,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         let root = mem_root("subagent-lifecycle");
         let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
         system
-            .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+            .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
@@ -166,7 +166,7 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
     let root = mem_root("subagent-foreground");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -217,7 +217,7 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     let root = mem_root("subagent-foreground-approval");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -285,7 +285,7 @@ fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() 
     let root = mem_root("subagent-approval-timeout");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -326,7 +326,7 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     let root = mem_root("subagent-background-concurrency");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -372,7 +372,7 @@ fn completed_background_child_is_inspectable_until_its_result_enters_root_contex
     let root = mem_root("subagent-pending-delivery-inspection");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -408,7 +408,7 @@ fn cancelled_foreground_spawn_deletes_its_subagent() {
     let root = mem_root("subagent-turn-control");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -447,7 +447,7 @@ fn foreground_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     let root = mem_root("subagent-foreground-timeout");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -477,7 +477,7 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     let root = mem_root("subagent-background-timeout");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -912,7 +912,7 @@ fn response_for_request(body: &str) -> String {
                 0 | 1 => assistant_tool_calls(vec![tool_call(
                     "call_permission",
                     "permission_resolve_reply",
-                    json!({ "decision": "approve" }),
+                    json!({ "decision": "yes" }),
                 )]),
                 other => panic!("unexpected permission request index {other}"),
             }

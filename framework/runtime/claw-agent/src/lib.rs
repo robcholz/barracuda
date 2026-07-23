@@ -7,22 +7,36 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use claw_api::{ClawApiConfig, InitError};
+use claw_api::InitError;
+#[cfg(feature = "cache_profile")]
+pub use claw_api::ProviderUsage;
+pub use claw_api::{BackendKind, ClawApiConfig};
 pub use claw_core::stream;
 pub use claw_core::{
-    AgentApprovalError, AgentCreateError, AgentId, ApiUsage, ApprovalResolverError, BaseAgentError,
-    InputRequestId, InputRequestKind, IterationEvent, IterationId, IterationLoopError, Message,
-    OpenSessionError, PermissionLevel, ReasoningEffort, SessionCloseReason, SessionControl,
-    SessionControlError, SessionCreateError, SessionError, SessionEvent, SessionEventError,
-    SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall,
-    ToolCallId, ToolOutput, TurnEvent, TurnEventError, TurnId, TurnOrigin,
+    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, ApprovalResolverError,
+    BaseAgentError, InputRequestId, InputRequestKind, IterationEvent, IterationId,
+    IterationLoopError, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
+    SessionCloseReason, SessionControl, SessionControlError, SessionCreateError, SessionError,
+    SessionEvent, SessionEventError, SessionId, SessionInputError, SessionPersistence,
+    SessionStream, SessionTurnError, ToolCall, ToolCallId, ToolOutput, TurnEvent, TurnEventError,
+    TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, FsError};
 use claw_persistence::{Persistence, PersistenceError, SharedPersistence};
-pub use claw_tool::ToolGroup;
 use claw_tool::{ToolRegistry, ToolRegistryError};
+
+/// Types needed to define tools accepted by [`AgentSystem::with_tool_groups`].
+pub mod tools {
+    pub use claw_tool::{
+        tool_metadata, Action, AsyncToolHandler, Resource, RetryCount, RiskClass, SyncToolHandler,
+        Tool, ToolConfig, ToolError, ToolFuture, ToolGroup, ToolInvocation, ToolInvokeError,
+        ToolOutput, ToolResult, ToolSpec,
+    };
+}
+
+pub use tools::ToolGroup;
 
 pub type AgentResult<T> = Result<T, AgentError>;
 
@@ -91,10 +105,10 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    /// Build a fully injectable agent system, spawning the core runtime
-    /// worker via the [`ClawThread`] policy `Thread` (`StdThread` on host,
-    /// `EspIdfThread` on device) and driving its `!Send` engine with the injected
-    /// [`ClawExecutor`] `Executor` (`TokioExecutor` on host,
+    /// Build an agent system with an empty tool registry, spawning the core
+    /// runtime worker via the [`ClawThread`] policy `Thread` (`StdThread` on
+    /// host, `EspIdfThread` on device) and driving its `!Send` engine with the
+    /// injected [`ClawExecutor`] `Executor` (`TokioExecutor` on host,
     /// `EspIdfExecutor` on device).
     /// Both are zero-sized policies selected purely by type parameter, like the
     /// `Filesystem`/`Http`/`Timer` backends.
@@ -198,18 +212,24 @@ where
         Ok(self.runtime.open_session(session)?)
     }
 
-    /// Register an LLM API config for a usage (root/subagent/memory/compaction).
+    /// Register an LLM API config for a purpose (root/subagent/memory/compaction).
     ///
     /// De-duplicated by model; when `default` is set it becomes the fallback for
-    /// usages without an explicit binding. Updates take effect at the start of the
-    /// next Agent iteration, so this never disturbs an in-flight LLM/tool operation.
+    /// purposes without an explicit binding. Updates take effect at the start of
+    /// the next Agent iteration, so this never disturbs an in-flight LLM/tool
+    /// operation.
     ///
     /// # Errors
     ///
     /// Returns [`AgentError::LlmConfig`] without changing bindings when `api` is
     /// invalid.
-    pub fn link_api(&self, api: ClawApiConfig, usage: ApiUsage, default: bool) -> AgentResult<()> {
-        self.runtime.link_api(api, usage, default)?;
+    pub fn link_api(
+        &self,
+        api: ClawApiConfig,
+        purpose: ApiPurpose,
+        default: bool,
+    ) -> AgentResult<()> {
+        self.runtime.link_api(api, purpose, default)?;
         Ok(())
     }
 

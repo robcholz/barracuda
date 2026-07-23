@@ -9,13 +9,13 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use claw_agent::tools::{
+    AsyncToolHandler, SyncToolHandler, Tool, ToolFuture, ToolGroup, ToolInvocation, ToolOutput,
+    ToolResult, ToolSpec,
+};
 use claw_agent::{AgentPersistenceConfig, AgentSystem, Message, SessionId, SessionPersistence};
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
-};
-use claw_tool::{
-    AsyncToolHandler, SyncToolHandler, Tool, ToolFuture, ToolGroup, ToolInvocation, ToolOutput,
-    ToolResult, ToolSpec,
 };
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
@@ -372,7 +372,7 @@ fn build_configured_system_with_tool_groups(
     )
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
 }

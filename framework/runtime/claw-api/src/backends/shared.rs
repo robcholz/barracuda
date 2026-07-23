@@ -10,7 +10,7 @@ use serde_json::{Map, Value};
 
 use super::super::errors::{ChatError, ClawApiError, InferMediaError};
 #[cfg(feature = "cache_profile")]
-use super::super::types::ApiUsage;
+use super::super::types::ProviderUsage;
 use super::super::types::{ClawApiConfig, LlmResponse, MediaAsset, ToolCall};
 
 /// HTTP statuses that indicate a transient, retryable server condition.
@@ -211,11 +211,11 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Claw
 
 /// Extract OpenAI-compatible usage counters for cache profiling.
 #[cfg(feature = "cache_profile")]
-pub(super) fn parse_openai_usage(root: &Value) -> Option<ApiUsage> {
+pub(super) fn parse_openai_usage(root: &Value) -> Option<ProviderUsage> {
     let usage = root.get("usage")?;
     let prompt_details = usage.get("prompt_tokens_details");
     let input_details = usage.get("input_tokens_details");
-    let profile = ApiUsage {
+    let profile = ProviderUsage {
         input_tokens: usage
             .get("prompt_tokens")
             .or_else(|| usage.get("input_tokens"))
@@ -239,11 +239,11 @@ pub(super) fn parse_openai_usage(root: &Value) -> Option<ApiUsage> {
 
 /// Extract Anthropic usage counters for cache profiling.
 #[cfg(feature = "cache_profile")]
-pub(super) fn parse_anthropic_usage(root: &Value) -> Option<ApiUsage> {
+pub(super) fn parse_anthropic_usage(root: &Value) -> Option<ProviderUsage> {
     let usage = root
         .get("usage")
         .or_else(|| root.get("message").and_then(|message| message.get("usage")))?;
-    let profile = ApiUsage {
+    let profile = ProviderUsage {
         input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
         output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
         cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),

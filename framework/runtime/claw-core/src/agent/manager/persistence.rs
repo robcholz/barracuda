@@ -51,6 +51,11 @@ where
             .collect()
     }
 
+    /// Remove any canonical storage owned by `id`.
+    ///
+    /// Missing state and transcript files are treated as already removed, so
+    /// callers use the same lifecycle path for persistent and in-memory Agents.
+    /// Every live Agent handle for `id` must be dropped before calling this.
     pub(crate) fn remove(&self, id: AgentId) -> Result<(), AgentCreateError> {
         self.persistence
             .collection::<BaseAgentState>(AGENT_STATE_NAME)?

@@ -8,7 +8,7 @@
 - `ToolSet`
 - `Arc<dyn PermissionPolicy>`
 - assembled `Context`
-- `SharedApiManager` and this Agent's `ApiUsage`
+- `SharedApiManager` and this Agent's `ApiPurpose`
 - `Vec<Box<dyn ContextAdapter>>`
 - `AgentEffectInbox`
 

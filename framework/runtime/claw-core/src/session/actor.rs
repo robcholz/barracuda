@@ -12,8 +12,9 @@ use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 
 use super::agent_slot::{AgentSlot, AgentSlotUpdate};
-use super::approval_resolver::{
-    ApprovalCompletion, ApprovalFlow, ApprovalResolverError, ApprovalRespondError,
+use super::approval::{
+    ApprovalCompletion, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
+    SharedApprovalResolver,
 };
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SharedAgentManager};
@@ -26,9 +27,9 @@ use super::{
 };
 use crate::agent::{
     AgentCompletion, AgentCreateError, AgentEvent, AgentInputRequest, AgentIterationEvent,
-    AgentOutcome, AgentTurnOrigin, PersistenceConfig, ReasoningEffort, ToolCallId,
+    AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig, ReasoningEffort,
+    ToolCallId,
 };
-use crate::config::SharedApiManager;
 use crate::scheduler::{AgentRunPort, AgentRunSchedulerHandle};
 
 struct OpenSession {
@@ -135,7 +136,7 @@ where
     inbox: VecDeque<Message>,
     active_turn: Option<TurnId>,
     next_turn: u32,
-    approval: ApprovalFlow,
+    approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
 
     runs: AgentRunPort<Http, Timer>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
@@ -158,7 +159,7 @@ where
         persistence: SessionPersistence,
         agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
         state: DurableState<SessionPersistentState>,
-        api_manager: SharedApiManager,
+        approval_resolver: SharedApprovalResolver<Http, Timer>,
         scheduler: AgentRunSchedulerHandle<Http, Timer>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = async_channel::unbounded();
@@ -172,7 +173,7 @@ where
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
-                approval: ApprovalFlow::new(api_manager),
+                approval: ApprovalFlow::new(approval_resolver),
                 runs: AgentRunPort::new(scheduler),
                 commands: Box::pin(commands),
                 next_source: PollSource::Command,
@@ -301,7 +302,7 @@ where
         }
         let result = self
             .approval
-            .respond::<Http, Timer>(request, message)
+            .respond(request, message)
             .map_err(|error| match error {
                 ApprovalRespondError::NotWaiting | ApprovalRespondError::Resolving => {
                     SessionControlError::NotAwaitingInput(self.session)
@@ -473,10 +474,8 @@ where
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
         self.root = None;
-        if self.persistence == SessionPersistence::Persistent {
-            if let Some(root_agent) = root_agent {
-                self.agent_manager.remove(root_agent)?;
-            }
+        if let Some(root_agent) = root_agent {
+            self.agent_manager.remove(root_agent)?;
         }
         self.state.get_mut().clear_root();
         Ok(())
@@ -576,6 +575,8 @@ where
                 IterationEvent::Reasoning(part)
             }
             StreamPart::Delta(AgentIterationEvent::Output(part)) => IterationEvent::Output(part),
+            #[cfg(feature = "cache_profile")]
+            StreamPart::Delta(AgentIterationEvent::Usage(usage)) => IterationEvent::Usage { usage },
             StreamPart::Delta(AgentIterationEvent::ToolResult(part)) => {
                 IterationEvent::ToolResult(part)
             }
@@ -590,19 +591,14 @@ where
     }
 
     fn handle_approval_result(&mut self, completion: ApprovalCompletion) {
-        let (request, tool_call_id, tool_call, reason, result) = completion.into_parts();
-        let resolution = match result {
-            Ok(resolution) => resolution,
-            Err(ApprovalResolverError::Cancelled) => return,
+        let (request, tool_call_id, result) = completion.into_parts();
+        let decision = match result {
+            Ok(decision) => decision,
             Err(error) => {
+                let rejection = format!("approval resolution failed: {error}");
                 self.emit_input_error(request, error.into());
-                self.request_approval(tool_call_id, tool_call, reason);
-                return;
+                ApprovalDecision::Rejected(rejection)
             }
-        };
-        let Some(decision) = resolution.into_decision() else {
-            self.request_approval(tool_call_id, tool_call, reason);
-            return;
         };
         let resolution = self
             .root

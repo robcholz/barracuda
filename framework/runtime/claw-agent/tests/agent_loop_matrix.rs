@@ -8,20 +8,20 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 use std::task::{Poll, Waker};
 
+use claw_agent::tools::{
+    SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError, ToolOutput,
+    ToolResult, ToolSpec,
+};
+#[cfg(feature = "cache_profile")]
+use claw_agent::ProviderUsage;
 use claw_agent::{
     stream::StreamPart, AgentSystem, InputRequestId, InputRequestKind, IterationEvent, IterationId,
     Message, PermissionLevel, ReasoningEffort, SessionControlError, SessionEvent, ToolCall,
     TurnEvent, TurnId, TurnOrigin,
 };
-#[cfg(feature = "cache_profile")]
-use claw_api::ApiUsage;
 use claw_interface::{
     Cancel, ClawHttp, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
     ImmediateTimer, MemFs, StdThread, TokioExecutor,
-};
-use claw_tool::{
-    SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError, ToolOutput,
-    ToolResult, ToolSpec,
 };
 use futures_lite::future::{block_on, poll_fn};
 use futures_lite::StreamExt;
@@ -296,11 +296,7 @@ fn ask_permission_level_reaches_the_public_approval_flow() {
     let arguments = r#"{"final_message":"approved execution"}"#;
     install_agent_replies(vec![
         assistant_tool_call("conversation_end", arguments, None),
-        assistant_tool_call(
-            "permission_resolve_reply",
-            r#"{"decision":"approve"}"#,
-            None,
-        ),
+        assistant_tool_call("permission_resolve_reply", r#"{"decision":"yes"}"#, None),
     ]);
 
     let root = mem_root("agent-loop-ask-permission-level");
@@ -367,11 +363,7 @@ fn approval_response_requires_the_pending_request_id() {
     let arguments = r#"{"final_message":"approved execution"}"#;
     install_agent_replies(vec![
         assistant_tool_call("conversation_end", arguments, None),
-        assistant_tool_call(
-            "permission_resolve_reply",
-            r#"{"decision":"approve"}"#,
-            None,
-        ),
+        assistant_tool_call("permission_resolve_reply", r#"{"decision":"yes"}"#, None),
     ]);
 
     let root = mem_root("agent-loop-approval-request-id");
@@ -405,7 +397,7 @@ fn approval_response_requires_the_pending_request_id() {
 }
 
 #[test]
-fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
+fn non_affirmative_approval_response_rejects_without_reissuing_input() {
     let _lock = AGENT_LOOP_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -414,17 +406,13 @@ fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
         assistant_tool_call("conversation_end", arguments, None),
         assistant_tool_call(
             "permission_resolve_reply",
-            r#"{"decision":"clarify","message":"Please answer yes or no."}"#,
+            r#"{"decision":"other","reason":"the reply did not grant permission"}"#,
             None,
         ),
-        assistant_tool_call(
-            "permission_resolve_reply",
-            r#"{"decision":"approve"}"#,
-            None,
-        ),
+        assistant_text("ambiguous response rejected"),
     ]);
 
-    let root = mem_root("agent-loop-approval-clarification");
+    let root = mem_root("agent-loop-approval-other");
     let system = build_matrix_system(&root);
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -436,30 +424,61 @@ fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
     let (first_request, _, first_events) = block_on(wait_for_input_request(&mut events));
 
     block_on(control.respond(first_request, Message::text("maybe"))).unwrap();
-    let (second_request, _, clarification_events) = block_on(wait_for_input_request(&mut events));
+    let remaining_events = drain_until_turn_ended(&mut events);
 
     assert_eq!(first_request, InputRequestId(1));
-    assert_eq!(second_request, InputRequestId(2));
-    assert!(output_fragments(&clarification_events).is_empty());
-    assert!(!clarification_events
+    assert_eq!(
+        output_fragments(&remaining_events),
+        vec!["ambiguous response rejected".to_string()]
+    );
+    assert!(!remaining_events
         .iter()
-        .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::Ended { .. }))));
+        .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::InputRequested { .. }))));
     assert_eq!(
         first_events
             .iter()
-            .chain(&clarification_events)
+            .chain(&remaining_events)
             .filter(|event| matches!(event, SessionEvent::Turn(TurnEvent::Started { .. })))
             .count(),
         1
     );
+}
 
-    block_on(control.respond(second_request, Message::text("approve"))).unwrap();
+#[test]
+fn approval_resolver_failure_rejects_without_reissuing_input() {
+    let _lock = AGENT_LOOP_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let arguments = r#"{"final_message":"must not run"}"#;
+    install_agent_replies(vec![
+        assistant_tool_call("conversation_end", arguments, None),
+        assistant_text("not a resolver tool call"),
+        assistant_text("resolver failure was fail-closed"),
+    ]);
+
+    let root = mem_root("agent-loop-approval-resolver-failure");
+    let system = build_matrix_system(&root);
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+
+    block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
+    block_on(control.append(Message::text("ask before running the tool"))).unwrap();
+    let (request, _, _) = block_on(wait_for_input_request(&mut events));
+
+    block_on(control.respond(request, Message::text("maybe"))).unwrap();
     let remaining_events = drain_until_turn_ended(&mut events);
-    assert!(
-        output_fragments(&remaining_events)
-            .iter()
-            .any(|output| output == "approved execution"),
-        "events={remaining_events:?}"
+
+    assert!(remaining_events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::Error(_)))));
+    assert!(!remaining_events
+        .iter()
+        .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::InputRequested { .. }))));
+    assert_eq!(
+        output_fragments(&remaining_events),
+        vec!["resolver failure was fail-closed".to_string()]
     );
 }
 
@@ -471,11 +490,7 @@ fn explicit_rejection_survives_a_switch_from_ask_to_allow_all() {
     let arguments = r#"{"final_message":"rejected action ran"}"#;
     install_agent_replies(vec![
         assistant_tool_call("conversation_end", arguments, None),
-        assistant_tool_call(
-            "permission_resolve_reply",
-            r#"{"decision":"reject","note":"not allowed"}"#,
-            None,
-        ),
+        assistant_tool_call("permission_resolve_reply", r#"{"decision":"no"}"#, None),
         assistant_text("rejection respected"),
     ]);
 
@@ -500,7 +515,12 @@ fn explicit_rejection_survives_a_switch_from_ask_to_allow_all() {
     );
     let bodies = agent_request_bodies();
     assert_eq!(bodies.len(), 3);
-    assert_followup_received_tool_result(&bodies[2], arguments, "not allowed", "rejected approval");
+    assert_followup_received_tool_result(
+        &bodies[2],
+        arguments,
+        "user rejected",
+        "rejected approval",
+    );
     assert!(bodies.iter().all(|body| !body.contains("[approval]")));
 }
 
@@ -525,14 +545,10 @@ fn each_asked_call_is_resolved_separately_while_safe_calls_keep_running() {
         ]),
         assistant_tool_call(
             "permission_resolve_reply",
-            r#"{"decision":"reject","note":"first denied"}"#,
+            r#"{"decision":"other","reason":"first denied"}"#,
             None,
         ),
-        assistant_tool_call(
-            "permission_resolve_reply",
-            r#"{"decision":"approve"}"#,
-            None,
-        ),
+        assistant_tool_call("permission_resolve_reply", r#"{"decision":"yes"}"#, None),
         assistant_text("history inspected"),
     ]);
 
@@ -668,7 +684,7 @@ fn agent_loop_emits_provider_usage_for_cli_consumers() {
     assert!(events.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Usage {
-            usage: ApiUsage {
+            usage: ProviderUsage {
                 input_tokens: Some(21),
                 output_tokens: Some(4),
                 cache_read_tokens: Some(13),
@@ -774,7 +790,7 @@ fn build_matrix_system_with_tool_groups(
     )
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
 }

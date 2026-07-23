@@ -116,7 +116,7 @@ pub use claw_utils::stream;
 pub use client::{ClawApi, ClawApiAsync};
 pub use errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
 #[cfg(feature = "cache_profile")]
-pub use types::ApiUsage;
+pub use types::ProviderUsage;
 pub use types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ChatStreamEvent, ClawApiConfig, LlmResponse,
     MediaAsset, MediaRequest, RetryPolicy, StaticOutputSchema, ToolCall,

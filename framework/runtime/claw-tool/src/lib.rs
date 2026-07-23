@@ -7,6 +7,7 @@ mod set;
 mod tool;
 mod validate;
 
+pub use claw_permission::{Action, Resource, RiskClass};
 pub use registry::{ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryVersion};
 pub use runner::{ToolDetachHandle, ToolJoinHandle, ToolRunner};
 pub use set::{

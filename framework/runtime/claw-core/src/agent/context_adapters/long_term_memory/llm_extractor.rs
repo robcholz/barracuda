@@ -17,7 +17,7 @@ use claw_memory::MemoryId;
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
-use crate::config::{ApiUsage, SharedApiManager};
+use crate::config::{ApiPurpose, SharedApiManager};
 
 use super::extraction::{
     ExtractError, ExtractFuture, ExtractedItem, ExtractionInput, Extractor, MemoryOp,
@@ -87,7 +87,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Extractor for LlmExtractor<H, Timer> {
                     .api_manager
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .get_api(ApiUsage::Memory)
+                    .get_api(ApiPurpose::Memory)
                 {
                     let _ = lease.api_mut().set_config(config);
                 }

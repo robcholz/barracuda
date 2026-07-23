@@ -16,6 +16,7 @@ use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
+use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
 use super::control::{SessionCommand, SessionControl, SessionControlError};
 use super::persistence::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
@@ -108,7 +109,7 @@ where
     persistence: SharedPersistence<Filesystem>,
     state: DurableState<SessionManagerState>,
     agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
-    api_manager: SharedApiManager,
+    approval_resolver: SharedApprovalResolver<Http, Timer>,
     scheduler: AgentRunSchedulerHandle<Http, Timer>,
     sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>>,
     actor_poll_queue: VecDeque<SessionId>,
@@ -142,6 +143,8 @@ where
             skill_roots,
             Arc::clone(&api_manager),
         )?);
+        let approval_resolver: SharedApprovalResolver<Http, Timer> =
+            Rc::new(LlmApprovalResolver::<Http, Timer>::new(api_manager));
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
         let mut sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>> =
             BTreeMap::new();
@@ -171,7 +174,7 @@ where
             persistence,
             state,
             agent_manager,
-            api_manager,
+            approval_resolver,
             scheduler,
             sessions,
             actor_poll_queue: VecDeque::new(),
@@ -330,7 +333,7 @@ where
             persistence,
             Rc::clone(&self.agent_manager),
             state,
-            Arc::clone(&self.api_manager),
+            Rc::clone(&self.approval_resolver),
             self.scheduler.clone(),
         );
         let span = tracing::info_span!(

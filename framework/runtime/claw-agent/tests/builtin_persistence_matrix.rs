@@ -414,7 +414,7 @@ fn run_phase(
     let system =
         BuiltinPersistenceSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)

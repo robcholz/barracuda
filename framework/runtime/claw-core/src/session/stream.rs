@@ -17,7 +17,7 @@ use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
-use super::approval_resolver::ApprovalResolverError;
+use super::approval::ApprovalResolverError;
 use super::control::SessionCommand;
 use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, IterationId};
 
@@ -140,7 +140,7 @@ pub enum IterationEvent {
     #[cfg(feature = "cache_profile")]
     Usage {
         /// Counters reported by the provider; individual fields may be absent.
-        usage: claw_api::ApiUsage,
+        usage: claw_api::ProviderUsage,
     },
     /// The iteration ended.
     Ended,

@@ -16,7 +16,7 @@ use claw_skill::SkillError;
 use claw_tool::ToolRegistry;
 
 use crate::agent::AgentManagerError;
-use crate::config::{ApiUsage, SharedApiManager};
+use crate::config::{ApiPurpose, SharedApiManager};
 use crate::session::{
     OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionId,
     SessionPersistence, SessionStream,
@@ -71,7 +71,7 @@ impl From<AgentManagerError> for AgentRuntimeBuildError {
 pub struct AgentRuntime {
     commands: Sender<RuntimeCommand>,
     worker: Mutex<Option<WorkerHandle>>,
-    /// Shared with the worker: turns read the per-usage config from it at
+    /// Shared with the worker: turns read the per-purpose config from it at
     /// each iteration; this handle side updates it via [`link_api`](Self::link_api).
     api_manager: SharedApiManager,
 }
@@ -137,7 +137,7 @@ impl AgentRuntime {
         }
     }
 
-    /// Register an LLM API config for a usage.
+    /// Register an LLM API config for a purpose.
     ///
     /// Takes `&self`: the manager is behind an `RwLock`, and updates are picked up
     /// at the start of the next Agent iteration, so this never interrupts an
@@ -149,13 +149,13 @@ impl AgentRuntime {
     pub fn link_api(
         &self,
         api: ClawApiConfig,
-        usage: ApiUsage,
+        purpose: ApiPurpose,
         default: bool,
     ) -> Result<(), InitError> {
         self.api_manager
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .link_api(api, usage, default)
+            .link_api(api, purpose, default)
     }
 
     /// Open a Session's long-lived event stream.

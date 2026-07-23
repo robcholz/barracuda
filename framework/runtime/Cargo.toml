@@ -15,6 +15,7 @@ members = [
     "claw-context",
     "claw-persistence",
     "claw-permission",
+    "claw-profile",
     "claw-sandbox",
     # Device-only (`#![cfg(target_os = "espidf")]`) staticlib crates that back
     # the on-device ESP-IDF integration test apps. They build to empty archives
@@ -34,3 +35,10 @@ members = [
 panic = "abort"
 opt-level = "s"
 lto = false
+
+# Host profiling keeps the same size-oriented optimization as firmware while
+# retaining source locations for allocation backtraces.
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = false

@@ -182,13 +182,13 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   `cancel` wakes and cooperatively aborts current async work.
 - `BaseAgent` owns only the generic run protocol and already assembled
   dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
-  instruction, inherited context, `SharedApiManager` plus its Agent `ApiUsage`,
+  instruction, inherited context, `SharedApiManager` plus its Agent `ApiPurpose`,
   `Vec<Box<dyn ContextAdapter>>`, and the transient `AgentEffectInbox` used to
   reduce typed tool effects.
 - At the beginning of every LLM iteration, BaseAgent snapshots its current API
   config from `SharedApiManager`, drops the manager lock, and applies that
   config directly to its LLM client. BaseAgent retains no shadow copy of the
-  applied config. Multiagent never resolves `ApiUsage` or configures a BaseAgent
+  applied config. Multiagent never resolves `ApiPurpose` or configures a BaseAgent
   LLM. Memory extraction and transcript compaction keep their own manager
   clones and dedicated usages.
 - Concrete mode, conversation, profile, skill, and memory semantics live under

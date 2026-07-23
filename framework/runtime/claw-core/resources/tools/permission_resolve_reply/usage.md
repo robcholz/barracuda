@@ -1,5 +1,5 @@
 Classify the user's reply to a permission request.
 
-Use `approve` only for clear consent. Use `reject` for clear refusal or
-objection. Use `clarify` for questions, ambiguity, or anything that does not
-decide the request yet.
+Use `yes` only for clear consent and `no` only for clear refusal. Use `other`
+for questions, ambiguity, objections with context, or any reply that does not
+grant permission, and include a concise `reason`.

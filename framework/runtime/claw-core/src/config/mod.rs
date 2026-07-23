@@ -2,5 +2,5 @@
 
 mod api;
 
-pub use api::ApiUsage;
+pub use api::ApiPurpose;
 pub(crate) use api::SharedApiManager;

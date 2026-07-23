@@ -9,14 +9,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use claw_agent::tools::{
+    AsyncToolHandler, Tool, ToolConfig, ToolFuture, ToolGroup, ToolInvocation, ToolOutput, ToolSpec,
+};
 use claw_agent::{
     stream::StreamPart, IterationEvent, Message, SessionEvent, TurnEvent, TurnId, TurnOrigin,
 };
 use claw_interface::{
     BlockingHttpAdapter, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
-};
-use claw_tool::{
-    AsyncToolHandler, Tool, ToolConfig, ToolFuture, ToolGroup, ToolInvocation, ToolOutput, ToolSpec,
 };
 use futures_lite::future::block_on;
 use serde_json::json;
@@ -57,7 +57,7 @@ fn detached_completion_opens_a_tool_call_turn_after_the_root_becomes_idle() {
     )
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system.start_all().unwrap();
 

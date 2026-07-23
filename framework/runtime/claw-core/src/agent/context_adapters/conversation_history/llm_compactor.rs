@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
-use crate::config::{ApiUsage, SharedApiManager};
+use crate::config::{ApiPurpose, SharedApiManager};
 
 const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_system.md");
 const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
@@ -52,7 +52,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Compactor for LlmCompactor<H, Timer> {
                     .api_manager
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .get_api(ApiUsage::Compaction)
+                    .get_api(ApiPurpose::Compaction)
                 {
                     let _ = lease.api_mut().set_config(config);
                 }

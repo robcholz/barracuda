@@ -1,6 +1,6 @@
 pub mod claw_agent
 pub use claw_agent::AgentId
-pub use claw_agent::ApiUsage
+pub use claw_agent::ApiPurpose
 pub use claw_agent::InputRequestId
 pub use claw_agent::InputRequestKind
 pub use claw_agent::IterationId
@@ -35,7 +35,7 @@ pub claw_agent::AgentPersistenceConfig::skill_roots: alloc::vec::Vec<alloc::stri
 pub struct claw_agent::AgentSystem<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
 impl<Filesystem, Http, Timer> claw_agent::AgentSystem<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::delete_session(&self, claw_core::protocol::ids::SessionId) -> core::result::Result<(), claw_core::session::api::SessionControlError>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::link_api(&self, claw_api::types::ClawApiConfig, claw_core::config::ApiUsage, bool) -> claw_agent::AgentResult<()>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::link_api(&self, claw_api::types::ClawApiConfig, claw_core::config::ApiPurpose, bool) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::list_sessions(&self) -> alloc::vec::Vec<claw_core::protocol::ids::SessionId>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new<Thread, Executor>(claw_agent::AgentPersistenceConfig) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new_session(&self, claw_core::protocol::SessionPersistence) -> claw_agent::AgentResult<claw_core::protocol::ids::SessionId>

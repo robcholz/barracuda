@@ -48,7 +48,7 @@ fn skill_tools_csv_matrix_scans_roots_reloads_and_activates_documents() {
         })
         .unwrap();
         system
-            .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+            .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
         install_runtime_skill(&runtime_root);
 

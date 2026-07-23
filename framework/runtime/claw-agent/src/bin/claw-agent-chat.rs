@@ -22,11 +22,11 @@ use std::path::Path;
 use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
-    stream::StreamPart, AgentPersistenceConfig, AgentSystem, InputRequestId, InputRequestKind,
-    IterationEvent, Message, PermissionLevel, SessionControl, SessionError, SessionEvent,
-    SessionPersistence, SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
+    stream::StreamPart, AgentPersistenceConfig, AgentSystem, ApiPurpose, BackendKind,
+    ClawApiConfig, InputRequestId, InputRequestKind, IterationEvent, Message, PermissionLevel,
+    ProviderUsage, SessionControl, SessionError, SessionEvent, SessionPersistence, SessionStream,
+    ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
-use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
 use claw_interface::{DiskFs, RealHttp, StdThread, TokioExecutor, TokioTimer};
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use futures_lite::StreamExt;
@@ -39,7 +39,7 @@ const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent
 struct ChatDriver {
     control: SessionControl,
     events: SessionStream,
-    total_usage: ApiUsage,
+    total_usage: ProviderUsage,
     content: ContentRenderer,
     active_origin: Option<TurnOrigin>,
     saw_output: bool,
@@ -50,14 +50,14 @@ impl ChatDriver {
         Self {
             control,
             events,
-            total_usage: ApiUsage::default(),
+            total_usage: ProviderUsage::default(),
             content: ContentRenderer::default(),
             active_origin: None,
             saw_output: false,
         }
     }
 
-    fn total_usage(&self) -> Option<ApiUsage> {
+    fn total_usage(&self) -> Option<ProviderUsage> {
         has_usage(self.total_usage).then_some(self.total_usage)
     }
 
@@ -447,7 +447,7 @@ fn format_input_request(kind: &InputRequestKind) -> String {
     }
 }
 
-fn format_usage(usage: ApiUsage) -> String {
+fn format_usage(usage: ProviderUsage) -> String {
     fn value(value: Option<u64>) -> String {
         value.map_or_else(|| "-".to_string(), |count| count.to_string())
     }
@@ -468,7 +468,7 @@ fn format_usage(usage: ApiUsage) -> String {
     )
 }
 
-fn accumulate_usage(total: &mut ApiUsage, usage: ApiUsage) {
+fn accumulate_usage(total: &mut ProviderUsage, usage: ProviderUsage) {
     fn accumulate(total: &mut Option<u64>, value: Option<u64>) {
         if let Some(value) = value {
             *total = Some(total.unwrap_or(0).saturating_add(value));
@@ -481,7 +481,7 @@ fn accumulate_usage(total: &mut ApiUsage, usage: ApiUsage) {
     accumulate(&mut total.cache_write_tokens, usage.cache_write_tokens);
 }
 
-fn has_usage(usage: ApiUsage) -> bool {
+fn has_usage(usage: ProviderUsage) -> bool {
     usage.input_tokens.is_some()
         || usage.output_tokens.is_some()
         || usage.cache_read_tokens.is_some()
@@ -533,7 +533,7 @@ async fn run() -> Result<()> {
     llm_config.timeout_ms = 60_000;
     let system =
         AgentSystem::<DiskFs, RealHttp, TokioTimer>::new::<StdThread, TokioExecutor>(persistence)?;
-    system.link_api(llm_config, claw_agent::ApiUsage::RootAgent, true)?;
+    system.link_api(llm_config, ApiPurpose::RootAgent, true)?;
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;
     let (control, events) = system.open_session(session)?;
@@ -642,11 +642,10 @@ fn required(key: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claw_api::ApiUsage;
 
     #[test]
     fn usage_line_includes_provider_cache_counters() {
-        let usage = ApiUsage {
+        let usage = ProviderUsage {
             input_tokens: Some(128),
             output_tokens: Some(9),
             cache_read_tokens: Some(96),
@@ -661,7 +660,7 @@ mod tests {
 
     #[test]
     fn usage_line_omits_rate_when_input_is_unavailable() {
-        let usage = ApiUsage {
+        let usage = ProviderUsage {
             input_tokens: None,
             output_tokens: Some(9),
             cache_read_tokens: Some(96),
@@ -676,10 +675,10 @@ mod tests {
 
     #[test]
     fn usage_totals_sum_iterations_and_recompute_rate() {
-        let mut total = ApiUsage::default();
+        let mut total = ProviderUsage::default();
         accumulate_usage(
             &mut total,
-            ApiUsage {
+            ProviderUsage {
                 input_tokens: Some(100),
                 output_tokens: Some(10),
                 cache_read_tokens: Some(80),
@@ -688,7 +687,7 @@ mod tests {
         );
         accumulate_usage(
             &mut total,
-            ApiUsage {
+            ProviderUsage {
                 input_tokens: Some(300),
                 output_tokens: Some(20),
                 cache_read_tokens: Some(120),
@@ -701,7 +700,7 @@ mod tests {
             "input=400 output=30 cache_read=200 cache_write=50 rate=50.00%"
         );
         assert!(has_usage(total));
-        assert!(!has_usage(ApiUsage::default()));
+        assert!(!has_usage(ProviderUsage::default()));
     }
 
     #[test]

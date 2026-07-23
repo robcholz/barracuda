@@ -1,0 +1,16 @@
+[package]
+name = "claw-profile"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Profiling utilities and common heap metrics for Claw workloads"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+dhat-heap = ["dep:dhat"]
+
+[target.'cfg(not(target_os = "espidf"))'.dependencies]
+dhat = { version = "0.3.3", optional = true }

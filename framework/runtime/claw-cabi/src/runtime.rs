@@ -12,9 +12,10 @@ use std::task::Waker;
 use std::time::Duration;
 
 use claw_agent::{
-    stream::StreamPart, AgentError, AgentPersistenceConfig, AgentSystem, ApiUsage, InputRequestId,
-    InputRequestKind, Message, OpenSessionError, SessionControl, SessionControlError, SessionEvent,
-    SessionEventStream, SessionId, SessionPersistence, TurnOrigin,
+    stream::StreamPart, AgentError, AgentPersistenceConfig, AgentSystem, ApiPurpose,
+    InputRequestId, InputRequestKind, Message, OpenSessionError, SessionControl,
+    SessionControlError, SessionEvent, SessionEventStream, SessionId, SessionPersistence,
+    TurnOrigin,
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
@@ -28,8 +29,9 @@ use crate::abi::{
     ClawAgentApiConfig, ClawAgentConfig, ClawAgentErrorEvent, ClawAgentEvent, ClawAgentEventData,
     ClawAgentInputRequestedEvent, ClawAgentIterationEvent, ClawAgentTextDeltaEvent,
     ClawAgentToolCallEvent, ClawAgentTurnEndedEvent, ClawAgentTurnStartedEvent, EspErr,
-    CLAW_AGENT_API_USAGE_COMPACTION, CLAW_AGENT_API_USAGE_MEMORY, CLAW_AGENT_API_USAGE_ROOT_AGENT,
-    CLAW_AGENT_API_USAGE_SUBAGENT, CLAW_AGENT_EVENT_KIND_CLOSED, CLAW_AGENT_EVENT_KIND_ERROR,
+    CLAW_AGENT_API_PURPOSE_COMPACTION, CLAW_AGENT_API_PURPOSE_MEMORY,
+    CLAW_AGENT_API_PURPOSE_ROOT_AGENT, CLAW_AGENT_API_PURPOSE_SUBAGENT,
+    CLAW_AGENT_EVENT_KIND_CLOSED, CLAW_AGENT_EVENT_KIND_ERROR,
     CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED, CLAW_AGENT_EVENT_KIND_ITERATION_ENDED,
     CLAW_AGENT_EVENT_KIND_ITERATION_STARTED, CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA,
     CLAW_AGENT_EVENT_KIND_OUTPUT_END, CLAW_AGENT_EVENT_KIND_REASONING_DELTA,
@@ -83,16 +85,16 @@ pub unsafe extern "C" fn claw_agent_init(config: *const ClawAgentConfig) -> EspE
 }
 
 #[no_mangle]
-/// Link or replace an LLM API configuration for one runtime usage.
+/// Link or replace an LLM API configuration for one runtime purpose.
 ///
 /// # Safety
 /// `config` must point to valid UTF-8 C strings for this call.
 pub unsafe extern "C" fn claw_agent_link_api(
     config: *const ClawAgentApiConfig,
-    usage: c_int,
+    purpose: c_int,
     is_default: bool,
 ) -> EspErr {
-    ffi_result(|| link_api(config, usage, is_default))
+    ffi_result(|| link_api(config, purpose, is_default))
 }
 
 #[no_mangle]
@@ -265,7 +267,7 @@ fn init(config: *const ClawAgentConfig) -> Result<(), CabiError> {
 
 fn link_api(
     config: *const ClawAgentApiConfig,
-    usage: c_int,
+    purpose: c_int,
     is_default: bool,
 ) -> Result<(), CabiError> {
     let config = unsafe { config.as_ref() }.ok_or(CabiError::InvalidArgument)?;
@@ -275,13 +277,13 @@ fn link_api(
         config.model,
         config.base_url,
     )?;
-    let usage = parse_api_usage(usage)?;
+    let purpose = parse_api_purpose(purpose)?;
 
     let _guard = lock_runtime();
     let runtime = runtime_mut()?;
     runtime
         .agent
-        .link_api(api, usage, is_default)
+        .link_api(api, purpose, is_default)
         .map_err(link_api_error)
 }
 
@@ -326,7 +328,7 @@ fn build_agent(
     let agent =
         DeviceAgent::with_tool_groups::<EspIdfThread, EspIdfExecutor>(persistence, tool_groups)?;
     if let Some(api) = api {
-        agent.link_api(api, ApiUsage::RootAgent, true)?;
+        agent.link_api(api, ApiPurpose::RootAgent, true)?;
     }
     Ok(agent)
 }
@@ -839,12 +841,12 @@ fn parse_initial_api_config(
     parse_api_config(api_key, backend_type, model, base_url).map(Some)
 }
 
-fn parse_api_usage(usage: c_int) -> Result<ApiUsage, CabiError> {
-    match usage {
-        CLAW_AGENT_API_USAGE_ROOT_AGENT => Ok(ApiUsage::RootAgent),
-        CLAW_AGENT_API_USAGE_SUBAGENT => Ok(ApiUsage::SubAgent),
-        CLAW_AGENT_API_USAGE_MEMORY => Ok(ApiUsage::Memory),
-        CLAW_AGENT_API_USAGE_COMPACTION => Ok(ApiUsage::Compaction),
+fn parse_api_purpose(purpose: c_int) -> Result<ApiPurpose, CabiError> {
+    match purpose {
+        CLAW_AGENT_API_PURPOSE_ROOT_AGENT => Ok(ApiPurpose::RootAgent),
+        CLAW_AGENT_API_PURPOSE_SUBAGENT => Ok(ApiPurpose::SubAgent),
+        CLAW_AGENT_API_PURPOSE_MEMORY => Ok(ApiPurpose::Memory),
+        CLAW_AGENT_API_PURPOSE_COMPACTION => Ok(ApiPurpose::Compaction),
         _ => Err(CabiError::InvalidArgument),
     }
 }

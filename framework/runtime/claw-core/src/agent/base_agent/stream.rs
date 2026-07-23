@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+#[cfg(feature = "cache_profile")]
+use claw_api::ProviderUsage;
 use claw_api::ToolCall;
 use claw_memory::TurnError;
 use claw_tool::{ToolDetachHandle, ToolOutput};
@@ -70,6 +72,8 @@ pub(crate) enum AgentIterationEvent {
     Started(IterationId),
     Reasoning(StreamPart<String>),
     Output(StreamPart<String>),
+    #[cfg(feature = "cache_profile")]
+    Usage(ProviderUsage),
     ToolResult(StreamPart<(ToolCall, ToolOutput)>),
 }
 

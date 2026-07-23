@@ -13,7 +13,7 @@ use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
 
-use crate::config::{ApiUsage, SharedApiManager};
+use crate::config::{ApiPurpose, SharedApiManager};
 use crate::session::Message;
 
 use super::context::ContextAdapter;
@@ -36,7 +36,7 @@ pub(in crate::agent) struct BaseAgentConfig {
     pub(in crate::agent) inherited_context: Vec<Block<'static>>,
     pub(in crate::agent) context_adapters: Vec<Box<dyn ContextAdapter>>,
     pub(in crate::agent) api_manager: SharedApiManager,
-    pub(in crate::agent) api_usage: ApiUsage,
+    pub(in crate::agent) api_purpose: ApiPurpose,
     pub(in crate::agent) tools: ToolSet,
     pub(in crate::agent) effect_inbox: AgentEffectInbox,
     pub(in crate::agent) permission_policy: Arc<dyn PermissionPolicy>,
@@ -70,7 +70,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     state: DurableState<BaseAgentState>,
     llm: ClawApiAsync<H, Timer>,
     api_manager: SharedApiManager,
-    api_usage: ApiUsage,
+    api_purpose: ApiPurpose,
     retry_policy: RetryPolicy,
     transcript: Box<dyn Transcript>,
     active_turn: Option<TurnHandle>,
@@ -107,7 +107,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             state: config.state,
             llm: ClawApiAsync::new(H::default(), Timer::default()),
             api_manager: config.api_manager,
-            api_usage: config.api_usage,
+            api_purpose: config.api_purpose,
             retry_policy: config.retry_policy,
             transcript: config.transcript,
             active_turn: None,
@@ -284,10 +284,10 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             .api_manager
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_api(self.api_usage);
+            .get_api(self.api_purpose);
         if let Some(config) = config {
             if self.llm.set_config(config).is_err() {
-                tracing::error!(name: "llm_config_invalid", usage = ?self.api_usage);
+                tracing::error!(name: "llm_config_invalid", purpose = ?self.api_purpose);
             }
         }
     }
@@ -662,6 +662,12 @@ where
                                     break;
                                 }
                             }
+                        }
+                        #[cfg(feature = "cache_profile")]
+                        IterationLoopEvent::Iteration(IterationEvent::Usage(usage)) => {
+                            yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                AgentIterationEvent::Usage(usage),
+                            )));
                         }
                         IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
                             for event in consumer.finish_content() {

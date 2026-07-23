@@ -2,11 +2,11 @@ pub mod claw_core
 pub use claw_core::PermissionLevel
 pub use claw_core::ToolCall
 pub use claw_core::stream
-pub enum claw_core::ApiUsage
-pub claw_core::ApiUsage::Compaction
-pub claw_core::ApiUsage::Memory
-pub claw_core::ApiUsage::RootAgent
-pub claw_core::ApiUsage::SubAgent
+pub enum claw_core::ApiPurpose
+pub claw_core::ApiPurpose::Compaction
+pub claw_core::ApiPurpose::Memory
+pub claw_core::ApiPurpose::RootAgent
+pub claw_core::ApiPurpose::SubAgent
 pub enum claw_core::InputRequestKind
 pub claw_core::InputRequestKind::PermissionApproval
 pub claw_core::InputRequestKind::PermissionApproval::reason: alloc::string::String
@@ -119,7 +119,7 @@ impl claw_core::Message
 pub fn claw_core::Message::text(impl core::convert::Into<alloc::string::String>) -> Self
 pub struct claw_core::Orchestrator
 impl claw_core::Orchestrator
-pub fn claw_core::Orchestrator::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiUsage, bool) -> core::result::Result<(), claw_api::errors::InitError>
+pub fn claw_core::Orchestrator::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiPurpose, bool) -> core::result::Result<(), claw_api::errors::InitError>
 pub fn claw_core::Orchestrator::new<Filesystem, Http, Timer, Thread, Executor>(alloc::sync::Arc<claw_tool::registry::ToolRegistry>, claw_persistence::SharedPersistence<Filesystem>, alloc::string::String, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, claw_core::OrchestratorBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static, Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub fn claw_core::Orchestrator::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionEventStream), claw_core::OpenSessionError>
 pub fn claw_core::Orchestrator::session_create(&self, claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>

@@ -134,7 +134,7 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         let system =
             YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
         system
-            .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+            .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
@@ -183,7 +183,7 @@ fn global_scheduler_interleaves_ready_agents_across_sessions() {
     let root = mem_root("global-scheduler-fairness");
     let system = YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
 
     let session_a = system
@@ -318,7 +318,7 @@ fn run_mem_stress_case(
     install_stress_outputs(expected_outputs);
     let system = MemStressSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     drive_stress_case(
         case,
@@ -462,7 +462,7 @@ impl DriveSystem for DiskStressSystem {
 fn build_disk_stress_system(root: &str) -> DiskStressSystem {
     let system = DiskStressSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
 }

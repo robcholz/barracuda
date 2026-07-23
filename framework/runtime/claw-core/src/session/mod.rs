@@ -2,7 +2,7 @@
 
 mod actor;
 mod agent_slot;
-mod approval_resolver;
+mod approval;
 mod control;
 mod manager;
 mod message;
@@ -11,7 +11,7 @@ mod persistence;
 mod state;
 mod stream;
 
-pub use approval_resolver::ApprovalResolverError;
+pub use approval::ApprovalResolverError;
 pub use control::{SessionControl, SessionControlError};
 pub use manager::{OpenSessionError, SessionCreateError, SessionId, SessionPersistence};
 pub(crate) use manager::{SessionManager, SessionManagerInitError};

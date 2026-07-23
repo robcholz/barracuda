@@ -37,8 +37,10 @@ impl ToolCall {
 /// Within one response the three logical streams are contiguous and explicitly
 /// closed in this order: `Reasoning(Delta)* -> Reasoning(End) ->
 /// Output(Delta)* -> Output(End) -> ToolCalls(Delta)* -> ToolCalls(End)`.
-/// Reasoning/output deltas are append fragments. Each tool-call delta is one
-/// complete call, emitted only after its arguments finish streaming.
+/// When cache profiling is enabled, one final [`ChatStreamEvent::Usage`] may
+/// follow those boundaries. Reasoning/output deltas are append fragments. Each
+/// tool-call delta is one complete call, emitted only after its arguments
+/// finish streaming.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChatStreamEvent {
     /// Provider thinking/reasoning content and its explicit boundary.
@@ -47,6 +49,9 @@ pub enum ChatStreamEvent {
     Output(StreamPart<String>),
     /// Complete requested tool calls and their explicit boundary.
     ToolCalls(StreamPart<ToolCall>),
+    /// Provider token counters for this completed response.
+    #[cfg(feature = "cache_profile")]
+    Usage(ProviderUsage),
 }
 
 /// The result of [`crate::ClawApi::chat`].
@@ -65,13 +70,13 @@ pub struct LlmResponse {
     pub tool_calls: Vec<ToolCall>,
     /// Provider token usage, including cache read/write counters.
     #[cfg(feature = "cache_profile")]
-    pub usage: Option<ApiUsage>,
+    pub usage: Option<ProviderUsage>,
 }
 
 /// Provider usage counters used for cache profiling.
 #[cfg(feature = "cache_profile")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ApiUsage {
+pub struct ProviderUsage {
     /// Input/prompt tokens reported by the provider.
     pub input_tokens: Option<u64>,
     /// Output/completion tokens reported by the provider.

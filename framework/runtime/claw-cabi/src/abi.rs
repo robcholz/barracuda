@@ -31,7 +31,7 @@ pub struct ClawAgentConfig {
     pub system_skills_root_dir: *const c_char,
 }
 
-/// One LLM API configuration linked to an agent usage.
+/// One LLM API configuration linked to an agent purpose.
 #[repr(C)]
 pub struct ClawAgentApiConfig {
     pub api_key: *const c_char,
@@ -40,10 +40,10 @@ pub struct ClawAgentApiConfig {
     pub base_url: *const c_char,
 }
 
-pub const CLAW_AGENT_API_USAGE_ROOT_AGENT: c_int = 0;
-pub const CLAW_AGENT_API_USAGE_SUBAGENT: c_int = 1;
-pub const CLAW_AGENT_API_USAGE_MEMORY: c_int = 2;
-pub const CLAW_AGENT_API_USAGE_COMPACTION: c_int = 3;
+pub const CLAW_AGENT_API_PURPOSE_ROOT_AGENT: c_int = 0;
+pub const CLAW_AGENT_API_PURPOSE_SUBAGENT: c_int = 1;
+pub const CLAW_AGENT_API_PURPOSE_MEMORY: c_int = 2;
+pub const CLAW_AGENT_API_PURPOSE_COMPACTION: c_int = 3;
 
 pub const CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT: c_int = 0;
 pub const CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL: c_int = 1;

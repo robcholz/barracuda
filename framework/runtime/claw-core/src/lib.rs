@@ -34,7 +34,7 @@ pub use agent::{
 pub use claw_api::ToolCall;
 pub use claw_permission::PermissionLevel;
 pub use claw_tool::ToolOutput;
-pub use config::ApiUsage;
+pub use config::ApiPurpose;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{
     ApprovalResolverError, InputRequestId, InputRequestKind, IterationEvent, Message,

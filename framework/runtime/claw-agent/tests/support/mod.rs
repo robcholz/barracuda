@@ -4,9 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use claw_agent::{
-    AgentError, AgentPersistenceConfig, AgentSystem, SessionEvent, SessionStream, ToolGroup,
+    AgentError, AgentPersistenceConfig, AgentSystem, BackendKind, ClawApiConfig, SessionEvent,
+    SessionStream, ToolGroup,
 };
-use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::http::{
     Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
     StreamingHttp,
@@ -146,7 +146,7 @@ pub fn try_build_mem_system_with_tool_groups(
         persistence(root),
         tool_groups,
     )?;
-    system.link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)?;
+    system.link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)?;
     Ok(system)
 }
 

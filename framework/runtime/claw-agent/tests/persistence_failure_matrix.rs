@@ -124,7 +124,7 @@ fn assert_submit_error(root: &str, fixture: &Fixture) {
     let system =
         PersistenceFailureSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -148,7 +148,7 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
     let system =
         PersistenceFailureSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)

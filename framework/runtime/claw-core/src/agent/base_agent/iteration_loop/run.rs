@@ -131,6 +131,10 @@ where
                         tool_calls.push(call);
                     }
                     Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::End))) => {}
+                    #[cfg(feature = "cache_profile")]
+                    Some(Ok(ChatStreamEvent::Usage(usage))) => {
+                        yield IterationLoopEvent::Iteration(IterationEvent::Usage(usage));
+                    }
                     Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
                         tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
                         yield IterationLoopEvent::Cancelled;

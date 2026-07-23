@@ -4,7 +4,7 @@
 //! through a session stream plus tools. Everything below uses the
 //! `claw_agent` surface:
 //!
-//! 1. Build an [`AgentSystem`] and register a **tool**.
+//! 1. Build an [`AgentSystem`] with a **tool**.
 //! 2. Start the registered runtime objects.
 //! 3. Open a session, append user text, and read replies from the same stream.
 //!
@@ -17,10 +17,11 @@
 //! ```
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionEvent, SessionPersistence,
-    TurnEvent,
+    stream::StreamPart,
+    tools::{SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec},
+    AgentSystem, ApiPurpose, BackendKind, ClawApiConfig, IterationEvent, Message, SessionEvent,
+    SessionPersistence, TurnEvent,
 };
-use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::http::SliceChunks;
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
@@ -28,9 +29,6 @@ use claw_interface::{
     TokioExecutor,
 };
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
-use claw_tool::{
-    SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
-};
 use futures_lite::StreamExt;
 
 #[derive(Default)]
@@ -144,7 +142,7 @@ async fn main() -> anyhow::Result<()> {
             [Tool::from_sync(TimeNowTool)],
         )],
     )?;
-    system.link_api(scripted_llm(), claw_agent::ApiUsage::RootAgent, true)?;
+    system.link_api(scripted_llm(), ApiPurpose::RootAgent, true)?;
     println!("registered tool `time_now`");
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;

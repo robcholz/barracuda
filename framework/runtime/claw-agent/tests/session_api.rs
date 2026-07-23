@@ -343,7 +343,7 @@ fn build_slow_system(root: &str, bodies: Vec<String>) -> SlowAgentSystem {
     install_script(bodies);
     let system = SlowAgentSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
 }

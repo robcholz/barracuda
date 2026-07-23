@@ -47,11 +47,11 @@ typedef struct {
 } claw_agent_api_config_t;
 
 typedef enum {
-    CLAW_AGENT_API_USAGE_ROOT_AGENT = 0,
-    CLAW_AGENT_API_USAGE_SUBAGENT = 1,
-    CLAW_AGENT_API_USAGE_MEMORY = 2,
-    CLAW_AGENT_API_USAGE_COMPACTION = 3,
-} claw_agent_api_usage_t;
+    CLAW_AGENT_API_PURPOSE_ROOT_AGENT = 0,
+    CLAW_AGENT_API_PURPOSE_SUBAGENT = 1,
+    CLAW_AGENT_API_PURPOSE_MEMORY = 2,
+    CLAW_AGENT_API_PURPOSE_COMPACTION = 3,
+} claw_agent_api_purpose_t;
 
 typedef enum {
     CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT = 0,
@@ -161,22 +161,22 @@ typedef struct {
 esp_err_t claw_agent_init(const claw_agent_config_t *config);
 
 /*
- * Link or replace an LLM API config for one usage after claw_agent_init(). It
+ * Link or replace an LLM API config for one purpose after claw_agent_init(). It
  * may be called before or after claw_agent_start(). A running agent observes
  * the change at the next turn boundary without disturbing an in-flight turn;
  * the stopped runtime retains the same AgentSystem and therefore the same
  * binding. Bindings survive a claw_agent_stop()/claw_agent_start() cycle and
  * are released only by claw_agent_deinit(). If is_default is true, this model
- * is also the fallback for usages without an explicit binding.
+ * is also the fallback for purposes without an explicit binding.
  *
  * Returns:
  * - ESP_OK on success.
- * - ESP_ERR_INVALID_ARG if config/usage is invalid or a required string is
+ * - ESP_ERR_INVALID_ARG if config/purpose is invalid or a required string is
  *   missing, non-UTF-8, or empty.
  * - ESP_ERR_INVALID_STATE if the runtime is not initialized.
  */
 esp_err_t claw_agent_link_api(const claw_agent_api_config_t *config,
-                              claw_agent_api_usage_t usage,
+                              claw_agent_api_purpose_t purpose,
                               bool is_default);
 
 /*

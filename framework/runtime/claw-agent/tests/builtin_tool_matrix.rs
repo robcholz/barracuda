@@ -46,7 +46,7 @@ fn builtin_tools_csv_matrix_feeds_profile_memory_and_subagent_results_back_to_ll
         let system =
             BuiltinToolSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
         system
-            .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+            .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)

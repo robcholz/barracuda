@@ -5,6 +5,9 @@ use support::Sse;
 
 use std::collections::BTreeMap;
 
+use claw_agent::tools::{
+    SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
+};
 use claw_agent::{
     stream::StreamPart, AgentError, AgentSystem, IterationEvent, IterationId, Message,
     OpenSessionError, SessionControlError, SessionEvent, SessionId, SessionStream, TurnEvent,
@@ -12,9 +15,6 @@ use claw_agent::{
 };
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
-};
-use claw_tool::{
-    SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
 };
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
@@ -421,7 +421,7 @@ fn try_build_mem_system(root: &str) -> Result<support::MemAgentSystem, AgentErro
     install_script(Vec::<String>::new());
     let system = support::MemAgentSystem::new::<StdThread, TokioExecutor>(persistence(root))?;
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     Ok(system)
 }
@@ -430,7 +430,7 @@ fn try_build_disk_system(root: &str) -> Result<DiskAgentSystem, AgentError> {
     install_script(Vec::<String>::new());
     let system = DiskAgentSystem::new::<StdThread, TokioExecutor>(persistence(root))?;
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     Ok(system)
 }

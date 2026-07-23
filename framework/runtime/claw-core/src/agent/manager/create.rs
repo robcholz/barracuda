@@ -17,7 +17,7 @@ use crate::agent::context_adapters::{
 };
 use crate::agent::tools::internal_tools;
 use crate::agent::{Agent, AgentKind, BaseAgentState, ReasoningEffort, ReasoningEffortHandle};
-use crate::config::ApiUsage;
+use crate::config::ApiPurpose;
 
 use super::error::AgentCreateError;
 use super::{AgentId, AgentManager};
@@ -246,16 +246,16 @@ impl<
             Box::new(profile_adapter),
             Box::new(adapter),
         ];
-        let api_usage = if is_root {
-            ApiUsage::RootAgent
+        let api_purpose = if is_root {
+            ApiPurpose::RootAgent
         } else {
-            ApiUsage::SubAgent
+            ApiPurpose::SubAgent
         };
         let base_config = BaseAgentConfig {
             state,
             transcript: transcript,
             api_manager: Arc::clone(&self.api_manager),
-            api_usage,
+            api_purpose,
             tools,
             effect_inbox,
             permission_policy,

@@ -500,7 +500,7 @@ path, without performing runtime checkpoints yet.
 - Add the concrete `Agent<H, T>` wrapper in `agent/`. It owns BaseAgent plus
   transient cross-task message/detached-tool state and remains independent of
   F and SharedPersistence.
-- Inject `SharedApiManager` and the Agent's `ApiUsage` into BaseAgent. Refresh
+- Inject `SharedApiManager` and the Agent's `ApiPurpose` into BaseAgent. Refresh
   the main LLM client at each iteration boundary without holding the manager
   lock across an await; remove API selection and LLM mutation from Multiagent.
 - Add `AgentState`. Do not persist `ToolCallId`, transient

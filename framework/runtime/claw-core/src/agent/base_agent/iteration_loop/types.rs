@@ -1,3 +1,5 @@
+#[cfg(feature = "cache_profile")]
+use claw_api::ProviderUsage;
 use claw_api::{ChatError, ToolCall};
 use claw_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
 use claw_utils::stream::StreamPart;
@@ -43,6 +45,8 @@ pub(crate) struct LlmStep<'a> {
 pub(crate) enum IterationEvent {
     Reasoning(StreamPart<String>),
     Output(StreamPart<String>),
+    #[cfg(feature = "cache_profile")]
+    Usage(ProviderUsage),
     /// BaseAgent records these calls before polling the iteration again and
     /// allowing tool execution to begin.
     BeforeToolCalls(Vec<ToolCall>),

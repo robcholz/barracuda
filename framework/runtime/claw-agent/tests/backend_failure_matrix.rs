@@ -8,6 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use claw_agent::tools::{
+    SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
+};
 use claw_agent::{
     stream::StreamPart, AgentError, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent,
 };
@@ -15,9 +18,6 @@ use claw_interface::{
     Cancel, ClawFile, ClawFs, ClawHttp, ClawTimer, FsError, HttpError, HttpJsonRequest,
     HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFs,
     SleepOutcome, StdThread, TimerFuture, TokioExecutor,
-};
-use claw_tool::{
-    SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
 };
 use futures_lite::future::block_on;
 use support::{
@@ -298,7 +298,7 @@ fn http_permanent_failure() -> Option<String> {
     )))
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     first_failure_text(drive_one_turn(&system, "permanent failure"))
 }
@@ -310,7 +310,7 @@ fn http_transient_then_success(case: &str) -> Option<String> {
     ))
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     let events = drive_one_turn(&system, "recover");
     assert_eq!(
@@ -328,7 +328,7 @@ fn http_transient_exhausts_retries() -> Option<String> {
     )))
     .unwrap();
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     first_failure_text(drive_one_turn(&system, "exhaust transient retries"))
 }
@@ -336,7 +336,7 @@ fn http_transient_exhausts_retries() -> Option<String> {
 fn build_fs_read_fail_system() -> Result<FsReadFailSystem, AgentError> {
     let system = FsReadFailSystem::new::<StdThread, TokioExecutor>(persistence("/fs-read-fail"))?;
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     Ok(system)
 }
@@ -353,7 +353,7 @@ fn build_fs_write_fail_system_with_tool_groups(
         tool_groups,
     )?;
     system
-        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     Ok(system)
 }

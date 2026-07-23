@@ -8,16 +8,12 @@
       "properties": {
         "decision": {
           "type": "string",
-          "enum": ["approve", "reject", "clarify"],
-          "description": "approve for clear consent, reject for clear refusal, clarify when the reply is ambiguous or asks a question."
+          "enum": ["yes", "no", "other"],
+          "description": "yes for clear consent, no for clear refusal, and other for every reply that does not grant permission."
         },
-        "note": {
+        "reason": {
           "type": "string",
-          "description": "Optional rejection reason. Used only when decision is reject."
-        },
-        "message": {
-          "type": "string",
-          "description": "Clarifying message to send back to the user. Used only when decision is clarify."
+          "description": "Required when decision is other. Concisely explains why the reply does not grant permission."
         }
       },
       "required": ["decision"]
