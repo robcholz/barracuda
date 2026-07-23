@@ -139,8 +139,7 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let mut events = system.open_session(session).unwrap();
-        let control = events.control();
+        let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.append(Message::text(format!("storm start {case}")))).unwrap();
         wait_for_yielding_http(case);
@@ -193,15 +192,15 @@ fn global_scheduler_interleaves_ready_agents_across_sessions() {
     let session_b = system
         .new_session(claw_agent::SessionPersistence::Ephemeral)
         .unwrap();
-    let mut events_a = system.open_session(session_a).unwrap();
-    let mut events_b = system.open_session(session_b).unwrap();
+    let (control_a, mut events_a) = system.open_session(session_a).unwrap();
+    let (control_b, mut events_b) = system.open_session(session_b).unwrap();
 
     block_on(async {
-        events_a
+        control_a
             .append(Message::text("fair-agent-a"))
             .await
             .unwrap();
-        events_b
+        control_b
             .append(Message::text("fair-agent-b"))
             .await
             .unwrap();
@@ -391,8 +390,7 @@ where
     for session in &sessions {
         if reopen_each_turn {
             for turn in 0..turns_per_session {
-                let mut events = system.open_session(*session);
-                let control = events.control();
+                let (control, mut events) = system.open_session(*session);
                 block_on(control.append(Message::text(format!(
                     "{case} session {session} turn {turn}"
                 ))))
@@ -409,8 +407,7 @@ where
                 assert_closed(&mut events);
             }
         } else {
-            let mut events = system.open_session(*session);
-            let control = events.control();
+            let (control, mut events) = system.open_session(*session);
             for turn in 0..turns_per_session {
                 block_on(control.append(Message::text(format!(
                     "{case} session {session} turn {turn}"
@@ -437,7 +434,7 @@ where
 
 trait DriveSystem {
     fn new_session(&self) -> SessionId;
-    fn open_session(&self, session: SessionId) -> SessionStream;
+    fn open_session(&self, session: SessionId) -> (claw_agent::SessionControl, SessionStream);
 }
 
 impl DriveSystem for MemStressSystem {
@@ -446,7 +443,7 @@ impl DriveSystem for MemStressSystem {
             .unwrap()
     }
 
-    fn open_session(&self, session: SessionId) -> SessionStream {
+    fn open_session(&self, session: SessionId) -> (claw_agent::SessionControl, SessionStream) {
         self.open_session(session).unwrap()
     }
 }
@@ -457,7 +454,7 @@ impl DriveSystem for DiskStressSystem {
             .unwrap()
     }
 
-    fn open_session(&self, session: SessionId) -> SessionStream {
+    fn open_session(&self, session: SessionId) -> (claw_agent::SessionControl, SessionStream) {
         self.open_session(session).unwrap()
     }
 }
@@ -554,14 +551,15 @@ fn assert_sorted_unique(sessions: &[SessionId], case: &str) {
 
 fn assert_closed(events: &mut SessionStream) {
     let events = drain_until_closed(events);
-    assert_eq!(events.last(), Some(&SessionEvent::Closed));
+    assert!(matches!(events.last(), Some(SessionEvent::Closed(_))));
 }
 
 fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
     block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {
-            let closed = event == SessionEvent::Closed;
+            let event = event.expect("Session stream failed");
+            let closed = matches!(event, SessionEvent::Closed(_));
             collected.push(event);
             if closed {
                 break;

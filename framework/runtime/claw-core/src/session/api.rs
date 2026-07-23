@@ -1,15 +1,11 @@
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use claw_permission::PermissionLevel;
 use claw_persistence::PersistenceError;
-use futures_core::Stream;
 
 use crate::agent::ReasoningEffort;
 
-use super::command::{ControlOp, SessionCommand, SessionEndpoint};
-use super::{InputRequestId, Message, SessionEvent, SessionId};
+use super::command::{ControlOp, SessionCommand};
+use super::{InputRequestId, Message, SessionId};
 
 /// Failure opening a session event stream.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -58,8 +54,7 @@ pub struct SessionControl {
 }
 
 impl SessionControl {
-    pub(crate) fn new(endpoint: SessionEndpoint) -> Self {
-        let (lease, commands) = endpoint.into_parts();
+    pub(super) fn new(lease: u64, commands: Sender<SessionCommand>) -> Self {
         Self { lease, commands }
     }
 
@@ -189,84 +184,5 @@ impl SessionControl {
             .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
-    }
-}
-
-/// One long-lived Session event stream with its control surface.
-///
-/// Dropping the stream asynchronously closes its lease; use [`close`](Self::close)
-/// when the caller must wait until the active Agent has returned.
-pub struct SessionStream {
-    control: SessionControl,
-    events: Pin<Box<Receiver<SessionEvent>>>,
-}
-
-impl SessionStream {
-    pub(crate) fn new(endpoint: SessionEndpoint, events: Receiver<SessionEvent>) -> Self {
-        Self {
-            control: SessionControl::new(endpoint),
-            events: Box::pin(events),
-        }
-    }
-
-    /// Clone the write/control capability without cloning this stream receiver.
-    pub fn control(&self) -> SessionControl {
-        self.control.clone()
-    }
-
-    pub async fn append(&self, message: Message) -> Result<(), SessionControlError> {
-        self.control.append(message).await
-    }
-
-    pub async fn respond(
-        &self,
-        request: InputRequestId,
-        message: Message,
-    ) -> Result<(), SessionControlError> {
-        self.control.respond(request, message).await
-    }
-
-    pub async fn set_reasoning_effort(
-        &self,
-        effort: ReasoningEffort,
-    ) -> Result<(), SessionControlError> {
-        self.control.set_reasoning_effort(effort).await
-    }
-
-    pub async fn set_permission_level(
-        &self,
-        level: PermissionLevel,
-    ) -> Result<(), SessionControlError> {
-        self.control.set_permission_level(level).await
-    }
-
-    pub async fn interrupt(&self) -> Result<(), SessionControlError> {
-        self.control.interrupt().await
-    }
-
-    pub async fn cancel(&self) -> Result<(), SessionControlError> {
-        self.control.cancel().await
-    }
-
-    pub async fn close(&self) -> Result<(), SessionControlError> {
-        self.control.close_session().await
-    }
-}
-
-impl Stream for SessionStream {
-    type Item = SessionEvent;
-
-    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().events.as_mut().poll_next(context)
-    }
-}
-
-impl Drop for SessionStream {
-    fn drop(&mut self) {
-        let (ack, _result) = async_channel::bounded(1);
-        let _ = self.control.commands.try_send(SessionCommand::Close {
-            lease: self.control.lease,
-            ack,
-        });
     }
 }

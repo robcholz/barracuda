@@ -20,7 +20,8 @@ use claw_tool::ToolRegistry;
 
 use self::long_term::LongTermDeps;
 pub(crate) use create::{AdditionalAgentState, PersistenceConfig};
-pub(crate) use error::{AgentCreateError, AgentManagerError};
+pub use error::AgentCreateError;
+pub(crate) use error::AgentManagerError;
 
 crate::define_prefixed_id!(AgentId, "agent-", "agent");
 crate::define_id_allocator!(

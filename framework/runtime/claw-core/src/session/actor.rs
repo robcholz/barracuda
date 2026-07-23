@@ -11,12 +11,11 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
-use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
 use crate::agent::{
-    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentError, AgentEvent, AgentId,
-    AgentInputRequest, AgentOutcome, IterationEvent, PersistenceConfig, ReasoningEffort,
+    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest,
+    AgentOutcome, IterationEvent as AgentIterationEvent, PersistenceConfig, ReasoningEffort,
     ToolCallId,
 };
 use crate::config::SharedApiManager;
@@ -28,13 +27,14 @@ use super::api::{OpenSessionError, SessionControlError};
 use super::approval_resolver::{
     self, ApprovalControl, ApprovalResolverError, PermissionReplyResolution,
 };
-use super::command::{ControlOp, SessionCommand, SessionEndpoint};
+use super::command::{ControlOp, SessionCommand};
 use super::manager::SharedAgentManager;
 use super::permission_policy::SessionPermission;
 use super::state::{next_agent, SessionManagerState, SessionPersistentState};
 use super::{
-    InputRequestId, InputRequestKind, Message, SessionEvent, SessionId, SessionPersistence, TurnId,
-    TurnOrigin,
+    InputRequestId, InputRequestKind, IterationEvent, Message, SessionCloseReason, SessionError,
+    SessionEvent, SessionEventError, SessionId, SessionInputError, SessionPersistence,
+    SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 
 type ApprovalFuture =
@@ -50,6 +50,7 @@ struct PendingApproval {
 struct ApprovalTask {
     control: ApprovalControl,
     future: ApprovalFuture,
+    request: InputRequestId,
     tool_call_id: ToolCallId,
     tool_call: ToolCall,
     reason: String,
@@ -77,24 +78,8 @@ impl PollSource {
     }
 }
 
-#[derive(Debug, IntoStaticStr, thiserror::Error)]
-enum SessionExecutionError {
-    #[strum(serialize = "agent_create")]
-    #[error(transparent)]
-    AgentCreate(#[from] AgentCreateError),
-    #[strum(serialize = "agent")]
-    #[error(transparent)]
-    Agent(#[from] AgentError),
-    #[strum(serialize = "approval")]
-    #[error(transparent)]
-    Approval(#[from] ApprovalResolverError),
-}
-
 pub(super) enum SessionActorExit {
-    Deleted {
-        session: SessionId,
-        acks: Vec<Sender<Result<(), SessionControlError>>>,
-    },
+    Deleted { session: SessionId },
     Shutdown {
         session: SessionId,
     },
@@ -103,7 +88,7 @@ pub(super) enum SessionActorExit {
 impl SessionActorExit {
     pub(super) fn session(&self) -> SessionId {
         match self {
-            Self::Deleted { session, .. } | Self::Shutdown { session, .. } => *session,
+            Self::Deleted { session } | Self::Shutdown { session } => *session,
         }
     }
 }
@@ -141,13 +126,12 @@ where
     commands: Pin<Box<Receiver<SessionCommand>>>,
     next_source: PollSource,
 
-    events: Option<Sender<SessionEvent>>,
+    events: Option<Sender<Result<SessionEvent, SessionError>>>,
     active_lease: Option<u64>,
     next_lease: u64,
     close_requested: bool,
     close_acks: Vec<Sender<Result<(), SessionControlError>>>,
     delete_requested: bool,
-    delete_acks: Vec<Sender<Result<(), SessionControlError>>>,
     shutdown_requested: bool,
 }
 
@@ -199,7 +183,6 @@ where
                 close_requested: false,
                 close_acks: Vec::new(),
                 delete_requested: false,
-                delete_acks: Vec::new(),
                 shutdown_requested: false,
             },
             command_sender,
@@ -260,11 +243,6 @@ where
 
     fn handle_command(&mut self, command: SessionCommand) {
         match command {
-            SessionCommand::Open {
-                events,
-                commands,
-                ack,
-            } => self.open(events, commands, ack),
             SessionCommand::Append {
                 lease,
                 message,
@@ -296,30 +274,25 @@ where
                 }
             }
             SessionCommand::Close { lease, ack } => self.close(lease, ack),
-            SessionCommand::Delete { ack } => self.request_delete(ack),
-            SessionCommand::Shutdown => self.request_shutdown(),
         }
     }
 
-    fn open(
+    pub(super) fn open(
         &mut self,
-        events: Sender<SessionEvent>,
-        commands: Sender<SessionCommand>,
-        ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
-    ) {
+        events: Sender<Result<SessionEvent, SessionError>>,
+    ) -> Result<u64, OpenSessionError> {
         if self.active_lease.is_some()
             || self.close_requested
             || self.delete_requested
             || self.shutdown_requested
         {
-            let _ = ack.try_send(Err(OpenSessionError::AlreadyOpen(self.session)));
-            return;
+            return Err(OpenSessionError::AlreadyOpen(self.session));
         }
         let lease = self.next_lease;
         self.next_lease = self.next_lease.saturating_add(1);
         self.active_lease = Some(lease);
         self.events = Some(events);
-        let _ = ack.try_send(Ok(SessionEndpoint::new(lease, commands)));
+        Ok(lease)
     }
 
     fn append(
@@ -388,6 +361,7 @@ where
         self.approval = Some(ApprovalTask {
             control,
             future,
+            request: pending.request,
             tool_call_id: pending.tool_call_id,
             tool_call: pending.tool_call,
             reason: pending.reason,
@@ -429,13 +403,12 @@ where
         self.stop_current_run(false);
     }
 
-    fn request_delete(&mut self, ack: Sender<Result<(), SessionControlError>>) {
+    pub(super) fn request_delete(&mut self) {
         self.delete_requested = true;
-        self.delete_acks.push(ack);
         self.stop_current_run(true);
     }
 
-    fn request_shutdown(&mut self) {
+    pub(super) fn request_shutdown(&mut self) {
         self.shutdown_requested = true;
         self.stop_current_run(false);
     }
@@ -466,29 +439,25 @@ where
 
         if self.delete_requested {
             if let Err(error) = self.delete_root_agent() {
-                self.emit_execution_error(SessionExecutionError::from(error));
+                self.emit_event_error(SessionEventError::DeleteFailed { source: error });
                 self.delete_requested = false;
-                for ack in std::mem::take(&mut self.delete_acks) {
-                    let _ = ack.try_send(Err(SessionControlError::Persistence));
-                }
                 return None;
             }
-            self.emit_closed();
+            self.emit_closed(SessionCloseReason::Deleted);
             self.complete_close_requests();
             return Some(SessionActorExit::Deleted {
                 session: self.session,
-                acks: std::mem::take(&mut self.delete_acks),
             });
         }
         if self.shutdown_requested {
-            self.emit_closed();
+            self.emit_closed(SessionCloseReason::RuntimeShutdown);
             self.complete_close_requests();
             return Some(SessionActorExit::Shutdown {
                 session: self.session,
             });
         }
 
-        self.emit_closed();
+        self.emit_closed(SessionCloseReason::Requested);
         self.active_lease = None;
         self.close_requested = false;
         self.complete_close_requests();
@@ -514,7 +483,7 @@ where
             .expect("a checked non-empty inbox has a front message");
         self.begin_turn();
         if let Err(error) = self.ensure_root(manager_state) {
-            self.emit_execution_error(SessionExecutionError::from(error));
+            self.emit_turn_error(error.into());
             self.finish_turn();
             return true;
         }
@@ -612,7 +581,7 @@ where
         match root.accept_output(output) {
             AgentSlotUpdate::Event(Ok(event)) => self.handle_agent_event(event),
             AgentSlotUpdate::Event(Err(error)) => {
-                self.emit_execution_error(SessionExecutionError::from(error));
+                self.emit_turn_error(error.into());
                 self.finish_turn();
             }
             AgentSlotUpdate::Returned => self.finish_turn(),
@@ -625,7 +594,9 @@ where
 
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
-            AgentEvent::Iteration(StreamPart::Delta(IterationEvent::BeforeToolCalls(calls))) => {
+            AgentEvent::Iteration(StreamPart::Delta(AgentIterationEvent::BeforeToolCalls(
+                calls,
+            ))) => {
                 self.record_toolcalls(calls);
             }
             AgentEvent::Iteration(progress) => self.emit_iteration(progress),
@@ -645,24 +616,24 @@ where
         }
     }
 
-    fn emit_iteration(&self, progress: StreamPart<IterationEvent>) {
+    fn emit_iteration(&self, progress: StreamPart<AgentIterationEvent>) {
         let event = match progress {
-            StreamPart::Delta(IterationEvent::Started(iteration)) => {
-                SessionEvent::IterationStarted { iteration }
+            StreamPart::Delta(AgentIterationEvent::Started(iteration)) => {
+                IterationEvent::Started { iteration }
             }
-            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Reasoning(part))) => {
-                SessionEvent::Reasoning(part)
+            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::Reasoning(part))) => {
+                IterationEvent::Reasoning(part)
             }
-            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Output(part))) => {
-                SessionEvent::Output(part)
+            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::Output(part))) => {
+                IterationEvent::Output(part)
             }
-            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
-                SessionEvent::ToolCalls(part)
+            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
+                IterationEvent::ToolCalls(part)
             }
-            StreamPart::Delta(IterationEvent::BeforeToolCalls(_)) => return,
-            StreamPart::End => SessionEvent::IterationEnded,
+            StreamPart::Delta(AgentIterationEvent::BeforeToolCalls(_)) => return,
+            StreamPart::End => IterationEvent::Ended,
         };
-        self.emit(event);
+        self.emit_turn(TurnEvent::Iteration(event));
     }
 
     fn request_approval(&mut self, tool_call_id: ToolCallId, tool_call: ToolCall, reason: String) {
@@ -678,7 +649,7 @@ where
             tool_call,
             reason,
         });
-        self.emit(SessionEvent::InputRequested { request, kind });
+        self.emit_turn(TurnEvent::InputRequested { request, kind });
     }
 
     fn handle_approval_result(
@@ -690,7 +661,7 @@ where
             Ok(resolution) => resolution,
             Err(ApprovalResolverError::Cancelled) => return,
             Err(error) => {
-                self.emit_execution_error(SessionExecutionError::from(error));
+                self.emit_input_error(task.request, error.into());
                 self.request_approval(task.tool_call_id, task.tool_call, task.reason);
                 return;
             }
@@ -708,9 +679,7 @@ where
             .ok_or(crate::agent::AgentApprovalError::NotAwaitingApproval)
             .and_then(|root| root.resolve_approval(task.tool_call_id, decision));
         if let Err(error) = resolution {
-            self.emit(SessionEvent::Error {
-                message: error.to_string(),
-            });
+            self.emit_input_error(task.request, error.into());
             if let Some(root) = &mut self.root {
                 root.cancel();
             }
@@ -725,7 +694,7 @@ where
             id: turn,
             toolcalls: Vec::new(),
         });
-        self.emit(SessionEvent::TurnStarted {
+        self.emit_turn(TurnEvent::Started {
             turn,
             origin: TurnOrigin::User,
         });
@@ -741,7 +710,7 @@ where
                 state.remove_root_inflight_toolcall(call);
             }
         }
-        self.emit(SessionEvent::TurnEnded { turn: turn.id });
+        self.emit_turn(TurnEvent::Ended { turn: turn.id });
     }
 
     fn record_toolcalls(&mut self, calls: Vec<ToolCall>) {
@@ -776,28 +745,43 @@ where
     }
 
     fn emit_text(&self, message: String) {
-        self.emit(SessionEvent::Output(StreamPart::Delta(message)));
-        self.emit(SessionEvent::Output(StreamPart::End));
+        self.emit_turn(TurnEvent::Output(StreamPart::Delta(message)));
+        self.emit_turn(TurnEvent::Output(StreamPart::End));
     }
 
-    fn emit_execution_error(&self, error: SessionExecutionError) {
-        let kind: &'static str = (&error).into();
-        tracing::error!(name: "session_execution_error", kind);
-        self.emit(SessionEvent::Error {
-            message: error.to_string(),
-        });
+    fn emit_turn_error(&self, source: SessionTurnError) {
+        self.emit_turn(TurnEvent::Error(TurnEventError::Execution(source)));
     }
 
-    fn emit_closed(&mut self) {
+    fn emit_input_error(&self, request: InputRequestId, source: SessionInputError) {
+        self.emit_turn(TurnEvent::Error(TurnEventError::InputResolutionFailed {
+            request,
+            source,
+        }));
+    }
+
+    fn emit_event_error(&self, error: SessionEventError) {
+        tracing::error!(
+            name: "session_execution_error",
+            error = %error,
+        );
+        self.emit(SessionEvent::Error(error));
+    }
+
+    fn emit_turn(&self, event: TurnEvent) {
+        self.emit(SessionEvent::Turn(event));
+    }
+
+    fn emit_closed(&mut self, reason: SessionCloseReason) {
         if self.events.is_some() {
-            self.emit(SessionEvent::Closed);
+            self.emit(SessionEvent::Closed(reason));
             self.events = None;
         }
     }
 
     fn emit(&self, event: SessionEvent) {
         if let Some(events) = &self.events {
-            let _ = events.try_send(event);
+            let _ = events.try_send(Ok(event));
         }
     }
 }

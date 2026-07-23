@@ -27,13 +27,18 @@ pub(crate) const SYSTEM_TRACE_SCOPE: &str = "agent-system";
 pub use claw_utils::stream;
 pub(crate) use claw_utils::{define_id_allocator, define_prefixed_id};
 
-pub use agent::{AgentId, IterationId, ReasoningEffort};
+pub use agent::{
+    AgentApprovalError, AgentCreateError, AgentError as BaseAgentError, AgentId, IterationId,
+    IterationLoopError, ReasoningEffort, ToolCallId,
+};
 pub use claw_api::ToolCall;
 pub use claw_permission::PermissionLevel;
 pub use config::ApiUsage;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{
-    InputRequestId, InputRequestKind, Message, OpenSessionError, SessionControl,
-    SessionControlError, SessionCreateError, SessionEvent, SessionId, SessionPersistence,
-    SessionStream, TurnId, TurnOrigin,
+    ApprovalResolverError, InputRequestId, InputRequestKind, IterationEvent, Message,
+    OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
+    SessionError, SessionEvent, SessionEventError, SessionId, SessionInputError,
+    SessionPersistence, SessionStream, SessionTurnError, TurnEvent, TurnEventError, TurnId,
+    TurnOrigin,
 };

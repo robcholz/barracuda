@@ -51,8 +51,7 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     let restored_session = first_system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = first_system.open_session(restored_session).unwrap();
-    let control = events.control();
+    let (control, mut events) = first_system.open_session(restored_session).unwrap();
 
     block_on(control.append(Message::text("trace one agent turn"))).unwrap();
     let _ = drain_until_turn_ended(&mut events);
@@ -66,8 +65,7 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     let created_session = second_system
         .new_session(claw_agent::SessionPersistence::Ephemeral)
         .unwrap();
-    let restored_events = second_system.open_session(restored_session).unwrap();
-    let restored_control = restored_events.control();
+    let (restored_control, restored_events) = second_system.open_session(restored_session).unwrap();
     drop(restored_control);
     drop(restored_events);
     drop(second_system);

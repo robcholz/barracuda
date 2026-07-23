@@ -10,9 +10,12 @@ use std::sync::Arc;
 use claw_api::{ClawApiConfig, InitError};
 pub use claw_core::stream;
 pub use claw_core::{
-    AgentId, ApiUsage, InputRequestId, InputRequestKind, IterationId, Message, OpenSessionError,
-    PermissionLevel, ReasoningEffort, SessionControl, SessionControlError, SessionCreateError,
-    SessionEvent, SessionId, SessionPersistence, SessionStream, ToolCall, TurnId, TurnOrigin,
+    AgentApprovalError, AgentCreateError, ApiUsage, ApprovalResolverError, BaseAgentError, AgentId,
+    InputRequestId, InputRequestKind, IterationEvent, IterationId, IterationLoopError, Message,
+    OpenSessionError, PermissionLevel, ReasoningEffort, SessionCloseReason, SessionControl,
+    SessionControlError, SessionCreateError, SessionError, SessionEvent, SessionEventError,
+    SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall,
+    ToolCallId, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;
@@ -163,7 +166,10 @@ where
     ///
     /// Returns [`OpenSessionError`] when the session is missing, already open, or
     /// the runtime is stopped.
-    pub fn open_session(&self, session: SessionId) -> AgentResult<SessionStream> {
+    pub fn open_session(
+        &self,
+        session: SessionId,
+    ) -> AgentResult<(SessionControl, SessionStream)> {
         Ok(self.runtime.open_session(session)?)
     }
 

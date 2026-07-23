@@ -45,7 +45,7 @@ impl PermissionReplyResolution {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(super) enum ApprovalResolverError {
+pub enum ApprovalResolverError {
     #[error("approval resolver was cancelled")]
     Cancelled,
     #[error("failed to initialize approval resolver LLM: {0}")]

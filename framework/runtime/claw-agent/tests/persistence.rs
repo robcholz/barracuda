@@ -94,8 +94,7 @@ fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
         .unwrap();
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text("run the blocking tool"))).unwrap();
 
     wait_until(&gate.started, "blocking tool did not start");
@@ -144,8 +143,7 @@ fn deleting_an_inflight_session_removes_its_root_agent_and_transcript() {
         .unwrap();
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text("run the blocking tool"))).unwrap();
 
     wait_until(&gate.started, "blocking tool did not start");
@@ -168,7 +166,8 @@ fn deleting_an_inflight_session_removes_its_root_agent_and_transcript() {
     )));
     block_on(async {
         while let Some(event) = events.next().await {
-            if event == claw_agent::SessionEvent::Closed {
+            let event = event.expect("Session stream failed");
+            if matches!(event, claw_agent::SessionEvent::Closed(_)) {
                 return;
             }
         }
@@ -339,8 +338,8 @@ fn create_persisted_root(root: &str) -> SessionId {
     let system = build_system(root, vec![support::assistant_text("done")]);
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
-    let mut events = system.open_session(session).unwrap();
-    block_on(events.append(Message::text("create the root agent"))).unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    block_on(control.append(Message::text("create the root agent"))).unwrap();
     let _ = support::drain_until_turn_ended(&mut events);
     drop(events);
     drop(system);

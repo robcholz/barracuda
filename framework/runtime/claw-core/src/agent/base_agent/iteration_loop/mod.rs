@@ -21,7 +21,8 @@ use claw_interface::{ClawHttp, ClawTimer};
 
 use super::stream::RunControl;
 
-pub(crate) use types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
+pub use types::IterationLoopError;
+pub(crate) use types::{IterationEvent, IterationLoopEvent, LlmStep};
 
 crate::define_prefixed_id!(IterationId, "iteration-", "iteration");
 crate::define_prefixed_id!(ToolCallId, "tool-call-", "tool call");

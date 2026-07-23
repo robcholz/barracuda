@@ -16,14 +16,14 @@ use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
-use super::api::{OpenSessionError, SessionControlError, SessionCreateError};
-use super::command::{SessionCommand, SessionEndpoint};
+use super::api::{OpenSessionError, SessionControl, SessionControlError, SessionCreateError};
+use super::command::SessionCommand;
 use super::persistent::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
     ensure_next_agent, ensure_next_session, next_session, SessionManagerState,
     SessionPersistentState,
 };
-use super::SessionEvent;
+use super::{SessionStream, SessionError};
 
 pub(super) type SharedAgentManager<Filesystem, Http, Timer> =
     Rc<AgentManager<Filesystem, Http, Timer>>;
@@ -191,60 +191,44 @@ where
     pub(crate) fn open(
         &mut self,
         session: SessionId,
-        events: Sender<SessionEvent>,
-        ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
-    ) {
+    ) -> Result<(SessionControl, SessionStream), OpenSessionError> {
         if !self.sessions.contains_key(&session) {
-            let _ = ack.try_send(Err(OpenSessionError::SessionNotFound(session)));
-            return;
+            return Err(OpenSessionError::SessionNotFound(session));
         }
         self.ensure_actor(session);
+        let (events, receiver) = async_channel::unbounded::<Result<_, SessionError>>();
         let task = self
             .sessions
-            .get(&session)
-            .and_then(|entry| entry.actor.as_ref())
+            .get_mut(&session)
+            .and_then(|entry| entry.actor.as_mut())
             .expect("a known Session was just materialized");
-        if task
-            .commands
-            .try_send(SessionCommand::Open {
-                events,
-                commands: task.commands.clone(),
-                ack: ack.clone(),
-            })
-            .is_err()
-        {
-            let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
-        }
+        let lease = task.actor.open(events)?;
+        let control = SessionControl::new(lease, task.commands.clone());
+        let stream = SessionStream::new(lease, task.commands.clone(), receiver);
+        Ok((control, stream))
     }
 
     pub(crate) fn delete(
         &mut self,
         session: SessionId,
-        ack: Sender<Result<(), SessionControlError>>,
-    ) {
+    ) -> Result<(), SessionControlError> {
         if !self.sessions.contains_key(&session) {
-            let _ = ack.try_send(Err(SessionControlError::SessionClosed(session)));
-            return;
+            return Err(SessionControlError::SessionClosed(session));
         }
         self.ensure_actor(session);
         let task = self
             .sessions
-            .get(&session)
-            .and_then(|entry| entry.actor.as_ref())
+            .get_mut(&session)
+            .and_then(|entry| entry.actor.as_mut())
             .expect("a known Session was just materialized");
-        if task
-            .commands
-            .try_send(SessionCommand::Delete { ack: ack.clone() })
-            .is_err()
-        {
-            let _ = ack.try_send(Err(SessionControlError::WorkerStopped));
-        }
+        task.actor.request_delete();
+        Ok(())
     }
 
-    pub(crate) fn shutdown(&self) {
-        for entry in self.sessions.values() {
-            if let Some(task) = &entry.actor {
-                let _ = task.commands.try_send(SessionCommand::Shutdown);
+    pub(crate) fn shutdown(&mut self) {
+        for entry in self.sessions.values_mut() {
+            if let Some(task) = &mut entry.actor {
+                task.actor.request_shutdown();
             }
         }
     }
@@ -356,13 +340,10 @@ where
             entry.actor = None;
         }
         match exit {
-            SessionActorExit::Deleted { acks, .. } => {
+            SessionActorExit::Deleted { .. } => {
                 let result = self.remove_persistent_state(session);
                 if result.is_ok() {
                     self.sessions.remove(&session);
-                }
-                for ack in acks {
-                    let _ = ack.try_send(result.clone());
                 }
             }
             SessionActorExit::Shutdown { .. } => {}

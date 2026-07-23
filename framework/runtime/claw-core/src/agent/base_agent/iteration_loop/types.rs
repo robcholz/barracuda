@@ -7,7 +7,7 @@ use super::{IterationId, ToolCallId};
 
 /// Errors from one [`super::IterationLoop::run`] step.
 #[derive(Clone, Debug, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum IterationLoopError {
+pub enum IterationLoopError {
     #[strum(serialize = "missing_provider_tool_call_id")]
     #[error("LLM tool call is missing its provider id")]
     MissingProviderToolCallId,

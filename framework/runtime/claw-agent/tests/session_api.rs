@@ -9,7 +9,10 @@ use core::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claw_agent::{stream::StreamPart, SessionEvent, SessionId, SessionStream, TurnId, TurnOrigin};
+use claw_agent::{
+    stream::StreamPart, SessionCloseReason, SessionEvent, SessionId, SessionStream, TurnId,
+    TurnOrigin,
+};
 use claw_agent::{AgentError, AgentSystem, Message, OpenSessionError};
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
@@ -88,23 +91,22 @@ fn session_streams_root_reply_as_output() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("say hi"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
-    assert_eq!(
+    assert!(matches!(
         events.first(),
-        Some(&SessionEvent::TurnStarted {
+        Some(SessionEvent::TurnStarted {
             turn: TurnId(1),
             origin: TurnOrigin::User,
         })
-    );
-    assert_eq!(
+    ));
+    assert!(matches!(
         events.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(1) })
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+    ));
     let outputs: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
@@ -166,8 +168,7 @@ fn append_queues_while_current_turn_runs() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(async {
         control.append(Message::text("first")).await.unwrap();
@@ -192,8 +193,7 @@ fn session_control_methods_are_idempotent() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(async {
         control.append(Message::text("cancel me")).await.unwrap();
@@ -211,10 +211,10 @@ fn session_control_methods_are_idempotent() {
             origin: TurnOrigin::User,
         })
     ));
-    assert_eq!(
+    assert!(matches!(
         events.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(1) })
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+    ));
 }
 
 #[test]
@@ -231,8 +231,7 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(async {
         control
@@ -247,16 +246,16 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
     });
 
     let cancelled = drain_until_turn_ended(&mut events);
-    assert_eq!(
+    assert!(matches!(
         cancelled.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(1) })
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+    ));
 
     let queued = drain_until_turn_ended(&mut events);
-    assert_eq!(
+    assert!(matches!(
         queued.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(2) })
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(2) })
+    ));
     assert!(queued.iter().any(
         |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "queued message ran")
     ));
@@ -270,8 +269,7 @@ fn close_session_cancels_active_work_and_closes_events() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(async {
         control.append(Message::text("close me")).await.unwrap();
@@ -279,7 +277,10 @@ fn close_session_cancels_active_work_and_closes_events() {
     });
     let events = drain_until_closed(&mut events);
 
-    assert_eq!(events.last(), Some(&SessionEvent::Closed));
+    assert!(matches!(
+        events.last(),
+        Some(SessionEvent::Closed(SessionCloseReason::Requested))
+    ));
     assert!(
         !events
             .iter()
@@ -301,13 +302,15 @@ fn delete_session_removes_session_and_closes_open_stream() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let _control = events.control();
+    let (_control, mut events) = system.open_session(session).unwrap();
 
     system.delete_session(session).unwrap();
     let events = drain_until_closed(&mut events);
 
-    assert_eq!(events.last(), Some(&SessionEvent::Closed));
+    assert!(matches!(
+        events.last(),
+        Some(SessionEvent::Closed(SessionCloseReason::Deleted))
+    ));
     assert!(!system.list_sessions().contains(&session));
     assert!(matches!(
         system.open_session(session),
@@ -330,7 +333,8 @@ fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
     block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {
-            let closed = event == SessionEvent::Closed;
+            let event = event.expect("Session stream failed");
+            let closed = matches!(event, SessionEvent::Closed(_));
             collected.push(event);
             if closed {
                 break;

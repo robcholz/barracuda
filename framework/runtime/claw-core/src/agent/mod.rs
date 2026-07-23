@@ -11,15 +11,14 @@ mod manager;
 mod tools;
 
 pub(crate) use baked::AgentKind;
-pub use base_agent::IterationId;
+pub use base_agent::{AgentApprovalError, AgentError, IterationId, IterationLoopError, ToolCallId};
 pub(crate) use base_agent::{
-    AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
-    AgentState, ApprovalDecision, BaseAgent, IterationEvent, ToolCallId,
+    AgentCompletion, AgentEvent, AgentInputRequest, AgentOutcome, AgentState, ApprovalDecision,
+    BaseAgent, IterationEvent,
 };
 pub use context_adapters::ReasoningEffort;
 pub(crate) use context_adapters::ReasoningEffortHandle;
-pub use manager::AgentId;
+pub use manager::{AgentCreateError, AgentId};
 pub(crate) use manager::{
-    AdditionalAgentState, AgentCreateError, AgentIdAllocator, AgentManager, AgentManagerError,
-    PersistenceConfig,
+    AdditionalAgentState, AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig,
 };

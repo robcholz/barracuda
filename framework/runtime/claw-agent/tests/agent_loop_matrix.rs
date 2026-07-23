@@ -56,8 +56,7 @@ fn session_events_close_each_content_stream_explicitly() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("exercise stream boundaries"))).unwrap();
     let protocol = drain_until_turn_ended(&mut events)
@@ -74,32 +73,34 @@ fn session_events_close_each_content_stream_explicitly() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(
-        protocol,
-        vec![
+    assert!(matches!(
+        protocol.as_slice(),
+        [
             SessionEvent::IterationStarted {
                 iteration: IterationId(0),
             },
-            SessionEvent::Reasoning(StreamPart::Delta("thinking".to_string())),
+            SessionEvent::Reasoning(StreamPart::Delta(reasoning)),
             SessionEvent::Reasoning(StreamPart::End),
             SessionEvent::Output(StreamPart::End),
-            SessionEvent::ToolCalls(StreamPart::Delta(ToolCall {
-                id: "call_matrix_1".to_string(),
-                name: "matrix_echo".to_string(),
-                arguments_json: arguments.to_string(),
-            })),
+            SessionEvent::ToolCalls(StreamPart::Delta(call)),
             SessionEvent::ToolCalls(StreamPart::End),
             SessionEvent::IterationEnded,
             SessionEvent::IterationStarted {
                 iteration: IterationId(1),
             },
             SessionEvent::Reasoning(StreamPart::End),
-            SessionEvent::Output(StreamPart::Delta("finished".to_string())),
+            SessionEvent::Output(StreamPart::Delta(output)),
             SessionEvent::Output(StreamPart::End),
             SessionEvent::ToolCalls(StreamPart::End),
             SessionEvent::IterationEnded,
-        ]
-    );
+        ] if reasoning == "thinking"
+            && call == &ToolCall {
+                id: "call_matrix_1".to_string(),
+                name: "matrix_echo".to_string(),
+                arguments_json: arguments.to_string(),
+            }
+            && output == "finished"
+    ));
 }
 
 #[test]
@@ -127,8 +128,7 @@ fn agent_loop_csv_tool_matrix_runs_tools_and_feeds_results_to_next_iteration() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let mut events = system.open_session(session).unwrap();
-        let control = events.control();
+        let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.append(Message::text(format!("run tool matrix {case}")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
@@ -196,8 +196,7 @@ fn agent_loop_csv_llm_response_matrix_reports_errors_and_bounds_reasoning() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let mut events = system.open_session(session).unwrap();
-        let control = events.control();
+        let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.append(Message::text(format!("run llm response matrix {case}")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
@@ -231,8 +230,7 @@ fn reasoning_effort_replaces_the_root_system_prompt_block_on_the_next_turn() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("first turn"))).unwrap();
     let _ = drain_until_turn_ended(&mut events);
@@ -267,8 +265,7 @@ fn permission_level_changes_during_a_turn_before_the_next_action_authorization()
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Deny)).unwrap();
     block_on(control.append(Message::text("switch while this turn is active"))).unwrap();
@@ -305,8 +302,7 @@ fn ask_permission_level_reaches_the_public_approval_flow() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("ask before running the tool"))).unwrap();
@@ -377,8 +373,7 @@ fn approval_response_requires_the_pending_request_id() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("ask before running the tool"))).unwrap();
@@ -428,8 +423,7 @@ fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("ask before running the tool"))).unwrap();
@@ -484,8 +478,7 @@ fn explicit_rejection_survives_a_switch_from_ask_to_allow_all() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("ask before running the tool"))).unwrap();
@@ -542,8 +535,7 @@ fn each_asked_call_is_resolved_separately_while_safe_calls_keep_running() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("run all three calls"))).unwrap();
@@ -621,8 +613,7 @@ fn permission_levels_are_isolated_between_sessions() {
     let denied_session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut denied_events = system.open_session(denied_session).unwrap();
-    let denied_control = denied_events.control();
+    let (denied_control, mut denied_events) = system.open_session(denied_session).unwrap();
     block_on(denied_control.set_permission_level(PermissionLevel::Deny)).unwrap();
     block_on(denied_control.append(Message::text("deny side effects"))).unwrap();
     let denied_events = drain_until_turn_ended(&mut denied_events);
@@ -634,8 +625,7 @@ fn permission_levels_are_isolated_between_sessions() {
     let default_session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut default_events = system.open_session(default_session).unwrap();
-    let default_control = default_events.control();
+    let (default_control, mut default_events) = system.open_session(default_session).unwrap();
     block_on(default_control.append(Message::text("use the default permission"))).unwrap();
     let default_events = drain_until_turn_ended(&mut default_events);
     assert_eq!(
@@ -665,8 +655,7 @@ fn agent_loop_emits_provider_usage_for_cli_consumers() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text("report usage"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
@@ -909,6 +898,7 @@ async fn wait_for_agent_response_release() {
 
 async fn wait_for_iteration_started(events: &mut claw_agent::SessionStream) {
     while let Some(event) = events.next().await {
+        let event = event.expect("Session stream failed");
         if matches!(event, SessionEvent::IterationStarted { .. }) {
             return;
         }
@@ -921,6 +911,7 @@ async fn wait_for_input_request(
 ) -> (InputRequestId, InputRequestKind, Vec<SessionEvent>) {
     let mut received = Vec::new();
     while let Some(event) = events.next().await {
+        let event = event.expect("Session stream failed");
         if let SessionEvent::InputRequested { request, kind } = event {
             return (request, kind, received);
         }
@@ -1088,19 +1079,17 @@ fn assert_reasoning_shape(
 }
 
 fn assert_turn_bracket(events: &[SessionEvent], case: &str) {
-    assert_eq!(
+    assert!(matches!(
         events.first(),
-        Some(&SessionEvent::TurnStarted {
+        Some(SessionEvent::TurnStarted {
             turn: TurnId(1),
             origin: TurnOrigin::User,
-        }),
-        "case {case}"
-    );
-    assert_eq!(
+        })
+    ), "case {case}");
+    assert!(matches!(
         events.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(1) }),
-        "case {case}"
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+    ), "case {case}");
 }
 
 fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
@@ -1147,7 +1136,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Error { message } => Some(message.clone()),
+            SessionEvent::Error(error) => Some(error.to_string()),
             _ => None,
         })
         .collect()

@@ -6,8 +6,8 @@ use strum::IntoStaticStr;
 
 use crate::agent::ReasoningEffort;
 
-use super::api::{OpenSessionError, SessionControlError};
-use super::{InputRequestId, Message, SessionEvent};
+use super::api::SessionControlError;
+use super::{InputRequestId, Message};
 
 #[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]
 pub(super) enum ControlOp {
@@ -17,27 +17,7 @@ pub(super) enum ControlOp {
     Cancel,
 }
 
-pub(crate) struct SessionEndpoint {
-    lease: u64,
-    commands: Sender<SessionCommand>,
-}
-
-impl SessionEndpoint {
-    pub(super) fn new(lease: u64, commands: Sender<SessionCommand>) -> Self {
-        Self { lease, commands }
-    }
-
-    pub(super) fn into_parts(self) -> (u64, Sender<SessionCommand>) {
-        (self.lease, self.commands)
-    }
-}
-
 pub(super) enum SessionCommand {
-    Open {
-        events: Sender<SessionEvent>,
-        commands: Sender<SessionCommand>,
-        ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
-    },
     Append {
         lease: u64,
         message: Message,
@@ -68,8 +48,4 @@ pub(super) enum SessionCommand {
         lease: u64,
         ack: Sender<Result<(), SessionControlError>>,
     },
-    Delete {
-        ack: Sender<Result<(), SessionControlError>>,
-    },
-    Shutdown,
 }

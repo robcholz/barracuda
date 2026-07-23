@@ -23,8 +23,8 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind,
-    Message, PermissionLevel, SessionControl, SessionEvent, SessionPersistence, SessionStream,
-    ToolCall, TurnOrigin,
+    Message, PermissionLevel, SessionControl, SessionError, SessionEvent, SessionPersistence,
+    SessionStream, ToolCall, TurnOrigin,
 };
 use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
 use claw_interface::{StdThread, TokioExecutor};
@@ -133,10 +133,10 @@ impl ChatDriver {
                     .event(editor, "usage", &format_usage(usage), EventStyle::Usage)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::Error { message } => {
+            SessionEvent::Error(error) => {
                 self.content.finish(editor)?;
                 self.content
-                    .event(editor, "error", &message, EventStyle::Error)?;
+                    .event(editor, "error", &error.to_string(), EventStyle::Error)?;
                 RenderOutcome::Continue
             }
             SessionEvent::TurnEnded { .. } => {
@@ -145,7 +145,7 @@ impl ChatDriver {
                 let saw_output = std::mem::take(&mut self.saw_output);
                 RenderOutcome::TurnEnded { user, saw_output }
             }
-            SessionEvent::Closed => {
+            SessionEvent::Closed(_) => {
                 self.content.finish(editor)?;
                 RenderOutcome::Closed
             }
@@ -175,12 +175,12 @@ enum ReplState {
 
 enum IdleActivity {
     Input(Option<LineInput>),
-    Session(Option<SessionEvent>),
+    Session(Option<Result<SessionEvent, SessionError>>),
 }
 
 async fn next_idle_activity(
     input: impl Future<Output = Option<LineInput>>,
-    event: impl Future<Output = Option<SessionEvent>>,
+    event: impl Future<Output = Option<Result<SessionEvent, SessionError>>>,
 ) -> IdleActivity {
     futures_lite::future::race(
         async move { IdleActivity::Input(input.await) },
@@ -192,7 +192,7 @@ async fn next_idle_activity(
 async fn next_activity(
     state: ReplState,
     input: impl Future<Output = Option<LineInput>>,
-    event: impl Future<Output = Option<SessionEvent>>,
+    event: impl Future<Output = Option<Result<SessionEvent, SessionError>>>,
 ) -> IdleActivity {
     match state {
         ReplState::Running => IdleActivity::Session(event.await),
@@ -522,8 +522,7 @@ async fn run() -> Result<()> {
     system.link_api(llm_config, claw_agent::ApiUsage::RootAgent, true)?;
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;
-    let events = system.open_session(session)?;
-    let control = events.control();
+    let (control, events) = system.open_session(session)?;
     let mut chat = ChatDriver::new(control, events);
 
     eprintln!("Memory:  {MEMORY_DIR}");
@@ -575,7 +574,7 @@ async fn run() -> Result<()> {
             }
             IdleActivity::Input(Some(LineInput::Eof) | None) => break,
             IdleActivity::Input(Some(LineInput::Failed(error))) => return Err(error.into()),
-            IdleActivity::Session(Some(event)) => {
+            IdleActivity::Session(Some(Ok(event))) => {
                 match chat.render(event, &mut editor, prompt_active)? {
                     RenderOutcome::Continue => {}
                     RenderOutcome::TurnStarted => state = ReplState::Running,
@@ -593,6 +592,7 @@ async fn run() -> Result<()> {
                     RenderOutcome::Closed => break,
                 }
             }
+            IdleActivity::Session(Some(Err(error))) => return Err(error.into()),
             IdleActivity::Session(None) => break,
         }
     }

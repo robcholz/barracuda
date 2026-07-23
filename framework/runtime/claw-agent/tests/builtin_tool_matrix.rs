@@ -50,8 +50,7 @@ fn builtin_tools_csv_matrix_feeds_profile_memory_and_subagent_results_back_to_ll
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let mut events = system.open_session(session).unwrap();
-        let control = events.control();
+        let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.append(Message::text(format!("run builtin tool matrix {case}")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
@@ -312,19 +311,17 @@ fn assert_fragments_in_tool_messages(
 }
 
 fn assert_turn_bracket(events: &[SessionEvent], case: &str) {
-    assert_eq!(
+    assert!(matches!(
         events.first(),
-        Some(&SessionEvent::TurnStarted {
+        Some(SessionEvent::TurnStarted {
             turn: TurnId(1),
             origin: TurnOrigin::User,
-        }),
-        "case {case}"
-    );
-    assert_eq!(
+        })
+    ), "case {case}");
+    assert!(matches!(
         events.last(),
-        Some(&SessionEvent::TurnEnded { turn: TurnId(1) }),
-        "case {case}"
-    );
+        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+    ), "case {case}");
 }
 
 fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
@@ -361,7 +358,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Error { message } => Some(message.clone()),
+            SessionEvent::Error(error) => Some(error.to_string()),
             _ => None,
         })
         .collect()

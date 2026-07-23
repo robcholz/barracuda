@@ -50,8 +50,7 @@ fn iteration_preparation_traces_auxiliary_llm_work_without_payloads() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     // Two committed turns are needed for compaction: the first becomes the aged
     // prefix and the second alone exceeds the configured verbatim-tail budget.

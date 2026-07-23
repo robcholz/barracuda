@@ -361,15 +361,14 @@ where
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text(input))).unwrap();
     drain_until_turn_ended(&mut events)
 }
 
 fn first_failure_text(events: Vec<SessionEvent>) -> Option<String> {
     events.into_iter().find_map(|event| match event {
-        SessionEvent::Error { message } => Some(message),
+        SessionEvent::Error(error) => Some(error.to_string()),
         SessionEvent::Output(StreamPart::Delta(text)) if text.contains("[failed:") => Some(text),
         _ => None,
     })

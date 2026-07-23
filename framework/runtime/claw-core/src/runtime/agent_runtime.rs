@@ -18,8 +18,8 @@ use claw_tool::ToolRegistry;
 use crate::agent::AgentManagerError;
 use crate::config::{ApiUsage, SharedApiManager};
 use crate::session::{
-    OpenSessionError, SessionControlError, SessionCreateError, SessionId, SessionPersistence,
-    SessionStream,
+    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionId,
+    SessionPersistence, SessionStream,
 };
 use crate::SYSTEM_TRACE_SCOPE;
 
@@ -163,29 +163,27 @@ impl AgentRuntime {
     /// # Errors
     ///
     /// Returns [`OpenSessionError`] when the Session cannot be opened.
-    pub fn open_session(&self, session: SessionId) -> Result<SessionStream, OpenSessionError> {
+    pub fn open_session(
+        &self,
+        session: SessionId,
+    ) -> Result<(SessionControl, SessionStream), OpenSessionError> {
         let span = tracing::info_span!(
             "session",
             run.system = SYSTEM_TRACE_SCOPE,
             run.session = %session,
         );
         let _enter = span.enter();
-        let (events, receiver) = async_channel::unbounded();
         let (ack, result) = async_channel::bounded(1);
         self.commands
-            .try_send(RuntimeCommand::OpenSession {
-                session,
-                events,
-                ack,
-            })
+            .try_send(RuntimeCommand::OpenSession { session, ack })
             .map_err(|_| {
                 tracing::error!(name: "open_rejected", reason = "runtime_stopped");
                 OpenSessionError::WorkerStopped
             })?;
         match result.recv_blocking() {
-            Ok(Ok(endpoint)) => {
+            Ok(Ok(connection)) => {
                 tracing::info!(name: "opened", "");
-                Ok(SessionStream::new(endpoint, receiver))
+                Ok(connection)
             }
             Ok(Err(error)) => {
                 match &error {

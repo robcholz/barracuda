@@ -127,8 +127,7 @@ fn assert_submit_error(root: &str, fixture: &Fixture) {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text(format!("trigger {}", fixture.case)))).unwrap();
     let events = drain_until_turn_ended(&mut events);
     let errors = error_messages(&events).join("\n");
@@ -152,8 +151,7 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
     block_on(control.append(Message::text(format!("trigger {}", fixture.case)))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
@@ -231,7 +229,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Error { message } => Some(message.clone()),
+            SessionEvent::Error(error) => Some(error.to_string()),
             _ => None,
         })
         .collect()

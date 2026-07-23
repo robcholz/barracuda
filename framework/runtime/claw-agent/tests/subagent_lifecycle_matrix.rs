@@ -90,8 +90,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let mut events = system.open_session(session).unwrap();
-        let control = events.control();
+        let (control, mut events) = system.open_session(session).unwrap();
 
         block_on(control.append(Message::text(format!("delegate {}", fixture.case)))).unwrap();
         let delegated_turn = drain_until_turn_ended(&mut events);
@@ -172,8 +171,7 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("delegate in foreground"))).unwrap();
     let turn = drain_until_turn_ended(&mut events);
@@ -224,8 +222,7 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("delegate with approval"))).unwrap();
@@ -293,8 +290,7 @@ fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() 
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
     block_on(control.append(Message::text("delegate and let approval time out"))).unwrap();
@@ -335,8 +331,7 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("start background work"))).unwrap();
     let delegated = drain_until_turn_ended(&mut events);
@@ -378,8 +373,7 @@ fn completed_background_child_is_inspectable_until_its_result_enters_root_contex
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("inspect completed delivery"))).unwrap();
     let turn = drain_until_turn_ended(&mut events);
@@ -415,8 +409,7 @@ fn cancelled_foreground_spawn_deletes_its_subagent() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text(format!("delegate then {control_name}")))).unwrap();
     wait_until_control_worker_is_pending(control_name);
@@ -455,8 +448,7 @@ fn foreground_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("start foreground timeout"))).unwrap();
     wait_until_control_worker_is_pending("foreground timeout");
@@ -486,8 +478,7 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("start background timeout"))).unwrap();
     let delegated = drain_until_turn_ended(&mut events);
@@ -1246,6 +1237,7 @@ async fn wait_for_input_request(
     events: &mut claw_agent::SessionStream,
 ) -> (InputRequestId, InputRequestKind) {
     while let Some(event) = events.next().await {
+        let event = event.expect("Session stream failed");
         if let SessionEvent::InputRequested { request, kind } = event {
             return (request, kind);
         }
@@ -1364,16 +1356,17 @@ fn recorded_child_id() -> AgentId {
 }
 
 fn assert_turn(events: &[SessionEvent], turn: TurnId, origin: TurnOrigin, case: &str) {
-    assert_eq!(
+    assert!(matches!(
         events.first(),
-        Some(&SessionEvent::TurnStarted { turn, origin }),
-        "case {case}"
-    );
-    assert_eq!(
+        Some(SessionEvent::TurnStarted {
+            turn: event_turn,
+            origin: event_origin,
+        }) if *event_turn == turn && *event_origin == origin
+    ), "case {case}");
+    assert!(matches!(
         events.last(),
-        Some(&SessionEvent::TurnEnded { turn }),
-        "case {case}"
-    );
+        Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
+    ), "case {case}");
 }
 
 fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
@@ -1410,7 +1403,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Error { message } => Some(message.clone()),
+            SessionEvent::Error(error) => Some(error.to_string()),
             _ => None,
         })
         .collect()

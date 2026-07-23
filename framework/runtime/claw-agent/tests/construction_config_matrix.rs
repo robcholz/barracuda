@@ -29,8 +29,7 @@ fn turn_without_linked_api_reports_not_configured() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let mut events = system.open_session(session).unwrap();
-    let control = events.control();
+    let (control, mut events) = system.open_session(session).unwrap();
 
     block_on(control.append(Message::text("run without api"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
@@ -39,7 +38,7 @@ fn turn_without_linked_api_reports_not_configured() {
         events.iter().any(|event| {
             matches!(
                 event,
-                SessionEvent::Error { message } if message.contains("not configured")
+                SessionEvent::Error(error) if error.to_string().contains("not configured")
             )
         }),
         "{events:?}"
@@ -120,7 +119,7 @@ trait ConstructionSystem: Sized {
     fn open_session(
         &self,
         session: claw_agent::SessionId,
-    ) -> claw_agent::AgentResult<claw_agent::SessionStream>;
+    ) -> claw_agent::AgentResult<(claw_agent::SessionControl, claw_agent::SessionStream)>;
 }
 
 impl ConstructionSystem for MemConstructionSystem {
@@ -141,7 +140,7 @@ impl ConstructionSystem for MemConstructionSystem {
     fn open_session(
         &self,
         session: claw_agent::SessionId,
-    ) -> claw_agent::AgentResult<claw_agent::SessionStream> {
+    ) -> claw_agent::AgentResult<(claw_agent::SessionControl, claw_agent::SessionStream)> {
         self.open_session(session)
     }
 }
@@ -164,7 +163,7 @@ impl ConstructionSystem for DiskConstructionSystem {
     fn open_session(
         &self,
         session: claw_agent::SessionId,
-    ) -> claw_agent::AgentResult<claw_agent::SessionStream> {
+    ) -> claw_agent::AgentResult<(claw_agent::SessionControl, claw_agent::SessionStream)> {
         self.open_session(session)
     }
 }
@@ -179,8 +178,7 @@ fn assert_construction_case<System: ConstructionSystem>(
     match System::build(config, persistence) {
         Ok(system) if expect_ok => {
             let session = system.new_session();
-            let mut events = system.open_session(session).unwrap();
-            let control = events.control();
+            let (control, mut events) = system.open_session(session).unwrap();
             block_on(control.append(Message::text(format!("construction config {case}")))).unwrap();
             let events = drain_until_turn_ended(&mut events);
             assert!(

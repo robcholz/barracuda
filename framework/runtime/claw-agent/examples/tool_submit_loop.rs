@@ -145,12 +145,15 @@ async fn main() -> anyhow::Result<()> {
     let session = system.new_session(SessionPersistence::Persistent)?;
 
     // 2. Drive the loop: explicit session id selects the agent session.
-    let mut events = system.open_session(session)?;
-    events.append(Message::text("Hi, what time is it?")).await?;
+    let (control, mut events) = system.open_session(session)?;
+    control
+        .append(Message::text("Hi, what time is it?"))
+        .await?;
 
     println!("\nsession `{session}` events:");
     let mut outputs = Vec::new();
     while let Some(event) = events.next().await {
+        let event = event?;
         match event {
             SessionEvent::Output(StreamPart::Delta(text)) => {
                 println!("  > {text}");
@@ -163,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
             SessionEvent::Reasoning(StreamPart::End)
             | SessionEvent::Output(StreamPart::End)
             | SessionEvent::ToolCalls(StreamPart::End) => {}
-            SessionEvent::Error { message } => println!("  [error] {message}"),
+            SessionEvent::Error(error) => println!("  [error] {error}"),
             SessionEvent::TurnEnded { .. } => break,
             other => println!("  [{other:?}]"),
         }

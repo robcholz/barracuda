@@ -26,7 +26,7 @@ pub(crate) enum AgentManagerError {
 
 /// What can go wrong while building one concrete agent from the manager.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum AgentCreateError {
+pub enum AgentCreateError {
     /// The Agent recovery collection could not be accessed or registered.
     #[error("failed to access persisted agent state: {0}")]
     Persistence(#[from] PersistenceError),

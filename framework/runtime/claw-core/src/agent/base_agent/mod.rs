@@ -17,9 +17,10 @@ pub(in crate::agent) use self::context::{ContextAdapter, ContextAdapterFuture, T
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
 pub(crate) use self::persistence::AgentState;
 pub(in crate::agent) use self::persistence::AgentStateBuilder;
+pub use self::stream::{AgentApprovalError, AgentError};
 pub(crate) use self::stream::{
-    AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
-    ApprovalDecision,
+    AgentCompletion, AgentEvent, AgentInputRequest, AgentOutcome, ApprovalDecision,
 };
 pub use iteration_loop::IterationId;
-pub(crate) use iteration_loop::{IterationEvent, ToolCallId};
+pub use iteration_loop::{IterationLoopError, ToolCallId};
+pub(crate) use iteration_loop::IterationEvent;

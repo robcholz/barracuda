@@ -16,8 +16,8 @@ use tracing::Instrument as _;
 use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunScheduler;
 use crate::session::{
-    OpenSessionError, SessionControlError, SessionCreateError, SessionEndpoint, SessionEvent,
-    SessionId, SessionManager, SessionManagerInitError, SessionPersistence,
+    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionId,
+    SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
 };
 use crate::SYSTEM_TRACE_SCOPE;
 
@@ -33,8 +33,7 @@ pub(super) enum RuntimeCommand {
     },
     OpenSession {
         session: SessionId,
-        events: Sender<SessionEvent>,
-        ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
+        ack: Sender<Result<(SessionControl, SessionStream), OpenSessionError>>,
     },
     DeleteSession {
         session: SessionId,
@@ -100,15 +99,11 @@ where
             Some(RuntimeCommand::ListSessions { ack }) => {
                 let _ = ack.try_send(self.sessions.list());
             }
-            Some(RuntimeCommand::OpenSession {
-                session,
-                events,
-                ack,
-            }) => {
-                self.sessions.open(session, events, ack);
+            Some(RuntimeCommand::OpenSession { session, ack }) => {
+                let _ = ack.try_send(self.sessions.open(session));
             }
             Some(RuntimeCommand::DeleteSession { session, ack }) => {
-                self.sessions.delete(session, ack);
+                let _ = ack.try_send(self.sessions.delete(session));
             }
             Some(RuntimeCommand::Stop) | None => {
                 self.stopping = true;

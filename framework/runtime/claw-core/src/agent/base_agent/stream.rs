@@ -21,7 +21,7 @@ pub(crate) enum AgentSubmitError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum AgentApprovalError {
+pub enum AgentApprovalError {
     #[error("agent is not awaiting approval")]
     NotAwaitingApproval,
     #[error("approval is for tool call {received}, expected {expected}")]
@@ -40,7 +40,7 @@ pub(crate) enum ApprovalDecision {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub(crate) enum AgentError {
+pub enum AgentError {
     #[error(transparent)]
     Iteration(#[from] IterationLoopError),
     #[error(transparent)]
