@@ -1356,17 +1356,23 @@ fn recorded_child_id() -> AgentId {
 }
 
 fn assert_turn(events: &[SessionEvent], turn: TurnId, origin: TurnOrigin, case: &str) {
-    assert!(matches!(
-        events.first(),
-        Some(SessionEvent::TurnStarted {
-            turn: event_turn,
-            origin: event_origin,
-        }) if *event_turn == turn && *event_origin == origin
-    ), "case {case}");
-    assert!(matches!(
-        events.last(),
-        Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
-    ), "case {case}");
+    assert!(
+        matches!(
+            events.first(),
+            Some(SessionEvent::TurnStarted {
+                turn: event_turn,
+                origin: event_origin,
+            }) if *event_turn == turn && *event_origin == origin
+        ),
+        "case {case}"
+    );
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
+        ),
+        "case {case}"
+    );
 }
 
 fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {

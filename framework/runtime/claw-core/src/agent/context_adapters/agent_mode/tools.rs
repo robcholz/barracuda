@@ -9,7 +9,7 @@ use claw_tool::{
 };
 
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::tools::optional_string_argument;
+use crate::agent::tools::helper::{non_blank_argument, optional_string_argument};
 
 use super::{lock_mode, AgentModeState, SharedAgentMode};
 
@@ -64,7 +64,8 @@ impl ToolSpec for RequestClarificationTool {
 
 impl SyncToolHandler for RequestClarificationTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let question = required_string_argument(call, "question")?;
+        let args = call.arguments_value()?;
+        let question = non_blank_argument(&args, "question")?;
         self.effects.emit(AgentEffect::Yield { message: question });
         Ok(success("Clarification presented to the user."))
     }
@@ -85,22 +86,23 @@ impl ToolSpec for ExitPlanModeTool {
 
 impl SyncToolHandler for ExitPlanModeTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let outcome = required_string_argument(call, "outcome")?;
+        let args = call.arguments_value()?;
+        let outcome = non_blank_argument(&args, "outcome")?;
         let output = match outcome.as_str() {
             "execute" => {
                 // The approved plan remains in this tool call's transcript
                 // arguments; the adapter only changes the next context frame.
-                let _plan = required_string_argument(call, "plan")?;
+                let _plan = non_blank_argument(&args, "plan")?;
                 "Plan Mode exited. Begin executing the approved plan."
             }
             "cancel" => {
-                if optional_string_argument(call.arguments_json(), "plan")?.is_some() {
+                if optional_string_argument(&args, "plan")?.is_some() {
                     return Err(ToolError::InvalidArguments(
                         "'plan' must be omitted when 'outcome' is 'cancel'".into(),
                     )
                     .into());
                 }
-                let message = optional_non_empty_string_argument(call, "message")?
+                let message = optional_non_empty_string_argument(&args, "message")?
                     .unwrap_or_else(|| DEFAULT_CANCEL_MESSAGE.to_owned());
                 self.effects.emit(AgentEffect::Yield { message });
                 "Plan Mode cancelled."
@@ -117,25 +119,11 @@ impl SyncToolHandler for ExitPlanModeTool {
     }
 }
 
-fn required_string_argument(
-    call: &ToolInvocation<'_>,
-    key: &str,
-) -> Result<String, ToolInvokeError> {
-    let Some(value) = optional_string_argument(call.arguments_json(), key)? else {
-        return Err(ToolError::InvalidArguments(format!("'{key}' is required")).into());
-    };
-    let value = value.trim();
-    if value.is_empty() {
-        return Err(ToolError::InvalidArguments(format!("'{key}' is required")).into());
-    }
-    Ok(value.to_owned())
-}
-
 fn optional_non_empty_string_argument(
-    call: &ToolInvocation<'_>,
+    args: &serde_json::Value,
     key: &str,
 ) -> Result<Option<String>, ToolInvokeError> {
-    optional_string_argument(call.arguments_json(), key)?
+    optional_string_argument(args, key)?
         .map(|value| {
             let value = value.trim();
             if value.is_empty() {

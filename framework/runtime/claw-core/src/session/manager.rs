@@ -16,14 +16,13 @@ use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
-use super::api::{OpenSessionError, SessionControl, SessionControlError, SessionCreateError};
-use super::command::SessionCommand;
-use super::persistent::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
+use super::control::{SessionCommand, SessionControl, SessionControlError};
+use super::persistence::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
     ensure_next_agent, ensure_next_session, next_session, SessionManagerState,
     SessionPersistentState,
 };
-use super::{SessionStream, SessionError};
+use super::{SessionError, SessionStream};
 
 pub(super) type SharedAgentManager<Filesystem, Http, Timer> =
     Rc<AgentManager<Filesystem, Http, Timer>>;
@@ -37,6 +36,26 @@ pub enum SessionPersistence {
     Persistent,
     /// Keep session state and transcript in memory for this process only.
     Ephemeral,
+}
+
+/// Failure opening a session event stream.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum OpenSessionError {
+    #[error("session not found: {0}")]
+    SessionNotFound(SessionId),
+    #[error("session is already open: {0}")]
+    AlreadyOpen(SessionId),
+    #[error("agent runtime is not running")]
+    WorkerStopped,
+}
+
+/// Failure creating a session through the session manager.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionCreateError {
+    #[error("agent runtime is not running")]
+    WorkerStopped,
+    #[error(transparent)]
+    Persistence(#[from] PersistenceError),
 }
 
 struct LiveActor<Filesystem, Http, Timer>
@@ -208,10 +227,7 @@ where
         Ok((control, stream))
     }
 
-    pub(crate) fn delete(
-        &mut self,
-        session: SessionId,
-    ) -> Result<(), SessionControlError> {
+    pub(crate) fn delete(&mut self, session: SessionId) -> Result<(), SessionControlError> {
         if !self.sessions.contains_key(&session) {
             return Err(SessionControlError::SessionClosed(session));
         }

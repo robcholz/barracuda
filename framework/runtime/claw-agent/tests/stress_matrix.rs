@@ -403,7 +403,7 @@ where
                         .expect("stress expected output"),
                 );
                 expected_index = expected_index.saturating_add(1);
-                block_on(control.close_session()).unwrap();
+                block_on(control.close()).unwrap();
                 assert_closed(&mut events);
             }
         } else {

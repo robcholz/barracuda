@@ -1,31 +1,10 @@
 use async_channel::Sender;
 use claw_permission::PermissionLevel;
-use claw_persistence::PersistenceError;
+use strum::IntoStaticStr;
 
 use crate::agent::ReasoningEffort;
 
-use super::command::{ControlOp, SessionCommand};
 use super::{InputRequestId, Message, SessionId};
-
-/// Failure opening a session event stream.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum OpenSessionError {
-    #[error("session not found: {0}")]
-    SessionNotFound(SessionId),
-    #[error("session is already open: {0}")]
-    AlreadyOpen(SessionId),
-    #[error("agent runtime is not running")]
-    WorkerStopped,
-}
-
-/// Failure creating a session through the session manager.
-#[derive(Debug, thiserror::Error)]
-pub enum SessionCreateError {
-    #[error("agent runtime is not running")]
-    WorkerStopped,
-    #[error(transparent)]
-    Persistence(#[from] PersistenceError),
-}
 
 /// Failure sending a command through a session control handle.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -44,6 +23,47 @@ pub enum SessionControlError {
     WorkerStopped,
     #[error("failed to update persisted session state")]
     Persistence,
+}
+
+#[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]
+pub(super) enum ControlOp {
+    #[strum(serialize = "interrupt")]
+    Interrupt,
+    #[strum(serialize = "cancel")]
+    Cancel,
+}
+
+pub(super) enum SessionCommand {
+    Append {
+        lease: u64,
+        message: Message,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
+    Respond {
+        lease: u64,
+        request: InputRequestId,
+        message: Message,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
+    Control {
+        lease: u64,
+        op: ControlOp,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
+    SetReasoningEffort {
+        lease: u64,
+        effort: ReasoningEffort,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
+    SetPermissionLevel {
+        lease: u64,
+        level: PermissionLevel,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
+    Close {
+        lease: u64,
+        ack: Sender<Result<(), SessionControlError>>,
+    },
 }
 
 /// Cloneable write/control half of an open session.
@@ -155,7 +175,7 @@ impl SessionControl {
 
     /// Close this event stream. The session id stays live; dirty state is
     /// persisted by the runtime's global persistence boundary.
-    pub async fn close_session(&self) -> Result<(), SessionControlError> {
+    pub async fn close(&self) -> Result<(), SessionControlError> {
         let (ack, result) = async_channel::bounded(1);
         self.commands
             .send(SessionCommand::Close {

@@ -273,7 +273,7 @@ fn close_session_cancels_active_work_and_closes_events() {
 
     block_on(async {
         control.append(Message::text("close me")).await.unwrap();
-        control.close_session().await.unwrap();
+        control.close().await.unwrap();
     });
     let events = drain_until_closed(&mut events);
 

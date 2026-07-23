@@ -21,6 +21,6 @@ pub use self::stream::{AgentApprovalError, AgentError};
 pub(crate) use self::stream::{
     AgentCompletion, AgentEvent, AgentInputRequest, AgentOutcome, ApprovalDecision,
 };
+pub(crate) use iteration_loop::IterationEvent;
 pub use iteration_loop::IterationId;
 pub use iteration_loop::{IterationLoopError, ToolCallId};
-pub(crate) use iteration_loop::IterationEvent;

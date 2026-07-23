@@ -10,6 +10,13 @@ use super::validate;
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
 
+/// Framework-only execution configuration. It is never rendered into a tool's
+/// model-facing schema or usage text.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ToolConfig {
+    pub detached: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolInvocation<'a> {
     id: Option<&'a str>,
@@ -179,6 +186,7 @@ macro_rules! tool_metadata {
 #[derive(Clone)]
 pub struct Tool {
     inner: Arc<ToolInner>,
+    config: ToolConfig,
 }
 
 enum ToolInner {
@@ -190,13 +198,24 @@ impl Tool {
     pub fn from_sync(handler: impl SyncToolHandler + 'static) -> Self {
         Self {
             inner: Arc::new(ToolInner::Sync(Box::new(handler))),
+            config: ToolConfig::default(),
         }
     }
 
     pub fn from_async(handler: impl AsyncToolHandler + 'static) -> Self {
         Self {
             inner: Arc::new(ToolInner::Async(Box::new(handler))),
+            config: ToolConfig::default(),
         }
+    }
+
+    pub fn with_config(mut self, config: ToolConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn config(&self) -> ToolConfig {
+        self.config
     }
 
     pub fn name(&self) -> &str {
@@ -229,6 +248,17 @@ impl Tool {
                 Err(error) => return Err(error),
             }
         }
+    }
+
+    pub(crate) fn detached_run(&self, call: &ToolInvocation<'_>) -> super::DetachedToolRun {
+        let invocation = super::DetachedToolInvocation::from_invocation(call);
+        let run_invocation = invocation.clone();
+        let tool = self.clone();
+        let future = Box::pin(async move {
+            let call = run_invocation.as_invocation()?;
+            tool.invoke(&call).await
+        });
+        super::DetachedToolRun::new(invocation, future)
     }
 
     async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation<'_>) -> ToolResult<ToolOutput> {

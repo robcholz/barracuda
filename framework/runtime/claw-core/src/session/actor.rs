@@ -14,22 +14,21 @@ use futures_core::Stream;
 use tracing::Instrument as _;
 
 use crate::agent::{
-    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest,
-    AgentOutcome, IterationEvent as AgentIterationEvent, PersistenceConfig, ReasoningEffort,
-    ToolCallId,
+    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentEvent, AgentId,
+    AgentInputRequest, AgentOutcome, IterationEvent as AgentIterationEvent, PersistenceConfig,
+    ReasoningEffort, ToolCallId,
 };
 use crate::config::SharedApiManager;
 use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
 use claw_api::ToolCall;
 
 use super::agent_slot::{AgentSlot, AgentSlotUpdate};
-use super::api::{OpenSessionError, SessionControlError};
 use super::approval_resolver::{
     self, ApprovalControl, ApprovalResolverError, PermissionReplyResolution,
 };
-use super::command::{ControlOp, SessionCommand};
-use super::manager::SharedAgentManager;
-use super::permission_policy::SessionPermission;
+use super::control::{ControlOp, SessionCommand, SessionControlError};
+use super::manager::{OpenSessionError, SharedAgentManager};
+use super::permission::SessionPermission;
 use super::state::{next_agent, SessionManagerState, SessionPersistentState};
 use super::{
     InputRequestId, InputRequestKind, IterationEvent, Message, SessionCloseReason, SessionError,
@@ -80,9 +79,7 @@ impl PollSource {
 
 pub(super) enum SessionActorExit {
     Deleted { session: SessionId },
-    Shutdown {
-        session: SessionId,
-    },
+    Shutdown { session: SessionId },
 }
 
 impl SessionActorExit {

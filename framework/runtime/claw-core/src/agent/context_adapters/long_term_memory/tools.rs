@@ -10,8 +10,7 @@ use claw_tool::{
 };
 
 use self::args::{
-    optional_limit, optional_string, optional_string_array, parse_object, required_string,
-    string_array,
+    optional_limit, optional_string, optional_string_array, required_string, string_array,
 };
 use super::MemoryStores;
 
@@ -47,7 +46,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryStoreTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryStoreTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let content = required_string(&args, "content")?;
         let draft = MemoryDraft::new(content)
             .with_tags(string_array(&args, "tags")?)
@@ -74,7 +73,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryRecallTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryRecallTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let labels = string_array(&args, "labels")?;
         let query = optional_string(&args, "query")?;
         let limit = optional_limit(&args)?;
@@ -97,7 +96,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryListTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryListTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let limit = optional_limit(&args)?;
         let mut items = self.stores.list();
         items.truncate(limit);
@@ -118,7 +117,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryUpdateTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryUpdateTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let id = MemoryId::from(required_string(&args, "id")?.as_str());
         let patch = MemoryPatch {
             content: optional_string(&args, "content")?,
@@ -148,7 +147,7 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryForgetTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for MemoryForgetTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let id = MemoryId::from(required_string(&args, "id")?.as_str());
         match self.stores.forget(&id) {
             Ok(()) => Ok(ToolOutput {

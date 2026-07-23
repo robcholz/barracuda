@@ -464,7 +464,7 @@ fn session_close(session_id: u32) -> Result<(), CabiError> {
         return Err(CabiError::InvalidArgument);
     }
     let session = get_open_session(session_id)?.ok_or(CabiError::NotFound)?;
-    futures_lite::future::block_on(session.control.close_session()).map_err(session_control_error)
+    futures_lite::future::block_on(session.control.close()).map_err(session_control_error)
 }
 
 fn session_delete(session_id: u32) -> Result<(), CabiError> {

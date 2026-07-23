@@ -1,24 +1,7 @@
-use claw_tool::{ToolError, ToolInvocation, ToolInvokeError};
+use claw_tool::{ToolError, ToolInvokeError};
 use serde_json::Value;
 
 const DEFAULT_RECALL_LIMIT: usize = 20;
-
-pub(super) fn parse_object(call: &ToolInvocation<'_>) -> Result<Value, ToolInvokeError> {
-    let text = call.arguments_json().trim();
-    let value = if text.is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(text).map_err(|error| {
-            ToolInvokeError::new(ToolError::InvalidArgumentsJson(error.to_string()))
-        })?
-    };
-    if !value.is_object() {
-        return Err(ToolInvokeError::new(ToolError::InvalidArgumentsJson(
-            "tool arguments must be a JSON object".into(),
-        )));
-    }
-    Ok(value)
-}
 
 pub(super) fn required_string(args: &Value, key: &str) -> Result<String, ToolInvokeError> {
     let value = args

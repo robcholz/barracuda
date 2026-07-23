@@ -47,7 +47,7 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReadTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileReadTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         match self.store.read(document) {
             Ok(Some(content)) => Ok(ToolOutput {
@@ -84,7 +84,7 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReplaceTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileReplaceTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
             ToolInvokeError::new(ToolError::InvokeRejected(
@@ -118,7 +118,7 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileClearTool<F> {
 
 impl<F: ClawFs + 'static> SyncToolHandler for ProfileClearTool<F> {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let args = parse_object(call)?;
+        let args = call.arguments_value()?;
         let document = document_from_args(&args)?;
         match self.store.clear(document) {
             Ok(()) => Ok(ToolOutput {
@@ -140,30 +140,13 @@ fn profile_action<F: ClawFs + 'static>(
     store: &ProfileStore<F>,
 ) -> Action {
     let action = Action::new(verb, risk);
-    let Ok(args) = parse_object(call) else {
+    let Ok(args) = call.arguments_value() else {
         return action;
     };
     let Ok(document) = document_from_args(&args) else {
         return action;
     };
     action.with_resource(Resource::Path(store.path(document)))
-}
-
-fn parse_object(call: &ToolInvocation<'_>) -> Result<Value, ToolInvokeError> {
-    let text = call.arguments_json().trim();
-    let value = if text.is_empty() {
-        Value::Object(serde_json::Map::new())
-    } else {
-        serde_json::from_str(text).map_err(|error| {
-            ToolInvokeError::new(ToolError::InvalidArgumentsJson(error.to_string()))
-        })?
-    };
-    if !value.is_object() {
-        return Err(ToolInvokeError::new(ToolError::InvalidArgumentsJson(
-            "tool arguments must be a JSON object".into(),
-        )));
-    }
-    Ok(value)
 }
 
 fn document_from_args(args: &Value) -> Result<ProfileDocument, ToolInvokeError> {

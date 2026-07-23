@@ -6,7 +6,7 @@ use claw_tool::{
 };
 
 use super::super::tool_port::SubagentControl;
-use super::args::{action_with_agent_resource, required_agent_id};
+use super::helper::{action_with_agent_resource, required_agent_id};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::from_sync(DeleteSubagentTool { control })
@@ -26,7 +26,8 @@ impl ToolSpec for DeleteSubagentTool {
 
 impl SyncToolHandler for DeleteSubagentTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let target = required_agent_id(call, "subagent_delete")?;
+        let args = call.arguments_value()?;
+        let target = required_agent_id(&args, "subagent_delete")?;
         if self.control.get(target).is_none() {
             return Ok(ToolOutput {
                 output: format!("Cannot delete {target}: it is not a subagent in your subtree."),

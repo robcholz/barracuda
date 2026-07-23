@@ -55,7 +55,7 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
 
     block_on(control.append(Message::text("trace one agent turn"))).unwrap();
     let _ = drain_until_turn_ended(&mut events);
-    block_on(control.close_session()).unwrap();
+    block_on(control.close()).unwrap();
 
     drop(control);
     drop(events);

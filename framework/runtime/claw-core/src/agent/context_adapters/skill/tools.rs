@@ -63,20 +63,7 @@ impl ToolSpec for ActivateSkillTool {
 
 impl SyncToolHandler for ActivateSkillTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let text = call.arguments_json().trim();
-        let args = if text.is_empty() {
-            Value::Object(serde_json::Map::new())
-        } else {
-            serde_json::from_str(text).map_err(|error| {
-                ToolError::InvalidArgumentsJson(format!("invalid tool arguments JSON: {error}"))
-            })?
-        };
-        if !args.is_object() {
-            return Err(ToolError::InvalidArgumentsJson(
-                "tool arguments must be a JSON object".into(),
-            )
-            .into());
-        }
+        let args = call.arguments_value()?;
         let skill_id = match args.get("skill_id") {
             Some(Value::String(skill_id)) => skill_id.trim(),
             Some(_) => {

@@ -48,17 +48,23 @@ fn submit_streams_csv_reply_cases() {
         block_on(control.append(Message::text(field(&row, "user_input")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
 
-        assert!(matches!(
-            events.first(),
-            Some(SessionEvent::TurnStarted {
-                turn: TurnId(1),
-                origin: TurnOrigin::User,
-            })
-        ), "case {case}");
-        assert!(matches!(
-            events.last(),
-            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
-        ), "case {case}");
+        assert!(
+            matches!(
+                events.first(),
+                Some(SessionEvent::TurnStarted {
+                    turn: TurnId(1),
+                    origin: TurnOrigin::User,
+                })
+            ),
+            "case {case}"
+        );
+        assert!(
+            matches!(
+                events.last(),
+                Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+            ),
+            "case {case}"
+        );
         assert_eq!(
             output_fragments(&events),
             expected_output_fragments(expected_output),
@@ -266,11 +272,11 @@ fn lifecycle_reopen_after_close(system: &support::MemAgentSystem) -> Option<Stri
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.close_session()).unwrap();
+    block_on(control.close()).unwrap();
     assert_closed(&mut events);
 
     let (reopened_control, mut reopened_events) = system.open_session(session).unwrap();
-    block_on(reopened_control.close_session()).unwrap();
+    block_on(reopened_control.close()).unwrap();
     assert_closed(&mut reopened_events);
     None
 }
@@ -283,7 +289,7 @@ fn lifecycle_control_after_close(
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.close_session()).unwrap();
+    block_on(control.close()).unwrap();
     assert_closed(&mut events);
 
     let result = block_on(async {
@@ -306,7 +312,7 @@ fn lifecycle_delete_after_close(system: &support::MemAgentSystem) -> Option<Stri
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.close_session()).unwrap();
+    block_on(control.close()).unwrap();
     assert_closed(&mut events);
 
     match system.delete_session(session) {

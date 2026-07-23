@@ -6,10 +6,10 @@ use claw_tool::{
 };
 
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::tools::optional_string_argument;
+use crate::agent::tools::helper::optional_string_argument;
 
 /// Build the always-visible core Agent control group.
-pub(crate) fn internal_tools(effects: AgentEffectEmitter) -> ToolGroup {
+pub(in crate::agent) fn internal_tools(effects: AgentEffectEmitter) -> ToolGroup {
     ToolGroup::new(
         "internal",
         true,
@@ -29,8 +29,8 @@ impl ToolSpec for EndConversationTool {
 
 impl SyncToolHandler for EndConversationTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let Some(final_message) = optional_string_argument(call.arguments_json(), "final_message")?
-        else {
+        let args = call.arguments_value()?;
+        let Some(final_message) = optional_string_argument(&args, "final_message")? else {
             return Err(ToolError::InvalidArguments(
                 "conversation_end 'final_message' is required".into(),
             )

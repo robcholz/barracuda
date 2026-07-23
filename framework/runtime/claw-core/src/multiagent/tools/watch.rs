@@ -7,7 +7,7 @@ use claw_tool::{
 };
 
 use super::super::tool_port::SubagentControl;
-use super::args::{action_with_agent_resource, required_agent_id};
+use super::helper::{action_with_agent_resource, required_agent_id};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::from_sync(WatchSubagentTool { control })
@@ -31,7 +31,8 @@ impl ToolSpec for WatchSubagentTool {
 
 impl SyncToolHandler for WatchSubagentTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let target = required_agent_id(call, "subagent_watch")?;
+        let args = call.arguments_value()?;
+        let target = required_agent_id(&args, "subagent_watch")?;
         match self.control.get(target) {
             Some(snapshot) => Ok(ToolOutput {
                 output: serde_json::to_string(&snapshot).map_err(|error| {

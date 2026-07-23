@@ -7,7 +7,7 @@ use claw_tool::{
 };
 use serde_json::json;
 
-use crate::agent::tools::optional_string_argument;
+use crate::agent::tools::helper::optional_string_argument;
 
 use super::{lock_state, SharedResumedState};
 
@@ -52,7 +52,8 @@ impl ToolSpec for ToolLoadTool {
 
 impl SyncToolHandler for ToolLoadTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let group_id = optional_string_argument(call.arguments_json(), "group_id")?
+        let args = call.arguments_value()?;
+        let group_id = optional_string_argument(&args, "group_id")?
             .map(|group_id| group_id.trim().to_owned())
             .filter(|group_id| !group_id.is_empty())
             .ok_or_else(|| {

@@ -2,19 +2,18 @@
 
 mod actor;
 mod agent_slot;
-mod api;
 mod approval_resolver;
-mod command;
+mod control;
 mod manager;
 mod message;
-mod permission_policy;
-mod persistent;
+mod permission;
+mod persistence;
 mod state;
 mod stream;
 
-pub use api::{OpenSessionError, SessionControl, SessionControlError, SessionCreateError};
 pub use approval_resolver::ApprovalResolverError;
-pub use manager::{SessionId, SessionPersistence};
+pub use control::{SessionControl, SessionControlError};
+pub use manager::{OpenSessionError, SessionCreateError, SessionId, SessionPersistence};
 pub(crate) use manager::{SessionManager, SessionManagerInitError};
 pub use message::Message;
 pub use stream::{

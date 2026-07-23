@@ -133,14 +133,14 @@ fn close_is_not_a_synchronous_persistence_barrier() {
     let (control, mut events) = system.open_session(session).unwrap();
 
     FAIL_PERSISTENCE_WRITES.store(true, Ordering::SeqCst);
-    let result = block_on(control.close_session());
+    let result = block_on(control.close());
     FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
 
     assert_eq!(result, Ok(()));
-    assert!(matches!(
-        block_on(events.next()),
-        Some(Ok(SessionEvent::Closed(_)))
-    ), "close must complete even when its final persistence flush fails");
+    assert!(
+        matches!(block_on(events.next()), Some(Ok(SessionEvent::Closed(_)))),
+        "close must complete even when its final persistence flush fails"
+    );
 }
 
 #[derive(Default)]
@@ -303,17 +303,23 @@ fn wait_for_bool(flag: &AtomicBool, case: &str, failure: &str) {
 }
 
 fn assert_turn(events: &[SessionEvent], turn: TurnId, case: &str) {
-    assert!(matches!(
-        events.first(),
-        Some(SessionEvent::TurnStarted {
-            turn: event_turn,
-            origin: TurnOrigin::User,
-        }) if *event_turn == turn
-    ), "case {case}");
-    assert!(matches!(
-        events.last(),
-        Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
-    ), "case {case}");
+    assert!(
+        matches!(
+            events.first(),
+            Some(SessionEvent::TurnStarted {
+                turn: event_turn,
+                origin: TurnOrigin::User,
+            }) if *event_turn == turn
+        ),
+        "case {case}"
+    );
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
+        ),
+        "case {case}"
+    );
 }
 
 fn output_fragments(events: &[SessionEvent]) -> Vec<String> {

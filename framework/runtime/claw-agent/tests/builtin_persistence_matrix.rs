@@ -464,17 +464,23 @@ fn install_replies(items: Vec<String>) {
 }
 
 fn assert_phase(result: &PhaseResult, expected_output: &str, case: &str) {
-    assert!(matches!(
-        result.events.first(),
-        Some(SessionEvent::TurnStarted {
-            turn: TurnId(1),
-            origin: TurnOrigin::User,
-        })
-    ), "case {case}");
-    assert!(matches!(
-        result.events.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
-    ), "case {case}");
+    assert!(
+        matches!(
+            result.events.first(),
+            Some(SessionEvent::TurnStarted {
+                turn: TurnId(1),
+                origin: TurnOrigin::User,
+            })
+        ),
+        "case {case}"
+    );
+    assert!(
+        matches!(
+            result.events.last(),
+            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+        ),
+        "case {case}"
+    );
     assert_eq!(
         iteration_ids(&result.events),
         vec![IterationId(0), IterationId(1)],

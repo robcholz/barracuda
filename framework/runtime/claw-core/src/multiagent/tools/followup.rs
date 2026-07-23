@@ -5,10 +5,11 @@ use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
 
+use crate::agent::tools::helper::non_blank_argument;
 use crate::session::Message;
 
 use super::super::tool_port::SubagentControl;
-use super::args::{action_with_agent_resource, non_blank_argument, required_agent_id};
+use super::helper::{action_with_agent_resource, required_agent_id};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::from_sync(FollowupSubagentTool { control })
@@ -28,8 +29,9 @@ impl ToolSpec for FollowupSubagentTool {
 
 impl SyncToolHandler for FollowupSubagentTool {
     fn invoke(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let target = required_agent_id(call, "subagent_followup")?;
-        let message = Message::text(non_blank_argument(call.arguments_json(), "message")?);
+        let args = call.arguments_value()?;
+        let target = required_agent_id(&args, "subagent_followup")?;
+        let message = Message::text(non_blank_argument(&args, "message")?);
         if self.control.get(target).is_none() {
             return Ok(ToolOutput {
                 output: format!("Cannot follow up {target}: it is not a subagent in your subtree."),

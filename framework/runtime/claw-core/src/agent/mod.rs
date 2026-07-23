@@ -8,7 +8,7 @@ pub(crate) mod baked;
 mod base_agent;
 mod context_adapters;
 mod manager;
-mod tools;
+pub(crate) mod tools;
 
 pub(crate) use baked::AgentKind;
 pub use base_agent::{AgentApprovalError, AgentError, IterationId, IterationLoopError, ToolCallId};
@@ -18,7 +18,7 @@ pub(crate) use base_agent::{
 };
 pub use context_adapters::ReasoningEffort;
 pub(crate) use context_adapters::ReasoningEffortHandle;
-pub use manager::{AgentCreateError, AgentId};
 pub(crate) use manager::{
     AdditionalAgentState, AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig,
 };
+pub use manager::{AgentCreateError, AgentId};

@@ -15,13 +15,11 @@ use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{
-    AgentApprovalError, AgentCreateError, AgentError, AgentId, IterationId,
-};
+use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, AgentId, IterationId};
 use claw_api::ToolCall;
 
 use super::approval_resolver::ApprovalResolverError;
-use super::command::SessionCommand;
+use super::control::SessionCommand;
 
 crate::define_prefixed_id!(InputRequestId, "input-", "input request");
 crate::define_prefixed_id!(TurnId, "turn-", "turn");

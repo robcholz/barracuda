@@ -311,17 +311,23 @@ fn assert_fragments_in_tool_messages(
 }
 
 fn assert_turn_bracket(events: &[SessionEvent], case: &str) {
-    assert!(matches!(
-        events.first(),
-        Some(SessionEvent::TurnStarted {
-            turn: TurnId(1),
-            origin: TurnOrigin::User,
-        })
-    ), "case {case}");
-    assert!(matches!(
-        events.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
-    ), "case {case}");
+    assert!(
+        matches!(
+            events.first(),
+            Some(SessionEvent::TurnStarted {
+                turn: TurnId(1),
+                origin: TurnOrigin::User,
+            })
+        ),
+        "case {case}"
+    );
+    assert!(
+        matches!(
+            events.last(),
+            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+        ),
+        "case {case}"
+    );
 }
 
 fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {

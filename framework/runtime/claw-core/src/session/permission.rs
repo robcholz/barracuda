@@ -1,3 +1,5 @@
+//! Session-scoped permission policy.
+
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_persistence::DurableState;
 

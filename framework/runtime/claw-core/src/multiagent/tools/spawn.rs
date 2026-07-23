@@ -1,3 +1,4 @@
+use core::num::NonZeroU32;
 use std::sync::Arc;
 
 use claw_permission::{Action, RiskClass};
@@ -6,14 +7,15 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
+use crate::agent::tools::helper::non_blank_argument;
 use crate::agent::AgentKind;
 use crate::session::Message;
 use claw_api::ToolCall;
+use serde_json::Value;
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
 use super::super::tool_port::SubagentControl;
-use super::args::{non_blank_argument, required_bool_argument, required_nonzero_u32_argument};
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
     Tool::from_async(SpawnSubagentTool { control, policy })
@@ -40,7 +42,8 @@ impl AsyncToolHandler for SpawnSubagentTool {
 
 impl SpawnSubagentTool {
     async fn invoke_inner(&self, call: &ToolInvocation<'_>) -> Result<ToolOutput, ToolInvokeError> {
-        let kind = AgentKind::new(non_blank_argument(call.arguments_json(), "kind")?);
+        let args = call.arguments_value()?;
+        let kind = AgentKind::new(non_blank_argument(&args, "kind")?);
         if !self.policy.allows(&kind) {
             tracing::warn!(name: "spawn_kind_rejected", kind = %kind.as_str());
             return Ok(ToolOutput {
@@ -78,13 +81,10 @@ impl SpawnSubagentTool {
             });
         }
 
-        let name = non_blank_argument(call.arguments_json(), "name")?;
-        let goal = Message::text(non_blank_argument(call.arguments_json(), "goal")?);
-        let foreground = required_bool_argument(call.arguments_json(), "foreground")?;
-        let timeout = SubagentTimeout::new(required_nonzero_u32_argument(
-            call.arguments_json(),
-            "timeout_ms",
-        )?);
+        let name = non_blank_argument(&args, "name")?;
+        let goal = Message::text(non_blank_argument(&args, "goal")?);
+        let foreground = required_bool_argument(&args, "foreground")?;
+        let timeout = SubagentTimeout::new(required_nonzero_u32_argument(&args, "timeout_ms")?);
         if foreground {
             let (_child, result) = match self
                 .control
@@ -132,6 +132,64 @@ impl SpawnSubagentTool {
                 ),
                 ok: true,
             })
+        }
+    }
+}
+
+fn required_bool_argument(args: &Value, key: &str) -> Result<bool, ToolError> {
+    match args.get(key) {
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => Err(ToolError::InvalidArguments(format!(
+            "'{key}' must be a boolean"
+        ))),
+        None => Err(ToolError::InvalidArguments(format!("'{key}' is required"))),
+    }
+}
+
+fn required_nonzero_u32_argument(args: &Value, key: &str) -> Result<NonZeroU32, ToolError> {
+    let Some(raw) = args.get(key) else {
+        return Err(ToolError::InvalidArguments(format!("'{key}' is required")));
+    };
+    let Some(raw) = raw.as_u64() else {
+        return Err(ToolError::InvalidArguments(format!(
+            "'{key}' must be a positive integer"
+        )));
+    };
+    u32::try_from(raw)
+        .ok()
+        .and_then(NonZeroU32::new)
+        .ok_or_else(|| {
+            ToolError::InvalidArguments(format!("'{key}' must be between 1 and {}", u32::MAX))
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::required_nonzero_u32_argument;
+
+    #[test]
+    fn required_nonzero_u32_rejects_missing_zero_negative_fractional_and_oversized_values() {
+        assert_eq!(
+            required_nonzero_u32_argument(&json!({"timeout_ms": 2500}), "timeout_ms")
+                .expect("valid timeout")
+                .get(),
+            2_500
+        );
+
+        for arguments in [
+            json!({}),
+            json!({"timeout_ms": 0}),
+            json!({"timeout_ms": -1}),
+            json!({"timeout_ms": 1.5}),
+            json!({"timeout_ms": 4_294_967_296_u64}),
+            json!({"timeout_ms": "1000"}),
+        ] {
+            assert!(
+                required_nonzero_u32_argument(&arguments, "timeout_ms").is_err(),
+                "unexpectedly accepted {arguments}"
+            );
         }
     }
 }
