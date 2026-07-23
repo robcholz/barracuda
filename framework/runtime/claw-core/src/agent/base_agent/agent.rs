@@ -24,8 +24,8 @@ use super::iteration_loop::{
     LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
 };
 use super::stream::{
-    AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentIterationEvent, AgentOutcome,
-    AgentStreamHandle, AgentSubmitError, ApprovalOutcome, RunControl,
+    AgentCompletion, AgentError, AgentInputRequest, AgentIterationEvent, AgentOutcome,
+    AgentSubmitError, ApprovalOutcome, BaseAgentEvent, BaseAgentStream, RunControl,
 };
 use super::TurnLifecycle;
 
@@ -127,18 +127,18 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     pub(crate) fn submit(
         &mut self,
         message: Message,
-    ) -> Result<AgentStreamHandle<'_>, AgentSubmitError> {
+    ) -> Result<BaseAgentStream<'_>, AgentSubmitError> {
         self.begin(message)?;
 
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         let stream = self.run_stream(control.clone());
-        Ok(AgentStreamHandle::new(stream, control))
+        Ok(BaseAgentStream::new(stream, control))
     }
 
     fn run_stream(
         &mut self,
         control: RunControl,
-    ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + '_ {
+    ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + '_ {
         ActiveRunGuard::new(self).into_stream(control)
     }
 
@@ -160,12 +160,15 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         &mut self,
         result: Result<IterationCompletion, AgentError>,
         control: &RunControl,
-    ) -> Result<Option<AgentEvent>, AgentError> {
+    ) -> Result<Option<BaseAgentEvent>, AgentError> {
         Ok(match result? {
             IterationCompletion::Response(text) => {
+                if self.apply_continuations(control)? {
+                    return Ok(None);
+                }
                 self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
-                Some(AgentEvent::Finished(AgentOutcome::Completed(
+                Some(BaseAgentEvent::Finished(AgentOutcome::Completed(
                     AgentCompletion::Streamed(text),
                 )))
             }
@@ -176,24 +179,24 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 if control.take_interrupt() {
                     self.abandon_open_task();
                     self.stop(StopReason::Interrupted);
-                    return Ok(Some(AgentEvent::Finished(AgentOutcome::Interrupted)));
+                    return Ok(Some(BaseAgentEvent::Finished(AgentOutcome::Interrupted)));
                 }
                 None
             }
             IterationCompletion::Interrupted => {
                 self.abandon_open_task();
                 self.stop(StopReason::Interrupted);
-                Some(AgentEvent::Finished(AgentOutcome::Interrupted))
+                Some(BaseAgentEvent::Finished(AgentOutcome::Interrupted))
             }
             IterationCompletion::Cancelled => {
                 self.abandon_open_task();
                 self.stop(StopReason::Cancelled);
-                Some(AgentEvent::Finished(AgentOutcome::Cancelled))
+                Some(BaseAgentEvent::Finished(AgentOutcome::Cancelled))
             }
         })
     }
 
-    fn reduce_agent_effects(&mut self) -> Result<Option<AgentEvent>, AgentError> {
+    fn reduce_agent_effects(&mut self) -> Result<Option<BaseAgentEvent>, AgentError> {
         let mut effects = self.effect_inbox.drain();
         if effects.len() > 1 {
             let count = effects.len();
@@ -206,7 +209,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             .transpose()
     }
 
-    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<AgentEvent, AgentError> {
+    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<BaseAgentEvent, AgentError> {
         let message = match effect {
             AgentEffect::Finish { final_message } => {
                 self.finish_synthesized_assistant(&final_message)?;
@@ -221,9 +224,25 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 message
             }
         };
-        Ok(AgentEvent::Finished(AgentOutcome::Completed(
+        Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
             AgentCompletion::Synthesized(message),
         )))
+    }
+
+    fn apply_continuations(&mut self, control: &RunControl) -> Result<bool, AgentError> {
+        let continuations = control.take_continuations();
+        if continuations.is_empty() {
+            return Ok(false);
+        }
+        let turn = self
+            .active_turn
+            .as_mut()
+            .ok_or(AgentError::StateInvariant)?;
+        for message in continuations {
+            turn.append_user(message.as_str())?;
+            turn.finish_user()?;
+        }
+        Ok(true)
     }
 
     fn fail(&mut self, error: AgentError) -> AgentError {
@@ -524,7 +543,7 @@ where
     fn into_stream(
         self,
         control: RunControl,
-    ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + 'a {
+    ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a {
         async_stream::stream! {
             loop {
                 if !matches!(self.agent.run_state, RunState::Running) {
@@ -534,7 +553,12 @@ where
                 if control.take_interrupt() {
                     self.agent.abandon_open_task();
                     self.agent.stop(StopReason::Interrupted);
-                    yield Ok(AgentEvent::Finished(AgentOutcome::Interrupted));
+                    yield Ok(BaseAgentEvent::Finished(AgentOutcome::Interrupted));
+                    break;
+                }
+
+                if let Err(error) = self.agent.apply_continuations(&control) {
+                    yield Err(self.agent.fail(error));
                     break;
                 }
 
@@ -607,7 +631,7 @@ where
                     .expect("active turn checked before borrowing iteration fields");
                 let mut consumer = IterationConsumer::new(turn);
 
-                yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                     AgentIterationEvent::Started(iteration_id),
                 )));
 
@@ -624,14 +648,14 @@ where
                     match event {
                         IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
                             if let Some(part) = consumer.consume_reasoning(part) {
-                                yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                                     AgentIterationEvent::Reasoning(part),
                                 )));
                             }
                         }
                         IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
                             match consumer.consume_output(part) {
-                                Ok(part) => yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                Ok(part) => yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                                     AgentIterationEvent::Output(part),
                                 ))),
                                 Err(error) => {
@@ -642,7 +666,7 @@ where
                         }
                         IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
                             for event in consumer.finish_content() {
-                                yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
                             }
                             if let Err(error) = consumer.finish_assistant(&calls) {
                                 result = Some(Err(error));
@@ -673,7 +697,7 @@ where
                                         .state
                                         .get_mut()
                                         .remove_inflight_toolcall(&call.id);
-                                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                                         AgentIterationEvent::ToolResult(StreamPart::Delta((
                                             call,
                                             execution,
@@ -686,25 +710,28 @@ where
                                         break;
                                     }
                                     for event in consumer.finish_content() {
-                                        yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
                                     }
                                     if let Err(error) = consumer.finish_assistant(&[]) {
                                         result = Some(Err(error));
                                         break;
                                     }
                                     tool_results_ended = true;
-                                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                                         AgentIterationEvent::ToolResult(StreamPart::End),
                                     )));
                                 }
                             }
+                        }
+                        IterationLoopEvent::Detached(handle) => {
+                            yield Ok(BaseAgentEvent::Detached(handle));
                         }
                         IterationLoopEvent::ApprovalRequired {
                             tool_call_id,
                             tool_call,
                             reason,
                         } => {
-                            yield Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
+                            yield Ok(BaseAgentEvent::InputRequired(AgentInputRequest::Approval {
                                 tool_call_id,
                                 tool_call,
                                 reason,
@@ -722,10 +749,10 @@ where
                 }
 
                 for event in consumer.finish_content() {
-                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
                 }
                 if !tool_results_ended {
-                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                         AgentIterationEvent::ToolResult(StreamPart::End),
                     )));
                 }
@@ -735,10 +762,10 @@ where
                 drop(permission);
                 drop(tools);
 
-                yield Ok(AgentEvent::Iteration(StreamPart::End));
+                yield Ok(BaseAgentEvent::Iteration(StreamPart::End));
 
                 match self.agent.reduce_iteration(result, &control) {
-                    Ok(Some(event @ AgentEvent::Finished(_))) => {
+                    Ok(Some(event @ BaseAgentEvent::Finished(_))) => {
                         yield Ok(event);
                         break;
                     }

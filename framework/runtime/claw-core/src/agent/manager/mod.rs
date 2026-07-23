@@ -1,4 +1,4 @@
-//! Resolves a baked agent manifest and assembles the corresponding [`BaseAgent`](super::BaseAgent).
+//! Resolves a baked manifest and assembles the corresponding [`Agent`](super::Agent).
 
 mod construction;
 mod create;

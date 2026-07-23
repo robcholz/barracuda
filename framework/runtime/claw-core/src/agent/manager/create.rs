@@ -17,7 +17,7 @@ use crate::agent::context_adapters::{
 };
 use crate::agent::state::AgentState;
 use crate::agent::tools::internal_tools;
-use crate::agent::{AgentKind, ReasoningEffort, ReasoningEffortHandle};
+use crate::agent::{Agent, AgentKind, ReasoningEffort, ReasoningEffortHandle};
 use crate::config::ApiUsage;
 
 use super::error::AgentCreateError;
@@ -58,8 +58,8 @@ impl<
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-        agent: &BaseAgent<Http, Timer>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+        agent: &Agent<Http, Timer>,
+    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -87,7 +87,7 @@ impl<
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
@@ -117,7 +117,7 @@ impl<
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -178,7 +178,7 @@ impl<
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
@@ -268,7 +268,8 @@ impl<
             context_adapters,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
-        let agent = BaseAgent::<Http, Timer>::build(base_config)?;
+        let base = BaseAgent::<Http, Timer>::build(base_config)?;
+        let agent = Agent::new(base);
 
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
         Ok((agent, reasoning_effort_handle))

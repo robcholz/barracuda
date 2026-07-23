@@ -14,7 +14,8 @@
 
 For each tool round, BaseAgent statically injects its permission implementation
 into the iteration loop. The implementation alone owns approval emission and
-waiting; `ToolExecutor` receives only authorized calls.
+waiting. `ToolRunner` receives only authorized batches and returns one joined
+result stream separately from the optional detached-completion stream.
 
 `BaseAgent::submit(&mut self, Message)` returns the sole
 `AgentStreamHandle<'_>`. Message queues, session state, multiagent graph state,

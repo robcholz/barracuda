@@ -31,7 +31,9 @@ AgentRuntime
 
 AgentRunScheduler<H, T>
 └── AgentRun<H, T>
-    └── checked-out BaseAgent<H, T>
+    └── checked-out Agent<H, T>
+        ├── BaseAgent<H, T>
+        └── transient detached-tool runtime
 ~~~
 
 ### AgentRuntime
@@ -57,7 +59,7 @@ AgentRunScheduler<H, T>
 - SessionManager owns `AgentManager`; the worker loop never reads Session
   metadata or calls AgentManager.
 - `SessionPersistentState` contains only Session-owned metadata: configuration,
-  the root Agent link, and root inflight-tool recovery metadata. AgentState,
+  and the root Agent link. AgentState (including unsettled tool-call recovery),
   transcript, profile, and memory remain canonical in their component stores.
 - Permanent deletion is two-stage: SessionActor first reaps physical Agent
   ownership and asks AgentManager to remove Agent-owned stores; SessionManager
@@ -81,7 +83,7 @@ AgentRunScheduler<H, T>
 ~~~text
 AgentSlot<H, T>
 ├── Resident {
-│     agent: BaseAgent<H, T>,
+│     agent: Agent<H, T>,
 │     metadata: AgentSlotMetadata,
 │   }
 └── InFlight {
@@ -120,37 +122,59 @@ across Sessions; a future directory cache must remain a rebuildable read model.
 - Fairness exists only at poll/yield boundaries. Synchronous blocking work in a
   poll blocks the sole OS thread and must remain bounded.
 - `AgentRun` is a Scheduler-private ownership/poll wrapper around a checked-out
-  BaseAgent and that Agent's `AgentStreamHandle`. It must not define a second
-  event or outcome protocol. It forwards `Result<AgentEvent, AgentError>` unchanged and
-  retains the completed BaseAgent until its owner takes it back exactly once.
+  `Agent` and that Agent's `AgentStream`. It must not define a second semantic
+  event or outcome protocol. It forwards `Result<AgentEvent, AgentError>`
+  unchanged and retains the completed Agent until its owner takes it back
+  exactly once.
 
-### BaseAgent
+### Agent and BaseAgent
 
-- `BaseAgent<H, T>` is the only concrete Agent type. There is no `GenericAgent`
-  abstraction or `dyn Agent` ownership layer.
+- `Agent<H, T>` is the concrete object created by `AgentManager`, stored in an
+  `AgentSlot`, and checked out by the Scheduler. It is a small, non-polymorphic
+  lifecycle wrapper around `BaseAgent<H, T>`; there is no `GenericAgent` or
+  `dyn Agent` ownership layer.
+- `Agent` owns only cross-task runtime semantics: its BaseAgent, queued
+  messages accepted while checked out, and transient detached-tool runs and
+  completions. `BaseAgent` remains the single-task LLM/tool execution core.
+- `Agent::submit(&mut self, Message)` returns one borrowing `AgentStream<'_>`.
+  The stream emits turn brackets and BaseAgent progress, while its control
+  surface accepts later messages, interrupt, cancel, and approval resolution.
+  A later message is queued as another Agent turn; it is never appended
+  directly into a running BaseAgent task.
+- Framework-configured detached tools return an immediate accepted tool result
+  through the batch `ToolJoinHandle` stream. Before BaseAgent consumes that
+  stream, it moves the optional batch `ToolDetachHandle` stream through its
+  internal stream into the Agent's transient runtime. No sink or runtime
+  callback is installed in ToolSet, and neither handle is model-visible.
+- If a detached completion arrives while BaseAgent is still running, Agent
+  injects a marked continuation at the next safe BaseAgent iteration boundary
+  and keeps the same Agent turn. If it arrives while BaseAgent is stopped,
+  Agent opens a new `ToolCall`-origin turn. SessionActor only translates these
+  brackets; it does not own, poll, join, or persist detached tool futures.
+- Detached runs, ready completions, stream controls, and message queues inside a
+  checked-out Agent are ephemeral. Cancel/drop discards them, and recovery
+  never reconstructs their futures.
 - BaseAgent has only `Running` or `Stopped(reason)`. While running, one
   `IterationLoop<P>` owns the linear `LLM stream -> ToolCalls boundary ->
   permission -> tool execution -> all-ID join` flow. Waiting for approval
   suspends the injected BaseAgent permission future; it is not a second Agent
   state machine.
-- `BaseAgent::submit(&mut self, Message)` is the only task-entry API. It returns
-  an `AgentStreamHandle<'_>` that exclusively borrows the BaseAgent for the
-  task and implements `Stream<Item = Result<AgentEvent, AgentError>>`. The handle is the only
-  event and control surface; there is no public tick API, output sender, or
-  separate terminal-outcome protocol.
-- The handle owns `interrupt`, `cancel`, and `resolve_approval`. Dropping it
-  before terminal completion cancels the active task and leaves BaseAgent in a
-  stopped state. BaseAgent directly consumes the borrowed HTTP stream, updates
-  its transcript, and yields each corresponding `AgentEvent`.
+- `BaseAgent::submit(&mut self, Message)` is its only task-entry API. It returns
+  a crate-private borrowing stream used only by Agent. There is no tick API,
+  output sender, or second terminal-outcome protocol.
+- Dropping that inner stream before terminal completion cancels the active task
+  and leaves BaseAgent stopped. BaseAgent directly consumes the borrowed HTTP
+  stream, updates its transcript, and yields its iteration/input/outcome
+  protocol to Agent.
 - After the LLM stream completes, `IterationLoop` emits the aggregate
   `IterationEvent::BeforeToolCalls` boundary and suspends until the owner polls again.
   It then continues directly into permission and execution; BaseAgent stores no
   duplicate tool-call substate. There is no `ToolCallObserver`, `ToolStartYield`,
   or hand-built observer barrier.
-- BaseAgent accepts a new `Message` through `submit` only while stopped. Its
-  owner retains all message queuing policy. `interrupt` requests a stop at the
-  end of the current LLM/tool loop boundary; `cancel` wakes and cooperatively
-  aborts current async work.
+- BaseAgent accepts a new task through `submit` only while stopped. Agent owns
+  cross-task message queuing. `interrupt` requests a stop at the end of the
+  current LLM/tool loop boundary; `cancel` wakes and cooperatively aborts
+  current async work.
 - `BaseAgent` owns only the generic run protocol and already assembled
   dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
   instruction, inherited context, `SharedApiManager` plus its Agent `ApiUsage`,
@@ -207,12 +231,14 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   adapter owns mode and the resumed adapter owns loaded-group recovery state.
   ToolSet retains only its existing runtime projection and has no persistence
   API.
-- Tool execution and permission are separate. `ToolExecutor` only invokes an
-  already-authorized call. The iteration tool round is generic over a statically
+- Tool execution and permission are separate. `ToolRunner::run` receives only
+  an authorized batch and immediately returns the result streams
+  `ToolJoinHandle` and optional `ToolDetachHandle`, without polling either.
+  BaseAgent streams the detach handle to Agent before consuming joined
+  settlements. The iteration tool round is generic over a statically
   dispatched `ToolPermissionPolicy`; `AllowAll` is the YOLO implementation,
   while BaseAgent injects the implementation that evaluates its configured
-  policy, emits `ApprovalRequired`, and awaits its stream handle. The iteration
-  loop contains no pending-approval or approval-resolution protocol.
+  policy, emits `ApprovalRequired`, and awaits its stream handle.
 - Scheduler schedules an entire `AgentRun`, not individual tool calls.
 - `BaseAgent` does not own `SharedPersistence`, perform storage I/O, or depend
   on the filesystem type `F`.
@@ -236,9 +262,11 @@ across Sessions; a future directory cache must remain a rebuildable read model.
 
 ## Construction and recovery
 
-`SessionActor` is the single orchestration-level assembly path for roots and
-workers. It selects Agent kind, lifecycle, baked policy, memory visibility,
-tool filtering, context, and recovery policy.
+The logical owner selects Agent kind, lifecycle, baked policy, memory
+visibility, tool filtering, context, and recovery policy, then asks
+`AgentManager` to materialize the configured Agent. SessionActor currently
+owns this path for the root; a future Multiagent owner uses the same Manager
+API for workers.
 
 `AgentManager<F, H, T>` is the sole concrete constructor. It supports two
 entry paths that converge on one internal builder:
@@ -247,51 +275,48 @@ entry paths that converge on one internal builder:
 - `resume_from`, which loads recovery state and canonical-store identities.
 
 Manager uses claw-persistence and filesystem-backed component stores during
-construction, but the resulting `BaseAgent<H, T>` retains no filesystem or
-`SharedPersistence` dependency.
+construction, but the resulting `Agent<H, T>` and its `BaseAgent<H, T>` retain
+no filesystem or `SharedPersistence` dependency.
 Manager does not choose Session, parentage, Multiagent graph, lifecycle, memory
 visibility, or durability policy.
 
 ## Recovery state registration
 
-`BaseAgent` exposes a synchronous, I/O-free projection of the state necessary
-to reconstruct it:
+`Agent` exposes the same synchronous, I/O-free durable state owned by its
+BaseAgent:
 
 ~~~rust
 struct AgentState {
-    agent_mode: AgentModeState,
-    resumed: ResumedState,
+    kind: String,
+    mode: AgentMode,
+    loaded_tool_groups: BTreeSet<String>,
+    inflight_toolcalls: Vec<ToolCall>,
 }
 
-impl<H, T> BaseAgent<H, T> {
-    fn recovery_state(&self) -> &DurableState<AgentState>;
+impl<H, T> Agent<H, T> {
+    fn state(&self) -> &DurableState<AgentState>;
 }
 ~~~
 
 Every field of a materialized `AgentState` is present; the aggregate does not
-use `Option` to represent component defaults. During construction Manager
-distributes a restored aggregate as `Some(AgentModeState)` and
-`Some(ResumedState)`. For a new Agent it passes `None` to each component, and
-that component owns its explicit initialization policy. Component state DTOs
-do not implement `Default`.
+use `Option` to represent component defaults. Manager creates or restores one
+`DurableState<AgentState>` and injects clones of that handle into the
+components that own those fields. Agent delegates the same state reference;
+it does not build a second snapshot.
 
-`AgentState` is a projection, not a second mutable shadow copy. Mode adapter
-and resumed adapter remain the authoritative live components.
-`BaseAgent::recovery_state()` drives a generic state sink over those components;
-it does not decode adapter-specific state.
+The persisted schema is versioned. Loaded tool groups use stable canonical
+order. Provider tool calls that crossed the durable pre-execution boundary
+remain until their transcript results are recorded. Conversation history is
+absent because the canonical transcript reconstructs it. Iteration-local
+`ToolCallId`, physical tool-executor state, active futures, and scheduler state
+are absent because they are transient.
 
-The persisted schema is versioned. `ResumedState` serializes loaded tool groups
-in stable canonical order. Conversation history is absent because the
-canonical transcript reconstructs it. `ToolCallId`, physical tool-executor
-state, active futures, and scheduler state are absent because they are
-transient.
-
-Each BaseAgent owns one `DurableState<AgentState>` projection. BaseAgent
+Each Agent's BaseAgent owns one `DurableState<AgentState>` projection. BaseAgent
 refreshes that projection from authoritative adapters at iteration and terminal
 boundaries. For a persistent root, AgentManager registers the same DurableState
 with the Agent collection during create or restore; ephemeral Agents leave it
 unregistered. No snapshot crosses the Scheduler protocol, and neither
-SessionActor nor RuntimeWorker borrows a checked-out BaseAgent for persistence.
+SessionActor nor RuntimeWorker borrows a checked-out Agent for persistence.
 
 RuntimeWorker calls the process-wide `SharedPersistence::maybe_persist()` boundary
 after every top-level poll. It does not interpret AgentState or
@@ -316,7 +341,8 @@ rather than changing the scope of `ToolCallId`.
 - Agent states, transcripts, profiles, and long-term memory are
   separate canonical stores; snapshots do not duplicate transcript contents.
 - `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
-  `RunId`, checkout state, and checkpoint waiters are transient.
+  detached-tool futures/completions, queued checked-out Agent messages, `RunId`,
+  checkout state, and checkpoint waiters are transient.
 - After a crash, Manager reconstructs Agents from durable recovery state and
   canonical stores. It never restores a physical future or checkout.
 - Agent, tool, LLM, and persistence failures are outcomes. They cannot destroy
@@ -328,13 +354,15 @@ rather than changing the scope of `ToolCallId`.
   owns the single event receiver and can clone a `SessionControl` capability
   for concurrent writers.
 - `append(Message)` only appends to the SessionActor's FIFO inbox. It does not
-  drive the Agent and does not wait for the resulting turn to finish.
-- SessionActor starts at most one root turn at a time. It moves the resident
-  root into the global Scheduler and starts the next queued message only after
-  that Agent has physically returned to its slot.
-- `interrupt` and `cancel` affect only the active run. They do not remove
-  messages already queued for later turns. Queue ownership and append semantics
-  never enter BaseAgent.
+  poll the Agent and does not wait for the resulting turn to finish.
+- SessionActor starts a resident root by moving it into the global Scheduler.
+  While the same Agent remains checked out, later messages may be forwarded to
+  its control capability and queued by Agent as later turns. SessionActor never
+  mutates BaseAgent's active task.
+- `interrupt` affects the current Agent turn. `cancel` ends the checked-out
+  Agent stream and discards its transient detached runtime. Neither operation
+  removes messages still waiting in the SessionActor inbox. Queue ownership and
+  append semantics never enter BaseAgent.
 - `close` and permanent Session deletion cancel the active run and discard the
   Session inbox. Deletion waits for physical Agent return before removing the
   slot or its durable record.
@@ -344,7 +372,7 @@ rather than changing the scope of `ToolCallId`.
 - SessionActor maps Agent events into Session events, owns input-request
   correlation, mutates its injected `DurableState<SessionPersistentState>`,
   and manages Agent lifecycle through AgentManager. SessionManager owns the
-  Session record lifecycle. SessionActor never polls BaseAgent or AgentRun
+  Session record lifecycle. SessionActor never polls Agent, BaseAgent, or AgentRun
   directly.
 
 ## Multiagent
@@ -383,10 +411,11 @@ external command
 → SessionActor mailbox
 → SessionActor command handling
 → optional Multiagent command/effects
-→ SessionActor assembles or checks out BaseAgent
+→ SessionActor asks AgentManager to materialize Agent
+→ SessionActor checks out Agent from AgentSlot
 → Scheduler submission mailbox
 → global Scheduler fair sweep
-→ checkpoint update or terminal completion
+→ Agent turn/detached-tool stream events or terminal completion
 → RuntimeWorker services the global persistence flush boundary
 → SessionActor restores AgentSlot before applying terminal outcome
 → Session event stream
@@ -433,7 +462,7 @@ Forbidden reverse dependencies:
 - scheduler must not depend on session, multiagent, or persistence;
 - session must not depend on runtime;
 - multiagent must not depend on physical Agent, scheduler, or session types;
-- BaseAgent and the Agent iteration loop must not depend on session,
+- Agent/BaseAgent and the Agent iteration loop must not depend on session,
   multiagent domain state, `SessionManager`, `SharedPersistence`, or filesystem
   type `F`.
 

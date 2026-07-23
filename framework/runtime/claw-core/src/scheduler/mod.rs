@@ -13,7 +13,7 @@ use claw_interface::{ClawHttp, ClawTimer};
 use futures_core::Stream;
 
 use crate::agent::AgentId;
-use crate::agent::{AgentError, AgentEvent, BaseAgent};
+use crate::agent::{Agent, AgentError, AgentEvent};
 use crate::session::Message;
 
 use run::{AgentRun, AgentRunControl, AgentRunItem};
@@ -35,7 +35,7 @@ pub(crate) struct AgentRunOutput<Http: ClawHttp, Timer: ClawTimer> {
 
 pub(crate) enum AgentRunOutputItem<Http: ClawHttp, Timer: ClawTimer> {
     Event(Result<AgentEvent, AgentError>),
-    Returned(BaseAgent<Http, Timer>),
+    Returned(Agent<Http, Timer>),
 }
 
 struct RouteState<Http: ClawHttp, Timer: ClawTimer> {
@@ -150,7 +150,7 @@ where
     pub(crate) fn submit(
         &self,
         agent_id: AgentId,
-        agent: BaseAgent<Http, Timer>,
+        agent: Agent<Http, Timer>,
         message: Message,
         route: AgentRunRoute<Http, Timer>,
         span: tracing::Span,
@@ -240,7 +240,7 @@ where
                     let agent = scheduled
                         .task
                         .take_completed_agent()
-                        .expect("completed AgentRun returns its BaseAgent once");
+                        .expect("completed AgentRun returns its Agent once");
                     scheduled.route.send(AgentRunOutput {
                         agent: scheduled.agent,
                         run: scheduled.run,

@@ -9,9 +9,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::task::{Poll, Waker};
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, InputRequestId, InputRequestKind, IterationId, Message,
-    PermissionLevel, ReasoningEffort, SessionControlError, SessionEvent, ToolCall, TurnId,
-    TurnOrigin,
+    stream::StreamPart, AgentSystem, InputRequestId, InputRequestKind, IterationEvent, IterationId,
+    Message, PermissionLevel, ReasoningEffort, SessionControlError, SessionEvent, ToolCall,
+    TurnEvent, TurnId, TurnOrigin,
 };
 #[cfg(feature = "cache_profile")]
 use claw_api::ApiUsage;
@@ -61,38 +61,47 @@ fn session_events_close_each_content_stream_explicitly() {
     block_on(control.append(Message::text("exercise stream boundaries"))).unwrap();
     let protocol = drain_until_turn_ended(&mut events)
         .into_iter()
-        .filter(|event| {
-            matches!(
-                event,
-                SessionEvent::IterationStarted { .. }
-                    | SessionEvent::Reasoning(_)
-                    | SessionEvent::Output(_)
-                    | SessionEvent::ToolCalls(_)
-                    | SessionEvent::IterationEnded
-            )
-        })
+        .filter(|event| matches!(event, SessionEvent::Turn(TurnEvent::Iteration(_))))
         .collect::<Vec<_>>();
 
     assert!(matches!(
         protocol.as_slice(),
         [
-            SessionEvent::IterationStarted {
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started {
                 iteration: IterationId(0),
-            },
-            SessionEvent::Reasoning(StreamPart::Delta(reasoning)),
-            SessionEvent::Reasoning(StreamPart::End),
-            SessionEvent::Output(StreamPart::End),
-            SessionEvent::ToolCalls(StreamPart::Delta(call)),
-            SessionEvent::ToolCalls(StreamPart::End),
-            SessionEvent::IterationEnded,
-            SessionEvent::IterationStarted {
+            })),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(
+                StreamPart::Delta(reasoning),
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::Delta((call, _)),
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Ended)),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started {
                 iteration: IterationId(1),
-            },
-            SessionEvent::Reasoning(StreamPart::End),
-            SessionEvent::Output(StreamPart::Delta(output)),
-            SessionEvent::Output(StreamPart::End),
-            SessionEvent::ToolCalls(StreamPart::End),
-            SessionEvent::IterationEnded,
+            })),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(
+                StreamPart::Delta(output),
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::End,
+            ))),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Ended)),
         ] if reasoning == "thinking"
             && call == &ToolCall {
                 id: "call_matrix_1".to_string(),
@@ -333,14 +342,14 @@ fn ask_permission_level_reaches_the_public_approval_flow() {
     assert!(
         !remaining_events
             .iter()
-            .any(|event| matches!(event, SessionEvent::InputRequested { .. })),
+            .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::InputRequested { .. }))),
         "an accepted response created another input request: {remaining_events:?}"
     );
     assert_eq!(
         request_events
             .iter()
             .chain(&remaining_events)
-            .filter(|event| matches!(event, SessionEvent::TurnStarted { .. }))
+            .filter(|event| matches!(event, SessionEvent::Turn(TurnEvent::Started { .. })))
             .count(),
         1
     );
@@ -437,12 +446,12 @@ fn ambiguous_approval_response_reissues_input_inside_the_same_turn() {
     assert!(output_fragments(&clarification_events).is_empty());
     assert!(!clarification_events
         .iter()
-        .any(|event| matches!(event, SessionEvent::TurnEnded { .. })));
+        .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::Ended { .. }))));
     assert_eq!(
         first_events
             .iter()
             .chain(&clarification_events)
-            .filter(|event| matches!(event, SessionEvent::TurnStarted { .. }))
+            .filter(|event| matches!(event, SessionEvent::Turn(TurnEvent::Started { .. })))
             .count(),
         1
     );
@@ -899,7 +908,10 @@ async fn wait_for_agent_response_release() {
 async fn wait_for_iteration_started(events: &mut claw_agent::SessionStream) {
     while let Some(event) = events.next().await {
         let event = event.expect("Session stream failed");
-        if matches!(event, SessionEvent::IterationStarted { .. }) {
+        if matches!(
+            event,
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started { .. }))
+        ) {
             return;
         }
     }
@@ -912,7 +924,7 @@ async fn wait_for_input_request(
     let mut received = Vec::new();
     while let Some(event) = events.next().await {
         let event = event.expect("Session stream failed");
-        if let SessionEvent::InputRequested { request, kind } = event {
+        if let SessionEvent::Turn(TurnEvent::InputRequested { request, kind }) = event {
             return (request, kind, received);
         }
         received.push(event);
@@ -1082,17 +1094,17 @@ fn assert_turn_bracket(events: &[SessionEvent], case: &str) {
     assert!(
         matches!(
             events.first(),
-            Some(SessionEvent::TurnStarted {
+            Some(SessionEvent::Turn(TurnEvent::Started {
                 turn: TurnId(1),
                 origin: TurnOrigin::User,
-            })
+            }))
         ),
         "case {case}"
     );
     assert!(
         matches!(
             events.last(),
-            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+            Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
         ),
         "case {case}"
     );
@@ -1102,7 +1114,9 @@ fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::IterationStarted { iteration } => Some(*iteration),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started { iteration })) => {
+                Some(*iteration)
+            }
             _ => None,
         })
         .collect()
@@ -1112,7 +1126,9 @@ fn reasoning_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Reasoning(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(
+                StreamPart::Delta(text),
+            ))) => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -1122,7 +1138,9 @@ fn tools_events(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::ToolCalls(StreamPart::Delta(call)) => Some(call.name.clone()),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::Delta((call, _)),
+            ))) => Some(call.name.clone()),
             _ => None,
         })
         .collect()
@@ -1132,7 +1150,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -1143,6 +1164,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Error(error) => Some(error.to_string()),
+            SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
             _ => None,
         })
         .collect()

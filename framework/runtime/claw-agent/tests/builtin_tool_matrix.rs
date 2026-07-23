@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, IterationId, Message, SessionEvent, TurnId, TurnOrigin,
+    stream::StreamPart, AgentSystem, IterationEvent, IterationId, Message, SessionEvent, TurnEvent,
+    TurnId, TurnOrigin,
 };
 use claw_interface::{
     Cancel, ClawHttp, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
@@ -314,17 +315,17 @@ fn assert_turn_bracket(events: &[SessionEvent], case: &str) {
     assert!(
         matches!(
             events.first(),
-            Some(SessionEvent::TurnStarted {
+            Some(SessionEvent::Turn(TurnEvent::Started {
                 turn: TurnId(1),
                 origin: TurnOrigin::User,
-            })
+            }))
         ),
         "case {case}"
     );
     assert!(
         matches!(
             events.last(),
-            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+            Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
         ),
         "case {case}"
     );
@@ -334,7 +335,9 @@ fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::IterationStarted { iteration } => Some(*iteration),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started { iteration })) => {
+                Some(*iteration)
+            }
             _ => None,
         })
         .collect()
@@ -344,7 +347,9 @@ fn tools_events(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::ToolCalls(StreamPart::Delta(call)) => Some(call.name.clone()),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::Delta((call, _)),
+            ))) => Some(call.name.clone()),
             _ => None,
         })
         .collect()
@@ -354,7 +359,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -365,6 +373,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Error(error) => Some(error.to_string()),
+            SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
             _ => None,
         })
         .collect()

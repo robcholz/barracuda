@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claw_agent::{
-    stream::StreamPart, SessionCloseReason, SessionEvent, SessionId, SessionStream, TurnId,
-    TurnOrigin,
+    stream::StreamPart, IterationEvent, SessionCloseReason, SessionEvent, SessionId, SessionStream,
+    TurnEvent, TurnId, TurnOrigin,
 };
 use claw_agent::{AgentError, AgentSystem, Message, OpenSessionError};
 use claw_interface::{
@@ -98,19 +98,22 @@ fn session_streams_root_reply_as_output() {
 
     assert!(matches!(
         events.first(),
-        Some(SessionEvent::TurnStarted {
+        Some(SessionEvent::Turn(TurnEvent::Started {
             turn: TurnId(1),
             origin: TurnOrigin::User,
-        })
+        }))
     ));
     assert!(matches!(
         events.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+        Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
     ));
     let outputs: Vec<&str> = events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.as_str()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.as_str()),
             _ => None,
         })
         .collect();
@@ -176,13 +179,21 @@ fn append_queues_while_current_turn_runs() {
     });
     let first_events = drain_until_turn_ended(&mut events);
 
-    assert!(first_events.iter().any(
-        |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "first")
-    ));
+    assert!(first_events.iter().any(|event| matches!(
+        event,
+        SessionEvent::Turn(
+            TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
+        ) if text == "first"
+    )));
     let second_events = drain_until_turn_ended(&mut events);
-    assert!(second_events.iter().any(
-        |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "second")
-    ));
+    assert!(second_events.iter().any(|event| matches!(
+        event,
+        SessionEvent::Turn(
+            TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
+        ) if text == "second"
+    )));
 }
 
 #[test]
@@ -206,14 +217,14 @@ fn session_control_methods_are_idempotent() {
     let events = drain_until_turn_ended(&mut events);
     assert!(matches!(
         events.first(),
-        Some(SessionEvent::TurnStarted {
+        Some(SessionEvent::Turn(TurnEvent::Started {
             turn: TurnId(1),
             origin: TurnOrigin::User,
-        })
+        }))
     ));
     assert!(matches!(
         events.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+        Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
     ));
 }
 
@@ -248,17 +259,21 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
     let cancelled = drain_until_turn_ended(&mut events);
     assert!(matches!(
         cancelled.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+        Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
     ));
 
     let queued = drain_until_turn_ended(&mut events);
     assert!(matches!(
         queued.last(),
-        Some(SessionEvent::TurnEnded { turn: TurnId(2) })
+        Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(2) }))
     ));
-    assert!(queued.iter().any(
-        |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "queued message ran")
-    ));
+    assert!(queued.iter().any(|event| matches!(
+        event,
+        SessionEvent::Turn(
+            TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
+        ) if text == "queued message ran"
+    )));
 }
 
 #[test]
@@ -282,9 +297,13 @@ fn close_session_cancels_active_work_and_closes_events() {
         Some(SessionEvent::Closed(SessionCloseReason::Requested))
     ));
     assert!(
-        !events
-            .iter()
-            .any(|event| matches!(event, SessionEvent::Output(StreamPart::Delta(_)))),
+        !events.iter().any(|event| matches!(
+            event,
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(_))
+                    | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(_)))
+            )
+        )),
         "closed stream should be cancelled without output: {events:?}"
     );
     assert!(system.list_sessions().contains(&session));

@@ -5,7 +5,10 @@ use support::Sse;
 
 use std::collections::BTreeMap;
 
-use claw_agent::{stream::StreamPart, AgentPersistenceConfig, AgentSystem, Message, SessionEvent};
+use claw_agent::{
+    stream::StreamPart, AgentPersistenceConfig, AgentSystem, IterationEvent, Message, SessionEvent,
+    TurnEvent,
+};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{
     Cancel, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
@@ -36,10 +39,13 @@ fn turn_without_linked_api_reports_not_configured() {
 
     assert!(
         events.iter().any(|event| {
-            matches!(
-                event,
-                SessionEvent::Error(error) if error.to_string().contains("not configured")
-            )
+            match event {
+                SessionEvent::Error(error) => error.to_string().contains("not configured"),
+                SessionEvent::Turn(TurnEvent::Error(error)) => {
+                    error.to_string().contains("not configured")
+                }
+                _ => false,
+            }
         }),
         "{events:?}"
     );
@@ -182,9 +188,15 @@ fn assert_construction_case<System: ConstructionSystem>(
             block_on(control.append(Message::text(format!("construction config {case}")))).unwrap();
             let events = drain_until_turn_ended(&mut events);
             assert!(
-                events.iter().any(
-                    |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "construction-ok")
-                ),
+                events.iter().any(|event| matches!(
+                    event,
+                    SessionEvent::Turn(
+                        TurnEvent::Output(StreamPart::Delta(text))
+                            | TurnEvent::Iteration(IterationEvent::Output(
+                                StreamPart::Delta(text)
+                            ))
+                    ) if text == "construction-ok"
+                )),
                 "case {case}: {events:?}"
             );
         }

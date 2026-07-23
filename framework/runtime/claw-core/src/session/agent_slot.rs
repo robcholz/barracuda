@@ -3,7 +3,7 @@ use claw_interface::{ClawHttp, ClawTimer};
 
 use crate::agent::AgentId;
 use crate::agent::{
-    AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, BaseAgent, ReasoningEffort,
+    Agent, AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, ReasoningEffort,
     ReasoningEffortHandle, ToolCallId,
 };
 use crate::scheduler::{
@@ -11,6 +11,7 @@ use crate::scheduler::{
 };
 
 use super::Message;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {
     Running,
@@ -27,7 +28,7 @@ struct InFlight {
 }
 
 enum Execution<Http: ClawHttp, Timer: ClawTimer> {
-    Resident(BaseAgent<Http, Timer>),
+    Resident(Agent<Http, Timer>),
     InFlight(InFlight),
 }
 
@@ -40,7 +41,7 @@ pub(super) enum AgentSlotUpdate {
 
 /// The authoritative ownership record for one Agent.
 ///
-/// A resident slot owns the BaseAgent. While the global Scheduler polls that
+/// A resident slot owns the Agent. While the global Scheduler polls that
 /// Agent, the slot retains only the checkout epoch and its control capability.
 pub(super) struct AgentSlot<Http: ClawHttp, Timer: ClawTimer> {
     id: AgentId,
@@ -55,7 +56,7 @@ where
 {
     pub(super) fn new(
         id: AgentId,
-        agent: BaseAgent<Http, Timer>,
+        agent: Agent<Http, Timer>,
         reasoning_effort: ReasoningEffortHandle,
     ) -> Self {
         Self {
@@ -90,6 +91,22 @@ where
             lifecycle: InFlightLifecycle::Running,
             terminal: None,
         }));
+    }
+
+    pub(super) fn submit(
+        &mut self,
+        message: Message,
+        scheduler: &AgentRunSchedulerHandle<Http, Timer>,
+        route: AgentRunRoute<Http, Timer>,
+        span: tracing::Span,
+    ) {
+        match self.execution.as_mut() {
+            Some(Execution::InFlight(in_flight)) => {
+                let _ = in_flight.control.submit(message);
+            }
+            Some(Execution::Resident(_)) => self.start(message, scheduler, route, span),
+            None => {}
+        }
     }
 
     pub(super) fn interrupt(&mut self) {
@@ -157,9 +174,7 @@ where
             AgentRunOutputItem::Event(_) if in_flight.lifecycle == InFlightLifecycle::Reaping => {
                 AgentSlotUpdate::Ignored
             }
-            AgentRunOutputItem::Event(event)
-                if matches!(&event, Ok(AgentEvent::Finished(_)) | Err(_)) =>
-            {
+            AgentRunOutputItem::Event(event) if event.is_err() => {
                 debug_assert!(
                     in_flight.terminal.is_none(),
                     "one Agent run has only one terminal event"

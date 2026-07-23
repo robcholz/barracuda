@@ -14,6 +14,7 @@ pub type ToolResult<T> = Result<T, ToolInvokeError>;
 /// model-facing schema or usage text.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ToolConfig {
+    /// Return an acceptance receipt and move execution into the owning runtime.
     pub detached: bool,
 }
 
@@ -248,17 +249,6 @@ impl Tool {
                 Err(error) => return Err(error),
             }
         }
-    }
-
-    pub(crate) fn detached_run(&self, call: &ToolInvocation<'_>) -> super::DetachedToolRun {
-        let invocation = super::DetachedToolInvocation::from_invocation(call);
-        let run_invocation = invocation.clone();
-        let tool = self.clone();
-        let future = Box::pin(async move {
-            let call = run_invocation.as_invocation()?;
-            tool.invoke(&call).await
-        });
-        super::DetachedToolRun::new(invocation, future)
     }
 
     async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation<'_>) -> ToolResult<ToolOutput> {

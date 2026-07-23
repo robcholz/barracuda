@@ -12,9 +12,10 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolError, ToolExecutor, ToolGroup, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolSetError, ToolSpec,
+    tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
+    ToolOutput, ToolRegistry, ToolRunInvocation, ToolRunner, ToolSetError, ToolSpec,
 };
+use futures_lite::StreamExt as _;
 use serde_json::{json, Value};
 
 use crate::agent::ApprovalDecision;
@@ -240,15 +241,19 @@ where
         ));
     }
 
-    let executor = ToolExecutor::new(&tools);
+    let runner = ToolRunner::new(&tools);
     for tool_call in &response.tool_calls {
-        let call = ToolInvocation::try_new(
+        let call = ToolRunInvocation::try_new(
             Some(&tool_call.id),
             &tool_call.name,
             &tool_call.arguments_json,
         )
         .map_err(|_| ApprovalResolverError::MalformedToolCall)?;
-        let _ = executor.execute(&call).await;
+        let (mut join, detached) = runner.run(vec![call]);
+        while join.next().await.is_some() {}
+        if let Some(mut detached) = detached {
+            while detached.next().await.is_some() {}
+        }
     }
     let resolved = resolution
         .lock()

@@ -6,7 +6,9 @@ use support::Sse;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
-use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent};
+use claw_agent::{
+    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent,
+};
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture,
     HttpStatusCode, ImmediateTimer, StdThread, TokioExecutor,
@@ -156,9 +158,13 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
     let events = drain_until_turn_ended(&mut events);
 
     assert!(
-        events.iter().any(
-            |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == &fixture.final_output)
-        ),
+        events.iter().any(|event| matches!(
+            event,
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                    | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
+            ) if text == &fixture.final_output
+        )),
         "case {}: {events:?}",
         fixture.case
     );
@@ -230,6 +236,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Error(error) => Some(error.to_string()),
+            SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
             _ => None,
         })
         .collect()

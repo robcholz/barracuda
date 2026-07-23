@@ -1,5 +1,5 @@
 use claw_api::{ChatError, ToolCall};
-use claw_tool::{ToolExecution, ToolSetError, ToolSetHandle};
+use claw_tool::{ToolDetachHandle, ToolExecution, ToolSetError, ToolSetHandle};
 use claw_utils::stream::StreamPart;
 use serde_json::Value;
 use strum::IntoStaticStr;
@@ -54,9 +54,9 @@ pub(crate) enum IterationEvent {
 /// Normal iteration completion is represented by the surrounding stream
 /// returning `None`; only cancellation and interruption need explicit items
 /// because they carry distinct control semantics for `BaseAgent`.
-#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationLoopEvent {
     Iteration(IterationEvent),
+    Detached(ToolDetachHandle),
     ApprovalRequired {
         tool_call_id: ToolCallId,
         tool_call: ToolCall,

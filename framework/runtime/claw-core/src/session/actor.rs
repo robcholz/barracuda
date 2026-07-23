@@ -28,7 +28,7 @@ use super::{
 };
 use crate::agent::{
     AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest, AgentIterationEvent,
-    AgentOutcome, PersistenceConfig, ReasoningEffort, ToolCallId,
+    AgentOutcome, AgentTurnOrigin, PersistenceConfig, ReasoningEffort, ToolCallId,
 };
 use crate::config::SharedApiManager;
 use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
@@ -88,7 +88,7 @@ impl SessionActorExit {
 
 /// One long-lived Session stream backed by one queued root Agent.
 ///
-/// The actor never polls BaseAgent directly. It moves the resident Agent into
+/// The actor never polls Agent directly. It moves the resident Agent into
 /// the process-global Scheduler and only reduces scheduler outputs back into
 /// the slot and outward Session stream.
 pub(super) struct SessionActor<Filesystem, Http, Timer>
@@ -109,6 +109,7 @@ where
     inbox: VecDeque<Message>,
     active_turn: Option<ActiveTurn>,
     next_turn: u32,
+    next_iteration: u32,
     next_input_request: u32,
     pending_approval: Option<PendingApproval>,
     approval: Option<ApprovalTask>,
@@ -162,6 +163,7 @@ where
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
+                next_iteration: 0,
                 next_input_request: 1,
                 pending_approval: None,
                 approval: None,
@@ -298,7 +300,7 @@ where
             self.reject_closed(ack);
             return;
         }
-        self.inbox.push_back(message.into_user());
+        self.inbox.push_back(message);
         let _ = ack.try_send(Ok(()));
     }
 
@@ -467,41 +469,37 @@ where
         if self.close_requested || self.delete_requested || self.shutdown_requested {
             return false;
         }
-        if self.root.as_ref().is_some_and(AgentSlot::is_in_flight) || self.inbox.is_empty() {
+        if self.active_turn.is_some() || self.inbox.is_empty() {
             return false;
         }
-        let message = self
-            .inbox
-            .pop_front()
-            .expect("a checked non-empty inbox has a front message");
-        self.begin_turn();
+        let Some(message) = self.inbox.pop_front() else {
+            return false;
+        };
+        if message.as_str().trim().is_empty() {
+            return true;
+        }
         if let Err(error) = self.ensure_root(manager_state) {
+            self.begin_turn(TurnOrigin::User);
             self.emit_turn_error(error.into());
             self.finish_turn();
             return true;
         }
-        if message.as_str().trim().is_empty() {
-            self.finish_turn();
-            return true;
-        }
-        let turn = self
-            .active_turn
-            .as_ref()
-            .expect("begin_turn installs the active turn")
-            .id;
+        self.start_root(message);
+        true
+    }
+
+    fn start_root(&mut self, message: Message) {
         let root = self
             .root
             .as_mut()
-            .expect("ensure_root materializes a root slot");
+            .expect("an Agent run starts only with a resident root");
         let agent = root.id();
         let span = tracing::info_span!(
             "agent",
             trace.task = %agent,
             run.agent = %agent,
-            run.turn = %turn,
         );
-        root.start(message, &self.scheduler, self.run_route.clone(), span);
-        true
+        root.submit(message, &self.scheduler, self.run_route.clone(), span);
     }
 
     fn delete_root_agent(&mut self) -> Result<(), AgentCreateError> {
@@ -583,13 +581,20 @@ where
 
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
+            AgentEvent::TurnStarted { origin } => {
+                let origin = match origin {
+                    AgentTurnOrigin::Message => TurnOrigin::User,
+                    AgentTurnOrigin::ToolCall { call } => TurnOrigin::ToolCall { call },
+                };
+                self.begin_turn(origin);
+            }
             AgentEvent::Iteration(progress) => self.emit_iteration(progress),
             AgentEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id,
                 tool_call,
                 reason,
             }) => self.request_approval(tool_call_id, tool_call, reason),
-            AgentEvent::Finished(outcome) => {
+            AgentEvent::TurnEnded { outcome } => {
                 if let AgentOutcome::Completed(AgentCompletion::Synthesized(message)) = outcome {
                     self.emit_text(message);
                 }
@@ -600,9 +605,11 @@ where
         }
     }
 
-    fn emit_iteration(&self, progress: StreamPart<AgentIterationEvent>) {
+    fn emit_iteration(&mut self, progress: StreamPart<AgentIterationEvent>) {
         let event = match progress {
-            StreamPart::Delta(AgentIterationEvent::Started(iteration)) => {
+            StreamPart::Delta(AgentIterationEvent::Started(_)) => {
+                let iteration = crate::agent::IterationId::new(self.next_iteration);
+                self.next_iteration = self.next_iteration.saturating_add(1);
                 IterationEvent::Started { iteration }
             }
             StreamPart::Delta(AgentIterationEvent::Reasoning(part)) => {
@@ -667,15 +674,12 @@ where
         }
     }
 
-    fn begin_turn(&mut self) {
+    fn begin_turn(&mut self, origin: TurnOrigin) {
         debug_assert!(self.active_turn.is_none());
         let turn = TurnId(self.next_turn);
         self.next_turn = self.next_turn.saturating_add(1);
         self.active_turn = Some(ActiveTurn { id: turn });
-        self.emit_turn(TurnEvent::Started {
-            turn,
-            origin: TurnOrigin::User,
-        });
+        self.emit_turn(TurnEvent::Started { turn, origin });
     }
 
     fn finish_turn(&mut self) {

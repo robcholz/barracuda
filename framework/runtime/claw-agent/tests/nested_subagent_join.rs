@@ -5,7 +5,9 @@ use support::Sse;
 
 use std::sync::Mutex;
 
-use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, TurnOrigin};
+use claw_agent::{
+    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent, TurnOrigin,
+};
 use claw_interface::{
     Cancel, ClawHttp, ClawTimer, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
     MemFs, StdThread, TimerFuture, TokioExecutor,
@@ -53,10 +55,10 @@ fn nested_background_children_join_before_their_parent_reports_upward() {
     let completed = drain_until_turn_ended(&mut events);
     assert!(matches!(
         completed.first(),
-        Some(SessionEvent::TurnStarted {
-            origin: TurnOrigin::Subagent { .. },
+        Some(SessionEvent::Turn(TurnEvent::Started {
+            origin: TurnOrigin::ToolCall { .. },
             ..
-        })
+        }))
     ));
     assert_eq!(
         output_fragments(&completed),
@@ -240,7 +242,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()

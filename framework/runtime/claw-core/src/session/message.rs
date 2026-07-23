@@ -2,47 +2,22 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::AgentId;
-
-use super::TurnOrigin;
-
 /// One message delivered to a session or agent.
 ///
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {
     text: String,
-    #[serde(default, skip_serializing_if = "TurnOrigin::is_user")]
-    origin: TurnOrigin,
 }
 
 impl Message {
     /// Build a text message.
     pub fn text(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            origin: TurnOrigin::User,
-        }
+        Self { text: text.into() }
     }
 
     pub(crate) fn as_str(&self) -> &str {
         &self.text
-    }
-
-    pub(crate) fn from_subagent(agent: AgentId, text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            origin: TurnOrigin::Subagent { agent },
-        }
-    }
-
-    pub(crate) fn origin(&self) -> TurnOrigin {
-        self.origin
-    }
-
-    pub(crate) fn into_user(mut self) -> Self {
-        self.origin = TurnOrigin::User;
-        self
     }
 }
 
@@ -67,24 +42,5 @@ mod tests {
             "attachments": []
         }))
         .is_err());
-    }
-
-    #[test]
-    fn subagent_origin_survives_message_round_trip() {
-        let message = Message::from_subagent(AgentId(7), "done");
-        let encoded = serde_json::to_value(&message).expect("message encodes");
-
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "text": "done",
-                "origin": { "type": "subagent", "agent": "agent-7" },
-            })
-        );
-        let restored: Message = serde_json::from_value(encoded).expect("message decodes");
-        assert_eq!(
-            restored.origin(),
-            TurnOrigin::Subagent { agent: AgentId(7) }
-        );
     }
 }

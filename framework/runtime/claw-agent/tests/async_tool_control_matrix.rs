@@ -12,7 +12,10 @@ use std::sync::{Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, TurnId, TurnOrigin};
+use claw_agent::{
+    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent, TurnId,
+    TurnOrigin,
+};
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, FsError, HttpError, HttpJsonRequest, HttpResponse,
     HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFile, MemFs, StdThread, TokioExecutor,
@@ -306,17 +309,18 @@ fn assert_turn(events: &[SessionEvent], turn: TurnId, case: &str) {
     assert!(
         matches!(
             events.first(),
-            Some(SessionEvent::TurnStarted {
+            Some(SessionEvent::Turn(TurnEvent::Started {
                 turn: event_turn,
                 origin: TurnOrigin::User,
-            }) if *event_turn == turn
+            })) if *event_turn == turn
         ),
         "case {case}"
     );
     assert!(
         matches!(
             events.last(),
-            Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
+            Some(SessionEvent::Turn(TurnEvent::Ended { turn: event_turn }))
+                if *event_turn == turn
         ),
         "case {case}"
     );
@@ -326,7 +330,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()

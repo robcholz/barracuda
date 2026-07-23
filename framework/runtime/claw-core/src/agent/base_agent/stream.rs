@@ -1,15 +1,18 @@
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use claw_api::ToolCall;
 use claw_memory::TurnError;
-use claw_tool::ToolExecution;
+use claw_tool::{ToolDetachHandle, ToolExecution};
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use futures_lite::future;
+
+use crate::session::Message;
 
 use super::iteration_loop::{IterationId, IterationLoopError, ToolCallId};
 
@@ -54,10 +57,10 @@ pub enum AgentError {
     StateInvariant,
 }
 
-/// One observable event produced by a submitted Agent task.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum AgentEvent {
+/// One event produced by the single-task BaseAgent execution core.
+pub(crate) enum BaseAgentEvent {
     Iteration(StreamPart<AgentIterationEvent>),
+    Detached(ToolDetachHandle),
     InputRequired(AgentInputRequest),
     Finished(AgentOutcome),
 }
@@ -103,6 +106,7 @@ struct RunSignals {
     interrupt: Cell<bool>,
     cancel: AtomicBool,
     approval: RefCell<ApprovalState>,
+    continuations: RefCell<VecDeque<Message>>,
     waker: RefCell<Option<Waker>>,
 }
 
@@ -125,6 +129,7 @@ impl RunControl {
                 interrupt: Cell::new(false),
                 cancel: AtomicBool::new(false),
                 approval: RefCell::new(ApprovalState::Idle),
+                continuations: RefCell::new(VecDeque::new()),
                 waker: RefCell::new(None),
             }),
         }
@@ -140,6 +145,10 @@ impl RunControl {
 
     pub(super) fn take_interrupt(&self) -> bool {
         self.inner.interrupt.replace(false)
+    }
+
+    pub(super) fn take_continuations(&self) -> VecDeque<Message> {
+        std::mem::take(&mut *self.inner.continuations.borrow_mut())
     }
 
     pub(super) fn begin_approval(&self, tool_call_id: ToolCallId) {
@@ -201,6 +210,11 @@ impl RunControl {
         Ok(())
     }
 
+    fn continue_with(&self, message: Message) {
+        self.inner.continuations.borrow_mut().push_back(message);
+        self.wake();
+    }
+
     fn clear_approval(&self) {
         *self.inner.approval.borrow_mut() = ApprovalState::Idle;
     }
@@ -236,14 +250,14 @@ impl RunControl {
 }
 
 /// The unique mutable capability for one submitted BaseAgent task.
-pub(crate) struct AgentStreamHandle<'a> {
-    stream: Pin<Box<dyn Stream<Item = Result<AgentEvent, AgentError>> + 'a>>,
+pub(crate) struct BaseAgentStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a>>,
     control: RunControl,
 }
 
-impl<'a> AgentStreamHandle<'a> {
+impl<'a> BaseAgentStream<'a> {
     pub(super) fn new(
-        stream: impl Stream<Item = Result<AgentEvent, AgentError>> + 'a,
+        stream: impl Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a,
         control: RunControl,
     ) -> Self {
         Self {
@@ -271,17 +285,21 @@ impl<'a> AgentStreamHandle<'a> {
     ) -> Result<(), AgentApprovalError> {
         self.control.resolve_approval(tool_call_id, decision)
     }
+
+    pub(crate) fn continue_with(&mut self, message: Message) {
+        self.control.continue_with(message);
+    }
 }
 
-impl Stream for AgentStreamHandle<'_> {
-    type Item = Result<AgentEvent, AgentError>;
+impl Stream for BaseAgentStream<'_> {
+    type Item = Result<BaseAgentEvent, AgentError>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().stream.as_mut().poll_next(context)
     }
 }
 
-impl Drop for AgentStreamHandle<'_> {
+impl Drop for BaseAgentStream<'_> {
     fn drop(&mut self) {
         self.control.cancel();
     }
@@ -300,51 +318,52 @@ mod tests {
 
     #[test]
     fn progress_is_a_real_poll_boundary() {
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         let phase = Rc::new(Cell::new(0));
         let producer_phase = Rc::clone(&phase);
         let progress = async_stream::stream! {
-            yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+            yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                 AgentIterationEvent::Started(IterationId::new(0)),
             )));
             future::yield_now().await;
             producer_phase.set(1);
-            yield Ok(AgentEvent::Finished(AgentOutcome::Cancelled));
+            yield Ok(BaseAgentEvent::Finished(AgentOutcome::Cancelled));
             producer_phase.set(2);
         };
-        let mut stream = AgentStreamHandle::new(progress, control);
+        let mut stream = BaseAgentStream::new(progress, control);
 
         block_on(async {
-            assert_eq!(
+            assert!(matches!(
                 stream.next().await,
-                Some(Ok(AgentEvent::Iteration(StreamPart::Delta(
-                    AgentIterationEvent::Started(IterationId::new(0)),
+                Some(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                    AgentIterationEvent::Started(iteration),
                 ))))
-            );
+                if iteration == IterationId::new(0)
+            ));
             assert_eq!(phase.get(), 0, "producer remains parked at the boundary");
 
             let mut next = Box::pin(stream.next());
-            assert_eq!(future::poll_once(next.as_mut()).await, None);
+            assert!(future::poll_once(next.as_mut()).await.is_none());
             assert_eq!(phase.get(), 0, "yield_now ends the current poll");
 
-            assert_eq!(
+            assert!(matches!(
                 next.await,
-                Some(Ok(AgentEvent::Finished(AgentOutcome::Cancelled)))
-            );
+                Some(Ok(BaseAgentEvent::Finished(AgentOutcome::Cancelled)))
+            ));
             assert_eq!(phase.get(), 1, "the next poll resumes the producer once");
 
-            assert_eq!(stream.next().await, None);
+            assert!(stream.next().await.is_none());
             assert_eq!(phase.get(), 2);
         });
     }
 
     #[test]
     fn approval_is_resolved_through_the_stream_handle() {
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         let driver_control = control.clone();
         let progress = async_stream::stream! {
             driver_control.begin_approval(ToolCallId::new(0));
-            yield Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
+            yield Ok(BaseAgentEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id: ToolCallId::new(0),
                 tool_call: ToolCall::default(),
                 reason: "run tool".to_owned(),
@@ -359,47 +378,51 @@ mod tests {
                 ApprovalOutcome::Interrupted => AgentOutcome::Interrupted,
                 ApprovalOutcome::Cancelled => AgentOutcome::Cancelled,
             };
-            yield Ok(AgentEvent::Finished(terminal));
+            yield Ok(BaseAgentEvent::Finished(terminal));
         };
-        let mut stream = AgentStreamHandle::new(progress, control);
+        let mut stream = BaseAgentStream::new(progress, control);
 
         block_on(async {
             assert!(matches!(
                 stream.next().await,
-                Some(Ok(AgentEvent::InputRequired(
+                Some(Ok(BaseAgentEvent::InputRequired(
                     AgentInputRequest::Approval { .. }
                 )))
             ));
             stream
                 .resolve_approval(ToolCallId::new(0), ApprovalDecision::Approved)
                 .expect("the visible approval is active");
-            assert_eq!(
+            assert!(matches!(
                 stream.next().await,
-                Some(Ok(AgentEvent::Finished(AgentOutcome::Completed(
-                    AgentCompletion::Synthesized("approved".to_owned())
+                Some(Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
+                    AgentCompletion::Synthesized(message)
                 ))))
-            );
-            assert_eq!(stream.next().await, None);
+                if message == "approved"
+            ));
+            assert!(stream.next().await.is_none());
         });
     }
 
     #[test]
     fn execution_error_is_an_err_item_followed_by_stream_end() {
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         let events = async_stream::stream! {
             yield Err(AgentError::StateInvariant);
         };
-        let mut stream = AgentStreamHandle::new(events, control);
+        let mut stream = BaseAgentStream::new(events, control);
 
         block_on(async {
-            assert_eq!(stream.next().await, Some(Err(AgentError::StateInvariant)));
-            assert_eq!(stream.next().await, None);
+            assert!(matches!(
+                stream.next().await,
+                Some(Err(AgentError::StateInvariant))
+            ));
+            assert!(stream.next().await.is_none());
         });
     }
 
     #[test]
     fn mismatched_approval_does_not_consume_the_waiting_request() {
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         control.begin_approval(ToolCallId::new(0));
 
         assert_eq!(

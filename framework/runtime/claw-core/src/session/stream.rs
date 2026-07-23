@@ -19,29 +19,23 @@ use serde::{Deserialize, Serialize};
 
 use super::approval_resolver::ApprovalResolverError;
 use super::control::SessionCommand;
-use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, AgentId, IterationId};
+use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, IterationId};
 
 crate::define_prefixed_id!(InputRequestId, "input-", "input request");
 crate::define_prefixed_id!(TurnId, "turn-", "turn");
 
 /// What caused a root-visible turn to start.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TurnOrigin {
     /// A public caller appended a message.
     #[default]
     User,
-    /// A detached subagent delivered its result to its parent.
-    Subagent {
-        /// The subagent whose result caused this turn.
-        agent: AgentId,
+    /// A detached tool delivered its result after the previous turn ended.
+    ToolCall {
+        /// The original model-requested call whose completion opened the turn.
+        call: ToolCall,
     },
-}
-
-impl TurnOrigin {
-    pub(crate) fn is_user(&self) -> bool {
-        matches!(self, Self::User)
-    }
 }
 
 // The reasoning cap is a compile-time tier, not a runtime knob. Exactly one of
@@ -188,7 +182,7 @@ pub enum SessionTurnError {
     /// The root Agent could not be constructed or restored.
     #[error(transparent)]
     AgentCreate(#[from] AgentCreateError),
-    /// The active BaseAgent run failed.
+    /// The active Agent turn failed.
     #[error(transparent)]
     Agent(#[from] AgentError),
 }

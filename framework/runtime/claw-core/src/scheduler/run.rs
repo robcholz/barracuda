@@ -12,7 +12,7 @@ use futures_lite::{future, StreamExt as _};
 use tracing::Instrument as _;
 
 use crate::agent::{
-    AgentApprovalError, AgentError, AgentEvent, AgentInputRequest, ApprovalDecision, BaseAgent,
+    Agent, AgentApprovalError, AgentError, AgentEvent, AgentInputRequest, ApprovalDecision,
     ToolCallId,
 };
 use crate::session::Message;
@@ -23,6 +23,7 @@ pub(super) enum AgentRunItem {
 }
 
 enum RunCommand {
+    Submit(Message),
     Interrupt,
     Cancel,
     ResolveApproval {
@@ -38,6 +39,10 @@ pub(crate) struct AgentRunControl {
 }
 
 impl AgentRunControl {
+    pub(crate) fn submit(&self, message: Message) -> bool {
+        self.commands.try_send(RunCommand::Submit(message)).is_ok()
+    }
+
     pub(crate) fn interrupt(&self) {
         let _ = self.commands.try_send(RunCommand::Interrupt);
     }
@@ -77,15 +82,15 @@ struct ProgressEnvelope {
     resume: Sender<()>,
 }
 
-type AgentRunFuture<Http, Timer> = Pin<Box<dyn Future<Output = BaseAgent<Http, Timer>>>>;
+type AgentRunFuture<Http, Timer> = Pin<Box<dyn Future<Output = Agent<Http, Timer>>>>;
 
-/// Temporary scheduler adapter around the self-contained BaseAgent stream.
+/// Scheduler-private polling adapter around the self-contained Agent stream.
 pub(super) struct AgentRun<Http: ClawHttp, Timer: ClawTimer> {
     control: AgentRunControl,
     progress: Pin<Box<Receiver<ProgressEnvelope>>>,
     resume: Option<Sender<()>>,
     future: Option<AgentRunFuture<Http, Timer>>,
-    agent: Option<BaseAgent<Http, Timer>>,
+    agent: Option<Agent<Http, Timer>>,
     returned: bool,
 }
 
@@ -96,11 +101,7 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    pub(super) fn start(
-        agent: BaseAgent<Http, Timer>,
-        message: Message,
-        span: tracing::Span,
-    ) -> Self {
+    pub(super) fn start(agent: Agent<Http, Timer>, message: Message, span: tracing::Span) -> Self {
         let (progress_sender, progress_receiver) = async_channel::bounded(1);
         let (command_sender, command_receiver) = async_channel::unbounded();
         let awaiting_approval = Rc::new(RefCell::new(None));
@@ -135,10 +136,10 @@ where
     pub(super) fn poll_event(&mut self, context: &mut Context<'_>) -> Poll<AgentRunItem> {
         Pin::new(self)
             .poll_next(context)
-            .map(|event| event.expect("AgentRun ends after returning its BaseAgent"))
+            .map(|event| event.expect("AgentRun ends after returning its Agent"))
     }
 
-    pub(super) fn take_completed_agent(&mut self) -> Option<BaseAgent<Http, Timer>> {
+    pub(super) fn take_completed_agent(&mut self) -> Option<Agent<Http, Timer>> {
         self.returned.then(|| self.agent.take()).flatten()
     }
 
@@ -188,19 +189,17 @@ where
 }
 
 async fn drive_agent<Http, Timer>(
-    mut agent: BaseAgent<Http, Timer>,
+    mut agent: Agent<Http, Timer>,
     message: Message,
     progress: Sender<ProgressEnvelope>,
     commands: Receiver<RunCommand>,
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
-) -> BaseAgent<Http, Timer>
+) -> Agent<Http, Timer>
 where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    let mut stream = agent
-        .submit(message)
-        .expect("scheduler only submits a stopped BaseAgent");
+    let mut stream = agent.submit(message);
 
     loop {
         enum Wake {
@@ -214,6 +213,9 @@ where
         .await;
 
         match wake {
+            Wake::Command(Some(RunCommand::Submit(message))) => {
+                let _ = stream.submit(message);
+            }
             Wake::Command(Some(RunCommand::Interrupt)) => stream.interrupt(),
             Wake::Command(Some(RunCommand::Cancel)) => stream.cancel(),
             Wake::Command(Some(RunCommand::ResolveApproval {
@@ -224,15 +226,19 @@ where
             }
             Wake::Command(None) => stream.cancel(),
             Wake::Event(Some(item)) => {
-                let pending = match &item {
+                match &item {
                     Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
                         tool_call_id,
                         ..
-                    })) => Some(*tool_call_id),
-                    _ => None,
-                };
-                *awaiting_approval.borrow_mut() = pending;
-                let terminal = matches!(&item, Ok(AgentEvent::Finished(_)) | Err(_));
+                    })) => {
+                        *awaiting_approval.borrow_mut() = Some(*tool_call_id);
+                    }
+                    Ok(AgentEvent::TurnEnded { .. }) | Err(_) => {
+                        awaiting_approval.borrow_mut().take();
+                    }
+                    _ => {}
+                }
+                let terminal = item.is_err();
                 let (resume, resumed) = async_channel::bounded(1);
                 if progress
                     .send(ProgressEnvelope { item, resume })

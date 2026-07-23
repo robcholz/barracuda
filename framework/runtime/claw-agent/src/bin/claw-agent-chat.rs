@@ -23,8 +23,8 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind,
-    Message, PermissionLevel, SessionControl, SessionError, SessionEvent, SessionPersistence,
-    SessionStream, ToolCall, TurnOrigin,
+    IterationEvent, Message, PermissionLevel, SessionControl, SessionError, SessionEvent,
+    SessionPersistence, SessionStream, ToolCall, ToolExecution, TurnEvent, TurnOrigin,
 };
 use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
 use claw_interface::{StdThread, TokioExecutor};
@@ -101,32 +101,33 @@ impl ChatDriver {
         above_prompt: bool,
     ) -> Result<RenderOutcome> {
         let outcome = match event {
-            SessionEvent::TurnStarted { origin, .. } => {
+            SessionEvent::Turn(TurnEvent::Started { origin, .. }) => {
                 self.content.start_turn(above_prompt, editor)?;
                 self.active_origin = Some(origin);
                 self.saw_output = false;
                 RenderOutcome::TurnStarted
             }
-            SessionEvent::InputRequested { request, kind } => {
+            SessionEvent::Turn(TurnEvent::InputRequested { request, kind }) => {
                 self.content
                     .output(StreamPart::Delta(format_input_request(&kind)))?;
                 self.content.output(StreamPart::End)?;
                 self.content.finish(editor)?;
                 RenderOutcome::InputRequested(request)
             }
-            SessionEvent::Reasoning(part) => {
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(part))) => {
                 self.content.reasoning(part)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::Output(part) => {
+            SessionEvent::Turn(TurnEvent::Output(part))
+            | SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(part))) => {
                 self.saw_output |= self.content.output(part)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::ToolCalls(part) => {
-                self.content.tool_calls(part, editor)?;
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(part))) => {
+                self.content.tool_result(part, editor)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::Usage { usage } => {
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Usage { usage })) => {
                 accumulate_usage(&mut self.total_usage, usage);
                 self.content.finish(editor)?;
                 self.content
@@ -139,7 +140,13 @@ impl ChatDriver {
                     .event(editor, "error", &error.to_string(), EventStyle::Error)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::TurnEnded { .. } => {
+            SessionEvent::Turn(TurnEvent::Error(error)) => {
+                self.content.finish(editor)?;
+                self.content
+                    .event(editor, "error", &error.to_string(), EventStyle::Error)?;
+                RenderOutcome::Continue
+            }
+            SessionEvent::Turn(TurnEvent::Ended { .. }) => {
                 self.content.finish(editor)?;
                 let user = matches!(self.active_origin.take(), Some(TurnOrigin::User));
                 let saw_output = std::mem::take(&mut self.saw_output);
@@ -149,9 +156,9 @@ impl ChatDriver {
                 self.content.finish(editor)?;
                 RenderOutcome::Closed
             }
-            SessionEvent::IterationStarted { .. } | SessionEvent::IterationEnded => {
-                RenderOutcome::Continue
-            }
+            SessionEvent::Turn(TurnEvent::Iteration(
+                IterationEvent::Started { .. } | IterationEvent::Ended,
+            )) => RenderOutcome::Continue,
         };
         Ok(outcome)
     }
@@ -243,14 +250,20 @@ impl ContentRenderer {
         }
     }
 
-    fn tool_calls(
+    fn tool_result(
         &mut self,
-        part: StreamPart<ToolCall>,
+        part: StreamPart<(ToolCall, ToolExecution)>,
         editor: &mut ChatLineEditor,
     ) -> Result<()> {
         self.finish(editor)?;
-        if let StreamPart::Delta(call) = part {
-            self.event(editor, "tools", &call.name, EventStyle::Tools)?;
+        if let StreamPart::Delta((call, execution)) = part {
+            let status = if execution.ok { "ok" } else { "failed" };
+            self.event(
+                editor,
+                "tool",
+                &format!("{}: {status}", call.name),
+                EventStyle::Tools,
+            )?;
         }
         Ok(())
     }
@@ -692,21 +705,28 @@ mod tests {
 
     #[test]
     fn idle_repl_receives_session_events_without_waiting_for_stdin() {
-        let event = SessionEvent::TurnStarted {
+        let event = SessionEvent::Turn(TurnEvent::Started {
             turn: claw_agent::TurnId(7),
-            origin: TurnOrigin::Subagent {
-                agent: claw_agent::AgentId(3),
+            origin: TurnOrigin::ToolCall {
+                call: ToolCall {
+                    id: "call-3".to_owned(),
+                    name: "background_work".to_owned(),
+                    arguments_json: "{}".to_owned(),
+                },
             },
-        };
+        });
 
         let activity = futures_lite::future::block_on(next_idle_activity(
             std::future::pending(),
-            std::future::ready(Some(event.clone())),
+            std::future::ready(Some(Ok(event))),
         ));
 
         assert!(matches!(
             activity,
-            IdleActivity::Session(Some(received)) if received == event
+            IdleActivity::Session(Some(Ok(SessionEvent::Turn(TurnEvent::Started {
+                turn: claw_agent::TurnId(7),
+                origin: TurnOrigin::ToolCall { .. },
+            }))))
         ));
     }
 

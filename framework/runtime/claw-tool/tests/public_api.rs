@@ -7,10 +7,11 @@ use std::task::Waker;
 use anyhow::{anyhow, Result};
 use claw_persistence::{DurableState, DurableStateCodec};
 use claw_tool::{
-    RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolExecutor, ToolGroup,
-    ToolInvocation, ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError,
-    ToolRegistryState, ToolResult, ToolSetHandle, ToolSpec,
+    RetryCount, SyncToolHandler, Tool, ToolError, ToolExecution, ToolGroup, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolResult,
+    ToolRunInvocation, ToolRunResult, ToolRunner, ToolSetHandle, ToolSpec,
 };
+use futures_lite::StreamExt as _;
 
 #[test]
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {
@@ -57,7 +58,7 @@ fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
 }
 
 #[test]
-fn temporary_disable_blocks_executor_but_keeps_tool_context() -> Result<()> {
+fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     let registry = Arc::new(ToolRegistry::new());
     let mut tool_set = registry.tool_set();
     tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
@@ -450,7 +451,7 @@ fn invocation_rejects_non_object_arguments() {
 }
 
 #[test]
-fn executor_retries_tool_according_to_retry_count() -> Result<()> {
+fn runner_retries_tool_according_to_retry_count() -> Result<()> {
     let attempts = Arc::new(AtomicU32::new(0));
     let outcome = run_retry_tool(RetryCount::extra(1), Arc::clone(&attempts))?;
 
@@ -466,7 +467,7 @@ fn executor_retries_tool_according_to_retry_count() -> Result<()> {
 }
 
 #[test]
-fn executor_does_not_retry_by_default() -> Result<()> {
+fn runner_does_not_retry_by_default() -> Result<()> {
     let attempts = Arc::new(AtomicU32::new(0));
     let outcome = run_retry_tool(RetryCount::none(), Arc::clone(&attempts))?;
 
@@ -571,8 +572,19 @@ fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolIn
 }
 
 fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation<'_>) -> Result<ToolExecution> {
-    let executor = ToolExecutor::new(handle);
-    poll_ready(executor.execute(call))
+    let call = ToolRunInvocation::try_new(call.id(), call.name(), call.arguments_json())
+        .map_err(|error| anyhow!("{error:?}"))?;
+    let (mut join, detached) = ToolRunner::new(handle).run(vec![call]);
+    if detached.is_some() {
+        return Err(anyhow!("test helper does not accept detached tools"));
+    }
+    poll_ready(async move {
+        join.next()
+            .await
+            .map(ToolRunResult::into_parts)
+            .map(|(_, execution)| execution)
+            .ok_or_else(|| anyhow!("join stream ended without a result"))
+    })?
 }
 
 fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolExecution> {

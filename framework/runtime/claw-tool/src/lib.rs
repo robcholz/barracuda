@@ -1,19 +1,18 @@
 #[cfg(feature = "build-support")]
 pub mod bake;
-mod detached;
-mod executor;
 mod registry;
+mod runner;
 mod set;
 #[allow(clippy::module_inception)]
 mod tool;
 mod validate;
 
-pub use detached::{
-    DetachedToolCompletion, DetachedToolInvocation, DetachedToolRun, DetachedToolSink,
-};
-pub use executor::{ToolExecution, ToolExecutor};
 pub use registry::{
     ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryState, ToolRegistryVersion,
+};
+pub use runner::{
+    ToolDetachCompletion, ToolDetachHandle, ToolExecution, ToolJoinHandle, ToolRunInvocation,
+    ToolRunResult, ToolRunner,
 };
 pub use set::{
     ToolCatalogEntry, ToolDiscoveryHandle, ToolGroupCatalog, ToolName, ToolSet, ToolSetError,

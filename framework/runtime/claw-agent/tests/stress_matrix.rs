@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, Message, SessionControlError, SessionEvent, SessionId,
-    SessionStream,
+    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionControlError, SessionEvent,
+    SessionId, SessionStream, TurnEvent,
 };
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpError, HttpJsonRequest, HttpResponse, HttpResponseFuture,
@@ -153,7 +153,7 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         assert!(
             first_events
                 .iter()
-                .any(|event| matches!(event, SessionEvent::TurnEnded { .. })),
+                .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::Ended { .. }))),
             "case {case}: first storm turn did not end: {first_events:?}"
         );
         assert!(
@@ -498,7 +498,7 @@ fn assert_turn_output(case: &str, events: &mut SessionStream, expected: &str) {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, SessionEvent::TurnEnded { .. })),
+            .any(|event| matches!(event, SessionEvent::Turn(TurnEvent::Ended { .. }))),
         "case {case}: missing TurnEnded: {events:?}"
     );
     assert_eq!(
@@ -573,7 +573,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()

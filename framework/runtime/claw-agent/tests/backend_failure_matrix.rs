@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use claw_agent::{stream::StreamPart, AgentError, AgentSystem, Message, SessionEvent};
+use claw_agent::{
+    stream::StreamPart, AgentError, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent,
+};
 use claw_interface::{
     Cancel, ClawFile, ClawFs, ClawHttp, ClawTimer, FsError, HttpError, HttpJsonRequest,
     HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, ImmediateTimer, MemFs,
@@ -369,7 +371,11 @@ where
 fn first_failure_text(events: Vec<SessionEvent>) -> Option<String> {
     events.into_iter().find_map(|event| match event {
         SessionEvent::Error(error) => Some(error.to_string()),
-        SessionEvent::Output(StreamPart::Delta(text)) if text.contains("[failed:") => Some(text),
+        SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
+        SessionEvent::Turn(
+            TurnEvent::Output(StreamPart::Delta(text))
+            | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+        ) if text.contains("[failed:") => Some(text),
         _ => None,
     })
 }
@@ -378,7 +384,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()

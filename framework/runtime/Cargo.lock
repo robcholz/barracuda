@@ -373,6 +373,8 @@ dependencies = [
  "anyhow",
  "claw-permission",
  "claw-persistence",
+ "futures-core",
+ "futures-lite 2.6.1",
  "serde",
  "serde_json",
  "thiserror",

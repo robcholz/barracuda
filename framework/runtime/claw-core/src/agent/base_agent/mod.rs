@@ -1,8 +1,6 @@
 //! One configured Agent and its complete single-Agent runtime.
 //!
-//! [`BaseAgent::submit`] borrows the Agent exclusively and returns one
-//! [`AgentStreamHandle`]. The handle is the only output and control surface for
-//! that task; owner-side message queuing remains outside this module.
+//! [`BaseAgent::submit`] executes one linear task for the outer [`super::Agent`].
 
 mod agent;
 mod context;
@@ -16,8 +14,8 @@ pub(in crate::agent) use self::context::{ContextAdapter, ContextAdapterFuture, T
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
 pub use self::stream::{AgentApprovalError, AgentError};
 pub(crate) use self::stream::{
-    AgentCompletion, AgentEvent, AgentInputRequest, AgentIterationEvent, AgentOutcome,
-    ApprovalDecision,
+    AgentCompletion, AgentInputRequest, AgentIterationEvent, AgentOutcome, AgentSubmitError,
+    ApprovalDecision, BaseAgentEvent,
 };
 pub use iteration_loop::IterationId;
 pub use iteration_loop::{IterationLoopError, ToolCallId};

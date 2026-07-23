@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, IterationId, Message, SessionEvent, TurnId, TurnOrigin,
+    stream::StreamPart, AgentSystem, IterationEvent, IterationId, Message, SessionEvent, TurnEvent,
+    TurnId, TurnOrigin,
 };
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpJsonRequest, HttpResponse, HttpResponseFuture,
@@ -257,7 +258,7 @@ fn builtin_profile_clear_and_memory_update_forget_survive_disk_rebuilds() {
     assert_phase(&mutate, "mutated rebuilt state", case);
     assert_followup_tool_fragments(
         &mutate.requests,
-        "Cleared profile document user_profile.|Profile document user_profile is empty.|Updated memory g-0.|Updated durable global fact",
+        "Cleared profile document user_profile.|Profile document user_profile is empty.|Updated memory g-0.",
         case,
     );
     assert_disk_file_equals(&root, "profile/user.md", "");
@@ -467,17 +468,17 @@ fn assert_phase(result: &PhaseResult, expected_output: &str, case: &str) {
     assert!(
         matches!(
             result.events.first(),
-            Some(SessionEvent::TurnStarted {
+            Some(SessionEvent::Turn(TurnEvent::Started {
                 turn: TurnId(1),
                 origin: TurnOrigin::User,
-            })
+            }))
         ),
         "case {case}"
     );
     assert!(
         matches!(
             result.events.last(),
-            Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+            Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
         ),
         "case {case}"
     );
@@ -571,7 +572,9 @@ fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::IterationStarted { iteration } => Some(*iteration),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started { iteration })) => {
+                Some(*iteration)
+            }
             _ => None,
         })
         .collect()
@@ -581,7 +584,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -592,6 +598,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Error(error) => Some(error.to_string()),
+            SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
             _ => None,
         })
         .collect()

@@ -1,12 +1,12 @@
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll};
 use std::collections::{HashSet, VecDeque};
 
 use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
-use claw_tool::{ToolExecution, ToolExecutor, ToolInvocation, ToolSetHandle};
+use claw_tool::{
+    ToolDetachHandle, ToolExecution, ToolJoinHandle, ToolRunInvocation, ToolRunResult, ToolRunner,
+    ToolSetHandle,
+};
 use claw_utils::stream::StreamPart;
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
@@ -19,12 +19,20 @@ use super::{
 
 struct ScheduledCall {
     id: ToolCallId,
-    call: ToolCall,
+    invocation: ToolRunInvocation,
 }
 
 impl ScheduledCall {
     fn approval_call(&self) -> ToolCall {
-        self.call.clone()
+        self.tool_call()
+    }
+
+    fn tool_call(&self) -> ToolCall {
+        ToolCall {
+            id: self.invocation.id().unwrap_or_default().to_owned(),
+            name: self.invocation.name().to_owned(),
+            arguments_json: self.invocation.arguments_json().to_owned(),
+        }
     }
 }
 
@@ -36,22 +44,15 @@ struct PendingApproval<'a> {
     announced: bool,
 }
 
-type ToolRunOutput = Result<(ToolCall, ToolExecution), IterationLoopError>;
-type ToolRunFuture<'a> = Pin<Box<dyn Future<Output = ToolRunOutput> + 'a>>;
-
-struct ToolRuns<'a> {
-    futures: Vec<ToolRunFuture<'a>>,
-    cursor: usize,
-}
-
 enum ToolBatchUpdate {
     Permission(ToolPermission),
-    Execution(ToolRunOutput),
+    Execution(Option<ToolRunResult>),
 }
 
 struct ToolPhase<'a> {
     tools: &'a ToolSetHandle<'a>,
-    runs: ToolRuns<'a>,
+    joined: Option<ToolJoinHandle>,
+    detached: VecDeque<ToolDetachHandle>,
     pending: VecDeque<PendingApproval<'a>>,
     active_permission: Option<PendingApproval<'a>>,
     ready_results: VecDeque<(ToolCall, ToolExecution)>,
@@ -196,13 +197,13 @@ impl<'a> ToolPhase<'a> {
 
         let remaining_results = tool_calls.len();
         let mut tool_call_ids = ToolCallIdAllocator::new();
-        let mut runs = ToolRuns::new();
+        let mut allowed = Vec::new();
         let mut pending = VecDeque::new();
         let mut ready_results = VecDeque::new();
 
         for tool_call in tool_calls {
             let id = tool_call_ids.next();
-            let invocation = match ToolInvocation::try_new(
+            let invocation = match ToolRunInvocation::try_new(
                 Some(&tool_call.id),
                 &tool_call.name,
                 &tool_call.arguments_json,
@@ -219,7 +220,20 @@ impl<'a> ToolPhase<'a> {
                     continue;
                 }
             };
-            let action = match tools.classify(&invocation) {
+            let borrowed = match invocation.as_invocation() {
+                Ok(invocation) => invocation,
+                Err(error) => {
+                    ready_results.push_back((
+                        tool_call,
+                        ToolExecution {
+                            content: error.to_string(),
+                            ok: false,
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let action = match tools.classify(&borrowed) {
                 Ok(action) => action,
                 Err(error) => {
                     ready_results.push_back((
@@ -232,20 +246,15 @@ impl<'a> ToolPhase<'a> {
                     continue;
                 }
             };
-            let scheduled = ScheduledCall {
-                id,
-                call: tool_call,
-            };
+            let scheduled = ScheduledCall { id, invocation };
 
             match permission.authorize(ToolPermissionRequest {
                 tool_call_id: id,
                 action: &action,
             }) {
-                ToolAuthorization::Allow => {
-                    runs.push(execute_scheduled_call(tools, scheduled));
-                }
+                ToolAuthorization::Allow => allowed.push(scheduled),
                 ToolAuthorization::Deny(reason) => ready_results.push_back((
-                    scheduled.call,
+                    scheduled.tool_call(),
                     ToolExecution {
                         content: reason,
                         ok: false,
@@ -264,10 +273,12 @@ impl<'a> ToolPhase<'a> {
                 }),
             }
         }
+        let (joined, detached) = dispatch_scheduled_calls(tools, allowed);
 
         Ok(Self {
             tools,
-            runs,
+            joined,
+            detached: detached.into_iter().collect(),
             pending,
             active_permission: None,
             ready_results,
@@ -281,6 +292,9 @@ impl<'a> ToolPhase<'a> {
         control: &super::super::stream::RunControl,
     ) -> Result<Option<IterationLoopEvent>, IterationLoopError> {
         loop {
+            if let Some(detached) = self.detached.pop_front() {
+                return Ok(Some(IterationLoopEvent::Detached(detached)));
+            }
             if let Some((call, execution)) = self.ready_results.pop_front() {
                 return self.tool_result(call, execution).map(Some);
             }
@@ -315,27 +329,31 @@ impl<'a> ToolPhase<'a> {
                 }
             }
 
-            if self.active_permission.is_none() && self.runs.is_empty() {
+            if self.active_permission.is_none() && self.joined.is_none() {
                 return Err(IterationLoopError::IncompleteToolBatch);
             }
 
-            let update = match self.active_permission.as_mut() {
-                Some(waiting) if !self.runs.is_empty() => {
+            let update = match (self.active_permission.as_mut(), self.joined.as_mut()) {
+                (Some(waiting), Some(joined)) => {
                     future::or(
                         async { ToolBatchUpdate::Permission(waiting.permission.as_mut().await) },
-                        async { ToolBatchUpdate::Execution(self.runs.next().await) },
+                        async { ToolBatchUpdate::Execution(joined.next().await) },
                     )
                     .await
                 }
-                Some(waiting) => ToolBatchUpdate::Permission(waiting.permission.as_mut().await),
-                None => ToolBatchUpdate::Execution(self.runs.next().await),
+                (Some(waiting), None) => {
+                    ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
+                }
+                (None, Some(joined)) => ToolBatchUpdate::Execution(joined.next().await),
+                (None, None) => return Err(IterationLoopError::IncompleteToolBatch),
             };
 
             match update {
-                ToolBatchUpdate::Execution(result) => {
-                    let (call, execution) = result?;
+                ToolBatchUpdate::Execution(Some(result)) => {
+                    let (call, execution) = tool_result_parts(result);
                     return self.tool_result(call, execution).map(Some);
                 }
+                ToolBatchUpdate::Execution(None) => self.joined = None,
                 ToolBatchUpdate::Permission(decision) => {
                     let waiting = self
                         .active_permission
@@ -343,13 +361,15 @@ impl<'a> ToolPhase<'a> {
                         .ok_or(IterationLoopError::IncompleteToolBatch)?;
                     match decision {
                         ToolPermission::Allow => {
-                            self.runs
-                                .push(execute_scheduled_call(self.tools, waiting.call));
+                            let (joined, detached) =
+                                dispatch_scheduled_calls(self.tools, vec![waiting.call]);
+                            self.merge_joined(joined);
+                            self.detached.extend(detached);
                         }
                         ToolPermission::Deny(reason) => {
                             return self
                                 .tool_result(
-                                    waiting.call.call,
+                                    waiting.call.tool_call(),
                                     ToolExecution {
                                         content: reason,
                                         ok: false,
@@ -384,85 +404,43 @@ impl<'a> ToolPhase<'a> {
             StreamPart::Delta((call, execution)),
         )))
     }
-}
 
-impl<'a> ToolRuns<'a> {
-    fn new() -> Self {
-        Self {
-            futures: Vec::new(),
-            cursor: 0,
-        }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.futures.is_empty()
-    }
-
-    fn push(&mut self, run: impl Future<Output = ToolRunOutput> + 'a) {
-        self.futures.push(Box::pin(run));
-    }
-
-    async fn next(&mut self) -> ToolRunOutput {
-        future::poll_fn(|context| self.poll_next(context)).await
-    }
-
-    fn poll_next(&mut self, context: &mut Context<'_>) -> Poll<ToolRunOutput> {
-        let count = self.futures.len();
-        if count == 0 {
-            return Poll::Ready(Err(IterationLoopError::IncompleteToolBatch));
-        }
-
-        let start = self.cursor % count;
-        for offset in 0..count {
-            let index = (start + offset) % count;
-            if let Poll::Ready(output) = self.futures[index].as_mut().poll(context) {
-                drop(self.futures.swap_remove(index));
-                self.cursor = if self.futures.is_empty() {
-                    0
-                } else {
-                    index % self.futures.len()
-                };
-                return Poll::Ready(output);
-            }
-        }
-
-        self.cursor = (start + 1) % count;
-        Poll::Pending
-    }
-}
-
-async fn execute_scheduled_call(tools: &ToolSetHandle<'_>, call: ScheduledCall) -> ToolRunOutput {
-    let span = tracing::info_span!("toolcall", tool = %call.call.name);
-    let execution = {
-        let invocation = match ToolInvocation::try_new(
-            Some(&call.call.id),
-            &call.call.name,
-            &call.call.arguments_json,
-        ) {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                return Ok((
-                    call.call,
-                    ToolExecution {
-                        content: error.to_string(),
-                        ok: false,
-                    },
-                ));
-            }
+    fn merge_joined(&mut self, joined: Option<ToolJoinHandle>) {
+        let Some(joined) = joined else {
+            return;
         };
-        ToolExecutor::new(tools)
-            .execute(&invocation)
-            .instrument(span.clone())
-            .await
-    };
-    span.in_scope(|| {
-        if execution.ok {
-            tracing::info!(name: "result", ok = true);
-        } else {
-            tracing::warn!(name: "result", ok = false);
+        match self.joined.as_mut() {
+            Some(active) => active.merge(joined),
+            None => self.joined = Some(joined),
         }
-    });
-    Ok((call.call, execution))
+    }
+}
+
+fn dispatch_scheduled_calls(
+    tools: &ToolSetHandle<'_>,
+    calls: Vec<ScheduledCall>,
+) -> (Option<ToolJoinHandle>, Option<ToolDetachHandle>) {
+    if calls.is_empty() {
+        return (None, None);
+    }
+    let calls = calls
+        .into_iter()
+        .map(|call| call.invocation)
+        .collect::<Vec<_>>();
+    let (joined, detached) = ToolRunner::new(tools).run(calls);
+    (Some(joined), detached)
+}
+
+fn tool_result_parts(result: ToolRunResult) -> (ToolCall, ToolExecution) {
+    let (invocation, execution) = result.into_parts();
+    (
+        ToolCall {
+            id: invocation.id().unwrap_or_default().to_owned(),
+            name: invocation.name().to_owned(),
+            arguments_json: invocation.arguments_json().to_owned(),
+        },
+        execution,
+    )
 }
 
 #[cfg(test)]
@@ -479,7 +457,7 @@ mod tests {
     use futures_lite::future::block_on;
 
     use super::*;
-    use crate::agent::base_agent::stream::AgentStreamHandle;
+    use crate::agent::base_agent::stream::BaseAgentStream;
 
     struct CountingTool {
         name: &'static str,
@@ -578,7 +556,7 @@ mod tests {
                 arguments_json: "{}".to_owned(),
             },
         ];
-        let control = AgentStreamHandle::control();
+        let control = BaseAgentStream::control();
         let permission = SelectivePermission {
             executions: Arc::clone(&executions),
             checks: Cell::new(0),

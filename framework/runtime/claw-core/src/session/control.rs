@@ -163,12 +163,12 @@ impl SessionControl {
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
 
-    /// Request a stop at the current BaseAgent iteration boundary.
+    /// Request a stop at the current Agent turn's iteration boundary.
     pub async fn interrupt(&self) -> Result<(), SessionControlError> {
         self.send_control(ControlOp::Interrupt).await
     }
 
-    /// Cooperatively abort the current BaseAgent task immediately.
+    /// Cooperatively abort the current Agent turn immediately.
     pub async fn cancel(&self) -> Result<(), SessionControlError> {
         self.send_control(ControlOp::Cancel).await
     }

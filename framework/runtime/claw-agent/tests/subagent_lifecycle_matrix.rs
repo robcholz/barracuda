@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use claw_agent::{
-    stream::StreamPart, AgentId, AgentSystem, InputRequestId, InputRequestKind, IterationId,
-    Message, PermissionLevel, SessionEvent, TurnId, TurnOrigin,
+    stream::StreamPart, AgentSystem, InputRequestId, InputRequestKind, IterationEvent, IterationId,
+    Message, PermissionLevel, SessionEvent, TurnEvent, TurnId, TurnOrigin,
 };
 use claw_interface::{
     Cancel, ClawHttp, ClawTimer, HttpJsonRequest, HttpResponse, HttpResponseFuture, HttpStatusCode,
@@ -347,14 +347,18 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     );
 
     RELEASE_HELD_WORKER.store(true, Ordering::SeqCst);
-    let child = recorded_child_id();
     let delivered = drain_until_turn_ended(&mut events);
-    assert_turn(
-        &delivered,
-        TurnId(3),
-        TurnOrigin::Subagent { agent: child },
-        "background result",
-    );
+    assert!(matches!(
+        delivered.first(),
+        Some(SessionEvent::Turn(TurnEvent::Started {
+            turn: TurnId(3),
+            origin: TurnOrigin::ToolCall { .. },
+        }))
+    ));
+    assert!(matches!(
+        delivered.last(),
+        Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(3) }))
+    ));
     assert_eq!(output_fragments(&delivered), vec!["background delivered"]);
 }
 
@@ -493,10 +497,10 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
 
     assert!(matches!(
         timed_out.first(),
-        Some(SessionEvent::TurnStarted {
-            origin: TurnOrigin::Subagent { .. },
+        Some(SessionEvent::Turn(TurnEvent::Started {
+            origin: TurnOrigin::ToolCall { .. },
             ..
-        })
+        }))
     ));
     assert_eq!(
         output_fragments(&timed_out),
@@ -1238,7 +1242,7 @@ async fn wait_for_input_request(
 ) -> (InputRequestId, InputRequestKind) {
     while let Some(event) = events.next().await {
         let event = event.expect("Session stream failed");
-        if let SessionEvent::InputRequested { request, kind } = event {
+        if let SessionEvent::Turn(TurnEvent::InputRequested { request, kind }) = event {
             return (request, kind);
         }
     }
@@ -1347,29 +1351,22 @@ fn tool_message_content(body: &str) -> Vec<String> {
         .collect()
 }
 
-fn recorded_child_id() -> AgentId {
-    let child = state()
-        .as_ref()
-        .and_then(|state| state.child_id.clone())
-        .expect("spawn response recorded child id");
-    AgentId::from_wire(&child).expect("valid recorded child id")
-}
-
 fn assert_turn(events: &[SessionEvent], turn: TurnId, origin: TurnOrigin, case: &str) {
     assert!(
         matches!(
             events.first(),
-            Some(SessionEvent::TurnStarted {
+            Some(SessionEvent::Turn(TurnEvent::Started {
                 turn: event_turn,
                 origin: event_origin,
-            }) if *event_turn == turn && *event_origin == origin
+            })) if *event_turn == turn && *event_origin == origin
         ),
         "case {case}"
     );
     assert!(
         matches!(
             events.last(),
-            Some(SessionEvent::TurnEnded { turn: event_turn }) if *event_turn == turn
+            Some(SessionEvent::Turn(TurnEvent::Ended { turn: event_turn }))
+                if *event_turn == turn
         ),
         "case {case}"
     );
@@ -1379,7 +1376,9 @@ fn iteration_ids(events: &[SessionEvent]) -> Vec<IterationId> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::IterationStarted { iteration } => Some(*iteration),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Started { iteration })) => {
+                Some(*iteration)
+            }
             _ => None,
         })
         .collect()
@@ -1389,7 +1388,9 @@ fn tools_events(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::ToolCalls(StreamPart::Delta(call)) => Some(call.name.clone()),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::Delta((call, _)),
+            ))) => Some(call.name.clone()),
             _ => None,
         })
         .collect()
@@ -1399,7 +1400,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()
@@ -1410,6 +1414,7 @@ fn error_messages(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Error(error) => Some(error.to_string()),
+            SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
             _ => None,
         })
         .collect()

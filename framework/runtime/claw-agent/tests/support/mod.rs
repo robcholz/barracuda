@@ -148,7 +148,10 @@ pub fn drain_until_turn_ended(events: &mut SessionStream) -> Vec<SessionEvent> {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {
             let event = event.expect("Session stream failed");
-            let ended = matches!(event, SessionEvent::TurnEnded { .. });
+            let ended = matches!(
+                event,
+                SessionEvent::Turn(claw_agent::TurnEvent::Ended { .. })
+            );
             collected.push(event);
             if ended {
                 break;

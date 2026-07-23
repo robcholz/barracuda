@@ -6,8 +6,9 @@ use support::Sse;
 use std::collections::BTreeMap;
 
 use claw_agent::{
-    stream::StreamPart, AgentError, AgentSystem, IterationId, Message, OpenSessionError,
-    SessionControlError, SessionEvent, SessionId, SessionStream, TurnId, TurnOrigin,
+    stream::StreamPart, AgentError, AgentSystem, IterationEvent, IterationId, Message,
+    OpenSessionError, SessionControlError, SessionEvent, SessionId, SessionStream, TurnEvent,
+    TurnId, TurnOrigin,
 };
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
@@ -51,17 +52,17 @@ fn submit_streams_csv_reply_cases() {
         assert!(
             matches!(
                 events.first(),
-                Some(SessionEvent::TurnStarted {
+                Some(SessionEvent::Turn(TurnEvent::Started {
                     turn: TurnId(1),
                     origin: TurnOrigin::User,
-                })
+                }))
             ),
             "case {case}"
         );
         assert!(
             matches!(
                 events.last(),
-                Some(SessionEvent::TurnEnded { turn: TurnId(1) })
+                Some(SessionEvent::Turn(TurnEvent::Ended { turn: TurnId(1) }))
             ),
             "case {case}"
         );
@@ -403,7 +404,10 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
     events
         .iter()
         .filter_map(|event| match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => Some(text.clone()),
+            SessionEvent::Turn(
+                TurnEvent::Output(StreamPart::Delta(text))
+                | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
+            ) => Some(text.clone()),
             _ => None,
         })
         .collect()

@@ -16,7 +16,10 @@
 //!   --target x86_64-unknown-linux-gnu
 //! ```
 
-use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, SessionPersistence};
+use claw_agent::{
+    stream::StreamPart, AgentSystem, IterationEvent, Message, SessionEvent, SessionPersistence,
+    TurnEvent,
+};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::http::SliceChunks;
 use claw_interface::{
@@ -155,19 +158,34 @@ async fn main() -> anyhow::Result<()> {
     while let Some(event) = events.next().await {
         let event = event?;
         match event {
-            SessionEvent::Output(StreamPart::Delta(text)) => {
+            SessionEvent::Turn(TurnEvent::Output(StreamPart::Delta(text)))
+            | SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(
+                StreamPart::Delta(text),
+            ))) => {
                 println!("  > {text}");
                 outputs.push(text);
             }
-            SessionEvent::Reasoning(StreamPart::Delta(text)) => println!("  [thinking] {text}"),
-            SessionEvent::ToolCalls(StreamPart::Delta(call)) => {
-                println!("  [tools] {}", call.name)
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(
+                StreamPart::Delta(text),
+            ))) => println!("  [thinking] {text}"),
+            SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::Delta((call, execution)),
+            ))) => {
+                println!(
+                    "  [tool] {}: {}",
+                    call.name,
+                    if execution.ok { "ok" } else { "failed" }
+                )
             }
-            SessionEvent::Reasoning(StreamPart::End)
-            | SessionEvent::Output(StreamPart::End)
-            | SessionEvent::ToolCalls(StreamPart::End) => {}
+            SessionEvent::Turn(TurnEvent::Iteration(
+                IterationEvent::Reasoning(StreamPart::End)
+                | IterationEvent::Output(StreamPart::End)
+                | IterationEvent::ToolResult(StreamPart::End),
+            ))
+            | SessionEvent::Turn(TurnEvent::Output(StreamPart::End)) => {}
             SessionEvent::Error(error) => println!("  [error] {error}"),
-            SessionEvent::TurnEnded { .. } => break,
+            SessionEvent::Turn(TurnEvent::Error(error)) => println!("  [error] {error}"),
+            SessionEvent::Turn(TurnEvent::Ended { .. }) => break,
             other => println!("  [{other:?}]"),
         }
     }

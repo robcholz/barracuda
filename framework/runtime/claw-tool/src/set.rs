@@ -5,7 +5,7 @@ use claw_permission::Action;
 use serde::Serialize;
 
 use super::registry::{ToolGroup, ToolProjection, ToolRegistry, ToolRegistryVersion};
-use super::tool::{Tool, ToolError, ToolInvocation, ToolOutput, ToolResult};
+use super::tool::{Tool, ToolError, ToolInvocation, ToolResult};
 
 pub type ToolName = String;
 
@@ -709,10 +709,7 @@ impl<'a> ToolSetHandle<'a> {
         }
     }
 
-    pub async fn invoke<'call>(
-        &self,
-        call: &'call ToolInvocation<'call>,
-    ) -> ToolResult<ToolOutput> {
+    pub(crate) fn runnable_tool(&self, call: &ToolInvocation<'_>) -> ToolResult<Tool> {
         match (self.tools.get(call.name()), self.states.get(call.name())) {
             (Some(tool), Some(entry))
                 if matches!(
@@ -720,7 +717,7 @@ impl<'a> ToolSetHandle<'a> {
                     ToolState::Enabled | ToolState::TemporarilyEnabled
                 ) =>
             {
-                tool.invoke(call).await
+                Ok(tool.clone())
             }
             (_, Some(entry)) if entry.state == ToolState::TemporarilyDisabled => {
                 Err(ToolError::InvokeRejected(unavailable_message(call.name())).into())
