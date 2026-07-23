@@ -33,6 +33,7 @@ pub use agent::{
 };
 pub use claw_api::ToolCall;
 pub use claw_permission::PermissionLevel;
+pub use claw_tool::ToolExecution;
 pub use config::ApiUsage;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{

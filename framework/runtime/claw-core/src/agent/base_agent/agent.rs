@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use claw_api::{ChatStreamEvent, ClawApiAsync, RetryPolicy, ToolCall};
+use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind, Context};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
@@ -13,7 +13,7 @@ use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
 
-use crate::agent::AgentKind;
+use crate::agent::state::AgentState;
 use crate::config::{ApiUsage, SharedApiManager};
 use crate::session::Message;
 
@@ -23,16 +23,15 @@ use super::iteration_loop::{
     IterationEvent, IterationIdAllocator, IterationLoop, IterationLoopError, IterationLoopEvent,
     LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
 };
-use super::persistence::{AgentState as RecoveryState, AgentStateBuilder};
 use super::stream::{
-    AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome, AgentStreamHandle,
-    AgentSubmitError, ApprovalOutcome, RunControl,
+    AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentIterationEvent, AgentOutcome,
+    AgentStreamHandle, AgentSubmitError, ApprovalOutcome, RunControl,
 };
 use super::TurnLifecycle;
 
 /// All construction-time dependencies for one fully assembled BaseAgent.
 pub(in crate::agent) struct BaseAgentConfig {
-    pub(in crate::agent) kind: AgentKind,
+    pub(in crate::agent) state: DurableState<AgentState>,
     pub(in crate::agent) transcript: Box<dyn Transcript>,
     pub(in crate::agent) agent_instruction: Block<'static>,
     pub(in crate::agent) inherited_context: Vec<Block<'static>>,
@@ -54,7 +53,7 @@ enum StopReason {
     Failed,
 }
 
-enum AgentState {
+enum RunState {
     Running,
     Stopped(StopReason),
 }
@@ -69,8 +68,7 @@ enum IterationCompletion {
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
 pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
-    kind: AgentKind,
-    recovery_state: DurableState<RecoveryState>,
+    state: DurableState<AgentState>,
     llm: ClawApiAsync<H, Timer>,
     api_manager: SharedApiManager,
     api_usage: ApiUsage,
@@ -82,7 +80,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     permission_policy: Arc<dyn PermissionPolicy>,
     #[getset(get = "pub(crate)")]
     context: Context,
-    state: AgentState,
+    run_state: RunState,
     iteration_ids: IterationIdAllocator,
     context_adapters: Vec<Box<dyn ContextAdapter>>,
 }
@@ -106,14 +104,8 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         }
         context.with(config.agent_instruction);
 
-        let recovery_state = DurableState::new(Self::collect_recovery_state(
-            config.kind.clone(),
-            &config.context_adapters,
-        ));
-
         Ok(Self {
-            kind: config.kind,
-            recovery_state,
+            state: config.state,
             llm: ClawApiAsync::new(H::default(), Timer::default()),
             api_manager: config.api_manager,
             api_usage: config.api_usage,
@@ -124,7 +116,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             effect_inbox: config.effect_inbox,
             permission_policy: config.permission_policy,
             context,
-            state: AgentState::Stopped(StopReason::Ready),
+            run_state: RunState::Stopped(StopReason::Ready),
             iteration_ids: IterationIdAllocator::new(),
             context_adapters: config.context_adapters,
         })
@@ -151,7 +143,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 
     fn begin(&mut self, message: Message) -> Result<(), AgentSubmitError> {
-        let AgentState::Stopped(previous) = self.state else {
+        let RunState::Stopped(previous) = self.run_state else {
             return Err(AgentSubmitError::Running);
         };
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
@@ -160,7 +152,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         turn.append_user(message.as_str())?;
         turn.finish_user()?;
         self.active_turn = Some(turn);
-        self.state = AgentState::Running;
+        self.run_state = RunState::Running;
         Ok(())
     }
 
@@ -178,7 +170,6 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
                 )))
             }
             IterationCompletion::Tools => {
-                self.refresh_recovery_state();
                 if let Some(event) = self.reduce_agent_effects()? {
                     return Ok(Some(event));
                 }
@@ -288,7 +279,6 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 enum ContentPhase {
     Reasoning,
     Output,
-    ToolCalls,
     Ended,
 }
 
@@ -296,31 +286,12 @@ enum ContentPhase {
 struct AssistantDraft {
     reasoning: String,
     response: Option<String>,
-    tool_calls: Vec<ToolCall>,
-}
-
-impl AssistantDraft {
-    fn take_tool_calls_json(&mut self) -> Vec<serde_json::Value> {
-        std::mem::take(&mut self.tool_calls)
-            .into_iter()
-            .map(|call| {
-                serde_json::json!({
-                    "id": call.id,
-                    "type": "function",
-                    "function": {
-                        "name": call.name,
-                        "arguments": call.arguments_json,
-                    },
-                })
-            })
-            .collect()
-    }
 }
 
 /// BaseAgent's consuming half of an iteration.
 ///
 /// It is deliberately the only place that knows both transcript semantics and
-/// owner-facing progress semantics: each chat stream event is incorporated into the
+/// owner-facing progress semantics: each stream part is incorporated into the
 /// active turn before the corresponding progress item is forwarded.
 struct IterationConsumer<'a> {
     turn: &'a mut TurnHandle,
@@ -343,54 +314,47 @@ impl<'a> IterationConsumer<'a> {
         }
     }
 
-    /// Apply one backend event to the transcript before returning the matching
-    /// owner-facing item. `None` means the event was intentionally suppressed.
-    fn consume_chat_event(
-        &mut self,
-        event: ChatStreamEvent,
-    ) -> Result<Option<ChatStreamEvent>, AgentError> {
+    /// Apply one reasoning part before returning the matching owner-facing
+    /// item. `None` means the fragment was intentionally capped.
+    fn consume_reasoning(&mut self, part: StreamPart<String>) -> Option<StreamPart<String>> {
         debug_assert!(!self.assistant_finished);
-        let progress = match event {
-            ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)) => {
+        match part {
+            StreamPart::Delta(fragment) => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
                 self.draft.reasoning.push_str(&fragment);
                 self.reasoning_progress(fragment)
             }
-            ChatStreamEvent::Reasoning(StreamPart::End) => {
+            StreamPart::End => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
                 self.phase = ContentPhase::Output;
-                Some(ChatStreamEvent::Reasoning(StreamPart::End))
+                Some(StreamPart::End)
             }
-            ChatStreamEvent::Output(StreamPart::Delta(fragment)) => {
+        }
+    }
+
+    /// Apply one output part to the transcript before returning it.
+    fn consume_output(
+        &mut self,
+        part: StreamPart<String>,
+    ) -> Result<StreamPart<String>, AgentError> {
+        debug_assert!(!self.assistant_finished);
+        match part {
+            StreamPart::Delta(fragment) => {
                 debug_assert_eq!(self.phase, ContentPhase::Output);
                 // Mutate the transcript first. If that fails, the fragment must
                 // not appear on the owner-facing stream as if it were durable.
                 self.turn.append_assistant(&fragment)?;
-                Some(ChatStreamEvent::Output(StreamPart::Delta(fragment)))
+                Ok(StreamPart::Delta(fragment))
             }
-            ChatStreamEvent::Output(StreamPart::End) => {
+            StreamPart::End => {
                 debug_assert_eq!(self.phase, ContentPhase::Output);
-                self.phase = ContentPhase::ToolCalls;
-                Some(ChatStreamEvent::Output(StreamPart::End))
-            }
-            ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) => {
-                debug_assert_eq!(self.phase, ContentPhase::ToolCalls);
-                self.draft.tool_calls.push(call.clone());
-                Some(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))
-            }
-            ChatStreamEvent::ToolCalls(StreamPart::End) => {
-                debug_assert_eq!(self.phase, ContentPhase::ToolCalls);
-                // At this boundary the complete backend-shaped assistant
-                // message is known. Finish it before exposing the End marker.
-                self.finish_assistant()?;
                 self.phase = ContentPhase::Ended;
-                Some(ChatStreamEvent::ToolCalls(StreamPart::End))
+                Ok(StreamPart::End)
             }
-        };
-        Ok(progress)
+        }
     }
 
-    fn reasoning_progress(&mut self, mut fragment: String) -> Option<ChatStreamEvent> {
+    fn reasoning_progress(&mut self, mut fragment: String) -> Option<StreamPart<String>> {
         debug_assert_eq!(self.phase, ContentPhase::Reasoning);
         if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
             return None;
@@ -405,28 +369,24 @@ impl<'a> IterationConsumer<'a> {
         }
         self.reasoning_bytes += end;
         fragment.truncate(end);
-        Some(ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)))
+        Some(StreamPart::Delta(fragment))
     }
 
-    fn finish_content(&mut self) -> Vec<ChatStreamEvent> {
-        let mut progress = Vec::with_capacity(3);
+    fn finish_content(&mut self) -> Vec<AgentIterationEvent> {
+        let mut progress = Vec::with_capacity(2);
         if self.phase == ContentPhase::Reasoning {
-            progress.push(ChatStreamEvent::Reasoning(StreamPart::End));
+            progress.push(AgentIterationEvent::Reasoning(StreamPart::End));
             self.phase = ContentPhase::Output;
         }
         if self.phase == ContentPhase::Output {
-            progress.push(ChatStreamEvent::Output(StreamPart::End));
-            self.phase = ContentPhase::ToolCalls;
-        }
-        if self.phase == ContentPhase::ToolCalls {
-            progress.push(ChatStreamEvent::ToolCalls(StreamPart::End));
+            progress.push(AgentIterationEvent::Output(StreamPart::End));
             self.phase = ContentPhase::Ended;
         }
         progress
     }
 
     fn finish_iteration(&mut self) -> Result<IterationCompletion, AgentError> {
-        self.finish_assistant()?;
+        self.finish_assistant(&[])?;
         if self.saw_tool_calls {
             Ok(IterationCompletion::Tools)
         } else {
@@ -439,11 +399,23 @@ impl<'a> IterationConsumer<'a> {
         }
     }
 
-    fn finish_assistant(&mut self) -> Result<(), AgentError> {
+    fn finish_assistant(&mut self, calls: &[ToolCall]) -> Result<(), AgentError> {
         if self.assistant_finished {
             return Ok(());
         }
-        let tool_calls = self.draft.take_tool_calls_json();
+        let tool_calls = calls
+            .iter()
+            .map(|call| {
+                serde_json::json!({
+                    "id": call.id,
+                    "type": "function",
+                    "function": {
+                        "name": call.name,
+                        "arguments": call.arguments_json,
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
         self.saw_tool_calls = !tool_calls.is_empty();
         self.draft.response = self
             .turn
@@ -473,40 +445,19 @@ const fn reasoning_limit() -> usize {
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
-    pub(crate) fn recovery_state(&self) -> &DurableState<RecoveryState> {
-        self.refresh_recovery_state();
-        &self.recovery_state
-    }
-
-    fn collect_recovery_state(
-        kind: AgentKind,
-        adapters: &[Box<dyn ContextAdapter>],
-    ) -> RecoveryState {
-        let mut state = AgentStateBuilder::new(kind);
-        for adapter in adapters {
-            adapter.contribute_state(&mut state);
-        }
-        state.finish()
-    }
-
-    fn refresh_recovery_state(&self) {
-        let next = Self::collect_recovery_state(self.kind.clone(), &self.context_adapters);
-        let changed = self.recovery_state.get().ne(&next);
-        if changed {
-            self.recovery_state.replace(next);
-        }
+    pub(in crate::agent) fn state(&self) -> &DurableState<AgentState> {
+        &self.state
     }
 
     pub(crate) fn is_stopped(&self) -> bool {
-        matches!(self.state, AgentState::Stopped(_))
+        matches!(self.run_state, RunState::Stopped(_))
     }
 
     fn stop(&mut self, reason: StopReason) {
-        self.state = AgentState::Stopped(reason);
+        self.run_state = RunState::Stopped(reason);
         for adapter in &mut self.context_adapters {
             adapter.on_turn_lifecycle(TurnLifecycle::Ended);
         }
-        self.refresh_recovery_state();
     }
 
     fn abandon_open_task(&mut self) {
@@ -576,7 +527,7 @@ where
     ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + 'a {
         async_stream::stream! {
             loop {
-                if !matches!(self.agent.state, AgentState::Running) {
+                if !matches!(self.agent.run_state, RunState::Running) {
                     yield Err(self.agent.fail(AgentError::StateInvariant));
                     break;
                 }
@@ -608,7 +559,6 @@ where
                 let render_span = prepare_span
                     .in_scope(|| tracing::info_span!("context.render", adapter_count));
                 let history = render_span.in_scope(|| self.agent.render_adapter_context());
-                self.agent.refresh_recovery_state();
                 let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
                     Ok(tools) => tools,
                     Err(error) => {
@@ -658,10 +608,11 @@ where
                 let mut consumer = IterationConsumer::new(turn);
 
                 yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                    IterationEvent::Started(iteration_id),
+                    AgentIterationEvent::Started(iteration_id),
                 )));
 
                 let mut result = None;
+                let mut tool_results_ended = false;
                 while let Some(item) = iteration.next().await {
                     let event = match item {
                         Ok(event) => event,
@@ -671,32 +622,82 @@ where
                         }
                     };
                     match event {
-                        IterationLoopEvent::Iteration(IterationEvent::Llm(event)) => match consumer.consume_chat_event(event) {
-                            Ok(Some(event)) => yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                                IterationEvent::Llm(event),
-                            ))),
-                            Ok(None) => {}
-                            Err(error) => {
-                                result = Some(Err(error));
-                                break;
-                            }
-                        },
-                        IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
-                            for event in consumer.finish_content() {
+                        IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
+                            if let Some(part) = consumer.consume_reasoning(part) {
                                 yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                                    IterationEvent::Llm(event),
+                                    AgentIterationEvent::Reasoning(part),
                                 )));
                             }
-                            if let Err(error) = consumer.finish_assistant() {
+                        }
+                        IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
+                            match consumer.consume_output(part) {
+                                Ok(part) => yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                    AgentIterationEvent::Output(part),
+                                ))),
+                                Err(error) => {
+                                    result = Some(Err(error));
+                                    break;
+                                }
+                            }
+                        }
+                        IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
+                            for event in consumer.finish_content() {
+                                yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                            }
+                            if let Err(error) = consumer.finish_assistant(&calls) {
                                 result = Some(Err(error));
                                 break;
                             }
-                            yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                                IterationEvent::BeforeToolCalls(calls),
-                            )));
+                            self.agent
+                                .state
+                                .get_mut()
+                                .record_inflight_toolcalls(calls);
+                            futures_lite::future::yield_now().await;
                         }
-                        IterationLoopEvent::Iteration(event) => {
-                            yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                        IterationLoopEvent::Iteration(IterationEvent::ToolResult(part)) => {
+                            match part {
+                                StreamPart::Delta((call, execution)) => {
+                                    if tool_results_ended {
+                                        result = Some(Err(AgentError::StateInvariant));
+                                        break;
+                                    }
+                                    if let Err(error) = consumer.turn.record_tool_result(
+                                        &call.id,
+                                        &execution.content,
+                                        !execution.ok,
+                                    ) {
+                                        result = Some(Err(AgentError::from(error)));
+                                        break;
+                                    }
+                                    self.agent
+                                        .state
+                                        .get_mut()
+                                        .remove_inflight_toolcall(&call.id);
+                                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                        AgentIterationEvent::ToolResult(StreamPart::Delta((
+                                            call,
+                                            execution,
+                                        ))),
+                                    )));
+                                }
+                                StreamPart::End => {
+                                    if tool_results_ended {
+                                        result = Some(Err(AgentError::StateInvariant));
+                                        break;
+                                    }
+                                    for event in consumer.finish_content() {
+                                        yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                                    }
+                                    if let Err(error) = consumer.finish_assistant(&[]) {
+                                        result = Some(Err(error));
+                                        break;
+                                    }
+                                    tool_results_ended = true;
+                                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(
+                                        AgentIterationEvent::ToolResult(StreamPart::End),
+                                    )));
+                                }
+                            }
                         }
                         IterationLoopEvent::ApprovalRequired {
                             tool_call_id,
@@ -708,19 +709,6 @@ where
                                 tool_call,
                                 reason,
                             }));
-                        }
-                        IterationLoopEvent::ToolResult {
-                            tool_call_id,
-                            execution,
-                        } => {
-                            if let Err(error) = consumer.turn.record_tool_result(
-                                &tool_call_id,
-                                &execution.content,
-                                !execution.ok,
-                            ) {
-                                result = Some(Err(AgentError::from(error)));
-                                break;
-                            }
                         }
                         IterationLoopEvent::Interrupted => {
                             result = Some(Ok(IterationCompletion::Interrupted));
@@ -734,8 +722,11 @@ where
                 }
 
                 for event in consumer.finish_content() {
+                    yield Ok(AgentEvent::Iteration(StreamPart::Delta(event)));
+                }
+                if !tool_results_ended {
                     yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                        IterationEvent::Llm(event),
+                        AgentIterationEvent::ToolResult(StreamPart::End),
                     )));
                 }
                 let result = result.unwrap_or_else(|| consumer.finish_iteration());
@@ -744,7 +735,6 @@ where
                 drop(permission);
                 drop(tools);
 
-                self.agent.refresh_recovery_state();
                 yield Ok(AgentEvent::Iteration(StreamPart::End));
 
                 match self.agent.reduce_iteration(result, &control) {
@@ -789,34 +779,27 @@ mod tests {
         turn.append_user("hello").expect("user fragment appends");
         turn.finish_user().expect("user message finishes");
 
-        let events = [
-            ChatStreamEvent::Reasoning(StreamPart::End),
-            ChatStreamEvent::Output(StreamPart::Delta("Hel".to_owned())),
-            ChatStreamEvent::Output(StreamPart::Delta("lo".to_owned())),
-            ChatStreamEvent::Output(StreamPart::End),
-            ChatStreamEvent::ToolCalls(StreamPart::End),
-        ];
         let mut consumer = IterationConsumer::new(&mut turn);
-        let mut actual = Vec::new();
-        for event in events {
-            let event = consumer
-                .consume_chat_event(event)
-                .expect("chat event is valid")
-                .expect("test event is visible");
-            match &event {
-                ChatStreamEvent::Output(StreamPart::Delta(fragment)) if fragment == "Hel" => {
-                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hel"));
-                }
-                ChatStreamEvent::Output(StreamPart::Delta(fragment)) if fragment == "lo" => {
-                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hello"));
-                }
-                ChatStreamEvent::ToolCalls(StreamPart::End) => {
-                    assert_eq!(assistant_content(&transcript).as_deref(), Some("Hello"));
-                }
-                _ => {}
-            }
-            actual.push(event);
-        }
+        let mut actual = vec![AgentIterationEvent::Reasoning(
+            consumer
+                .consume_reasoning(StreamPart::End)
+                .expect("reasoning end is visible"),
+        )];
+        let first = consumer
+            .consume_output(StreamPart::Delta("Hel".to_owned()))
+            .expect("output fragment appends");
+        assert_eq!(assistant_content(&transcript).as_deref(), Some("Hel"));
+        actual.push(AgentIterationEvent::Output(first));
+        let second = consumer
+            .consume_output(StreamPart::Delta("lo".to_owned()))
+            .expect("output fragment appends");
+        assert_eq!(assistant_content(&transcript).as_deref(), Some("Hello"));
+        actual.push(AgentIterationEvent::Output(second));
+        actual.push(AgentIterationEvent::Output(
+            consumer
+                .consume_output(StreamPart::End)
+                .expect("output ends"),
+        ));
         actual.extend(consumer.finish_content());
         let completion = consumer.finish_iteration();
         drop(consumer);
@@ -828,11 +811,10 @@ mod tests {
         assert_eq!(
             actual,
             vec![
-                ChatStreamEvent::Reasoning(StreamPart::End),
-                ChatStreamEvent::Output(StreamPart::Delta("Hel".to_owned())),
-                ChatStreamEvent::Output(StreamPart::Delta("lo".to_owned())),
-                ChatStreamEvent::Output(StreamPart::End),
-                ChatStreamEvent::ToolCalls(StreamPart::End),
+                AgentIterationEvent::Reasoning(StreamPart::End),
+                AgentIterationEvent::Output(StreamPart::Delta("Hel".to_owned())),
+                AgentIterationEvent::Output(StreamPart::Delta("lo".to_owned())),
+                AgentIterationEvent::Output(StreamPart::End),
             ]
         );
         turn.discard();
@@ -845,23 +827,21 @@ mod tests {
         turn.append_user("hello").expect("user fragment appends");
         turn.finish_user().expect("user message finishes");
         let mut consumer = IterationConsumer::new(&mut turn);
-        let events = [
-            ChatStreamEvent::Reasoning(StreamPart::Delta("think".to_owned())),
-            ChatStreamEvent::Reasoning(StreamPart::End),
-            ChatStreamEvent::Output(StreamPart::Delta("answer".to_owned())),
-            ChatStreamEvent::Output(StreamPart::End),
-            ChatStreamEvent::ToolCalls(StreamPart::Delta(ToolCall {
+        consumer.consume_reasoning(StreamPart::Delta("think".to_owned()));
+        consumer.consume_reasoning(StreamPart::End);
+        consumer
+            .consume_output(StreamPart::Delta("answer".to_owned()))
+            .expect("output appends");
+        consumer
+            .consume_output(StreamPart::End)
+            .expect("output ends");
+        consumer
+            .finish_assistant(&[ToolCall {
                 id: "call-1".to_owned(),
                 name: "search".to_owned(),
                 arguments_json: r#"{"query":"rust"}"#.to_owned(),
-            })),
-            ChatStreamEvent::ToolCalls(StreamPart::End),
-        ];
-        for event in events {
-            consumer
-                .consume_chat_event(event)
-                .expect("assistant event is valid");
-        }
+            }])
+            .expect("assistant finishes");
         assert!(matches!(
             consumer.finish_iteration().expect("iteration finishes"),
             IterationCompletion::Tools

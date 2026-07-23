@@ -1,22 +1,23 @@
 use std::sync::Arc;
 
-use claw_api::{RetryPolicy, ToolCall};
+use claw_api::RetryPolicy;
 use claw_context::{Block, BlockKind};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{Transcript, TranscriptStore};
 use claw_permission::PermissionPolicy;
+use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
 
 use crate::agent::baked;
 use crate::agent::base_agent::{agent_effect_channel, BaseAgent, BaseAgentConfig, ContextAdapter};
 use crate::agent::context_adapters::{
-    AgentModeContextAdapter, AgentResumeNotice, ConversationHistoryContextAdapter,
-    ProfileContextAdapter, ReasoningEffortContextAdapter, ResumedContextAdapter,
-    SkillContextAdapter,
+    AgentModeContextAdapter, ConversationHistoryContextAdapter, ProfileContextAdapter,
+    ReasoningEffortContextAdapter, ResumeContextAdapter, SkillContextAdapter,
 };
+use crate::agent::state::AgentState;
 use crate::agent::tools::internal_tools;
-use crate::agent::{AgentKind, AgentState, ReasoningEffort, ReasoningEffortHandle};
+use crate::agent::{AgentKind, ReasoningEffort, ReasoningEffortHandle};
 use crate::config::ApiUsage;
 
 use super::error::AgentCreateError;
@@ -40,21 +41,6 @@ struct AgentEnvironment {
     inherited_context: Vec<Block<'static>>,
     reasoning_effort: ReasoningEffort,
     state: Option<AgentState>,
-    resume_notice: Option<AgentResumeNotice>,
-}
-
-pub(crate) struct AdditionalAgentState {
-    inflight_toolcalls: Vec<ToolCall>,
-}
-
-impl AdditionalAgentState {
-    pub(crate) fn new(inflight_toolcalls: Vec<ToolCall>) -> Self {
-        Self { inflight_toolcalls }
-    }
-
-    fn into_resume_notice(self) -> AgentResumeNotice {
-        AgentResumeNotice::new(self.inflight_toolcalls)
-    }
 }
 
 impl<
@@ -86,11 +72,10 @@ impl<
                 inherited_context: agent.context().fork_blocks(),
                 reasoning_effort,
                 state: None,
-                resume_notice: None,
             },
         )?;
         if persistence_config == PersistenceConfig::Persistent {
-            self.register_new_agent(id, agent.recovery_state())?;
+            self.register_new_agent(id, agent.state())?;
         }
         Ok((agent, reasoning_effort_handle))
     }
@@ -102,7 +87,6 @@ impl<
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-        additional_state: Option<AdditionalAgentState>,
     ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.kind();
@@ -118,10 +102,9 @@ impl<
                 inherited_context: Vec::new(),
                 reasoning_effort,
                 state: Some(persisted),
-                resume_notice: additional_state.map(AdditionalAgentState::into_resume_notice),
             },
         )?;
-        self.register_restored_agent(id, agent.recovery_state())?;
+        self.register_restored_agent(id, agent.state())?;
         Ok((agent, reasoning_effort_handle))
     }
 
@@ -147,11 +130,10 @@ impl<
                 inherited_context: Vec::new(),
                 reasoning_effort,
                 state: None,
-                resume_notice: None,
             },
         )?;
         if persistence_config == PersistenceConfig::Persistent {
-            self.register_new_agent(id, agent.recovery_state())?;
+            self.register_new_agent(id, agent.state())?;
         }
         Ok((agent, reasoning_effort_handle))
     }
@@ -206,8 +188,7 @@ impl<
             extension_tools,
             inherited_context,
             reasoning_effort,
-            state: resume,
-            resume_notice,
+            state: recovery_state,
         } = environment;
 
         let manifest = baked::find(kind).ok_or_else(|| {
@@ -216,13 +197,7 @@ impl<
         })?;
         let runtime = manifest.runtime();
         let skills = self.skills.skill_set();
-        let (mode_state, resumed_state) = match resume {
-            Some(state) => {
-                let (mode, resumed) = state.into_parts();
-                (Some(mode), Some(resumed))
-            }
-            None => (None, None),
-        };
+        let state = DurableState::new(recovery_state.unwrap_or_else(|| AgentState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.
@@ -232,8 +207,7 @@ impl<
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
-        let resumed_adapter =
-            ResumedContextAdapter::new(resumed_state, resume_notice, tools.discovery());
+        let resume_adapter = ResumeContextAdapter::new(state.clone(), tools.discovery());
 
         // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
         // adapters read it through the `&dyn Transcript` lent to `prepare`.
@@ -259,15 +233,15 @@ impl<
         };
         // AgentManager is the only configured-agent assembly point. BaseAgent sees
         // one generic, immutable adapter set; concrete mode, memory, and skill
-        // semantics do not leak into its runtime protocol. ResumedContextAdapter
+        // semantics do not leak into its runtime protocol. ResumeContextAdapter
         // is the boundary that contributes resume context and exposes the pure
-        // discovery group implemented alongside the resumed adapter.
+        // discovery group implemented alongside the resume adapter.
         let (reasoning_effort_adapter, reasoning_effort_handle) =
             ReasoningEffortContextAdapter::new(reasoning_effort);
         let context_adapters: Vec<Box<dyn ContextAdapter>> = vec![
-            Box::new(AgentModeContextAdapter::new(mode_state, effect_emitter)),
+            Box::new(AgentModeContextAdapter::new(state.clone(), effect_emitter)),
             Box::new(reasoning_effort_adapter),
-            Box::new(resumed_adapter),
+            Box::new(resume_adapter),
             Box::new(conversation_history),
             Box::new(SkillContextAdapter::new(skills)),
             Box::new(profile_adapter),
@@ -279,7 +253,7 @@ impl<
             ApiUsage::SubAgent
         };
         let base_config = BaseAgentConfig {
-            kind: kind.clone(),
+            state,
             transcript: transcript,
             api_manager: Arc::clone(&self.api_manager),
             api_usage,

@@ -11,15 +11,15 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
+use claw_api::ToolCall;
+use claw_tool::ToolExecution;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, AgentId, IterationId};
-use claw_api::ToolCall;
-
 use super::approval_resolver::ApprovalResolverError;
 use super::control::SessionCommand;
+use crate::agent::{AgentApprovalError, AgentCreateError, AgentError, AgentId, IterationId};
 
 crate::define_prefixed_id!(InputRequestId, "input-", "input request");
 crate::define_prefixed_id!(TurnId, "turn-", "turn");
@@ -126,7 +126,7 @@ pub enum TurnEvent {
 ///
 /// The three content streams are emitted in this order:
 /// `Reasoning(Delta)* -> Reasoning(End) -> Output(Delta)* -> Output(End) ->
-/// ToolCalls(Delta)* -> ToolCalls(End)`. Every content stream emits exactly one
+/// ToolResult(Delta)* -> ToolResult(End)`. Every content stream emits exactly one
 /// [`StreamPart::End`], including streams with no deltas.
 #[derive(Debug)]
 pub enum IterationEvent {
@@ -139,9 +139,9 @@ pub enum IterationEvent {
     Reasoning(StreamPart<String>),
     /// Assistant-visible model text. Deltas are append fragments.
     Output(StreamPart<String>),
-    /// Complete tool calls requested by the model this iteration. Each delta is
-    /// one call; `End` means no more calls will be emitted for the iteration.
-    ToolCalls(StreamPart<ToolCall>),
+    /// Completed tool executions. Each delta contains the original request and
+    /// its result; `End` means no more results will be emitted this iteration.
+    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
     /// Provider token/cache counters for the completed LLM iteration.
     #[cfg(feature = "cache_profile")]
     Usage {

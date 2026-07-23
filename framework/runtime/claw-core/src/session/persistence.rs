@@ -35,7 +35,7 @@ impl DurableStateCodec for SessionManagerState {
 }
 
 impl DurableStateCodec for SessionPersistentState {
-    const SCHEMA_VERSION: SchemaVersion = 7;
+    const SCHEMA_VERSION: SchemaVersion = 8;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -62,7 +62,6 @@ pub(super) fn session_instance(session: SessionId) -> InstanceId {
 
 #[cfg(test)]
 mod tests {
-    use claw_api::ToolCall;
     use claw_permission::PermissionLevel;
     use claw_persistence::{DurableStateCodec, StateSlice};
 
@@ -93,18 +92,13 @@ mod tests {
         state.reasoning_effort = ReasoningEffort::Medium;
         state.permission_level = PermissionLevel::Ask;
         state.root_agent = Some(AgentId::new(7));
-        state.add_root_inflight_toolcall(&ToolCall {
-            id: "call-1".to_owned(),
-            name: "subagent_spawn".to_owned(),
-            arguments_json: r#"{"kind":"worker","foreground":false}"#.to_owned(),
-        });
 
         let encoded = state.encode_state().unwrap().into_owned();
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
         assert_eq!(json["reasoning_effort"], "medium");
         assert_eq!(json["permission_level"], "ask");
         assert_eq!(json["root_agent"], "agent-7");
-        assert_eq!(json["root_inflight_toolcalls"][0]["name"], "subagent_spawn");
+        assert!(json.get("root_inflight_toolcalls").is_none());
 
         let restored = SessionPersistentState::decode_state(
             SessionPersistentState::SCHEMA_VERSION,

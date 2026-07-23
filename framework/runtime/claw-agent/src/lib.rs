@@ -15,7 +15,7 @@ pub use claw_core::{
     OpenSessionError, PermissionLevel, ReasoningEffort, SessionCloseReason, SessionControl,
     SessionControlError, SessionCreateError, SessionError, SessionEvent, SessionEventError,
     SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall,
-    ToolCallId, TurnEvent, TurnEventError, TurnId, TurnOrigin,
+    ToolCallId, ToolExecution, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;

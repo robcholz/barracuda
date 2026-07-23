@@ -6,7 +6,7 @@ use claw_memory::TranscriptStore;
 use claw_persistence::{DurableState, InstanceId};
 
 use super::AgentId;
-use crate::agent::AgentState;
+use crate::agent::state::AgentState;
 
 use super::error::AgentCreateError;
 use super::AgentManager;

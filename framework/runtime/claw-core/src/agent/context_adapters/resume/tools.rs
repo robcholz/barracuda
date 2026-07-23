@@ -1,22 +1,22 @@
 //! The `tool_discovery` group: search hidden groups and load one for the next turn.
 
 use claw_permission::{Action, RiskClass};
+use claw_persistence::DurableState;
 use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolDiscoveryHandle, ToolError, ToolGroup,
     ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
 use serde_json::json;
 
+use crate::agent::state::AgentState;
 use crate::agent::tools::helper::optional_string_argument;
-
-use super::{lock_state, SharedResumedState};
 
 /// Build the always-visible discovery group over a [`ToolSet`](claw_tool::ToolSet)
 /// bridge. All other registered groups remain hidden until `tool_load` reveals
 /// one for the next turn.
 pub(super) fn discovery_tools(
     discovery: ToolDiscoveryHandle,
-    state: SharedResumedState,
+    state: DurableState<AgentState>,
 ) -> ToolGroup {
     ToolGroup::new(
         "tool_discovery",
@@ -39,7 +39,7 @@ struct ToolSearchTool {
 /// Queues a group to be enabled when ToolSet begins the next iteration.
 struct ToolLoadTool {
     discovery: ToolDiscoveryHandle,
-    state: SharedResumedState,
+    state: DurableState<AgentState>,
 }
 
 impl ToolSpec for ToolLoadTool {
@@ -62,7 +62,9 @@ impl SyncToolHandler for ToolLoadTool {
 
         let loaded = self.discovery.request_load(group_id.clone());
         if loaded {
-            lock_state(&self.state).record_loaded_tool_group(group_id.clone());
+            self.state
+                .get_mut()
+                .record_loaded_tool_group(group_id.clone());
         }
         Ok(ToolOutput {
             output: json!({
@@ -95,18 +97,20 @@ impl SyncToolHandler for ToolSearchTool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
+    use claw_persistence::DurableState;
     use claw_tool::{
         SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,
         ToolSpec,
     };
 
     use super::ToolLoadTool;
-    use crate::agent::context_adapters::resumed::{lock_state, ResumedState};
+    use crate::agent::state::AgentState;
+    use crate::agent::AgentKind;
 
     #[test]
-    fn successful_load_is_recorded_in_adapter_state() {
+    fn successful_load_is_recorded_in_agent_state() {
         let registry = Arc::new(ToolRegistry::new());
         registry
             .register_group(ToolGroup::new(
@@ -121,10 +125,10 @@ mod tests {
         {
             let _initial_tools = tool_set.begin().expect("tool set begins");
         }
-        let state = Arc::new(Mutex::new(ResumedState::new(Vec::new())));
+        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
         let tool = ToolLoadTool {
             discovery,
-            state: Arc::clone(&state),
+            state: state.clone(),
         };
         let call =
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
@@ -133,7 +137,7 @@ mod tests {
         let output = tool.invoke(&call).expect("load succeeds");
 
         assert!(output.ok);
-        assert!(lock_state(&state).loaded_tool_groups.contains("hidden"));
+        assert!(state.get().loaded_tool_groups().contains("hidden"));
     }
 
     struct HiddenTool;

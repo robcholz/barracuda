@@ -12,8 +12,6 @@ use claw_context::ContextSink;
 use claw_memory::Transcript;
 use claw_tool::ToolGroup;
 
-use super::AgentStateBuilder;
-
 /// Turn-lifecycle events observed by context adapters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::agent) enum TurnLifecycle {
@@ -57,7 +55,4 @@ pub(in crate::agent) trait ContextAdapter {
 
     /// Observe a turn-lifecycle transition.
     fn on_turn_lifecycle(&mut self, _lifecycle: TurnLifecycle) {}
-
-    /// Add this adapter's typed durable DTO to the complete Agent state.
-    fn contribute_state(&self, _state: &mut AgentStateBuilder) {}
 }

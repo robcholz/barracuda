@@ -19,7 +19,7 @@ use claw_skill::FsSkillRegistry;
 use claw_tool::ToolRegistry;
 
 use self::long_term::LongTermDeps;
-pub(crate) use create::{AdditionalAgentState, PersistenceConfig};
+pub(crate) use create::PersistenceConfig;
 pub use error::AgentCreateError;
 pub(crate) use error::AgentManagerError;
 

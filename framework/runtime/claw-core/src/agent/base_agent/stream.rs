@@ -6,11 +6,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use claw_api::ToolCall;
 use claw_memory::TurnError;
+use claw_tool::ToolExecution;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use futures_lite::future;
 
-use super::iteration_loop::{IterationEvent, IterationLoopError, ToolCallId};
+use super::iteration_loop::{IterationId, IterationLoopError, ToolCallId};
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum AgentSubmitError {
@@ -56,9 +57,17 @@ pub enum AgentError {
 /// One observable event produced by a submitted Agent task.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum AgentEvent {
-    Iteration(StreamPart<IterationEvent>),
+    Iteration(StreamPart<AgentIterationEvent>),
     InputRequired(AgentInputRequest),
     Finished(AgentOutcome),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum AgentIterationEvent {
+    Started(IterationId),
+    Reasoning(StreamPart<String>),
+    Output(StreamPart<String>),
+    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,7 +88,7 @@ pub(crate) enum AgentOutcome {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AgentCompletion {
-    /// A model response already exposed through `Llm(Output(_))` events.
+    /// A model response already exposed through `Output(_)` events.
     Streamed(String),
     /// A final message synthesized by an Agent effect and not streamed before.
     Synthesized(String),
@@ -283,6 +292,7 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
+    use crate::agent::IterationId;
     use futures_lite::future::block_on;
     use futures_lite::StreamExt as _;
 
@@ -295,8 +305,9 @@ mod tests {
         let producer_phase = Rc::clone(&phase);
         let progress = async_stream::stream! {
             yield Ok(AgentEvent::Iteration(StreamPart::Delta(
-                IterationEvent::BeforeToolCalls(Vec::new()),
+                AgentIterationEvent::Started(IterationId::new(0)),
             )));
+            future::yield_now().await;
             producer_phase.set(1);
             yield Ok(AgentEvent::Finished(AgentOutcome::Cancelled));
             producer_phase.set(2);
@@ -307,13 +318,17 @@ mod tests {
             assert_eq!(
                 stream.next().await,
                 Some(Ok(AgentEvent::Iteration(StreamPart::Delta(
-                    IterationEvent::BeforeToolCalls(Vec::new())
+                    AgentIterationEvent::Started(IterationId::new(0)),
                 ))))
             );
             assert_eq!(phase.get(), 0, "producer remains parked at the boundary");
 
+            let mut next = Box::pin(stream.next());
+            assert_eq!(future::poll_once(next.as_mut()).await, None);
+            assert_eq!(phase.get(), 0, "yield_now ends the current poll");
+
             assert_eq!(
-                stream.next().await,
+                next.await,
                 Some(Ok(AgentEvent::Finished(AgentOutcome::Cancelled)))
             );
             assert_eq!(phase.get(), 1, "the next poll resumes the producer once");

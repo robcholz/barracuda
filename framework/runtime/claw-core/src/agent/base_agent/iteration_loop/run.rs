@@ -1,7 +1,7 @@
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 
 use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
@@ -36,17 +36,12 @@ struct PendingApproval<'a> {
     announced: bool,
 }
 
-type ToolRunOutput = Result<(ToolCallId, String, ToolExecution), IterationLoopError>;
+type ToolRunOutput = Result<(ToolCall, ToolExecution), IterationLoopError>;
 type ToolRunFuture<'a> = Pin<Box<dyn Future<Output = ToolRunOutput> + 'a>>;
 
 struct ToolRuns<'a> {
     futures: Vec<ToolRunFuture<'a>>,
     cursor: usize,
-}
-
-struct ToolCallBatch {
-    order: Vec<ToolCallId>,
-    results: BTreeMap<ToolCallId, (String, ToolExecution)>,
 }
 
 enum ToolBatchUpdate {
@@ -56,12 +51,12 @@ enum ToolBatchUpdate {
 
 struct ToolPhase<'a> {
     tools: &'a ToolSetHandle<'a>,
-    batch: Option<ToolCallBatch>,
     runs: ToolRuns<'a>,
     pending: VecDeque<PendingApproval<'a>>,
     active_permission: Option<PendingApproval<'a>>,
-    ready_results: VecDeque<(String, ToolExecution)>,
-    finished: bool,
+    ready_results: VecDeque<(ToolCall, ToolExecution)>,
+    remaining_results: usize,
+    results_ended: bool,
 }
 
 impl<'a, H, Timer, P> IterationLoop<'a, H, Timer, P>
@@ -74,7 +69,7 @@ where
     ///
     /// A successful iteration ends at `None`; failures are yielded as `Err`.
     /// Code after each `yield` cannot run until the owner polls again, making
-    /// `BeforeToolCalls` a natural execution boundary without a channel bridge.
+    /// `BeforeToolCalls` a natural pre-execution boundary.
     pub(crate) fn run(
         self,
         step: LlmStep<'a>,
@@ -126,15 +121,16 @@ where
                     .instrument(chat_span.clone())
                     .await;
                 match next {
-                    Some(Ok(event)) => {
-                        // The owner needs the event now and the tool phase needs
-                        // the complete call later. This is the one unavoidable
-                        // ToolCall copy with the current by-value event API.
-                        if let ChatStreamEvent::ToolCalls(StreamPart::Delta(call)) = &event {
-                            tool_calls.push(call.clone());
-                        }
-                        yield IterationLoopEvent::Iteration(IterationEvent::Llm(event));
+                    Some(Ok(ChatStreamEvent::Reasoning(part))) => {
+                        yield IterationLoopEvent::Iteration(IterationEvent::Reasoning(part));
                     }
+                    Some(Ok(ChatStreamEvent::Output(part))) => {
+                        yield IterationLoopEvent::Iteration(IterationEvent::Output(part));
+                    }
+                    Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))) => {
+                        tool_calls.push(call);
+                    }
+                    Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::End))) => {}
                     Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
                         tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
                         yield IterationLoopEvent::Cancelled;
@@ -154,6 +150,7 @@ where
                 return;
             }
             if tool_calls.is_empty() {
+                yield IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::End));
                 return;
             }
 
@@ -197,14 +194,14 @@ impl<'a> ToolPhase<'a> {
             }
         }
 
-        let mut batch = ToolCallBatch::new(tool_calls.len());
+        let remaining_results = tool_calls.len();
         let mut tool_call_ids = ToolCallIdAllocator::new();
         let mut runs = ToolRuns::new();
         let mut pending = VecDeque::new();
+        let mut ready_results = VecDeque::new();
 
         for tool_call in tool_calls {
             let id = tool_call_ids.next();
-            batch.order.push(id);
             let invocation = match ToolInvocation::try_new(
                 Some(&tool_call.id),
                 &tool_call.name,
@@ -212,28 +209,26 @@ impl<'a> ToolPhase<'a> {
             ) {
                 Ok(invocation) => invocation,
                 Err(error) => {
-                    batch.collect(
-                        id,
-                        tool_call.id,
+                    ready_results.push_back((
+                        tool_call,
                         ToolExecution {
                             content: error.to_string(),
                             ok: false,
                         },
-                    );
+                    ));
                     continue;
                 }
             };
             let action = match tools.classify(&invocation) {
                 Ok(action) => action,
                 Err(error) => {
-                    batch.collect(
-                        id,
-                        tool_call.id,
+                    ready_results.push_back((
+                        tool_call,
                         ToolExecution {
                             content: error.to_string(),
                             ok: false,
                         },
-                    );
+                    ));
                     continue;
                 }
             };
@@ -249,14 +244,13 @@ impl<'a> ToolPhase<'a> {
                 ToolAuthorization::Allow => {
                     runs.push(execute_scheduled_call(tools, scheduled));
                 }
-                ToolAuthorization::Deny(reason) => batch.collect(
-                    id,
-                    scheduled.call.id,
+                ToolAuthorization::Deny(reason) => ready_results.push_back((
+                    scheduled.call,
                     ToolExecution {
                         content: reason,
                         ok: false,
                     },
-                ),
+                )),
                 ToolAuthorization::Pending {
                     reason,
                     activate,
@@ -273,12 +267,12 @@ impl<'a> ToolPhase<'a> {
 
         Ok(Self {
             tools,
-            batch: Some(batch),
             runs,
             pending,
             active_permission: None,
-            ready_results: VecDeque::new(),
-            finished: false,
+            ready_results,
+            remaining_results,
+            results_ended: false,
         })
     }
 
@@ -287,17 +281,20 @@ impl<'a> ToolPhase<'a> {
         control: &super::super::stream::RunControl,
     ) -> Result<Option<IterationLoopEvent>, IterationLoopError> {
         loop {
-            if let Some((tool_call_id, execution)) = self.ready_results.pop_front() {
-                return Ok(Some(IterationLoopEvent::ToolResult {
-                    tool_call_id,
-                    execution,
-                }));
+            if let Some((call, execution)) = self.ready_results.pop_front() {
+                return self.tool_result(call, execution).map(Some);
             }
-            if self.finished {
+            if self.results_ended {
                 return Ok(None);
             }
+            if self.remaining_results == 0 {
+                self.results_ended = true;
+                return Ok(Some(IterationLoopEvent::Iteration(
+                    IterationEvent::ToolResult(StreamPart::End),
+                )));
+            }
             if control.is_cancelled() {
-                self.finished = true;
+                self.results_ended = true;
                 return Ok(Some(IterationLoopEvent::Cancelled));
             }
 
@@ -319,16 +316,7 @@ impl<'a> ToolPhase<'a> {
             }
 
             if self.active_permission.is_none() && self.runs.is_empty() {
-                let batch = self
-                    .batch
-                    .take()
-                    .ok_or(IterationLoopError::IncompleteToolBatch)?;
-                if !batch.is_complete() {
-                    return Err(IterationLoopError::IncompleteToolBatch);
-                }
-                self.ready_results = batch.into_results();
-                self.finished = true;
-                continue;
+                return Err(IterationLoopError::IncompleteToolBatch);
             }
 
             let update = match self.active_permission.as_mut() {
@@ -345,11 +333,8 @@ impl<'a> ToolPhase<'a> {
 
             match update {
                 ToolBatchUpdate::Execution(result) => {
-                    let (id, provider_id, result) = result?;
-                    self.batch
-                        .as_mut()
-                        .ok_or(IterationLoopError::IncompleteToolBatch)?
-                        .collect(id, provider_id, result);
+                    let (call, execution) = result?;
+                    return self.tool_result(call, execution).map(Some);
                 }
                 ToolBatchUpdate::Permission(decision) => {
                     let waiting = self
@@ -362,25 +347,22 @@ impl<'a> ToolPhase<'a> {
                                 .push(execute_scheduled_call(self.tools, waiting.call));
                         }
                         ToolPermission::Deny(reason) => {
-                            let id = waiting.call.id;
-                            self.batch
-                                .as_mut()
-                                .ok_or(IterationLoopError::IncompleteToolBatch)?
-                                .collect(
-                                    id,
-                                    waiting.call.call.id,
+                            return self
+                                .tool_result(
+                                    waiting.call.call,
                                     ToolExecution {
                                         content: reason,
                                         ok: false,
                                     },
-                                );
+                                )
+                                .map(Some);
                         }
                         ToolPermission::Interrupted => {
-                            self.finished = true;
+                            self.results_ended = true;
                             return Ok(Some(IterationLoopEvent::Interrupted));
                         }
                         ToolPermission::Cancelled => {
-                            self.finished = true;
+                            self.results_ended = true;
                             return Ok(Some(IterationLoopEvent::Cancelled));
                         }
                     }
@@ -388,34 +370,19 @@ impl<'a> ToolPhase<'a> {
             }
         }
     }
-}
 
-impl ToolCallBatch {
-    fn new(capacity: usize) -> Self {
-        Self {
-            order: Vec::with_capacity(capacity),
-            results: BTreeMap::new(),
-        }
-    }
-
-    fn collect(&mut self, id: ToolCallId, provider_id: String, execution: ToolExecution) {
-        let previous = self.results.insert(id, (provider_id, execution));
-        debug_assert!(previous.is_none());
-    }
-
-    fn is_complete(&self) -> bool {
-        self.results.len() == self.order.len()
-            && self.order.iter().all(|id| self.results.contains_key(id))
-    }
-
-    fn into_results(mut self) -> VecDeque<(String, ToolExecution)> {
-        let mut results = VecDeque::with_capacity(self.order.len());
-        for id in self.order {
-            if let Some(result) = self.results.remove(&id) {
-                results.push_back(result);
-            }
-        }
-        results
+    fn tool_result(
+        &mut self,
+        call: ToolCall,
+        execution: ToolExecution,
+    ) -> Result<IterationLoopEvent, IterationLoopError> {
+        self.remaining_results = self
+            .remaining_results
+            .checked_sub(1)
+            .ok_or(IterationLoopError::IncompleteToolBatch)?;
+        Ok(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+            StreamPart::Delta((call, execution)),
+        )))
     }
 }
 
@@ -465,7 +432,6 @@ impl<'a> ToolRuns<'a> {
 }
 
 async fn execute_scheduled_call(tools: &ToolSetHandle<'_>, call: ScheduledCall) -> ToolRunOutput {
-    let id = call.id;
     let span = tracing::info_span!("toolcall", tool = %call.call.name);
     let execution = {
         let invocation = match ToolInvocation::try_new(
@@ -476,8 +442,7 @@ async fn execute_scheduled_call(tools: &ToolSetHandle<'_>, call: ScheduledCall) 
             Ok(invocation) => invocation,
             Err(error) => {
                 return Ok((
-                    id,
-                    call.call.id,
+                    call.call,
                     ToolExecution {
                         content: error.to_string(),
                         ok: false,
@@ -497,7 +462,7 @@ async fn execute_scheduled_call(tools: &ToolSetHandle<'_>, call: ScheduledCall) 
             tracing::warn!(name: "result", ok = false);
         }
     });
-    Ok((id, call.call.id, execution))
+    Ok((call.call, execution))
 }
 
 #[cfg(test)]
@@ -597,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn allowed_tools_run_while_permission_is_pending_and_results_keep_call_order() {
+    fn allowed_tools_run_while_permission_is_pending_and_results_use_completion_order() {
         let executions = Arc::new(AtomicUsize::new(0));
         let (_registry, mut tool_set) = test_tools(&executions);
         let tools = tool_set.begin().expect("test tool set starts");
@@ -640,13 +605,19 @@ mod tests {
             [ToolCallId::new(0), ToolCallId::new(1)]
         );
         assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            events.last(),
+            Some(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::End
+            )))
+        ));
         let results = events
             .into_iter()
             .filter_map(|event| match event {
-                IterationLoopEvent::ToolResult {
-                    tool_call_id,
+                IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::Delta((
+                    call,
                     execution,
-                } => Some((tool_call_id, execution)),
+                )))) => Some((call.id, execution)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -654,17 +625,17 @@ mod tests {
             results,
             vec![
                 (
-                    "call-deny".to_owned(),
-                    ToolExecution {
-                        content: "policy denied".to_owned(),
-                        ok: false,
-                    },
-                ),
-                (
                     "call-allow".to_owned(),
                     ToolExecution {
                         content: "allowed".to_owned(),
                         ok: true,
+                    },
+                ),
+                (
+                    "call-deny".to_owned(),
+                    ToolExecution {
+                        content: "policy denied".to_owned(),
+                        ok: false,
                     },
                 ),
             ]

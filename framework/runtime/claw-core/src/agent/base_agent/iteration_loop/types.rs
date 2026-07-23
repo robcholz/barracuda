@@ -1,5 +1,6 @@
-use claw_api::{ChatError, ChatStreamEvent, ToolCall};
+use claw_api::{ChatError, ToolCall};
 use claw_tool::{ToolExecution, ToolSetError, ToolSetHandle};
+use claw_utils::stream::StreamPart;
 use serde_json::Value;
 use strum::IntoStaticStr;
 
@@ -37,14 +38,15 @@ pub(crate) struct LlmStep<'a> {
     pub(crate) tools: &'a ToolSetHandle<'a>,
 }
 
-/// One owner-visible event from an iteration.
+/// One event from an iteration.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationEvent {
-    Started(IterationId),
-    Llm(ChatStreamEvent),
-    /// The calls are now visible to the owner. They cannot execute until the
-    /// owner polls the stream again.
+    Reasoning(StreamPart<String>),
+    Output(StreamPart<String>),
+    /// BaseAgent records these calls before polling the iteration again and
+    /// allowing tool execution to begin.
     BeforeToolCalls(Vec<ToolCall>),
+    ToolResult(StreamPart<(ToolCall, ToolExecution)>),
 }
 
 /// One internal item produced by an [`super::IterationLoop`].
@@ -54,17 +56,11 @@ pub(crate) enum IterationEvent {
 /// because they carry distinct control semantics for `BaseAgent`.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum IterationLoopEvent {
-    /// An owner-visible iteration event. BaseAgent may tap its payload for
-    /// transcript durability before forwarding it.
     Iteration(IterationEvent),
     ApprovalRequired {
         tool_call_id: ToolCallId,
         tool_call: ToolCall,
         reason: String,
-    },
-    ToolResult {
-        tool_call_id: String,
-        execution: ToolExecution,
     },
     Interrupted,
     Cancelled,

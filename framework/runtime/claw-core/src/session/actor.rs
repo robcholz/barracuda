@@ -5,22 +5,13 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
-use claw_api::ChatStreamEvent;
+use claw_api::ToolCall;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use tracing::Instrument as _;
-
-use crate::agent::{
-    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentEvent, AgentId,
-    AgentInputRequest, AgentOutcome, IterationEvent as AgentIterationEvent, PersistenceConfig,
-    ReasoningEffort, ToolCallId,
-};
-use crate::config::SharedApiManager;
-use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
-use claw_api::ToolCall;
 
 use super::agent_slot::{AgentSlot, AgentSlotUpdate};
 use super::approval_resolver::{
@@ -35,6 +26,12 @@ use super::{
     SessionEvent, SessionEventError, SessionId, SessionInputError, SessionPersistence,
     SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
+use crate::agent::{
+    AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest, AgentIterationEvent,
+    AgentOutcome, PersistenceConfig, ReasoningEffort, ToolCallId,
+};
+use crate::config::SharedApiManager;
+use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
 
 type ApprovalFuture =
     Pin<Box<dyn Future<Output = Result<PermissionReplyResolution, ApprovalResolverError>>>>;
@@ -57,7 +54,6 @@ struct ApprovalTask {
 
 struct ActiveTurn {
     id: TurnId,
-    toolcalls: Vec<ToolCall>,
 }
 
 #[derive(Clone, Copy)]
@@ -536,16 +532,12 @@ where
         }
         let reasoning_effort = self.state.get().reasoning_effort;
         let (id, agent, reasoning_handle) = if let Some(id) = self.restored_root.take() {
-            let root_inflight_toolcalls = self.state.get().root_inflight_toolcalls().to_vec();
-            let additional = (!root_inflight_toolcalls.is_empty())
-                .then(|| AdditionalAgentState::new(root_inflight_toolcalls));
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
                 Arc::clone(&self.permission) as Arc<_>,
                 reasoning_effort,
                 Vec::new(),
-                additional,
             )?;
             (id, agent, reasoning)
         } else {
@@ -591,11 +583,6 @@ where
 
     fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
-            AgentEvent::Iteration(StreamPart::Delta(AgentIterationEvent::BeforeToolCalls(
-                calls,
-            ))) => {
-                self.record_toolcalls(calls);
-            }
             AgentEvent::Iteration(progress) => self.emit_iteration(progress),
             AgentEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id,
@@ -618,16 +605,13 @@ where
             StreamPart::Delta(AgentIterationEvent::Started(iteration)) => {
                 IterationEvent::Started { iteration }
             }
-            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::Reasoning(part))) => {
+            StreamPart::Delta(AgentIterationEvent::Reasoning(part)) => {
                 IterationEvent::Reasoning(part)
             }
-            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::Output(part))) => {
-                IterationEvent::Output(part)
+            StreamPart::Delta(AgentIterationEvent::Output(part)) => IterationEvent::Output(part),
+            StreamPart::Delta(AgentIterationEvent::ToolResult(part)) => {
+                IterationEvent::ToolResult(part)
             }
-            StreamPart::Delta(AgentIterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
-                IterationEvent::ToolCalls(part)
-            }
-            StreamPart::Delta(AgentIterationEvent::BeforeToolCalls(_)) => return,
             StreamPart::End => IterationEvent::Ended,
         };
         self.emit_turn(TurnEvent::Iteration(event));
@@ -687,10 +671,7 @@ where
         debug_assert!(self.active_turn.is_none());
         let turn = TurnId(self.next_turn);
         self.next_turn = self.next_turn.saturating_add(1);
-        self.active_turn = Some(ActiveTurn {
-            id: turn,
-            toolcalls: Vec::new(),
-        });
+        self.active_turn = Some(ActiveTurn { id: turn });
         self.emit_turn(TurnEvent::Started {
             turn,
             origin: TurnOrigin::User,
@@ -701,24 +682,7 @@ where
         let Some(turn) = self.active_turn.take() else {
             return;
         };
-        if !turn.toolcalls.is_empty() {
-            let mut state = self.state.get_mut();
-            for call in &turn.toolcalls {
-                state.remove_root_inflight_toolcall(call);
-            }
-        }
         self.emit_turn(TurnEvent::Ended { turn: turn.id });
-    }
-
-    fn record_toolcalls(&mut self, calls: Vec<ToolCall>) {
-        let Some(turn) = &mut self.active_turn else {
-            return;
-        };
-        let mut state = self.state.get_mut();
-        for call in calls {
-            state.add_root_inflight_toolcall(&call);
-            turn.toolcalls.push(call);
-        }
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
