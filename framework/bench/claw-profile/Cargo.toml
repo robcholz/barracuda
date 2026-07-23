@@ -4,6 +4,7 @@ authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
 description = "Profiling utilities and common heap metrics for Claw workloads"
+publish = false
 
 [lib]
 crate-type = ["rlib"]

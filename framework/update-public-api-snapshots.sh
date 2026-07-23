@@ -30,6 +30,6 @@ crates=(
 
 for crate in "${crates[@]}"; do
     echo "updating public API snapshot: ${crate}"
-    cargo public-api --manifest-path "${crate}/Cargo.toml" --color never -sss \
+    cargo public-api --manifest-path "crates/${crate}/Cargo.toml" --color never -sss \
         >"snapshots/${crate}.txt"
 done

@@ -1,0 +1,22 @@
+[package]
+name = "claw-agent-profile"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Host memory-profiling scenarios for the assembled Claw agent"
+publish = false
+
+[[bin]]
+name = "claw-agent-profile"
+path = "src/main.rs"
+
+[dependencies]
+claw-agent = { path = "../../crates/claw-agent" }
+claw-interface = { path = "../../crates/claw-interface", features = [
+    "memfs",
+    "httpmock",
+    "timermock",
+    "stdthread",
+    "tokioexecutor",
+] }
+claw-profile = { path = "../claw-profile", features = ["dhat-heap"] }

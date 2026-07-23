@@ -22,10 +22,6 @@ required-features = ["dev", "cache_profile"]
 name = "tool_submit_loop"
 required-features = ["dev"]
 
-[[example]]
-name = "memory_profile"
-required-features = ["memory_profile"]
-
 [features]
 # Concepts:
 # - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
@@ -59,17 +55,6 @@ cache_profile = [
     "claw-api/cache_profile",
     "claw-core/cache_profile",
 ]
-# Host-only heap profiling harnesses. Kept separate from `dev` so normal host
-# tests and firmware dependency resolution do not pull in the profiling backend.
-memory_profile = [
-    "dep:claw-profile",
-    "claw-interface/memfs",
-    "claw-interface/httpmock",
-    "claw-interface/timermock",
-    "claw-interface/stdthread",
-    "claw-interface/tokioexecutor",
-]
-
 [dependencies]
 claw-core = { path = "../claw-core" }
 claw-api = { path = "../claw-api" }
@@ -83,7 +68,6 @@ claw-memory = { path = "../claw-memory" }
 # build (via claw-cabi) stays free of reqwest/std-thread.
 claw-interface = { path = "../claw-interface" }
 claw-log = { path = "../claw-log", optional = true }
-claw-profile = { path = "../claw-profile", features = ["dhat-heap"], optional = true }
 thiserror = "2"
 # Dev-only: ergonomic errors for the `claw-agent-chat` bin and the examples.
 anyhow = { version = "1", optional = true }

@@ -199,7 +199,6 @@ dependencies = [
  "claw-log",
  "claw-memory",
  "claw-persistence",
- "claw-profile",
  "claw-tool",
  "claw-utils",
  "dotenvy",
@@ -210,6 +209,15 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "claw-agent-profile"
+version = "0.1.0"
+dependencies = [
+ "claw-agent",
+ "claw-interface",
+ "claw-profile",
 ]
 
 [[package]]

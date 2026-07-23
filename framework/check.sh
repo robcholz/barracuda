@@ -35,6 +35,6 @@ for crate in "${crates[@]}"; do
     snapshot="snapshots/${crate}.txt"
     current="${tmpdir}/${crate}.txt"
     echo "checking public API snapshot: ${crate}"
-    cargo public-api --manifest-path "${crate}/Cargo.toml" --color never -sss >"${current}"
+    cargo public-api --manifest-path "crates/${crate}/Cargo.toml" --color never -sss >"${current}"
     diff -u "${snapshot}" "${current}"
 done

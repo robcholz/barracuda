@@ -1,8 +1,8 @@
 idf_component_register(
     SRCS
-        "claw-sys/csrc/claw_rs_log.c"
+        "crates/claw-sys/csrc/claw_rs_log.c"
     INCLUDE_DIRS
-        "claw-cabi/include"
+        "crates/claw-cabi/include"
     REQUIRES
         claw_cap
         esp_http_client

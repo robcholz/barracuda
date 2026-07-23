@@ -1,8 +1,8 @@
 # Runtime Migration Decisions vs `master`
 
 This note records the intentional compatibility boundary for replacing the
-`master` C agent path with `framework/runtime`. It describes the current app
-wiring, not a future compatibility wish list.
+`master` C agent path with the Rust workspace under `framework/`. It describes
+the current app wiring, not a future compatibility wish list.
 
 ## Architecture
 

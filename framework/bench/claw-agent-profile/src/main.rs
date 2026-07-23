@@ -4,8 +4,7 @@
 //! one scenario in a fresh process and writes a DHAT allocation profile.
 //!
 //! ```bash
-//! cargo run --profile profiling -p claw-agent \
-//!   --features memory_profile --example memory_profile -- agent-init
+//! cargo run --profile profiling -p claw-agent-profile -- agent-init
 //! ```
 
 use std::path::{Path, PathBuf};

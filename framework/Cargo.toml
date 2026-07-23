@@ -1,27 +1,28 @@
 [workspace]
 resolver = "2"
 members = [
-    "claw-agent",
-    "claw-interface",
-    "claw-utils",
-    "claw-api",
-    "claw-sys",
-    "claw-log",
-    "claw-skill",
-    "claw-core",
-    "claw-tool",
-    "claw-cabi",
-    "claw-memory",
-    "claw-context",
-    "claw-persistence",
-    "claw-permission",
-    "claw-profile",
-    "claw-sandbox",
+    "crates/claw-agent",
+    "crates/claw-interface",
+    "crates/claw-utils",
+    "crates/claw-api",
+    "crates/claw-sys",
+    "crates/claw-log",
+    "crates/claw-skill",
+    "crates/claw-core",
+    "crates/claw-tool",
+    "crates/claw-cabi",
+    "crates/claw-memory",
+    "crates/claw-context",
+    "crates/claw-persistence",
+    "crates/claw-permission",
+    "crates/claw-sandbox",
+    "bench/claw-profile",
+    "bench/claw-agent-profile",
     # Device-only (`#![cfg(target_os = "espidf")]`) staticlib crates that back
     # the on-device ESP-IDF integration test apps. They build to empty archives
     # on the host, so they are harmless members of `cargo build --workspace`.
-    "claw-sys/tests/esp_idf/claw-sys-selftest",
-    "claw-api/tests/esp_idf/claw-api-selftest",
+    "crates/claw-sys/tests/esp_idf/claw-sys-selftest",
+    "crates/claw-api/tests/esp_idf/claw-api-selftest",
 ]
 
 # Device images are built with the release profile (panic = abort, since the
