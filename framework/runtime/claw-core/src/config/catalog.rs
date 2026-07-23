@@ -1,4 +1,4 @@
-//! Compile-time catalog shared by the single-agent factory and orchestrator.
+//! Compile-time catalog shared by the AgentManager and orchestrator.
 //!
 //! The catalog is data, not runtime ownership. [`AgentRuntimeManifest`] is the
 //! projection consumed by `agent`; [`MultiagentManifest`] is consumed only by

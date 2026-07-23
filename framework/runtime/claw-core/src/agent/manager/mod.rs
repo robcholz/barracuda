@@ -20,10 +20,10 @@ use claw_tool::ToolRegistry;
 
 use self::long_term::LongTermDeps;
 pub(crate) use create::{AdditionalAgentState, PersistenceConfig};
-pub(crate) use error::{FsAgentCreateError, FsAgentFactoryError};
+pub(crate) use error::{AgentCreateError, AgentManagerError};
 
 /// Shared assembly dependencies for independently-built agents.
-pub(crate) struct FsAgentFactory<
+pub(crate) struct AgentManager<
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,

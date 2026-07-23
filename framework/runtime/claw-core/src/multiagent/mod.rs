@@ -46,7 +46,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{FsAgentFactory, PersistenceConfig};
+use crate::agent::{AgentManager, PersistenceConfig};
 use crate::config::ReasoningEffort;
 use crate::protocol::AgentId;
 use crate::protocol::ToolCall;
@@ -80,12 +80,12 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     /// Builds agents (root and children). Owned here; slots only store.
-    factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+    manager: Rc<AgentManager<Filesystem, Http, Timer>>,
     /// Session-owned policy propagated unchanged to every built agent.
     permission_policy: Arc<dyn PermissionPolicy>,
     /// Session default copied into each newly assembled Agent.
     reasoning_effort: ReasoningEffort,
-    /// Durable root identity waiting to be materialized by the Agent Factory.
+    /// Durable root identity waiting to be materialized by the AgentManager.
     restored_root: Option<AgentId>,
     root_deliveries_in_turn: Vec<AgentId>,
     root_background_spawns: BTreeMap<AgentId, ToolCall>,

@@ -80,7 +80,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
         agent_store(dir)
     }
 
-    /// Build the shared LLM-backed adapter constructor used by Agent Factory.
+    /// Build the shared LLM-backed adapter constructor used by AgentManager.
     pub(in crate::agent) fn llm_builder<H, Timer>(
         api_manager: SharedApiManager,
     ) -> Arc<AdapterBuilder<F>>

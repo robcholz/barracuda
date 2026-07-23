@@ -12,7 +12,7 @@ use futures_core::Stream;
 use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
-use crate::agent::{FsAgentFactory, PersistenceConfig};
+use crate::agent::{AgentManager, PersistenceConfig};
 use crate::config::{ReasoningEffort, SharedApiManager};
 use crate::multiagent::{
     AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
@@ -149,7 +149,7 @@ where
     pub(crate) fn new(
         session: SessionId,
         persistence: SessionPersistence,
-        factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+        manager: Rc<AgentManager<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         state: DurableState<SessionState>,
         api_manager: SharedApiManager,
@@ -160,7 +160,7 @@ where
         let permission = Arc::new(SessionPermission::new(state.clone()));
         let reasoning_effort = state.get().reasoning_effort();
         let runtime = MultiagentRuntime::new_with_root(
-            factory,
+            manager,
             id_allocator,
             permission.clone(),
             reasoning_effort,

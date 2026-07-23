@@ -17,7 +17,7 @@ mod tools;
 
 /// Durable state owned by [`ResumedContextAdapter`].
 ///
-/// The DTO has no `Default`: Factory passes `None` for a fresh Agent, and the
+/// The DTO has no `Default`: AgentManager passes `None` for a fresh Agent, and the
 /// adapter owns its explicit empty-state policy.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(in crate::agent) struct ResumedState {
@@ -44,7 +44,7 @@ pub(super) fn lock_state(state: &SharedResumedState) -> MutexGuard<'_, ResumedSt
 
 /// Process-local information shown once after reconstructing an Agent.
 ///
-/// This is not durable Agent state. Factory derives it while distributing a
+/// This is not durable Agent state. AgentManager derives it while distributing a
 /// restored AgentState to its authoritative components.
 pub(in crate::agent) struct AgentResumeNotice {
     inflight_toolcalls: Vec<ToolCall>,

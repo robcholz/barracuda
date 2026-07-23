@@ -16,7 +16,7 @@ use claw_persistence::{
 use claw_skill::SkillError;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::FsAgentFactoryError;
+use crate::agent::AgentManagerError;
 use crate::multiagent::AgentIdAllocatorState;
 use crate::protocol::{AgentId, SessionId, SessionIdAllocator};
 pub use handle::Orchestrator;
@@ -110,12 +110,12 @@ pub enum OrchestratorBuildError {
     WorkerExitedBeforeReady,
 }
 
-impl From<FsAgentFactoryError> for OrchestratorBuildError {
-    fn from(error: FsAgentFactoryError) -> Self {
+impl From<AgentManagerError> for OrchestratorBuildError {
+    fn from(error: AgentManagerError) -> Self {
         match error {
-            FsAgentFactoryError::MissingPersistenceDir => Self::MissingPersistenceDir,
-            FsAgentFactoryError::LongTermInit(source) => Self::LongTermInit(source),
-            FsAgentFactoryError::SkillRegistry(source) => Self::SkillRegistry(source),
+            AgentManagerError::MissingPersistenceDir => Self::MissingPersistenceDir,
+            AgentManagerError::LongTermInit(source) => Self::LongTermInit(source),
+            AgentManagerError::SkillRegistry(source) => Self::SkillRegistry(source),
         }
     }
 }

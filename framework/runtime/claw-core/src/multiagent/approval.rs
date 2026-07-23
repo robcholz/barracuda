@@ -115,7 +115,7 @@ mod tests {
     use claw_tool::ToolRegistry;
 
     use crate::agent::{
-        AgentApprovalError, ApprovalDecision, FsAgentFactory, PersistenceConfig, ToolCallId,
+        AgentApprovalError, AgentManager, ApprovalDecision, PersistenceConfig, ToolCallId,
     };
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, Message};
@@ -127,7 +127,7 @@ mod tests {
 
     fn instance() -> TestInstance {
         MemFs::new();
-        let factory = FsAgentFactory::new(
+        let manager = AgentManager::new(
             Arc::new(ToolRegistry::new()),
             Arc::new(
                 Persistence::<MemFs>::new("/approval-test/state").expect("test persistence builds"),
@@ -136,9 +136,9 @@ mod tests {
             Vec::new(),
             SharedApiManager::default(),
         )
-        .expect("test factory builds");
+        .expect("test manager builds");
         MultiagentRuntime::new(
-            Rc::new(factory),
+            Rc::new(manager),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             MultiagentState::default(),

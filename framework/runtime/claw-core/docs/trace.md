@@ -49,7 +49,7 @@ scope and opens the fixed `trace.task=orchestrator` logical lane. No system id
 is allocated or persisted.
 
 The root covers engine construction, checkpoint restoration, and the worker
-loop. System-wide startup spans such as `agent.factory` and `skill.catalog`
+loop. System-wide startup spans such as `agent.manager` and `skill.catalog`
 therefore inherit the system context instead of falling into an unknown
 session bucket. Synchronous handle operations on the caller thread carry the
 same `run.system` explicitly; their task label remains the physical-thread
@@ -195,19 +195,19 @@ span-name: `turn`
 `output`: `text_bytes`.
 `error`: `kind`.
 
-## Agent Factory
+## AgentManager
 
 ### Tracing Context
 
-span-name: `agent.factory`
+span-name: `agent.manager`
 
-Factory construction is system-wide startup work. It is a child of
+Manager construction is system-wide startup work. It is a child of
 `orchestrator` and inherits `run.system`; it intentionally has no
 `run.session`.
 
 ### Events
 
-`missing_persistence_dir`: Factory construction rejected an empty persistence root.
+`missing_persistence_dir`: Manager construction rejected an empty persistence root.
 `extraction_llm_init_failed`: Internal extraction LLM client failed to initialize.
 `long_term_memory_init_failed`: Long-term memory failed to initialize.
 

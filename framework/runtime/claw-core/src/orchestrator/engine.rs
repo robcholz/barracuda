@@ -13,7 +13,7 @@ use claw_tool::ToolRegistry;
 use futures_core::Stream;
 use tracing::Instrument as _;
 
-use crate::agent::FsAgentFactory;
+use crate::agent::AgentManager;
 use crate::config::SharedApiManager;
 use crate::multiagent::AgentIdAllocator;
 use crate::protocol::{AgentId, EventSink, SessionId, SessionPersistence};
@@ -56,7 +56,7 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+    manager: Rc<AgentManager<Filesystem, Http, Timer>>,
     persistence: SharedPersistence<Filesystem>,
     sessions: Arc<SessionStore>,
     id_allocator: AgentIdAllocator,
@@ -80,7 +80,7 @@ where
         id_allocator: AgentIdAllocator,
         api_manager: SharedApiManager,
     ) -> Result<Self, OrchestratorBuildError> {
-        let factory = Rc::new(FsAgentFactory::new(
+        let manager = Rc::new(AgentManager::new(
             tools,
             Arc::clone(&persistence),
             persistence_dir,
@@ -100,7 +100,7 @@ where
         }
 
         Ok(Self {
-            factory,
+            manager,
             persistence,
             sessions,
             id_allocator,
@@ -176,7 +176,7 @@ where
         let actor = SessionActor::new(
             session,
             session_persistence,
-            Rc::clone(&self.factory),
+            Rc::clone(&self.manager),
             self.id_allocator.clone(),
             state,
             Arc::clone(&self.api_manager),
@@ -245,7 +245,7 @@ where
             let actor = SessionActor::new(
                 session,
                 session_persistence,
-                Rc::clone(&self.factory),
+                Rc::clone(&self.manager),
                 self.id_allocator.clone(),
                 state,
                 Arc::clone(&self.api_manager),
@@ -352,7 +352,7 @@ where
             return Ok(());
         }
         if let Some(root_agent) = root_agent {
-            self.factory.remove(root_agent).map_err(|error| {
+            self.manager.remove(root_agent).map_err(|error| {
                 tracing::error!(
                     name: "root_agent_remove_failed",
                     session = %session,

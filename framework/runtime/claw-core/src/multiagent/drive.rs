@@ -520,7 +520,7 @@ mod tests {
         MultiagentWork,
     };
     use super::DriveOutput;
-    use crate::agent::{FsAgentFactory, PersistenceConfig};
+    use crate::agent::{AgentManager, PersistenceConfig};
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, AgentKind, EventSink, Message, TurnOrigin};
 
@@ -592,7 +592,7 @@ mod tests {
     #[allow(clippy::arc_with_non_send_sync)]
     fn runtime_with_root_and_child() -> (TestRuntime, AgentId, AgentId) {
         MemFs::new();
-        let factory = FsAgentFactory::new(
+        let manager = AgentManager::new(
             Arc::new(ToolRegistry::new()),
             Arc::new(
                 Persistence::<MemFs>::new("/work-priority-test/state")
@@ -602,9 +602,9 @@ mod tests {
             Vec::new(),
             SharedApiManager::default(),
         )
-        .expect("test factory builds");
+        .expect("test manager builds");
         let mut runtime = MultiagentRuntime::new(
-            Rc::new(factory),
+            Rc::new(manager),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             MultiagentState::default(),

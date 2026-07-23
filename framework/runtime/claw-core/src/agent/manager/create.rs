@@ -19,8 +19,8 @@ use crate::agent::{AgentState, ReasoningEffortHandle};
 use crate::config::{catalog as agent_catalog, ApiUsage, ReasoningEffort};
 use crate::protocol::{AgentId, AgentKind, ToolCall};
 
-use super::error::FsAgentCreateError;
-use super::FsAgentFactory;
+use super::error::AgentCreateError;
+use super::AgentManager;
 
 const COMPACTION_TRIGGER_TOKENS: usize = 6000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 2000;
@@ -61,7 +61,7 @@ impl<
         Filesystem: ClawFs + 'static,
         Http: ClawHttp + StreamingHttp + Default + 'static,
         Timer: ClawTimer + Default + 'static,
-    > FsAgentFactory<Filesystem, Http, Timer>
+    > AgentManager<Filesystem, Http, Timer>
 {
     pub(crate) fn fork_from(
         &self,
@@ -73,7 +73,7 @@ impl<
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
         agent: &BaseAgent<Http, Timer>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), FsAgentCreateError> {
+    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -103,7 +103,7 @@ impl<
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
         additional_state: Option<AdditionalAgentState>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), FsAgentCreateError> {
+    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
@@ -134,7 +134,7 @@ impl<
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), FsAgentCreateError> {
+    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -161,7 +161,7 @@ impl<
         id: AgentId,
         kind: &AgentKind,
         persistence: PersistenceConfig,
-    ) -> Result<Box<dyn Transcript>, FsAgentCreateError> {
+    ) -> Result<Box<dyn Transcript>, AgentCreateError> {
         match persistence {
             PersistenceConfig::Persistent => {
                 TranscriptStore::<Filesystem>::new(id.0, &self.transcript_dir)
@@ -172,7 +172,7 @@ impl<
                             agent = %id,
                             kind = %kind.as_str(),
                         );
-                        FsAgentCreateError::Transcript(error)
+                        AgentCreateError::Transcript(error)
                     })
             }
             PersistenceConfig::InMemory => {
@@ -184,7 +184,7 @@ impl<
     /// Build one stopped agent of `kind`.
     ///
     /// Its owner supplies storage, inherited context, and any extension tools
-    /// through `environment`. The factory does not interpret orchestration roles.
+    /// through `environment`. The manager does not interpret orchestration roles.
     ///
     /// # Errors
     ///
@@ -196,7 +196,7 @@ impl<
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), FsAgentCreateError> {
+    ) -> Result<(BaseAgent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
@@ -219,7 +219,7 @@ impl<
                     tracing::error!(name: "unknown_kind", kind = %kind.as_str());
                 }
             }
-            FsAgentCreateError::Config(error)
+            AgentCreateError::Config(error)
         })?;
         let (mode_state, resumed_state) = match resume {
             Some(state) => {
@@ -256,10 +256,10 @@ impl<
                     adapter = "long_term",
                     kind = %kind.as_str(),
                 );
-                return Err(FsAgentCreateError::LongTerm(error));
+                return Err(AgentCreateError::LongTerm(error));
             }
         };
-        // Factory is the only configured-agent assembly point. BaseAgent sees
+        // AgentManager is the only configured-agent assembly point. BaseAgent sees
         // one generic, immutable adapter set; concrete mode, memory, and skill
         // semantics do not leak into its runtime protocol. ResumedContextAdapter
         // is the boundary that contributes resume context and exposes the pure

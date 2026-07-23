@@ -6,7 +6,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_permission::PermissionPolicy;
 
-use crate::agent::{FsAgentCreateError, FsAgentFactory, PersistenceConfig};
+use crate::agent::{AgentCreateError, AgentManager, PersistenceConfig};
 use crate::config::ReasoningEffort;
 use crate::protocol::{AgentId, AgentKind, Message, ToolCall};
 
@@ -24,13 +24,13 @@ where
     /// Create an empty runtime.
     #[cfg(test)]
     pub(crate) fn new(
-        factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+        manager: Rc<AgentManager<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         state: MultiagentState,
     ) -> Self {
         Self::new_with_root(
-            factory,
+            manager,
             id_allocator,
             permission_policy,
             ReasoningEffort::default(),
@@ -41,7 +41,7 @@ where
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_root(
-        factory: Rc<FsAgentFactory<Filesystem, Http, Timer>>,
+        manager: Rc<AgentManager<Filesystem, Http, Timer>>,
         id_allocator: AgentIdAllocator,
         permission_policy: Arc<dyn PermissionPolicy>,
         reasoning_effort: ReasoningEffort,
@@ -50,7 +50,7 @@ where
     ) -> Self {
         let multiagent = Arc::new(MultiagentBridge::new(id_allocator.clone()));
         Self {
-            factory,
+            manager,
             permission_policy,
             reasoning_effort,
             restored_root,
@@ -72,12 +72,12 @@ where
         kind: &AgentKind,
         goal: Message,
         placement: AgentPlacement,
-    ) -> Result<AgentKind, FsAgentCreateError> {
+    ) -> Result<AgentKind, AgentCreateError> {
         let extension_tools = tools::tool_group(id, kind, Arc::clone(&self.multiagent))
             .into_iter()
             .collect();
         let (agent, reasoning_effort) = match placement {
-            AgentPlacement::FreshRoot(persistence) => self.factory.create(
+            AgentPlacement::FreshRoot(persistence) => self.manager.create(
                 id,
                 kind,
                 true,
@@ -86,7 +86,7 @@ where
                 persistence,
                 extension_tools,
             )?,
-            AgentPlacement::RestoredRoot => self.factory.resume_from(
+            AgentPlacement::RestoredRoot => self.manager.resume_from(
                 id,
                 true,
                 Arc::clone(&self.permission_policy),
@@ -94,7 +94,7 @@ where
                 extension_tools,
                 None,
             )?,
-            AgentPlacement::Child => self.factory.create(
+            AgentPlacement::Child => self.manager.create(
                 id,
                 kind,
                 false,
@@ -133,7 +133,7 @@ mod tests {
     use claw_persistence::Persistence;
     use claw_tool::ToolRegistry;
 
-    use crate::agent::{FsAgentFactory, PersistenceConfig};
+    use crate::agent::{AgentManager, PersistenceConfig};
     use crate::config::SharedApiManager;
     use crate::protocol::Message;
 
@@ -148,18 +148,18 @@ mod tests {
             Persistence::<MemFs>::new("/agent-state-restore-test/state")
                 .expect("test persistence builds"),
         );
-        let factory = Rc::new(
-            FsAgentFactory::new(
+        let manager = Rc::new(
+            AgentManager::new(
                 Arc::new(ToolRegistry::new()),
                 Arc::clone(&persistence),
                 "/agent-state-restore-test/memory".to_owned(),
                 Vec::new(),
                 SharedApiManager::default(),
             )
-            .expect("test factory builds"),
+            .expect("test manager builds"),
         );
         let mut runtime = TestRuntime::new(
-            Rc::clone(&factory),
+            Rc::clone(&manager),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             MultiagentState::default(),
@@ -174,7 +174,7 @@ mod tests {
         drop(runtime);
 
         let mut restored = TestRuntime::new_with_root(
-            factory,
+            manager,
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             Default::default(),

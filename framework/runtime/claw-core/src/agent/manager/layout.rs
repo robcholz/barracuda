@@ -2,13 +2,13 @@ const TRANSCRIPT_DIR: &str = "transcript";
 const PROFILE_DIR: &str = "profile";
 const LONG_TERM_DIR: &str = "long_term";
 
-pub(super) struct FsAgentFactoryLayout {
+pub(super) struct AgentManagerLayout {
     pub(super) transcript_dir: String,
     pub(super) profile_dir: String,
     pub(super) long_term_dir: String,
 }
 
-impl FsAgentFactoryLayout {
+impl AgentManagerLayout {
     pub(super) fn new(root: String) -> Self {
         Self {
             transcript_dir: join_storage_path(&root, TRANSCRIPT_DIR),

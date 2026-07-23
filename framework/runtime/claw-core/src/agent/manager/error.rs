@@ -6,10 +6,10 @@ use claw_tool::ToolSetError;
 use crate::agent::config::AgentConfigError;
 use crate::protocol::AgentId;
 
-/// What can go wrong while building an [`super::FsAgentFactory`].
+/// What can go wrong while building an [`super::AgentManager`].
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FsAgentFactoryError {
-    /// No persistence directory was provided to the factory.
+pub(crate) enum AgentManagerError {
+    /// No persistence directory was provided to the manager.
     #[error("persistence directory is required")]
     MissingPersistenceDir,
     /// A long-term memory journal exists but could not be read at startup.
@@ -20,9 +20,9 @@ pub(crate) enum FsAgentFactoryError {
     SkillRegistry(#[from] SkillError),
 }
 
-/// What can go wrong while building one concrete agent from the factory.
+/// What can go wrong while building one concrete agent from the manager.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum FsAgentCreateError {
+pub(crate) enum AgentCreateError {
     /// The Agent recovery collection could not be accessed or registered.
     #[error("failed to access persisted agent state: {0}")]
     Persistence(#[from] PersistenceError),

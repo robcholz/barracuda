@@ -1,7 +1,7 @@
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::agent::{FsAgentCreateError, PersistenceConfig};
+use crate::agent::{AgentCreateError, PersistenceConfig};
 use crate::config::{catalog as agent_catalog, ReasoningEffort};
 use crate::protocol::{AgentId, Message};
 
@@ -10,7 +10,7 @@ use super::{AgentPlacement, MultiagentRuntime};
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum MultiagentDeliverError {
     #[error("failed to build root agent: {0}")]
-    Create(#[from] FsAgentCreateError),
+    Create(#[from] AgentCreateError),
     #[error("failed to deliver to root {root}: {source}")]
     Root {
         root: AgentId,

@@ -7,7 +7,7 @@
 mod base_agent;
 mod config;
 mod context_adapters;
-mod factory;
+mod manager;
 mod tools;
 
 pub use base_agent::IterationId;
@@ -16,7 +16,6 @@ pub(crate) use base_agent::{
     AgentState, ApprovalDecision, BaseAgent, IterationEvent, ToolCallId,
 };
 pub(crate) use context_adapters::ReasoningEffortHandle;
-pub(crate) use factory::{
-    AdditionalAgentState, FsAgentCreateError, FsAgentFactory, FsAgentFactoryError,
-    PersistenceConfig,
+pub(crate) use manager::{
+    AdditionalAgentState, AgentCreateError, AgentManager, AgentManagerError, PersistenceConfig,
 };

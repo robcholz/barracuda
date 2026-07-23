@@ -83,7 +83,7 @@ impl ConversationHistoryContextAdapter {
     }
 
     /// Build the configured LLM-backed conversation projection used by Agent
-    /// Factory without exposing its compactor implementation or policy type.
+    /// AgentManager without exposing its compactor implementation or policy type.
     pub(in crate::agent) fn with_llm_compaction<H, Timer>(
         api_manager: SharedApiManager,
         trigger_tokens: usize,

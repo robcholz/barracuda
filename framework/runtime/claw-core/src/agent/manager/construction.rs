@@ -9,24 +9,24 @@ use claw_persistence::SharedPersistence;
 use claw_skill::{FsSkillRegistry, SkillError};
 use claw_tool::ToolRegistry;
 
-use super::error::FsAgentFactoryError;
-use super::layout::FsAgentFactoryLayout;
+use super::error::AgentManagerError;
+use super::layout::AgentManagerLayout;
 use super::long_term::LongTermDeps;
-use super::FsAgentFactory;
+use super::AgentManager;
 
 impl<
         Filesystem: ClawFs + 'static,
         Http: ClawHttp + StreamingHttp + Default + 'static,
         Timer: ClawTimer + Default + 'static,
-    > FsAgentFactory<Filesystem, Http, Timer>
+    > AgentManager<Filesystem, Http, Timer>
 {
-    /// The factory owns the memory layout below `persistence_dir`: transcripts,
+    /// The manager owns the memory layout below `persistence_dir`: transcripts,
     /// editable profile documents, and long-term memory. `Filesystem` selects
     /// the static filesystem HAL backend used by those stores.
     ///
     /// # Errors
     ///
-    /// Returns [`FsAgentFactoryError::MissingPersistenceDir`] when the
+    /// Returns [`AgentManagerError::MissingPersistenceDir`] when the
     /// persistence root is blank.
     pub(crate) fn new(
         tools: Arc<ToolRegistry>,
@@ -34,14 +34,14 @@ impl<
         memory_directory: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-    ) -> Result<Self, FsAgentFactoryError> {
-        let span = tracing::info_span!("agent.factory");
+    ) -> Result<Self, AgentManagerError> {
+        let span = tracing::info_span!("agent.manager");
         let _enter = span.enter();
         if memory_directory.trim().is_empty() {
             tracing::error!(name: "missing_persistence_dir", reason = "empty");
-            return Err(FsAgentFactoryError::MissingPersistenceDir);
+            return Err(AgentManagerError::MissingPersistenceDir);
         }
-        let layout = FsAgentFactoryLayout::new(memory_directory);
+        let layout = AgentManagerLayout::new(memory_directory);
 
         let long_term = match LongTermDeps::<Filesystem>::from_root::<Http, Timer>(
             &layout.long_term_dir,

@@ -1,7 +1,7 @@
-//! Runnable agent config assembled by the factory.
+//! Runnable agent config assembled by the AgentManager.
 //!
-//! Runtime binding belongs to `FsAgentFactory`; this module only stores the
-//! single-agent config consumed at the factory's private assembly point.
+//! Runtime binding belongs to `AgentManager`; this module only stores the
+//! single-agent config consumed at the manager's private assembly point.
 
 use claw_api::RetryPolicy;
 use claw_skill::SkillSet;

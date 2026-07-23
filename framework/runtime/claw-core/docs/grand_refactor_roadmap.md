@@ -59,7 +59,8 @@ boundaries created here.
 - Every terminal path, including success, LLM failure, tool failure,
   persistence failure, cancellation, and shutdown, returns the Agent exactly
   once.
-- There is no AgentManager that independently owns Agents.
+- AgentManager constructs and restores Agents but never owns live Agents.
+- There is no second Agent-owning registry.
 
 The core slot model is:
 
@@ -142,7 +143,7 @@ across these boundaries.
 - Multiagent is exposed to an Agent as a tool.
 - Multiagent owns graph policy, parent/child relationships, readiness,
   join/follow-up/delete semantics, and timeout policy.
-- Multiagent does not own BaseAgent, AgentRun, AgentSlot, FsAgentFactory, or
+- Multiagent does not own BaseAgent, AgentRun, AgentSlot, AgentManager, or
   AgentRunScheduler.
 - Multiagent does not need Session semantics. A MultiagentBridge transports
   typed commands to SessionActor; the domain validates them and emits typed
@@ -152,7 +153,7 @@ across these boundaries.
 - SessionActor is the only orchestration-level assembly path for root and
   worker Agents: it selects lifecycle, baked, memory-visibility, tool, and
   context policy and constructs AgentEnvironment<F>.
-- FsAgentFactory is the sole concrete BaseAgent constructor. It materializes
+- AgentManager is the sole concrete BaseAgent constructor. It materializes
   invariant Agent components from the supplied environment; it does not choose
   Session, parent, graph, lifecycle, or memory-visibility policy.
 
@@ -186,7 +187,7 @@ AgentState {
   being reloaded into the fresh ToolSet. ToolSet gains no persistence DTO or
   recovery API.
 - A materialized `AgentState` is complete: its component fields are not
-  optional. Factory passes `Some(XxxState)` when restoring and `None` when
+  optional. Manager passes `Some(XxxState)` when restoring and `None` when
   creating; the component owns fresh initialization, and XxxState DTOs do not
   implement `Default`.
 - `ToolCallId`, `InflightToolCall`, active futures, and physical executor state
@@ -194,11 +195,11 @@ AgentState {
   typed identities and canonical serialized order when order has no runtime
   meaning.
 - Filesystem remains a real static capability in Engine, Session assembly,
-  Factory, transcript, and persistence stores, but it stops at the constructed
+  Manager, transcript, and persistence stores, but it stops at the constructed
   Agent boundary:
 
 ~~~text
-Engine<F, H, T> / SessionActor<F, H, T> / FsAgentFactory<F, H, T>
+Engine<F, H, T> / SessionActor<F, H, T> / AgentManager<F, H, T>
     → BaseAgent<H, T>
     → AgentRun<H, T>
     → AgentSlot<H, T>
@@ -213,7 +214,7 @@ Engine<F, H, T> / SessionActor<F, H, T> / FsAgentFactory<F, H, T>
 - `PersistentRoot` has a versioned Agent recovery record keyed by AgentId and
   receives crash-durability guarantees. `EphemeralRoot` and `TransientWorker`
   keep the same recovery state in memory but create no durable Agent record.
-- `FsAgentFactory<F, H, T>` uses `AgentStateStore<F>` to create or restore
+- `AgentManager<F, H, T>` uses `AgentStateStore<F>` to create or restore
   recovery state, then injects ordinary Agent dependencies. It is the sole
   concrete BaseAgent constructor but does not choose durability policy.
 - Engine owns runtime checkpoint I/O through `AgentStateStore<F>`. SessionActor
@@ -303,7 +304,7 @@ Forbidden reverse dependencies:
   orchestrator;
 - agent must not depend on session, multiagent domain state, or orchestrator.
 - BaseAgent and the Agent iteration loop must not depend on
-  `SharedPersistence`, `AgentStateStore`, or filesystem type F. Factory may
+  `SharedPersistence`, `AgentStateStore`, or filesystem type F. Manager may
   depend on construction-time persistence and canonical stores.
 
 ### 3.3 Runtime dataflow
@@ -342,7 +343,7 @@ The implementation order is:
 ~~~text
 P0 freeze contracts and baseline
  ↓
-P1 establish AgentState and Factory create/restore contracts
+P1 establish AgentState and Manager create/restore contracts
  ↓
 P2 establish owned AgentRun move/return protocol
  ↓
@@ -399,7 +400,7 @@ Remove ambiguity before changing production ownership.
   and `AgentState` as the only aggregate Agent recovery shape.
 - State explicitly that BaseAgent, AgentRun, AgentSlot, and Scheduler do not
   carry filesystem type F or own SharedPersistence.
-- State that Factory performs create/restore construction while Engine performs
+- State that Manager performs create/restore construction while Engine performs
   runtime checkpoint I/O from Agent-exported snapshots.
 - Add the durable SessionState root_agent_id link, creation/deletion ordering,
   typed dangling-link failure, and orphan Agent-state cleanup rule.
@@ -408,7 +409,7 @@ Remove ambiguity before changing production ownership.
 - State that checked-out overview reads retained AgentSlot metadata and never a
   second owning Agent directory.
 - State that SessionActor builds AgentEnvironment<F> for both roots and workers,
-  while FsAgentFactory only constructs BaseAgent from that environment.
+  while AgentManager only constructs BaseAgent from that environment.
 - Correct canonical-store descriptions to match their actual persistence seam;
   in particular, long-term memory currently uses claw-memory over ClawFs rather
   than the claw-persistence state collection.
@@ -455,19 +456,19 @@ Phase 0 distinguishes preserved behavior from intentionally changed mechanics.
 A currently observable implementation detail is not automatically a
 compatibility contract. No production behavior changes in this phase.
 
-## 6. Phase 1 — Establish the Agent recovery and Factory boundary
+## 6. Phase 1 — Establish the Agent recovery and Manager boundary
 
 ### Goal
 
 Give the bottom-level ownership object its final linear stream contract and
-in-memory recovery semantics, and give Factory one create/restore construction
+in-memory recovery semantics, and give Manager one create/restore construction
 path, without performing runtime checkpoints yet.
 
 ### Primary files
 
 - claw-core/src/agent/base_agent/
 - claw-core/src/scheduler/run.rs
-- claw-core/src/agent/factory/
+- claw-core/src/agent/manager/
 - claw-core/src/protocol/
 - claw-core/src/session/actor.rs
 - claw-core/src/multiagent/
@@ -497,7 +498,7 @@ path, without performing runtime checkpoints yet.
   `Stream<Item = Result<AgentEvent, AgentError>>`
   and owns interrupt, cancel, and approval resolution for that task. Delete the
   old tick, output-channel, and terminal-outcome protocols.
-- Keep owner message queues outside BaseAgent. A factory constructs a stopped
+- Keep owner message queues outside BaseAgent. A manager constructs a stopped
   Agent; the owning AgentSlot queues the initial or follow-up Message and passes
   exactly one Message to `submit` at checkout.
 - Model reasoning effort as independent per-Agent adapter state. SessionState
@@ -507,15 +508,15 @@ path, without performing runtime checkpoints yet.
   and returns only its sending handle to the AgentSlot. Do not bind adapters to
   a shared reasoning-effort source or add a ReasoningEffort update method to the
   generic ContextAdapter port.
-- Give `FsAgentFactory<F, H, T>` explicit `create_new` and `restore` entry
-  points that converge on one private BaseAgent builder. Factory loads or
+- Give `AgentManager<F, H, T>` explicit `create_new` and `restore` entry
+  points that converge on one private BaseAgent builder. Manager loads or
   initializes recovery state and assembles transcript, tools, mode, and memory
   adapters; BaseAgent receives only the constructed dependencies/state.
-- Keep F in Engine, SessionActor/AgentEnvironment, Factory, transcript, and
+- Keep F in Engine, SessionActor/AgentEnvironment, Manager, transcript, and
   AgentStateStore. Confirm it does not propagate into BaseAgent, AgentRun,
   AgentSlot, or Scheduler.
 - Keep AgentPersistencePolicy outside BaseAgent in Session/slot construction
-  metadata. Policy selects whether Factory loads a durable record; it is not an
+  metadata. Policy selects whether Manager loads a durable record; it is not an
   Agent dependency.
 - Move the process-global AgentId allocator definition/state out of multiagent
   ownership. Engine owns its registered durable state and exposes only a local
@@ -523,7 +524,7 @@ path, without performing runtime checkpoints yet.
   handle temporarily until Phase 6 removes allocation from Multiagent.
 - Keep BaseAgent as the only concrete Agent type.
 - Keep protocol-only values, such as IDs and outcomes, independent of F.
-- Route Engine-owned AgentStateStore to Factory rather than injecting it into
+- Route Engine-owned AgentStateStore to Manager rather than injecting it into
   the constructed Agent. During this phase, restore may adapt the legacy
   SessionState representation; the new durable record/write migration does not
   activate until Phase 7.
@@ -542,7 +543,7 @@ path, without performing runtime checkpoints yet.
       no iteration-local ToolCallId.
 - [ ] Snapshot serialization is deterministic where collection ordering has no
       semantic meaning.
-- [ ] Factory create_new and restore share one invariant builder.
+- [ ] Manager create_new and restore share one invariant builder.
 - [ ] Root and worker construction still share the expected assembled behavior.
 - [ ] Engine is the only owner/registrar of the durable AgentId allocator.
 - [ ] Allocator checkpoint failure exposes no ID and constructs no Agent.
@@ -827,7 +828,7 @@ domain effect examples
   allocator.
 - SessionActor selects session, persistence, baked, memory-visibility, tool, and
   context policy and builds one AgentEnvironment<F>.
-- FsAgentFactory is the sole concrete BaseAgent constructor. Its create/restore
+- AgentManager is the sole concrete BaseAgent constructor. Its create/restore
   entries consume that environment and converge on one invariant builder; it
   does not choose Session, parent, graph, lifecycle, or memory-visibility
   policy.
@@ -842,7 +843,7 @@ domain effect examples
 ### Gate
 
 - [ ] multiagent imports/owns none of BaseAgent, AgentRun, AgentSlot,
-      FsAgentFactory, AgentRunScheduler, AgentIdAllocator, or SessionId.
+      AgentManager, AgentRunScheduler, AgentIdAllocator, or SessionId.
 - [ ] A command cannot create an Agent before SessionActor accepts and executes
       its typed effect.
 - [ ] Allocation persistence failure returns a typed root/spawn failure without
@@ -874,10 +875,10 @@ without giving BaseAgent a persistence dependency.
 - claw-core/src/agent/base_agent/
 - claw-core/src/agent/base_agent/iteration_loop/run.rs
 - claw-core/src/agent/event.rs
-- claw-core/src/agent/factory/
+- claw-core/src/agent/manager/
 - claw-core/src/agent/base_agent/context_adapter.rs
 - claw-core/src/agent/base_agent/transcript.rs
-- claw-core/src/agent/factory/transcript.rs
+- claw-core/src/agent/manager/transcript.rs
 - claw-core/src/protocol/tool.rs
 - claw-core/src/session/persistence.rs
 - claw-core/src/session/actor.rs
@@ -903,7 +904,7 @@ AgentState {
   adapter state. It owns no SharedPersistence, DurableState, AgentStateStore,
   filesystem generic, or persistence callback.
 - Engine owns `AgentStateStore<F>` and runtime checkpoint I/O.
-  `FsAgentFactory<F, H, T>` uses that store only for initial create/restore and
+  `AgentManager<F, H, T>` uses that store only for initial create/restore and
   injects the restored ordinary state into `BaseAgent<H, T>`.
 - SessionActor retains recovery policy with slot metadata and authorizes
   permanent record removal after the Agent returns and logical deletion is
@@ -966,10 +967,10 @@ profile, and long-term memory as separate canonical stores.
 ### Creation, migration, deletion, and rollback
 
 - Version the persisted Agent recovery record.
-- Persistent root creation uses Factory to construct a new Agent and initial
+- Persistent root creation uses Manager to construct a new Agent and initial
   snapshot, durably stores that snapshot, then publishes `root_agent_id` and
   canonical-store identities in SessionState.
-- Factory restore loads the versioned snapshot and canonical-store identities,
+- Manager restore loads the versioned snapshot and canonical-store identities,
   then calls the same invariant builder used by create_new.
 - Read the old SessionState representation long enough to migrate PersistentRoot
   state idempotently:
@@ -1078,7 +1079,7 @@ The following are Phase 9 entry conditions, not work deferred to Phase 9:
   AgentRun poller, and AgentExecution::Running(AgentRun);
 - Phase 5 already removed AgentSlot, BaseAgent, and AgentRun ownership from
   MultiagentRuntime;
-- Phase 6 already removed Multiagent-owned FsAgentFactory/physical scheduling,
+- Phase 6 already removed Multiagent-owned Agent construction/physical scheduling,
   AgentId allocation, duplicate root/worker assembly, and all
   RuntimeExecution/take_runtime wrappers;
 - Any retained SessionActor inflight compatibility bookkeeping is explicitly
@@ -1101,7 +1102,7 @@ Phases 4–7.
 - multiagent has no physical agent, session, scheduler, or orchestrator imports;
 - BaseAgent/iteration-loop code has no session, multiagent domain,
   orchestrator, AgentStateStore, SharedPersistence, or filesystem-type imports;
-- Agent Factory may depend on construction-time recovery and canonical stores;
+- AgentManager may depend on construction-time recovery and canonical stores;
 - only scheduler code polls AgentRun;
 - only SessionActor owns AgentSlots;
 - no Arc<Mutex<AgentRunScheduler>> and no Scheduler-created thread/runtime.
@@ -1171,12 +1172,12 @@ The grand refactor is complete only when all of the following are true:
 4. Multiagent is a pluggable tool/domain component with no physical Agent or
    Scheduler ownership.
 5. Root and worker Agents are assembled through one SessionActor path and the
-   create/restore entry points of one FsAgentFactory invariant builder.
+   create/restore entry points of one AgentManager invariant builder.
 6. Engine owns the durable process-global AgentId allocator; Multiagent never
    allocates an ID.
 7. BaseAgent<H, T> coordinates a generic recovery projection from its
    authoritative components and exports a complete AgentState,
-   while Factory/Engine own restore/checkpoint I/O and F does not propagate
+   while Manager/Engine own restore/checkpoint I/O and F does not propagate
    into AgentRun, AgentSlot, or Scheduler.
 8. PersistentRoot recovery follows the durable root link, while EphemeralRoot
    and TransientWorker create no durable Agent record.

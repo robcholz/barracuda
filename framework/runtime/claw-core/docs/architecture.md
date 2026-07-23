@@ -62,7 +62,8 @@ logical Agent exists
     => exactly one of Resident or CheckedOut is true
 ~~~
 
-There is no second owning `AgentManager` or `AgentDirectory`.
+`AgentManager` constructs and restores Agents but never owns live Agents.
+There is no second Agent-owning registry or `AgentDirectory`.
 `agents_overview()` is projected from retained slot metadata, including checked
 out and cancelling Agents. Engine may aggregate these projections across
 Sessions; a future directory cache must remain a rebuildable read model.
@@ -136,7 +137,7 @@ Sessions; a future directory cache must remain a rebuildable read model.
 - `ContextAdapter` and transcript-facing traits are consumer-owned ports under
   `agent/base_agent`; `agent/context_adapters` contains implementations only.
   The concrete `TranscriptStore<F>` binding lives at the filesystem-aware
-  Factory boundary.
+  Manager boundary.
 - Each component's durable DTO is defined beside that component:
   `AgentModeState` beside `AgentModeContextAdapter`, and `ResumedState` beside
   `ResumedContextAdapter`. `agent/context_adapters/mod.rs` re-exports each
@@ -154,9 +155,9 @@ Sessions; a future directory cache must remain a rebuildable read model.
   `ToolDiscoveryHandle` asks ToolSet to update its runtime visibility. After a
   restart, recorded groups are rendered into the one-shot reminder; they are
   not automatically loaded into the fresh ToolSet.
-- Other pure ToolGroups are assembled directly into ToolSet by Factory; they
+- Other pure ToolGroups are assembled directly into ToolSet by Manager; they
   are not wrapped in fake context adapters merely to deliver an Agent effect.
-- Factory creates one synchronous tool-to-Agent effect channel. BaseAgent owns
+- Manager creates one synchronous tool-to-Agent effect channel. BaseAgent owns
   its unique, non-cloneable `AgentEffectInbox`; pure tools and adapter-owned
   tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no generic
   reverse drain/message or configuration-update API; an adapter that needs
@@ -202,15 +203,15 @@ Sessions; a future directory cache must remain a rebuildable read model.
 workers. It selects Agent kind, lifecycle, baked policy, memory visibility,
 tool filtering, context, and recovery policy.
 
-`FsAgentFactory<F, H, T>` is the sole concrete constructor. It supports two
+`AgentManager<F, H, T>` is the sole concrete constructor. It supports two
 entry paths that converge on one internal builder:
 
 - `create_new`, which initializes a fresh recovery state;
 - `restore`, which loads recovery state and canonical-store identities.
 
-Factory may use `AgentStateStore<F>` and filesystem-backed component stores
+Manager may use `AgentStateStore<F>` and filesystem-backed component stores
 during construction, but the resulting `BaseAgent<H, T>` does not retain them.
-Factory does not choose Session, parentage, Multiagent graph, lifecycle, memory
+Manager does not choose Session, parentage, Multiagent graph, lifecycle, memory
 visibility, or durability policy.
 
 ## Recovery state and checkpoint protocol
@@ -230,7 +231,7 @@ impl<H, T> BaseAgent<H, T> {
 ~~~
 
 Every field of a materialized `AgentState` is present; the aggregate does not
-use `Option` to represent component defaults. During construction Factory
+use `Option` to represent component defaults. During construction Manager
 distributes a restored aggregate as `Some(AgentModeState)` and
 `Some(ResumedState)`. For a new Agent it passes `None` to each component, and
 that component owns its explicit initialization policy. Component state DTOs
@@ -306,7 +307,7 @@ rather than changing the scope of `ToolCallId`.
   separate canonical stores; snapshots do not duplicate transcript contents.
 - `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
   `RunId`, checkout state, and checkpoint waiters are transient.
-- After a crash, Factory reconstructs Agents from durable recovery state and
+- After a crash, Manager reconstructs Agents from durable recovery state and
   canonical stores. It never restores a physical future or checkout.
 - Agent, tool, LLM, and persistence failures are outcomes. They cannot destroy
   the global loop or lose Agent ownership.
@@ -318,12 +319,12 @@ rather than changing the scope of `ToolCallId`.
 - It owns graph policy, parent/child relationships, readiness, joins,
   follow-up/delete/cancel semantics, and timeout policy.
 - It has no dependency on `BaseAgent`, `AgentRun`, `AgentSlot`,
-  `FsAgentFactory`, `AgentRunScheduler`, `SessionActor`, or `SessionId`.
+  `AgentManager`, `AgentRunScheduler`, `SessionActor`, or `SessionId`.
 - A `MultiagentBridge` transports typed commands and correlated results.
   Multiagent validates domain intent and emits typed effects; SessionActor
   executes accepted physical effects without reimplementing graph policy.
 - Root and worker construction use the same SessionActor assembly path and
-  Factory constructor with explicit policy inputs.
+  Manager constructor with explicit policy inputs.
 
 ## Memory components
 
@@ -367,7 +368,7 @@ orchestrator
 └── persistence / AgentStateStore
 
 session
-├── agent factory and Agent types
+├── agent manager and Agent types
 ├── scheduler submission protocol
 ├── memory
 └── multiagent port/domain

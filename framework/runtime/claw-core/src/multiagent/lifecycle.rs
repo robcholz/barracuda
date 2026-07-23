@@ -413,7 +413,7 @@ mod tests {
     use claw_tool::ToolRegistry;
 
     use crate::agent::{
-        AgentCompletion, AgentEvent, AgentOutcome, FsAgentFactory, PersistenceConfig,
+        AgentCompletion, AgentEvent, AgentManager, AgentOutcome, PersistenceConfig,
     };
     use crate::config::{catalog as agent_catalog, SharedApiManager};
     use crate::protocol::{AgentId, AgentKind, Message};
@@ -443,7 +443,7 @@ mod tests {
     #[allow(clippy::arc_with_non_send_sync)]
     fn instance_with_root() -> (TestInstance, AgentId) {
         MemFs::new();
-        let factory = FsAgentFactory::new(
+        let manager = AgentManager::new(
             Arc::new(ToolRegistry::new()),
             Arc::new(
                 Persistence::<MemFs>::new("/output-test/state").expect("test persistence builds"),
@@ -452,9 +452,9 @@ mod tests {
             Vec::new(),
             SharedApiManager::default(),
         )
-        .expect("test factory builds");
+        .expect("test manager builds");
         let mut instance = MultiagentRuntime::new(
-            Rc::new(factory),
+            Rc::new(manager),
             AgentIdAllocator::new(),
             Arc::new(AllowAll),
             MultiagentState::default(),
