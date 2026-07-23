@@ -1,4 +1,4 @@
-//! Durable state shared by one Agent and its stateful components.
+//! Durable state owned by one BaseAgent and its stateful components.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
@@ -7,22 +7,15 @@ use claw_api::ToolCall;
 use claw_persistence::{DurablePartError, DurableStateCodec, SchemaVersion, StateBlob, StateSlice};
 use serde::{Deserialize, Serialize};
 
-use super::AgentKind;
+use crate::agent::context_adapters::AgentMode;
+use crate::agent::AgentKind;
 
-/// The context mode applied to the next model request.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(in crate::agent) enum AgentMode {
-    Normal,
-    Plan,
-}
-
-/// Complete currently implemented Agent recovery DTO.
+/// Complete currently implemented BaseAgent recovery DTO.
 ///
 /// Conversation history is not included: it is a projection of the canonical
 /// transcript store. Runtime-only stream and poll state is not durable.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub(in crate::agent) struct AgentState {
+pub(in crate::agent) struct BaseAgentState {
     kind: String,
     mode: AgentMode,
     loaded_tool_groups: BTreeSet<String>,
@@ -31,7 +24,7 @@ pub(in crate::agent) struct AgentState {
     inflight_toolcalls: Vec<ToolCall>,
 }
 
-impl AgentState {
+impl BaseAgentState {
     pub(in crate::agent) fn new(kind: &AgentKind) -> Self {
         Self {
             kind: kind.as_str().to_owned(),
@@ -78,7 +71,7 @@ impl AgentState {
     }
 }
 
-impl DurableStateCodec for AgentState {
+impl DurableStateCodec for BaseAgentState {
     const SCHEMA_VERSION: SchemaVersion = 2;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
@@ -102,14 +95,15 @@ impl DurableStateCodec for AgentState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentMode, AgentState};
+    use super::BaseAgentState;
+    use crate::agent::context_adapters::AgentMode;
     use crate::agent::AgentKind;
     use claw_api::ToolCall;
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     #[test]
     fn state_codec_round_trip_preserves_agent_state() {
-        let mut state = AgentState::new(&AgentKind::from_static("worker"));
+        let mut state = BaseAgentState::new(&AgentKind::from_static("worker"));
         state.set_mode(AgentMode::Plan);
         state.record_loaded_tool_group("memory".to_owned());
         state.record_inflight_toolcalls(vec![ToolCall {
@@ -122,8 +116,8 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&encoded.bytes).expect("state is JSON");
         assert_eq!(json["inflight_toolcalls"][0]["id"], "call-1");
-        let decoded = AgentState::decode_state(
-            AgentState::SCHEMA_VERSION,
+        let decoded = BaseAgentState::decode_state(
+            BaseAgentState::SCHEMA_VERSION,
             StateSlice {
                 bytes: &encoded.bytes,
             },

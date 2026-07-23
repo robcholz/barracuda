@@ -13,7 +13,6 @@ use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
 
-use crate::agent::state::AgentState;
 use crate::config::{ApiUsage, SharedApiManager};
 use crate::session::Message;
 
@@ -27,11 +26,11 @@ use super::stream::{
     AgentCompletion, AgentError, AgentInputRequest, AgentIterationEvent, AgentOutcome,
     AgentSubmitError, ApprovalOutcome, BaseAgentEvent, BaseAgentStream, RunControl,
 };
-use super::TurnLifecycle;
+use super::{BaseAgentState, TurnLifecycle};
 
 /// All construction-time dependencies for one fully assembled BaseAgent.
 pub(in crate::agent) struct BaseAgentConfig {
-    pub(in crate::agent) state: DurableState<AgentState>,
+    pub(in crate::agent) state: DurableState<BaseAgentState>,
     pub(in crate::agent) transcript: Box<dyn Transcript>,
     pub(in crate::agent) agent_instruction: Block<'static>,
     pub(in crate::agent) inherited_context: Vec<Block<'static>>,
@@ -68,7 +67,7 @@ enum IterationCompletion {
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
 pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
     llm: ClawApiAsync<H, Timer>,
     api_manager: SharedApiManager,
     api_usage: ApiUsage,
@@ -464,7 +463,7 @@ const fn reasoning_limit() -> usize {
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
-    pub(in crate::agent) fn state(&self) -> &DurableState<AgentState> {
+    pub(in crate::agent) fn state(&self) -> &DurableState<BaseAgentState> {
         &self.state
     }
 

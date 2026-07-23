@@ -6,10 +6,11 @@
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
+use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::AgentEffectEmitter;
 use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
-use crate::agent::state::{AgentMode, AgentState};
+use crate::agent::BaseAgentState;
 
 use self::tools::plan_tools;
 
@@ -17,14 +18,22 @@ mod tools;
 
 const PLAN_MODE_FRAMING: &str = prompt!("plan_mode/instructions.md");
 
+/// The context mode applied to the next model request.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(in crate::agent) enum AgentMode {
+    Normal,
+    Plan,
+}
+
 /// Projects the shared Agent mode and provides all mode-specific tools.
 pub(crate) struct AgentModeContextAdapter {
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 }
 
 impl AgentModeContextAdapter {
-    pub(crate) fn new(state: DurableState<AgentState>, effects: AgentEffectEmitter) -> Self {
+    pub(crate) fn new(state: DurableState<BaseAgentState>, effects: AgentEffectEmitter) -> Self {
         Self { state, effects }
     }
 }
@@ -54,14 +63,13 @@ mod tests {
     use claw_context::Context;
     use claw_persistence::DurableState;
 
-    use super::AgentModeContextAdapter;
+    use super::{AgentMode, AgentModeContextAdapter};
     use crate::agent::base_agent::agent_effect_channel;
     use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
-    use crate::agent::state::{AgentMode, AgentState};
-    use crate::agent::AgentKind;
+    use crate::agent::{AgentKind, BaseAgentState};
 
     fn adapter(mode: AgentMode) -> AgentModeContextAdapter {
-        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state.get_mut().set_mode(mode);
         let (effects, _inbox) = agent_effect_channel();
         AgentModeContextAdapter::new(state, effects)

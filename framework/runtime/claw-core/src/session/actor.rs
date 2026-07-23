@@ -484,11 +484,16 @@ where
             self.finish_turn();
             return true;
         }
-        self.start_root(message);
-        true
+        match self.dispatch_root(message) {
+            Ok(()) => true,
+            Err(message) => {
+                self.inbox.push_front(message);
+                false
+            }
+        }
     }
 
-    fn start_root(&mut self, message: Message) {
+    fn dispatch_root(&mut self, message: Message) -> Result<(), Message> {
         let root = self
             .root
             .as_mut()
@@ -499,7 +504,7 @@ where
             trace.task = %agent,
             run.agent = %agent,
         );
-        root.submit(message, &self.scheduler, self.run_route.clone(), span);
+        root.dispatch(message, &self.scheduler, self.run_route.clone(), span)
     }
 
     fn delete_root_agent(&mut self) -> Result<(), AgentCreateError> {

@@ -1,3 +1,4 @@
+use core::cell::Cell;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -12,8 +13,8 @@ use futures_lite::{future, StreamExt as _};
 use tracing::Instrument as _;
 
 use crate::agent::{
-    Agent, AgentApprovalError, AgentError, AgentEvent, AgentInputRequest, ApprovalDecision,
-    ToolCallId,
+    Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, AgentHandle,
+    AgentInputRequest, ApprovalDecision, ToolCallId,
 };
 use crate::session::Message;
 
@@ -23,7 +24,7 @@ pub(super) enum AgentRunItem {
 }
 
 enum RunCommand {
-    Submit(Message),
+    Dispatch(Message),
     Interrupt,
     Cancel,
     ResolveApproval {
@@ -32,22 +33,48 @@ enum RunCommand {
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunActivity {
+    Running,
+    Idle,
+    Closed,
+}
+
 #[derive(Clone)]
 pub(crate) struct AgentRunControl {
     commands: Sender<RunCommand>,
+    activity: Rc<Cell<RunActivity>>,
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 }
 
 impl AgentRunControl {
-    pub(crate) fn submit(&self, message: Message) -> bool {
-        self.commands.try_send(RunCommand::Submit(message)).is_ok()
+    pub(crate) fn dispatch(&self, message: Message) -> Result<(), AgentDispatchError> {
+        match self.activity.get() {
+            RunActivity::Running => return Err(AgentDispatchError::Busy),
+            RunActivity::Closed => return Err(AgentDispatchError::Closed),
+            RunActivity::Idle => self.activity.set(RunActivity::Running),
+        }
+        if self
+            .commands
+            .try_send(RunCommand::Dispatch(message))
+            .is_err()
+        {
+            self.activity.set(RunActivity::Closed);
+            return Err(AgentDispatchError::Closed);
+        }
+        Ok(())
     }
 
     pub(crate) fn interrupt(&self) {
-        let _ = self.commands.try_send(RunCommand::Interrupt);
+        if self.activity.get() == RunActivity::Running {
+            let _ = self.commands.try_send(RunCommand::Interrupt);
+        }
     }
 
     pub(crate) fn cancel(&self) {
+        if self.activity.replace(RunActivity::Closed) == RunActivity::Closed {
+            return;
+        }
         let _ = self.commands.try_send(RunCommand::Cancel);
     }
 
@@ -104,9 +131,11 @@ where
     pub(super) fn start(agent: Agent<Http, Timer>, message: Message, span: tracing::Span) -> Self {
         let (progress_sender, progress_receiver) = async_channel::bounded(1);
         let (command_sender, command_receiver) = async_channel::unbounded();
+        let activity = Rc::new(Cell::new(RunActivity::Running));
         let awaiting_approval = Rc::new(RefCell::new(None));
         let control = AgentRunControl {
             commands: command_sender,
+            activity: Rc::clone(&activity),
             awaiting_approval: Rc::clone(&awaiting_approval),
         };
         let future = Box::pin(
@@ -115,6 +144,7 @@ where
                 message,
                 progress_sender,
                 command_receiver,
+                activity,
                 awaiting_approval,
             )
             .instrument(span),
@@ -193,13 +223,14 @@ async fn drive_agent<Http, Timer>(
     message: Message,
     progress: Sender<ProgressEnvelope>,
     commands: Receiver<RunCommand>,
+    activity: Rc<Cell<RunActivity>>,
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 ) -> Agent<Http, Timer>
 where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    let mut stream = agent.submit(message);
+    let (mut stream, handle): (_, AgentHandle) = agent.submit(message);
 
     loop {
         enum Wake {
@@ -213,28 +244,40 @@ where
         .await;
 
         match wake {
-            Wake::Command(Some(RunCommand::Submit(message))) => {
-                let _ = stream.submit(message);
+            Wake::Command(Some(RunCommand::Dispatch(message))) => {
+                if handle.dispatch(message).is_err() {
+                    activity.set(RunActivity::Closed);
+                    handle.cancel();
+                    break;
+                }
             }
-            Wake::Command(Some(RunCommand::Interrupt)) => stream.interrupt(),
-            Wake::Command(Some(RunCommand::Cancel)) => stream.cancel(),
+            Wake::Command(Some(RunCommand::Interrupt)) => handle.interrupt(),
+            Wake::Command(Some(RunCommand::Cancel)) => handle.cancel(),
             Wake::Command(Some(RunCommand::ResolveApproval {
                 tool_call_id,
                 decision,
             })) => {
-                let _ = stream.resolve_approval(tool_call_id, decision);
+                let _ = handle.resolve_approval(tool_call_id, decision);
             }
-            Wake::Command(None) => stream.cancel(),
+            Wake::Command(None) => handle.cancel(),
             Wake::Event(Some(item)) => {
                 match &item {
+                    Ok(AgentEvent::TurnStarted { .. }) => {
+                        activity.set(RunActivity::Running);
+                    }
                     Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
                         tool_call_id,
                         ..
                     })) => {
                         *awaiting_approval.borrow_mut() = Some(*tool_call_id);
                     }
-                    Ok(AgentEvent::TurnEnded { .. }) | Err(_) => {
+                    Ok(AgentEvent::TurnEnded { .. }) => {
                         awaiting_approval.borrow_mut().take();
+                        activity.set(RunActivity::Idle);
+                    }
+                    Err(_) => {
+                        awaiting_approval.borrow_mut().take();
+                        activity.set(RunActivity::Closed);
                     }
                     _ => {}
                 }
@@ -245,7 +288,7 @@ where
                     .await
                     .is_err()
                 {
-                    stream.cancel();
+                    handle.cancel();
                     break;
                 }
                 let _ = resumed.recv().await;
@@ -254,10 +297,14 @@ where
                     break;
                 }
             }
-            Wake::Event(None) => break,
+            Wake::Event(None) => {
+                activity.set(RunActivity::Closed);
+                break;
+            }
         }
     }
 
     drop(stream);
+    activity.set(RunActivity::Closed);
     agent
 }

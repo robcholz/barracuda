@@ -6,12 +6,14 @@ mod agent;
 mod context;
 mod effect;
 mod iteration_loop;
+mod persistence;
 mod stream;
 
 pub(crate) use self::agent::BaseAgent;
 pub(super) use self::agent::BaseAgentConfig;
 pub(in crate::agent) use self::context::{ContextAdapter, ContextAdapterFuture, TurnLifecycle};
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
+pub(in crate::agent) use self::persistence::BaseAgentState;
 pub use self::stream::{AgentApprovalError, AgentError};
 pub(crate) use self::stream::{
     AgentCompletion, AgentInputRequest, AgentIterationEvent, AgentOutcome, AgentSubmitError,

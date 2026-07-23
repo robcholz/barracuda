@@ -14,7 +14,7 @@ mod reasoning_effort;
 mod resume;
 mod skill;
 
-pub(in crate::agent) use agent_mode::AgentModeContextAdapter;
+pub(in crate::agent) use agent_mode::{AgentMode, AgentModeContextAdapter};
 pub(in crate::agent) use conversation_history::ConversationHistoryContextAdapter;
 pub(in crate::agent) use long_term_memory::LongTermMemoryContextAdapter;
 pub(in crate::agent) use profile::ProfileContextAdapter;

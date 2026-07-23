@@ -6,7 +6,7 @@ use claw_memory::TranscriptStore;
 use claw_persistence::{DurableState, InstanceId};
 
 use super::AgentId;
-use crate::agent::state::AgentState;
+use crate::agent::BaseAgentState;
 
 use super::error::AgentCreateError;
 use super::AgentManager;
@@ -40,7 +40,7 @@ where
 
     pub(crate) fn list_persisted_agents(&self) -> Result<Vec<AgentId>, AgentCreateError> {
         self.persistence
-            .collection::<AgentState>(AGENT_STATE_NAME)?
+            .collection::<BaseAgentState>(AGENT_STATE_NAME)?
             .list()?
             .into_iter()
             .map(|instance| {
@@ -53,15 +53,18 @@ where
 
     pub(crate) fn remove(&self, id: AgentId) -> Result<(), AgentCreateError> {
         self.persistence
-            .collection::<AgentState>(AGENT_STATE_NAME)?
+            .collection::<BaseAgentState>(AGENT_STATE_NAME)?
             .remove(&agent_instance(id))?;
         TranscriptStore::<Filesystem>::delete(id.0, &self.transcript_dir)?;
         Ok(())
     }
 
-    pub(super) fn load_persisted_agent(&self, id: AgentId) -> Result<AgentState, AgentCreateError> {
+    pub(super) fn load_persisted_agent(
+        &self,
+        id: AgentId,
+    ) -> Result<BaseAgentState, AgentCreateError> {
         self.persistence
-            .collection::<AgentState>(AGENT_STATE_NAME)?
+            .collection::<BaseAgentState>(AGENT_STATE_NAME)?
             .load(&agent_instance(id))?
             .ok_or(AgentCreateError::AgentNotFound(id))
     }
@@ -69,11 +72,11 @@ where
     pub(super) fn register_new_agent(
         &self,
         id: AgentId,
-        state: &DurableState<AgentState>,
+        state: &DurableState<BaseAgentState>,
     ) -> Result<(), AgentCreateError> {
         let collection = self
             .persistence
-            .collection::<AgentState>(AGENT_STATE_NAME)?;
+            .collection::<BaseAgentState>(AGENT_STATE_NAME)?;
         let instance = agent_instance(id);
         if collection.load(&instance)?.is_some() {
             return Err(AgentCreateError::AgentAlreadyExists(id));
@@ -84,7 +87,7 @@ where
     pub(super) fn register_restored_agent(
         &self,
         id: AgentId,
-        state: &DurableState<AgentState>,
+        state: &DurableState<BaseAgentState>,
     ) -> Result<(), AgentCreateError> {
         self.register_agent(id, state)
     }
@@ -92,10 +95,10 @@ where
     fn register_agent(
         &self,
         id: AgentId,
-        state: &DurableState<AgentState>,
+        state: &DurableState<BaseAgentState>,
     ) -> Result<(), AgentCreateError> {
         self.persistence
-            .collection::<AgentState>(AGENT_STATE_NAME)?
+            .collection::<BaseAgentState>(AGENT_STATE_NAME)?
             .register(&agent_instance(id), state)?;
         Ok(())
     }

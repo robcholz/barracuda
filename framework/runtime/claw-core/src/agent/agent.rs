@@ -1,7 +1,9 @@
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::fmt::Write as _;
+use std::rc::Rc;
 
 use async_channel::{Receiver, TryRecvError};
 use claw_api::ToolCall;
@@ -16,9 +18,10 @@ use futures_lite::{future, StreamExt as _};
 use super::base_agent::{
     AgentInputRequest, AgentOutcome, AgentSubmitError, BaseAgent, BaseAgentEvent,
 };
-use super::state::AgentState;
-use super::stream::{AgentCommand, AgentEvent, AgentStream, AgentTurnOrigin};
-use super::{AgentError, AgentIterationEvent};
+use super::stream::{
+    AgentActivity, AgentCommand, AgentEvent, AgentHandle, AgentStream, AgentTurnOrigin,
+};
+use super::{AgentError, AgentIterationEvent, BaseAgentState};
 use crate::session::Message;
 
 #[derive(Clone)]
@@ -85,12 +88,73 @@ impl AgentEphemeralState {
         self.inflight_detached_toolcalls.clear();
         self.ready_detached_toolcalls.clear();
     }
+
+    async fn next_turn(
+        &mut self,
+        commands: &Receiver<AgentCommand>,
+        activity: &Cell<AgentActivity>,
+    ) -> Option<PendingTurn> {
+        loop {
+            match commands.try_recv() {
+                Ok(AgentCommand::Dispatch(message)) => {
+                    return Some(PendingTurn::message(message));
+                }
+                Ok(AgentCommand::Interrupt) | Ok(AgentCommand::ResolveApproval { .. }) => continue,
+                Ok(AgentCommand::Cancel) | Err(TryRecvError::Closed) => {
+                    self.clear();
+                    return None;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+
+            if !self.ready_detached_toolcalls.is_empty() && activity.get() == AgentActivity::Idle {
+                activity.set(AgentActivity::Running);
+                return detached_turn(&mut self.ready_detached_toolcalls);
+            }
+            if !self.has_inflight_detached_toolcalls() {
+                return None;
+            }
+
+            enum Wake {
+                Command(Option<AgentCommand>),
+                Detached(DetachedCompletion),
+            }
+            match future::or(async { Wake::Command(commands.recv().await.ok()) }, async {
+                Wake::Detached(future::poll_fn(|context| self.poll_completion(context)).await)
+            })
+            .await
+            {
+                Wake::Command(Some(AgentCommand::Dispatch(message))) => {
+                    return Some(PendingTurn::message(message));
+                }
+                Wake::Command(Some(AgentCommand::Interrupt))
+                | Wake::Command(Some(AgentCommand::ResolveApproval { .. })) => {}
+                Wake::Command(Some(AgentCommand::Cancel)) | Wake::Command(None) => {
+                    self.clear();
+                    return None;
+                }
+                Wake::Detached(completion) => {
+                    self.ready_detached_toolcalls.push_back(completion);
+                }
+            }
+        }
+    }
 }
 
 struct PendingTurn {
     origin: AgentTurnOrigin,
     message: Message,
     applied_completions: Vec<DetachedCompletion>,
+}
+
+impl PendingTurn {
+    fn message(message: Message) -> Self {
+        Self {
+            origin: AgentTurnOrigin::Message,
+            message,
+            applied_completions: Vec::new(),
+        }
+    }
 }
 
 /// One long-lived Agent instance around the single-task [`BaseAgent`] core.
@@ -111,13 +175,17 @@ where
         }
     }
 
-    pub(crate) fn submit(&mut self, message: Message) -> AgentStream<'_> {
-        let (control, commands, awaiting_approval) = AgentStream::channel();
-        let stream = ActiveStreamGuard::new(self).into_stream(message, commands, awaiting_approval);
-        AgentStream::new(stream, control)
+    pub(crate) fn submit(&mut self, message: Message) -> (AgentStream<'_>, AgentHandle) {
+        let (handle, commands, activity, awaiting_approval) = AgentHandle::channel();
+        let stream = ActiveStreamGuard::new(self, activity).into_stream(
+            message,
+            commands,
+            awaiting_approval,
+        );
+        (AgentStream::new(stream), handle)
     }
 
-    pub(in crate::agent) fn state(&self) -> &DurableState<AgentState> {
+    pub(in crate::agent) fn state(&self) -> &DurableState<BaseAgentState> {
         self.base.state()
     }
 
@@ -128,6 +196,7 @@ where
 
 struct ActiveStreamGuard<'a, H: ClawHttp, Timer: ClawTimer> {
     agent: &'a mut Agent<H, Timer>,
+    activity: Rc<Cell<AgentActivity>>,
 }
 
 impl<'a, H, Timer> ActiveStreamGuard<'a, H, Timer>
@@ -135,101 +204,22 @@ where
     H: ClawHttp + StreamingHttp,
     Timer: ClawTimer,
 {
-    fn new(agent: &'a mut Agent<H, Timer>) -> Self {
-        Self { agent }
+    fn new(agent: &'a mut Agent<H, Timer>, activity: Rc<Cell<AgentActivity>>) -> Self {
+        Self { agent, activity }
     }
 
     fn into_stream(
         self,
         first_message: Message,
         commands: Receiver<AgentCommand>,
-        awaiting_approval: std::rc::Rc<std::cell::RefCell<Option<super::ToolCallId>>>,
+        awaiting_approval: Rc<std::cell::RefCell<Option<super::ToolCallId>>>,
     ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + 'a {
         async_stream::stream! {
             let Agent { base, ephemeral } = self.agent;
-            let mut messages = VecDeque::from([PendingTurn {
-                origin: AgentTurnOrigin::Message,
-                message: first_message,
-                applied_completions: Vec::new(),
-            }]);
+            let mut turn = PendingTurn::message(first_message);
             let mut cancel_requested = false;
 
             loop {
-                let next_turn = loop {
-                    loop {
-                        match commands.try_recv() {
-                            Ok(AgentCommand::Submit(message)) => {
-                                messages.push_back(PendingTurn {
-                                    origin: AgentTurnOrigin::Message,
-                                    message,
-                                    applied_completions: Vec::new(),
-                                });
-                            }
-                            Ok(AgentCommand::Interrupt) => {}
-                            Ok(AgentCommand::Cancel) => {
-                                ephemeral.clear();
-                                cancel_requested = true;
-                            }
-                            Ok(AgentCommand::ResolveApproval { .. }) => {}
-                            Err(TryRecvError::Empty) => break,
-                            Err(TryRecvError::Closed) => {
-                                ephemeral.clear();
-                                cancel_requested = true;
-                                break;
-                            }
-                        }
-                    }
-                    if cancel_requested {
-                        break None;
-                    }
-                    if let Some(turn) = messages.pop_front() {
-                        break Some(turn);
-                    }
-                    if !ephemeral.ready_detached_toolcalls.is_empty() {
-                        break detached_turn(&mut ephemeral.ready_detached_toolcalls);
-                    }
-                    if !ephemeral.has_inflight_detached_toolcalls() {
-                        break None;
-                    }
-
-                    enum IdleWake {
-                        Command(Option<AgentCommand>),
-                        Detached(DetachedCompletion),
-                    }
-                    let wake = future::or(
-                        async { IdleWake::Command(commands.recv().await.ok()) },
-                        async {
-                            IdleWake::Detached(
-                                future::poll_fn(|context| ephemeral.poll_completion(context)).await,
-                            )
-                        },
-                    )
-                    .await;
-                    match wake {
-                        IdleWake::Command(Some(AgentCommand::Submit(message))) => {
-                            messages.push_back(PendingTurn {
-                                origin: AgentTurnOrigin::Message,
-                                message,
-                                applied_completions: Vec::new(),
-                            });
-                        }
-                        IdleWake::Command(Some(AgentCommand::Interrupt)) => {}
-                        IdleWake::Command(Some(AgentCommand::Cancel))
-                        | IdleWake::Command(None) => {
-                            ephemeral.clear();
-                            cancel_requested = true;
-                            break None;
-                        }
-                        IdleWake::Command(Some(AgentCommand::ResolveApproval { .. })) => {}
-                        IdleWake::Detached(completion) => {
-                            ephemeral.ready_detached_toolcalls.push_back(completion);
-                        }
-                    }
-                };
-
-                let Some(turn) = next_turn else {
-                    break;
-                };
                 yield Ok(AgentEvent::TurnStarted {
                     origin: turn.origin.clone(),
                 });
@@ -275,12 +265,8 @@ where
                     .await;
 
                     match wake {
-                        ActiveWake::Command(Some(AgentCommand::Submit(message))) => {
-                            messages.push_back(PendingTurn {
-                                origin: AgentTurnOrigin::Message,
-                                message,
-                                applied_completions: Vec::new(),
-                            });
+                        ActiveWake::Command(Some(AgentCommand::Dispatch(_))) => {
+                            failure = Some(AgentError::StateInvariant);
                         }
                         ActiveWake::Command(Some(AgentCommand::Interrupt)) => run.interrupt(),
                         ActiveWake::Command(Some(AgentCommand::Cancel))
@@ -354,12 +340,25 @@ where
                         cancel_requested = true;
                     }
                 }
+                if cancel_requested {
+                    self.activity.set(AgentActivity::Closed);
+                } else {
+                    self.activity.set(AgentActivity::Idle);
+                }
                 yield Ok(AgentEvent::TurnEnded { outcome });
 
                 if cancel_requested {
                     ephemeral.clear();
                     break;
                 }
+
+                let Some(next_turn) = ephemeral
+                    .next_turn(&commands, self.activity.as_ref())
+                    .await
+                else {
+                    break;
+                };
+                turn = next_turn;
             }
         }
     }
@@ -367,6 +366,7 @@ where
 
 impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveStreamGuard<'_, H, Timer> {
     fn drop(&mut self) {
+        self.activity.set(AgentActivity::Closed);
         self.agent.ephemeral.clear();
     }
 }

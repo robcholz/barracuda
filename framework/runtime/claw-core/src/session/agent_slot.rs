@@ -93,19 +93,23 @@ where
         }));
     }
 
-    pub(super) fn submit(
+    pub(super) fn dispatch(
         &mut self,
         message: Message,
         scheduler: &AgentRunSchedulerHandle<Http, Timer>,
         route: AgentRunRoute<Http, Timer>,
         span: tracing::Span,
-    ) {
+    ) -> Result<(), Message> {
         match self.execution.as_mut() {
             Some(Execution::InFlight(in_flight)) => {
-                let _ = in_flight.control.submit(message);
+                let retry = message.clone();
+                in_flight.control.dispatch(message).map_err(|_| retry)
             }
-            Some(Execution::Resident(_)) => self.start(message, scheduler, route, span),
-            None => {}
+            Some(Execution::Resident(_)) => {
+                self.start(message, scheduler, route, span);
+                Ok(())
+            }
+            None => Err(message),
         }
     }
 

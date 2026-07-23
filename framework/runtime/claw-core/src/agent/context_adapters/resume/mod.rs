@@ -7,7 +7,7 @@ use claw_persistence::DurableState;
 use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 
 use crate::agent::base_agent::ContextAdapter;
-use crate::agent::state::AgentState;
+use crate::agent::BaseAgentState;
 
 use self::tools::discovery_tools;
 
@@ -16,14 +16,14 @@ mod tools;
 /// Contributes a one-shot reminder derived from restored Agent state and
 /// exposes tool discovery.
 pub(in crate::agent) struct ResumeContextAdapter {
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
     reminder: Option<String>,
     discovery: ToolDiscoveryHandle,
 }
 
 impl ResumeContextAdapter {
     pub(in crate::agent) fn new(
-        state: DurableState<AgentState>,
+        state: DurableState<BaseAgentState>,
         discovery: ToolDiscoveryHandle,
     ) -> Self {
         let reminder = render_resume_reminder(&state.get());
@@ -46,7 +46,7 @@ impl ContextAdapter for ResumeContextAdapter {
     }
 }
 
-fn render_resume_reminder(state: &AgentState) -> Option<String> {
+fn render_resume_reminder(state: &BaseAgentState) -> Option<String> {
     let mut details = Vec::new();
     if !state.loaded_tool_groups().is_empty() {
         details.push(format!(
@@ -101,8 +101,7 @@ mod tests {
 
     use super::ResumeContextAdapter;
     use crate::agent::base_agent::ContextAdapter;
-    use crate::agent::state::AgentState;
-    use crate::agent::AgentKind;
+    use crate::agent::{AgentKind, BaseAgentState};
     use claw_api::ToolCall;
     use claw_context::Context;
     use claw_persistence::DurableState;
@@ -115,7 +114,7 @@ mod tests {
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {
         let registry = Arc::new(ToolRegistry::new());
         let mut tool_set = registry.tool_set();
-        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state.get_mut().record_inflight_toolcalls(vec![ToolCall {
             id: "call-1".to_owned(),
             name: "profile_read".to_owned(),
@@ -162,7 +161,7 @@ mod tests {
             .expect("hidden group registers");
         registry.start_all().expect("registry starts");
         let mut tool_set = registry.tool_set();
-        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state
             .get_mut()
             .record_loaded_tool_group("hidden".to_owned());

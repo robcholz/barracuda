@@ -7,14 +7,15 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
+use super::AgentMode;
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::state::{AgentMode, AgentState};
 use crate::agent::tools::helper::{non_blank_argument, optional_string_argument};
+use crate::agent::BaseAgentState;
 
 const DEFAULT_CANCEL_MESSAGE: &str = "Planning cancelled.";
 
 pub(super) fn plan_tools(
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 ) -> ToolGroup {
     ToolGroup::new(
@@ -33,7 +34,7 @@ pub(super) fn plan_tools(
 }
 
 pub(super) struct EnterPlanModeTool {
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
 }
 
 impl ToolSpec for EnterPlanModeTool {
@@ -73,7 +74,7 @@ impl SyncToolHandler for RequestClarificationTool {
 }
 
 pub(super) struct ExitPlanModeTool {
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 }
 
@@ -148,17 +149,18 @@ mod tests {
     use claw_persistence::DurableState;
     use claw_tool::{SyncToolHandler, ToolInvocation};
 
-    use super::{AgentEffect, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool};
+    use super::{
+        AgentEffect, AgentMode, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
+    };
     use crate::agent::base_agent::agent_effect_channel;
-    use crate::agent::state::{AgentMode, AgentState};
-    use crate::agent::AgentKind;
+    use crate::agent::{AgentKind, BaseAgentState};
 
     fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation<'a> {
         ToolInvocation::try_new(Some("call-test"), name, arguments_json).expect("valid invocation")
     }
 
-    fn state(mode: AgentMode) -> DurableState<AgentState> {
-        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
+    fn state(mode: AgentMode) -> DurableState<BaseAgentState> {
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state.get_mut().set_mode(mode);
         state
     }

@@ -15,9 +15,8 @@ use crate::agent::context_adapters::{
     AgentModeContextAdapter, ConversationHistoryContextAdapter, ProfileContextAdapter,
     ReasoningEffortContextAdapter, ResumeContextAdapter, SkillContextAdapter,
 };
-use crate::agent::state::AgentState;
 use crate::agent::tools::internal_tools;
-use crate::agent::{Agent, AgentKind, ReasoningEffort, ReasoningEffortHandle};
+use crate::agent::{Agent, AgentKind, BaseAgentState, ReasoningEffort, ReasoningEffortHandle};
 use crate::config::ApiUsage;
 
 use super::error::AgentCreateError;
@@ -40,7 +39,7 @@ struct AgentEnvironment {
     extension_tools: Vec<ToolGroup>,
     inherited_context: Vec<Block<'static>>,
     reasoning_effort: ReasoningEffort,
-    state: Option<AgentState>,
+    state: Option<BaseAgentState>,
 }
 
 impl<
@@ -197,7 +196,7 @@ impl<
         })?;
         let runtime = manifest.runtime();
         let skills = self.skills.skill_set();
-        let state = DurableState::new(recovery_state.unwrap_or_else(|| AgentState::new(kind)));
+        let state = DurableState::new(recovery_state.unwrap_or_else(|| BaseAgentState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.

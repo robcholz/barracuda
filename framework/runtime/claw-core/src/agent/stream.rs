@@ -1,6 +1,6 @@
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use async_channel::{Receiver, Sender};
@@ -30,8 +30,21 @@ pub(crate) enum AgentEvent {
     TurnEnded { outcome: AgentOutcome },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AgentDispatchError {
+    Busy,
+    Closed,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum AgentActivity {
+    Running,
+    Idle,
+    Closed,
+}
+
 pub(super) enum AgentCommand {
-    Submit(Message),
+    Dispatch(Message),
     Interrupt,
     Cancel,
     ResolveApproval {
@@ -40,29 +53,66 @@ pub(super) enum AgentCommand {
     },
 }
 
-/// Cloneable control capability for one checked-out Agent.
-#[derive(Clone)]
-pub(super) struct AgentControl {
+/// Control capability for one checked-out Agent.
+pub(crate) struct AgentHandle {
     commands: Sender<AgentCommand>,
+    activity: Rc<Cell<AgentActivity>>,
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 }
 
-impl AgentControl {
-    fn submit(&self, message: Message) -> bool {
-        self.commands
-            .try_send(AgentCommand::Submit(message))
-            .is_ok()
+impl AgentHandle {
+    pub(super) fn channel() -> (
+        Self,
+        Receiver<AgentCommand>,
+        Rc<Cell<AgentActivity>>,
+        Rc<RefCell<Option<ToolCallId>>>,
+    ) {
+        let (commands, receiver) = async_channel::unbounded();
+        let activity = Rc::new(Cell::new(AgentActivity::Running));
+        let awaiting_approval = Rc::new(RefCell::new(None));
+        (
+            Self {
+                commands,
+                activity: Rc::clone(&activity),
+                awaiting_approval: Rc::clone(&awaiting_approval),
+            },
+            receiver,
+            activity,
+            awaiting_approval,
+        )
     }
 
-    fn interrupt(&self) {
-        let _ = self.commands.try_send(AgentCommand::Interrupt);
+    pub(crate) fn dispatch(&self, message: Message) -> Result<(), AgentDispatchError> {
+        match self.activity.get() {
+            AgentActivity::Running => return Err(AgentDispatchError::Busy),
+            AgentActivity::Closed => return Err(AgentDispatchError::Closed),
+            AgentActivity::Idle => self.activity.set(AgentActivity::Running),
+        }
+        if self
+            .commands
+            .try_send(AgentCommand::Dispatch(message))
+            .is_err()
+        {
+            self.activity.set(AgentActivity::Closed);
+            return Err(AgentDispatchError::Closed);
+        }
+        Ok(())
     }
 
-    fn cancel(&self) {
+    pub(crate) fn interrupt(&self) {
+        if self.activity.get() == AgentActivity::Running {
+            let _ = self.commands.try_send(AgentCommand::Interrupt);
+        }
+    }
+
+    pub(crate) fn cancel(&self) {
+        if self.activity.replace(AgentActivity::Closed) == AgentActivity::Closed {
+            return;
+        }
         let _ = self.commands.try_send(AgentCommand::Cancel);
     }
 
-    fn resolve_approval(
+    pub(crate) fn resolve_approval(
         &self,
         tool_call_id: ToolCallId,
         decision: ApprovalDecision,
@@ -88,58 +138,16 @@ impl AgentControl {
     }
 }
 
-/// Borrowing stream and control surface for one physical Agent checkout.
+/// Events produced by one physical Agent checkout.
 pub(crate) struct AgentStream<'a> {
     stream: Pin<Box<dyn Stream<Item = Result<AgentEvent, AgentError>> + 'a>>,
-    control: AgentControl,
 }
 
 impl<'a> AgentStream<'a> {
-    pub(super) fn channel() -> (
-        AgentControl,
-        Receiver<AgentCommand>,
-        Rc<RefCell<Option<ToolCallId>>>,
-    ) {
-        let (commands, receiver) = async_channel::unbounded();
-        let awaiting_approval = Rc::new(RefCell::new(None));
-        (
-            AgentControl {
-                commands,
-                awaiting_approval: Rc::clone(&awaiting_approval),
-            },
-            receiver,
-            awaiting_approval,
-        )
-    }
-
-    pub(super) fn new(
-        stream: impl Stream<Item = Result<AgentEvent, AgentError>> + 'a,
-        control: AgentControl,
-    ) -> Self {
+    pub(super) fn new(stream: impl Stream<Item = Result<AgentEvent, AgentError>> + 'a) -> Self {
         Self {
             stream: Box::pin(stream),
-            control,
         }
-    }
-
-    pub(crate) fn submit(&mut self, message: Message) -> bool {
-        self.control.submit(message)
-    }
-
-    pub(crate) fn interrupt(&mut self) {
-        self.control.interrupt();
-    }
-
-    pub(crate) fn cancel(&mut self) {
-        self.control.cancel();
-    }
-
-    pub(crate) fn resolve_approval(
-        &mut self,
-        tool_call_id: ToolCallId,
-        decision: ApprovalDecision,
-    ) -> Result<(), AgentApprovalError> {
-        self.control.resolve_approval(tool_call_id, decision)
     }
 }
 
@@ -151,8 +159,45 @@ impl Stream for AgentStream<'_> {
     }
 }
 
-impl Drop for AgentStream<'_> {
-    fn drop(&mut self) {
-        self.control.cancel();
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatch_accepts_exactly_one_message_while_idle() {
+        let (handle, commands, activity, _) = AgentHandle::channel();
+
+        assert_eq!(
+            handle.dispatch(Message::text("busy")),
+            Err(AgentDispatchError::Busy)
+        );
+
+        activity.set(AgentActivity::Idle);
+        assert_eq!(handle.dispatch(Message::text("next")), Ok(()));
+        assert_eq!(
+            handle.dispatch(Message::text("queued")),
+            Err(AgentDispatchError::Busy)
+        );
+
+        let command = commands
+            .try_recv()
+            .expect("the accepted dispatch reaches the Agent");
+        let AgentCommand::Dispatch(message) = command else {
+            panic!("dispatch emits only a dispatch command");
+        };
+        assert_eq!(message.as_str(), "next");
+    }
+
+    #[test]
+    fn cancel_closes_dispatch() {
+        let (handle, _, activity, _) = AgentHandle::channel();
+
+        activity.set(AgentActivity::Idle);
+        handle.cancel();
+
+        assert_eq!(
+            handle.dispatch(Message::text("closed")),
+            Err(AgentDispatchError::Closed)
+        );
     }
 }

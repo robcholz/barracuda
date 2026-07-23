@@ -8,15 +8,15 @@ use claw_tool::{
 };
 use serde_json::json;
 
-use crate::agent::state::AgentState;
 use crate::agent::tools::helper::optional_string_argument;
+use crate::agent::BaseAgentState;
 
 /// Build the always-visible discovery group over a [`ToolSet`](claw_tool::ToolSet)
 /// bridge. All other registered groups remain hidden until `tool_load` reveals
 /// one for the next turn.
 pub(super) fn discovery_tools(
     discovery: ToolDiscoveryHandle,
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
 ) -> ToolGroup {
     ToolGroup::new(
         "tool_discovery",
@@ -39,7 +39,7 @@ struct ToolSearchTool {
 /// Queues a group to be enabled when ToolSet begins the next iteration.
 struct ToolLoadTool {
     discovery: ToolDiscoveryHandle,
-    state: DurableState<AgentState>,
+    state: DurableState<BaseAgentState>,
 }
 
 impl ToolSpec for ToolLoadTool {
@@ -106,8 +106,7 @@ mod tests {
     };
 
     use super::ToolLoadTool;
-    use crate::agent::state::AgentState;
-    use crate::agent::AgentKind;
+    use crate::agent::{AgentKind, BaseAgentState};
 
     #[test]
     fn successful_load_is_recorded_in_agent_state() {
@@ -125,7 +124,7 @@ mod tests {
         {
             let _initial_tools = tool_set.begin().expect("tool set begins");
         }
-        let state = DurableState::new(AgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         let tool = ToolLoadTool {
             discovery,
             state: state.clone(),
