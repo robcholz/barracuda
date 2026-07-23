@@ -50,9 +50,10 @@ fn builtin_tools_csv_matrix_feeds_profile_memory_and_subagent_results_back_to_ll
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
 
-        block_on(control.submit(Message::text(format!("run builtin tool matrix {case}")))).unwrap();
+        block_on(control.append(Message::text(format!("run builtin tool matrix {case}")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
 
         assert_turn_bracket(&events, case);

@@ -90,9 +90,10 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
 
-        block_on(control.submit(Message::text(format!("delegate {}", fixture.case)))).unwrap();
+        block_on(control.append(Message::text(format!("delegate {}", fixture.case)))).unwrap();
         let delegated_turn = drain_until_turn_ended(&mut events);
         assert_turn(&delegated_turn, TurnId(1), TurnOrigin::User, &fixture.case);
         assert_eq!(
@@ -114,7 +115,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
             fixture.case
         );
 
-        block_on(control.submit(Message::text(format!("supervise {}", fixture.case)))).unwrap();
+        block_on(control.append(Message::text(format!("supervise {}", fixture.case)))).unwrap();
         let supervision_turn = drain_until_turn_ended(&mut events);
         assert_turn(
             &supervision_turn,
@@ -171,9 +172,10 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("delegate in foreground"))).unwrap();
+    block_on(control.append(Message::text("delegate in foreground"))).unwrap();
     let turn = drain_until_turn_ended(&mut events);
     assert_turn(&turn, TurnId(1), TurnOrigin::User, &fixture.case);
     assert_eq!(iteration_ids(&turn), vec![IterationId(0), IterationId(1)]);
@@ -222,10 +224,11 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
-    block_on(control.submit(Message::text("delegate with approval"))).unwrap();
+    block_on(control.append(Message::text("delegate with approval"))).unwrap();
     let (root_approval, root_kind) = block_on(wait_for_input_request(&mut events));
     assert!(matches!(
         root_kind,
@@ -290,10 +293,11 @@ fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() 
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     block_on(control.set_permission_level(PermissionLevel::Ask)).unwrap();
-    block_on(control.submit(Message::text("delegate and let approval time out"))).unwrap();
+    block_on(control.append(Message::text("delegate and let approval time out"))).unwrap();
     let (root_approval, _) = block_on(wait_for_input_request(&mut events));
     block_on(control.respond(root_approval, Message::text("approve"))).unwrap();
     let (_child_approval, child_kind) = block_on(wait_for_input_request(&mut events));
@@ -331,14 +335,15 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("start background work"))).unwrap();
+    block_on(control.append(Message::text("start background work"))).unwrap();
     let delegated = drain_until_turn_ended(&mut events);
     assert_turn(&delegated, TurnId(1), TurnOrigin::User, "background");
     wait_until_control_worker_is_pending("background");
 
-    block_on(control.submit(Message::text("answer while it runs"))).unwrap();
+    block_on(control.append(Message::text("answer while it runs"))).unwrap();
     let concurrent = drain_until_turn_ended(&mut events);
     assert_turn(&concurrent, TurnId(2), TurnOrigin::User, "concurrent user");
     assert_eq!(
@@ -373,9 +378,10 @@ fn completed_background_child_is_inspectable_until_its_result_enters_root_contex
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("inspect completed delivery"))).unwrap();
+    block_on(control.append(Message::text("inspect completed delivery"))).unwrap();
     let turn = drain_until_turn_ended(&mut events);
 
     assert_turn(&turn, TurnId(1), TurnOrigin::User, "pending delivery");
@@ -409,12 +415,13 @@ fn cancelled_foreground_spawn_deletes_its_subagent() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text(format!("delegate then {control_name}")))).unwrap();
+    block_on(control.append(Message::text(format!("delegate then {control_name}")))).unwrap();
     wait_until_control_worker_is_pending(control_name);
     block_on(control.cancel()).unwrap();
-    block_on(control.submit(Message::text(format!("inspect after {control_name}")))).unwrap();
+    block_on(control.append(Message::text(format!("inspect after {control_name}")))).unwrap();
 
     let controlled_turn = drain_until_turn_ended(&mut events);
     assert_turn(&controlled_turn, TurnId(1), TurnOrigin::User, control_name);
@@ -448,9 +455,10 @@ fn foreground_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("start foreground timeout"))).unwrap();
+    block_on(control.append(Message::text("start foreground timeout"))).unwrap();
     wait_until_control_worker_is_pending("foreground timeout");
     release_timers();
     let turn = drain_until_turn_ended(&mut events);
@@ -478,9 +486,10 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("start background timeout"))).unwrap();
+    block_on(control.append(Message::text("start background timeout"))).unwrap();
     let delegated = drain_until_turn_ended(&mut events);
     assert_eq!(
         output_fragments(&delegated),
@@ -1234,7 +1243,7 @@ fn classify_request(body: &str) -> RequestKind {
 }
 
 async fn wait_for_input_request(
-    events: &mut claw_agent::SessionEventStream,
+    events: &mut claw_agent::SessionStream,
 ) -> (InputRequestId, InputRequestKind) {
     while let Some(event) = events.next().await {
         if let SessionEvent::InputRequested { request, kind } = event {

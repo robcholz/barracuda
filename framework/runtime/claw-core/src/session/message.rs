@@ -2,7 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{AgentId, TurnOrigin};
+use crate::agent::AgentId;
+
+use super::TurnOrigin;
 
 /// One message delivered to a session or agent.
 ///

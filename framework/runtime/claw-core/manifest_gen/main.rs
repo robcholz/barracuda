@@ -6,7 +6,7 @@
 //! This is a thin wiring layer: it resolves the build environment and then calls
 //! each self-contained generator:
 //! - [`agent_manifests`] turns `resources/agents/<kind>/` into typed catalog
-//!   entries in `$OUT_DIR/manifests.rs` (`include!`-d by `agent_catalog`).
+//!   entries in `$OUT_DIR/manifests.rs` (`include!`-d by `agent::baked`).
 //! - `claw_tool::bake` validates the `resources/tools/<function.name>/` layout
 //!   (`schema.json` + `usage.md`) that the `tool_metadata!` macro `include_str!`s.
 //!   The validator lives with the tool runtime.

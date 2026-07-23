@@ -4,7 +4,7 @@ use claw_permission::{Action, Resource, RiskClass};
 use claw_tool::{ToolError, ToolInvocation, ToolInvokeError};
 use serde_json::Value;
 
-use crate::protocol::AgentId;
+use crate::agent::AgentId;
 
 pub(super) fn non_blank_argument(arguments_json: &str, key: &str) -> Result<String, ToolError> {
     let Some(raw) = optional_string_argument(arguments_json, key)? else {

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use claw_api::{RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
@@ -7,20 +8,19 @@ use claw_memory::{Transcript, TranscriptStore};
 use claw_permission::PermissionPolicy;
 use claw_tool::ToolGroup;
 
+use crate::agent::baked;
 use crate::agent::base_agent::{agent_effect_channel, BaseAgent, BaseAgentConfig, ContextAdapter};
-use crate::agent::config::{AgentConfig, AgentConfigError};
 use crate::agent::context_adapters::{
     AgentModeContextAdapter, AgentResumeNotice, ConversationHistoryContextAdapter,
     ProfileContextAdapter, ReasoningEffortContextAdapter, ResumedContextAdapter,
     SkillContextAdapter,
 };
 use crate::agent::tools::internal_tools;
-use crate::agent::{AgentState, ReasoningEffortHandle};
-use crate::config::{catalog as agent_catalog, ApiUsage, ReasoningEffort};
-use crate::protocol::{AgentId, AgentKind, ToolCall};
+use crate::agent::{AgentKind, AgentState, ReasoningEffortHandle};
+use crate::config::{ApiUsage, ReasoningEffort};
 
 use super::error::AgentCreateError;
-use super::AgentManager;
+use super::{AgentId, AgentManager};
 
 const COMPACTION_TRIGGER_TOKENS: usize = 6000;
 const COMPACTION_KEEP_RECENT_TOKENS: usize = 2000;
@@ -210,17 +210,12 @@ impl<
             resume_notice,
         } = environment;
 
-        // The config is pure baked data. The per-kind blacklist stays attached
-        // to this ToolSet projection so registry refreshes and later local
-        // groups follow the same exact-name policy.
-        let config = self.resolve_config(kind).map_err(|error| {
-            match &error {
-                AgentConfigError::UnknownKind(_) => {
-                    tracing::error!(name: "unknown_kind", kind = %kind.as_str());
-                }
-            }
-            AgentCreateError::Config(error)
+        let manifest = baked::find(kind).ok_or_else(|| {
+            tracing::error!(name: "unknown_kind", kind = %kind.as_str());
+            AgentCreateError::UnknownKind(kind.as_str().to_owned())
         })?;
+        let runtime = manifest.runtime();
+        let skills = self.skills.skill_set();
         let (mode_state, resumed_state) = match resume {
             Some(state) => {
                 let (mode, resumed) = state.into_parts();
@@ -228,7 +223,10 @@ impl<
             }
             None => (None, None),
         };
-        let mut tools = self.tools.tool_set_with_blacklist(config.tool_blacklist);
+        // The per-kind blacklist stays attached to this ToolSet projection so
+        // registry refreshes and later local groups follow the same exact-name
+        // policy.
+        let mut tools = self.tools.tool_set_with_blacklist(runtime.tool_blacklist());
         let (effect_emitter, effect_inbox) = agent_effect_channel();
         tools.add_group(internal_tools(effect_emitter.clone()))?;
         for extension in extension_tools {
@@ -271,7 +269,7 @@ impl<
             Box::new(reasoning_effort_adapter),
             Box::new(resumed_adapter),
             Box::new(conversation_history),
-            Box::new(SkillContextAdapter::new(config.skills)),
+            Box::new(SkillContextAdapter::new(skills)),
             Box::new(profile_adapter),
             Box::new(adapter),
         ];
@@ -288,21 +286,17 @@ impl<
             tools,
             effect_inbox,
             permission_policy,
-            agent_instruction: Block::new(BlockKind::AgentInstruction, config.system_prompt),
+            agent_instruction: Block::new(
+                BlockKind::AgentInstruction,
+                runtime.instructions().trim().to_owned(),
+            ),
             inherited_context,
             context_adapters,
-            retry_policy: config.retry_policy,
+            retry_policy: RetryPolicy::new(runtime.retries()),
         };
         let agent = BaseAgent::<Http, Timer>::build(base_config)?;
 
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
         Ok((agent, reasoning_effort_handle))
-    }
-
-    fn resolve_config(&self, kind: &AgentKind) -> Result<AgentConfig, AgentConfigError> {
-        let manifest = agent_catalog::find(kind)
-            .ok_or_else(|| AgentConfigError::UnknownKind(kind.as_str().to_owned()))?;
-        let runtime = manifest.runtime();
-        Ok(AgentConfig::from_manifest(runtime, self.skills.skill_set()))
     }
 }

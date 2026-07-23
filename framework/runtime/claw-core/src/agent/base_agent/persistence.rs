@@ -6,7 +6,7 @@ use claw_persistence::{DurablePartError, DurableStateCodec, SchemaVersion, State
 use serde::{Deserialize, Serialize};
 
 use crate::agent::context_adapters::{AgentModeState, ResumedState};
-use crate::protocol::AgentKind;
+use crate::agent::AgentKind;
 
 /// Complete currently implemented Agent recovery DTO.
 ///
@@ -114,7 +114,7 @@ impl DurableStateCodec for AgentState {
 mod tests {
     use super::AgentState;
     use crate::agent::context_adapters::{AgentModeState, ResumedState};
-    use crate::protocol::AgentKind;
+    use crate::agent::AgentKind;
     use claw_persistence::{DurableStateCodec, StateSlice};
 
     #[test]

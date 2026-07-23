@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use claw_agent::{AgentPersistenceConfig, AgentSystem, SessionEvent, SessionEventStream};
+use claw_agent::{AgentPersistenceConfig, AgentSystem, SessionEvent, SessionStream};
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::http::{
     Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
@@ -143,7 +143,7 @@ pub fn assistant_text(text: &str) -> String {
     json!({ "choices": [{ "message": { "role": "assistant", "content": text } }] }).to_string()
 }
 
-pub fn drain_until_turn_ended(events: &mut SessionEventStream) -> Vec<SessionEvent> {
+pub fn drain_until_turn_ended(events: &mut SessionStream) -> Vec<SessionEvent> {
     futures_lite::future::block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {

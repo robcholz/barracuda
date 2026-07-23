@@ -3,55 +3,53 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::task::Waker;
 
 use async_channel::{Receiver, Sender};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 
-use crate::protocol::{AgentId, AgentKind, Message, ToolCall};
+use crate::agent::{AgentId, AgentKind};
+use crate::session::Message;
+use claw_api::ToolCall;
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,
 };
-use super::{AgentIdAllocator, MultiagentRuntime};
-
 /// One command emitted by an agent's subagent tools.
-pub(super) struct MultiagentCommand {
+pub(crate) struct MultiagentCommand {
     requester: AgentId,
     action: MultiagentAction,
 }
 
 impl MultiagentCommand {
-    pub(super) fn new(requester: AgentId, action: MultiagentAction) -> Self {
+    pub(crate) fn new(requester: AgentId, action: MultiagentAction) -> Self {
         Self { requester, action }
     }
 
-    pub(super) fn into_parts(self) -> (AgentId, MultiagentAction) {
+    pub(crate) fn into_parts(self) -> (AgentId, MultiagentAction) {
         (self.requester, self.action)
     }
 }
 
-pub(super) enum MultiagentAction {
+pub(crate) enum MultiagentAction {
     Spawn(SpawnCommand),
     Delete { target: AgentId },
     Followup { target: AgentId, message: Message },
 }
 
-pub(super) struct SpawnCommand {
-    id: AgentId,
+pub(crate) struct SpawnCommand {
     spec: SubagentSpec,
+    accepted: Sender<Result<AgentId, String>>,
     completion: Option<Sender<SubagentResult>>,
     source_call: Option<ToolCall>,
 }
 
 impl SpawnCommand {
-    pub(super) fn into_parts(
+    pub(crate) fn into_parts(
         self,
     ) -> (
-        AgentId,
         SubagentSpec,
+        Sender<Result<AgentId, String>>,
         Option<Sender<SubagentResult>>,
         Option<ToolCall>,
     ) {
-        (self.id, self.spec, self.completion, self.source_call)
+        (self.spec, self.accepted, self.completion, self.source_call)
     }
 }
 
@@ -66,8 +64,7 @@ struct MultiagentBridgeState {
 ///
 /// Tools can only invoke the semantic methods on this bridge. The runtime alone
 /// drains commands and publishes the inspection snapshot.
-pub(in crate::multiagent) struct MultiagentBridge {
-    id_allocator: AgentIdAllocator,
+pub(crate) struct MultiagentBridge {
     state: Mutex<MultiagentBridgeState>,
 }
 
@@ -75,63 +72,72 @@ pub(in crate::multiagent) struct MultiagentBridge {
 ///
 /// Binding the caller here prevents tools from choosing an arbitrary requester
 /// when they enqueue commands or inspect the graph.
-pub(super) struct SubagentControl {
+pub(crate) struct SubagentControl {
     caller: AgentId,
     bridge: Arc<MultiagentBridge>,
 }
 
 impl SubagentControl {
-    pub(super) fn new(caller: AgentId, bridge: Arc<MultiagentBridge>) -> Self {
+    pub(crate) fn new(caller: AgentId, bridge: Arc<MultiagentBridge>) -> Self {
         Self { caller, bridge }
     }
 
-    pub(super) fn spawn_background(
+    pub(crate) async fn spawn_background(
         &self,
         kind: AgentKind,
         name: Option<String>,
         goal: Message,
         timeout: SubagentTimeout,
         source_call: ToolCall,
-    ) -> AgentId {
-        self.bridge.spawn_background(
-            self.caller,
-            SubagentSpec::new(kind, name, goal, timeout),
-            source_call,
-        )
+    ) -> Result<AgentId, String> {
+        self.bridge
+            .spawn_background(
+                self.caller,
+                SubagentSpec::new(kind, name, goal, timeout),
+                source_call,
+            )
+            .recv()
+            .await
+            .map_err(|_| "subagent spawn acknowledgement channel closed".to_owned())?
     }
 
-    pub(super) fn spawn_foreground(
+    pub(crate) async fn spawn_foreground(
         &self,
         kind: AgentKind,
         name: Option<String>,
         goal: Message,
         timeout: SubagentTimeout,
-    ) -> (AgentId, Receiver<SubagentResult>) {
-        self.bridge
-            .spawn_foreground(self.caller, SubagentSpec::new(kind, name, goal, timeout))
+    ) -> Result<(AgentId, Receiver<SubagentResult>), String> {
+        let (accepted, result) = self
+            .bridge
+            .spawn_foreground(self.caller, SubagentSpec::new(kind, name, goal, timeout));
+        let id = accepted
+            .recv()
+            .await
+            .map_err(|_| "subagent spawn acknowledgement channel closed".to_owned())??;
+        Ok((id, result))
     }
 
-    pub(super) fn delete(&self, target: AgentId) {
+    pub(crate) fn delete(&self, target: AgentId) {
         self.bridge.delete(self.caller, target);
     }
 
-    pub(super) fn followup(&self, target: AgentId, message: Message) {
+    pub(crate) fn followup(&self, target: AgentId, message: Message) {
         self.bridge.followup(self.caller, target, message);
     }
 
-    pub(super) fn list(&self) -> Vec<SubagentSnapshot> {
+    pub(crate) fn list(&self) -> Vec<SubagentSnapshot> {
         self.bridge.list(self.caller)
     }
 
-    pub(super) fn get(&self, target: AgentId) -> Option<SubagentSnapshot> {
+    pub(crate) fn get(&self, target: AgentId) -> Option<SubagentSnapshot> {
         self.bridge.get(self.caller, target)
     }
 }
 
 impl MultiagentBridge {
-    pub(in crate::multiagent) fn new(id_allocator: AgentIdAllocator) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            id_allocator,
             state: Mutex::new(MultiagentBridgeState::default()),
         }
     }
@@ -159,29 +165,25 @@ impl MultiagentBridge {
         spec: SubagentSpec,
         completion: Option<Sender<SubagentResult>>,
         source_call: Option<ToolCall>,
-    ) -> AgentId {
-        let id = self.id_allocator.next();
+    ) -> Receiver<Result<AgentId, String>> {
+        let (accepted, result) = async_channel::bounded(1);
         self.push(MultiagentCommand::new(
             parent,
             MultiagentAction::Spawn(SpawnCommand {
-                id,
                 spec,
+                accepted,
                 completion,
                 source_call,
             }),
         ));
-        id
+        result
     }
 
-    pub(super) fn drain(&self) -> Vec<MultiagentCommand> {
+    pub(crate) fn drain(&self) -> Vec<MultiagentCommand> {
         self.state().commands.drain(..).collect()
     }
 
-    pub(super) fn requeue(&self, command: MultiagentCommand) {
-        self.push(command);
-    }
-
-    pub(in crate::multiagent) fn clear(&self) {
+    pub(crate) fn clear(&self) {
         let mut state = self.state();
         state.commands.clear();
         state.waiter = None;
@@ -189,7 +191,7 @@ impl MultiagentBridge {
 
     /// Register the drive waiting for an in-flight run. Returns `true` when a
     /// command is already queued and the caller should apply it immediately.
-    pub(in crate::multiagent) fn register_waiter(&self, waiter: &Waker) -> bool {
+    pub(crate) fn register_waiter(&self, waiter: &Waker) -> bool {
         let mut state = self.state();
         if !state.commands.is_empty() {
             return true;
@@ -198,78 +200,51 @@ impl MultiagentBridge {
         false
     }
 
-    pub(super) fn publish_snapshot(&self, snapshot: MultiagentSnapshot) {
+    pub(crate) fn publish_snapshot(&self, snapshot: MultiagentSnapshot) {
         let mut state = self.state();
         state.snapshot = snapshot;
     }
 }
 
 impl MultiagentBridge {
-    pub(super) fn spawn_background(
+    pub(crate) fn spawn_background(
         &self,
         parent: AgentId,
         spec: SubagentSpec,
         source_call: ToolCall,
-    ) -> AgentId {
+    ) -> Receiver<Result<AgentId, String>> {
         self.spawn(parent, spec, None, Some(source_call))
     }
 
-    pub(super) fn spawn_foreground(
+    pub(crate) fn spawn_foreground(
         &self,
         parent: AgentId,
         spec: SubagentSpec,
-    ) -> (AgentId, Receiver<SubagentResult>) {
+    ) -> (Receiver<Result<AgentId, String>>, Receiver<SubagentResult>) {
         let (completion, result) = async_channel::bounded(1);
-        let child = self.spawn(parent, spec, Some(completion), None);
-        (child, result)
+        let accepted = self.spawn(parent, spec, Some(completion), None);
+        (accepted, result)
     }
 
-    pub(super) fn delete(&self, requester: AgentId, target: AgentId) {
+    pub(crate) fn delete(&self, requester: AgentId, target: AgentId) {
         self.push(MultiagentCommand::new(
             requester,
             MultiagentAction::Delete { target },
         ));
     }
 
-    pub(super) fn followup(&self, requester: AgentId, target: AgentId, message: Message) {
+    pub(crate) fn followup(&self, requester: AgentId, target: AgentId, message: Message) {
         self.push(MultiagentCommand::new(
             requester,
             MultiagentAction::Followup { target, message },
         ));
     }
 
-    pub(super) fn list(&self, requester: AgentId) -> Vec<SubagentSnapshot> {
+    pub(crate) fn list(&self, requester: AgentId) -> Vec<SubagentSnapshot> {
         self.state().snapshot.descendants_of(requester)
     }
 
-    pub(super) fn get(&self, requester: AgentId, target: AgentId) -> Option<SubagentSnapshot> {
+    pub(crate) fn get(&self, requester: AgentId, target: AgentId) -> Option<SubagentSnapshot> {
         self.state().snapshot.descendant(requester, target)
-    }
-}
-
-impl<Filesystem, Http, Timer> MultiagentRuntime<Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    pub(in crate::multiagent) fn refresh_multiagent_snapshot(&self) {
-        let live = self
-            .state
-            .nodes()
-            .map(|(id, meta)| {
-                SubagentSnapshot::new(
-                    id,
-                    meta.kind().clone(),
-                    meta.name().map(str::to_owned),
-                    meta.parent(),
-                    self.state.depth(id).expect("live graph topology is valid"),
-                    self.state.agent_status(id, self.slots.is_running(id)),
-                )
-            })
-            .collect::<Vec<_>>();
-        let snapshot =
-            MultiagentSnapshot::new(live.into_iter().chain(self.pending_deliveries.snapshots()));
-        self.multiagent.publish_snapshot(snapshot);
     }
 }

@@ -51,9 +51,10 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     let restored_session = first_system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = first_system.open_session(restored_session).unwrap();
+    let mut events = first_system.open_session(restored_session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("trace one agent turn"))).unwrap();
+    block_on(control.append(Message::text("trace one agent turn"))).unwrap();
     let _ = drain_until_turn_ended(&mut events);
     block_on(control.close_session()).unwrap();
 
@@ -65,36 +66,37 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     let created_session = second_system
         .new_session(claw_agent::SessionPersistence::Ephemeral)
         .unwrap();
-    let (restored_control, restored_events) = second_system.open_session(restored_session).unwrap();
+    let restored_events = second_system.open_session(restored_session).unwrap();
+    let restored_control = restored_events.control();
     drop(restored_control);
     drop(restored_events);
     drop(second_system);
 
     let lines = sink.lines();
-    let orchestrators = lines
+    let runtimes = lines
         .iter()
         .filter(|line| {
-            line_type(line) == Some("enter") && token(line, "span-name") == Some("orchestrator")
+            line_type(line) == Some("enter") && token(line, "span-name") == Some("agent.runtime")
         })
         .collect::<Vec<_>>();
-    assert_eq!(orchestrators.len(), 2, "{}", lines.join("\n"));
-    for orchestrator in &orchestrators {
-        assert_eq!(token(orchestrator, "system"), Some("agent-system"));
-        assert_eq!(token(orchestrator, "task"), Some("orchestrator"));
-        let orchestrator_span = token(orchestrator, "span").expect("orchestrator span id");
-        let factory = lines
+    assert_eq!(runtimes.len(), 2, "{}", lines.join("\n"));
+    for runtime in &runtimes {
+        assert_eq!(token(runtime, "system"), Some("agent-system"));
+        assert_eq!(token(runtime, "task"), Some("agent-runtime"));
+        let runtime_span = token(runtime, "span").expect("agent runtime span id");
+        let manager = lines
             .iter()
             .find(|line| {
                 line_type(line) == Some("enter")
-                    && token(line, "span-name") == Some("agent.factory")
-                    && token(line, "parent") == Some(orchestrator_span)
+                    && token(line, "span-name") == Some("agent.manager")
+                    && token(line, "parent") == Some(runtime_span)
             })
-            .expect("agent factory is system-scoped startup");
-        let factory_span = token(factory, "span").expect("agent factory span id");
+            .expect("agent manager is system-scoped startup");
+        let manager_span = token(manager, "span").expect("agent manager span id");
         assert!(lines.iter().any(|line| {
             line_type(line) == Some("enter")
                 && token(line, "span-name") == Some("skill.catalog")
-                && token(line, "parent") == Some(factory_span)
+                && token(line, "parent") == Some(manager_span)
         }));
     }
 
@@ -115,7 +117,7 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
         .find(|line| {
             line_type(line) == Some("enter")
                 && token(line, "span-name") == Some("session")
-                && token(line, "target") == Some("claw_core::orchestrator::engine")
+                && token(line, "target") == Some("claw_core::session::manager")
                 && token(line, "session") == Some(restored_session_wire.as_str())
         })
         .expect("session actor enter line");

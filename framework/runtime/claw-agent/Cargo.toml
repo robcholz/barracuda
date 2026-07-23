@@ -3,7 +3,7 @@ name = "claw-agent"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Concise agent API over the orchestrator: build an agent system and submit session turns"
+description = "Assembled agent-system API over claw-core runtime and Sessions"
 
 [lib]
 name = "claw_agent"

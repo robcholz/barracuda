@@ -3,8 +3,7 @@ use claw_persistence::PersistenceError;
 use claw_skill::SkillError;
 use claw_tool::ToolSetError;
 
-use crate::agent::config::AgentConfigError;
-use crate::protocol::AgentId;
+use super::AgentId;
 
 /// What can go wrong while building an [`super::AgentManager`].
 #[derive(Debug, thiserror::Error)]
@@ -35,9 +34,9 @@ pub(crate) enum AgentCreateError {
     /// An entry in the Agent collection did not use an AgentId wire key.
     #[error("invalid persisted agent id: {0}")]
     InvalidPersistedAgentId(String),
-    /// The baked manifest could not be resolved into an agent config.
-    #[error("failed to resolve agent config: {0}")]
-    Config(#[from] AgentConfigError),
+    /// No baked manifest exists for the requested kind.
+    #[error("unknown agent kind: {0}")]
+    UnknownKind(String),
     /// The agent's local tools could not be added to the tool set.
     #[error("failed to assemble agent tools: {0}")]
     Tools(#[from] ToolSetError),

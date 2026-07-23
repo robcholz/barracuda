@@ -6,7 +6,9 @@ use claw_tool::{
     ToolOutput, ToolSpec,
 };
 
-use crate::protocol::{AgentKind, Message, ToolCall};
+use crate::agent::AgentKind;
+use crate::session::Message;
+use claw_api::ToolCall;
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -84,9 +86,19 @@ impl SpawnSubagentTool {
             "timeout_ms",
         )?);
         if foreground {
-            let (_child, result) = self
+            let (_child, result) = match self
                 .control
-                .spawn_foreground(kind, Some(name), goal, timeout);
+                .spawn_foreground(kind, Some(name), goal, timeout)
+                .await
+            {
+                Ok(spawn) => spawn,
+                Err(message) => {
+                    return Ok(ToolOutput {
+                        output: message,
+                        ok: false,
+                    });
+                }
+            };
             let result = result.recv().await.map_err(|_| {
                 ToolError::InvokeRejected("foreground subagent result channel closed".to_owned())
             })?;
@@ -100,9 +112,19 @@ impl SpawnSubagentTool {
                 name: call.name().to_owned(),
                 arguments_json: call.arguments_json().to_owned(),
             };
-            let child =
-                self.control
-                    .spawn_background(kind, Some(name.clone()), goal, timeout, source_call);
+            let child = match self
+                .control
+                .spawn_background(kind, Some(name.clone()), goal, timeout, source_call)
+                .await
+            {
+                Ok(child) => child,
+                Err(message) => {
+                    return Ok(ToolOutput {
+                        output: message,
+                        ok: false,
+                    });
+                }
+            };
             Ok(ToolOutput {
                 output: format!(
                     "Subagent {child} named '{name}' requested with a {} ms timeout; its result will be reported back when it finishes.",

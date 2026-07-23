@@ -1,117 +1,119 @@
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
+use claw_api::ChatStreamEvent;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
+use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use strum::IntoStaticStr;
 use tracing::Instrument as _;
 
-use crate::agent::{AgentManager, PersistenceConfig};
+use crate::agent::{
+    AdditionalAgentState, AgentCompletion, AgentCreateError, AgentError, AgentEvent, AgentId,
+    AgentInputRequest, AgentManager, AgentOutcome, IterationEvent, PersistenceConfig, ToolCallId,
+};
 use crate::config::{ReasoningEffort, SharedApiManager};
-use crate::multiagent::{
-    AgentIdAllocator, ApprovalResolutionError, DriveControl, DriveOutcome, DriveOutput, DriveStop,
-    MultiagentDeliverError, MultiagentRuntime, MultiagentState, MultiagentWork, TurnStopMode,
-};
-use crate::protocol::{
-    AgentId, EventSink, InputRequestId, InputRequestKind, Message, SessionEvent, SessionId,
-    SessionPersistence, ToolCall, TurnId, TurnOrigin,
-};
-use crate::stream::StreamPart;
+use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
+use claw_api::ToolCall;
 
-use super::api::{
-    ControlOp, OpenSessionError, SessionCommand, SessionControlError, SessionEndpoint,
+use super::agent_slot::{AgentSlot, AgentSlotUpdate};
+use super::api::{OpenSessionError, SessionControlError};
+use super::approval_resolver::{
+    self, ApprovalControl, ApprovalResolverError, PermissionReplyResolution,
 };
-use super::approval::{self, ApprovalResolverError, PermissionReplyResolution};
-use super::permission::SessionPermission;
-use super::persistence::SessionState;
-use super::state::{PendingTurnInput, TurnState};
+use super::command::{ControlOp, SessionCommand, SessionEndpoint};
+use super::manager_state::{next_agent, SessionManagerState};
+use super::permission_policy::SessionPermission;
+use super::persistent_state::SessionPersistentState;
+use super::{
+    InputRequestId, InputRequestKind, Message, SessionEvent, SessionId, SessionPersistence, TurnId,
+    TurnOrigin,
+};
 
-type RuntimeFuture<Filesystem, Http, Timer> =
-    Pin<Box<dyn Future<Output = RuntimeCompletion<Filesystem, Http, Timer>>>>;
+type ApprovalFuture =
+    Pin<Box<dyn Future<Output = Result<PermissionReplyResolution, ApprovalResolverError>>>>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RuntimeDriveKind {
-    Foreground,
-    Background,
-    Stop,
+struct PendingApproval {
+    request: InputRequestId,
+    tool_call_id: ToolCallId,
+    tool_call: ToolCall,
+    reason: String,
 }
 
-impl RuntimeDriveKind {
-    fn is_foreground(self) -> bool {
-        self == Self::Foreground
+struct ApprovalTask {
+    control: ApprovalControl,
+    future: ApprovalFuture,
+    tool_call_id: ToolCallId,
+    tool_call: ToolCall,
+    reason: String,
+}
+
+struct ActiveTurn {
+    id: TurnId,
+    toolcalls: Vec<ToolCall>,
+}
+
+#[derive(Clone, Copy)]
+enum PollSource {
+    Command,
+    Approval,
+    Agent,
+}
+
+impl PollSource {
+    fn next(self) -> Self {
+        match self {
+            Self::Command => Self::Approval,
+            Self::Approval => Self::Agent,
+            Self::Agent => Self::Command,
+        }
     }
 }
 
-enum RuntimeDriveResult {
-    Driven(Result<DriveOutcome, DeliverError>),
-    Stopped,
-}
-
-struct RuntimeCompletion<Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    runtime: Box<MultiagentRuntime<Filesystem, Http, Timer>>,
-    result: RuntimeDriveResult,
-}
-
-enum RuntimeExecution<Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    Idle(Box<MultiagentRuntime<Filesystem, Http, Timer>>),
-    Driving {
-        kind: RuntimeDriveKind,
-        control: DriveControl,
-        future: RuntimeFuture<Filesystem, Http, Timer>,
-    },
-}
-
 #[derive(Debug, IntoStaticStr, thiserror::Error)]
-enum DeliverError {
+enum SessionExecutionError {
+    #[strum(serialize = "agent_create")]
+    #[error(transparent)]
+    AgentCreate(#[from] AgentCreateError),
     #[strum(serialize = "agent")]
     #[error(transparent)]
-    Multiagent(#[from] MultiagentDeliverError),
-    #[strum(serialize = "agent")]
+    Agent(#[from] AgentError),
+    #[strum(serialize = "approval")]
     #[error(transparent)]
-    ApprovalResolver(#[from] ApprovalResolverError),
-    #[strum(serialize = "agent")]
-    #[error(transparent)]
-    ApprovalResolution(#[from] ApprovalResolutionError),
+    Approval(#[from] ApprovalResolverError),
 }
 
-pub(crate) enum SessionActorExit {
+pub(super) enum SessionActorExit {
     Deleted {
         session: SessionId,
-        root_agent: Option<AgentId>,
         acks: Vec<Sender<Result<(), SessionControlError>>>,
     },
     Shutdown {
         session: SessionId,
-        state: DurableState<SessionState>,
     },
 }
 
 impl SessionActorExit {
-    pub(crate) fn session(&self) -> SessionId {
+    pub(super) fn session(&self) -> SessionId {
         match self {
             Self::Deleted { session, .. } | Self::Shutdown { session, .. } => *session,
         }
     }
 }
 
-/// The sole owner of one session's turn state, event stream, and agent graph.
-pub(crate) struct SessionActor<Filesystem, Http, Timer>
+/// One long-lived Session stream backed by one queued root Agent.
+///
+/// The actor never polls BaseAgent directly. It moves the resident Agent into
+/// the process-global Scheduler and only reduces scheduler outputs back into
+/// the slot and outward Session stream.
+pub(super) struct SessionActor<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -119,19 +121,29 @@ where
 {
     session: SessionId,
     persistence: SessionPersistence,
-    state: DurableState<SessionState>,
-    /// Active turns and request ids are process-local and restart at boot.
-    turn: TurnState,
-    execution: Option<RuntimeExecution<Filesystem, Http, Timer>>,
+    state: DurableState<SessionPersistentState>,
+    manager: Rc<AgentManager<Filesystem, Http, Timer>>,
+    permission: Arc<SessionPermission>,
     api_manager: SharedApiManager,
-    pending_reasoning_effort: Option<ReasoningEffort>,
-    events: Option<EventSink>,
+
+    root: Option<AgentSlot<Http, Timer>>,
+    restored_root: Option<AgentId>,
+    inbox: VecDeque<Message>,
+    active_turn: Option<ActiveTurn>,
+    next_turn: u32,
+    next_input_request: u32,
+    pending_approval: Option<PendingApproval>,
+    approval: Option<ApprovalTask>,
+
+    scheduler: AgentRunSchedulerHandle<Http, Timer>,
+    run_route: AgentRunRoute<Http, Timer>,
+    run_outputs: AgentRunReceiver<Http, Timer>,
+    commands: Pin<Box<Receiver<SessionCommand>>>,
+    next_source: PollSource,
+
+    events: Option<Sender<SessionEvent>>,
     active_lease: Option<u64>,
     next_lease: u64,
-    announced_turn: Option<TurnId>,
-    announced_input_request: Option<InputRequestId>,
-    requested_control: Option<ControlOp>,
-    control_acks: Vec<Sender<Result<(), SessionControlError>>>,
     close_requested: bool,
     close_acks: Vec<Sender<Result<(), SessionControlError>>>,
     delete_requested: bool,
@@ -146,179 +158,104 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(super) fn new(
         session: SessionId,
         persistence: SessionPersistence,
         manager: Rc<AgentManager<Filesystem, Http, Timer>>,
-        id_allocator: AgentIdAllocator,
-        state: DurableState<SessionState>,
+        state: DurableState<SessionPersistentState>,
         api_manager: SharedApiManager,
-    ) -> Self {
+        scheduler: AgentRunSchedulerHandle<Http, Timer>,
+    ) -> (Self, Sender<SessionCommand>) {
+        let (command_sender, commands) = async_channel::unbounded();
+        let (run_route, run_outputs) = agent_run_route();
         let restored_root = (persistence == SessionPersistence::Persistent)
             .then(|| state.get().root_agent())
             .flatten();
         let permission = Arc::new(SessionPermission::new(state.clone()));
-        let reasoning_effort = state.get().reasoning_effort();
-        let runtime = MultiagentRuntime::new_with_root(
-            manager,
-            id_allocator,
-            permission.clone(),
-            reasoning_effort,
-            MultiagentState::default(),
-            restored_root,
-        );
-        Self {
-            session,
-            persistence,
-            state,
-            turn: TurnState::default(),
-            execution: Some(RuntimeExecution::Idle(Box::new(runtime))),
-            api_manager,
-            pending_reasoning_effort: None,
-            events: None,
-            active_lease: None,
-            next_lease: 1,
-            announced_turn: None,
-            announced_input_request: None,
-            requested_control: None,
-            control_acks: Vec::new(),
-            close_requested: false,
-            close_acks: Vec::new(),
-            delete_requested: false,
-            delete_acks: Vec::new(),
-            shutdown_requested: false,
-        }
+        (
+            Self {
+                session,
+                persistence,
+                state,
+                manager,
+                permission,
+                api_manager,
+                root: None,
+                restored_root,
+                inbox: VecDeque::new(),
+                active_turn: None,
+                next_turn: 1,
+                next_input_request: 1,
+                pending_approval: None,
+                approval: None,
+                scheduler,
+                run_route,
+                run_outputs,
+                commands: Box::pin(commands),
+                next_source: PollSource::Command,
+                events: None,
+                active_lease: None,
+                next_lease: 1,
+                close_requested: false,
+                close_acks: Vec::new(),
+                delete_requested: false,
+                delete_acks: Vec::new(),
+                shutdown_requested: false,
+            },
+            command_sender,
+        )
     }
 
-    pub(crate) async fn run(mut self, commands: Receiver<SessionCommand>) -> SessionActorExit {
-        let mut commands = Box::pin(commands);
-        loop {
-            if let Some(exit) = self.advance() {
-                return exit;
-            }
-
-            match (ActorPoll {
-                commands: commands.as_mut(),
-                execution: &mut self.execution,
-            })
-            .await
-            {
-                ActorEvent::Command(Some(command)) => self.handle_command(command),
-                ActorEvent::Command(None) => self.shutdown_requested = true,
-                ActorEvent::RuntimeFinished { kind, result } => {
-                    if self.handle_runtime_finished(kind, result) {
-                        futures_lite::future::yield_now().await;
-                    }
-                }
-                ActorEvent::RuntimeTimedOut { output } => self.handle_idle_timeout(output),
-            }
+    pub(super) fn poll(
+        &mut self,
+        context: &mut Context<'_>,
+        manager_state: &DurableState<SessionManagerState>,
+    ) -> Poll<SessionActorStatus> {
+        if let Some(exit) = self.finish_lifecycle() {
+            return Poll::Ready(SessionActorStatus::Exit(exit));
         }
-    }
 
-    /// Run immediate state transitions until the actor must wait for a command
-    /// or one runtime operation.
-    fn advance(&mut self) -> Option<SessionActorExit> {
-        loop {
-            if self.is_driving() {
-                return None;
-            }
-
-            if self.delete_requested || self.shutdown_requested || self.close_requested {
-                if self.needs_stop() {
-                    self.start_stop(TurnStopMode::DeleteSpawnedAgents);
-                    return None;
-                }
-                self.finish_active_turn(false);
-                self.finish_control_request();
-                if self.delete_requested {
-                    self.emit_closed();
-                    return Some(SessionActorExit::Deleted {
-                        session: self.session,
-                        root_agent: self.runtime().root_id(),
-                        acks: std::mem::take(&mut self.delete_acks),
-                    });
-                }
-                if self.shutdown_requested {
-                    self.record_root_agent();
-                    self.emit_closed();
-                    return Some(SessionActorExit::Shutdown {
-                        session: self.session,
-                        state: self.state.clone(),
-                    });
-                }
-                self.finish_close();
-                continue;
-            }
-
-            if let Some(op) = self.requested_control {
-                if self.needs_stop() {
-                    let mode = match op {
-                        ControlOp::Interrupt => TurnStopMode::PreserveAgents,
-                        ControlOp::Cancel => TurnStopMode::DeleteSpawnedAgents,
-                    };
-                    self.start_stop(mode);
-                    return None;
-                }
-                self.finish_active_turn(false);
-                self.finish_control_request();
-                continue;
-            }
-
-            self.active_lease?;
-
-            self.ensure_input_request();
-
-            self.announce_turn();
-            self.announce_input_request();
-            if let Some(input) = self.turn.take_pending_input() {
-                self.start_turn_input(input);
-                return None;
-            }
-            if self.turn.active_input_request().is_some() {
-                return None;
-            }
-
-            match self.runtime().work() {
-                MultiagentWork::Root => match self.turn.active_turn_origin() {
-                    None => {
-                        let origin = self
-                            .runtime()
-                            .pending_root_origin()
-                            .expect("root work outside a turn has a subagent origin");
-                        self.turn.begin_subagent_turn(origin);
+        for _ in 0..3 {
+            let source = self.next_source;
+            self.next_source = source.next();
+            match source {
+                PollSource::Command => {
+                    if let Poll::Ready(command) = self.commands.as_mut().poll_next(context) {
+                        match command {
+                            Some(command) => self.handle_command(command),
+                            None => self.request_shutdown(),
+                        }
+                        return Poll::Ready(SessionActorStatus::Progress);
                     }
-                    Some(TurnOrigin::User) if self.runtime().pending_root_origin().is_some() => {
-                        self.start_pending_root_result();
-                        return None;
+                }
+                PollSource::Approval => {
+                    if let Some(task) = &mut self.approval {
+                        if let Poll::Ready(result) = task.future.as_mut().poll(context) {
+                            let task = self
+                                .approval
+                                .take()
+                                .expect("a ready approval task remains installed");
+                            self.handle_approval_result(task, result);
+                            return Poll::Ready(SessionActorStatus::Progress);
+                        }
                     }
-                    Some(TurnOrigin::Subagent { .. })
-                        if self.runtime().pending_root_origin().is_some() =>
+                }
+                PollSource::Agent => {
+                    if let Poll::Ready(Some(output)) =
+                        Pin::new(&mut self.run_outputs).poll_next(context)
                     {
-                        self.start_pending_root_result();
-                        return None;
-                    }
-                    Some(TurnOrigin::User | TurnOrigin::Subagent { .. }) => {
-                        self.start_root_resume();
-                        return None;
-                    }
-                },
-                MultiagentWork::Background => {
-                    if self.turn.has_active_turn() {
-                        self.finish_active_turn(true);
-                    } else {
-                        self.start_background();
-                        return None;
-                    }
-                }
-                MultiagentWork::None => {
-                    if self.turn.has_active_turn() {
-                        self.finish_active_turn(true);
-                    } else {
-                        return None;
+                        self.handle_agent_output(output);
+                        return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
             }
         }
+
+        if self.start_next_message(manager_state) {
+            return Poll::Ready(SessionActorStatus::Progress);
+        }
+
+        Poll::Pending
     }
 
     fn handle_command(&mut self, command: SessionCommand) {
@@ -328,11 +265,11 @@ where
                 commands,
                 ack,
             } => self.open(events, commands, ack),
-            SessionCommand::Submit {
+            SessionCommand::Append {
                 lease,
                 message,
                 ack,
-            } => self.submit(lease, message, ack),
+            } => self.append(lease, message, ack),
             SessionCommand::Respond {
                 lease,
                 request,
@@ -359,21 +296,14 @@ where
                 }
             }
             SessionCommand::Close { lease, ack } => self.close(lease, ack),
-            SessionCommand::Delete { ack } => {
-                self.delete_requested = true;
-                self.delete_acks.push(ack);
-                self.cancel_running();
-            }
-            SessionCommand::Shutdown => {
-                self.shutdown_requested = true;
-                self.cancel_running();
-            }
+            SessionCommand::Delete { ack } => self.request_delete(ack),
+            SessionCommand::Shutdown => self.request_shutdown(),
         }
     }
 
     fn open(
         &mut self,
-        events: EventSink,
+        events: Sender<SessionEvent>,
         commands: Sender<SessionCommand>,
         ack: Sender<Result<SessionEndpoint, OpenSessionError>>,
     ) {
@@ -389,91 +319,45 @@ where
         self.next_lease = self.next_lease.saturating_add(1);
         self.active_lease = Some(lease);
         self.events = Some(events);
-        self.announced_turn = None;
-        self.announced_input_request = None;
         let _ = ack.try_send(Ok(SessionEndpoint::new(lease, commands)));
     }
 
-    fn submit(&mut self, lease: u64, input: Message, ack: Sender<Result<(), SessionControlError>>) {
-        let has_text = !input.as_str().is_empty();
-        let text_bytes = input.as_str().len() as u64;
+    fn append(
+        &mut self,
+        lease: u64,
+        message: Message,
+        ack: Sender<Result<(), SessionControlError>>,
+    ) {
         if !self.accepts(lease) {
-            tracing::warn!(name: "submit_rejected", reason = "session_closed");
             self.reject_closed(ack);
             return;
         }
-        let foreground_running = self
-            .driving_kind()
-            .is_some_and(RuntimeDriveKind::is_foreground);
-        let root_busy = self
-            .idle_runtime()
-            .is_some_and(|runtime| runtime.work() == MultiagentWork::Root);
-        if foreground_running
-            || self.turn.has_pending_input()
-            || self.turn.has_active_turn()
-            || root_busy
-        {
-            tracing::warn!(name: "submit_rejected", reason = "busy", has_text, text_bytes);
-            let _ = ack.try_send(Err(SessionControlError::Busy(self.session)));
-            return;
-        }
-        self.turn.begin_user_turn(input);
-        if let Some(control) = self.driving_control() {
-            control.request_wake();
-        }
-        tracing::info!(name: "submit_accepted", has_text, text_bytes);
+        self.inbox.push_back(message.into_user());
         let _ = ack.try_send(Ok(()));
-    }
-
-    fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
-        if self.state.get().reasoning_effort() != effort {
-            self.state.get_mut().set_reasoning_effort(effort);
-        }
-        if self.is_driving() {
-            self.pending_reasoning_effort = Some(effort);
-            self.driving_control()
-                .expect("a driving runtime has control")
-                .request_wake();
-        } else {
-            self.runtime_mut().set_reasoning_effort(effort);
-        }
-    }
-
-    fn apply_pending_reasoning_effort(&mut self) {
-        if let Some(effort) = self.pending_reasoning_effort.take() {
-            self.runtime_mut().set_reasoning_effort(effort);
-        }
     }
 
     fn respond(
         &mut self,
         lease: u64,
         request: InputRequestId,
-        input: Message,
+        message: Message,
         ack: Sender<Result<(), SessionControlError>>,
     ) {
         if !self.accepts(lease) {
-            tracing::warn!(name: "respond_rejected", reason = "session_closed");
             self.reject_closed(ack);
             return;
         }
-        if self.is_driving() || self.turn.has_pending_input() {
-            tracing::warn!(name: "respond_rejected", reason = "busy", request = %request);
-            let _ = ack.try_send(Err(SessionControlError::Busy(self.session)));
+        if self.approval.is_some() {
+            let _ = ack.try_send(Err(SessionControlError::NotAwaitingInput(self.session)));
             return;
         }
-        let Some(expected) = self.turn.active_input_request().map(|pending| pending.id) else {
-            tracing::warn!(name: "respond_rejected", reason = "not_awaiting_input", request = %request);
+        let Some(pending) = self.pending_approval.take() else {
             let _ = ack.try_send(Err(SessionControlError::NotAwaitingInput(self.session)));
             return;
         };
-        if expected != request {
-            tracing::warn!(
-                name: "respond_rejected",
-                reason = "input_request_mismatch",
-                expected = %expected,
-                received = %request,
-            );
+        if pending.request != request {
+            let expected = pending.request;
+            self.pending_approval = Some(pending);
             let _ = ack.try_send(Err(SessionControlError::InputRequestMismatch {
                 session: self.session,
                 expected,
@@ -481,10 +365,33 @@ where
             }));
             return;
         }
-        let accepted = self.turn.respond_to_input(request, input);
-        debug_assert!(accepted, "validated input request must still be active");
-        self.announced_input_request = None;
-        tracing::info!(name: "respond_accepted", request = %request);
+
+        let control = ApprovalControl::new();
+        let task_control = control.clone();
+        let api_manager = Arc::clone(&self.api_manager);
+        let tool_call = pending.tool_call.clone();
+        let reason = pending.reason.clone();
+        let user_reply = message.as_str().to_owned();
+        let future = Box::pin(
+            async move {
+                approval_resolver::resolve_permission_reply::<Http, Timer>(
+                    &api_manager,
+                    &tool_call,
+                    &reason,
+                    &user_reply,
+                    &task_control,
+                )
+                .await
+            }
+            .instrument(tracing::info_span!("approval.resolve")),
+        );
+        self.approval = Some(ApprovalTask {
+            control,
+            future,
+            tool_call_id: pending.tool_call_id,
+            tool_call: pending.tool_call,
+            reason: pending.reason,
+        });
         let _ = ack.try_send(Ok(()));
     }
 
@@ -493,26 +400,23 @@ where
             self.reject_closed(ack);
             return;
         }
-        let has_active_turn = self.turn.has_active_turn();
-        let has_background = self
-            .driving_kind()
-            .is_some_and(|kind| kind == RuntimeDriveKind::Background)
-            || self
-                .idle_runtime()
-                .is_some_and(|runtime| runtime.work() == MultiagentWork::Background);
-        if !has_active_turn && (op == ControlOp::Interrupt || !has_background) {
-            let _ = ack.try_send(Ok(()));
-            return;
-        }
-        self.requested_control = Some(ControlOp::merge(self.requested_control, op));
-        self.control_acks.push(ack);
-        if let Some(control) = self.driving_control() {
-            match self.requested_control {
-                Some(ControlOp::Interrupt) => control.request_interrupt(),
-                Some(ControlOp::Cancel) => control.request_cancel(),
-                None => {}
+        match op {
+            ControlOp::Interrupt => {
+                if let Some(root) = &mut self.root {
+                    root.interrupt();
+                }
+            }
+            ControlOp::Cancel => {
+                if let Some(root) = &mut self.root {
+                    root.cancel();
+                }
             }
         }
+        if let Some(approval) = &self.approval {
+            approval.control.cancel();
+        }
+        self.pending_approval = None;
+        let _ = ack.try_send(Ok(()));
     }
 
     fn close(&mut self, lease: u64, ack: Sender<Result<(), SessionControlError>>) {
@@ -522,128 +426,366 @@ where
         }
         self.close_requested = true;
         self.close_acks.push(ack);
-        self.cancel_running();
+        self.stop_current_run(false);
+    }
+
+    fn request_delete(&mut self, ack: Sender<Result<(), SessionControlError>>) {
+        self.delete_requested = true;
+        self.delete_acks.push(ack);
+        self.stop_current_run(true);
+    }
+
+    fn request_shutdown(&mut self) {
+        self.shutdown_requested = true;
+        self.stop_current_run(false);
+    }
+
+    fn stop_current_run(&mut self, reaping: bool) {
+        self.inbox.clear();
+        self.pending_approval = None;
+        if let Some(approval) = self.approval.take() {
+            approval.control.cancel();
+        }
+        if let Some(root) = &mut self.root {
+            if reaping {
+                root.begin_reaping();
+            } else {
+                root.cancel();
+            }
+        }
+    }
+
+    fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
+        if !(self.close_requested || self.delete_requested || self.shutdown_requested) {
+            return None;
+        }
+        if self.root.as_ref().is_some_and(AgentSlot::is_in_flight) {
+            return None;
+        }
+        self.finish_turn();
+
+        if self.delete_requested {
+            if let Err(error) = self.delete_root_agent() {
+                self.emit_execution_error(SessionExecutionError::from(error));
+                self.delete_requested = false;
+                for ack in std::mem::take(&mut self.delete_acks) {
+                    let _ = ack.try_send(Err(SessionControlError::Persistence));
+                }
+                return None;
+            }
+            self.emit_closed();
+            self.complete_close_requests();
+            return Some(SessionActorExit::Deleted {
+                session: self.session,
+                acks: std::mem::take(&mut self.delete_acks),
+            });
+        }
+        if self.shutdown_requested {
+            self.emit_closed();
+            self.complete_close_requests();
+            return Some(SessionActorExit::Shutdown {
+                session: self.session,
+            });
+        }
+
+        self.emit_closed();
+        self.active_lease = None;
+        self.close_requested = false;
+        self.complete_close_requests();
+        None
+    }
+
+    fn complete_close_requests(&mut self) {
+        for ack in std::mem::take(&mut self.close_acks) {
+            let _ = ack.try_send(Ok(()));
+        }
+    }
+
+    fn start_next_message(&mut self, manager_state: &DurableState<SessionManagerState>) -> bool {
+        if self.close_requested || self.delete_requested || self.shutdown_requested {
+            return false;
+        }
+        if self.root.as_ref().is_some_and(AgentSlot::is_in_flight) || self.inbox.is_empty() {
+            return false;
+        }
+        let message = self
+            .inbox
+            .pop_front()
+            .expect("a checked non-empty inbox has a front message");
+        self.begin_turn();
+        if let Err(error) = self.ensure_root(manager_state) {
+            self.emit_execution_error(SessionExecutionError::from(error));
+            self.finish_turn();
+            return true;
+        }
+        if message.as_str().trim().is_empty() {
+            self.finish_turn();
+            return true;
+        }
+        let turn = self
+            .active_turn
+            .as_ref()
+            .expect("begin_turn installs the active turn")
+            .id;
+        let root = self
+            .root
+            .as_mut()
+            .expect("ensure_root materializes a root slot");
+        let agent = root.id();
+        let span = tracing::info_span!(
+            "agent",
+            trace.task = %agent,
+            run.agent = %agent,
+            run.turn = %turn,
+        );
+        root.start(message, &self.scheduler, self.run_route.clone(), span);
+        true
+    }
+
+    fn delete_root_agent(&mut self) -> Result<(), AgentCreateError> {
+        let root_agent = self.root.as_ref().map(AgentSlot::id).or(self.restored_root);
+        // Drop every live component handle before deleting its canonical
+        // stores. In particular, dropping a filesystem TranscriptStore after
+        // deletion could otherwise recreate its index file.
+        self.root = None;
+        if self.persistence == SessionPersistence::Persistent {
+            if let Some(root_agent) = root_agent {
+                if let Err(error) = self.manager.remove(root_agent) {
+                    self.restored_root = Some(root_agent);
+                    return Err(error);
+                }
+            }
+        }
+        self.restored_root = None;
+        self.state.get_mut().clear_root_agent();
+        Ok(())
+    }
+
+    fn ensure_root(
+        &mut self,
+        manager_state: &DurableState<SessionManagerState>,
+    ) -> Result<(), AgentCreateError> {
+        if self.root.is_some() {
+            return Ok(());
+        }
+        let reasoning_effort = self.state.get().reasoning_effort();
+        let (id, agent, reasoning_handle) = if let Some(id) = self.restored_root.take() {
+            let root_inflight_toolcalls = self.state.get().root_inflight_toolcalls().to_vec();
+            let additional = (!root_inflight_toolcalls.is_empty())
+                .then(|| AdditionalAgentState::new(root_inflight_toolcalls));
+            let (agent, reasoning) = self.manager.resume_from(
+                id,
+                true,
+                Arc::clone(&self.permission) as Arc<_>,
+                reasoning_effort,
+                Vec::new(),
+                additional,
+            )?;
+            (id, agent, reasoning)
+        } else {
+            let id = next_agent(manager_state);
+            let persistence = match self.persistence {
+                SessionPersistence::Persistent => PersistenceConfig::Persistent,
+                SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
+            };
+            let kind = crate::agent::baked::root_kind();
+            let (agent, reasoning) = self.manager.create(
+                id,
+                kind,
+                true,
+                Arc::clone(&self.permission) as Arc<_>,
+                reasoning_effort,
+                persistence,
+                Vec::new(),
+            )?;
+            self.state.get_mut().set_root_agent(id);
+            (id, agent, reasoning)
+        };
+        self.root = Some(AgentSlot::new(id, agent, reasoning_handle));
+        Ok(())
+    }
+
+    fn handle_agent_output(&mut self, output: crate::scheduler::AgentRunOutput<Http, Timer>) {
+        let Some(root) = &mut self.root else {
+            return;
+        };
+        match root.accept_output(output) {
+            AgentSlotUpdate::Event(Ok(event)) => self.handle_agent_event(event),
+            AgentSlotUpdate::Event(Err(error)) => {
+                self.emit_execution_error(SessionExecutionError::from(error));
+                self.finish_turn();
+            }
+            AgentSlotUpdate::Returned => self.finish_turn(),
+            AgentSlotUpdate::Reaped => {
+                self.finish_turn();
+            }
+            AgentSlotUpdate::Ignored => {}
+        }
+    }
+
+    fn handle_agent_event(&mut self, event: AgentEvent) {
+        match event {
+            AgentEvent::Iteration(StreamPart::Delta(IterationEvent::BeforeToolCalls(calls))) => {
+                self.record_toolcalls(calls);
+            }
+            AgentEvent::Iteration(progress) => self.emit_iteration(progress),
+            AgentEvent::InputRequired(AgentInputRequest::Approval {
+                tool_call_id,
+                tool_call,
+                reason,
+            }) => self.request_approval(tool_call_id, tool_call, reason),
+            AgentEvent::Finished(outcome) => {
+                if let AgentOutcome::Completed(AgentCompletion::Synthesized(message)) = outcome {
+                    self.emit_text(message);
+                }
+                self.pending_approval = None;
+                self.approval = None;
+                self.finish_turn();
+            }
+        }
+    }
+
+    fn emit_iteration(&self, progress: StreamPart<IterationEvent>) {
+        let event = match progress {
+            StreamPart::Delta(IterationEvent::Started(iteration)) => {
+                SessionEvent::IterationStarted { iteration }
+            }
+            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Reasoning(part))) => {
+                SessionEvent::Reasoning(part)
+            }
+            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::Output(part))) => {
+                SessionEvent::Output(part)
+            }
+            StreamPart::Delta(IterationEvent::Llm(ChatStreamEvent::ToolCalls(part))) => {
+                SessionEvent::ToolCalls(part)
+            }
+            StreamPart::Delta(IterationEvent::BeforeToolCalls(_)) => return,
+            StreamPart::End => SessionEvent::IterationEnded,
+        };
+        self.emit(event);
+    }
+
+    fn request_approval(&mut self, tool_call_id: ToolCallId, tool_call: ToolCall, reason: String) {
+        let request = InputRequestId(self.next_input_request);
+        self.next_input_request = self.next_input_request.saturating_add(1);
+        let kind = InputRequestKind::PermissionApproval {
+            tool_call: tool_call.clone(),
+            reason: reason.clone(),
+        };
+        self.pending_approval = Some(PendingApproval {
+            request,
+            tool_call_id,
+            tool_call,
+            reason,
+        });
+        self.emit(SessionEvent::InputRequested { request, kind });
+    }
+
+    fn handle_approval_result(
+        &mut self,
+        task: ApprovalTask,
+        result: Result<PermissionReplyResolution, ApprovalResolverError>,
+    ) {
+        let resolution = match result {
+            Ok(resolution) => resolution,
+            Err(ApprovalResolverError::Cancelled) => return,
+            Err(error) => {
+                self.emit_execution_error(SessionExecutionError::from(error));
+                self.request_approval(task.tool_call_id, task.tool_call, task.reason);
+                return;
+            }
+        };
+        let Some(decision) = resolution.clone().into_decision() else {
+            let PermissionReplyResolution::Clarify(_) = resolution else {
+                unreachable!("non-clarification resolutions map to decisions")
+            };
+            self.request_approval(task.tool_call_id, task.tool_call, task.reason);
+            return;
+        };
+        let resolution = self
+            .root
+            .as_ref()
+            .ok_or(crate::agent::AgentApprovalError::NotAwaitingApproval)
+            .and_then(|root| root.resolve_approval(task.tool_call_id, decision));
+        if let Err(error) = resolution {
+            self.emit(SessionEvent::Error {
+                message: error.to_string(),
+            });
+            if let Some(root) = &mut self.root {
+                root.cancel();
+            }
+        }
+    }
+
+    fn begin_turn(&mut self) {
+        debug_assert!(self.active_turn.is_none());
+        let turn = TurnId(self.next_turn);
+        self.next_turn = self.next_turn.saturating_add(1);
+        self.active_turn = Some(ActiveTurn {
+            id: turn,
+            toolcalls: Vec::new(),
+        });
+        self.emit(SessionEvent::TurnStarted {
+            turn,
+            origin: TurnOrigin::User,
+        });
+    }
+
+    fn finish_turn(&mut self) {
+        let Some(turn) = self.active_turn.take() else {
+            return;
+        };
+        if !turn.toolcalls.is_empty() {
+            let mut state = self.state.get_mut();
+            for call in &turn.toolcalls {
+                state.remove_root_inflight_toolcall(call);
+            }
+        }
+        self.emit(SessionEvent::TurnEnded { turn: turn.id });
+    }
+
+    fn record_toolcalls(&mut self, calls: Vec<ToolCall>) {
+        let Some(turn) = &mut self.active_turn else {
+            return;
+        };
+        let mut state = self.state.get_mut();
+        for call in calls {
+            state.add_root_inflight_toolcall(&call);
+            turn.toolcalls.push(call);
+        }
+    }
+
+    fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
+        if self.state.get().reasoning_effort() != effort {
+            self.state.get_mut().set_reasoning_effort(effort);
+        }
+        if let Some(root) = &self.root {
+            root.set_reasoning_effort(effort);
+        }
     }
 
     fn accepts(&self, lease: u64) -> bool {
         self.active_lease == Some(lease)
+            && !self.close_requested
             && !self.delete_requested
             && !self.shutdown_requested
-            && !self.close_requested
     }
 
     fn reject_closed(&self, ack: Sender<Result<(), SessionControlError>>) {
         let _ = ack.try_send(Err(SessionControlError::SessionClosed(self.session)));
     }
 
-    fn needs_stop(&self) -> bool {
-        self.turn.has_active_turn()
-            || self
-                .idle_runtime()
-                .is_some_and(|runtime| runtime.work() != MultiagentWork::None)
+    fn emit_text(&self, message: String) {
+        self.emit(SessionEvent::Output(StreamPart::Delta(message)));
+        self.emit(SessionEvent::Output(StreamPart::End));
     }
 
-    fn cancel_running(&self) {
-        if let Some(control) = self.driving_control() {
-            control.request_cancel();
-        }
-    }
-
-    fn announce_turn(&mut self) {
-        let Some(turn) = self.turn.active_turn_id() else {
-            return;
-        };
-        if self.announced_turn == Some(turn) {
-            return;
-        }
-        let origin = self
-            .turn
-            .active_turn_origin()
-            .expect("an active turn has an origin");
-        self.announced_turn = Some(turn);
-        self.emit(SessionEvent::TurnStarted { turn, origin });
-    }
-
-    fn ensure_input_request(&mut self) {
-        if self.turn.has_pending_input() || self.turn.active_input_request().is_some() {
-            return;
-        }
-        let Some(request) = self.runtime().required_input() else {
-            return;
-        };
-        let (idle_origin, kind) = request.into_parts();
-        let _ = self.turn.request_input(idle_origin, kind);
-    }
-
-    fn announce_input_request(&mut self) {
-        let Some(pending) = self.turn.active_input_request().cloned() else {
-            return;
-        };
-        if self.announced_input_request == Some(pending.id) {
-            return;
-        }
-        self.announced_input_request = Some(pending.id);
-        self.emit(SessionEvent::InputRequested {
-            request: pending.id,
-            kind: pending.kind,
+    fn emit_execution_error(&self, error: SessionExecutionError) {
+        let kind: &'static str = (&error).into();
+        tracing::error!(name: "session_execution_error", kind);
+        self.emit(SessionEvent::Error {
+            message: error.to_string(),
         });
-    }
-
-    fn finish_active_turn(&mut self, commit_background_results: bool) {
-        let Some(finished) = self.turn.finish_turn() else {
-            return;
-        };
-        if commit_background_results {
-            let background_results = self.runtime_mut().commit_root_deliveries();
-            self.settle_persisted_toolcalls(&background_results);
-            let deferred = self.runtime().active_root_background_spawns();
-            let ordinary = finished
-                .toolcalls
-                .into_iter()
-                .filter(|call| !deferred.contains(call))
-                .collect::<Vec<_>>();
-            self.settle_persisted_toolcalls(&ordinary);
-        }
-        self.announced_turn = None;
-        self.announced_input_request = None;
-        self.record_root_agent();
-        self.emit(SessionEvent::TurnEnded { turn: finished.id });
-    }
-
-    fn record_tool_started(&mut self, call: ToolCall) {
-        self.state.get_mut().add_inflight_toolcall(&call);
-        self.turn.record_tool_started(call);
-    }
-
-    fn settle_persisted_toolcalls(&self, calls: &[ToolCall]) {
-        if calls.is_empty() {
-            return;
-        }
-        let mut state = self.state.get_mut();
-        for call in calls {
-            state.remove_inflight_toolcall(call);
-        }
-    }
-
-    fn finish_control_request(&mut self) {
-        self.requested_control = None;
-        for ack in std::mem::take(&mut self.control_acks) {
-            let _ = ack.try_send(Ok(()));
-        }
-    }
-
-    fn finish_close(&mut self) {
-        self.record_root_agent();
-        self.emit_closed();
-        self.active_lease = None;
-        self.close_requested = false;
-        self.requested_control = None;
-        for ack in std::mem::take(&mut self.control_acks) {
-            let _ = ack.try_send(Ok(()));
-        }
-        for ack in std::mem::take(&mut self.close_acks) {
-            let _ = ack.try_send(Ok(()));
-        }
     }
 
     fn emit_closed(&mut self) {
@@ -655,480 +797,12 @@ where
 
     fn emit(&self, event: SessionEvent) {
         if let Some(events) = &self.events {
-            events.emit(event);
-        }
-    }
-
-    fn emit_error(&self, message: String) {
-        self.emit(SessionEvent::Error { message });
-    }
-
-    fn record_root_agent(&mut self) {
-        let Some(root) = self.runtime().root_id() else {
-            return;
-        };
-        if self.state.get().root_agent() == Some(root) {
-            return;
-        }
-        self.state.get_mut().set_root_agent(root);
-    }
-
-    fn runtime(&self) -> &MultiagentRuntime<Filesystem, Http, Timer> {
-        self.idle_runtime()
-            .expect("session runtime is idle outside an actor drive")
-    }
-
-    fn runtime_mut(&mut self) -> &mut MultiagentRuntime<Filesystem, Http, Timer> {
-        match self.execution.as_mut() {
-            Some(RuntimeExecution::Idle(runtime)) => runtime,
-            Some(RuntimeExecution::Driving { .. }) => {
-                panic!("session runtime is driving outside an actor drive")
-            }
-            None => panic!("session runtime left in a transition state"),
-        }
-    }
-
-    fn idle_runtime(&self) -> Option<&MultiagentRuntime<Filesystem, Http, Timer>> {
-        match self.execution.as_ref()? {
-            RuntimeExecution::Idle(runtime) => Some(runtime),
-            RuntimeExecution::Driving { .. } => None,
-        }
-    }
-
-    fn take_runtime(&mut self) -> Box<MultiagentRuntime<Filesystem, Http, Timer>> {
-        match self.execution.take() {
-            Some(RuntimeExecution::Idle(runtime)) => runtime,
-            Some(driving @ RuntimeExecution::Driving { .. }) => {
-                self.execution = Some(driving);
-                panic!("session runtime is already driving")
-            }
-            None => panic!("session runtime left in a transition state"),
-        }
-    }
-
-    fn is_driving(&self) -> bool {
-        matches!(self.execution, Some(RuntimeExecution::Driving { .. }))
-    }
-
-    fn driving_kind(&self) -> Option<RuntimeDriveKind> {
-        match self.execution.as_ref()? {
-            RuntimeExecution::Driving { kind, .. } => Some(*kind),
-            RuntimeExecution::Idle(_) => None,
-        }
-    }
-
-    fn driving_control(&self) -> Option<&DriveControl> {
-        match self.execution.as_ref()? {
-            RuntimeExecution::Driving { control, .. } => Some(control),
-            RuntimeExecution::Idle(_) => None,
-        }
-    }
-
-    fn start_turn_input(&mut self, input: PendingTurnInput) {
-        let mut runtime = self.take_runtime();
-        let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let persistence = match self.persistence {
-            SessionPersistence::Persistent => PersistenceConfig::Persistent,
-            SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
-        };
-        let api_manager = Arc::clone(&self.api_manager);
-        let turn = self
-            .turn
-            .active_turn_id()
-            .expect("user input belongs to an active turn");
-        let control = DriveControl::new();
-        let drive_control = control.clone();
-        let span = tracing::info_span!("turn", run.turn = %turn, cause = "user_submit");
-        let future: RuntimeFuture<Filesystem, Http, Timer> = match input {
-            PendingTurnInput::Submit(message) => {
-                let delivery = runtime
-                    .deliver(message, persistence)
-                    .map_err(DeliverError::from);
-                if delivery.is_ok() {
-                    if let Some(root) = runtime.root_id() {
-                        if self.state.get().root_agent() != Some(root) {
-                            self.state.get_mut().set_root_agent(root);
-                        }
-                    }
-                }
-                Box::pin(
-                    async move {
-                        let result = match delivery {
-                            Ok(()) => drive_root(&mut runtime, &drive_control, &events).await,
-                            Err(error) => Err(error),
-                        };
-                        RuntimeCompletion {
-                            runtime,
-                            result: RuntimeDriveResult::Driven(result),
-                        }
-                    }
-                    .instrument(span),
-                )
-            }
-            PendingTurnInput::Response { kind, message } => Box::pin(
-                async move {
-                    let result = match kind {
-                        InputRequestKind::PermissionApproval { tool_call, reason } => {
-                            resolve_pending_approval(
-                                &mut runtime,
-                                &tool_call,
-                                &reason,
-                                message.as_str(),
-                                &drive_control,
-                                &events,
-                                &api_manager,
-                            )
-                            .await
-                        }
-                    };
-                    RuntimeCompletion {
-                        runtime,
-                        result: RuntimeDriveResult::Driven(result),
-                    }
-                }
-                .instrument(span),
-            ),
-        };
-        self.execution = Some(RuntimeExecution::Driving {
-            kind: RuntimeDriveKind::Foreground,
-            control,
-            future,
-        });
-    }
-
-    fn start_pending_root_result(&mut self) {
-        let runtime = self.take_runtime();
-        let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let turn = self
-            .turn
-            .active_turn_id()
-            .expect("a pending root result belongs to an active turn");
-        let control = DriveControl::new();
-        let drive_control = control.clone();
-        let future = Box::pin(
-            async move {
-                let mut runtime = runtime;
-                let result = drive_pending_root_result(&mut runtime, &events, &drive_control).await;
-                RuntimeCompletion { runtime, result }
-            }
-            .instrument(tracing::info_span!("turn", run.turn = %turn, cause = "background_result")),
-        );
-        self.execution = Some(RuntimeExecution::Driving {
-            kind: RuntimeDriveKind::Foreground,
-            control,
-            future,
-        });
-    }
-
-    fn start_root_resume(&mut self) {
-        let runtime = self.take_runtime();
-        let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let turn = self
-            .turn
-            .active_turn_id()
-            .expect("resumed root work belongs to an active turn");
-        let control = DriveControl::new();
-        let drive_control = control.clone();
-        let future = Box::pin(
-            async move {
-                let mut runtime = runtime;
-                let result = drive_root(&mut runtime, &drive_control, &events).await;
-                RuntimeCompletion {
-                    runtime,
-                    result: RuntimeDriveResult::Driven(result),
-                }
-            }
-            .instrument(tracing::info_span!("turn", run.turn = %turn, cause = "runtime_resume")),
-        );
-        self.execution = Some(RuntimeExecution::Driving {
-            kind: RuntimeDriveKind::Foreground,
-            control,
-            future,
-        });
-    }
-
-    fn start_background(&mut self) {
-        let runtime = self.take_runtime();
-        let events = self.events.clone().unwrap_or_else(EventSink::disabled);
-        let control = DriveControl::new();
-        let drive_control = control.clone();
-        let future = Box::pin(async move {
-            let mut runtime = runtime;
-            let result = drive_background(&mut runtime, &events, &drive_control).await;
-            RuntimeCompletion { runtime, result }
-        });
-        self.execution = Some(RuntimeExecution::Driving {
-            kind: RuntimeDriveKind::Background,
-            control,
-            future,
-        });
-    }
-
-    fn start_stop(&mut self, mode: TurnStopMode) {
-        let runtime = self.take_runtime();
-        let future = Box::pin(async move {
-            let mut runtime = runtime;
-            runtime.stop_turn_tasks(mode).await;
-            RuntimeCompletion {
-                runtime,
-                result: RuntimeDriveResult::Stopped,
-            }
-        });
-        self.execution = Some(RuntimeExecution::Driving {
-            kind: RuntimeDriveKind::Stop,
-            control: DriveControl::new(),
-            future,
-        });
-    }
-
-    fn handle_runtime_finished(
-        &mut self,
-        kind: RuntimeDriveKind,
-        result: RuntimeDriveResult,
-    ) -> bool {
-        self.record_root_agent();
-        self.apply_pending_reasoning_effort();
-        let mut yield_for_persistence = false;
-        if let RuntimeDriveResult::Driven(result) = result {
-            match result {
-                Ok(DriveOutcome::BeforeToolCalls(output, calls)) => {
-                    let _ = self
-                        .emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
-                    for call in calls {
-                        self.record_tool_started(call);
-                    }
-                    yield_for_persistence = true;
-                }
-                Ok(DriveOutcome::Complete(output, stop)) => {
-                    let stop = self.emit_drive_result(Ok::<_, DeliverError>((output, stop)));
-                    if kind.is_foreground() && stop_mode(stop).is_some() {
-                        self.finish_active_turn(false);
-                    }
-                }
-                Err(error) => {
-                    let stop = self.emit_drive_result(Err(error));
-                    if kind.is_foreground() && stop != DriveStop::Quiescent {
-                        self.finish_active_turn(false);
-                    }
-                }
-            }
-        }
-        if self.requested_control.is_some() || self.close_requested || self.delete_requested {
-            self.finish_active_turn(false);
-            self.finish_control_request();
-            yield_for_persistence = false;
-        }
-        yield_for_persistence
-    }
-
-    fn handle_idle_timeout(&mut self, output: DriveOutput) {
-        let _ = self.emit_drive_result(Ok::<_, DeliverError>((output, DriveStop::Quiescent)));
-        let active_kind = self
-            .turn
-            .active_input_request()
-            .map(|request| request.kind.clone());
-        let request_is_still_current = active_kind.as_ref().is_some_and(|active_kind| {
-            self.runtime()
-                .required_input()
-                .is_some_and(|required| required.kind() == active_kind)
-        });
-        if active_kind.is_some() && !request_is_still_current {
-            if let Some(request) = self.turn.cancel_input_request() {
-                self.announced_input_request = None;
-                tracing::info!(name: "input_request_cancelled", request = %request, reason = "subagent_timeout");
-            }
-        }
-    }
-
-    fn emit_drive_result(
-        &self,
-        result: Result<(DriveOutput, DriveStop), DeliverError>,
-    ) -> DriveStop {
-        match result {
-            Ok((output, stop)) => {
-                let mut emitted = false;
-                for text in output.into_messages() {
-                    self.emit(SessionEvent::Output(StreamPart::Delta(text)));
-                    emitted = true;
-                }
-                if emitted {
-                    self.emit(SessionEvent::Output(StreamPart::End));
-                }
-                stop
-            }
-            Err(error) => {
-                let kind: &'static str = (&error).into();
-                tracing::error!(name: "error", kind);
-                self.emit_error(error.to_string());
-                DriveStop::Quiescent
-            }
+            let _ = events.try_send(event);
         }
     }
 }
 
-enum ActorEvent {
-    Command(Option<SessionCommand>),
-    RuntimeTimedOut {
-        output: DriveOutput,
-    },
-    RuntimeFinished {
-        kind: RuntimeDriveKind,
-        result: RuntimeDriveResult,
-    },
-}
-
-struct ActorPoll<'a, Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    commands: Pin<&'a mut Receiver<SessionCommand>>,
-    execution: &'a mut Option<RuntimeExecution<Filesystem, Http, Timer>>,
-}
-
-impl<Filesystem, Http, Timer> Future for ActorPoll<'_, Filesystem, Http, Timer>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    type Output = ActorEvent;
-
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-        if let Poll::Ready(command) = this.commands.as_mut().poll_next(context) {
-            return Poll::Ready(ActorEvent::Command(command));
-        }
-        match this.execution.as_mut() {
-            Some(RuntimeExecution::Idle(runtime)) => runtime
-                .poll_expired_timeouts(context)
-                .map(|output| ActorEvent::RuntimeTimedOut { output }),
-            Some(RuntimeExecution::Driving { kind, future, .. }) => {
-                let kind = *kind;
-                let Poll::Ready(completion) = future.as_mut().poll(context) else {
-                    return Poll::Pending;
-                };
-                *this.execution = Some(RuntimeExecution::Idle(completion.runtime));
-                Poll::Ready(ActorEvent::RuntimeFinished {
-                    kind,
-                    result: completion.result,
-                })
-            }
-            None => Poll::Pending,
-        }
-    }
-}
-
-async fn drive_pending_root_result<Filesystem, Http, Timer>(
-    runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    events: &EventSink,
-    control: &DriveControl,
-) -> RuntimeDriveResult
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    if !runtime.activate_pending_root_results() {
-        debug_assert!(false, "subagent turn requires one pending root result");
-    }
-    let result = drive_root(runtime, control, events).await;
-    RuntimeDriveResult::Driven(result)
-}
-
-async fn drive_background<Filesystem, Http, Timer>(
-    runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    events: &EventSink,
-    control: &DriveControl,
-) -> RuntimeDriveResult
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    let (output, stop) = runtime
-        .drive_background_until_root_ready(control, events)
-        .await;
-    if let Some(mode) = stop_mode(stop) {
-        runtime.stop_turn_tasks(mode).await;
-    }
-    RuntimeDriveResult::Driven(Ok(DriveOutcome::Complete(output, stop)))
-}
-
-async fn drive_root<Filesystem, Http, Timer>(
-    runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    control: &DriveControl,
-    events: &EventSink,
-) -> Result<DriveOutcome, DeliverError>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    let outcome = runtime.drive_root_turn(control, events).await;
-    if let DriveOutcome::Complete(_, stop) = &outcome {
-        if let Some(mode) = stop_mode(*stop) {
-            runtime.stop_turn_tasks(mode).await;
-        }
-    }
-    Ok(outcome)
-}
-
-fn stop_mode(stop: DriveStop) -> Option<TurnStopMode> {
-    match stop {
-        DriveStop::Cancelled => Some(TurnStopMode::DeleteSpawnedAgents),
-        DriveStop::Interrupted => Some(TurnStopMode::PreserveAgents),
-        DriveStop::Quiescent | DriveStop::Woken => None,
-    }
-}
-
-async fn resolve_pending_approval<Filesystem, Http, Timer>(
-    runtime: &mut MultiagentRuntime<Filesystem, Http, Timer>,
-    tool_call: &ToolCall,
-    reason: &str,
-    user_reply: &str,
-    control: &DriveControl,
-    events: &EventSink,
-    api_manager: &SharedApiManager,
-) -> Result<DriveOutcome, DeliverError>
-where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-{
-    let resolution = match approval::resolve_permission_reply::<Http, Timer>(
-        api_manager,
-        tool_call,
-        reason,
-        user_reply,
-        control,
-    )
-    .await
-    {
-        Ok(resolution) => resolution,
-        Err(ApprovalResolverError::Cancelled) => {
-            runtime
-                .stop_turn_tasks(TurnStopMode::DeleteSpawnedAgents)
-                .await;
-            return Ok(DriveOutcome::Complete(
-                DriveOutput::default(),
-                DriveStop::Cancelled,
-            ));
-        }
-        Err(error) => return Err(error.into()),
-    };
-
-    let Some(decision) = resolution.clone().into_decision() else {
-        let PermissionReplyResolution::Clarify(message) = resolution else {
-            unreachable!("non-clarification resolutions map to approval decisions")
-        };
-        tracing::info!(name: "approval_clarification", reason = %message);
-        return Ok(DriveOutcome::Complete(
-            DriveOutput::default(),
-            DriveStop::Quiescent,
-        ));
-    };
-    runtime.resolve_required_input(decision)?;
-    drive_root(runtime, control, events).await
+pub(super) enum SessionActorStatus {
+    Progress,
+    Exit(SessionActorExit),
 }

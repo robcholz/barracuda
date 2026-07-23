@@ -13,10 +13,10 @@ use support::Sse;
 type DiskSystem = AgentSystem<DiskFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>, ImmediateTimer>;
 
 #[test]
-fn short_id_allocator_header_rejects_startup() {
+fn short_session_manager_header_rejects_startup() {
     let root = TempDir::new("claw-persistence-short-header").unwrap();
     DiskFs::write_atomic(
-        &format!("{}/id_allocators.bin", root.path().display()),
+        &format!("{}/session_manager.bin", root.path().display()),
         b"x",
     )
     .unwrap();
@@ -25,10 +25,10 @@ fn short_id_allocator_header_rejects_startup() {
 }
 
 #[test]
-fn invalid_id_allocator_json_rejects_startup() {
+fn invalid_session_manager_json_rejects_startup() {
     let root = TempDir::new("claw-persistence-invalid-json").unwrap();
     write_state(
-        &format!("{}/id_allocators.bin", root.path().display()),
+        &format!("{}/session_manager.bin", root.path().display()),
         1,
         b"{bad-json",
     );
@@ -37,17 +37,17 @@ fn invalid_id_allocator_json_rejects_startup() {
 }
 
 #[test]
-fn unsupported_id_allocator_schema_rejects_startup() {
+fn unsupported_session_manager_schema_rejects_startup() {
     let root = TempDir::new("claw-persistence-id-allocator-schema").unwrap();
     write_state(
-        &format!("{}/id_allocators.bin", root.path().display()),
+        &format!("{}/session_manager.bin", root.path().display()),
         99,
         br#"{"next_session_id":1,"next_agent_id":1}"#,
     );
 
     assert_startup_error(
         root.path().to_str().unwrap(),
-        "unsupported id allocator state schema",
+        "unsupported tuple state schema",
     );
 }
 

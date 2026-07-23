@@ -5,7 +5,6 @@
 //! against an [`ApiUsage`] and resolves the right one per usage, falling back to
 //! a registered default.
 
-pub(crate) mod catalog;
 mod reasoning;
 
 pub use reasoning::ReasoningEffort;

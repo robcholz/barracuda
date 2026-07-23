@@ -1,13 +1,12 @@
-//! A full tool/submit message loop, end to end and offline.
+//! A full tool/session message loop, end to end and offline.
 //!
 //! This is the reference for how a device (firmware or host) drives the agent
-//! through direct session submission plus tools. Everything below uses the
+//! through a session stream plus tools. Everything below uses the
 //! `claw_agent` surface:
 //!
 //! 1. Build an [`AgentSystem`] and register a **tool**.
 //! 2. Start the registered runtime objects.
-//! 3. Open a session, submit user text through its control half, and read the
-//!    returned replies from its event half.
+//! 3. Open a session, append user text, and read replies from the same stream.
 //!
 //! The LLM is a scripted in-memory double and the filesystem is in-memory, so the
 //! example runs hermetically (no network, no API key):
@@ -19,14 +18,58 @@
 
 use claw_agent::{stream::StreamPart, AgentSystem, Message, SessionEvent, SessionPersistence};
 use claw_api::{BackendKind, ClawApiConfig};
+use claw_interface::http::SliceChunks;
 use claw_interface::{
-    BlockingHttpAdapter, ImmediateTimer, MemFs, SharedScriptHttp, StdThread, TokioExecutor,
+    BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
+    HttpStatusCode, ImmediateTimer, MemFs, SharedScriptHttp, StdThread, StreamingHttp,
+    TokioExecutor,
 };
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use claw_tool::{
     SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
 };
 use futures_lite::StreamExt;
+
+#[derive(Default)]
+struct Sse<T>(T);
+
+impl<T: ClawHttp> ClawHttp for Sse<T> {
+    fn post_json<'a>(
+        &'a mut self,
+        request: &'a HttpJsonRequest<'a>,
+        cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        self.0.post_json(request, cancel)
+    }
+}
+
+impl<T: ClawHttp> StreamingHttp for Sse<T> {
+    type ByteStream<'a>
+        = SliceChunks<'a>
+    where
+        Self: 'a;
+
+    async fn post_json_streaming<'a, 'r>(
+        &'a mut self,
+        request: &'r HttpJsonRequest<'r>,
+        cancel: Cancel<'a>,
+    ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
+        let response = self.0.post_json(request, cancel).await?;
+        let message: serde_json::Value =
+            serde_json::from_str(&response.body).map_err(|_| HttpError::Aborted)?;
+        let content = message["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or_default();
+        let event = serde_json::json!({
+            "choices": [{ "delta": { "content": content } }]
+        });
+        let body = format!("data: {event}\n\ndata: [DONE]\n\n");
+        Ok((
+            response.status_code,
+            SliceChunks::once_with_cancel(body.into_bytes(), cancel),
+        ))
+    }
+}
 
 /// A tool: returns a fixed timestamp. Registering it makes `time_now`
 /// resolvable by the agent; whether the model calls it is up to the prompt.
@@ -83,16 +126,15 @@ async fn main() -> anyhow::Result<()> {
         "Hello from the agent — the local time is 2026-06-29T17:00:00Z.",
     )]);
 
-    let system = AgentSystem::<MemFs, BlockingHttpAdapter<SharedScriptHttp>, ImmediateTimer>::new::<
-        StdThread,
-        TokioExecutor,
-    >(
-        scripted_llm(),
-        claw_agent::AgentPersistenceConfig {
+    let system =
+        AgentSystem::<MemFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>, ImmediateTimer>::new::<
+            StdThread,
+            TokioExecutor,
+        >(claw_agent::AgentPersistenceConfig {
             persistence_root: "/mem".to_string(),
             skill_roots: Vec::new(),
-        },
-    )?;
+        })?;
+    system.link_api(scripted_llm(), claw_agent::ApiUsage::RootAgent, true)?;
     system.tool_registry().register_group(ToolGroup::new(
         "example",
         true,
@@ -103,10 +145,8 @@ async fn main() -> anyhow::Result<()> {
     let session = system.new_session(SessionPersistence::Persistent)?;
 
     // 2. Drive the loop: explicit session id selects the agent session.
-    let (control, mut events) = system.open_session(session)?;
-    control
-        .submit(Message::text("Hi, what time is it?"))
-        .await?;
+    let mut events = system.open_session(session)?;
+    events.append(Message::text("Hi, what time is it?")).await?;
 
     println!("\nsession `{session}` events:");
     let mut outputs = Vec::new();

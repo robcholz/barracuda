@@ -6,10 +6,11 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use strum::IntoStaticStr;
 
-use crate::protocol::{AgentId, AgentKind, Message};
+use crate::agent::{AgentId, AgentKind};
+use crate::session::Message;
 
-/// Everything the orchestrator needs to materialize one child agent.
-pub(in crate::multiagent) struct SubagentSpec {
+/// Everything the future Multiagent orchestrator needs to materialize one child agent.
+pub(crate) struct SubagentSpec {
     kind: AgentKind,
     name: Option<String>,
     goal: Message,
@@ -17,7 +18,7 @@ pub(in crate::multiagent) struct SubagentSpec {
 }
 
 impl SubagentSpec {
-    pub(in crate::multiagent) fn new(
+    pub(crate) fn new(
         kind: AgentKind,
         name: Option<String>,
         goal: Message,
@@ -31,55 +32,53 @@ impl SubagentSpec {
         }
     }
 
-    pub(in crate::multiagent) fn into_parts(
-        self,
-    ) -> (AgentKind, Option<String>, Message, SubagentTimeout) {
+    pub(crate) fn into_parts(self) -> (AgentKind, Option<String>, Message, SubagentTimeout) {
         (self.kind, self.name, self.goal, self.timeout)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::multiagent) struct SubagentTimeout(NonZeroU32);
+pub(crate) struct SubagentTimeout(NonZeroU32);
 
 impl SubagentTimeout {
-    pub(in crate::multiagent) const fn new(milliseconds: NonZeroU32) -> Self {
+    pub(crate) const fn new(milliseconds: NonZeroU32) -> Self {
         Self(milliseconds)
     }
 
     #[cfg(test)]
-    pub(in crate::multiagent) fn from_millis(milliseconds: u32) -> Option<Self> {
+    pub(crate) fn from_millis(milliseconds: u32) -> Option<Self> {
         NonZeroU32::new(milliseconds).map(Self)
     }
 
-    pub(in crate::multiagent) const fn millis(self) -> u32 {
+    pub(crate) const fn millis(self) -> u32 {
         self.0.get()
     }
 
-    pub(in crate::multiagent) fn duration(self) -> Duration {
+    pub(crate) fn duration(self) -> Duration {
         Duration::from_millis(u64::from(self.millis()))
     }
 }
 
-pub(in crate::multiagent) trait TranscriptText {
+pub(crate) trait TranscriptText {
     fn text(&self) -> String;
 }
 
-pub(in crate::multiagent) struct SubagentResult {
+pub(crate) struct SubagentResult {
     id: AgentId,
     text: String,
     ok: bool,
 }
 
 impl SubagentResult {
-    pub(in crate::multiagent) fn new(id: AgentId, text: String, ok: bool) -> Self {
+    pub(crate) fn new(id: AgentId, text: String, ok: bool) -> Self {
         Self { id, text, ok }
     }
 
-    pub(in crate::multiagent) fn id(&self) -> AgentId {
+    pub(crate) fn id(&self) -> AgentId {
         self.id
     }
 
-    pub(in crate::multiagent) fn ok(&self) -> bool {
+    pub(crate) fn ok(&self) -> bool {
         self.ok
     }
 }
@@ -94,13 +93,17 @@ impl TranscriptText for SubagentResult {
 }
 
 #[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]
-pub(in crate::multiagent) enum SubagentStatus {
+pub(crate) enum SubagentStatus {
     #[strum(serialize = "ready")]
     Ready,
     #[strum(serialize = "awaiting_approval")]
     AwaitingApproval,
     #[strum(serialize = "running")]
     Running,
+    #[strum(serialize = "cancelling")]
+    Cancelling,
+    #[strum(serialize = "reaping")]
+    Reaping,
     #[strum(serialize = "idle")]
     Idle,
     #[strum(serialize = "completed_pending_delivery")]
@@ -108,7 +111,7 @@ pub(in crate::multiagent) enum SubagentStatus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::multiagent) struct SubagentSnapshot {
+pub(crate) struct SubagentSnapshot {
     id: AgentId,
     kind: AgentKind,
     name: Option<String>,
@@ -118,7 +121,7 @@ pub(in crate::multiagent) struct SubagentSnapshot {
 }
 
 impl SubagentSnapshot {
-    pub(in crate::multiagent) fn new(
+    pub(crate) fn new(
         id: AgentId,
         kind: AgentKind,
         name: Option<String>,
@@ -134,6 +137,11 @@ impl SubagentSnapshot {
             depth,
             status,
         }
+    }
+
+    pub(crate) fn with_status(mut self, status: SubagentStatus) -> Self {
+        self.status = status;
+        self
     }
 }
 
@@ -153,12 +161,12 @@ impl Serialize for SubagentSnapshot {
 
 /// Immutable read model published by the session runtime for tool inspection.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(in crate::multiagent) struct MultiagentSnapshot {
+pub(crate) struct MultiagentSnapshot {
     agents: BTreeMap<AgentId, SubagentSnapshot>,
 }
 
 impl MultiagentSnapshot {
-    pub(in crate::multiagent) fn new(agents: impl IntoIterator<Item = SubagentSnapshot>) -> Self {
+    pub(crate) fn new(agents: impl IntoIterator<Item = SubagentSnapshot>) -> Self {
         Self {
             agents: agents
                 .into_iter()
@@ -167,7 +175,7 @@ impl MultiagentSnapshot {
         }
     }
 
-    pub(in crate::multiagent) fn descendants_of(&self, ancestor: AgentId) -> Vec<SubagentSnapshot> {
+    pub(crate) fn descendants_of(&self, ancestor: AgentId) -> Vec<SubagentSnapshot> {
         let mut descendants = self
             .agents
             .values()
@@ -182,7 +190,7 @@ impl MultiagentSnapshot {
         descendants
     }
 
-    pub(in crate::multiagent) fn descendant(
+    pub(crate) fn descendant(
         &self,
         ancestor: AgentId,
         target: AgentId,
@@ -196,7 +204,7 @@ impl MultiagentSnapshot {
 }
 
 /// Shared parent-chain rule for the live topology and its read model.
-pub(in crate::multiagent) fn is_strict_descendant(
+pub(crate) fn is_strict_descendant(
     ancestor: AgentId,
     node: AgentId,
     mut parent_of: impl FnMut(AgentId) -> Option<AgentId>,
@@ -221,7 +229,7 @@ pub(in crate::multiagent) fn is_strict_descendant(
 #[cfg(test)]
 mod tests {
     use super::{MultiagentSnapshot, SubagentSnapshot, SubagentStatus};
-    use crate::protocol::{AgentId, AgentKind};
+    use crate::agent::{AgentId, AgentKind};
 
     fn snapshot(
         id: AgentId,

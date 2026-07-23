@@ -127,8 +127,9 @@ fn assert_submit_error(root: &str, fixture: &Fixture) {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.submit(Message::text(format!("trigger {}", fixture.case)))).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
+    block_on(control.append(Message::text(format!("trigger {}", fixture.case)))).unwrap();
     let events = drain_until_turn_ended(&mut events);
     let errors = error_messages(&events).join("\n");
     assert_contains(&errors, &fixture.expected_error, &fixture.case);
@@ -151,8 +152,9 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.submit(Message::text(format!("trigger {}", fixture.case)))).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
+    block_on(control.append(Message::text(format!("trigger {}", fixture.case)))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
     assert!(

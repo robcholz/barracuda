@@ -55,8 +55,9 @@ fn skill_tools_csv_matrix_scans_roots_reloads_and_activates_documents() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
-        block_on(control.submit(Message::text(format!("run skill matrix {}", fixture.case))))
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
+        block_on(control.append(Message::text(format!("run skill matrix {}", fixture.case))))
             .unwrap();
         let events = drain_until_turn_ended(&mut events);
 

@@ -10,8 +10,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use claw_agent::{
-    stream::StreamPart, AgentSystem, Message, SessionControl, SessionControlError, SessionEvent,
-    SessionEventStream, SessionId,
+    stream::StreamPart, AgentSystem, Message, SessionControlError, SessionEvent, SessionId,
+    SessionStream,
 };
 use claw_interface::{
     Cancel, ClawFs, ClawHttp, DiskFs, HttpError, HttpJsonRequest, HttpResponse, HttpResponseFuture,
@@ -32,6 +32,7 @@ type YieldingAgentSystem = AgentSystem<MemFs, Sse<YieldingCountingHttp>, Immedia
 static STRESS_OUTPUTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 static YIELDING_HTTP_CALLS: AtomicUsize = AtomicUsize::new(0);
 static YIELDING_HTTP_POLLS: AtomicUsize = AtomicUsize::new(0);
+static FAIR_POLL_LOG: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 #[test]
 fn stress_csv_session_turn_matrix_preserves_outputs_and_rebuilds() {
@@ -138,9 +139,10 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
 
-        block_on(control.submit(Message::text(format!("storm start {case}")))).unwrap();
+        block_on(control.append(Message::text(format!("storm start {case}")))).unwrap();
         wait_for_yielding_http(case);
         let handles = spawn_control_storm(&control, interrupts, cancels);
         for handle in handles {
@@ -161,7 +163,7 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         );
 
         if post_storm_submit {
-            block_on(control.submit(Message::text(format!("after storm {case}")))).unwrap();
+            block_on(control.append(Message::text(format!("after storm {case}")))).unwrap();
             let second_events = drain_until_turn_ended(&mut events);
             assert!(
                 output_fragments(&second_events)
@@ -171,6 +173,60 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
             );
         }
     }
+}
+
+#[test]
+fn global_scheduler_interleaves_ready_agents_across_sessions() {
+    YIELDING_HTTP_CALLS.store(0, Ordering::SeqCst);
+    YIELDING_HTTP_POLLS.store(0, Ordering::SeqCst);
+    fair_poll_log().clear();
+
+    let root = mem_root("global-scheduler-fairness");
+    let system = YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiUsage::RootAgent, true)
+        .unwrap();
+
+    let session_a = system
+        .new_session(claw_agent::SessionPersistence::Ephemeral)
+        .unwrap();
+    let session_b = system
+        .new_session(claw_agent::SessionPersistence::Ephemeral)
+        .unwrap();
+    let mut events_a = system.open_session(session_a).unwrap();
+    let mut events_b = system.open_session(session_b).unwrap();
+
+    block_on(async {
+        events_a
+            .append(Message::text("fair-agent-a"))
+            .await
+            .unwrap();
+        events_b
+            .append(Message::text("fair-agent-b"))
+            .await
+            .unwrap();
+    });
+    let _ = drain_until_turn_ended(&mut events_a);
+    let _ = drain_until_turn_ended(&mut events_b);
+
+    let polls = fair_poll_log().clone();
+    let both_ready = polls
+        .iter()
+        .position(|agent| *agent == "b")
+        .expect("the second Session Agent must enter the Scheduler");
+    let fair_window = polls
+        .get(both_ready..)
+        .expect("the second Agent index belongs to the poll log")
+        .iter()
+        .take(32)
+        .copied()
+        .collect::<Vec<_>>();
+
+    assert_eq!(fair_window.len(), 32, "poll log was too short: {polls:?}");
+    assert!(
+        fair_window.windows(2).all(|pair| pair[0] != pair[1]),
+        "ready Agents were not interleaved fairly: {fair_window:?}"
+    );
 }
 
 fn wait_for_yielding_http(case: &str) {
@@ -216,12 +272,22 @@ struct YieldingCountingHttp;
 impl ClawHttp for YieldingCountingHttp {
     fn post_json<'a>(
         &'a mut self,
-        _request: &'a HttpJsonRequest<'a>,
+        request: &'a HttpJsonRequest<'a>,
         cancel: Cancel<'a>,
     ) -> HttpResponseFuture<'a> {
+        let fair_agent = if request.body.contains("fair-agent-a") {
+            Some("a")
+        } else if request.body.contains("fair-agent-b") {
+            Some("b")
+        } else {
+            None
+        };
         Box::pin(async move {
             for _ in 0..64 {
                 YIELDING_HTTP_POLLS.fetch_add(1, Ordering::SeqCst);
+                if let Some(agent) = fair_agent {
+                    fair_poll_log().push(agent);
+                }
                 if cancel.is_cancelled() {
                     return Err(HttpError::Aborted);
                 }
@@ -286,7 +352,7 @@ fn run_disk_stress_case(
         expected_outputs,
     );
     assert!(
-        DiskFs::exists(&format!("{root}/id_allocators.bin")),
+        DiskFs::exists(&format!("{root}/session_manager.bin")),
         "case {case}: id allocator state missing"
     );
 
@@ -325,8 +391,9 @@ where
     for session in &sessions {
         if reopen_each_turn {
             for turn in 0..turns_per_session {
-                let (control, mut events) = system.open_session(*session);
-                block_on(control.submit(Message::text(format!(
+                let mut events = system.open_session(*session);
+                let control = events.control();
+                block_on(control.append(Message::text(format!(
                     "{case} session {session} turn {turn}"
                 ))))
                 .unwrap();
@@ -342,9 +409,10 @@ where
                 assert_closed(&mut events);
             }
         } else {
-            let (control, mut events) = system.open_session(*session);
+            let mut events = system.open_session(*session);
+            let control = events.control();
             for turn in 0..turns_per_session {
-                block_on(control.submit(Message::text(format!(
+                block_on(control.append(Message::text(format!(
                     "{case} session {session} turn {turn}"
                 ))))
                 .unwrap();
@@ -369,7 +437,7 @@ where
 
 trait DriveSystem {
     fn new_session(&self) -> SessionId;
-    fn open_session(&self, session: SessionId) -> (SessionControl, SessionEventStream);
+    fn open_session(&self, session: SessionId) -> SessionStream;
 }
 
 impl DriveSystem for MemStressSystem {
@@ -378,7 +446,7 @@ impl DriveSystem for MemStressSystem {
             .unwrap()
     }
 
-    fn open_session(&self, session: SessionId) -> (SessionControl, SessionEventStream) {
+    fn open_session(&self, session: SessionId) -> SessionStream {
         self.open_session(session).unwrap()
     }
 }
@@ -389,7 +457,7 @@ impl DriveSystem for DiskStressSystem {
             .unwrap()
     }
 
-    fn open_session(&self, session: SessionId) -> (SessionControl, SessionEventStream) {
+    fn open_session(&self, session: SessionId) -> SessionStream {
         self.open_session(session).unwrap()
     }
 }
@@ -428,7 +496,7 @@ fn fixed_width_output(case: &str, session: usize, turn: usize, output_bytes: usi
     output
 }
 
-fn assert_turn_output(case: &str, events: &mut SessionEventStream, expected: &str) {
+fn assert_turn_output(case: &str, events: &mut SessionStream, expected: &str) {
     let events = drain_until_turn_ended(events);
     assert!(
         events
@@ -484,12 +552,12 @@ fn assert_sorted_unique(sessions: &[SessionId], case: &str) {
     );
 }
 
-fn assert_closed(events: &mut SessionEventStream) {
+fn assert_closed(events: &mut SessionStream) {
     let events = drain_until_closed(events);
     assert_eq!(events.last(), Some(&SessionEvent::Closed));
 }
 
-fn drain_until_closed(events: &mut SessionEventStream) -> Vec<SessionEvent> {
+fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
     block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {
@@ -519,6 +587,12 @@ fn install_stress_outputs(outputs: &[String]) {
 
 fn stress_outputs() -> MutexGuard<'static, VecDeque<String>> {
     STRESS_OUTPUTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn fair_poll_log() -> MutexGuard<'static, Vec<&'static str>> {
+    FAIR_POLL_LOG
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

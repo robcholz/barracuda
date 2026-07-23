@@ -17,6 +17,7 @@ that LLM context and memory usage can be optimized safely afterwards.
 It includes:
 
 - one process-global, fair Agent scheduler on one OS thread;
+- SessionManager ownership of Session records, AgentManager, and live actors;
 - SessionActor ownership of all logical Agents and their lifecycle metadata;
 - explicit move-in/move-out ownership for checked-out Agent runs;
 - Multiagent as a pluggable tool and domain component;
@@ -70,7 +71,7 @@ AgentSlot<H, T>
 │     agent: BaseAgent<H, T>,
 │     metadata: AgentSlotMetadata,
 │   }
-└── CheckedOut {
+└── InFlight {
       run_id: RunId,
       metadata: AgentSlotMetadata,
       lifecycle: Running | Cancelling | Reaping,
@@ -82,15 +83,15 @@ The invariant is:
 ~~~text
 logical Agent exists
     => exactly one AgentSlot exists
-    => exactly one of Resident or CheckedOut is true
+    => exactly one of Resident or InFlight is true
 ~~~
 
 ### 2.2 Identity
 
 - AgentId is globally unique within the persisted installation and is never
   reused.
-- Engine owns, registers, and persists the process-global AgentId allocator.
-  SessionActor obtains the next ID through an Engine-injected allocator handle
+- SessionManager owns, registers, and persists the process-global AgentId
+  allocator. SessionActor obtains the next ID through a Manager-injected handle
   only after accepting a root creation or Multiagent spawn effect. Multiagent
   and Scheduler never allocate AgentIds. Failed construction may consume an ID;
   consumed IDs are not reused.
@@ -112,7 +113,7 @@ across these boundaries.
 ### 2.3 Scheduling
 
 - There is exactly one process-global AgentRunScheduler<H, T>.
-- The active Scheduler is owned and polled by the Orchestrator/Engine.
+- The active Scheduler is owned and polled by RuntimeWorker.
 - The Scheduler owns a central async polling loop/state machine. It is not only
   a shared container around callers that still drive their own Agents.
 - All checked-out root and worker Agents across all sessions are polled by this
@@ -133,7 +134,7 @@ across these boundaries.
   or other work performed inside one poll blocks the only thread and therefore
   must be bounded.
 - AgentRunScheduler is not Arc<Mutex<_>>. A lightweight single-thread-local
-  submission handle/mailbox may be shared, while Engine remains the sole owner
+  submission handle/mailbox may be shared, while RuntimeWorker remains the sole owner
   of the active polling state.
 
 ### 2.4 Session and Multiagent
@@ -194,12 +195,13 @@ AgentState {
   are transient and absent from `AgentState`. Loaded tool groups use stable
   typed identities and canonical serialized order when order has no runtime
   meaning.
-- Filesystem remains a real static capability in Engine, Session assembly,
+- Filesystem remains a real static capability in the Session worker, Session assembly,
   Manager, transcript, and persistence stores, but it stops at the constructed
   Agent boundary:
 
 ~~~text
-Engine<F, H, T> / SessionActor<F, H, T> / AgentManager<F, H, T>
+RuntimeWorker<F, H, T> / SessionManager<F, H, T> / SessionActor<F, H, T>
+    / AgentManager<F, H, T>
     → BaseAgent<H, T>
     → AgentRun<H, T>
     → AgentSlot<H, T>
@@ -217,29 +219,29 @@ Engine<F, H, T> / SessionActor<F, H, T> / AgentManager<F, H, T>
 - `AgentManager<F, H, T>` uses `AgentStateStore<F>` to create or restore
   recovery state, then injects ordinary Agent dependencies. It is the sole
   concrete BaseAgent constructor but does not choose durability policy.
-- Engine owns runtime checkpoint I/O through `AgentStateStore<F>`. SessionActor
-  authorizes permanent record removal only after logical deletion is committed
-  and physical Agent ownership has returned.
+- SessionManager owns AgentManager and the Session record lifecycle.
+  SessionActor authorizes permanent Agent-record removal only after physical
+  Agent ownership has returned. RuntimeWorker owns only the global persistence flush
+  boundary.
 - SessionActor owns session state and AgentSlot lifecycle/recovery metadata.
-  Persistent SessionState stores the root_agent_id and canonical store
+  Persistent SessionPersistentState stores the root_agent_id and canonical store
   identities required to locate the Agent recovery snapshot after restart.
 - Persistent root creation writes and checkpoints Agent state before publishing
-  root_agent_id in SessionState. Permanent deletion durably removes the root
-  link before removing Agent state. A crash may therefore leave an unreferenced
-  Agent record, which recovery treats as garbage; a root link whose Agent state
-  is missing or corrupt is a typed recovery error, never a silently rebuilt
-  Agent with a new ID.
+  root_agent_id in SessionPersistentState. Permanent deletion removes Agent
+  stores through AgentManager before SessionManager removes the Session record.
+  A failed Session-record removal retains a rootless managed Session that can be
+  deleted idempotently on retry.
 - Transcript, profile, and long-term memory remain independent canonical
   stores; they are referenced rather than duplicated into session checkpoints.
 - A physical AgentRun, Scheduler queue, active tool future, and checkout state
   are transient and are never restored.
 - Runtime AgentSlot state and durable Agent recovery metadata are separate
-  types. RunId, Resident/CheckedOut, Running/Cancelling/Reaping, inboxes,
+  types. RunId, Resident/InFlight, Running/Cancelling/Reaping, inboxes,
   Wakers, and physical handles are never serialized.
-- Because a running BaseAgent has moved into AgentRun, Engine cannot call
+- Because a running BaseAgent has moved into AgentRun, SessionActor cannot call
   `recovery_state()` from outside. BaseAgent calls it internally at a
   recovery boundary and emits an owned snapshot in `CheckpointRequired`.
-- Scheduler parks that run and echoes the update; Engine persists or
+- Scheduler parks that run and echoes the update; SessionActor persists or
   acknowledges it according to the slot/run policy, then sends a matching
   `CheckpointResult`. Scheduler never interprets the snapshot.
 - No persistence guard or mutable borrow may be held across await.
@@ -256,16 +258,20 @@ Engine<F, H, T> / SessionActor<F, H, T> / AgentManager<F, H, T>
 ### 3.1 Ownership tree
 
 ~~~text
-Orchestrator / Engine<F, H, T>
-├── SharedPersistence<F>
-├── AgentStateStore<F>
-├── process-global durable ID allocators
-├── AgentRunScheduler<H, T>
-└── SessionActors<F, H, T>
-    ├── AgentSlots<H, T>
-    ├── session and turn state
-    ├── memory/context assembly policy
-    └── optional Multiagent domain state
+AgentRuntime
+├── SharedApiManager
+├── SessionManager
+└── RuntimeWorker<F, H, T>
+    ├── SharedPersistence<F>
+    ├── AgentRunScheduler<H, T>
+    └── SessionManager<F, H, T>
+        ├── AgentStateStore<F>
+        ├── process-global durable ID allocators
+        └── SessionActors<F, H, T>
+            ├── AgentSlots<H, T>
+            ├── session and turn state
+            ├── memory/context assembly policy
+            └── optional Multiagent domain state
 
 AgentRunScheduler<H, T>
 └── AgentRun<H, T>
@@ -275,14 +281,18 @@ AgentRunScheduler<H, T>
 ### 3.2 Module dependency direction
 
 ~~~text
-orchestrator
+runtime
+├── public AgentRuntime
+├── private RuntimeWorker
 ├── session
 ├── scheduler
-└── persistence
+└── persistence flush boundary
 
 session
+├── SessionManager
 ├── agent
 ├── scheduler handle/protocol
+├── persistence
 ├── memory
 └── multiagent port/domain
 
@@ -300,9 +310,9 @@ agent
 Forbidden reverse dependencies:
 
 - scheduler must not depend on session or multiagent;
-- multiagent must not depend on physical Agent types, scheduler, session, or
-  orchestrator;
-- agent must not depend on session, multiagent domain state, or orchestrator.
+- session must not depend on runtime;
+- multiagent must not depend on physical Agent types, scheduler, or session;
+- agent must not depend on session or multiagent domain state.
 - BaseAgent and the Agent iteration loop must not depend on
   `SharedPersistence`, `AgentStateStore`, or filesystem type F. Manager may
   depend on construction-time persistence and canonical stores.
@@ -311,7 +321,7 @@ Forbidden reverse dependencies:
 
 ~~~text
 external command
-→ Engine ingress budget
+→ RuntimeWorker ingress budget
 → SessionActor command handling
 → optional Multiagent domain command/effects
 → SessionActor obtains AgentId when creation is required
@@ -319,19 +329,19 @@ external command
 → local Scheduler submission mailbox
 → global Scheduler fair sweep
 → opaque-routed checkpoint update or terminal completion
-→ Engine services checkpoint I/O and resumes/fails parked runs
+→ RuntimeWorker services checkpoint I/O and resumes/fails parked runs
 → SessionActor restores AgentSlot first
 → SessionActor applies lifecycle/domain outcome
 → persistence and outgoing budgets
 ~~~
 
-Engine fairness and Scheduler fairness are separate:
+RuntimeWorker fairness and Scheduler fairness are separate:
 
-- Engine rotates bounded budgets across ingress, SessionActors, Scheduler work,
-  completion/outgoing routing, and persistence service;
+- RuntimeWorker rotates across ingress, one-poll-per-actor Session rounds, Scheduler
+  work, completion routing, and persistence service;
 - Scheduler independently rotates across runnable AgentRuns;
 - polling a SessionActor never polls AgentRun directly;
-- Engine does not return early merely because the first work class is Ready.
+- RuntimeWorker does not return early merely because the first work class is Ready.
 
 These rules prevent starvation only at poll/yield boundaries. They cannot
 preempt synchronous work performed inside a poll.
@@ -362,9 +372,9 @@ P8 close overview, assembly, and memory-visibility boundaries
 P9 audit deletions and run final verification
 ~~~
 
-This is intentionally not a top-down rewrite of Orchestrator. The top-level
+This is intentionally not a top-down rewrite of SessionManager. The top-level
 contract is fixed first, but code changes start at BaseAgent/AgentRun so that
-Engine never depends on a half-defined ownership protocol.
+the Session worker never depends on a half-defined ownership protocol.
 
 Each phase should be a separate reviewable commit or short commit series.
 Temporary compatibility code must carry a TODO naming the phase that deletes
@@ -380,19 +390,20 @@ Remove ambiguity before changing production ownership.
 
 - Update architecture.md so SessionActor no longer claims ownership of Agent
   mode or loaded tool groups.
-- Replace “Orchestrator drives all agents” with:
-  - Orchestrator polls SessionActors by a bounded budget;
-  - Orchestrator polls the global Scheduler by a bounded tick;
+- Replace “SessionManager drives all agents” with:
+  - RuntimeWorker polls every currently live SessionActor at most once per
+    Session round;
+  - RuntimeWorker polls the global Scheduler by a bounded tick;
   - Scheduler exclusively polls AgentRuns.
 - Distinguish Multiagent domain “scheduling” from physical fair run scheduling.
 - Fix the MultiagentBridge naming and describe typed commands/effects.
-- Write the Resident/CheckedOut invariant and exact return-on-every-outcome
+- Write the Resident/InFlight invariant and exact return-on-every-outcome
   rule into the architecture.
 - Replace the concrete Vec<AgentSlot> wording with an AgentSlots collection
   keyed by AgentId, and distinguish SessionActor's logical ownership from
   Scheduler's temporary physical custody.
-- State that Engine owns the durable process-global AgentId allocator and that
-  SessionActor only requests IDs through its injected handle.
+- State that SessionManager owns the durable process-global AgentId allocator
+  and that SessionActor only requests IDs through its injected handle.
 - Require allocator advancement to be durable before an AgentId is exposed.
 - Freeze AgentPersistencePolicy as PersistentRoot, EphemeralRoot, and
   TransientWorker, or explicitly expand worker durability before Phase 1.
@@ -400,11 +411,11 @@ Remove ambiguity before changing production ownership.
   and `AgentState` as the only aggregate Agent recovery shape.
 - State explicitly that BaseAgent, AgentRun, AgentSlot, and Scheduler do not
   carry filesystem type F or own SharedPersistence.
-- State that Manager performs create/restore construction while Engine performs
-  runtime checkpoint I/O from Agent-exported snapshots.
-- Add the durable SessionState root_agent_id link, creation/deletion ordering,
+- State that AgentManager performs create/restore/removal while RuntimeWorker performs
+  only the global persistence flush.
+- Add the durable SessionPersistentState root_agent_id link, creation/deletion ordering,
   typed dangling-link failure, and orphan Agent-state cleanup rule.
-- Replace “durable SessionActor” with durable SessionState and recoverable
+- Replace “durable SessionActor” with durable SessionPersistentState and recoverable
   AgentSlot metadata; actor futures, RunId, and checkout state remain transient.
 - State that checked-out overview reads retained AgentSlot metadata and never a
   second owning Agent directory.
@@ -440,7 +451,7 @@ Remove ambiguity before changing production ownership.
       construction/storage boundary.
 - [ ] the AgentState export and checkpoint park/resume dataflow is documented.
 - [ ] worker durability policy is explicit.
-- [ ] Resident XOR CheckedOut is documented.
+- [ ] Resident XOR InFlight is documented.
 - [ ] AgentId allocation and durable root lookup have one documented owner and
       recovery path.
 - [ ] A crash after ID reservation cannot cause AgentId reuse.
@@ -472,7 +483,7 @@ path, without performing runtime checkpoints yet.
 - claw-core/src/protocol/
 - claw-core/src/session/actor.rs
 - claw-core/src/multiagent/
-- claw-core/src/orchestrator/engine.rs
+- claw-core/src/session/worker.rs
 
 ### Changes
 
@@ -501,8 +512,9 @@ path, without performing runtime checkpoints yet.
 - Keep owner message queues outside BaseAgent. A manager constructs a stopped
   Agent; the owning AgentSlot queues the initial or follow-up Message and passes
   exactly one Message to `submit` at checkout.
-- Model reasoning effort as independent per-Agent adapter state. SessionState
-  retains the Session-wide default; changing it broadcasts an owner update to
+- Model reasoning effort as independent per-Agent adapter state.
+  `SessionPersistentState` retains the Session-wide default; changing it
+  broadcasts an owner update to
   all live AgentSlots through independent typed queues and supplies the initial
   value for future Agents. ReasoningEffortContextAdapter creates its own queue
   and returns only its sending handle to the AgentSlot. Do not bind adapters to
@@ -512,24 +524,20 @@ path, without performing runtime checkpoints yet.
   points that converge on one private BaseAgent builder. Manager loads or
   initializes recovery state and assembles transcript, tools, mode, and memory
   adapters; BaseAgent receives only the constructed dependencies/state.
-- Keep F in Engine, SessionActor/AgentEnvironment, Manager, transcript, and
-  AgentStateStore. Confirm it does not propagate into BaseAgent, AgentRun,
+- Keep F in RuntimeWorker, SessionManager, SessionActor/AgentEnvironment, Manager,
+  transcript, and AgentStateStore. Confirm it does not propagate into BaseAgent, AgentRun,
   AgentSlot, or Scheduler.
 - Keep AgentPersistencePolicy outside BaseAgent in Session/slot construction
   metadata. Policy selects whether Manager loads a durable record; it is not an
   Agent dependency.
 - Move the process-global AgentId allocator definition/state out of multiagent
-  ownership. Engine owns its registered durable state and exposes only a local
-  allocation handle to callers. Existing Multiagent construction may use that
-  handle temporarily until Phase 6 removes allocation from Multiagent.
+  ownership. SessionManager owns its registered durable state and exposes only
+  a local allocation handle to SessionActor.
 - Keep BaseAgent as the only concrete Agent type.
 - Keep protocol-only values, such as IDs and outcomes, independent of F.
-- Route Engine-owned AgentStateStore to Manager rather than injecting it into
-  the constructed Agent. During this phase, restore may adapt the legacy
-  SessionState representation; the new durable record/write migration does not
-  activate until Phase 7.
-- Mark any legacy SessionState-to-snapshot restoration adapter for deletion or
-  schema migration in Phase 7.
+- Route SessionManager-owned AgentManager storage to construction rather than
+  injecting it into the constructed Agent. No legacy Session-state embedding
+  or dual-read compatibility is retained.
 - Keep the temporary direct driver as a Scheduler-local ownership adapter over
   `AgentStreamHandle`; it must forward `Result<AgentEvent, AgentError>` unchanged rather than
   inventing another Agent protocol.
@@ -545,7 +553,7 @@ path, without performing runtime checkpoints yet.
       semantic meaning.
 - [ ] Manager create_new and restore share one invariant builder.
 - [ ] Root and worker construction still share the expected assembled behavior.
-- [ ] Engine is the only owner/registrar of the durable AgentId allocator.
+- [ ] SessionManager is the only owner/registrar of the durable AgentId allocator.
 - [ ] Allocator checkpoint failure exposes no ID and constructs no Agent.
 - [ ] There is no dyn Agent, GenericAgent, persistence facade, or persistence
       callback stored in BaseAgent.
@@ -623,7 +631,7 @@ the original request, including its Agent.
 
 ### Gate
 
-- [ ] Resident → CheckedOut(run_id) → Resident works.
+- [ ] Resident → InFlight(run_id) → Resident works.
 - [ ] Duplicate checkout is rejected.
 - [ ] Rejected submit returns the exact original Agent.
 - [ ] Every terminal outcome currently emitted by AgentRun—success, LLM/tool
@@ -650,7 +658,7 @@ ownership.
 
 ### Changes
 
-- Add AgentRunScheduler<H, T>, owned by Engine.
+- Add AgentRunScheduler<H, T>, owned by RuntimeWorker.
 - Add a single-thread-local SchedulerHandle or submission mailbox.
 - The handle accepts a moved AgentRunRequest and supports cancellation; it does
   not poll runs.
@@ -690,10 +698,10 @@ Make the global Scheduler the only physical Agent driver.
 
 ### Changes
 
-- Add the Scheduler and its handle/mailbox to Engine.
-- Change the Engine loop to a bounded, rotating sweep:
+- Add the Scheduler and its handle/mailbox to RuntimeWorker.
+- Change the RuntimeWorker loop to a rotating sweep:
   1. process a bounded ingress batch;
-  2. poll SessionActors by a bounded budget;
+  2. poll every currently live SessionActor at most once;
   3. drain Scheduler submissions;
   4. run one global fair Scheduler sweep;
   5. route run updates/completions;
@@ -703,7 +711,7 @@ Make the global Scheduler the only physical Agent driver.
 - Route completions through opaque reply ports/tokens. Scheduler must not decode
   SessionId.
 - Convert the current execution slot from Idle/Running(AgentRun) into the
-  Resident/CheckedOut model.
+  Resident/InFlight model.
 - A root-only vertical slice may be used for one short commit to validate
   wiring, but root and worker production execution must be migrated in the same
   phase.
@@ -726,7 +734,7 @@ migrated into AgentState by persisting the iteration-local ToolCallId.
 - [ ] Roots and workers from different sessions make alternating progress.
 - [ ] Fairness is measured per runnable AgentRun; tests do not accidentally
       require equal per-Session quotas.
-- [ ] A continuously-ready Engine work class cannot prevent later work classes
+- [ ] A continuously-ready RuntimeWorker work class cannot prevent later work classes
       from receiving their configured budget.
 - [ ] An always-ready ingress source cannot starve Agents or outgoing work.
 - [ ] A failing Agent does not stop another Agent, Session, or the global loop.
@@ -756,7 +764,7 @@ Separate logical session ownership from Multiagent domain state.
 
 - Introduce an AgentSlots<H, T> collection owned only by SessionActor.
 - Move root and worker slot ownership out of MultiagentRuntime.
-- Keep enough metadata in CheckedOut for:
+- Keep enough metadata in InFlight for:
   - AgentId, kind, parent/recovery relation, and status;
   - current RunId;
   - inbox or queued signals;
@@ -778,7 +786,7 @@ Separate logical session ownership from Multiagent domain state.
 - [ ] No RuntimeExecution/take_runtime path moves or owns physical
       Multiagent/Agent state.
 - [ ] A checked-out Agent remains visible in agents_overview().
-- [ ] Stale completion cannot overwrite a newer Resident or CheckedOut state.
+- [ ] Stale completion cannot overwrite a newer Resident or InFlight state.
 - [ ] Delete removes a slot only after the Agent has returned.
 - [ ] Closing one Session does not stall Agents in another Session.
 
@@ -824,7 +832,7 @@ domain effect examples
 ### Part B: SessionActor executes physical effects
 
 - After accepting a root creation or typed Multiagent spawn effect, SessionActor
-  obtains the next durably reserved AgentId from the Engine-owned process-global
+  obtains the next durably reserved AgentId from the SessionManager-owned process-global
   allocator.
 - SessionActor selects session, persistence, baked, memory-visibility, tool, and
   context policy and builds one AgentEnvironment<F>.
@@ -882,7 +890,7 @@ without giving BaseAgent a persistence dependency.
 - claw-core/src/protocol/tool.rs
 - claw-core/src/session/persistence.rs
 - claw-core/src/session/actor.rs
-- claw-core/src/orchestrator/engine.rs
+- claw-core/src/session/worker.rs
 - claw-core/src/scheduler/
 - claw-memory/src/transcript_store.rs
 
@@ -903,7 +911,7 @@ AgentState {
   contributes its own live semantics; BaseAgent does not inspect concrete
   adapter state. It owns no SharedPersistence, DurableState, AgentStateStore,
   filesystem generic, or persistence callback.
-- Engine owns `AgentStateStore<F>` and runtime checkpoint I/O.
+- SessionManager owns `AgentStateStore<F>` and runtime checkpoint I/O.
   `AgentManager<F, H, T>` uses that store only for initial create/restore and
   injects the restored ordinary state into `BaseAgent<H, T>`.
 - SessionActor retains recovery policy with slot metadata and authorizes
@@ -929,15 +937,15 @@ CheckpointResult {
 ~~~
 
 - Because the active BaseAgent is owned inside AgentRun, it calls
-  `recovery_state()` before yielding; Engine never borrows a running Agent.
+  `recovery_state()` before yielding; RuntimeWorker never borrows a running Agent.
 - `checkpoint_id` is transient and scoped to one RunId. It matches one parked run
   with one acknowledgement and is not a persisted generation.
 - BaseAgent releases every mutable borrow before emitting
   `CheckpointRequired`. No persistence guard exists in BaseAgent.
-- Scheduler parks the run and never polls it until Engine returns the matching
+- Scheduler parks the run and never polls it until SessionActor returns the matching
   `CheckpointResult`. It forwards but never inspects the snapshot or policy.
 - For PersistentRoot, success means the exported snapshot is durable. For
-  EphemeralRoot and TransientWorker, Engine may acknowledge the same boundary
+  EphemeralRoot and TransientWorker, SessionActor may acknowledge the same boundary
   without storage; they receive no restart guarantee.
 - Every recovery-relevant mutation must eventually be covered by an
   acknowledgement. Ordinary mode/loaded-group updates may be coalesced, but an
@@ -948,7 +956,7 @@ CheckpointResult {
 - Stale RunId/checkpoint_id acknowledgements are rejected.
 - Checkpoint failure resumes the AgentRun with Err; BaseAgent converts it to a
   typed outcome and the normal completion path returns the Agent.
-- Scheduler implements only park/resume/fail mechanics. Engine and
+- Scheduler implements only park/resume/fail mechanics. SessionActor and
   AgentStateStore own persistence policy and flush semantics. Do not add a
   PersistenceCoordinator solely for this flow.
 
@@ -967,26 +975,21 @@ profile, and long-term memory as separate canonical stores.
 ### Creation, migration, deletion, and rollback
 
 - Version the persisted Agent recovery record.
-- Persistent root creation uses Manager to construct a new Agent and initial
+- Persistent root creation uses AgentManager to construct a new Agent and initial
   snapshot, durably stores that snapshot, then publishes `root_agent_id` and
-  canonical-store identities in SessionState.
+  canonical-store identities in SessionPersistentState.
 - Manager restore loads the versioned snapshot and canonical-store identities,
   then calls the same invariant builder used by create_new.
-- Read the old SessionState representation long enough to migrate PersistentRoot
-  state idempotently:
-  1. construct the versioned Agent recovery record from legacy fields;
-  2. durably checkpoint the new record;
-  3. publish `root_agent_id` and canonical-store identities in SessionState
-     while removing embedded legacy Agent fields;
-  4. durably checkpoint SessionState.
+- Old SessionState representations are rejected at the schema boundary; there
+  is no legacy migration or dual-write path.
 - Recovery removes unreferenced Agent records left by a crash during creation or
   deletion. A referenced missing/corrupt Agent record is a typed recovery error.
-- Permanent Session deletion durably removes its root link before removing the
-  corresponding Agent record. BaseAgent never deletes its own record.
+- Permanent Session deletion waits for Agent return, removes Agent-owned stores
+  through AgentManager, then removes SessionPersistentState through
+  SessionManager. BaseAgent never deletes its own record.
 - EphemeralRoot and TransientWorker create no durable Agent record.
-- If rollback to an old binary is required, retain dual-write compatibility for
-  a defined release window; otherwise mark this phase as the hard rollback
-  boundary and document it in release notes.
+- This schema transition is a hard rollback boundary; no dual-write
+  compatibility is retained.
 
 ### Gate
 
@@ -1000,10 +1003,8 @@ profile, and long-term memory as separate canonical stores.
       before terminal completion.
 - [ ] Persistence failure returns the Agent and does not break global progress.
 - [ ] The checkpoint API structurally releases mutable borrows before yielding,
-      and Engine holds no persistence guard while polling Agent code.
-- [ ] SessionState no longer owns Agent mode or loaded groups.
-- [ ] Old SessionState migration is idempotent after a crash at every migration
-      write boundary.
+      and RuntimeWorker holds no persistence guard while polling Agent code.
+- [ ] SessionPersistentState owns no Agent mode or loaded groups.
 - [ ] A dangling root link is a typed error; an unreferenced Agent record is
       reconciled as garbage.
 - [ ] Permanent Session deletion removes PersistentRoot Agent state.
@@ -1023,11 +1024,11 @@ Expose a complete system view and freeze memory visibility before optimization.
 - agents_overview() reads only AgentSlot metadata.
 - SessionActor updates its projection on insert, checkout, cancellation, return,
   failure, and deletion.
-- Orchestrator aggregates SessionActor snapshots across sessions.
+- SessionManager aggregates SessionActor snapshots across sessions.
 - If a future AgentDirectory cache is needed for lookup performance, it is a
   rebuildable read model only. It never owns an Agent and is updated from slot
   lifecycle events.
-- CheckedOut and Cancelling Agents remain visible.
+- InFlight and Cancelling Agents remain visible.
 - Aggregate output has stable ordering and globally unique AgentIds.
 
 ### Memory visibility contract
@@ -1099,9 +1100,9 @@ Phases 4–7.
 ### Static dependency audit
 
 - scheduler has no session or multiagent imports;
-- multiagent has no physical agent, session, scheduler, or orchestrator imports;
+- multiagent has no physical agent, session, or scheduler imports;
 - BaseAgent/iteration-loop code has no session, multiagent domain,
-  orchestrator, AgentStateStore, SharedPersistence, or filesystem-type imports;
+  AgentStateStore, SharedPersistence, or filesystem-type imports;
 - AgentManager may depend on construction-time recovery and canonical stores;
 - only scheduler code polls AgentRun;
 - only SessionActor owns AgentSlots;
@@ -1130,7 +1131,7 @@ Phases 4–7.
   borrow while polling or awaiting user/tool/LLM code.
 - Move a BaseAgent across the ownership boundary; do not clone it.
 - `recovery_state()` is synchronous and I/O-free. Only its owned projection
-  crosses a running Agent boundary; Engine never borrows a checked-out Agent.
+  crosses a running Agent boundary; RuntimeWorker never borrows a checked-out Agent.
 - Keep cancellation explicit and ownership-preserving.
 - Treat all Agent/tool/LLM/persistence failures as data returned in a run
   outcome. They must not tear down the global loop.
@@ -1164,7 +1165,7 @@ Phases 4–7.
 
 The grand refactor is complete only when all of the following are true:
 
-1. Engine owns one global Scheduler, and all running Agents are fairly polled
+1. RuntimeWorker owns one global Scheduler, and all running Agents are fairly polled
    through it on one OS thread.
 2. SessionActor is the sole logical owner of AgentSlots; Scheduler is only the
    temporary physical custodian of checked-out BaseAgents.
@@ -1173,12 +1174,13 @@ The grand refactor is complete only when all of the following are true:
    Scheduler ownership.
 5. Root and worker Agents are assembled through one SessionActor path and the
    create/restore entry points of one AgentManager invariant builder.
-6. Engine owns the durable process-global AgentId allocator; Multiagent never
-   allocates an ID.
+6. SessionManager owns the durable process-global AgentId allocator;
+   Multiagent never allocates an ID.
 7. BaseAgent<H, T> coordinates a generic recovery projection from its
    authoritative components and exports a complete AgentState,
-   while Manager/Engine own restore/checkpoint I/O and F does not propagate
-   into AgentRun, AgentSlot, or Scheduler.
+   while AgentManager owns Agent restore/checkpoint I/O, SessionManager owns
+   aggregate lifecycle, and F does not propagate into AgentRun, AgentSlot, or
+   Scheduler.
 8. PersistentRoot recovery follows the durable root link, while EphemeralRoot
    and TransientWorker create no durable Agent record.
 9. Transcript settlement has a fallible durability acknowledgement and never

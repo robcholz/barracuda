@@ -1,10 +1,33 @@
-//! Compile-time catalog shared by the AgentManager and orchestrator.
+//! Agent definitions baked into the firmware at compile time.
 //!
-//! The catalog is data, not runtime ownership. [`AgentRuntimeManifest`] is the
-//! projection consumed by `agent`; [`MultiagentManifest`] is consumed only by
-//! the orchestrator's multiagent extension.
+//! [`AgentRuntimeManifest`] is consumed while assembling one Agent;
+//! [`MultiagentManifest`] is consumed only by the Multiagent extension.
 
-use crate::protocol::AgentKind;
+use std::borrow::Cow;
+
+/// Which baked agent template to instantiate from `resources/agents/<kind>/`.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct AgentKind(Cow<'static, str>);
+
+impl AgentKind {
+    pub(crate) fn new(kind: String) -> Self {
+        Self(Cow::Owned(kind))
+    }
+
+    pub(crate) const fn from_static(kind: &'static str) -> Self {
+        Self(Cow::Borrowed(kind))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for AgentKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 pub(crate) struct AgentCatalogEntry {
     kind: AgentKind,

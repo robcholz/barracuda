@@ -50,16 +50,17 @@ fn iteration_preparation_traces_auxiliary_llm_work_without_payloads() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     // Two committed turns are needed for compaction: the first becomes the aged
     // prefix and the second alone exceeds the configured verbatim-tail budget.
     let oversized_input = USER_PAYLOAD_SECRET.repeat(1_024);
     for input in [oversized_input.clone(), oversized_input] {
-        block_on(control.submit(Message::text(input))).unwrap();
+        block_on(control.append(Message::text(input))).unwrap();
         let _ = drain_until_turn_ended(&mut events);
     }
-    block_on(control.submit(Message::text("trigger the next context preparation"))).unwrap();
+    block_on(control.append(Message::text("trigger the next context preparation"))).unwrap();
     let _ = drain_until_turn_ended(&mut events);
 
     // Join the worker before inspecting the complete trace so every selected
@@ -114,22 +115,14 @@ fn assert_iteration_sibling(lines: &[String], prepare: &str, agent: &str) {
         Some(agent_id),
         "iteration.prepare must be a direct child of agent: {prepare}"
     );
-    let iteration_loop = find_child(lines, agent_id, "iteration_loop");
+    let iteration_chat = find_child_with_field(lines, agent_id, "api.chat", "purpose", "iteration");
     assert_eq!(
-        token(iteration_loop, "iteration"),
+        token(iteration_chat, "iteration"),
         token(prepare, "iteration"),
-        "prepare and iteration_loop siblings must identify the same iteration"
-    );
-    let iteration_chat = find_child_with_field(
-        lines,
-        span_id(iteration_loop),
-        "api.chat",
-        "purpose",
-        "iteration",
+        "prepare and api.chat siblings must identify the same iteration"
     );
     assert_attempt_child(lines, iteration_chat);
     assert_has_exit(lines, iteration_chat);
-    assert_has_exit(lines, iteration_loop);
 }
 
 fn assert_render_child(lines: &[String], prepare: &str) {

@@ -3,8 +3,8 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::TranscriptStore;
 use claw_persistence::{DurableState, InstanceId};
 
+use super::AgentId;
 use crate::agent::AgentState;
-use crate::protocol::AgentId;
 
 use super::error::AgentCreateError;
 use super::AgentManager;

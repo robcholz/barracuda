@@ -3,40 +3,30 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use claw_api::ToolCall;
 
 use crate::agent::ToolCallId;
-use crate::protocol::{AgentId, AgentKind};
+use crate::agent::AgentId;
 
-use super::model::{SubagentStatus, SubagentTimeout};
+use super::model::SubagentStatus;
 
 #[derive(Clone)]
-pub(super) struct NodeMeta {
+pub(crate) struct NodeMeta {
     parent: Option<AgentId>,
-    kind: AgentKind,
-    name: Option<String>,
 }
 
 impl NodeMeta {
-    pub(super) fn new(parent: Option<AgentId>, kind: AgentKind, name: Option<String>) -> Self {
-        Self { parent, kind, name }
+    pub(crate) fn new(parent: Option<AgentId>) -> Self {
+        Self { parent }
     }
 
-    pub(super) fn parent(&self) -> Option<AgentId> {
+    pub(crate) fn parent(&self) -> Option<AgentId> {
         self.parent
-    }
-
-    pub(super) fn kind(&self) -> &AgentKind {
-        &self.kind
-    }
-
-    pub(super) fn name(&self) -> Option<&str> {
-        self.name.as_deref()
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct ParkedApproval {
-    pub(super) tool_call_id: ToolCallId,
-    pub(super) tool_call: ToolCall,
-    pub(super) reason: String,
+pub(crate) struct ParkedApproval {
+    pub(crate) tool_call_id: ToolCallId,
+    pub(crate) tool_call: ToolCall,
+    pub(crate) reason: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +49,7 @@ pub(crate) struct MultiagentState {
 
 impl MultiagentState {
     #[cfg(test)]
-    pub(super) fn restored(
+    pub(crate) fn restored(
         nodes: BTreeMap<AgentId, NodeMeta>,
         ready: VecDeque<AgentId>,
         approvals: VecDeque<(AgentId, ParkedApproval)>,
@@ -71,7 +61,7 @@ impl MultiagentState {
         }
     }
 
-    pub(super) fn root(&self) -> Option<AgentId> {
+    pub(crate) fn root(&self) -> Option<AgentId> {
         let mut roots = self
             .nodes
             .iter()
@@ -80,62 +70,50 @@ impl MultiagentState {
         roots.next().is_none().then_some(root)
     }
 
-    pub(super) fn is_root(&self, id: AgentId) -> bool {
+    pub(crate) fn is_root(&self, id: AgentId) -> bool {
         self.root() == Some(id)
     }
 
-    pub(super) fn contains(&self, id: AgentId) -> bool {
+    pub(crate) fn contains(&self, id: AgentId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    pub(super) fn parent(&self, id: AgentId) -> Option<Option<AgentId>> {
+    pub(crate) fn parent(&self, id: AgentId) -> Option<Option<AgentId>> {
         self.nodes.get(&id).map(NodeMeta::parent)
     }
 
-    pub(super) fn node(&self, id: AgentId) -> Option<&NodeMeta> {
+    pub(crate) fn node(&self, id: AgentId) -> Option<&NodeMeta> {
         self.nodes.get(&id)
     }
 
-    pub(super) fn nodes(&self) -> impl Iterator<Item = (AgentId, &NodeMeta)> {
-        self.nodes.iter().map(|(&id, meta)| (id, meta))
-    }
-
     #[cfg(test)]
-    pub(super) fn node_count(&self) -> usize {
+    pub(crate) fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
     #[must_use]
-    pub(super) fn insert_root(&mut self, id: AgentId, kind: AgentKind) -> bool {
+    pub(crate) fn insert_root(&mut self, id: AgentId) -> bool {
         if self.root().is_some() || self.nodes.contains_key(&id) {
             return false;
         }
-        self.nodes.insert(id, NodeMeta::new(None, kind, None));
+        self.nodes.insert(id, NodeMeta::new(None));
         true
     }
 
     #[must_use]
-    pub(super) fn insert_child(
-        &mut self,
-        parent: AgentId,
-        id: AgentId,
-        kind: AgentKind,
-        name: Option<String>,
-        _timeout: SubagentTimeout,
-    ) -> bool {
+    pub(crate) fn insert_child(&mut self, parent: AgentId, id: AgentId) -> bool {
         if !self.nodes.contains_key(&parent) || self.nodes.contains_key(&id) {
             return false;
         }
-        self.nodes
-            .insert(id, NodeMeta::new(Some(parent), kind, name));
+        self.nodes.insert(id, NodeMeta::new(Some(parent)));
         true
     }
 
-    pub(super) fn has_children(&self, parent: AgentId) -> bool {
+    pub(crate) fn has_children(&self, parent: AgentId) -> bool {
         self.nodes.values().any(|meta| meta.parent == Some(parent))
     }
 
-    pub(super) fn root_children(&self) -> Vec<AgentId> {
+    pub(crate) fn root_children(&self) -> Vec<AgentId> {
         let Some(root) = self.root() else {
             return Vec::new();
         };
@@ -145,7 +123,7 @@ impl MultiagentState {
             .collect()
     }
 
-    pub(super) fn is_strict_descendant(&self, ancestor: AgentId, node: AgentId) -> bool {
+    pub(crate) fn is_strict_descendant(&self, ancestor: AgentId, node: AgentId) -> bool {
         if ancestor == node {
             return false;
         }
@@ -163,7 +141,7 @@ impl MultiagentState {
         false
     }
 
-    pub(super) fn depth(&self, id: AgentId) -> Option<u16> {
+    pub(crate) fn depth(&self, id: AgentId) -> Option<u16> {
         let mut current = id;
         let mut depth = 0_u16;
         let mut visited = BTreeSet::new();
@@ -180,7 +158,7 @@ impl MultiagentState {
         }
     }
 
-    pub(super) fn subtree_ids(&self, root: AgentId) -> Vec<AgentId> {
+    pub(crate) fn subtree_ids(&self, root: AgentId) -> Vec<AgentId> {
         let mut out = Vec::new();
         let mut frontier = VecDeque::from([root]);
         let mut visited = BTreeSet::new();
@@ -198,7 +176,7 @@ impl MultiagentState {
         out
     }
 
-    pub(super) fn remove_agents(&mut self, agents: &[AgentId]) {
+    pub(crate) fn remove_agents(&mut self, agents: &[AgentId]) {
         for id in agents {
             self.nodes.remove(id);
         }
@@ -206,30 +184,22 @@ impl MultiagentState {
         self.approvals.retain(|(agent, _)| !agents.contains(agent));
     }
 
-    pub(super) fn enqueue(&mut self, id: AgentId) {
+    pub(crate) fn enqueue(&mut self, id: AgentId) {
         if !self.ready.contains(&id) {
             self.ready.push_back(id);
         }
     }
 
-    pub(super) fn has_ready(&self) -> bool {
-        !self.ready.is_empty()
-    }
-
-    pub(super) fn is_ready(&self, id: AgentId) -> bool {
-        self.ready.contains(&id)
-    }
-
-    pub(super) fn pop_ready(&mut self) -> Option<AgentId> {
+    pub(crate) fn pop_ready(&mut self) -> Option<AgentId> {
         self.ready.pop_front()
     }
 
-    pub(super) fn clear_turn_work(&mut self) {
+    pub(crate) fn clear_turn_work(&mut self) {
         self.ready.clear();
         self.approvals.clear();
     }
 
-    pub(super) fn work(&self, root_running: bool, background_running: bool) -> MultiagentWork {
+    pub(crate) fn work(&self, root_running: bool, background_running: bool) -> MultiagentWork {
         let root = self.root();
         let root_ready = root.is_some_and(|root| self.ready.contains(&root));
         if root_ready || root_running || self.has_pending_approval() {
@@ -243,7 +213,7 @@ impl MultiagentState {
         }
     }
 
-    pub(super) fn agent_status(&self, id: AgentId, running: bool) -> SubagentStatus {
+    pub(crate) fn agent_status(&self, id: AgentId, running: bool) -> SubagentStatus {
         if self.is_awaiting_approval(id) {
             SubagentStatus::AwaitingApproval
         } else if running {
@@ -255,16 +225,16 @@ impl MultiagentState {
         }
     }
 
-    pub(super) fn has_pending_approval(&self) -> bool {
+    pub(crate) fn has_pending_approval(&self) -> bool {
         !self.approvals.is_empty()
     }
 
-    pub(super) fn active_approval(&self) -> Option<(AgentId, &ParkedApproval)> {
+    pub(crate) fn active_approval(&self) -> Option<(AgentId, &ParkedApproval)> {
         let (agent, pending) = self.approvals.front()?;
         Some((*agent, pending))
     }
 
-    pub(super) fn park_approval(
+    pub(crate) fn park_approval(
         &mut self,
         agent: AgentId,
         tool_call_id: ToolCallId,
@@ -287,13 +257,13 @@ impl MultiagentState {
         }
     }
 
-    pub(super) fn is_awaiting_approval(&self, agent: AgentId) -> bool {
+    pub(crate) fn is_awaiting_approval(&self, agent: AgentId) -> bool {
         self.approvals
             .iter()
             .any(|(queued_agent, _)| *queued_agent == agent)
     }
 
-    pub(super) fn remove_approval(&mut self, agent: AgentId) -> bool {
+    pub(crate) fn remove_approval(&mut self, agent: AgentId) -> bool {
         let Some(position) = self
             .approvals
             .iter()
@@ -312,14 +282,9 @@ mod tests {
     use claw_api::ToolCall;
 
     use crate::agent::ToolCallId;
-    use crate::protocol::{AgentId, AgentKind};
+    use crate::agent::AgentId;
 
-    use super::super::model::SubagentTimeout;
     use super::{MultiagentState, MultiagentWork, NodeMeta};
-
-    fn timeout() -> SubagentTimeout {
-        SubagentTimeout::from_millis(60_000).expect("non-zero timeout")
-    }
 
     #[test]
     fn topology_owns_descendant_and_subtree_rules() {
@@ -327,15 +292,9 @@ mod tests {
         let child = AgentId(2);
         let grandchild = AgentId(3);
         let mut state = MultiagentState::default();
-        assert!(state.insert_root(root, AgentKind::from_static("test")));
-        assert!(state.insert_child(root, child, AgentKind::from_static("test"), None, timeout(),));
-        assert!(state.insert_child(
-            child,
-            grandchild,
-            AgentKind::from_static("test"),
-            None,
-            timeout(),
-        ));
+        assert!(state.insert_root(root));
+        assert!(state.insert_child(root, child));
+        assert!(state.insert_child(child, grandchild));
 
         assert!(state.is_strict_descendant(root, grandchild));
         assert_eq!(state.depth(grandchild), Some(2));
@@ -347,14 +306,8 @@ mod tests {
         let first = AgentId(1);
         let second = AgentId(2);
         let nodes = BTreeMap::from([
-            (
-                first,
-                NodeMeta::new(Some(second), AgentKind::from_static("test"), None),
-            ),
-            (
-                second,
-                NodeMeta::new(Some(first), AgentKind::from_static("test"), None),
-            ),
+            (first, NodeMeta::new(Some(second))),
+            (second, NodeMeta::new(Some(first))),
         ]);
         let state = MultiagentState::restored(nodes, Default::default(), Default::default());
 
@@ -367,8 +320,8 @@ mod tests {
         let root = AgentId(1);
         let child = AgentId(2);
         let mut state = MultiagentState::default();
-        assert!(state.insert_root(root, AgentKind::from_static("test")));
-        assert!(state.insert_child(root, child, AgentKind::from_static("test"), None, timeout(),));
+        assert!(state.insert_root(root));
+        assert!(state.insert_child(root, child));
 
         assert_eq!(state.work(false, false), MultiagentWork::None);
         state.enqueue(child);

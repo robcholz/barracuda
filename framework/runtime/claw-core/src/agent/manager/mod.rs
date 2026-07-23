@@ -22,6 +22,13 @@ use self::long_term::LongTermDeps;
 pub(crate) use create::{AdditionalAgentState, PersistenceConfig};
 pub(crate) use error::{AgentCreateError, AgentManagerError};
 
+crate::define_prefixed_id!(AgentId, "agent-", "agent");
+crate::define_id_allocator!(
+    /// Hands out process-unique agent ids for the current runtime.
+    pub(crate) AgentIdAllocator(AgentId),
+    AgentId(1)
+);
+
 /// Shared assembly dependencies for independently-built agents.
 pub(crate) struct AgentManager<
     Filesystem: ClawFs + 'static,

@@ -18,6 +18,7 @@ use claw_tool::{
     ToolResult, ToolSpec,
 };
 use futures_lite::future::block_on;
+use futures_lite::StreamExt;
 use serde_json::{json, Value};
 
 use support::{install_script, llm_config, serialize_script, Sse};
@@ -35,7 +36,7 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
         let system = build_system(&root, Vec::new());
         system.new_session(SessionPersistence::Persistent).unwrap()
     };
-    assert!(DiskFs::exists(&format!("{root}/id_allocators.bin")));
+    assert!(DiskFs::exists(&format!("{root}/session_manager.bin")));
     assert!(DiskFs::exists(&format!("{root}/tool_registry.bin")));
     assert!(DiskFs::exists(&format!(
         "{root}/sessions/{}.bin",
@@ -50,7 +51,7 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
 }
 
 #[test]
-fn id_allocator_payload_contains_both_counters() {
+fn session_manager_payload_contains_both_counters() {
     let _script = serialize_script();
     let temp = TempDir::new("runtime-payload").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
@@ -59,15 +60,12 @@ fn id_allocator_payload_contains_both_counters() {
         let _ = system.new_session(SessionPersistence::Persistent).unwrap();
     }
 
-    let allocators = read_payload(&format!("{root}/id_allocators.bin"));
-    assert_eq!(
-        allocators,
-        json!({ "next_session_id": 2, "next_agent_id": 1 })
-    );
+    let state = read_payload(&format!("{root}/session_manager.bin"));
+    assert_eq!(state, json!(["agent-1", "session-2"]));
 }
 
 #[test]
-fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
+fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     let _script = serialize_script();
     let temp = TempDir::new("inflight-toolcall").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
@@ -90,14 +88,15 @@ fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
         .unwrap();
     system.start_all().unwrap();
     let session = system.new_session(SessionPersistence::Persistent).unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.submit(Message::text("run the blocking tool"))).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
+    block_on(control.append(Message::text("run the blocking tool"))).unwrap();
 
     wait_until(&gate.started, "blocking tool did not start");
     let path = format!("{root}/sessions/{}.bin", session.to_wire());
     let inflight = read_payload(&path);
     assert_eq!(
-        inflight["inflight_toolcalls"],
+        inflight["root_inflight_toolcalls"],
         json!([{
             "id": "call_persistence_1",
             "name": "blocking_tool",
@@ -113,9 +112,65 @@ fn inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
 
     let completed = read_payload(&path);
     assert!(
-        completed.get("inflight_toolcalls").is_none(),
+        completed.get("root_inflight_toolcalls").is_none(),
         "a completed transcript turn settles its persisted tool calls: {completed}"
     );
+}
+
+#[test]
+fn deleting_an_inflight_session_removes_its_root_agent_and_transcript() {
+    let _script = serialize_script();
+    let temp = TempDir::new("delete-inflight-session").unwrap();
+    let root = temp.path().to_string_lossy().into_owned();
+    install_script(vec![
+        assistant_tool_call("blocking_tool", json!({ "value": "held" })),
+        support::assistant_text("done"),
+    ]);
+
+    let gate = Arc::new(ToolGate::default());
+    let system = Arc::new(build_configured_system(&root));
+    system
+        .tool_registry()
+        .register_group(ToolGroup::new(
+            "test",
+            true,
+            [Tool::from_async(BlockingTool {
+                gate: Arc::clone(&gate),
+            })],
+        ))
+        .unwrap();
+    system.start_all().unwrap();
+    let session = system.new_session(SessionPersistence::Persistent).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
+    block_on(control.append(Message::text("run the blocking tool"))).unwrap();
+
+    wait_until(&gate.started, "blocking tool did not start");
+    let agent_state = format!("{root}/agents/agent-1.bin");
+    let transcript_data = format!("{root}/transcript/1.jsonl");
+    let transcript_index = format!("{root}/transcript/1.json");
+    assert!(DiskFs::exists(&agent_state));
+
+    let deleting = Arc::clone(&system);
+    let delete = thread::spawn(move || deleting.delete_session(session));
+    gate.release();
+    delete.join().unwrap().unwrap();
+
+    assert!(!DiskFs::exists(&agent_state));
+    assert!(!DiskFs::exists(&transcript_data));
+    assert!(!DiskFs::exists(&transcript_index));
+    assert!(!DiskFs::exists(&format!(
+        "{root}/sessions/{}.bin",
+        session.to_wire()
+    )));
+    block_on(async {
+        while let Some(event) = events.next().await {
+            if event == claw_agent::SessionEvent::Closed {
+                return;
+            }
+        }
+        panic!("deleted Session stream ended without Closed");
+    });
 }
 
 #[test]
@@ -209,73 +264,10 @@ fn deleting_a_session_removes_it_from_the_directory_registry() {
     assert!(!system.list_sessions().contains(&session));
 }
 
-#[test]
-fn unopened_session_does_not_consume_its_recovery_journal() {
-    let _script = serialize_script();
-    let temp = TempDir::new("unopened-session-recovery").unwrap();
-    let root = temp.path().to_string_lossy().into_owned();
-    let session = {
-        let system = build_system(&root, Vec::new());
-        system.new_session(SessionPersistence::Persistent).unwrap()
-    };
-    let path = format!("{root}/sessions/{}.bin", session.to_wire());
-    let mut payload = read_payload(&path);
-    payload["agent_state"] = json!({
-        "agent_mode": "normal",
-        "resumed": { "loaded_tool_groups": ["profile"] }
-    });
-    write_payload(&path, &payload);
-
-    {
-        let system = build_system(&root, Vec::new());
-        assert_eq!(system.list_sessions(), vec![session]);
-    }
-
-    assert_eq!(
-        read_payload(&path)["agent_state"]["resumed"]["loaded_tool_groups"],
-        json!(["profile"])
-    );
-}
-
-#[test]
-fn opening_without_a_turn_does_not_consume_the_recovery_reminder() {
-    let _script = serialize_script();
-    let temp = TempDir::new("idle-open-session-recovery").unwrap();
-    let root = temp.path().to_string_lossy().into_owned();
-    let session = {
-        let system = build_system(&root, Vec::new());
-        system.new_session(SessionPersistence::Persistent).unwrap()
-    };
-    let path = format!("{root}/sessions/{}.bin", session.to_wire());
-    let mut payload = read_payload(&path);
-    payload["agent_state"] = json!({
-        "agent_mode": "normal",
-        "resumed": { "loaded_tool_groups": ["profile"] }
-    });
-    write_payload(&path, &payload);
-
-    {
-        let system = build_system(&root, Vec::new());
-        let (control, _events) = system.open_session(session).unwrap();
-        futures_lite::future::block_on(control.close_session()).unwrap();
-    }
-
-    assert_eq!(
-        read_payload(&path)["agent_state"]["resumed"]["loaded_tool_groups"],
-        json!(["profile"])
-    );
-}
-
 fn read_payload(path: &str) -> Value {
     let bytes = DiskFs::read(path).unwrap();
     assert!(bytes.len() >= std::mem::size_of::<u32>());
     serde_json::from_slice(&bytes[std::mem::size_of::<u32>()..]).unwrap()
-}
-
-fn write_payload(path: &str, payload: &Value) {
-    let mut bytes = 4u32.to_le_bytes().to_vec();
-    bytes.extend(serde_json::to_vec(payload).unwrap());
-    DiskFs::write_atomic(path, &bytes).unwrap();
 }
 
 fn build_system(root: &str, bodies: Vec<String>) -> DiskSystem {

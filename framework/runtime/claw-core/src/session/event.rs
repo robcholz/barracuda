@@ -1,9 +1,9 @@
 //! The event vocabulary a session event stream yields.
 //!
-//! One open session has one long-lived stream. A user submit creates a turn;
-//! a detached subagent result creates another turn. Only the **root** agent is
-//! externally visible, and a root's iterations are sequential, so content
-//! events carry no agent id: the `iteration` id is emitted once (on
+//! One open session has one long-lived stream. Appending a user message creates
+//! a turn. Only the **root** agent is externally visible, and a root's
+//! iterations are sequential, so content events carry no agent id: the
+//! `iteration` id is emitted once (on
 //! [`SessionEvent::IterationStarted`]) and the following content events belong
 //! to it by position.
 //!
@@ -16,7 +16,7 @@ use crate::agent::IterationId;
 
 use super::{InputRequestId, TurnId, TurnOrigin};
 
-pub use claw_api::ToolCall;
+use claw_api::ToolCall;
 
 // The reasoning cap is a compile-time tier, not a runtime knob. Exactly one of
 // the mutually-exclusive `reasoning_short` / `reasoning_medium` / `reasoning_long`
@@ -67,6 +67,8 @@ pub enum InputRequestKind {
 /// non-streaming one holding the whole string). Each `ToolCalls` delta is one
 /// complete [`ToolCall`], in call order. Every content stream emits exactly one
 /// [`StreamPart::End`] per iteration, even when it emitted no deltas.
+/// A task-ending Agent effect may additionally emit one synthesized
+/// `Output(Delta) -> Output(End)` after `IterationEnded` and before `TurnEnded`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SessionEvent {
     /// A root-visible turn started.
@@ -116,34 +118,4 @@ pub enum SessionEvent {
     },
     /// The session was closed and no more events will be sent.
     Closed,
-}
-
-/// Where [`SessionEvent`]s are pushed while a session is driven.
-///
-/// Cheap to clone (an `Arc`-backed channel sender). A
-/// [`disabled`](Self::disabled) sink drops every event — handed to subagents so
-/// only the root's events reach the stream, and used when a session has no
-/// live subscriber.
-#[derive(Clone)]
-pub(crate) struct EventSink {
-    tx: Option<async_channel::Sender<SessionEvent>>,
-}
-
-impl EventSink {
-    /// A sink that forwards events to `tx`.
-    pub(crate) fn new(tx: async_channel::Sender<SessionEvent>) -> Self {
-        Self { tx: Some(tx) }
-    }
-
-    /// A sink that drops everything. Handed to non-root agents.
-    pub(crate) fn disabled() -> Self {
-        Self { tx: None }
-    }
-
-    /// Push one event. A no-op on a disabled sink or a closed channel.
-    pub(crate) fn emit(&self, event: SessionEvent) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(event);
-        }
-    }
 }

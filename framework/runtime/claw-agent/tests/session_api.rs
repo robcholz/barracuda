@@ -6,11 +6,11 @@ use support::Sse;
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use claw_agent::{
-    stream::StreamPart, SessionEvent, SessionEventStream, SessionId, TurnId, TurnOrigin,
-};
-use claw_agent::{AgentError, AgentSystem, Message, OpenSessionError, SessionControlError};
+use claw_agent::{stream::StreamPart, SessionEvent, SessionId, SessionStream, TurnId, TurnOrigin};
+use claw_agent::{AgentError, AgentSystem, Message, OpenSessionError};
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
     ImmediateTimer, MemFs, SharedScriptHttp, StdThread, TokioExecutor,
@@ -88,9 +88,10 @@ fn session_streams_root_reply_as_output() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
-    block_on(control.submit(Message::text("say hi"))).unwrap();
+    block_on(control.append(Message::text("say hi"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
 
     assert_eq!(
@@ -129,7 +130,33 @@ fn open_unknown_session_returns_error() {
 }
 
 #[test]
-fn second_submit_returns_busy_until_current_turn_ends() {
+fn dropping_the_stream_releases_its_session_lease() {
+    let _script = serialize_script();
+    let root = mem_root("agent-drop-stream");
+    let system = build_mem_system(&root, Vec::new());
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+
+    drop(system.open_session(session).unwrap());
+
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let reopened = loop {
+        match system.open_session(session) {
+            Ok(stream) => break stream,
+            Err(AgentError::OpenSession(OpenSessionError::AlreadyOpen(open)))
+                if open == session && Instant::now() < deadline =>
+            {
+                thread::yield_now();
+            }
+            Err(error) => panic!("dropped SessionStream did not release its lease: {error}"),
+        }
+    };
+    drop(reopened);
+}
+
+#[test]
+fn append_queues_while_current_turn_runs() {
     let _script = serialize_script();
     let root = mem_root("agent-submit-busy");
     let system = build_slow_system(
@@ -139,21 +166,18 @@ fn second_submit_returns_busy_until_current_turn_ends() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     block_on(async {
-        control.submit(Message::text("first")).await.unwrap();
-        assert!(matches!(
-            control.submit(Message::text("second")).await,
-            Err(SessionControlError::Busy(busy_session)) if busy_session == session
-        ));
+        control.append(Message::text("first")).await.unwrap();
+        control.append(Message::text("second")).await.unwrap();
     });
     let first_events = drain_until_turn_ended(&mut events);
 
     assert!(first_events.iter().any(
         |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "first")
     ));
-    block_on(control.submit(Message::text("second"))).unwrap();
     let second_events = drain_until_turn_ended(&mut events);
     assert!(second_events.iter().any(
         |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "second")
@@ -168,10 +192,11 @@ fn session_control_methods_are_idempotent() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     block_on(async {
-        control.submit(Message::text("cancel me")).await.unwrap();
+        control.append(Message::text("cancel me")).await.unwrap();
         control.interrupt().await.unwrap();
         control.interrupt().await.unwrap();
         control.cancel().await.unwrap();
@@ -193,6 +218,51 @@ fn session_control_methods_are_idempotent() {
 }
 
 #[test]
+fn cancel_preserves_messages_already_queued_for_later_turns() {
+    let _script = serialize_script();
+    let root = mem_root("agent-cancel-preserves-inbox");
+    let system = build_slow_system(
+        &root,
+        vec![
+            assistant_text("queued message ran"),
+            assistant_text("queued message ran"),
+        ],
+    );
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
+
+    block_on(async {
+        control
+            .append(Message::text("cancel this turn"))
+            .await
+            .unwrap();
+        control
+            .append(Message::text("keep this queued turn"))
+            .await
+            .unwrap();
+        control.cancel().await.unwrap();
+    });
+
+    let cancelled = drain_until_turn_ended(&mut events);
+    assert_eq!(
+        cancelled.last(),
+        Some(&SessionEvent::TurnEnded { turn: TurnId(1) })
+    );
+
+    let queued = drain_until_turn_ended(&mut events);
+    assert_eq!(
+        queued.last(),
+        Some(&SessionEvent::TurnEnded { turn: TurnId(2) })
+    );
+    assert!(queued.iter().any(
+        |event| matches!(event, SessionEvent::Output(StreamPart::Delta(text)) if text == "queued message ran")
+    ));
+}
+
+#[test]
 fn close_session_cancels_active_work_and_closes_events() {
     let _script = serialize_script();
     let root = mem_root("agent-close-session");
@@ -200,10 +270,11 @@ fn close_session_cancels_active_work_and_closes_events() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     block_on(async {
-        control.submit(Message::text("close me")).await.unwrap();
+        control.append(Message::text("close me")).await.unwrap();
         control.close_session().await.unwrap();
     });
     let events = drain_until_closed(&mut events);
@@ -217,8 +288,8 @@ fn close_session_cancels_active_work_and_closes_events() {
     );
     assert!(system.list_sessions().contains(&session));
     assert!(
-        block_on(control.submit(Message::text("after close"))).is_err(),
-        "closed control should reject new submits"
+        block_on(control.append(Message::text("after close"))).is_err(),
+        "closed control should reject new appends"
     );
 }
 
@@ -230,7 +301,8 @@ fn delete_session_removes_session_and_closes_open_stream() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (_control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let _control = events.control();
 
     system.delete_session(session).unwrap();
     let events = drain_until_closed(&mut events);
@@ -254,7 +326,7 @@ fn build_slow_system(root: &str, bodies: Vec<String>) -> SlowAgentSystem {
     system
 }
 
-fn drain_until_closed(events: &mut SessionEventStream) -> Vec<SessionEvent> {
+fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
     block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {

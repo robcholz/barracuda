@@ -37,18 +37,18 @@ Context-carrying spans (`session`, `turn`, `agent`, `iteration_loop`,
 `toolcall`, etc.) use `info_span!` so `info`/`warn`/`error` events retain their
 incremental context when the runtime level is `Info`.
 
-## Agent System / Orchestrator
+## Agent Runtime
 
 ### Tracing Context
 
-span-name: `orchestrator`
+span-name: `agent.runtime`
 
-The `Orchestrator` is the global runtime root owned by `AgentSystem`. Its
-long-lived engine span carries the fixed `run.system=agent-system` semantic
-scope and opens the fixed `trace.task=orchestrator` logical lane. No system id
-is allocated or persisted.
+The `AgentRuntime` is the runtime root owned by `AgentSystem`. Its long-lived
+worker span carries the fixed `run.system=agent-system` semantic scope and
+opens the fixed `trace.task=agent-runtime` logical lane. No system id is
+allocated or persisted.
 
-The root covers engine construction, checkpoint restoration, and the worker
+The root covers worker construction, checkpoint restoration, and the worker
 loop. System-wide startup spans such as `agent.manager` and `skill.catalog`
 therefore inherit the system context instead of falling into an unknown
 session bucket. Synchronous handle operations on the caller thread carry the
@@ -61,7 +61,7 @@ fallback because they are not independently scheduled async futures.
 
 ### Shutdown
 
-span-name: `orchestrator.shutdown`
+span-name: `agent.runtime.shutdown`
 
 The handle-side shutdown and worker join. It carries `run.system`; checkpoint
 errors emitted while shutting down inherit that scope.
@@ -72,7 +72,7 @@ errors emitted while shutting down inherit that scope.
 
 span-name: `session`
 
-The engine-owned, long-lived session actor root sets `trace.task` to the
+The worker-owned, long-lived session actor root sets `trace.task` to the
 session id. Concurrent session actor futures therefore have distinct logical
 lanes even when one executor thread polls all of them. Short synchronous
 `session` handle spans do not open a logical task.
@@ -132,8 +132,8 @@ registry-checkpoint diagnostics carry both context keys.
 span-name: `session.restore`
 
 One startup span per persisted session runtime restored while constructing the
-engine. (A registry-only session with no runtime checkpoint has nothing to
-restore.) It is a child of `orchestrator`; restored `agent.create` spans are
+worker. (A registry-only session with no runtime checkpoint has nothing to
+restore.) It is a child of `agent.runtime`; restored `agent.create` spans are
 children of this span rather than unattributed startup work.
 
 ### Incremental Context
@@ -202,7 +202,7 @@ span-name: `turn`
 span-name: `agent.manager`
 
 Manager construction is system-wide startup work. It is a child of
-`orchestrator` and inherits `run.system`; it intentionally has no
+`agent.runtime` and inherits `run.system`; it intentionally has no
 `run.session`.
 
 ### Events

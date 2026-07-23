@@ -1,6 +1,6 @@
 //! `claw-agent-chat` — a minimal REPL that drives the whole agent system through
 //! the public [`claw_agent`] API: build an [`AgentSystem`], create a session,
-//! submit user text, and print each turn's replies.
+//! append user text, and print each turn's replies.
 //!
 //! LLM config is read from `claw-core/.env.local` (the same file the integration
 //! tests use): `CLAW_LLM_API_KEY`, `CLAW_LLM_BASE_URL`, `CLAW_LLM_MODEL`. Memory
@@ -23,7 +23,7 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, HostAgentSystem, InputRequestId, InputRequestKind,
-    Message, PermissionLevel, SessionControl, SessionEvent, SessionEventStream, SessionPersistence,
+    Message, PermissionLevel, SessionControl, SessionEvent, SessionPersistence, SessionStream,
     ToolCall, TurnOrigin,
 };
 use claw_api::{ApiUsage, BackendKind, ClawApiConfig};
@@ -38,7 +38,7 @@ const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent
 
 struct ChatDriver {
     control: SessionControl,
-    events: SessionEventStream,
+    events: SessionStream,
     total_usage: ApiUsage,
     content: ContentRenderer,
     active_origin: Option<TurnOrigin>,
@@ -46,7 +46,7 @@ struct ChatDriver {
 }
 
 impl ChatDriver {
-    fn new(control: SessionControl, events: SessionEventStream) -> Self {
+    fn new(control: SessionControl, events: SessionStream) -> Self {
         Self {
             control,
             events,
@@ -61,8 +61,8 @@ impl ChatDriver {
         has_usage(self.total_usage).then_some(self.total_usage)
     }
 
-    async fn submit(&self, text: impl Into<String>) -> bool {
-        if let Err(error) = self.control.submit(Message::text(text)).await {
+    async fn append(&self, text: impl Into<String>) -> bool {
+        if let Err(error) = self.control.append(Message::text(text)).await {
             print_event("error", &error.to_string(), EventStyle::Error);
             return false;
         }
@@ -522,7 +522,8 @@ async fn run() -> Result<()> {
     system.link_api(llm_config, claw_agent::ApiUsage::RootAgent, true)?;
     system.start_all()?;
     let session = system.new_session(SessionPersistence::Persistent)?;
-    let (control, events) = system.open_session(session)?;
+    let events = system.open_session(session)?;
+    let control = events.control();
     let mut chat = ChatDriver::new(control, events);
 
     eprintln!("Memory:  {MEMORY_DIR}");
@@ -545,7 +546,7 @@ async fn run() -> Result<()> {
                 match parse_input(input) {
                     Ok(CliInput::Message(message)) => {
                         let accepted = match state {
-                            ReplState::Idle => chat.submit(message).await,
+                            ReplState::Idle => chat.append(message).await,
                             ReplState::AwaitingInput(request) => {
                                 chat.respond(request, message).await
                             }

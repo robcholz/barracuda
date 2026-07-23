@@ -109,8 +109,8 @@ below `orchestrator` with no session key.
 ## Example (overlapping async agents)
 
 ```
-TRACE 2090 enter <span=1 parent=none task=orchestrator span-name=orchestrator target=claw_core::orchestrator::engine> <context=run system=agent-system>
-TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=claw_core::orchestrator::engine> <context=run system=agent-system session=session-1>
+TRACE 2090 enter <span=1 parent=none task=agent-runtime span-name=agent.runtime target=claw_core::runtime::worker> <context=run system=agent-system>
+TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=claw_core::session::manager> <context=run system=agent-system session=session-1>
 TRACE 2105 enter <span=3 parent=2 task=session-1 span-name=turn target=claw_core::session::actor> <context=run turn=turn-7> cause=user_submit
 TRACE 2110 enter <span=4 parent=3 task=agent-1 span-name=agent target=claw_core::multiagent::drive> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-1> kind=conversation depth=0
 TRACE 2112 enter <span=5 parent=4 task=agent-1 span-name=iteration_loop target=claw_core::agent::iteration_loop> <context=run iteration=iteration-0>

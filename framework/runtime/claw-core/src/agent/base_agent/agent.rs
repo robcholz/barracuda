@@ -13,8 +13,9 @@ use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
 
+use crate::agent::AgentKind;
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::protocol::{AgentKind, Message};
+use crate::session::Message;
 
 use super::context::ContextAdapter;
 use super::effect::{AgentEffect, AgentEffectInbox};
@@ -472,10 +473,6 @@ const fn reasoning_limit() -> usize {
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
-    pub(crate) fn kind(&self) -> &AgentKind {
-        &self.kind
-    }
-
     pub(crate) fn recovery_state(&self) -> &DurableState<RecoveryState> {
         self.refresh_recovery_state();
         &self.recovery_state

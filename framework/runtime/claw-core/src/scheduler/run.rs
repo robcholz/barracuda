@@ -1,21 +1,23 @@
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
+use tracing::Instrument as _;
 
 use crate::agent::{
     AgentApprovalError, AgentError, AgentEvent, AgentInputRequest, ApprovalDecision, BaseAgent,
     ToolCallId,
 };
-use crate::protocol::Message;
+use crate::session::Message;
 
-pub(crate) enum AgentRunItem {
+pub(super) enum AgentRunItem {
     Event(Result<AgentEvent, AgentError>),
     Returned,
 }
@@ -32,7 +34,7 @@ enum RunCommand {
 #[derive(Clone)]
 pub(crate) struct AgentRunControl {
     commands: Sender<RunCommand>,
-    awaiting_approval: Arc<Mutex<Option<ToolCallId>>>,
+    awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 }
 
 impl AgentRunControl {
@@ -49,10 +51,7 @@ impl AgentRunControl {
         tool_call_id: ToolCallId,
         decision: ApprovalDecision,
     ) -> Result<(), AgentApprovalError> {
-        let mut awaiting = self
-            .awaiting_approval
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut awaiting = self.awaiting_approval.borrow_mut();
         let Some(expected) = *awaiting else {
             return Err(AgentApprovalError::NotAwaitingApproval);
         };
@@ -81,7 +80,7 @@ struct ProgressEnvelope {
 type AgentRunFuture<Http, Timer> = Pin<Box<dyn Future<Output = BaseAgent<Http, Timer>>>>;
 
 /// Temporary scheduler adapter around the self-contained BaseAgent stream.
-pub(crate) struct AgentRun<Http: ClawHttp, Timer: ClawTimer> {
+pub(super) struct AgentRun<Http: ClawHttp, Timer: ClawTimer> {
     control: AgentRunControl,
     progress: Pin<Box<Receiver<ProgressEnvelope>>>,
     resume: Option<Sender<()>>,
@@ -97,21 +96,28 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    pub(crate) fn start(agent: BaseAgent<Http, Timer>, message: Message) -> Self {
+    pub(super) fn start(
+        agent: BaseAgent<Http, Timer>,
+        message: Message,
+        span: tracing::Span,
+    ) -> Self {
         let (progress_sender, progress_receiver) = async_channel::bounded(1);
         let (command_sender, command_receiver) = async_channel::unbounded();
-        let awaiting_approval = Arc::new(Mutex::new(None));
+        let awaiting_approval = Rc::new(RefCell::new(None));
         let control = AgentRunControl {
             commands: command_sender,
-            awaiting_approval: Arc::clone(&awaiting_approval),
+            awaiting_approval: Rc::clone(&awaiting_approval),
         };
-        let future = Box::pin(drive_agent(
-            agent,
-            message,
-            progress_sender,
-            command_receiver,
-            awaiting_approval,
-        ));
+        let future = Box::pin(
+            drive_agent(
+                agent,
+                message,
+                progress_sender,
+                command_receiver,
+                awaiting_approval,
+            )
+            .instrument(span),
+        );
         Self {
             control,
             progress: Box::pin(progress_receiver),
@@ -122,17 +128,17 @@ where
         }
     }
 
-    pub(crate) fn control(&self) -> AgentRunControl {
+    pub(super) fn control(&self) -> AgentRunControl {
         self.control.clone()
     }
 
-    pub(crate) fn poll_event(&mut self, context: &mut Context<'_>) -> Poll<AgentRunItem> {
+    pub(super) fn poll_event(&mut self, context: &mut Context<'_>) -> Poll<AgentRunItem> {
         Pin::new(self)
             .poll_next(context)
             .map(|event| event.expect("AgentRun ends after returning its BaseAgent"))
     }
 
-    pub(crate) fn take_completed_agent(&mut self) -> Option<BaseAgent<Http, Timer>> {
+    pub(super) fn take_completed_agent(&mut self) -> Option<BaseAgent<Http, Timer>> {
         self.returned.then(|| self.agent.take()).flatten()
     }
 
@@ -186,7 +192,7 @@ async fn drive_agent<Http, Timer>(
     message: Message,
     progress: Sender<ProgressEnvelope>,
     commands: Receiver<RunCommand>,
-    awaiting_approval: Arc<Mutex<Option<ToolCallId>>>,
+    awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 ) -> BaseAgent<Http, Timer>
 where
     Http: ClawHttp + StreamingHttp + 'static,
@@ -225,9 +231,7 @@ where
                     })) => Some(*tool_call_id),
                     _ => None,
                 };
-                *awaiting_approval
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = pending;
+                *awaiting_approval.borrow_mut() = pending;
                 let terminal = matches!(&item, Ok(AgentEvent::Finished(_)) | Err(_));
                 let (resume, resumed) = async_channel::bounded(1);
                 if progress

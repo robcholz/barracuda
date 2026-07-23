@@ -52,9 +52,10 @@ fn pending_request_control_ends_the_turn_before_returning() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
 
-        block_on(control.submit(Message::text(format!("run {}", fixture.case)))).unwrap();
+        block_on(control.append(Message::text(format!("run {}", fixture.case)))).unwrap();
         wait_for(
             &REQUEST_POLLS,
             &fixture.case,
@@ -90,7 +91,7 @@ fn pending_request_control_ends_the_turn_before_returning() {
         FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
         control_result.unwrap();
 
-        block_on(control.submit(Message::text(format!("after control {}", fixture.case)))).unwrap();
+        block_on(control.append(Message::text(format!("after control {}", fixture.case)))).unwrap();
 
         let controlled_turn = drain_until_turn_ended(&mut events);
         assert_turn(&controlled_turn, TurnId(1), &fixture.case);
@@ -130,7 +131,8 @@ fn close_is_not_a_synchronous_persistence_barrier() {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
 
     FAIL_PERSISTENCE_WRITES.store(true, Ordering::SeqCst);
     let result = block_on(control.close_session());

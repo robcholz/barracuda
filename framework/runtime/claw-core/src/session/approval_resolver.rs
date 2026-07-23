@@ -1,7 +1,7 @@
 //! Internal natural-language approval resolver for one session actor.
 //!
 //! This is deliberately not an agent tool. The channel user replies in free
-//! text, and the orchestrator runs one short LLM/tool round to classify that text
+//! text, and the SessionActor runs one short LLM/tool round to classify that text
 //! into the internal [`ApprovalDecision`] it feeds back to the parked agent.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +19,6 @@ use serde_json::{json, Value};
 
 use crate::agent::ApprovalDecision;
 use crate::config::{ApiUsage, SharedApiManager};
-use crate::multiagent::DriveControl;
 
 const APPROVAL_RESOLVER_PROMPT: &str = prompt!("approval/resolver_system.md");
 
@@ -29,14 +28,14 @@ static APPROVAL_TOOL_PARENT: LazyLock<Arc<ToolRegistry>> =
     LazyLock::new(|| Arc::new(ToolRegistry::new()));
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PermissionReplyResolution {
+pub(super) enum PermissionReplyResolution {
     Approved,
     Rejected(String),
     Clarify(String),
 }
 
 impl PermissionReplyResolution {
-    pub(crate) fn into_decision(self) -> Option<ApprovalDecision> {
+    pub(super) fn into_decision(self) -> Option<ApprovalDecision> {
         match self {
             Self::Approved => Some(ApprovalDecision::Approved),
             Self::Rejected(reason) => Some(ApprovalDecision::Rejected(reason)),
@@ -46,7 +45,7 @@ impl PermissionReplyResolution {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ApprovalResolverError {
+pub(super) enum ApprovalResolverError {
     #[error("approval resolver was cancelled")]
     Cancelled,
     #[error("failed to initialize approval resolver LLM: {0}")]
@@ -59,19 +58,24 @@ pub(crate) enum ApprovalResolverError {
     MalformedToolCall,
 }
 
-struct ApprovalResolverControl {
-    interrupt: Arc<AtomicBool>,
+#[derive(Clone)]
+pub(super) struct ApprovalControl {
+    cancelled: Arc<AtomicBool>,
 }
 
-impl ApprovalResolverControl {
-    fn new() -> Self {
+impl ApprovalControl {
+    pub(super) fn new() -> Self {
         Self {
-            interrupt: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    fn cancel_handle(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.interrupt)
+    pub(super) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
     }
 }
 
@@ -162,12 +166,12 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
     }
 }
 
-pub(crate) async fn resolve_permission_reply<H, Timer>(
+pub(super) async fn resolve_permission_reply<H, Timer>(
     api_manager: &SharedApiManager,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
-    control: &DriveControl,
+    control: &ApprovalControl,
 ) -> Result<PermissionReplyResolution, ApprovalResolverError>
 where
     H: ClawHttp + StreamingHttp + Default + 'static,
@@ -194,12 +198,6 @@ where
         ))],
     ))?;
     let tools = tools.begin()?;
-    let resolver_control = ApprovalResolverControl::new();
-    let cancel_handle = resolver_control.cancel_handle();
-    control.set_cancel_hook(move || {
-        cancel_handle.store(true, Ordering::Release);
-    });
-
     let messages = json!([
         {
             "role": "user",
@@ -219,13 +217,12 @@ where
         retry: RetryPolicy::none(),
     };
     let response = llm
-        .chat(&request, Cancel::new(resolver_control.interrupt.as_ref()))
+        .chat(&request, Cancel::new(control.cancelled.as_ref()))
         .await;
-    control.clear_cancel_hook();
 
     let response = match response {
         Ok(response) => response,
-        Err(error) if resolver_control.interrupt.load(Ordering::Acquire) || error.is_aborted() => {
+        Err(error) if control.is_cancelled() || error.is_aborted() => {
             return Err(ApprovalResolverError::Cancelled)
         }
         Err(error) => return Err(error.into()),

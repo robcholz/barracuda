@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use claw_agent::{
     stream::StreamPart, AgentError, AgentSystem, IterationId, Message, OpenSessionError,
-    SessionControlError, SessionEvent, SessionEventStream, SessionId, TurnId, TurnOrigin,
+    SessionControlError, SessionEvent, SessionId, SessionStream, TurnId, TurnOrigin,
 };
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
@@ -43,9 +43,10 @@ fn submit_streams_csv_reply_cases() {
         let session = system
             .new_session(claw_agent::SessionPersistence::Persistent)
             .unwrap();
-        let (control, mut events) = system.open_session(session).unwrap();
+        let mut events = system.open_session(session).unwrap();
+        let control = events.control();
 
-        block_on(control.submit(Message::text(field(&row, "user_input")))).unwrap();
+        block_on(control.append(Message::text(field(&row, "user_input")))).unwrap();
         let events = drain_until_turn_ended(&mut events);
 
         assert_eq!(
@@ -185,7 +186,10 @@ fn construction_csv_roots_accept_tempdirs_and_reject_blank_roots() {
             assert_eq!(system.list_sessions(), vec![session], "case {case}");
             drop(system);
             assert!(
-                DiskFs::exists(&format!("{}/id_allocators.bin", root.trim_end_matches('/'))),
+                DiskFs::exists(&format!(
+                    "{}/session_manager.bin",
+                    root.trim_end_matches('/')
+                )),
                 "case {case}"
             );
         } else {
@@ -243,7 +247,8 @@ fn lifecycle_open_twice(system: &support::MemAgentSystem) -> Option<String> {
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (_control, _events) = system.open_session(session).unwrap();
+    let _events = system.open_session(session).unwrap();
+    let _control = _events.control();
     match system.open_session(session) {
         Ok(_) => panic!("second open should fail"),
         Err(AgentError::OpenSession(OpenSessionError::AlreadyOpen(open))) if open == session => {
@@ -264,11 +269,13 @@ fn lifecycle_reopen_after_close(system: &support::MemAgentSystem) -> Option<Stri
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
 
-    let (reopened_control, mut reopened_events) = system.open_session(session).unwrap();
+    let mut reopened_events = system.open_session(session).unwrap();
+    let reopened_control = reopened_events.control();
     block_on(reopened_control.close_session()).unwrap();
     assert_closed(&mut reopened_events);
     None
@@ -281,7 +288,8 @@ fn lifecycle_control_after_close(
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
 
@@ -304,7 +312,8 @@ fn lifecycle_delete_after_close(system: &support::MemAgentSystem) -> Option<Stri
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
-    let (control, mut events) = system.open_session(session).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    let control = events.control();
     block_on(control.close_session()).unwrap();
     assert_closed(&mut events);
 
@@ -317,12 +326,12 @@ fn lifecycle_delete_after_close(system: &support::MemAgentSystem) -> Option<Stri
     }
 }
 
-fn assert_closed(events: &mut SessionEventStream) {
+fn assert_closed(events: &mut SessionStream) {
     let events = drain_until_closed(events);
     assert_eq!(events.last(), Some(&SessionEvent::Closed));
 }
 
-fn drain_until_closed(events: &mut SessionEventStream) -> Vec<SessionEvent> {
+fn drain_until_closed(events: &mut SessionStream) -> Vec<SessionEvent> {
     block_on(async move {
         let mut collected = Vec::new();
         while let Some(event) = events.next().await {

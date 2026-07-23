@@ -9,7 +9,7 @@ use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::{AgentStateBuilder, ContextAdapter};
-use crate::protocol::ToolCall;
+use claw_api::ToolCall;
 
 use self::tools::discovery_tools;
 
@@ -159,7 +159,7 @@ mod tests {
 
     use super::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
     use crate::agent::base_agent::ContextAdapter;
-    use crate::protocol::ToolCall;
+    use claw_api::ToolCall;
     use claw_context::Context;
     use claw_tool::{
         SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolRegistry, ToolResult,

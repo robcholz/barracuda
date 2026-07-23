@@ -5,7 +5,7 @@ use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
 
-use crate::protocol::Message;
+use crate::session::Message;
 
 use super::super::tool_port::SubagentControl;
 use super::args::{action_with_agent_resource, non_blank_argument, required_agent_id};

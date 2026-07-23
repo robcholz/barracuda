@@ -3,7 +3,7 @@ name = "claw-core"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Runtime primitives: orchestrator shell, channels, and iteration loop"
+description = "Agent execution runtime, Session control, and iteration primitives"
 # Agent manifests under `resources/agents/<kind>/` are parsed + validated at
 # compile time and emitted as typed catalog entries (see `manifest_gen/`),
 # so malformed metadata fails the build instead of the device at boot.
@@ -48,7 +48,7 @@ async-stream = "0.3"
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 getset = "0.1.7"
-# NOTE: the `block_on` backend for the orchestrator worker is injected as a
+# NOTE: the `block_on` backend for the runtime worker is injected as a
 # `ClawExecutor` (edge-executor on device via `claw-sys`, tokio on host via
 # `claw-interface`), so `claw-core` no longer depends on a concrete executor.
 claw-memory = { path = "../claw-memory" }

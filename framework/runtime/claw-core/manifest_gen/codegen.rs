@@ -1,6 +1,6 @@
 //! Render parsed manifests into Rust source: a single `ENTRIES` array of typed
 //! `AgentCatalogEntry` values. The output is `include!`-d into
-//! `crate::agent_catalog`.
+//! `crate::agent::baked`.
 //!
 //! Generation uses `quote` to build a typed `proc_macro2::TokenStream` rather
 //! than hand-concatenating source strings, so string escaping, slice literals,
@@ -65,8 +65,8 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
 ///
 /// Both files are pulled in with `include_str!` and joined by `concat!` at
 /// compile time, so no instruction bytes are duplicated into the generated
-/// source. (`AgentConfig::from_manifest` trims the result, so an empty preamble
-/// contributes nothing.)
+/// source. Agent assembly trims the result, so an empty preamble contributes
+/// nothing.
 fn render_instructions(kind: &ParsedManifest) -> TokenStream {
     let own = kind
         .instructions_path

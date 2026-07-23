@@ -1,5 +1,4 @@
-use crate::config::catalog as agent_catalog;
-use crate::protocol::AgentKind;
+use crate::agent::{baked, AgentKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SpawnPolicy {
@@ -9,7 +8,7 @@ pub(super) enum SpawnPolicy {
 
 impl SpawnPolicy {
     pub(super) fn for_agent(kind: &AgentKind) -> Option<Self> {
-        let manifest = agent_catalog::find(kind)?.multiagent();
+        let manifest = baked::find(kind)?.multiagent();
         manifest
             .spawn_enabled()
             .then(|| Self::from_allowed_kinds(manifest.allowed_kinds()))
@@ -31,19 +30,19 @@ impl SpawnPolicy {
     }
 
     pub(super) fn is_known(kind: &AgentKind) -> bool {
-        agent_catalog::find(kind).is_some()
+        baked::find(kind).is_some()
     }
 
     pub(super) fn catalog(&self) -> Vec<(AgentKind, &'static str)> {
         match self {
-            Self::Any => agent_catalog::entries()
+            Self::Any => baked::entries()
                 .iter()
                 .map(|entry| (entry.kind().clone(), entry.description()))
                 .collect(),
             Self::Only(kinds) => kinds
                 .iter()
                 .filter_map(|kind| {
-                    agent_catalog::find(kind).map(|entry| (kind.clone(), entry.description()))
+                    baked::find(kind).map(|entry| (kind.clone(), entry.description()))
                 })
                 .collect(),
         }
