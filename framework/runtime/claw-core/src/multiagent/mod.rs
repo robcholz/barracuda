@@ -1,28 +1,16 @@
-//! Per-session agent runtime: the **graph + scheduler + lifecycle**.
+//! Optional per-Session multiagent domain component.
 //!
-//! Each session owns one [`MultiagentRuntime`]. It holds:
-//! - runtime graph state — root plus node topology and lifecycle metadata;
-//! - runtime scheduler state — ready work and approvals;
-//! - stable agent slots — each slot owns its resident agent or its checked-out run;
-//! - one subagent host that owns tool commands and the inspection read model.
+//! [`Multiagent`] owns graph policy, tool commands, and the inspection read
+//! model. SessionActor remains the sole owner of Agent slots and executes the
+//! physical operations requested by this component.
 //!
-//! Responsibility line: the instance decides *when* agents run, *what* their run
-//! outcomes mean (bubble a subagent result to its parent vs. surface a root
-//! reply), and *what happens to their lifetimes*. Agent slots only store; agents
-//! only compute.
-//!
-//! Sessions are isolated — one session's agents never appear in another's store —
-//! while a single global id allocator (shared at construction) keeps every
-//! [`AgentId`] unique across the whole process. The root is built lazily on the
-//! first delivered message (that message is its goal); later messages are
-//! accepted only once the root has returned to an idle boundary.
-//!
-//! Borrow safety: Multiagent-owned tools submit semantic commands
-//! through their private port. The instance starts ready agents as owned
-//! futures, then — with no agent borrowed — drains and applies those commands
-//! before routing completed outcomes.
+//! Multiagent never owns an Agent, AgentSlot, AgentManager, Scheduler, Session
+//! identifier, or persistence policy. Its tools submit semantic commands
+//! through a private bridge; SessionActor polls those commands without holding
+//! a bridge lock across Agent work.
 
 mod model;
+mod plugin;
 mod policy;
 mod state;
 mod tool_port;
@@ -32,6 +20,5 @@ pub(crate) use self::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentStatus, SubagentTimeout,
     TranscriptText,
 };
-pub(crate) use self::state::{MultiagentState, MultiagentWork};
-pub(crate) use self::tool_port::{MultiagentAction, MultiagentBridge, SpawnCommand};
-pub(crate) use self::tools::tool_group;
+pub(crate) use self::plugin::Multiagent;
+pub(crate) use self::tool_port::{MultiagentAction, SpawnCommand};

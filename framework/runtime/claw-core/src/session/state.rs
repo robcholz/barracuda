@@ -20,8 +20,21 @@ pub(super) struct SessionManagerState {
     session_ids: SessionIdAllocator,
 }
 
-pub(super) fn next_agent(state: &DurableState<SessionManagerState>) -> AgentId {
-    state.get_mut().agent_ids.next()
+#[derive(Clone, Debug)]
+pub(super) struct AgentIdAllocatorHandle {
+    state: DurableState<SessionManagerState>,
+}
+
+impl AgentIdAllocatorHandle {
+    pub(super) fn new(state: &DurableState<SessionManagerState>) -> Self {
+        Self {
+            state: state.clone(),
+        }
+    }
+
+    pub(super) fn next(&self) -> AgentId {
+        self.state.get_mut().agent_ids.next()
+    }
 }
 
 pub(super) fn next_session(state: &DurableState<SessionManagerState>) -> SessionId {
@@ -60,7 +73,8 @@ mod tests {
     use claw_persistence::DurableState;
 
     use super::{
-        ensure_next_agent, ensure_next_session, next_agent, next_session, SessionManagerState,
+        ensure_next_agent, ensure_next_session, next_session, AgentIdAllocatorHandle,
+        SessionManagerState,
     };
     use crate::agent::AgentId;
     use crate::session::SessionId;
@@ -73,6 +87,6 @@ mod tests {
         ensure_next_agent(&state, AgentId::new(7));
 
         assert_eq!(next_session(&state), SessionId::new(4));
-        assert_eq!(next_agent(&state), AgentId::new(7));
+        assert_eq!(AgentIdAllocatorHandle::new(&state).next(), AgentId::new(7));
     }
 }

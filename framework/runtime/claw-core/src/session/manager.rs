@@ -20,8 +20,8 @@ use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
 use super::control::{SessionCommand, SessionControl, SessionControlError};
 use super::persistence::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
-    ensure_next_agent, ensure_next_session, next_session, SessionManagerState,
-    SessionPersistentState,
+    ensure_next_agent, ensure_next_session, next_session, AgentIdAllocatorHandle,
+    SessionManagerState, SessionPersistentState,
 };
 use super::{SessionEvent, SessionStream};
 
@@ -302,7 +302,7 @@ where
                 };
                 self.actor_poll_queue.push_back(session);
                 let _entered = task.span.enter();
-                task.actor.poll(context, &self.state)
+                task.actor.poll(context)
             };
             match status {
                 Poll::Ready(SessionActorStatus::Progress) => {
@@ -332,6 +332,7 @@ where
             session,
             persistence,
             Rc::clone(&self.agent_manager),
+            AgentIdAllocatorHandle::new(&self.state),
             state,
             Rc::clone(&self.approval_resolver),
             self.scheduler.clone(),

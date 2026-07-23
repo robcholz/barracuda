@@ -19,7 +19,7 @@ use super::approval::{
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SharedAgentManager};
 use super::permission::SessionPermission;
-use super::state::{next_agent, SessionManagerState, SessionPersistentState};
+use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
     InputRequestId, IterationEvent, Message, SessionCloseReason, SessionEvent, SessionEventError,
     SessionId, SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError,
@@ -131,6 +131,7 @@ where
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
     agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
+    agent_ids: AgentIdAllocatorHandle,
 
     root: Option<AgentSlot<Http, Timer>>,
     inbox: VecDeque<Message>,
@@ -158,6 +159,7 @@ where
         session: SessionId,
         persistence: SessionPersistence,
         agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
+        agent_ids: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
         approval_resolver: SharedApprovalResolver<Http, Timer>,
         scheduler: AgentRunSchedulerHandle<Http, Timer>,
@@ -169,6 +171,7 @@ where
                 persistence,
                 state,
                 agent_manager,
+                agent_ids,
                 root: None,
                 inbox: VecDeque::new(),
                 active_turn: None,
@@ -185,11 +188,7 @@ where
         )
     }
 
-    pub(super) fn poll(
-        &mut self,
-        context: &mut Context<'_>,
-        manager_state: &DurableState<SessionManagerState>,
-    ) -> Poll<SessionActorStatus> {
+    pub(super) fn poll(&mut self, context: &mut Context<'_>) -> Poll<SessionActorStatus> {
         if let Some(exit) = self.finish_lifecycle() {
             return Poll::Ready(SessionActorStatus::Exit(exit));
         }
@@ -222,7 +221,7 @@ where
             }
         }
 
-        if self.start_next_message(manager_state) {
+        if self.start_next_message() {
             return Poll::Ready(SessionActorStatus::Progress);
         }
 
@@ -422,7 +421,7 @@ where
         }
     }
 
-    fn start_next_message(&mut self, manager_state: &DurableState<SessionManagerState>) -> bool {
+    fn start_next_message(&mut self) -> bool {
         if !self.lifecycle.is_running() {
             return false;
         }
@@ -435,7 +434,7 @@ where
         if message.as_str().trim().is_empty() {
             return true;
         }
-        if let Err(error) = self.ensure_root(manager_state) {
+        if let Err(error) = self.ensure_root() {
             self.begin_turn(TurnOrigin::User);
             self.emit_turn_error(error.into());
             self.finish_turn();
@@ -481,10 +480,7 @@ where
         Ok(())
     }
 
-    fn ensure_root(
-        &mut self,
-        manager_state: &DurableState<SessionManagerState>,
-    ) -> Result<(), AgentCreateError> {
+    fn ensure_root(&mut self) -> Result<(), AgentCreateError> {
         if self.root.is_some() {
             return Ok(());
         }
@@ -501,7 +497,7 @@ where
             )?;
             (id, agent, reasoning)
         } else {
-            let id = next_agent(manager_state);
+            let id = self.agent_ids.next();
             let persistence = match self.persistence {
                 SessionPersistence::Persistent => PersistenceConfig::Persistent,
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,

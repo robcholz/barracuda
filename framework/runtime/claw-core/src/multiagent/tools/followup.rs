@@ -34,7 +34,9 @@ impl SyncToolHandler for FollowupSubagentTool {
         let message = Message::text(non_blank_argument(&args, "message")?);
         if self.control.get(target).is_none() {
             return Ok(ToolOutput {
-                content: format!("Cannot follow up {target}: it is not a subagent in your subtree."),
+                content: format!(
+                    "Cannot follow up {target}: it is not a subagent in your subtree."
+                ),
                 ok: false,
             });
         }

@@ -18,6 +18,7 @@ macro_rules! prompt {
 
 mod agent;
 mod config;
+mod multiagent;
 mod runtime;
 mod scheduler;
 mod session;

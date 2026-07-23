@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use claw_api::ToolCall;
 
-use crate::agent::ToolCallId;
 use crate::agent::AgentId;
+use crate::agent::ToolCallId;
 
 use super::model::SubagentStatus;
 
@@ -281,8 +281,8 @@ mod tests {
 
     use claw_api::ToolCall;
 
-    use crate::agent::ToolCallId;
     use crate::agent::AgentId;
+    use crate::agent::ToolCallId;
 
     use super::{MultiagentState, MultiagentWork, NodeMeta};
 

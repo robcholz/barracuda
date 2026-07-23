@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::task::Waker;
+use std::task::{Context, Poll, Waker};
 
 use async_channel::{Receiver, Sender};
 
@@ -179,25 +179,25 @@ impl MultiagentBridge {
         result
     }
 
-    pub(crate) fn drain(&self) -> Vec<MultiagentCommand> {
-        self.state().commands.drain(..).collect()
+    pub(crate) fn poll_command(&self, context: &mut Context<'_>) -> Poll<MultiagentCommand> {
+        let mut state = self.state();
+        if let Some(command) = state.commands.pop_front() {
+            return Poll::Ready(command);
+        }
+        if state
+            .waiter
+            .as_ref()
+            .is_none_or(|waiter| !waiter.will_wake(context.waker()))
+        {
+            state.waiter = Some(context.waker().clone());
+        }
+        Poll::Pending
     }
 
     pub(crate) fn clear(&self) {
         let mut state = self.state();
         state.commands.clear();
         state.waiter = None;
-    }
-
-    /// Register the drive waiting for an in-flight run. Returns `true` when a
-    /// command is already queued and the caller should apply it immediately.
-    pub(crate) fn register_waiter(&self, waiter: &Waker) -> bool {
-        let mut state = self.state();
-        if !state.commands.is_empty() {
-            return true;
-        }
-        state.waiter = Some(waiter.clone());
-        false
     }
 
     pub(crate) fn publish_snapshot(&self, snapshot: MultiagentSnapshot) {
