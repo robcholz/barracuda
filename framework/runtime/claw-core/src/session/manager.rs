@@ -17,10 +17,10 @@ use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
-use super::control::{SessionCommand, SessionControl, SessionControlError};
+use super::control::{SessionCommand, SessionControl};
 use super::persistence::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
 use super::state::{
-    ensure_next_agent, ensure_next_session, next_session, AgentIdAllocatorHandle,
+    allocate_session_id, ensure_next_agent_id, ensure_next_session_id, AgentIdAllocatorHandle,
     SessionManagerState, SessionPersistentState,
 };
 use super::{SessionEvent, SessionStream};
@@ -56,6 +56,21 @@ pub enum SessionCreateError {
     #[error("agent runtime is not running")]
     WorkerStopped,
     #[error(transparent)]
+    Persistence(#[from] PersistenceError),
+}
+
+/// Failure permanently deleting one Session and all of its Agent-owned stores.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionDeleteError {
+    #[error("session not found: {0}")]
+    SessionNotFound(SessionId),
+    #[error("session deletion is already in progress: {0}")]
+    AlreadyDeleting(SessionId),
+    #[error("agent runtime is not running")]
+    WorkerStopped,
+    #[error(transparent)]
+    Agent(#[from] AgentCreateError),
+    #[error("failed to delete persisted session state: {0}")]
     Persistence(#[from] PersistenceError),
 }
 
@@ -123,7 +138,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        tools: Arc<ToolRegistry>,
+        tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
@@ -137,7 +152,7 @@ where
             state
         };
         let agent_manager = Rc::new(AgentManager::new(
-            tools,
+            tool_registry,
             Arc::clone(&persistence),
             persistence_dir,
             skill_roots,
@@ -164,11 +179,11 @@ where
                 },
             );
         }
-        let discovered_next = sessions
+        let next_session_id = sessions
             .last_key_value()
             .map(|(session, _)| session.0.saturating_add(1))
             .unwrap_or(1);
-        ensure_next_session(&state, SessionId::new(discovered_next));
+        ensure_next_session_id(&state, SessionId::new(next_session_id));
 
         let mut manager = Self {
             persistence,
@@ -187,7 +202,7 @@ where
         &mut self,
         persistence: SessionPersistence,
     ) -> Result<SessionId, SessionCreateError> {
-        let session = next_session(&self.state);
+        let session = allocate_session_id(&self.state);
         let state = DurableState::new(SessionPersistentState::default());
         if persistence == SessionPersistence::Persistent {
             self.persistence
@@ -230,9 +245,14 @@ where
         Ok((control, stream))
     }
 
-    pub(crate) fn delete(&mut self, session: SessionId) -> Result<(), SessionControlError> {
+    pub(crate) fn delete(
+        &mut self,
+        session: SessionId,
+        ack: Sender<Result<(), SessionDeleteError>>,
+    ) {
         if !self.sessions.contains_key(&session) {
-            return Err(SessionControlError::SessionClosed(session));
+            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            return;
         }
         self.ensure_actor(session);
         let task = self
@@ -240,8 +260,7 @@ where
             .get_mut(&session)
             .and_then(|entry| entry.actor.as_mut())
             .expect("a known Session was just materialized");
-        task.actor.request_delete();
-        Ok(())
+        task.actor.request_delete(ack);
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -252,8 +271,8 @@ where
         }
     }
 
-    pub(crate) fn is_idle(&self) -> bool {
-        self.actor_poll_queue.is_empty()
+    pub(crate) fn has_live_actors(&self) -> bool {
+        !self.actor_poll_queue.is_empty()
     }
 
     fn purge_dead(&mut self) -> Result<(), AgentCreateError> {
@@ -264,7 +283,7 @@ where
             .max()
             .map(|agent| agent.saturating_add(1))
             .unwrap_or(1);
-        ensure_next_agent(&self.state, AgentId::new(next_agent_id));
+        ensure_next_agent_id(&self.state, AgentId::new(next_agent_id));
 
         let persisted_agents = persisted_agents.into_iter().collect::<BTreeSet<_>>();
         let mut reachable_agents = BTreeSet::new();
@@ -286,7 +305,8 @@ where
         Ok(())
     }
 
-    pub(crate) fn poll(&mut self, context: &mut Context<'_>) -> Poll<()> {
+    /// Fairly advance the currently live Session actors once.
+    pub(crate) fn poll_actors(&mut self, context: &mut Context<'_>) -> Poll<()> {
         let actor_count = self.actor_poll_queue.len();
         for _ in 0..actor_count {
             let Some(session) = self.actor_poll_queue.pop_front() else {
@@ -355,24 +375,33 @@ where
 
     fn finish_actor(&mut self, exit: SessionActorExit) {
         let session = exit.session();
-        self.actor_poll_queue.retain(|queued| *queued != session);
-        if let Some(entry) = self.sessions.get_mut(&session) {
-            entry.actor = None;
-        }
         match exit {
-            SessionActorExit::Deleted { .. } => {
+            SessionActorExit::DeleteReady { .. } => {
                 let result = self.remove_persistent_state(session);
-                if result.is_ok() {
+                let deleted = self
+                    .sessions
+                    .get_mut(&session)
+                    .and_then(|entry| entry.actor.as_mut())
+                    .expect("a delete-ready Session still owns its actor")
+                    .actor
+                    .complete_delete(result);
+                if deleted {
+                    self.actor_poll_queue.retain(|queued| *queued != session);
                     self.sessions.remove(&session);
                 }
             }
-            SessionActorExit::Shutdown { .. } => {}
+            SessionActorExit::Shutdown { .. } => {
+                self.actor_poll_queue.retain(|queued| *queued != session);
+                if let Some(entry) = self.sessions.get_mut(&session) {
+                    entry.actor = None;
+                }
+            }
         }
     }
 
-    fn remove_persistent_state(&self, session: SessionId) -> Result<(), SessionControlError> {
+    fn remove_persistent_state(&self, session: SessionId) -> Result<(), SessionDeleteError> {
         let Some(entry) = self.sessions.get(&session) else {
-            return Err(SessionControlError::SessionClosed(session));
+            return Err(SessionDeleteError::SessionNotFound(session));
         };
         if entry.persistence == SessionPersistence::Ephemeral {
             return Ok(());
@@ -386,7 +415,7 @@ where
                     session = %session,
                     error = %error,
                 );
-                SessionControlError::Persistence
+                SessionDeleteError::Persistence(error)
             })
     }
 }

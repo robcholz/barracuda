@@ -17,7 +17,7 @@ type BuildAdapter<F> =
 
 pub(super) struct LongTermDeps<F: ClawFs + 'static> {
     global: LongTermMemory<F>,
-    agents: AgentMemoryStores<F>,
+    agent_stores: AgentMemoryStores<F>,
     build_adapter: Arc<BuildAdapter<F>>,
 }
 
@@ -63,7 +63,7 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         Ok(Self {
             global: LongTermMemoryContextAdapter::<F>::open_global_store(&global_dir)?,
-            agents: AgentMemoryStores::new(agent_root_dir),
+            agent_stores: AgentMemoryStores::new(agent_root_dir),
             build_adapter: LongTermMemoryContextAdapter::<F>::llm_builder::<H, Timer>(api_manager),
         })
     }
@@ -72,7 +72,7 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
         &self,
         kind: &str,
     ) -> Result<LongTermMemoryContextAdapter<F>, LongTermInitError> {
-        let agent = self.agents.get(kind)?;
+        let agent = self.agent_stores.get(kind)?;
         Ok((self.build_adapter)(agent, self.global.clone()))
     }
 }

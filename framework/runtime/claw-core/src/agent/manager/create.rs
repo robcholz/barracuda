@@ -195,12 +195,14 @@ impl<
             AgentCreateError::UnknownKind(kind.as_str().to_owned())
         })?;
         let runtime = manifest.runtime();
-        let skills = self.skills.skill_set();
+        let skill_set = self.skill_registry.skill_set();
         let state = DurableState::new(recovery_state.unwrap_or_else(|| BaseAgentState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.
-        let mut tools = self.tools.tool_set_with_blacklist(runtime.tool_blacklist());
+        let mut tools = self
+            .tool_registry
+            .tool_set_with_blacklist(runtime.tool_blacklist());
         let (effect_emitter, effect_inbox) = agent_effect_channel();
         tools.add_group(internal_tools(effect_emitter.clone()))?;
         for extension in extension_tools {
@@ -217,7 +219,7 @@ impl<
                 COMPACTION_KEEP_RECENT_TOKENS,
                 COMPACTION_SEGMENT_TOKEN_BUDGET,
             );
-        let profile_adapter = ProfileContextAdapter::new(self.profile.clone());
+        let profile_adapter = ProfileContextAdapter::new(self.profile_store.clone());
         let adapter = match self.long_term.adapter(kind.as_str()) {
             Ok(adapter) => adapter,
             Err(error) => {
@@ -242,7 +244,7 @@ impl<
             Box::new(reasoning_effort_adapter),
             Box::new(resume_adapter),
             Box::new(conversation_history),
-            Box::new(SkillContextAdapter::new(skills)),
+            Box::new(SkillContextAdapter::new(skill_set)),
             Box::new(profile_adapter),
             Box::new(adapter),
         ];

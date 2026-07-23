@@ -64,8 +64,8 @@ fn session_manager_payload_contains_both_counters() {
     assert_eq!(
         state,
         json!({
-            "agent_ids": "agent-1",
-            "session_ids": "session-2",
+            "agent_id_allocator": "agent-1",
+            "session_id_allocator": "session-2",
         })
     );
 }

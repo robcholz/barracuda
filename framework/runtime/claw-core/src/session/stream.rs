@@ -38,27 +38,6 @@ pub enum TurnOrigin {
     },
 }
 
-// The reasoning cap is a compile-time tier, not a runtime knob. Exactly one of
-// the mutually-exclusive `reasoning_short` / `reasoning_medium` / `reasoning_long`
-// Cargo features selects it; the default is `reasoning_short`. Reject zero or
-// multiple so the cap is never ambiguous.
-#[cfg(not(any(
-    feature = "reasoning_short",
-    feature = "reasoning_medium",
-    feature = "reasoning_long",
-)))]
-compile_error!(
-    "enable exactly one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
-);
-#[cfg(any(
-    all(feature = "reasoning_short", feature = "reasoning_medium"),
-    all(feature = "reasoning_short", feature = "reasoning_long"),
-    all(feature = "reasoning_medium", feature = "reasoning_long"),
-))]
-compile_error!(
-    "enable only one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
-);
-
 /// Semantic input the active turn needs from its caller.
 ///
 /// Callers choose how to present this request. A chat adapter may render it as
@@ -149,13 +128,12 @@ pub enum IterationEvent {
 /// A recoverable Session-scope problem.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionEventError {
-    /// Deleting the Session's root Agent failed; the Session remains registered.
-    #[error("session deletion failed: {source}")]
-    DeleteFailed {
-        /// The typed lower-layer failure.
-        #[source]
-        source: AgentCreateError,
-    },
+    /// Permanent deletion failed; the Session remains registered.
+    ///
+    /// The caller that requested deletion receives the typed lower-layer
+    /// failure through `SessionDeleteError`.
+    #[error("session deletion failed")]
+    DeleteFailed,
 }
 
 /// A recoverable problem reported inside an active [`TurnEvent`] bracket.

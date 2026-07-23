@@ -1,6 +1,6 @@
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
@@ -11,13 +11,13 @@ use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 
-use super::agent_slot::{AgentSlot, AgentSlotUpdate};
+use super::agent_slot::{AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
     ApprovalCompletion, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
 };
 use super::control::{ControlOp, SessionCommand, SessionControlError};
-use super::manager::{OpenSessionError, SharedAgentManager};
+use super::manager::{OpenSessionError, SessionDeleteError, SharedAgentManager};
 use super::permission::SessionPermission;
 use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
@@ -37,21 +37,33 @@ struct OpenSession {
     events: Sender<SessionEvent>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StopReason {
     Close,
     Shutdown,
     Delete,
 }
 
+impl StopReason {
+    fn escalate(self, incoming: Self) -> Self {
+        match (self, incoming) {
+            (Self::Delete, _) | (_, Self::Delete) => Self::Delete,
+            (Self::Shutdown, _) | (_, Self::Shutdown) => Self::Shutdown,
+            (Self::Close, Self::Close) => Self::Close,
+        }
+    }
+}
+
 struct Stopping {
     reason: StopReason,
     close_acks: Vec<Sender<Result<(), SessionControlError>>>,
+    delete_ack: Option<Sender<Result<(), SessionDeleteError>>>,
 }
 
 enum ActorLifecycle {
     Running,
     Stopping(Stopping),
+    DeleteReady(Stopping),
 }
 
 impl ActorLifecycle {
@@ -59,28 +71,50 @@ impl ActorLifecycle {
         matches!(self, Self::Running)
     }
 
+    fn is_deleting(&self) -> bool {
+        matches!(
+            self,
+            Self::Stopping(Stopping {
+                reason: StopReason::Delete,
+                ..
+            }) | Self::DeleteReady(_)
+        )
+    }
+
     fn stop(
         &mut self,
         reason: StopReason,
         close_ack: Option<Sender<Result<(), SessionControlError>>>,
+        delete_ack: Option<Sender<Result<(), SessionDeleteError>>>,
     ) {
         match self {
             Self::Running => {
                 *self = Self::Stopping(Stopping {
                     reason,
                     close_acks: close_ack.into_iter().collect(),
+                    delete_ack,
                 });
             }
             Self::Stopping(stopping) => {
-                stopping.reason = stopping.reason.max(reason);
+                stopping.reason = stopping.reason.escalate(reason);
                 stopping.close_acks.extend(close_ack);
+                debug_assert!(
+                    stopping.delete_ack.is_none() || delete_ack.is_none(),
+                    "one Session deletion has only one completion receiver"
+                );
+                if delete_ack.is_some() {
+                    stopping.delete_ack = delete_ack;
+                }
+            }
+            Self::DeleteReady(_) => {
+                unreachable!("a delete-ready actor is completed synchronously by its manager")
             }
         }
     }
 
     fn reason(&self) -> Option<StopReason> {
         match self {
-            Self::Running => None,
+            Self::Running | Self::DeleteReady(_) => None,
             Self::Stopping(stopping) => Some(stopping.reason),
         }
     }
@@ -104,23 +138,23 @@ impl PollSource {
 }
 
 pub(super) enum SessionActorExit {
-    Deleted { session: SessionId },
+    DeleteReady { session: SessionId },
     Shutdown { session: SessionId },
 }
 
 impl SessionActorExit {
     pub(super) fn session(&self) -> SessionId {
         match self {
-            Self::Deleted { session } | Self::Shutdown { session } => *session,
+            Self::DeleteReady { session } | Self::Shutdown { session } => *session,
         }
     }
 }
 
-/// One long-lived Session stream backed by one queued root Agent.
+/// One long-lived Session stream backed by Session-owned Agent slots.
 ///
-/// The actor never polls Agent directly. It moves the resident Agent into
-/// the process-global Scheduler and only reduces scheduler outputs back into
-/// the slot and outward Session stream.
+/// The actor never polls an Agent directly. It moves each resident Agent into
+/// the process-global Scheduler, reduces scheduler outputs back into its slot,
+/// and projects only root-Agent events onto the public Session stream.
 pub(super) struct SessionActor<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
@@ -131,15 +165,15 @@ where
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
     agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
-    agent_ids: AgentIdAllocatorHandle,
+    agent_id_allocator: AgentIdAllocatorHandle,
 
-    root: Option<AgentSlot<Http, Timer>>,
+    agents: AgentSlots<Http, Timer>,
     inbox: VecDeque<Message>,
     active_turn: Option<TurnId>,
     next_turn: u32,
     approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
 
-    runs: AgentRunPort<Http, Timer>,
+    run_port: AgentRunPort<Http, Timer>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
     next_source: PollSource,
 
@@ -159,7 +193,7 @@ where
         session: SessionId,
         persistence: SessionPersistence,
         agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
-        agent_ids: AgentIdAllocatorHandle,
+        agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
         approval_resolver: SharedApprovalResolver<Http, Timer>,
         scheduler: AgentRunSchedulerHandle<Http, Timer>,
@@ -171,13 +205,13 @@ where
                 persistence,
                 state,
                 agent_manager,
-                agent_ids,
-                root: None,
+                agent_id_allocator,
+                agents: AgentSlots::new(),
                 inbox: VecDeque::new(),
                 active_turn: None,
                 next_turn: 1,
                 approval: ApprovalFlow::new(approval_resolver),
-                runs: AgentRunPort::new(scheduler),
+                run_port: AgentRunPort::new(scheduler),
                 commands: Box::pin(commands),
                 next_source: PollSource::Command,
                 client: None,
@@ -213,7 +247,9 @@ where
                     }
                 }
                 PollSource::Agent => {
-                    if let Poll::Ready(Some(output)) = Pin::new(&mut self.runs).poll_next(context) {
+                    if let Poll::Ready(Some(output)) =
+                        Pin::new(&mut self.run_port).poll_next(context)
+                    {
                         self.handle_agent_output(output);
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
@@ -324,12 +360,12 @@ where
         }
         match op {
             ControlOp::Interrupt => {
-                if let Some(root) = &mut self.root {
+                if let Some(root) = self.root_mut() {
                     root.interrupt();
                 }
             }
             ControlOp::Cancel => {
-                if let Some(root) = &mut self.root {
+                if let Some(root) = self.root_mut() {
                     root.cancel();
                 }
             }
@@ -343,35 +379,39 @@ where
             self.reject_closed(ack);
             return;
         }
-        self.lifecycle.stop(StopReason::Close, Some(ack));
+        self.lifecycle.stop(StopReason::Close, Some(ack), None);
         self.stop_current_run(false);
     }
 
-    pub(super) fn request_delete(&mut self) {
-        self.lifecycle.stop(StopReason::Delete, None);
+    pub(super) fn request_delete(&mut self, ack: Sender<Result<(), SessionDeleteError>>) {
+        if self.lifecycle.is_deleting() {
+            let _ = ack.try_send(Err(SessionDeleteError::AlreadyDeleting(self.session)));
+            return;
+        }
+        self.lifecycle.stop(StopReason::Delete, None, Some(ack));
         self.stop_current_run(true);
     }
 
     pub(super) fn request_shutdown(&mut self) {
-        self.lifecycle.stop(StopReason::Shutdown, None);
+        self.lifecycle.stop(StopReason::Shutdown, None, None);
         self.stop_current_run(false);
     }
 
     fn stop_current_run(&mut self, reaping: bool) {
         self.inbox.clear();
         self.approval.cancel();
-        if let Some(root) = &mut self.root {
+        for agent in self.agents.values_mut() {
             if reaping {
-                root.begin_reaping();
+                agent.begin_reaping();
             } else {
-                root.cancel();
+                agent.cancel();
             }
         }
     }
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
         let reason = self.lifecycle.reason()?;
-        if self.root.as_ref().is_some_and(AgentSlot::is_in_flight) {
+        if self.agents.values().any(AgentSlot::is_in_flight) {
             return None;
         }
         self.finish_turn();
@@ -384,19 +424,12 @@ where
 
         match reason {
             StopReason::Delete => {
-                if let Err(error) = self.delete_root_agent() {
-                    self.emit_event_error(SessionEventError::DeleteFailed { source: error });
-                    if !stopping.close_acks.is_empty() {
-                        self.lifecycle = ActorLifecycle::Stopping(Stopping {
-                            reason: StopReason::Close,
-                            close_acks: stopping.close_acks,
-                        });
-                    }
+                if let Err(error) = self.delete_agents() {
+                    self.fail_delete(stopping, error.into());
                     return None;
                 }
-                self.emit_closed(SessionCloseReason::Deleted);
-                Self::complete_close_requests(stopping.close_acks);
-                Some(SessionActorExit::Deleted {
+                self.lifecycle = ActorLifecycle::DeleteReady(stopping);
+                Some(SessionActorExit::DeleteReady {
                     session: self.session,
                 })
             }
@@ -412,6 +445,42 @@ where
                 Self::complete_close_requests(stopping.close_acks);
                 None
             }
+        }
+    }
+
+    pub(super) fn complete_delete(&mut self, result: Result<(), SessionDeleteError>) -> bool {
+        let ActorLifecycle::DeleteReady(mut stopping) =
+            std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running)
+        else {
+            unreachable!("only a delete-ready actor can complete Session deletion")
+        };
+        match result {
+            Ok(()) => {
+                self.emit_closed(SessionCloseReason::Deleted);
+                Self::complete_close_requests(stopping.close_acks);
+                if let Some(ack) = stopping.delete_ack.take() {
+                    let _ = ack.try_send(Ok(()));
+                }
+                true
+            }
+            Err(error) => {
+                self.fail_delete(stopping, error);
+                false
+            }
+        }
+    }
+
+    fn fail_delete(&mut self, mut stopping: Stopping, error: SessionDeleteError) {
+        self.emit_event_error(SessionEventError::DeleteFailed);
+        if let Some(ack) = stopping.delete_ack.take() {
+            let _ = ack.try_send(Err(error));
+        }
+        if !stopping.close_acks.is_empty() {
+            self.lifecycle = ActorLifecycle::Stopping(Stopping {
+                reason: StopReason::Close,
+                close_acks: stopping.close_acks,
+                delete_ack: None,
+            });
         }
     }
 
@@ -450,38 +519,43 @@ where
     }
 
     fn dispatch_root(&mut self, message: Message) -> Result<(), Message> {
-        let root = self
-            .root
-            .as_mut()
-            .expect("an Agent run starts only with a resident root");
-        let agent = root.id();
+        let agent = self
+            .root_id()
+            .expect("an Agent run starts only with a root Agent id");
         let span = tracing::info_span!(
             "agent",
             trace.task = %agent,
             run.agent = %agent,
         );
-        root.dispatch(message, &self.runs, span)
+        let root = self
+            .agents
+            .get_mut(&agent)
+            .expect("an Agent run starts only with a resident root");
+        root.dispatch(message, &self.run_port, span)
     }
 
-    fn delete_root_agent(&mut self) -> Result<(), AgentCreateError> {
-        let root_agent = self
-            .root
-            .as_ref()
-            .map(AgentSlot::id)
-            .or_else(|| self.state.get().root_agent);
+    fn delete_agents(&mut self) -> Result<(), AgentCreateError> {
+        let root_agent = self.root_id();
+        let mut agent_ids = self.agents.keys().copied().collect::<BTreeSet<_>>();
+        agent_ids.extend(root_agent);
         // Drop every live component handle before deleting its canonical
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
-        self.root = None;
-        if let Some(root_agent) = root_agent {
-            self.agent_manager.remove(root_agent)?;
+        self.agents.clear();
+        for agent in agent_ids {
+            self.agent_manager.remove(agent)?;
+            if Some(agent) == root_agent {
+                self.state.get_mut().clear_root();
+            }
         }
-        self.state.get_mut().clear_root();
         Ok(())
     }
 
     fn ensure_root(&mut self) -> Result<(), AgentCreateError> {
-        if self.root.is_some() {
+        if self
+            .root_id()
+            .is_some_and(|root| self.agents.contains_key(&root))
+        {
             return Ok(());
         }
         let reasoning_effort = self.state.get().reasoning_effort;
@@ -497,7 +571,7 @@ where
             )?;
             (id, agent, reasoning)
         } else {
-            let id = self.agent_ids.next();
+            let id = self.agent_id_allocator.next();
             let persistence = match self.persistence {
                 SessionPersistence::Persistent => PersistenceConfig::Persistent,
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
@@ -515,15 +589,24 @@ where
             self.state.get_mut().root_agent = Some(id);
             (id, agent, reasoning)
         };
-        self.root = Some(AgentSlot::new(id, agent, reasoning_handle));
+        let previous = self
+            .agents
+            .insert(id, AgentSlot::new(id, agent, reasoning_handle));
+        debug_assert!(previous.is_none());
         Ok(())
     }
 
     fn handle_agent_output(&mut self, output: crate::scheduler::AgentRunOutput<Http, Timer>) {
-        let Some(root) = &mut self.root else {
+        let agent = output.agent;
+        let is_root = self.root_id() == Some(agent);
+        let Some(slot) = self.agents.get_mut(&agent) else {
             return;
         };
-        match root.accept_output(output) {
+        let update = slot.accept_output(output);
+        if !is_root {
+            return;
+        }
+        match update {
             AgentSlotUpdate::Event(Ok(event)) => self.handle_agent_event(event),
             AgentSlotUpdate::Event(Err(error)) => {
                 self.emit_turn_error(error.into());
@@ -597,13 +680,12 @@ where
             }
         };
         let resolution = self
-            .root
-            .as_ref()
+            .root()
             .ok_or(crate::agent::AgentApprovalError::NotAwaitingApproval)
             .and_then(|root| root.resolve_approval(tool_call_id, decision));
         if let Err(error) = resolution {
             self.emit_input_error(request, error.into());
-            if let Some(root) = &mut self.root {
+            if let Some(root) = self.root_mut() {
                 root.cancel();
             }
         }
@@ -628,9 +710,23 @@ where
         if self.state.get().reasoning_effort != effort {
             self.state.get_mut().reasoning_effort = effort;
         }
-        if let Some(root) = &self.root {
-            root.set_reasoning_effort(effort);
+        for agent in self.agents.values() {
+            agent.set_reasoning_effort(effort);
         }
+    }
+
+    fn root_id(&self) -> Option<crate::agent::AgentId> {
+        self.state.get().root_agent
+    }
+
+    fn root(&self) -> Option<&AgentSlot<Http, Timer>> {
+        let root = self.root_id()?;
+        self.agents.get(&root)
+    }
+
+    fn root_mut(&mut self) -> Option<&mut AgentSlot<Http, Timer>> {
+        let root = self.root_id()?;
+        self.agents.get_mut(&root)
     }
 
     fn accepts(&self, lease: u64) -> bool {
@@ -689,4 +785,29 @@ where
 pub(super) enum SessionActorStatus {
     Progress,
     Exit(SessionActorExit),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StopReason;
+
+    #[test]
+    fn stop_reason_escalation_is_explicit_and_monotonic() {
+        assert_eq!(
+            StopReason::Close.escalate(StopReason::Shutdown),
+            StopReason::Shutdown
+        );
+        assert_eq!(
+            StopReason::Shutdown.escalate(StopReason::Close),
+            StopReason::Shutdown
+        );
+        assert_eq!(
+            StopReason::Shutdown.escalate(StopReason::Delete),
+            StopReason::Delete
+        );
+        assert_eq!(
+            StopReason::Delete.escalate(StopReason::Close),
+            StopReason::Delete
+        );
+    }
 }

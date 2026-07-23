@@ -21,8 +21,6 @@ pub enum SessionControlError {
     },
     #[error("agent runtime is not running")]
     WorkerStopped,
-    #[error("failed to update persisted session state")]
-    Persistence,
 }
 
 #[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]

@@ -16,8 +16,8 @@ crate::define_id_allocator!(
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(super) struct SessionManagerState {
-    agent_ids: AgentIdAllocator,
-    session_ids: SessionIdAllocator,
+    agent_id_allocator: AgentIdAllocator,
+    session_id_allocator: SessionIdAllocator,
 }
 
 #[derive(Clone, Debug)]
@@ -33,25 +33,25 @@ impl AgentIdAllocatorHandle {
     }
 
     pub(super) fn next(&self) -> AgentId {
-        self.state.get_mut().agent_ids.next()
+        self.state.get_mut().agent_id_allocator.next()
     }
 }
 
-pub(super) fn next_session(state: &DurableState<SessionManagerState>) -> SessionId {
-    state.get_mut().session_ids.next()
+pub(super) fn allocate_session_id(state: &DurableState<SessionManagerState>) -> SessionId {
+    state.get_mut().session_id_allocator.next()
 }
 
-pub(super) fn ensure_next_session(state: &DurableState<SessionManagerState>, next: SessionId) {
+pub(super) fn ensure_next_session_id(state: &DurableState<SessionManagerState>, next: SessionId) {
     let mut state = state.get_mut();
-    if state.session_ids.peek() < next {
-        state.session_ids = SessionIdAllocator::starting_at(next);
+    if state.session_id_allocator.peek() < next {
+        state.session_id_allocator = SessionIdAllocator::starting_at(next);
     }
 }
 
-pub(super) fn ensure_next_agent(state: &DurableState<SessionManagerState>, next: AgentId) {
+pub(super) fn ensure_next_agent_id(state: &DurableState<SessionManagerState>, next: AgentId) {
     let mut state = state.get_mut();
-    if state.agent_ids.peek() < next {
-        state.agent_ids = AgentIdAllocator::starting_at(next);
+    if state.agent_id_allocator.peek() < next {
+        state.agent_id_allocator = AgentIdAllocator::starting_at(next);
     }
 }
 
@@ -73,7 +73,7 @@ mod tests {
     use claw_persistence::DurableState;
 
     use super::{
-        ensure_next_agent, ensure_next_session, next_session, AgentIdAllocatorHandle,
+        allocate_session_id, ensure_next_agent_id, ensure_next_session_id, AgentIdAllocatorHandle,
         SessionManagerState,
     };
     use crate::agent::AgentId;
@@ -83,10 +83,10 @@ mod tests {
     fn manager_state_owns_both_global_allocators() {
         let state = DurableState::new(SessionManagerState::default());
 
-        ensure_next_session(&state, SessionId::new(4));
-        ensure_next_agent(&state, AgentId::new(7));
+        ensure_next_session_id(&state, SessionId::new(4));
+        ensure_next_agent_id(&state, AgentId::new(7));
 
-        assert_eq!(next_session(&state), SessionId::new(4));
+        assert_eq!(allocate_session_id(&state), SessionId::new(4));
         assert_eq!(AgentIdAllocatorHandle::new(&state).next(), AgentId::new(7));
     }
 }

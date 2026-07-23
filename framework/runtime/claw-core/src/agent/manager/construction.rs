@@ -29,7 +29,7 @@ impl<
     /// Returns [`AgentManagerError::MissingPersistenceDir`] when the
     /// persistence root is blank.
     pub(crate) fn new(
-        tools: Arc<ToolRegistry>,
+        tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         memory_directory: String,
         skill_roots: Vec<String>,
@@ -54,19 +54,19 @@ impl<
             }
         };
 
-        let profile = ProfileStore::new(&layout.profile_dir);
-        let skills = build_skill_registry::<Filesystem>(skill_roots)?;
+        let profile_store = ProfileStore::new(&layout.profile_dir);
+        let skill_registry = build_skill_registry::<Filesystem>(skill_roots)?;
 
         let manager = Self {
             persistence,
             api_manager,
-            tools,
+            tool_registry,
             _http: PhantomData,
             _timer: PhantomData,
             transcript_dir: layout.transcript_dir,
             long_term,
-            profile,
-            skills,
+            profile_store,
+            skill_registry,
         };
         manager.purge_dead()?;
         Ok(manager)

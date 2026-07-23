@@ -16,7 +16,7 @@ use tracing::Instrument as _;
 use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunScheduler;
 use crate::session::{
-    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionId,
+    OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
 };
 use crate::SYSTEM_TRACE_SCOPE;
@@ -37,7 +37,7 @@ pub(super) enum RuntimeCommand {
     },
     DeleteSession {
         session: SessionId,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: Sender<Result<(), SessionDeleteError>>,
     },
     Stop,
 }
@@ -49,7 +49,7 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     persistence: SharedPersistence<Filesystem>,
-    sessions: SessionManager<Filesystem, Http, Timer>,
+    session_manager: SessionManager<Filesystem, Http, Timer>,
     scheduler: AgentRunScheduler<Http, Timer>,
     commands: Pin<Box<Receiver<RuntimeCommand>>>,
     stopping: bool,
@@ -64,7 +64,7 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        tools: Arc<ToolRegistry>,
+        tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
@@ -72,8 +72,8 @@ where
         commands: Receiver<RuntimeCommand>,
     ) -> Result<Self, AgentRuntimeBuildError> {
         let (scheduler, scheduler_handle) = AgentRunScheduler::new();
-        let sessions = SessionManager::new(
-            tools,
+        let session_manager = SessionManager::new(
+            tool_registry,
             Arc::clone(&persistence),
             persistence_dir,
             skill_roots,
@@ -83,7 +83,7 @@ where
         .map_err(map_session_manager_init_error)?;
         Ok(Self {
             persistence,
-            sessions,
+            session_manager,
             scheduler,
             commands: Box::pin(commands),
             stopping: false,
@@ -94,20 +94,20 @@ where
     fn handle_command(&mut self, command: Option<RuntimeCommand>) {
         match command {
             Some(RuntimeCommand::CreateSession { persistence, ack }) => {
-                let _ = ack.try_send(self.sessions.create(persistence));
+                let _ = ack.try_send(self.session_manager.create(persistence));
             }
             Some(RuntimeCommand::ListSessions { ack }) => {
-                let _ = ack.try_send(self.sessions.list());
+                let _ = ack.try_send(self.session_manager.list());
             }
             Some(RuntimeCommand::OpenSession { session, ack }) => {
-                let _ = ack.try_send(self.sessions.open(session));
+                let _ = ack.try_send(self.session_manager.open(session));
             }
             Some(RuntimeCommand::DeleteSession { session, ack }) => {
-                let _ = ack.try_send(self.sessions.delete(session));
+                self.session_manager.delete(session, ack);
             }
             Some(RuntimeCommand::Stop) | None => {
                 self.stopping = true;
-                self.sessions.shutdown();
+                self.session_manager.shutdown();
             }
         }
     }
@@ -125,15 +125,15 @@ where
                     let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
                 }
                 RuntimeCommand::DeleteSession { ack, .. } => {
-                    let _ = ack.try_send(Err(SessionControlError::WorkerStopped));
+                    let _ = ack.try_send(Err(SessionDeleteError::WorkerStopped));
                 }
                 RuntimeCommand::Stop => {}
             }
         }
     }
 
-    fn is_idle(&self) -> bool {
-        self.sessions.is_idle() && self.scheduler.is_idle()
+    fn shutdown_complete(&self) -> bool {
+        !self.session_manager.has_live_actors() && self.scheduler.is_idle()
     }
 }
 
@@ -169,7 +169,7 @@ where
                     }
                 }
                 WorkerTask::Sessions => {
-                    if let Poll::Ready(()) = this.sessions.poll(context) {
+                    if let Poll::Ready(()) = this.session_manager.poll_actors(context) {
                         progressed = true;
                         break;
                     }
@@ -189,7 +189,7 @@ where
             tracing::error!(name: "persistence_failed", error = %error);
         }
 
-        if this.stopping && this.is_idle() {
+        if this.stopping && this.shutdown_complete() {
             this.reject_commands();
             Poll::Ready(())
         } else {
@@ -234,7 +234,7 @@ fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntim
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_runtime_worker<Filesystem, Http, Timer, Executor>(
-    tools: Arc<ToolRegistry>,
+    tool_registry: Arc<ToolRegistry>,
     persistence: SharedPersistence<Filesystem>,
     persistence_dir: String,
     skill_roots: Vec<String>,
@@ -254,7 +254,7 @@ pub(super) fn run_runtime_worker<Filesystem, Http, Timer, Executor>(
     );
     let worker = match span.in_scope(|| {
         RuntimeWorker::<Filesystem, Http, Timer>::new(
-            tools,
+            tool_registry,
             persistence,
             persistence_dir,
             skill_roots,

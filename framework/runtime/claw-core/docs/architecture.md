@@ -63,7 +63,9 @@ AgentRunScheduler<H, T>
   transcript, profile, and memory remain canonical in their component stores.
 - Permanent deletion is two-stage: SessionActor first reaps physical Agent
   ownership and asks AgentManager to remove Agent-owned stores; SessionManager
-  then removes the Session record and directory entry.
+  then removes the Session record and directory entry. The public deletion
+  acknowledgement completes only after both stages succeed; `Closed(Deleted)`
+  is never emitted before the Session record has been removed.
 - RuntimeWorker owns only the polling/flush boundary. It forwards lifecycle
   commands to SessionManager and does not understand the Session persistence
   schema.
@@ -355,9 +357,9 @@ rather than changing the scope of `ToolCallId`.
 
 ## Session stream
 
-- `SessionStream` is the public read/control surface for one open Session. It
-  owns the single event receiver and can clone a `SessionControl` capability
-  for concurrent writers.
+- Opening a Session returns parallel `SessionControl` and `SessionStream`
+  values. SessionStream owns the single event receiver; SessionControl is the
+  cloneable command capability for concurrent writers.
 - `append(Message)` only appends to the SessionActor's FIFO inbox. It does not
   poll the Agent and does not wait for the resulting turn to finish.
 - SessionActor starts a resident root by moving it into the global Scheduler.
@@ -429,7 +431,7 @@ external command
 ~~~
 
 RuntimeWorker rotates across command ingress, SessionManager, and Scheduler
-work. One SessionManager round polls every currently live SessionActor at most
+work. `SessionManager::poll_actors` polls every currently live SessionActor at most
 once; the global Scheduler independently gives every active AgentRun at most
 one poll per fair sweep. Polling SessionManager or SessionActor never polls
 an `AgentRun` directly. Persistence is serviced after every top-level worker

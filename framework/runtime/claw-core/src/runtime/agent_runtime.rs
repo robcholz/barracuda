@@ -18,7 +18,7 @@ use claw_tool::ToolRegistry;
 use crate::agent::AgentManagerError;
 use crate::config::{ApiPurpose, SharedApiManager};
 use crate::session::{
-    OpenSessionError, SessionControl, SessionControlError, SessionCreateError, SessionId,
+    OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionPersistence, SessionStream,
 };
 use crate::SYSTEM_TRACE_SCOPE;
@@ -84,7 +84,7 @@ impl AgentRuntime {
     /// Returns [`AgentRuntimeBuildError`] when persistent state cannot be
     /// restored or the worker cannot be started.
     pub fn new<Filesystem, Http, Timer, Thread, Executor>(
-        tools: Arc<ToolRegistry>,
+        tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
@@ -109,7 +109,7 @@ impl AgentRuntime {
             CoreAffinity::Any,
             move || {
                 run_runtime_worker::<Filesystem, Http, Timer, Executor>(
-                    tools,
+                    tool_registry,
                     persistence,
                     persistence_dir,
                     skill_roots,
@@ -249,8 +249,8 @@ impl AgentRuntime {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionControlError`] when the Session cannot be deleted.
-    pub fn delete_session(&self, session: SessionId) -> Result<(), SessionControlError> {
+    /// Returns [`SessionDeleteError`] when the complete deletion transaction fails.
+    pub fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
         let span = tracing::info_span!(
             "session.delete",
             run.system = SYSTEM_TRACE_SCOPE,
@@ -262,31 +262,33 @@ impl AgentRuntime {
             .try_send(RuntimeCommand::DeleteSession { session, ack })
             .map_err(|_| {
                 tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
-                SessionControlError::WorkerStopped
+                SessionDeleteError::WorkerStopped
             })?;
         match result.recv_blocking() {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => {
                 match &error {
-                    SessionControlError::SessionClosed(_) => {
-                        tracing::warn!(name: "delete_rejected", reason = "session_closed");
+                    SessionDeleteError::SessionNotFound(_) => {
+                        tracing::warn!(name: "delete_rejected", reason = "session_not_found");
                     }
-                    SessionControlError::WorkerStopped => {
+                    SessionDeleteError::AlreadyDeleting(_) => {
+                        tracing::warn!(name: "delete_rejected", reason = "already_deleting");
+                    }
+                    SessionDeleteError::WorkerStopped => {
                         tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
                     }
-                    SessionControlError::Persistence => {
-                        tracing::error!(name: "delete_rejected", reason = "persistence");
+                    SessionDeleteError::Agent(_) => {
+                        tracing::error!(name: "delete_rejected", reason = "agent");
                     }
-                    SessionControlError::NotAwaitingInput(_)
-                    | SessionControlError::InputRequestMismatch { .. } => {
-                        tracing::error!(name: "delete_rejected", reason = "unexpected_response");
+                    SessionDeleteError::Persistence(_) => {
+                        tracing::error!(name: "delete_rejected", reason = "persistence");
                     }
                 }
                 Err(error)
             }
             Err(_) => {
                 tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
-                Err(SessionControlError::WorkerStopped)
+                Err(SessionDeleteError::WorkerStopped)
             }
         }
     }

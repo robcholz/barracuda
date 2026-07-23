@@ -38,11 +38,11 @@ pub(crate) struct AgentManager<
 > {
     persistence: SharedPersistence<Filesystem>,
     api_manager: SharedApiManager,
-    tools: Arc<ToolRegistry>,
+    tool_registry: Arc<ToolRegistry>,
     _http: PhantomData<fn() -> Http>,
     _timer: PhantomData<fn() -> Timer>,
     transcript_dir: String,
     long_term: LongTermDeps<Filesystem>,
-    profile: ProfileStore<Filesystem>,
-    skills: Arc<FsSkillRegistry<Filesystem>>,
+    profile_store: ProfileStore<Filesystem>,
+    skill_registry: Arc<FsSkillRegistry<Filesystem>>,
 }

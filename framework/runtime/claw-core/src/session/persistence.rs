@@ -13,7 +13,7 @@ pub(super) const SESSION_MANAGER_STATE_NAME: &str = "session_manager";
 pub(super) const SESSION_STATE_NAME: &str = "sessions";
 
 impl DurableStateCodec for SessionManagerState {
-    const SCHEMA_VERSION: SchemaVersion = 1;
+    const SCHEMA_VERSION: SchemaVersion = 2;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -74,8 +74,8 @@ mod tests {
         let encoded = state.encode_state().unwrap().into_owned();
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();
 
-        assert_eq!(json["agent_ids"], "agent-1");
-        assert_eq!(json["session_ids"], "session-1");
+        assert_eq!(json["agent_id_allocator"], "agent-1");
+        assert_eq!(json["session_id_allocator"], "session-1");
 
         SessionManagerState::decode_state(
             SessionManagerState::SCHEMA_VERSION,

@@ -80,7 +80,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     #[getset(get = "pub(crate)")]
     context: Context,
     run_state: RunState,
-    iteration_ids: IterationIdAllocator,
+    iteration_id_allocator: IterationIdAllocator,
     context_adapters: Vec<Box<dyn ContextAdapter>>,
 }
 
@@ -116,7 +116,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             permission_policy: config.permission_policy,
             context,
             run_state: RunState::Stopped(StopReason::Ready),
-            iteration_ids: IterationIdAllocator::new(),
+            iteration_id_allocator: IterationIdAllocator::new(),
             context_adapters: config.context_adapters,
         })
     }
@@ -146,7 +146,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             return Err(AgentSubmitError::Running);
         };
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
-        self.iteration_ids = IterationIdAllocator::new();
+        self.iteration_id_allocator = IterationIdAllocator::new();
         let mut turn = self.transcript.open_turn()?;
         turn.append_user(message.as_str())?;
         turn.finish_user()?;
@@ -561,7 +561,7 @@ where
                     break;
                 }
 
-                let iteration_id = self.agent.iteration_ids.next();
+                let iteration_id = self.agent.iteration_id_allocator.next();
                 self.agent.refresh_llm_config();
                 if self.agent.active_turn.is_none() {
                     yield Err(self.agent.fail(AgentError::StateInvariant));

@@ -16,10 +16,10 @@ pub use claw_core::{
     AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, ApprovalResolverError,
     BaseAgentError, InputRequestId, InputRequestKind, IterationEvent, IterationId,
     IterationLoopError, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
-    SessionCloseReason, SessionControl, SessionControlError, SessionCreateError, SessionError,
-    SessionEvent, SessionEventError, SessionId, SessionInputError, SessionPersistence,
-    SessionStream, SessionTurnError, ToolCall, ToolCallId, ToolOutput, TurnEvent, TurnEventError,
-    TurnId, TurnOrigin,
+    SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
+    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
+    SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall, ToolCallId,
+    ToolOutput, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;
@@ -258,9 +258,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`SessionControlError`] when the session is already gone or the
-    /// runtime is stopped.
-    pub fn delete_session(&self, session: SessionId) -> Result<(), SessionControlError> {
+    /// Returns [`SessionDeleteError`] if any part of permanent deletion fails.
+    pub fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
         self.runtime.delete_session(session)
     }
 }

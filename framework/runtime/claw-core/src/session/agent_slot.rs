@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 
@@ -9,6 +11,8 @@ use crate::agent::{
 use crate::scheduler::{AgentRunOutput, AgentRunOutputItem, AgentRunPort, RunControl, RunId};
 
 use super::Message;
+
+pub(super) type AgentSlots<Http, Timer> = BTreeMap<AgentId, AgentSlot<Http, Timer>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {
@@ -64,24 +68,20 @@ where
         }
     }
 
-    pub(super) fn id(&self) -> AgentId {
-        self.id
-    }
-
     pub(super) fn is_in_flight(&self) -> bool {
         matches!(self.execution, Some(Execution::InFlight(_)))
     }
 
-    pub(super) fn start(
+    fn start(
         &mut self,
         message: Message,
-        runs: &AgentRunPort<Http, Timer>,
+        run_port: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
     ) {
         let Some(Execution::Resident(agent)) = self.execution.take() else {
             panic!("only a resident Agent can start a run");
         };
-        let scheduled = runs.submit(self.id, agent, message, span);
+        let scheduled = run_port.submit(self.id, agent, message, span);
         self.execution = Some(Execution::InFlight(InFlight {
             run: scheduled.run,
             control: scheduled.control,
@@ -93,7 +93,7 @@ where
     pub(super) fn dispatch(
         &mut self,
         message: Message,
-        runs: &AgentRunPort<Http, Timer>,
+        run_port: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
     ) -> Result<(), Message> {
         match self.execution.as_mut() {
@@ -102,7 +102,7 @@ where
                 in_flight.control.dispatch(message).map_err(|_| retry)
             }
             Some(Execution::Resident(_)) => {
-                self.start(message, runs, span);
+                self.start(message, run_port, span);
                 Ok(())
             }
             None => Err(message),

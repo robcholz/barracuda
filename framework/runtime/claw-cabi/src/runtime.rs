@@ -14,8 +14,8 @@ use std::time::Duration;
 use claw_agent::{
     stream::StreamPart, AgentError, AgentPersistenceConfig, AgentSystem, ApiPurpose,
     InputRequestId, InputRequestKind, Message, OpenSessionError, SessionControl,
-    SessionControlError, SessionEvent, SessionEventStream, SessionId, SessionPersistence,
-    TurnOrigin,
+    SessionControlError, SessionDeleteError, SessionEvent, SessionEventStream, SessionId,
+    SessionPersistence, TurnOrigin,
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
@@ -479,7 +479,7 @@ fn session_delete(session_id: u32) -> Result<(), CabiError> {
     let agent = running_agent(runtime)?;
     agent
         .delete_session(SessionId::new(session_id))
-        .map_err(session_control_error)
+        .map_err(session_delete_error)
 }
 
 fn receive(
@@ -895,8 +895,17 @@ fn session_control_error(error: SessionControlError) -> CabiError {
         SessionControlError::Busy(_)
         | SessionControlError::NotAwaitingInput(_)
         | SessionControlError::InputRequestMismatch { .. }
-        | SessionControlError::WorkerStopped
-        | SessionControlError::Persistence => CabiError::InvalidState,
+        | SessionControlError::WorkerStopped => CabiError::InvalidState,
+    }
+}
+
+fn session_delete_error(error: SessionDeleteError) -> CabiError {
+    match error {
+        SessionDeleteError::SessionNotFound(_) => CabiError::NotFound,
+        SessionDeleteError::AlreadyDeleting(_)
+        | SessionDeleteError::WorkerStopped
+        | SessionDeleteError::Agent(_)
+        | SessionDeleteError::Persistence(_) => CabiError::InvalidState,
     }
 }
 

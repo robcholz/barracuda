@@ -199,13 +199,13 @@ impl<'a> ToolPhase<'a> {
         }
 
         let remaining_results = tool_calls.len();
-        let mut tool_call_ids = ToolCallIdAllocator::new();
+        let mut tool_call_id_allocator = ToolCallIdAllocator::new();
         let mut allowed = Vec::new();
         let mut pending = VecDeque::new();
         let mut ready_results = VecDeque::new();
 
         for tool_call in tool_calls {
-            let id = tool_call_ids.next();
+            let id = tool_call_id_allocator.next();
             let invocation = match ToolInvocation::try_new(
                 Some(&tool_call.id),
                 &tool_call.name,

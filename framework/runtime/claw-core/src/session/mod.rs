@@ -13,7 +13,9 @@ mod stream;
 
 pub use approval::ApprovalResolverError;
 pub use control::{SessionControl, SessionControlError};
-pub use manager::{OpenSessionError, SessionCreateError, SessionId, SessionPersistence};
+pub use manager::{
+    OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionPersistence,
+};
 pub(crate) use manager::{SessionManager, SessionManagerInitError};
 pub use message::Message;
 pub use stream::{
