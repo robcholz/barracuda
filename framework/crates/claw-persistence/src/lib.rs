@@ -277,7 +277,7 @@ mod tests {
     }
 
     impl DurableStateCodec for TestState {
-        const SCHEMA_VERSION: SchemaVersion = 7;
+        const SCHEMA_VERSION: SchemaVersion = 1;
 
         fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
             Ok(StateBlob {

@@ -600,7 +600,7 @@ mod tests {
     }
 
     impl DurableStateCodec for TestState {
-        const SCHEMA_VERSION: SchemaVersion = 7;
+        const SCHEMA_VERSION: SchemaVersion = 1;
 
         fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
             Ok(StateBlob {
@@ -675,7 +675,7 @@ mod tests {
         persistence.maybe_persist().expect("dirty state persists");
 
         let file = MemFs::read(&format!("{root}/state.bin")).expect("state file exists");
-        assert_eq!(&file[..SCHEMA_VERSION_SIZE], &7_u32.to_le_bytes());
+        assert_eq!(&file[..SCHEMA_VERSION_SIZE], &1_u32.to_le_bytes());
         assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
 
         let restored = Persistence::<MemFs>::new(root).expect("persistence reinitializes");

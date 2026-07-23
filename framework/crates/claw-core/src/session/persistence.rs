@@ -13,7 +13,7 @@ pub(super) const SESSION_MANAGER_STATE_NAME: &str = "session_manager";
 pub(super) const SESSION_STATE_NAME: &str = "sessions";
 
 impl DurableStateCodec for SessionManagerState {
-    const SCHEMA_VERSION: SchemaVersion = 2;
+    const SCHEMA_VERSION: SchemaVersion = 1;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {
@@ -35,7 +35,7 @@ impl DurableStateCodec for SessionManagerState {
 }
 
 impl DurableStateCodec for SessionPersistentState {
-    const SCHEMA_VERSION: SchemaVersion = 8;
+    const SCHEMA_VERSION: SchemaVersion = 1;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {

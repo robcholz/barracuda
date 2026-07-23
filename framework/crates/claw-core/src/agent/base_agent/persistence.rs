@@ -72,7 +72,7 @@ impl BaseAgentState {
 }
 
 impl DurableStateCodec for BaseAgentState {
-    const SCHEMA_VERSION: SchemaVersion = 2;
+    const SCHEMA_VERSION: SchemaVersion = 1;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
         Ok(StateBlob {

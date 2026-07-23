@@ -29,7 +29,7 @@ fn invalid_session_manager_json_rejects_startup() {
     let root = TempDir::new("claw-persistence-invalid-json").unwrap();
     write_state(
         &format!("{}/session_manager.bin", root.path().display()),
-        2,
+        1,
         b"{bad-json",
     );
 
@@ -37,7 +37,7 @@ fn invalid_session_manager_json_rejects_startup() {
 }
 
 #[test]
-fn legacy_session_manager_schema_rejects_startup() {
+fn legacy_session_manager_fields_reject_startup() {
     let root = TempDir::new("claw-persistence-session-manager-schema").unwrap();
     write_state(
         &format!("{}/session_manager.bin", root.path().display()),
@@ -45,10 +45,7 @@ fn legacy_session_manager_schema_rejects_startup() {
         br#"{"agent_ids":"agent-1","session_ids":"session-1"}"#,
     );
 
-    assert_startup_error(
-        root.path().to_str().unwrap(),
-        "unsupported session manager state schema",
-    );
+    assert_startup_error(root.path().to_str().unwrap(), "decode durable state");
 }
 
 #[test]
