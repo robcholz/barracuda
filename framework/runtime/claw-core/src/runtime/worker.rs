@@ -17,7 +17,7 @@ use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunScheduler;
 use crate::session::{
     OpenSessionError, SessionControlError, SessionCreateError, SessionEndpoint, SessionEvent,
-    SessionId, SessionManager, SessionManagerInitError, SessionManagerStatus, SessionPersistence,
+    SessionId, SessionManager, SessionManagerInitError, SessionPersistence,
 };
 use crate::SYSTEM_TRACE_SCOPE;
 
@@ -174,8 +174,7 @@ where
                     }
                 }
                 WorkerTask::Sessions => {
-                    if let Poll::Ready(SessionManagerStatus::Progress) = this.sessions.poll(context)
-                    {
+                    if let Poll::Ready(()) = this.sessions.poll(context) {
                         progressed = true;
                         break;
                     }
@@ -227,6 +226,9 @@ impl WorkerTask {
 fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntimeBuildError {
     match error {
         SessionManagerInitError::AgentManager(error) => error.into(),
+        SessionManagerInitError::AgentReconciliation(error) => {
+            AgentRuntimeBuildError::AgentReconciliation(error.to_string())
+        }
         SessionManagerInitError::Persistence(error) => error.into(),
         SessionManagerInitError::InvalidSessionId(error) => error.into(),
         SessionManagerInitError::MissingState(session) => {

@@ -1,7 +1,7 @@
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_persistence::DurableState;
 
-use super::persistent_state::SessionPersistentState;
+use super::state::SessionPersistentState;
 
 /// Live projection of the durable session permission level.
 ///
@@ -19,6 +19,6 @@ impl SessionPermission {
 
 impl PermissionPolicy for SessionPermission {
     fn evaluate(&self, request: &PermissionRequest<'_>) -> PermissionDecision {
-        self.state.get().permission_level().evaluate(request)
+        self.state.get().permission_level.evaluate(request)
     }
 }

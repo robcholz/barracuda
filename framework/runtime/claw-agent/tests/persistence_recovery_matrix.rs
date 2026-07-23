@@ -38,16 +38,16 @@ fn invalid_session_manager_json_rejects_startup() {
 
 #[test]
 fn unsupported_session_manager_schema_rejects_startup() {
-    let root = TempDir::new("claw-persistence-id-allocator-schema").unwrap();
+    let root = TempDir::new("claw-persistence-session-manager-schema").unwrap();
     write_state(
         &format!("{}/session_manager.bin", root.path().display()),
         99,
-        br#"{"next_session_id":1,"next_agent_id":1}"#,
+        br#"{"agent_ids":"agent-1","session_ids":"session-1"}"#,
     );
 
     assert_startup_error(
         root.path().to_str().unwrap(),
-        "unsupported tuple state schema",
+        "unsupported session manager state schema",
     );
 }
 

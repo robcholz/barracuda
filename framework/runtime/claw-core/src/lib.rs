@@ -27,10 +27,10 @@ pub(crate) const SYSTEM_TRACE_SCOPE: &str = "agent-system";
 pub use claw_utils::stream;
 pub(crate) use claw_utils::{define_id_allocator, define_prefixed_id};
 
-pub use agent::{AgentId, IterationId};
+pub use agent::{AgentId, IterationId, ReasoningEffort};
 pub use claw_api::ToolCall;
 pub use claw_permission::PermissionLevel;
-pub use config::{ApiUsage, ReasoningEffort};
+pub use config::ApiUsage;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{
     InputRequestId, InputRequestKind, Message, OpenSessionError, SessionControl,

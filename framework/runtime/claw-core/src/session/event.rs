@@ -12,11 +12,31 @@
 use claw_utils::stream::StreamPart;
 use serde::{Deserialize, Serialize};
 
-use crate::agent::IterationId;
-
-use super::{InputRequestId, TurnId, TurnOrigin};
-
+use crate::agent::{AgentId, IterationId};
 use claw_api::ToolCall;
+
+crate::define_prefixed_id!(InputRequestId, "input-", "input request");
+crate::define_prefixed_id!(TurnId, "turn-", "turn");
+
+/// What caused a root-visible turn to start.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TurnOrigin {
+    /// A public caller appended a message.
+    #[default]
+    User,
+    /// A detached subagent delivered its result to its parent.
+    Subagent {
+        /// The subagent whose result caused this turn.
+        agent: AgentId,
+    },
+}
+
+impl TurnOrigin {
+    pub(crate) fn is_user(&self) -> bool {
+        matches!(self, Self::User)
+    }
+}
 
 // The reasoning cap is a compile-time tier, not a runtime knob. Exactly one of
 // the mutually-exclusive `reasoning_short` / `reasoning_medium` / `reasoning_long`

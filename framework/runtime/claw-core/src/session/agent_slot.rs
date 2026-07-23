@@ -3,10 +3,9 @@ use claw_interface::{ClawHttp, ClawTimer};
 
 use crate::agent::AgentId;
 use crate::agent::{
-    AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, BaseAgent, ReasoningEffortHandle,
-    ToolCallId,
+    AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, BaseAgent, ReasoningEffort,
+    ReasoningEffortHandle, ToolCallId,
 };
-use crate::config::ReasoningEffort;
 use crate::scheduler::{
     AgentRunOutput, AgentRunOutputItem, AgentRunRoute, AgentRunSchedulerHandle, RunControl, RunId,
 };

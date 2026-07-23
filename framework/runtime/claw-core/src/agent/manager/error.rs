@@ -1,4 +1,6 @@
-use claw_memory::{LongTermInitError, TranscriptDeleteError, TranscriptInitError};
+use claw_memory::{
+    LongTermInitError, TranscriptDeleteError, TranscriptInitError, TranscriptListError,
+};
 use claw_persistence::PersistenceError;
 use claw_skill::SkillError;
 use claw_tool::ToolSetError;
@@ -17,6 +19,9 @@ pub(crate) enum AgentManagerError {
     /// The configured skill catalog could not be scanned.
     #[error("failed to load skill catalog: {0}")]
     SkillRegistry(#[from] SkillError),
+    /// Persisted Agent records and transcript files could not be reconciled.
+    #[error("failed to reconcile persisted agent storage: {0}")]
+    AgentReconciliation(#[from] AgentCreateError),
 }
 
 /// What can go wrong while building one concrete agent from the manager.
@@ -46,6 +51,9 @@ pub(crate) enum AgentCreateError {
     /// The persisted transcript could not be deleted.
     #[error("failed to delete transcript: {0}")]
     TranscriptDelete(#[from] TranscriptDeleteError),
+    /// Persisted transcript ids could not be enumerated.
+    #[error("failed to list persisted transcripts: {0}")]
+    TranscriptList(#[from] TranscriptListError),
     /// The per-agent long-term memory store could not be opened.
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),

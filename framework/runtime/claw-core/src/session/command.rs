@@ -4,7 +4,7 @@ use async_channel::Sender;
 use claw_permission::PermissionLevel;
 use strum::IntoStaticStr;
 
-use crate::config::ReasoningEffort;
+use crate::agent::ReasoningEffort;
 
 use super::api::{OpenSessionError, SessionControlError};
 use super::{InputRequestId, Message, SessionEvent};

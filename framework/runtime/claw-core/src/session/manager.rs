@@ -1,7 +1,7 @@
 //! Ownership and lifecycle for every Session in one runtime.
 
 use core::task::{Context, Poll};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -11,20 +11,35 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::{DurableState, PersistenceError, SharedPersistence};
 use claw_tool::ToolRegistry;
 
-use crate::agent::{AgentManager, AgentManagerError};
+use crate::agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
 use crate::config::SharedApiManager;
 use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::api::{OpenSessionError, SessionControlError, SessionCreateError};
 use super::command::{SessionCommand, SessionEndpoint};
-use super::manager_state::{
-    ensure_next_session, next_session, SessionManagerState, SESSION_MANAGER_STATE_NAME,
+use super::persistent::{session_instance, SESSION_MANAGER_STATE_NAME, SESSION_STATE_NAME};
+use super::state::{
+    ensure_next_agent, ensure_next_session, next_session, SessionManagerState,
+    SessionPersistentState,
 };
-use super::persistent_state::{session_instance, SessionPersistentState, SESSION_STATE_NAME};
-use super::{SessionEvent, SessionId, SessionPersistence};
+use super::SessionEvent;
 
-struct ActorTask<Filesystem, Http, Timer>
+pub(super) type SharedAgentManager<Filesystem, Http, Timer> =
+    Rc<AgentManager<Filesystem, Http, Timer>>;
+
+crate::define_prefixed_id!(SessionId, "session-", "session");
+
+/// Whether a session survives a runtime restart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionPersistence {
+    /// Persist session state and write the root transcript to storage.
+    Persistent,
+    /// Keep session state and transcript in memory for this process only.
+    Ephemeral,
+}
+
+struct LiveActor<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -35,7 +50,7 @@ where
     span: tracing::Span,
 }
 
-struct ManagedSession<Filesystem, Http, Timer>
+struct SessionEntry<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -43,13 +58,15 @@ where
 {
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    actor: Option<ActorTask<Filesystem, Http, Timer>>,
+    actor: Option<LiveActor<Filesystem, Http, Timer>>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum SessionManagerInitError {
     #[error(transparent)]
     AgentManager(#[from] AgentManagerError),
+    #[error("failed to reconcile persisted agents: {0}")]
+    AgentReconciliation(#[from] AgentCreateError),
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
     #[error(transparent)]
@@ -71,11 +88,11 @@ where
 {
     persistence: SharedPersistence<Filesystem>,
     state: DurableState<SessionManagerState>,
-    agent_manager: Rc<AgentManager<Filesystem, Http, Timer>>,
+    agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
     api_manager: SharedApiManager,
     scheduler: AgentRunSchedulerHandle<Http, Timer>,
-    sessions: BTreeMap<SessionId, ManagedSession<Filesystem, Http, Timer>>,
-    actor_order: VecDeque<SessionId>,
+    sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>>,
+    actor_poll_queue: VecDeque<SessionId>,
 }
 
 impl<Filesystem, Http, Timer> SessionManager<Filesystem, Http, Timer>
@@ -107,7 +124,7 @@ where
             Arc::clone(&api_manager),
         )?);
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, ManagedSession<Filesystem, Http, Timer>> =
+        let mut sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>> =
             BTreeMap::new();
         for instance in states.list()? {
             let session = SessionId::from_wire(instance.as_str())?;
@@ -118,7 +135,7 @@ where
             states.register(&instance, &state)?;
             sessions.insert(
                 session,
-                ManagedSession {
+                SessionEntry {
                     persistence: SessionPersistence::Persistent,
                     state,
                     actor: None,
@@ -131,15 +148,17 @@ where
             .unwrap_or(1);
         ensure_next_session(&state, SessionId::new(discovered_next));
 
-        Ok(Self {
+        let mut manager = Self {
             persistence,
             state,
             agent_manager,
             api_manager,
             scheduler,
             sessions,
-            actor_order: VecDeque::new(),
-        })
+            actor_poll_queue: VecDeque::new(),
+        };
+        manager.purge_dead()?;
+        Ok(manager)
     }
 
     pub(crate) fn create(
@@ -155,7 +174,7 @@ where
         }
         let previous = self.sessions.insert(
             session,
-            ManagedSession {
+            SessionEntry {
                 persistence,
                 state,
                 actor: None,
@@ -231,13 +250,43 @@ where
     }
 
     pub(crate) fn is_idle(&self) -> bool {
-        self.actor_order.is_empty()
+        self.actor_poll_queue.is_empty()
     }
 
-    pub(crate) fn poll(&mut self, context: &mut Context<'_>) -> Poll<SessionManagerStatus> {
-        let actor_count = self.actor_order.len();
+    pub(crate) fn purge_dead(&mut self) -> Result<(), AgentCreateError> {
+        let persisted_agents = self.agent_manager.list_persisted_agents()?;
+        let next_agent_id = persisted_agents
+            .iter()
+            .map(|agent| agent.0)
+            .max()
+            .map(|agent| agent.saturating_add(1))
+            .unwrap_or(1);
+        ensure_next_agent(&self.state, AgentId::new(next_agent_id));
+
+        let persisted_agents = persisted_agents.into_iter().collect::<BTreeSet<_>>();
+        let mut reachable_agents = BTreeSet::new();
+
+        for entry in self.sessions.values() {
+            let Some(root) = entry.state.get().root_agent else {
+                continue;
+            };
+            if persisted_agents.contains(&root) {
+                reachable_agents.insert(root);
+            } else {
+                entry.state.get_mut().clear_root();
+            }
+        }
+
+        for agent in persisted_agents.difference(&reachable_agents).copied() {
+            self.agent_manager.remove(agent)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn poll(&mut self, context: &mut Context<'_>) -> Poll<()> {
+        let actor_count = self.actor_poll_queue.len();
         for _ in 0..actor_count {
-            let Some(session) = self.actor_order.pop_front() else {
+            let Some(session) = self.actor_poll_queue.pop_front() else {
                 break;
             };
             let status = {
@@ -248,17 +297,17 @@ where
                 else {
                     continue;
                 };
-                self.actor_order.push_back(session);
+                self.actor_poll_queue.push_back(session);
                 let _entered = task.span.enter();
                 task.actor.poll(context, &self.state)
             };
             match status {
                 Poll::Ready(SessionActorStatus::Progress) => {
-                    return Poll::Ready(SessionManagerStatus::Progress);
+                    return Poll::Ready(());
                 }
                 Poll::Ready(SessionActorStatus::Exit(exit)) => {
                     self.finish_actor(exit);
-                    return Poll::Ready(SessionManagerStatus::Progress);
+                    return Poll::Ready(());
                 }
                 Poll::Pending => {}
             }
@@ -292,23 +341,23 @@ where
         self.sessions
             .get_mut(&session)
             .expect("the Session remains registered")
-            .actor = Some(ActorTask {
+            .actor = Some(LiveActor {
             commands,
             actor,
             span,
         });
-        self.actor_order.push_back(session);
+        self.actor_poll_queue.push_back(session);
     }
 
     fn finish_actor(&mut self, exit: SessionActorExit) {
         let session = exit.session();
-        self.actor_order.retain(|queued| *queued != session);
+        self.actor_poll_queue.retain(|queued| *queued != session);
         if let Some(entry) = self.sessions.get_mut(&session) {
             entry.actor = None;
         }
         match exit {
             SessionActorExit::Deleted { acks, .. } => {
-                let result = self.remove_session_record(session);
+                let result = self.remove_persistent_state(session);
                 if result.is_ok() {
                     self.sessions.remove(&session);
                 }
@@ -320,7 +369,7 @@ where
         }
     }
 
-    fn remove_session_record(&self, session: SessionId) -> Result<(), SessionControlError> {
+    fn remove_persistent_state(&self, session: SessionId) -> Result<(), SessionControlError> {
         let Some(entry) = self.sessions.get(&session) else {
             return Err(SessionControlError::SessionClosed(session));
         };
@@ -339,8 +388,4 @@ where
                 SessionControlError::Persistence
             })
     }
-}
-
-pub(crate) enum SessionManagerStatus {
-    Progress,
 }

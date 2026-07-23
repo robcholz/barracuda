@@ -16,6 +16,7 @@ pub(crate) use base_agent::{
     AgentApprovalError, AgentCompletion, AgentError, AgentEvent, AgentInputRequest, AgentOutcome,
     AgentState, ApprovalDecision, BaseAgent, IterationEvent, ToolCallId,
 };
+pub use context_adapters::ReasoningEffort;
 pub(crate) use context_adapters::ReasoningEffortHandle;
 pub use manager::AgentId;
 pub(crate) use manager::{

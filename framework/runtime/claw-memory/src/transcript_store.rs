@@ -61,6 +61,7 @@
 //! persist is a no-op. Subagents use it — their transcripts are context-management
 //! scratch that is never enumerated or resumed, so it need not survive a restart.
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -503,6 +504,23 @@ pub enum TranscriptDeleteError {
     },
 }
 
+/// Failure enumerating persisted transcript ids.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TranscriptListError {
+    /// The transcript directory could not be listed.
+    #[error("failed to list transcript directory {path}: {source}")]
+    List {
+        /// The directory that could not be listed.
+        path: String,
+        /// The underlying filesystem error.
+        #[source]
+        source: FsError,
+    },
+    /// A transcript filename used a known extension but not a numeric id.
+    #[error("invalid persisted transcript filename: {0}")]
+    InvalidFilename(String),
+}
+
 // Manual `Clone`: only the `Arc` is cloned, so this is cheap and does **not**
 // require `F: Clone` (a `#[derive(Clone)]` would wrongly add that bound).
 impl<F: ClawFs + 'static> Clone for TranscriptStore<F> {
@@ -515,6 +533,37 @@ impl<F: ClawFs + 'static> Clone for TranscriptStore<F> {
 }
 
 impl<F: ClawFs + 'static> TranscriptStore<F> {
+    /// List every transcript id represented by a data or index file in `dir`.
+    ///
+    /// A missing directory is empty. When only one half of a transcript remains,
+    /// its id is still returned so the owner can reconcile or delete it.
+    pub fn list_persisted_ids(dir: &str) -> Result<Vec<u32>, TranscriptListError> {
+        let entries = match F::list_dir(dir) {
+            Ok(entries) => entries,
+            Err(FsError::NotFound) => return Ok(Vec::new()),
+            Err(source) => {
+                return Err(TranscriptListError::List {
+                    path: dir.to_owned(),
+                    source,
+                });
+            }
+        };
+        let mut ids = BTreeSet::new();
+        for entry in entries {
+            let stem = entry
+                .strip_suffix(DATA_EXT)
+                .or_else(|| entry.strip_suffix(INDEX_EXT));
+            let Some(stem) = stem else {
+                continue;
+            };
+            let id = stem
+                .parse()
+                .map_err(|_| TranscriptListError::InvalidFilename(entry))?;
+            ids.insert(id);
+        }
+        Ok(ids.into_iter().collect())
+    }
+
     /// Build the store for `transcript_id`, restoring its persisted contents if
     /// present (missing or unreadable files start empty).
     ///
@@ -1469,5 +1518,34 @@ mod tests {
         assert!(!MemFs::exists(&index_path));
 
         TranscriptStore::<MemFs>::delete(7, dir).unwrap();
+    }
+
+    #[test]
+    fn list_persisted_ids_unions_data_and_index_files() {
+        MemFs::new();
+        let dir = "/transcript-list";
+        MemFs::write_atomic(&transcript_path(dir, 3, DATA_EXT), b"").unwrap();
+        MemFs::write_atomic(&transcript_path(dir, 3, INDEX_EXT), b"").unwrap();
+        MemFs::write_atomic(&transcript_path(dir, 7, DATA_EXT), b"").unwrap();
+        MemFs::write_atomic(&format!("{dir}/unrelated"), b"").unwrap();
+
+        assert_eq!(
+            TranscriptStore::<MemFs>::list_persisted_ids(dir).unwrap(),
+            vec![3, 7]
+        );
+    }
+
+    #[test]
+    fn list_persisted_ids_rejects_invalid_transcript_filenames() {
+        MemFs::new();
+        let dir = "/transcript-list-invalid";
+        MemFs::write_atomic(&format!("{dir}/not-an-id.jsonl"), b"").unwrap();
+
+        assert_eq!(
+            TranscriptStore::<MemFs>::list_persisted_ids(dir),
+            Err(TranscriptListError::InvalidFilename(
+                "not-an-id.jsonl".to_owned()
+            ))
+        );
     }
 }

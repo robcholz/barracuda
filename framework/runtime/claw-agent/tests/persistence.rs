@@ -61,7 +61,13 @@ fn session_manager_payload_contains_both_counters() {
     }
 
     let state = read_payload(&format!("{root}/session_manager.bin"));
-    assert_eq!(state, json!(["agent-1", "session-2"]));
+    assert_eq!(
+        state,
+        json!({
+            "agent_ids": "agent-1",
+            "session_ids": "session-2",
+        })
+    );
 }
 
 #[test]
@@ -111,10 +117,7 @@ fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     drop(system);
 
     let completed = read_payload(&path);
-    assert!(
-        completed.get("root_inflight_toolcalls").is_none(),
-        "a completed transcript turn settles its persisted tool calls: {completed}"
-    );
+    assert_eq!(completed["root_inflight_toolcalls"], json!([]));
 }
 
 #[test]
@@ -188,9 +191,77 @@ fn session_payload_contains_only_restart_relevant_state() {
         json,
         json!({
             "reasoning_effort": "medium",
-            "permission_level": "allow_all"
+            "permission_level": "allow_all",
+            "root_agent": null,
+            "root_inflight_toolcalls": [],
         })
     );
+}
+
+#[test]
+fn startup_purges_agent_and_transcript_without_a_referencing_session() {
+    let _script = serialize_script();
+    let temp = TempDir::new("purge-orphan-agent").unwrap();
+    let root = temp.path().to_string_lossy().into_owned();
+    let session = create_persisted_root(&root);
+    let session_state = format!("{root}/sessions/{}.bin", session.to_wire());
+    let agent_state = format!("{root}/agents/agent-1.bin");
+    let transcript_data = format!("{root}/transcript/1.jsonl");
+    let transcript_index = format!("{root}/transcript/1.json");
+
+    DiskFs::remove(&session_state).unwrap();
+    assert!(DiskFs::exists(&agent_state));
+    assert!(DiskFs::exists(&transcript_data));
+    assert!(DiskFs::exists(&transcript_index));
+
+    drop(build_system(&root, Vec::new()));
+
+    assert!(!DiskFs::exists(&agent_state));
+    assert!(!DiskFs::exists(&transcript_data));
+    assert!(!DiskFs::exists(&transcript_index));
+}
+
+#[test]
+fn startup_purges_transcript_without_an_agent_record() {
+    let _script = serialize_script();
+    let temp = TempDir::new("purge-orphan-transcript").unwrap();
+    let root = temp.path().to_string_lossy().into_owned();
+    let transcript_data = format!("{root}/transcript/41.jsonl");
+    let transcript_index = format!("{root}/transcript/41.json");
+
+    DiskFs::write_atomic(&transcript_data, b"").unwrap();
+    DiskFs::write_atomic(&transcript_index, b"").unwrap();
+    assert!(DiskFs::exists(&transcript_data));
+    assert!(DiskFs::exists(&transcript_index));
+
+    drop(build_system(&root, Vec::new()));
+
+    assert!(!DiskFs::exists(&transcript_data));
+    assert!(!DiskFs::exists(&transcript_index));
+}
+
+#[test]
+fn startup_clears_a_session_root_whose_agent_record_is_missing() {
+    let _script = serialize_script();
+    let temp = TempDir::new("purge-dangling-root").unwrap();
+    let root = temp.path().to_string_lossy().into_owned();
+    let session = create_persisted_root(&root);
+    let session_state = format!("{root}/sessions/{}.bin", session.to_wire());
+    let agent_state = format!("{root}/agents/agent-1.bin");
+    let transcript_data = format!("{root}/transcript/1.jsonl");
+    let transcript_index = format!("{root}/transcript/1.json");
+
+    DiskFs::remove(&agent_state).unwrap();
+    assert!(DiskFs::exists(&transcript_data));
+    assert!(DiskFs::exists(&transcript_index));
+
+    drop(build_system(&root, Vec::new()));
+
+    let state = read_payload(&session_state);
+    assert_eq!(state["root_agent"], Value::Null);
+    assert_eq!(state["root_inflight_toolcalls"], json!([]));
+    assert!(!DiskFs::exists(&transcript_data));
+    assert!(!DiskFs::exists(&transcript_index));
 }
 
 #[test]
@@ -262,6 +333,18 @@ fn deleting_a_session_removes_it_from_the_directory_registry() {
 
     let system = build_system(&root, Vec::new());
     assert!(!system.list_sessions().contains(&session));
+}
+
+fn create_persisted_root(root: &str) -> SessionId {
+    let system = build_system(root, vec![support::assistant_text("done")]);
+    system.start_all().unwrap();
+    let session = system.new_session(SessionPersistence::Persistent).unwrap();
+    let mut events = system.open_session(session).unwrap();
+    block_on(events.append(Message::text("create the root agent"))).unwrap();
+    let _ = support::drain_until_turn_ended(&mut events);
+    drop(events);
+    drop(system);
+    session
 }
 
 fn read_payload(path: &str) -> Value {

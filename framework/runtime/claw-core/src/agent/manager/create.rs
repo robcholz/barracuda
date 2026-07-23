@@ -16,8 +16,8 @@ use crate::agent::context_adapters::{
     SkillContextAdapter,
 };
 use crate::agent::tools::internal_tools;
-use crate::agent::{AgentKind, AgentState, ReasoningEffortHandle};
-use crate::config::{ApiUsage, ReasoningEffort};
+use crate::agent::{AgentKind, AgentState, ReasoningEffort, ReasoningEffortHandle};
+use crate::config::ApiUsage;
 
 use super::error::AgentCreateError;
 use super::{AgentId, AgentManager};

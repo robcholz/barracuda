@@ -2,7 +2,6 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
@@ -17,9 +16,10 @@ use tracing::Instrument as _;
 
 use crate::agent::{
     AdditionalAgentState, AgentCompletion, AgentCreateError, AgentError, AgentEvent, AgentId,
-    AgentInputRequest, AgentManager, AgentOutcome, IterationEvent, PersistenceConfig, ToolCallId,
+    AgentInputRequest, AgentOutcome, IterationEvent, PersistenceConfig, ReasoningEffort,
+    ToolCallId,
 };
-use crate::config::{ReasoningEffort, SharedApiManager};
+use crate::config::SharedApiManager;
 use crate::scheduler::{agent_run_route, AgentRunReceiver, AgentRunRoute, AgentRunSchedulerHandle};
 use claw_api::ToolCall;
 
@@ -29,9 +29,9 @@ use super::approval_resolver::{
     self, ApprovalControl, ApprovalResolverError, PermissionReplyResolution,
 };
 use super::command::{ControlOp, SessionCommand, SessionEndpoint};
-use super::manager_state::{next_agent, SessionManagerState};
+use super::manager::SharedAgentManager;
 use super::permission_policy::SessionPermission;
-use super::persistent_state::SessionPersistentState;
+use super::state::{next_agent, SessionManagerState, SessionPersistentState};
 use super::{
     InputRequestId, InputRequestKind, Message, SessionEvent, SessionId, SessionPersistence, TurnId,
     TurnOrigin,
@@ -122,7 +122,7 @@ where
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    manager: Rc<AgentManager<Filesystem, Http, Timer>>,
+    agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
     permission: Arc<SessionPermission>,
     api_manager: SharedApiManager,
 
@@ -161,7 +161,7 @@ where
     pub(super) fn new(
         session: SessionId,
         persistence: SessionPersistence,
-        manager: Rc<AgentManager<Filesystem, Http, Timer>>,
+        agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
         state: DurableState<SessionPersistentState>,
         api_manager: SharedApiManager,
         scheduler: AgentRunSchedulerHandle<Http, Timer>,
@@ -169,7 +169,7 @@ where
         let (command_sender, commands) = async_channel::unbounded();
         let (run_route, run_outputs) = agent_run_route();
         let restored_root = (persistence == SessionPersistence::Persistent)
-            .then(|| state.get().root_agent())
+            .then(|| state.get().root_agent)
             .flatten();
         let permission = Arc::new(SessionPermission::new(state.clone()));
         (
@@ -177,7 +177,7 @@ where
                 session,
                 persistence,
                 state,
-                manager,
+                agent_manager,
                 permission,
                 api_manager,
                 root: None,
@@ -287,8 +287,8 @@ where
             }
             SessionCommand::SetPermissionLevel { lease, level, ack } => {
                 if self.accepts(lease) {
-                    if self.state.get().permission_level() != level {
-                        self.state.get_mut().set_permission_level(level);
+                    if self.state.get().permission_level != level {
+                        self.state.get_mut().permission_level = level;
                     }
                     let _ = ack.try_send(Ok(()));
                 } else {
@@ -550,14 +550,14 @@ where
         self.root = None;
         if self.persistence == SessionPersistence::Persistent {
             if let Some(root_agent) = root_agent {
-                if let Err(error) = self.manager.remove(root_agent) {
+                if let Err(error) = self.agent_manager.remove(root_agent) {
                     self.restored_root = Some(root_agent);
                     return Err(error);
                 }
             }
         }
         self.restored_root = None;
-        self.state.get_mut().clear_root_agent();
+        self.state.get_mut().clear_root();
         Ok(())
     }
 
@@ -568,12 +568,12 @@ where
         if self.root.is_some() {
             return Ok(());
         }
-        let reasoning_effort = self.state.get().reasoning_effort();
+        let reasoning_effort = self.state.get().reasoning_effort;
         let (id, agent, reasoning_handle) = if let Some(id) = self.restored_root.take() {
             let root_inflight_toolcalls = self.state.get().root_inflight_toolcalls().to_vec();
             let additional = (!root_inflight_toolcalls.is_empty())
                 .then(|| AdditionalAgentState::new(root_inflight_toolcalls));
-            let (agent, reasoning) = self.manager.resume_from(
+            let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
                 Arc::clone(&self.permission) as Arc<_>,
@@ -589,7 +589,7 @@ where
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
             };
             let kind = crate::agent::baked::root_kind();
-            let (agent, reasoning) = self.manager.create(
+            let (agent, reasoning) = self.agent_manager.create(
                 id,
                 kind,
                 true,
@@ -598,7 +598,7 @@ where
                 persistence,
                 Vec::new(),
             )?;
-            self.state.get_mut().set_root_agent(id);
+            self.state.get_mut().root_agent = Some(id);
             (id, agent, reasoning)
         };
         self.root = Some(AgentSlot::new(id, agent, reasoning_handle));
@@ -756,8 +756,8 @@ where
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
-        if self.state.get().reasoning_effort() != effort {
-            self.state.get_mut().set_reasoning_effort(effort);
+        if self.state.get().reasoning_effort != effort {
+            self.state.get_mut().reasoning_effort = effort;
         }
         if let Some(root) = &self.root {
             root.set_reasoning_effort(effort);

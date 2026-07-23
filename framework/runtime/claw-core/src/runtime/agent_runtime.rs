@@ -43,6 +43,8 @@ pub enum AgentRuntimeBuildError {
     InvalidSessionId(#[from] claw_utils::IdParseError),
     #[error("persisted session state is missing: {0}")]
     MissingPersistedSessionState(SessionId),
+    #[error("failed to reconcile persisted agents: {0}")]
+    AgentReconciliation(String),
     #[error("failed to spawn the agent runtime worker: {0}")]
     WorkerSpawn(#[from] io::Error),
     #[error("agent runtime worker exited before signalling readiness")]
@@ -55,6 +57,9 @@ impl From<AgentManagerError> for AgentRuntimeBuildError {
             AgentManagerError::MissingPersistenceDir => Self::MissingPersistenceDir,
             AgentManagerError::LongTermInit(source) => Self::LongTermInit(source),
             AgentManagerError::SkillRegistry(source) => Self::SkillRegistry(source),
+            AgentManagerError::AgentReconciliation(source) => {
+                Self::AgentReconciliation(source.to_string())
+            }
         }
     }
 }

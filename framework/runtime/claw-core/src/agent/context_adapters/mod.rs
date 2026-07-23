@@ -18,6 +18,7 @@ pub(in crate::agent) use agent_mode::{AgentModeContextAdapter, AgentModeState};
 pub(in crate::agent) use conversation_history::ConversationHistoryContextAdapter;
 pub(in crate::agent) use long_term_memory::LongTermMemoryContextAdapter;
 pub(in crate::agent) use profile::ProfileContextAdapter;
+pub use reasoning_effort::ReasoningEffort;
 pub(crate) use reasoning_effort::{ReasoningEffortContextAdapter, ReasoningEffortHandle};
 pub(in crate::agent) use resumed::{AgentResumeNotice, ResumedContextAdapter, ResumedState};
 pub(in crate::agent) use skill::SkillContextAdapter;

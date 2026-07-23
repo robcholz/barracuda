@@ -6,7 +6,7 @@ use claw_permission::PermissionLevel;
 use claw_persistence::PersistenceError;
 use futures_core::Stream;
 
-use crate::config::ReasoningEffort;
+use crate::agent::ReasoningEffort;
 
 use super::command::{ControlOp, SessionCommand, SessionEndpoint};
 use super::{InputRequestId, Message, SessionEvent, SessionId};

@@ -57,7 +57,7 @@ impl<
         let profile = ProfileStore::new(&layout.profile_dir);
         let skills = build_skill_registry::<Filesystem>(skill_roots)?;
 
-        Ok(Self {
+        let manager = Self {
             persistence,
             api_manager,
             tools,
@@ -67,7 +67,9 @@ impl<
             long_term,
             profile,
             skills,
-        })
+        };
+        manager.purge_dead()?;
+        Ok(manager)
     }
 }
 

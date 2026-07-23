@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::TranscriptStore;
@@ -21,6 +23,21 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
+    /// Delete transcript files whose owning Agent record no longer exists.
+    pub(super) fn purge_dead(&self) -> Result<(), AgentCreateError> {
+        let agents = self
+            .list_persisted_agents()?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        for transcript in TranscriptStore::<Filesystem>::list_persisted_ids(&self.transcript_dir)? {
+            let agent = AgentId::new(transcript);
+            if !agents.contains(&agent) {
+                TranscriptStore::<Filesystem>::delete(transcript, &self.transcript_dir)?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn list_persisted_agents(&self) -> Result<Vec<AgentId>, AgentCreateError> {
         self.persistence
             .collection::<AgentState>(AGENT_STATE_NAME)?

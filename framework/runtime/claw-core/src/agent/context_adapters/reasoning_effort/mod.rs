@@ -1,10 +1,45 @@
 //! Per-agent reasoning-effort context.
 
 use async_channel::{Receiver, Sender};
-use claw_context::ContextSink;
+use claw_context::{Block, BlockKind, ContextSink};
+use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::ContextAdapter;
-use crate::config::ReasoningEffort;
+
+const LOW_PROMPT: &str = prompt!("effort/low.md");
+const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
+const HIGH_PROMPT: &str = prompt!("effort/high.md");
+const ULTRA_PROMPT: &str = prompt!("effort/ultra.md");
+
+/// How deliberately an agent should reason about and orchestrate work.
+///
+/// Higher tiers prompt more decomposition, delegation, and verification.
+/// Updates take effect at the Agent's next LLM iteration.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReasoningEffort {
+    /// Take the shortest sound path and avoid delegation by default.
+    Low,
+    /// Use necessary steps and delegate only clearly separable work. The default.
+    #[default]
+    Medium,
+    /// Deliberately decompose, delegate, and verify non-trivial work.
+    High,
+    /// Use multi-agent execution and independent verification when appropriate.
+    Ultra,
+}
+
+impl ReasoningEffort {
+    fn context_block(self) -> Block<'static> {
+        let content = match self {
+            Self::Low => LOW_PROMPT,
+            Self::Medium => MEDIUM_PROMPT,
+            Self::High => HIGH_PROMPT,
+            Self::Ultra => ULTRA_PROMPT,
+        };
+        Block::new(BlockKind::ReasoningEffort, content)
+    }
+}
 
 /// Sending endpoint retained by the Agent's logical owner.
 pub(crate) struct ReasoningEffortHandle {
@@ -48,11 +83,10 @@ impl ContextAdapter for ReasoningEffortContextAdapter {
 
 #[cfg(test)]
 mod tests {
-    use claw_context::Context;
+    use claw_context::{BlockKind, Context};
 
-    use super::ReasoningEffortContextAdapter;
+    use super::{ReasoningEffort, ReasoningEffortContextAdapter};
     use crate::agent::base_agent::ContextAdapter;
-    use crate::config::ReasoningEffort;
 
     fn render(adapter: &mut ReasoningEffortContextAdapter, context: &mut Context) -> String {
         let history = {
@@ -79,5 +113,19 @@ mod tests {
 
         let mut other_context = Context::new();
         assert!(render(&mut other, &mut other_context).contains("Reasoning effort: low"));
+    }
+
+    #[test]
+    fn every_effort_has_a_reasoning_effort_context_block() {
+        for effort in [
+            ReasoningEffort::Low,
+            ReasoningEffort::Medium,
+            ReasoningEffort::High,
+            ReasoningEffort::Ultra,
+        ] {
+            let block = effort.context_block();
+            assert_eq!(block.kind, BlockKind::ReasoningEffort);
+            assert!(!block.content.trim().is_empty());
+        }
     }
 }
