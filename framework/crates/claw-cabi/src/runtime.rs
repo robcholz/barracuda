@@ -13,14 +13,15 @@ use std::time::Duration;
 
 use claw_agent::{
     stream::StreamPart, AgentError, AgentPersistenceConfig, AgentSystem, ApiPurpose,
-    InputRequestId, InputRequestKind, Message, OpenSessionError, SessionControl,
-    SessionControlError, SessionDeleteError, SessionEvent, SessionEventStream, SessionId,
-    SessionPersistence, TurnOrigin,
+    InputRequestId, InputRequestKind, IterationEvent, Message, OpenSessionError, SessionControl,
+    SessionControlError, SessionDeleteError, SessionError, SessionEvent, SessionId,
+    SessionPersistence, SessionStream, TurnEvent, TurnOrigin,
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
-#[cfg(not(all(feature = "trace_max_off", not(debug_assertions))))]
+#[cfg(feature = "rich_logging")]
 use claw_log::TracingConfig;
+#[cfg(feature = "prod_logging")]
 use claw_log::{LevelFilter, LogOutput};
 use claw_sys::{EspIdfExecutor, EspIdfFs, EspIdfHttp, EspIdfThread, EspIdfTimer};
 
@@ -41,10 +42,12 @@ use crate::abi::{
     CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END, CLAW_AGENT_EVENT_KIND_TURN_ENDED,
     CLAW_AGENT_EVENT_KIND_TURN_STARTED, CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
     CLAW_AGENT_SESSION_PERSISTENCE_EPHEMERAL, CLAW_AGENT_SESSION_PERSISTENCE_PERSISTENT,
-    CLAW_AGENT_TURN_ORIGIN_SUBAGENT, CLAW_AGENT_TURN_ORIGIN_USER, ESP_ERR_INVALID_ARG,
+    CLAW_AGENT_TURN_ORIGIN_TOOL_CALL, CLAW_AGENT_TURN_ORIGIN_USER, ESP_ERR_INVALID_ARG,
     ESP_ERR_INVALID_SIZE, ESP_ERR_INVALID_STATE, ESP_ERR_NOT_FOUND, ESP_ERR_TIMEOUT, ESP_FAIL,
     ESP_OK,
 };
+#[cfg(feature = "cache_profile")]
+use crate::abi::{ClawAgentUsageEvent, CLAW_AGENT_EVENT_KIND_USAGE};
 use crate::tool::capability_tool_groups;
 
 /// The device agent runtime. `AgentSystem` is now backend-erased and
@@ -72,7 +75,7 @@ struct RuntimeController {
 /// One open session connection. The stream is drained incrementally — one
 /// [`SessionEvent`] per `receive` — while commands use the cloneable control half.
 struct OpenSession {
-    stream: Mutex<SessionEventStream>,
+    stream: Mutex<SessionStream>,
     control: SessionControl,
     terminal: AtomicBool,
 }
@@ -215,8 +218,9 @@ pub unsafe extern "C" fn claw_agent_event_free(event: *mut ClawAgentEvent) {
 }
 
 fn init(config: *const ClawAgentConfig) -> Result<(), CabiError> {
+    #[cfg(feature = "prod_logging")]
     let _ = claw_log::init_logger(LevelFilter::Info, LogOutput::Stderr);
-    #[cfg(not(all(feature = "trace_max_off", not(debug_assertions))))]
+    #[cfg(feature = "rich_logging")]
     let _ = claw_log::init_tracing(
         TracingConfig::default()
             .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]),
@@ -377,7 +381,7 @@ fn submit_session(session_id: u32, text: *const c_char) -> Result<(), CabiError>
         running_agent(runtime)?;
         get_open_session_locked(runtime, session_id)?.ok_or(CabiError::NotFound)?
     };
-    futures_lite::future::block_on(session.control.submit(Message::text(text)))
+    futures_lite::future::block_on(session.control.append(Message::text(text)))
         .map_err(session_control_error)
 }
 
@@ -518,13 +522,19 @@ fn receive(
     };
 
     match next {
-        Some(event) => {
-            let terminal = matches!(event, SessionEvent::Closed);
+        Some(Ok(event)) => {
+            let terminal = matches!(&event, SessionEvent::Closed(_));
             write_event(out_event, event)?;
             if terminal {
                 session.terminal.store(true, Ordering::Release);
                 remove_open_session(session_id, &session);
             }
+            Ok(())
+        }
+        Some(Err(error)) => {
+            write_error_event(out_event, &error.to_string())?;
+            session.terminal.store(true, Ordering::Release);
+            remove_open_session(session_id, &session);
             Ok(())
         }
         None => Err(CabiError::Timeout),
@@ -553,30 +563,34 @@ fn session_cancel(session_id: u32) -> Result<(), CabiError> {
     futures_lite::future::block_on(session.control.cancel()).map_err(|_| CabiError::InvalidState)
 }
 
+type SessionStreamItem = Result<SessionEvent, SessionError>;
+
 /// Pull the next event already buffered on the stream without blocking.
-/// Returns `None` when nothing is ready yet and maps a closed receiver to
-/// [`SessionEvent::Closed`].
-fn next_ready(stream: &mut SessionEventStream) -> Option<SessionEvent> {
+/// Returns `None` when nothing is ready yet. An unexpected stream end is
+/// surfaced as the terminal [`SessionError::RuntimeStopped`].
+fn next_ready(stream: &mut SessionStream) -> Option<SessionStreamItem> {
     let mut context = Context::from_waker(Waker::noop());
     match Pin::new(stream).poll_next(&mut context) {
         Poll::Ready(Some(event)) => Some(event),
-        Poll::Ready(None) => Some(SessionEvent::Closed),
+        Poll::Ready(None) => Some(Err(SessionError::RuntimeStopped)),
         Poll::Pending => None,
     }
 }
 
 /// Pull the next event, waiting up to `timeout_ms`. Returns `None` on timeout
-/// (the stream is retained for a later `receive`) and maps a closed receiver to
-/// [`SessionEvent::Closed`].
-fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<SessionEvent> {
+/// (the stream is retained for a later `receive`). An unexpected stream end is
+/// surfaced as the terminal [`SessionError::RuntimeStopped`].
+fn next_within(stream: &mut SessionStream, timeout_ms: u32) -> Option<SessionStreamItem> {
     let abort = AtomicBool::new(false);
     let mut timer = EspIdfTimer;
     futures_lite::future::block_on(async {
         let pull = async {
-            match stream.next().await {
-                Some(event) => Some(event),
-                None => Some(SessionEvent::Closed),
-            }
+            Some(
+                stream
+                    .next()
+                    .await
+                    .unwrap_or(Err(SessionError::RuntimeStopped)),
+            )
         };
         let timeout = async {
             let _ = timer
@@ -585,7 +599,7 @@ fn next_within(stream: &mut SessionEventStream, timeout_ms: u32) -> Option<Sessi
                     Cancel::new(&abort),
                 )
                 .await;
-            None::<SessionEvent>
+            None::<SessionStreamItem>
         };
         futures_lite::future::or(pull, timeout).await
     })
@@ -642,13 +656,23 @@ fn running_agent(runtime: &RuntimeController) -> Result<&DeviceAgent, CabiError>
 
 /// Marshal one [`SessionEvent`] into its corresponding tagged C payload.
 fn write_event(out_event: &mut ClawAgentEvent, event: SessionEvent) -> Result<(), CabiError> {
-    *out_event = match event {
-        SessionEvent::TurnStarted { turn, origin } => {
+    let event = match event {
+        SessionEvent::Turn(event) => write_turn_event(event)?,
+        SessionEvent::Error(error) => error_event(&error.to_string())?,
+        SessionEvent::Closed(_) => empty_event(CLAW_AGENT_EVENT_KIND_CLOSED),
+    };
+    *out_event = event;
+    Ok(())
+}
+
+fn write_turn_event(event: TurnEvent) -> Result<ClawAgentEvent, CabiError> {
+    match event {
+        TurnEvent::Started { turn, origin } => {
             let (origin, agent_id) = match origin {
                 TurnOrigin::User => (CLAW_AGENT_TURN_ORIGIN_USER, 0),
-                TurnOrigin::Subagent { agent } => (CLAW_AGENT_TURN_ORIGIN_SUBAGENT, agent.0),
+                TurnOrigin::ToolCall { .. } => (CLAW_AGENT_TURN_ORIGIN_TOOL_CALL, 0),
             };
-            ClawAgentEvent {
+            Ok(ClawAgentEvent {
                 kind: CLAW_AGENT_EVENT_KIND_TURN_STARTED,
                 data: ClawAgentEventData {
                     turn_started: ClawAgentTurnStartedEvent {
@@ -657,95 +681,123 @@ fn write_event(out_event: &mut ClawAgentEvent, event: SessionEvent) -> Result<()
                         agent_id,
                     },
                 },
-            }
+            })
         }
-        SessionEvent::InputRequested {
+        TurnEvent::InputRequested {
             request,
             kind: InputRequestKind::PermissionApproval { tool_call, reason },
         } => {
-            let id = cstring(&tool_call.id)?;
-            let name = cstring(&tool_call.name)?;
-            let arguments_json = cstring(&tool_call.arguments_json)?;
+            let tool_call = tool_call_event(&tool_call)?;
             let reason = cstring(&reason)?;
-            ClawAgentEvent {
+            Ok(ClawAgentEvent {
                 kind: CLAW_AGENT_EVENT_KIND_INPUT_REQUESTED,
                 data: ClawAgentEventData {
                     input_requested: ClawAgentInputRequestedEvent {
                         request_id: request.0,
                         kind: CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL,
-                        tool_call: ClawAgentToolCallEvent {
-                            id: id.into_raw(),
-                            name: name.into_raw(),
-                            arguments_json: arguments_json.into_raw(),
-                        },
+                        tool_call,
                         reason: reason.into_raw(),
                     },
                 },
-            }
+            })
         }
-        SessionEvent::IterationStarted { iteration } => ClawAgentEvent {
+        TurnEvent::Iteration(event) => write_iteration_event(event),
+        TurnEvent::Output(StreamPart::Delta(text)) => {
+            text_event(CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA, &text)
+        }
+        TurnEvent::Output(StreamPart::End) => Ok(empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END)),
+        TurnEvent::Error(error) => error_event(&error.to_string()),
+        TurnEvent::Ended { turn } => Ok(ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_TURN_ENDED,
+            data: ClawAgentEventData {
+                turn_ended: ClawAgentTurnEndedEvent { turn_id: turn.0 },
+            },
+        }),
+    }
+}
+
+fn write_iteration_event(event: IterationEvent) -> Result<ClawAgentEvent, CabiError> {
+    match event {
+        IterationEvent::Started { iteration } => Ok(ClawAgentEvent {
             kind: CLAW_AGENT_EVENT_KIND_ITERATION_STARTED,
             data: ClawAgentEventData {
                 iteration: ClawAgentIterationEvent {
                     iteration_id: iteration.0,
                 },
             },
-        },
-        SessionEvent::Reasoning(StreamPart::Delta(text)) => ClawAgentEvent {
-            kind: CLAW_AGENT_EVENT_KIND_REASONING_DELTA,
-            data: ClawAgentEventData {
-                text_delta: ClawAgentTextDeltaEvent {
-                    text: cstring(&text)?.into_raw(),
-                },
-            },
-        },
-        SessionEvent::Reasoning(StreamPart::End) => {
-            empty_event(CLAW_AGENT_EVENT_KIND_REASONING_END)
+        }),
+        IterationEvent::Reasoning(StreamPart::Delta(text)) => {
+            text_event(CLAW_AGENT_EVENT_KIND_REASONING_DELTA, &text)
         }
-        SessionEvent::Output(StreamPart::Delta(text)) => ClawAgentEvent {
-            kind: CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA,
-            data: ClawAgentEventData {
-                text_delta: ClawAgentTextDeltaEvent {
-                    text: cstring(&text)?.into_raw(),
-                },
-            },
-        },
-        SessionEvent::Output(StreamPart::End) => empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END),
-        SessionEvent::ToolCalls(StreamPart::Delta(call)) => {
-            let id = cstring(&call.id)?;
-            let name = cstring(&call.name)?;
-            let arguments_json = cstring(&call.arguments_json)?;
-            ClawAgentEvent {
-                kind: CLAW_AGENT_EVENT_KIND_TOOL_CALL,
-                data: ClawAgentEventData {
-                    tool_call: ClawAgentToolCallEvent {
-                        id: id.into_raw(),
-                        name: name.into_raw(),
-                        arguments_json: arguments_json.into_raw(),
-                    },
-                },
-            }
+        IterationEvent::Reasoning(StreamPart::End) => {
+            Ok(empty_event(CLAW_AGENT_EVENT_KIND_REASONING_END))
         }
-        SessionEvent::ToolCalls(StreamPart::End) => {
-            empty_event(CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END)
+        IterationEvent::Output(StreamPart::Delta(text)) => {
+            text_event(CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA, &text)
         }
-        SessionEvent::IterationEnded => empty_event(CLAW_AGENT_EVENT_KIND_ITERATION_ENDED),
-        SessionEvent::TurnEnded { turn } => ClawAgentEvent {
-            kind: CLAW_AGENT_EVENT_KIND_TURN_ENDED,
+        IterationEvent::Output(StreamPart::End) => {
+            Ok(empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END))
+        }
+        IterationEvent::ToolResult(StreamPart::Delta((call, _output))) => Ok(ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_TOOL_CALL,
             data: ClawAgentEventData {
-                turn_ended: ClawAgentTurnEndedEvent { turn_id: turn.0 },
+                tool_call: tool_call_event(&call)?,
             },
-        },
-        SessionEvent::Error { message } => ClawAgentEvent {
-            kind: CLAW_AGENT_EVENT_KIND_ERROR,
+        }),
+        IterationEvent::ToolResult(StreamPart::End) => {
+            Ok(empty_event(CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END))
+        }
+        #[cfg(feature = "cache_profile")]
+        IterationEvent::Usage { usage } => Ok(ClawAgentEvent {
+            kind: CLAW_AGENT_EVENT_KIND_USAGE,
             data: ClawAgentEventData {
-                error: ClawAgentErrorEvent {
-                    message: cstring(&message)?.into_raw(),
+                usage: ClawAgentUsageEvent {
+                    input_tokens: usage.input_tokens.unwrap_or(u64::MAX),
+                    output_tokens: usage.output_tokens.unwrap_or(u64::MAX),
+                    cache_read_tokens: usage.cache_read_tokens.unwrap_or(u64::MAX),
+                    cache_write_tokens: usage.cache_write_tokens.unwrap_or(u64::MAX),
                 },
             },
+        }),
+        IterationEvent::Ended => Ok(empty_event(CLAW_AGENT_EVENT_KIND_ITERATION_ENDED)),
+    }
+}
+
+fn text_event(kind: c_int, text: &str) -> Result<ClawAgentEvent, CabiError> {
+    Ok(ClawAgentEvent {
+        kind,
+        data: ClawAgentEventData {
+            text_delta: ClawAgentTextDeltaEvent {
+                text: cstring(text)?.into_raw(),
+            },
         },
-        SessionEvent::Closed => empty_event(CLAW_AGENT_EVENT_KIND_CLOSED),
-    };
+    })
+}
+
+fn tool_call_event(call: &claw_agent::ToolCall) -> Result<ClawAgentToolCallEvent, CabiError> {
+    let id = cstring(&call.id)?;
+    let name = cstring(&call.name)?;
+    let arguments_json = cstring(&call.arguments_json)?;
+    Ok(ClawAgentToolCallEvent {
+        id: id.into_raw(),
+        name: name.into_raw(),
+        arguments_json: arguments_json.into_raw(),
+    })
+}
+
+fn error_event(message: &str) -> Result<ClawAgentEvent, CabiError> {
+    Ok(ClawAgentEvent {
+        kind: CLAW_AGENT_EVENT_KIND_ERROR,
+        data: ClawAgentEventData {
+            error: ClawAgentErrorEvent {
+                message: cstring(message)?.into_raw(),
+            },
+        },
+    })
+}
+
+fn write_error_event(out_event: &mut ClawAgentEvent, message: &str) -> Result<(), CabiError> {
+    *out_event = error_event(message)?;
     Ok(())
 }
 
@@ -895,8 +947,7 @@ fn link_api_error(error: AgentError) -> CabiError {
 fn session_control_error(error: SessionControlError) -> CabiError {
     match error {
         SessionControlError::SessionClosed(_) => CabiError::NotFound,
-        SessionControlError::Busy(_)
-        | SessionControlError::NotAwaitingInput(_)
+        SessionControlError::NotAwaitingInput(_)
         | SessionControlError::InputRequestMismatch { .. }
         | SessionControlError::WorkerStopped => CabiError::InvalidState,
     }
@@ -908,7 +959,8 @@ fn session_delete_error(error: SessionDeleteError) -> CabiError {
         SessionDeleteError::AlreadyDeleting(_)
         | SessionDeleteError::WorkerStopped
         | SessionDeleteError::Agent(_)
-        | SessionDeleteError::Persistence(_) => CabiError::InvalidState,
+        | SessionDeleteError::Persistence(_)
+        | SessionDeleteError::InvalidInstanceId(_) => CabiError::InvalidState,
     }
 }
 
@@ -925,11 +977,13 @@ fn ffi_result(op: impl FnOnce() -> Result<(), CabiError>) -> EspErr {
             let esp_err = error.esp_err();
             if error.should_log() {
                 tracing::error!(target: "claw_cabi", error = %error, "C ABI call failed");
+                log::error!(target: "claw_cabi", "C ABI call failed: {error}");
             }
             esp_err
         }
         Err(_) => {
             tracing::error!(target: "claw_cabi", "C ABI call panicked");
+            log::error!(target: "claw_cabi", "C ABI call panicked");
             ESP_FAIL
         }
     }

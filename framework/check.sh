@@ -3,7 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-cargo check --workspace --all-targets
+# `claw-core` defaults to reasoning_short while the public `claw-agent`
+# boundary defaults to reasoning_medium. Building both workspace packages in
+# one Cargo invocation unions those mutually exclusive features. Check the
+# assembled workspace first, then the implementation crate on its own.
+cargo check --workspace --all-targets --exclude claw-core
+cargo check -p claw-core --all-targets
 
 if ! cargo public-api --version >/dev/null 2>&1; then
     echo "cargo-public-api is required. Install it with: cargo +stable install cargo-public-api" >&2

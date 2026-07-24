@@ -66,16 +66,23 @@ typedef enum {
     CLAW_AGENT_EVENT_KIND_REASONING_END = 4,
     CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA = 5,
     CLAW_AGENT_EVENT_KIND_OUTPUT_END = 6,
+    /* One completed tool result. The payload retains the original call
+     * metadata; the C boundary currently does not expose the result body. */
     CLAW_AGENT_EVENT_KIND_TOOL_CALL = 7,
     CLAW_AGENT_EVENT_KIND_TOOL_CALLS_END = 8,
     CLAW_AGENT_EVENT_KIND_ITERATION_ENDED = 9,
     CLAW_AGENT_EVENT_KIND_TURN_ENDED = 10,
     CLAW_AGENT_EVENT_KIND_ERROR = 11,
     CLAW_AGENT_EVENT_KIND_CLOSED = 12,
+    /* Present only when claw-cabi is built with cache_profile. */
+    CLAW_AGENT_EVENT_KIND_USAGE = 13,
 } claw_agent_event_kind_t;
 
 typedef enum {
     CLAW_AGENT_TURN_ORIGIN_USER = 0,
+    CLAW_AGENT_TURN_ORIGIN_TOOL_CALL = 1,
+    /* Deprecated compatibility name; current root-visible background turns
+     * originate from detached tool completions, not subagents. */
     CLAW_AGENT_TURN_ORIGIN_SUBAGENT = 1,
 } claw_agent_turn_origin_t;
 
@@ -86,7 +93,7 @@ typedef enum {
 typedef struct {
     uint32_t turn_id;
     claw_agent_turn_origin_t origin;
-    /* Non-zero only for SUBAGENT origin. */
+    /* Reserved compatibility field; current root-visible origins set it to 0. */
     uint32_t agent_id;
 } claw_agent_turn_started_event_t;
 
@@ -123,6 +130,14 @@ typedef struct {
     char *message;
 } claw_agent_error_event_t;
 
+typedef struct {
+    /* UINT64_MAX means the provider did not report this counter. */
+    uint64_t input_tokens;
+    uint64_t output_tokens;
+    uint64_t cache_read_tokens;
+    uint64_t cache_write_tokens;
+} claw_agent_usage_event_t;
+
 typedef union {
     claw_agent_turn_started_event_t turn_started;
     claw_agent_input_requested_event_t input_requested;
@@ -133,6 +148,8 @@ typedef union {
     claw_agent_tool_call_event_t tool_call;
     claw_agent_turn_ended_event_t turn_ended;
     claw_agent_error_event_t error;
+    /* Used by USAGE. */
+    claw_agent_usage_event_t usage;
     uint32_t reserved;
 } claw_agent_event_data_t;
 
@@ -241,10 +258,12 @@ esp_err_t claw_agent_session_open(uint32_t session_id);
  * text must be a non-NULL UTF-8 string.
  *
  * Returns:
- * - ESP_OK after the worker accepts the input.
+ * Messages are appended to the Session's FIFO inbox, including while another
+ * turn is active.
+ *
+ * - ESP_OK after the worker accepts the input into that inbox.
  * - ESP_ERR_INVALID_ARG for invalid text/session arguments.
- * - ESP_ERR_INVALID_STATE if the runtime is not started, is stopping, or the
- *   session already has an active foreground submit.
+ * - ESP_ERR_INVALID_STATE if the runtime is not started or is stopping.
  * - ESP_ERR_NOT_FOUND if session_id is not open.
  * - ESP_FAIL for unexpected scheduling failures.
  */

@@ -3,7 +3,7 @@
 mod support;
 use support::Sse;
 
-use core::future::Future;
+use core::future::{poll_fn, Future};
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::thread;
@@ -26,6 +26,7 @@ use support::{
 };
 
 type SlowAgentSystem = AgentSystem<MemFs, Sse<SlowScriptHttp>, ImmediateTimer>;
+type CancelOnlyAgentSystem = AgentSystem<MemFs, Sse<CancelOnlyHttp>, ImmediateTimer>;
 
 #[derive(Default)]
 struct SlowScriptHttp;
@@ -68,6 +69,31 @@ impl Future for YieldTimes {
             context.waker().wake_by_ref();
             Poll::Pending
         }
+    }
+}
+
+#[derive(Default)]
+struct CancelOnlyHttp;
+
+impl ClawHttp for CancelOnlyHttp {
+    fn post_json<'a>(
+        &'a mut self,
+        _request: &'a HttpJsonRequest<'a>,
+        cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        Box::pin(async move {
+            poll_fn(|context| {
+                if cancel.is_cancelled() {
+                    Poll::Ready(())
+                } else {
+                    context.waker().wake_by_ref();
+                    thread::yield_now();
+                    Poll::Pending
+                }
+            })
+            .await;
+            Err(HttpError::Aborted)
+        })
     }
 }
 
@@ -280,7 +306,7 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
 fn close_session_cancels_active_work_and_closes_events() {
     let _script = serialize_script();
     let root = mem_root("agent-close-session");
-    let system = build_slow_system(&root, vec![assistant_text("should not surface")]);
+    let system = build_cancel_only_system(&root, vec![assistant_text("should not surface")]);
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
@@ -342,6 +368,15 @@ fn delete_session_removes_session_and_closes_open_stream() {
 fn build_slow_system(root: &str, bodies: Vec<String>) -> SlowAgentSystem {
     install_script(bodies);
     let system = SlowAgentSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
+        .unwrap();
+    system
+}
+
+fn build_cancel_only_system(root: &str, bodies: Vec<String>) -> CancelOnlyAgentSystem {
+    install_script(bodies);
+    let system = CancelOnlyAgentSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

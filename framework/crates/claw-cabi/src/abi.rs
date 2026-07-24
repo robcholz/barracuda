@@ -63,9 +63,11 @@ pub const CLAW_AGENT_EVENT_KIND_ITERATION_ENDED: c_int = 9;
 pub const CLAW_AGENT_EVENT_KIND_TURN_ENDED: c_int = 10;
 pub const CLAW_AGENT_EVENT_KIND_ERROR: c_int = 11;
 pub const CLAW_AGENT_EVENT_KIND_CLOSED: c_int = 12;
+#[cfg(feature = "cache_profile")]
+pub const CLAW_AGENT_EVENT_KIND_USAGE: c_int = 13;
 
 pub const CLAW_AGENT_TURN_ORIGIN_USER: c_int = 0;
-pub const CLAW_AGENT_TURN_ORIGIN_SUBAGENT: c_int = 1;
+pub const CLAW_AGENT_TURN_ORIGIN_TOOL_CALL: c_int = 1;
 
 pub const CLAW_AGENT_INPUT_REQUEST_KIND_PERMISSION_APPROVAL: c_int = 0;
 
@@ -119,6 +121,15 @@ pub struct ClawAgentErrorEvent {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
+pub struct ClawAgentUsageEvent {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+}
+
+#[repr(C)]
 pub union ClawAgentEventData {
     pub turn_started: ClawAgentTurnStartedEvent,
     pub input_requested: ClawAgentInputRequestedEvent,
@@ -127,6 +138,7 @@ pub union ClawAgentEventData {
     pub tool_call: ClawAgentToolCallEvent,
     pub turn_ended: ClawAgentTurnEndedEvent,
     pub error: ClawAgentErrorEvent,
+    pub usage: ClawAgentUsageEvent,
     pub reserved: u32,
 }
 

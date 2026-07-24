@@ -1,5 +1,8 @@
 //! ESP-IDF C adapter for the Rust agent runtime.
 
+#[cfg(all(feature = "rich_logging", feature = "prod_logging"))]
+compile_error!("`rich_logging` and `prod_logging` are mutually exclusive");
+
 #[cfg(target_os = "espidf")]
 mod abi;
 #[cfg(target_os = "espidf")]

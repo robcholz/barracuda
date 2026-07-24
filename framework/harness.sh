@@ -11,12 +11,14 @@ run() {
 workspace_flags=(
     --workspace
     --all-targets
+    # Avoid unifying claw-core's reasoning_short default with claw-agent's
+    # reasoning_medium default. claw-core gets its own tier matrix below.
+    --exclude
+    claw-core
 )
 
 feature_packages=(
-    claw-agent
     claw-api
-    claw-cabi
     claw-persistence
     claw-context
     claw-interface
@@ -106,16 +108,59 @@ run_claw_core_feature_matrix() {
     done
 }
 
+run_claw_agent_feature_matrix() {
+    local cargo_cmd="$1"
+    local feature
+
+    # claw-agent is the public feature boundary and forwards the same exclusive
+    # reasoning tiers to claw-core. Exercise one complete shape at a time.
+    for feature in "${reasoning_tier_features[@]}"; do
+        if [[ "$cargo_cmd" == "clippy" ]]; then
+            run cargo "$cargo_cmd" -p claw-agent --all-targets \
+                --no-default-features \
+                --features "$feature stage_verbose multiagent cache_profile dev" \
+                -- -D warnings
+        else
+            run cargo "$cargo_cmd" -p claw-agent --all-targets \
+                --no-default-features \
+                --features "$feature stage_verbose multiagent cache_profile dev"
+        fi
+    done
+}
+
+run_claw_cabi_feature_matrix() {
+    local cargo_cmd="$1"
+    local features
+
+    # The two firmware logging modes deliberately compile out opposite
+    # facades, so --all-features is not a valid claw-cabi shape.
+    for features in "" "cache_profile rich_logging" "cache_profile prod_logging"; do
+        if [[ "$cargo_cmd" == "clippy" ]]; then
+            run cargo "$cargo_cmd" -p claw-cabi --all-targets \
+                --no-default-features --features "$features" -- -D warnings
+        else
+            run cargo "$cargo_cmd" -p claw-cabi --all-targets \
+                --no-default-features --features "$features"
+        fi
+    done
+}
+
 run cargo fmt --all --check
 run cargo clippy "${workspace_flags[@]}" -- -D warnings
 run_package_all_features clippy
+run_claw_agent_feature_matrix clippy
+run_claw_cabi_feature_matrix clippy
 run_claw_log_feature_matrix clippy
 run_claw_core_feature_matrix clippy
 run cargo check "${workspace_flags[@]}"
 run_package_all_features check
+run_claw_agent_feature_matrix check
+run_claw_cabi_feature_matrix check
 run_claw_log_feature_matrix check
 run_claw_core_feature_matrix check
 run cargo test "${workspace_flags[@]}"
 run_package_all_features test
+run_claw_agent_feature_matrix test
+run_claw_cabi_feature_matrix test
 run_claw_log_feature_matrix test
 run_claw_core_feature_matrix test

@@ -11,6 +11,7 @@ pub claw_core::AgentApprovalError::ToolCallMismatch::received: claw_core::ToolCa
 pub enum claw_core::AgentCreateError
 pub claw_core::AgentCreateError::AgentAlreadyExists(claw_core::AgentId)
 pub claw_core::AgentCreateError::AgentNotFound(claw_core::AgentId)
+pub claw_core::AgentCreateError::InvalidInstanceId(claw_persistence::InvalidInstanceId)
 pub claw_core::AgentCreateError::InvalidPersistedAgentId(alloc::string::String)
 pub claw_core::AgentCreateError::LongTerm(claw_memory::long_term_memory::LongTermInitError)
 pub claw_core::AgentCreateError::Persistence(claw_persistence::persistence::PersistenceError)
@@ -86,11 +87,13 @@ pub claw_core::SessionControlError::NotAwaitingInput(claw_core::SessionId)
 pub claw_core::SessionControlError::SessionClosed(claw_core::SessionId)
 pub claw_core::SessionControlError::WorkerStopped
 pub enum claw_core::SessionCreateError
+pub claw_core::SessionCreateError::InvalidInstanceId(claw_persistence::InvalidInstanceId)
 pub claw_core::SessionCreateError::Persistence(claw_persistence::persistence::PersistenceError)
 pub claw_core::SessionCreateError::WorkerStopped
 pub enum claw_core::SessionDeleteError
 pub claw_core::SessionDeleteError::Agent(claw_core::AgentCreateError)
 pub claw_core::SessionDeleteError::AlreadyDeleting(claw_core::SessionId)
+pub claw_core::SessionDeleteError::InvalidInstanceId(claw_persistence::InvalidInstanceId)
 pub claw_core::SessionDeleteError::Persistence(claw_persistence::persistence::PersistenceError)
 pub claw_core::SessionDeleteError::SessionNotFound(claw_core::SessionId)
 pub claw_core::SessionDeleteError::WorkerStopped
