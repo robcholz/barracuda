@@ -19,7 +19,9 @@ use claw_agent::{
 };
 use claw_api::{BackendKind, ClawApiConfig};
 use claw_interface::{Cancel, ClawThread, ClawTimer, CoreAffinity, Priority};
-use claw_log::{LevelFilter, LogOutput, TracingConfig};
+#[cfg(not(all(feature = "trace_max_off", not(debug_assertions))))]
+use claw_log::TracingConfig;
+use claw_log::{LevelFilter, LogOutput};
 use claw_sys::{EspIdfExecutor, EspIdfFs, EspIdfHttp, EspIdfThread, EspIdfTimer};
 
 use futures_core::Stream;
@@ -214,6 +216,7 @@ pub unsafe extern "C" fn claw_agent_event_free(event: *mut ClawAgentEvent) {
 
 fn init(config: *const ClawAgentConfig) -> Result<(), CabiError> {
     let _ = claw_log::init_logger(LevelFilter::Info, LogOutput::Stderr);
+    #[cfg(not(all(feature = "trace_max_off", not(debug_assertions))))]
     let _ = claw_log::init_tracing(
         TracingConfig::default()
             .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]),

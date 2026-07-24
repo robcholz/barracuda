@@ -43,10 +43,11 @@ required-features = ["multiagent"]
 # - `dev` is the shared local workflow bundle for examples and host tools.
 # - `cache_profile` forwards provider usage support; `claw-agent-chat` requires it.
 #
-# Multiagent and backends are selected explicitly at compile time. Firmware uses
-# `AgentSystem::<Filesystem, Http, Timer>::new(...)` with ESP-IDF backends
-# injected by `claw-cabi`.
-default = []
+# `claw-agent` is the public feature-selection boundary. It disables
+# `claw-core`'s implicit defaults below and forwards every runtime-shape choice,
+# so consumers never need to configure an implementation crate directly.
+default = ["reasoning_medium"]
+stage_verbose = ["claw-core/stage_verbose"]
 multiagent = ["claw-core/multiagent"]
 host-backends = [
     "claw-interface/host-backends",
@@ -67,8 +68,25 @@ cache_profile = [
     "claw-api/cache_profile",
     "claw-core/cache_profile",
 ]
+
+# Compile-time byte cap on accumulated reasoning deltas. Exactly one tier must
+# be selected; the default preserves the existing 2000-byte cap.
+reasoning_short = ["claw-core/reasoning_short"]
+reasoning_medium = ["claw-core/reasoning_medium"]
+reasoning_long = ["claw-core/reasoning_long"]
+
+# Release-only compile-time tracing ceilings for the complete runtime graph.
+# `trace_max_off` removes all statically-levelled span/event instrumentation;
+# debug builds remain fully observable for local development.
+trace_max_off = ["claw-core/trace_max_off"]
+trace_max_error = ["claw-core/trace_max_error"]
+trace_max_warn = ["claw-core/trace_max_warn"]
+trace_max_info = ["claw-core/trace_max_info"]
+trace_max_debug = ["claw-core/trace_max_debug"]
+trace_max_trace = ["claw-core/trace_max_trace"]
+
 [dependencies]
-claw-core = { path = "../claw-core" }
+claw-core = { path = "../claw-core", default-features = false }
 claw-api = { path = "../claw-api" }
 claw-persistence = { path = "../claw-persistence" }
 claw-tool = { path = "../claw-tool" }

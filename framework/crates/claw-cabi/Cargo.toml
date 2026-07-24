@@ -10,13 +10,29 @@ name = "claw_cabi"
 crate-type = ["staticlib", "rlib"]
 
 [features]
-default = []
+# `claw-cabi` is the firmware build boundary, so it mirrors `claw-agent`'s
+# public runtime configuration instead of reaching into implementation crates.
+default = ["reasoning_medium"]
+stage_verbose = ["claw-agent/stage_verbose"]
+cache_profile = ["claw-agent/cache_profile"]
+
 multiagent = ["claw-agent/multiagent"]
+
+reasoning_short = ["claw-agent/reasoning_short"]
+reasoning_medium = ["claw-agent/reasoning_medium"]
+reasoning_long = ["claw-agent/reasoning_long"]
+
+trace_max_off = ["claw-agent/trace_max_off"]
+trace_max_error = ["claw-agent/trace_max_error"]
+trace_max_warn = ["claw-agent/trace_max_warn"]
+trace_max_info = ["claw-agent/trace_max_info"]
+trace_max_debug = ["claw-agent/trace_max_debug"]
+trace_max_trace = ["claw-agent/trace_max_trace"]
 
 [dependencies]
 
 [target.'cfg(target_os = "espidf")'.dependencies]
-claw-agent = { path = "../claw-agent" }
+claw-agent = { path = "../claw-agent", default-features = false }
 claw-api = { path = "../claw-api" }
 claw-interface = { path = "../claw-interface" }
 claw-log = { path = "../claw-log" }
