@@ -16,6 +16,7 @@ use crate::agent::AgentId;
 use crate::agent::{Agent, AgentError, AgentEvent};
 use crate::session::Message;
 
+pub(crate) use run::AgentRunResume;
 use run::{AgentRun, AgentRunControl, AgentRunItem};
 
 /// One checkout epoch. A late event from an older run cannot mutate a newer
@@ -34,8 +35,11 @@ pub(crate) struct AgentRunOutput<Http: ClawHttp, Timer: ClawTimer> {
 }
 
 pub(crate) enum AgentRunOutputItem<Http: ClawHttp, Timer: ClawTimer> {
-    Event(Result<AgentEvent, AgentError>),
-    Returned(Agent<Http, Timer>),
+    Event {
+        event: Result<AgentEvent, AgentError>,
+        resume: AgentRunResume,
+    },
+    Returned(Box<Agent<Http, Timer>>),
 }
 
 struct RouteState<Http: ClawHttp, Timer: ClawTimer> {
@@ -167,7 +171,7 @@ where
     pub(crate) fn submit(
         &self,
         agent_id: AgentId,
-        agent: Agent<Http, Timer>,
+        agent: Box<Agent<Http, Timer>>,
         message: Message,
         span: tracing::Span,
     ) -> ScheduledAgent {
@@ -192,7 +196,7 @@ where
     fn submit(
         &self,
         agent_id: AgentId,
-        agent: Agent<Http, Timer>,
+        agent: Box<Agent<Http, Timer>>,
         message: Message,
         route: AgentRunRoute<Http, Timer>,
         span: tracing::Span,
@@ -269,11 +273,11 @@ where
                 .pop_front()
                 .expect("fair sweep length matches the active queue");
             match scheduled.task.poll_event(context) {
-                Poll::Ready(AgentRunItem::Event(event)) => {
+                Poll::Ready(AgentRunItem::Event { event, resume }) => {
                     scheduled.route.send(AgentRunOutput {
                         agent: scheduled.agent,
                         run: scheduled.run,
-                        item: AgentRunOutputItem::Event(event),
+                        item: AgentRunOutputItem::Event { event, resume },
                     });
                     this.active.push_back(scheduled);
                     return Poll::Ready(Some(()));

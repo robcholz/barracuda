@@ -3,14 +3,13 @@ use std::sync::Arc;
 
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, AsyncToolHandler, Tool, ToolError, ToolFuture, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolSpec,
+    tool_metadata, DetachedTool, DetachedToolFuture, DetachedToolHandler, Tool, ToolError,
+    ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
 
 use crate::agent::tools::helper::non_blank_argument;
 use crate::agent::AgentKind;
 use crate::session::Message;
-use claw_api::ToolCall;
 use serde_json::Value;
 
 use super::super::model::{SubagentTimeout, TranscriptText};
@@ -18,7 +17,7 @@ use super::super::policy::SpawnPolicy;
 use super::super::tool_port::SubagentControl;
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
-    Tool::from_async(SpawnSubagentTool { control, policy })
+    Tool::from_detached(SpawnSubagentTool { control, policy })
 }
 
 struct SpawnSubagentTool {
@@ -34,116 +33,106 @@ impl ToolSpec for SpawnSubagentTool {
     }
 }
 
-impl AsyncToolHandler for SpawnSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+impl DetachedToolHandler for SpawnSubagentTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
         Box::pin(async move { self.invoke_inner(call).await })
     }
 }
 
 impl SpawnSubagentTool {
-    async fn invoke_inner(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let kind = AgentKind::new(non_blank_argument(&args, "kind")?);
-        if !self.policy.allows(&kind) {
-            tracing::warn!(name: "spawn_kind_rejected", kind = %kind.as_str());
-            return Ok(ToolOutput {
-                content: format!(
-                    "subagent_spawn: kind '{kind}' is not permitted for this agent. \
-                     Allowed: {}. This is a policy restriction, not a transient error: \
-                     pick a permitted kind or handle the work yourself.",
-                    self.policy.describe()
-                ),
-                ok: false,
-            });
-        }
-
-        if !SpawnPolicy::is_known(&kind) {
-            tracing::warn!(name: "spawn_unknown_kind_rejected", kind = %kind.as_str());
-            let available = self
-                .policy
-                .catalog()
-                .iter()
-                .map(|(agent_kind, _)| agent_kind.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let available = if available.is_empty() {
-                "(none)".to_string()
-            } else {
-                available
-            };
-            return Ok(ToolOutput {
-                content: format!(
-                    "subagent_spawn: '{kind}' is not a known agent kind, so it cannot be \
-                     created. Spawnable kinds: {available}. Call subagent_list_spawnable to see \
-                     what you can spawn."
-                ),
-                ok: false,
-            });
-        }
-
-        let name = non_blank_argument(&args, "name")?;
-        let goal = Message::text(non_blank_argument(&args, "goal")?);
-        let foreground = required_bool_argument(&args, "foreground")?;
-        let timeout = SubagentTimeout::new(required_nonzero_u32_argument(&args, "timeout_ms")?);
-        if foreground {
-            let (_child, result) = match self
-                .control
-                .spawn_foreground(kind, Some(name), goal, timeout)
-                .await
-            {
-                Ok(spawn) => spawn,
-                Err(message) => {
-                    return Ok(ToolOutput {
-                        content: message,
-                        ok: false,
-                    });
-                }
-            };
+    async fn invoke_inner(&self, call: &ToolInvocation) -> Result<DetachedTool, ToolInvokeError> {
+        let request = SpawnRequest::parse(call, &self.policy, "subagent_spawn")?;
+        let SpawnRequest {
+            kind,
+            name,
+            goal,
+            timeout,
+        } = request;
+        let (child, result) = self
+            .control
+            .spawn(kind, Some(name.clone()), goal, timeout)
+            .await
+            .map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
+        let accepted = ToolOutput {
+            content: format!(
+                "Subagent {child} named '{name}' started with a {} ms timeout; its result will be delivered automatically.",
+                timeout.millis()
+            ),
+            ok: true,
+        };
+        let control = Arc::clone(&self.control);
+        let completion = Box::pin(async move {
             let result = result.recv().await.map_err(|_| {
-                ToolError::InvokeRejected("foreground subagent result channel closed".to_owned())
+                ToolError::InvokeRejected("subagent result channel closed".to_owned())
             })?;
+            control.acknowledge_delivery(child);
             Ok(ToolOutput {
                 content: result.text(),
                 ok: result.ok(),
             })
-        } else {
-            let source_call = ToolCall {
-                id: call.id().unwrap_or_default().to_owned(),
-                name: call.name().to_owned(),
-                arguments_json: call.arguments_json().to_owned(),
-            };
-            let child = match self
-                .control
-                .spawn_background(kind, Some(name.clone()), goal, timeout, source_call)
-                .await
-            {
-                Ok(child) => child,
-                Err(message) => {
-                    return Ok(ToolOutput {
-                        content: message,
-                        ok: false,
-                    });
-                }
-            };
-            Ok(ToolOutput {
-                content: format!(
-                    "Subagent {child} named '{name}' requested with a {} ms timeout; its result will be reported back when it finishes.",
-                    timeout.millis()
-                ),
-                ok: true,
-            })
-        }
+        });
+        Ok(DetachedTool::new(accepted, completion))
     }
 }
 
-fn required_bool_argument(args: &Value, key: &str) -> Result<bool, ToolError> {
-    match args.get(key) {
-        Some(Value::Bool(value)) => Ok(*value),
-        Some(_) => Err(ToolError::InvalidArguments(format!(
-            "'{key}' must be a boolean"
-        ))),
-        None => Err(ToolError::InvalidArguments(format!("'{key}' is required"))),
+pub(super) struct SpawnRequest {
+    pub(super) kind: AgentKind,
+    pub(super) name: String,
+    pub(super) goal: Message,
+    pub(super) timeout: SubagentTimeout,
+}
+
+impl SpawnRequest {
+    pub(super) fn parse(
+        call: &ToolInvocation,
+        policy: &SpawnPolicy,
+        tool_name: &str,
+    ) -> Result<Self, ToolInvokeError> {
+        let args = call.arguments_value()?;
+        let kind = AgentKind::new(non_blank_argument(&args, "kind")?);
+        validate_kind(policy, &kind, tool_name)?;
+        Ok(Self {
+            kind,
+            name: non_blank_argument(&args, "name")?,
+            goal: Message::text(non_blank_argument(&args, "goal")?),
+            timeout: SubagentTimeout::new(required_nonzero_u32_argument(&args, "timeout_ms")?),
+        })
     }
+}
+
+fn validate_kind(
+    policy: &SpawnPolicy,
+    kind: &AgentKind,
+    tool_name: &str,
+) -> Result<(), ToolInvokeError> {
+    if !policy.allows(kind) {
+        tracing::warn!(name: "spawn_kind_rejected", kind = %kind.as_str());
+        return Err(ToolError::InvokeRejected(format!(
+            "{tool_name}: kind '{kind}' is not permitted for this agent. Allowed: {}",
+            policy.describe()
+        ))
+        .into());
+    }
+    if SpawnPolicy::is_known(kind) {
+        return Ok(());
+    }
+
+    tracing::warn!(name: "spawn_unknown_kind_rejected", kind = %kind.as_str());
+    let available = policy
+        .catalog()
+        .iter()
+        .map(|(agent_kind, _)| agent_kind.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let available = if available.is_empty() {
+        "(none)".to_owned()
+    } else {
+        available
+    };
+    Err(ToolError::InvokeRejected(format!(
+        "{tool_name}: '{kind}' is not a known agent kind. Spawnable kinds: {available}"
+    ))
+    .into())
 }
 
 fn required_nonzero_u32_argument(args: &Value, key: &str) -> Result<NonZeroU32, ToolError> {

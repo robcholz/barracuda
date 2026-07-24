@@ -6,15 +6,11 @@ Give the subagent a short, required `name` so you can tell several subagents apa
 in `subagent_list` / `subagent_watch`. The name is just a label; you still
 `subagent_delete` (and refer to it) by the agent id this call returns.
 
-Choose the required execution mode explicitly:
-
-- `foreground: true` — wait; this tool call returns the subagent result in the
-  current turn.
-- `foreground: false` — return the agent id immediately; the subagent keeps
-  running and its result is delivered asynchronously to the spawning parent.
-  If the parent is already running, the result waits until its next safe agent
-  boundary and `subagent_list` / `subagent_watch` report the finished child as
-  `completed_pending_delivery` during that interval.
+This tool always runs in the background. It returns the new agent id after the
+child has actually been created, then the child keeps running as a detached
+tool. Its final result is delivered automatically to the spawning Agent at the
+next safe boundary. Use `subagent_run` when the current tool call should wait
+for the result instead.
 
 Always set the required `timeout_ms` to the maximum lifetime this delegated work
 may consume. The deadline covers the subagent and the complete subtree it owns.
@@ -25,7 +21,7 @@ a runtime restart, each live subagent receives a fresh full `timeout_ms` window;
 process-local elapsed time is not checkpointed.
 
 Every subagent is one-shot. A subagent that spawned background children is kept
-idle after a successful response until those children report back; each result
-resumes it through its inbox. It is removed only after it has no live children
-and reports its final result. While a background subagent is still live, you can
-inspect, retask, or stop it with the other subagent tools.
+idle after a successful response until those detached results report back. It
+is removed only after it has no live children and reports its final result.
+While a background subagent is still live, you can inspect, retask, or stop it
+with the other subagent tools.

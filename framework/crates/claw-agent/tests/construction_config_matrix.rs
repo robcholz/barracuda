@@ -4,6 +4,7 @@ mod support;
 use support::Sse;
 
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, AgentSystem, BackendKind, ClawApiConfig,
@@ -20,6 +21,8 @@ use tempdir::TempDir;
 
 type MemConstructionSystem = AgentSystem<MemFs, Sse<ConstructionHttp>, ImmediateTimer>;
 type DiskConstructionSystem = AgentSystem<DiskFs, Sse<ConstructionHttp>, ImmediateTimer>;
+
+static CONSTRUCTION_REQUESTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[test]
 fn turn_without_linked_api_reports_not_configured() {
@@ -92,6 +95,48 @@ fn construction_csv_config_matrix_validates_llm_config_and_skill_roots() {
     }
 }
 
+#[test]
+#[cfg(not(feature = "multiagent"))]
+fn compile_time_disabled_multiagent_omits_subagent_tools() {
+    MemFs::new();
+    let root = mem_root("construction-no-multiagent");
+    let system =
+        MemConstructionSystem::new::<StdThread, TokioExecutor>(mem_persistence(&root, "none"))
+            .unwrap();
+    system
+        .link_api(
+            ClawApiConfig::new(
+                BackendKind::OpenAiCompatible,
+                "sk-test",
+                "model-test",
+                "https://example.invalid",
+            ),
+            claw_agent::ApiPurpose::RootAgent,
+            true,
+        )
+        .unwrap();
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Ephemeral)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    let marker = "verify-disabled-multiagent-tools";
+
+    block_on(control.append(Message::text(marker))).unwrap();
+    let _ = drain_until_turn_ended(&mut events);
+
+    let requests = CONSTRUCTION_REQUESTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let body = requests
+        .iter()
+        .find(|body| body.contains(marker))
+        .expect("root iteration request");
+    assert!(
+        !body.contains("\"subagent_"),
+        "disabled multiagent leaked tools into request: {body}"
+    );
+}
+
 #[derive(Default)]
 struct ConstructionHttp;
 
@@ -101,8 +146,13 @@ impl ClawHttp for ConstructionHttp {
         request: &'a HttpJsonRequest<'a>,
         _cancel: Cancel<'a>,
     ) -> HttpResponseFuture<'a> {
+        let request_body = request.body.to_owned();
         Box::pin(async move {
-            let body = if is_agent_iteration_request(request.body) {
+            CONSTRUCTION_REQUESTS
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(request_body.clone());
+            let body = if is_agent_iteration_request(&request_body) {
                 assistant_text("construction-ok")
             } else {
                 assistant_text("[]")

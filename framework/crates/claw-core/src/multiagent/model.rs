@@ -9,7 +9,8 @@ use strum::IntoStaticStr;
 use crate::agent::{AgentId, AgentKind};
 use crate::session::Message;
 
-/// Everything the future Multiagent orchestrator needs to materialize one child agent.
+/// Everything the Multiagent component needs to materialize one child Agent.
+#[derive(Clone)]
 pub(crate) struct SubagentSpec {
     kind: AgentKind,
     name: Option<String>,
@@ -34,6 +35,10 @@ impl SubagentSpec {
 
     pub(crate) fn into_parts(self) -> (AgentKind, Option<String>, Message, SubagentTimeout) {
         (self.kind, self.name, self.goal, self.timeout)
+    }
+
+    pub(crate) fn kind(&self) -> &AgentKind {
+        &self.kind
     }
 }
 
@@ -63,6 +68,7 @@ pub(crate) trait TranscriptText {
     fn text(&self) -> String;
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SubagentResult {
     id: AgentId,
     text: String,
@@ -72,10 +78,6 @@ pub(crate) struct SubagentResult {
 impl SubagentResult {
     pub(crate) fn new(id: AgentId, text: String, ok: bool) -> Self {
         Self { id, text, ok }
-    }
-
-    pub(crate) fn id(&self) -> AgentId {
-        self.id
     }
 
     pub(crate) fn ok(&self) -> bool {
@@ -100,8 +102,6 @@ pub(crate) enum SubagentStatus {
     AwaitingApproval,
     #[strum(serialize = "running")]
     Running,
-    #[strum(serialize = "cancelling")]
-    Cancelling,
     #[strum(serialize = "reaping")]
     Reaping,
     #[strum(serialize = "idle")]
@@ -137,11 +137,6 @@ impl SubagentSnapshot {
             depth,
             status,
         }
-    }
-
-    pub(crate) fn with_status(mut self, status: SubagentStatus) -> Self {
-        self.status = status;
-        self
     }
 }
 

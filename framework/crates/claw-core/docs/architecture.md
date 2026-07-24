@@ -148,11 +148,13 @@ across Sessions; a future directory cache must remain a rebuildable read model.
 - `dispatch` accepts exactly one message only while Agent is idle between
   turns. It never queues a second message and never appends directly into a
   running BaseAgent task.
-- Framework-configured detached tools return an immediate accepted tool result
-  through the batch `ToolJoinHandle` stream. Before BaseAgent consumes that
-  stream, it moves the optional batch `ToolDetachHandle` stream through its
-  internal stream into the Agent's transient runtime. No sink or runtime
-  callback is installed in ToolSet, and neither handle is model-visible.
+- Static detached tools return the framework's immediate accepted result.
+  Dynamically detached tools first start their operation and provide both a
+  domain-specific accepted result and an owned completion future. In both
+  cases, BaseAgent moves the optional `ToolDetachHandle` through its internal
+  stream into the Agent's transient runtime before consuming joined
+  settlements. No runtime callback is installed in ToolSet, and neither handle
+  is model-visible.
 - If a detached completion arrives while BaseAgent is still running, Agent
   injects a marked continuation at the next safe BaseAgent iteration boundary
   and keeps the same Agent turn. If it arrives while BaseAgent is stopped,
@@ -166,9 +168,11 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   permission -> tool execution -> all-ID join` flow. Waiting for approval
   suspends the injected BaseAgent permission future; it is not a second Agent
   state machine.
-- `BaseAgent::submit(&mut self, Message)` is its only task-entry API. It returns
-  a crate-private borrowing stream used only by Agent. There is no tick API,
-  output sender, or second terminal-outcome protocol.
+- `BaseAgent::submit` accepts an Agent-private `AgentTask`: either an ordinary
+  `Message` or a detached `ToolCompletion` carrying the original call identity.
+  SessionActor, AgentSlot, and Scheduler still dispatch only `Message`.
+  BaseAgent returns a crate-private borrowing stream used only by Agent; there
+  is no tick API, output sender, or second terminal-outcome protocol.
 - Dropping that inner stream before terminal completion cancels the active task
   and leaves BaseAgent stopped. BaseAgent directly consumes the borrowed HTTP
   stream, updates its transcript, and yields its iteration/input/outcome

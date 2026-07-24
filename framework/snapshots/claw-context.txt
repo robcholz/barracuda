@@ -55,7 +55,7 @@ impl<'a> claw_context::Block<'a>
 pub fn claw_context::Block<'a>::new(claw_context::BlockKind, impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
 pub struct claw_context::Context
 impl claw_context::Context
-pub fn claw_context::Context::blocks(&self) -> alloc::vec::Vec<claw_context::Block<'static>>
+pub fn claw_context::Context::fork_blocks(&self) -> alloc::vec::Vec<claw_context::Block<'static>>
 pub fn claw_context::Context::new() -> Self
 pub fn claw_context::Context::reminder(&mut self, core::option::Option<&str>) -> &mut Self
 pub fn claw_context::Context::request<'a>(&'a mut self, &'a serde_json::value::Value) -> claw_context::RequestContext<'a>

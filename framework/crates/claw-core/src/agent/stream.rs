@@ -60,13 +60,15 @@ pub(crate) struct AgentHandle {
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
 }
 
+type AgentChannel = (
+    AgentHandle,
+    Receiver<AgentCommand>,
+    Rc<Cell<AgentActivity>>,
+    Rc<RefCell<Option<ToolCallId>>>,
+);
+
 impl AgentHandle {
-    pub(super) fn channel() -> (
-        Self,
-        Receiver<AgentCommand>,
-        Rc<Cell<AgentActivity>>,
-        Rc<RefCell<Option<ToolCallId>>>,
-    ) {
+    pub(super) fn channel() -> AgentChannel {
         let (commands, receiver) = async_channel::unbounded();
         let activity = Rc::new(Cell::new(AgentActivity::Running));
         let awaiting_approval = Rc::new(RefCell::new(None));

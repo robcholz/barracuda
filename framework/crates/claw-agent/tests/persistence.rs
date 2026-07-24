@@ -4,6 +4,8 @@ mod support;
 
 use core::future::poll_fn;
 use core::task::{Poll, Waker};
+#[cfg(feature = "multiagent")]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -17,6 +19,11 @@ use claw_agent::{AgentPersistenceConfig, AgentSystem, Message, SessionId, Sessio
 use claw_interface::{
     BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
 };
+#[cfg(feature = "multiagent")]
+use claw_interface::{
+    Cancel, ClawHttp, ClawTimer, HttpError, HttpJsonRequest, HttpResponse, HttpResponseFuture,
+    HttpStatusCode, SleepOutcome, TimerFuture,
+};
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
 use serde_json::{json, Value};
@@ -25,6 +32,11 @@ use support::{install_script, llm_config, serialize_script, Sse};
 use tempdir::TempDir;
 
 type DiskSystem = AgentSystem<DiskFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>, ImmediateTimer>;
+#[cfg(feature = "multiagent")]
+type PersistentSubagentSystem = AgentSystem<DiskFs, Sse<PersistentSubagentHttp>, PendingTimer>;
+
+#[cfg(feature = "multiagent")]
+static PERSISTENT_SUBAGENT_POLLS: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn persistent_sessions_use_the_documented_layout_and_restore() {
@@ -51,6 +63,38 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
 }
 
 #[test]
+#[cfg(feature = "multiagent")]
+fn persistent_session_keeps_only_the_root_agent_on_disk() {
+    PERSISTENT_SUBAGENT_POLLS.store(0, Ordering::SeqCst);
+    let temp = TempDir::new("in-memory-subagent").unwrap();
+    let root = temp.path().to_string_lossy().into_owned();
+    let system =
+        PersistentSubagentSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
+            persistence_root: root.clone(),
+            skill_roots: Vec::new(),
+        })
+        .unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
+        .unwrap();
+    let session = system.new_session(SessionPersistence::Persistent).unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+
+    block_on(control.append(Message::text("spawn a persistent-session child"))).unwrap();
+    let _ = support::drain_until_turn_ended(&mut events);
+    wait_until_subagent_is_pending();
+
+    assert!(DiskFs::exists(&format!("{root}/agents/agent-1.bin")));
+    assert!(DiskFs::exists(&format!("{root}/transcript/1.jsonl")));
+    assert!(DiskFs::exists(&format!("{root}/transcript/1.json")));
+    assert!(!DiskFs::exists(&format!("{root}/agents/agent-2.bin")));
+    assert!(!DiskFs::exists(&format!("{root}/transcript/2.jsonl")));
+    assert!(!DiskFs::exists(&format!("{root}/transcript/2.json")));
+
+    block_on(control.close()).unwrap();
+}
+
+#[test]
 fn session_manager_payload_contains_both_counters() {
     let _script = serialize_script();
     let temp = TempDir::new("runtime-payload").unwrap();
@@ -71,7 +115,7 @@ fn session_manager_payload_contains_both_counters() {
 }
 
 #[test]
-fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
+fn root_agent_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     let _script = serialize_script();
     let temp = TempDir::new("inflight-toolcall").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
@@ -97,10 +141,10 @@ fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     block_on(control.append(Message::text("run the blocking tool"))).unwrap();
 
     wait_until(&gate.started, "blocking tool did not start");
-    let path = format!("{root}/sessions/{}.bin", session.to_wire());
+    let path = format!("{root}/agents/agent-1.bin");
     let inflight = read_payload(&path);
     assert_eq!(
-        inflight["root_inflight_toolcalls"],
+        inflight["inflight_toolcalls"],
         json!([{
             "id": "call_persistence_1",
             "name": "blocking_tool",
@@ -115,7 +159,7 @@ fn root_inflight_toolcall_is_on_disk_before_the_tool_body_can_finish() {
     drop(system);
 
     let completed = read_payload(&path);
-    assert_eq!(completed["root_inflight_toolcalls"], json!([]));
+    assert_eq!(completed["inflight_toolcalls"], json!([]));
 }
 
 #[test]
@@ -190,7 +234,6 @@ fn session_payload_contains_only_restart_relevant_state() {
             "reasoning_effort": "medium",
             "permission_level": "allow_all",
             "root_agent": null,
-            "root_inflight_toolcalls": [],
         })
     );
 }
@@ -256,7 +299,7 @@ fn startup_clears_a_session_root_whose_agent_record_is_missing() {
 
     let state = read_payload(&session_state);
     assert_eq!(state["root_agent"], Value::Null);
-    assert_eq!(state["root_inflight_toolcalls"], json!([]));
+    assert!(state.get("root_inflight_toolcalls").is_none());
     assert!(!DiskFs::exists(&transcript_data));
     assert!(!DiskFs::exists(&transcript_index));
 }
@@ -375,6 +418,96 @@ fn build_configured_system_with_tool_groups(
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     system
+}
+
+#[derive(Default)]
+#[cfg(feature = "multiagent")]
+struct PendingTimer;
+
+#[cfg(feature = "multiagent")]
+impl ClawTimer for PendingTimer {
+    fn sleep<'a>(
+        &'a mut self,
+        _duration: core::time::Duration,
+        _cancel: Cancel<'a>,
+    ) -> TimerFuture<'a> {
+        Box::pin(core::future::pending::<SleepOutcome>())
+    }
+}
+
+#[derive(Default)]
+#[cfg(feature = "multiagent")]
+struct PersistentSubagentHttp;
+
+#[cfg(feature = "multiagent")]
+impl ClawHttp for PersistentSubagentHttp {
+    fn post_json<'a>(
+        &'a mut self,
+        request: &'a HttpJsonRequest<'a>,
+        cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        let body = request.body.to_owned();
+        Box::pin(async move {
+            if body.contains("\"response_format\"") || !body.contains("\"tools\"") {
+                return Ok(HttpResponse {
+                    status_code: HttpStatusCode::OK,
+                    body: support::assistant_text("[]"),
+                });
+            }
+            if body.contains("subagent spawned by the root agent") {
+                return futures_lite::future::poll_fn(|context| {
+                    PERSISTENT_SUBAGENT_POLLS.fetch_add(1, Ordering::SeqCst);
+                    if cancel.is_cancelled() {
+                        return Poll::Ready(Err(HttpError::Aborted));
+                    }
+                    context.waker().wake_by_ref();
+                    Poll::Pending
+                })
+                .await;
+            }
+            let response = if body.contains("call_persist_child") {
+                support::assistant_text("child accepted")
+            } else {
+                json!({
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": "call_persist_child",
+                                "type": "function",
+                                "function": {
+                                    "name": "subagent_spawn",
+                                    "arguments": json!({
+                                        "kind": "worker",
+                                        "name": "transient",
+                                        "goal": "remain pending",
+                                        "timeout_ms": 60_000,
+                                    }).to_string(),
+                                }
+                            }]
+                        }
+                    }]
+                })
+                .to_string()
+            };
+            Ok(HttpResponse {
+                status_code: HttpStatusCode::OK,
+                body: response,
+            })
+        })
+    }
+}
+
+#[cfg(feature = "multiagent")]
+fn wait_until_subagent_is_pending() {
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while PERSISTENT_SUBAGENT_POLLS.load(Ordering::SeqCst) == 0 {
+        assert!(
+            Instant::now() < deadline,
+            "subagent did not enter its pending HTTP request"
+        );
+        thread::yield_now();
+    }
 }
 
 fn assistant_tool_call(name: &str, arguments: Value) -> String {

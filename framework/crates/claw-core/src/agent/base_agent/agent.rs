@@ -582,7 +582,8 @@ where
                 let render_span = prepare_span
                     .in_scope(|| tracing::info_span!("context.render", adapter_count));
                 let history = render_span.in_scope(|| self.agent.render_adapter_context());
-                let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
+                let result = {
+                    let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
                     Ok(tools) => tools,
                     Err(error) => {
                         yield Err(self.agent.fail(AgentError::from(
@@ -590,53 +591,53 @@ where
                         )));
                         break;
                     }
-                };
-                render_span.in_scope(|| {
-                    self.agent
-                        .context
-                        .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
-                        .with_reminder(
-                            BlockKind::ToolReminder,
-                            Some(tools.extra_tool_context()),
-                        );
-                });
+                    };
+                    render_span.in_scope(|| {
+                        self.agent
+                            .context
+                            .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
+                            .with_reminder(
+                                BlockKind::ToolReminder,
+                                Some(tools.extra_tool_context()),
+                            );
+                    });
 
-                let context = render_span.in_scope(|| self.agent.context.request(&history));
-                let step = LlmStep {
-                    iteration_id,
-                    system_prompt: context.system(),
-                    messages: context.history(),
-                    reminders: context.reminders(),
-                    tools: &tools,
-                };
-                drop(render_span);
-                drop(prepare_span);
+                    let context = render_span.in_scope(|| self.agent.context.request(&history));
+                    let step = LlmStep {
+                        iteration_id,
+                        system_prompt: context.system(),
+                        messages: context.history(),
+                        reminders: context.reminders(),
+                        tools: &tools,
+                    };
+                    drop(render_span);
+                    drop(prepare_span);
 
-                let permission = BaseAgentPermissionPolicy {
-                    policy: self.agent.permission_policy.as_ref(),
-                    control: &control,
-                };
-                let mut iteration = Box::pin(IterationLoop {
-                    llm: &mut self.agent.llm,
-                    control: &control,
-                    permission: &permission,
-                    retry: self.agent.retry_policy,
-                }
-                .run(step));
-                let turn = self
-                    .agent
-                    .active_turn
-                    .as_mut()
-                    .expect("active turn checked before borrowing iteration fields");
-                let mut consumer = IterationConsumer::new(turn);
+                    let permission = BaseAgentPermissionPolicy {
+                        policy: self.agent.permission_policy.as_ref(),
+                        control: &control,
+                    };
+                    let mut iteration = Box::pin(IterationLoop {
+                        llm: &mut self.agent.llm,
+                        control: &control,
+                        permission: &permission,
+                        retry: self.agent.retry_policy,
+                    }
+                    .run(step));
+                    let turn = self
+                        .agent
+                        .active_turn
+                        .as_mut()
+                        .expect("active turn checked before borrowing iteration fields");
+                    let mut consumer = IterationConsumer::new(turn);
 
-                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                    AgentIterationEvent::Started(iteration_id),
-                )));
+                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                        AgentIterationEvent::Started(iteration_id),
+                    )));
 
-                let mut result = None;
-                let mut tool_results_ended = false;
-                while let Some(item) = iteration.next().await {
+                    let mut result = None;
+                    let mut tool_results_ended = false;
+                    while let Some(item) = iteration.next().await {
                     let event = match item {
                         Ok(event) => event,
                         Err(error) => {
@@ -751,21 +752,18 @@ where
                             break;
                         }
                     }
-                }
+                    }
 
-                for event in consumer.finish_content() {
-                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
-                }
-                if !tool_results_ended {
-                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                        AgentIterationEvent::ToolResult(StreamPart::End),
-                    )));
-                }
-                let result = result.unwrap_or_else(|| consumer.finish_iteration());
-                drop(consumer);
-                drop(iteration);
-                drop(permission);
-                drop(tools);
+                    for event in consumer.finish_content() {
+                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
+                    }
+                    if !tool_results_ended {
+                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                            AgentIterationEvent::ToolResult(StreamPart::End),
+                        )));
+                    }
+                    result.unwrap_or_else(|| consumer.finish_iteration())
+                };
 
                 yield Ok(BaseAgentEvent::Iteration(StreamPart::End));
 

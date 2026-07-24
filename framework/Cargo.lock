@@ -417,6 +417,7 @@ name = "claw-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel",
  "claw-interface",
  "claw-permission",
  "claw-persistence",

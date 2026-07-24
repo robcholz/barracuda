@@ -1,70 +1,135 @@
 pub mod claw_core
 pub use claw_core::PermissionLevel
 pub use claw_core::ToolCall
+pub use claw_core::ToolOutput
 pub use claw_core::stream
+pub enum claw_core::AgentApprovalError
+pub claw_core::AgentApprovalError::NotAwaitingApproval
+pub claw_core::AgentApprovalError::ToolCallMismatch
+pub claw_core::AgentApprovalError::ToolCallMismatch::expected: claw_core::ToolCallId
+pub claw_core::AgentApprovalError::ToolCallMismatch::received: claw_core::ToolCallId
+pub enum claw_core::AgentCreateError
+pub claw_core::AgentCreateError::AgentAlreadyExists(claw_core::AgentId)
+pub claw_core::AgentCreateError::AgentNotFound(claw_core::AgentId)
+pub claw_core::AgentCreateError::InvalidPersistedAgentId(alloc::string::String)
+pub claw_core::AgentCreateError::LongTerm(claw_memory::long_term_memory::LongTermInitError)
+pub claw_core::AgentCreateError::Persistence(claw_persistence::persistence::PersistenceError)
+pub claw_core::AgentCreateError::Tools(claw_tool::set::ToolSetError)
+pub claw_core::AgentCreateError::Transcript(claw_memory::transcript_store::TranscriptInitError)
+pub claw_core::AgentCreateError::TranscriptDelete(claw_memory::transcript_store::TranscriptDeleteError)
+pub claw_core::AgentCreateError::TranscriptList(claw_memory::transcript_store::TranscriptListError)
+pub claw_core::AgentCreateError::UnknownKind(alloc::string::String)
+pub enum claw_core::AgentRuntimeBuildError
+pub claw_core::AgentRuntimeBuildError::AgentReconciliation(alloc::string::String)
+pub claw_core::AgentRuntimeBuildError::InvalidSessionId(claw_utils::IdParseError)
+pub claw_core::AgentRuntimeBuildError::LongTermInit(claw_memory::long_term_memory::LongTermInitError)
+pub claw_core::AgentRuntimeBuildError::MissingPersistedSessionState(claw_core::SessionId)
+pub claw_core::AgentRuntimeBuildError::MissingPersistenceDir
+pub claw_core::AgentRuntimeBuildError::Persistence(claw_persistence::persistence::PersistenceError)
+pub claw_core::AgentRuntimeBuildError::SkillRegistry(claw_skill::skill::SkillError)
+pub claw_core::AgentRuntimeBuildError::WorkerExitedBeforeReady
+pub claw_core::AgentRuntimeBuildError::WorkerSpawn(core::io::error::Error)
 pub enum claw_core::ApiPurpose
 pub claw_core::ApiPurpose::Compaction
 pub claw_core::ApiPurpose::Memory
 pub claw_core::ApiPurpose::RootAgent
 pub claw_core::ApiPurpose::SubAgent
+pub enum claw_core::ApprovalResolverError
+pub claw_core::ApprovalResolverError::Chat(claw_api::errors::ChatError)
+pub claw_core::ApprovalResolverError::Init(claw_api::errors::InitError)
+pub claw_core::ApprovalResolverError::MalformedToolCall
+pub claw_core::ApprovalResolverError::ToolSet(claw_tool::set::ToolSetError)
+pub enum claw_core::BaseAgentError
+pub claw_core::BaseAgentError::ConflictingEffects
+pub claw_core::BaseAgentError::ConflictingEffects::count: usize
+pub claw_core::BaseAgentError::Iteration(claw_core::IterationLoopError)
+pub claw_core::BaseAgentError::MalformedAssistantMessage
+pub claw_core::BaseAgentError::StateInvariant
+pub claw_core::BaseAgentError::Transcript(claw_memory::transcript_store::TurnError)
 pub enum claw_core::InputRequestKind
 pub claw_core::InputRequestKind::PermissionApproval
 pub claw_core::InputRequestKind::PermissionApproval::reason: alloc::string::String
 pub claw_core::InputRequestKind::PermissionApproval::tool_call: claw_api::types::ToolCall
+pub enum claw_core::IterationEvent
+pub claw_core::IterationEvent::Ended
+pub claw_core::IterationEvent::Output(claw_utils::stream::StreamPart<alloc::string::String>)
+pub claw_core::IterationEvent::Reasoning(claw_utils::stream::StreamPart<alloc::string::String>)
+pub claw_core::IterationEvent::Started
+pub claw_core::IterationEvent::Started::iteration: claw_core::IterationId
+pub claw_core::IterationEvent::ToolResult(claw_utils::stream::StreamPart<(claw_api::types::ToolCall, claw_tool::tool::ToolOutput)>)
+pub enum claw_core::IterationLoopError
+pub claw_core::IterationLoopError::Chat(claw_api::errors::ChatError)
+pub claw_core::IterationLoopError::DuplicateProviderToolCallId(alloc::string::String)
+pub claw_core::IterationLoopError::IncompleteToolBatch
+pub claw_core::IterationLoopError::MissingProviderToolCallId
+pub claw_core::IterationLoopError::Tools(claw_tool::set::ToolSetError)
 pub enum claw_core::OpenSessionError
 pub claw_core::OpenSessionError::AlreadyOpen(claw_core::SessionId)
 pub claw_core::OpenSessionError::SessionNotFound(claw_core::SessionId)
 pub claw_core::OpenSessionError::WorkerStopped
-pub enum claw_core::OrchestratorBuildError
-pub claw_core::OrchestratorBuildError::InvalidSessionId(claw_utils::IdParseError)
-pub claw_core::OrchestratorBuildError::LongTermInit(claw_memory::long_term_memory::LongTermInitError)
-pub claw_core::OrchestratorBuildError::MissingPersistenceDir
-pub claw_core::OrchestratorBuildError::Persistence(claw_persistence::persistence::PersistenceError)
-pub claw_core::OrchestratorBuildError::SkillRegistry(claw_skill::skill::SkillError)
-pub claw_core::OrchestratorBuildError::WorkerExitedBeforeReady
-pub claw_core::OrchestratorBuildError::WorkerSpawn(core::io::error::Error)
 pub enum claw_core::ReasoningEffort
 pub claw_core::ReasoningEffort::High
 pub claw_core::ReasoningEffort::Low
 pub claw_core::ReasoningEffort::Medium
 pub claw_core::ReasoningEffort::Ultra
+pub enum claw_core::SessionCloseReason
+pub claw_core::SessionCloseReason::Deleted
+pub claw_core::SessionCloseReason::Requested
+pub claw_core::SessionCloseReason::RuntimeShutdown
 pub enum claw_core::SessionControlError
-pub claw_core::SessionControlError::Busy(claw_core::SessionId)
 pub claw_core::SessionControlError::InputRequestMismatch
 pub claw_core::SessionControlError::InputRequestMismatch::expected: claw_core::InputRequestId
 pub claw_core::SessionControlError::InputRequestMismatch::received: claw_core::InputRequestId
 pub claw_core::SessionControlError::InputRequestMismatch::session: claw_core::SessionId
 pub claw_core::SessionControlError::NotAwaitingInput(claw_core::SessionId)
-pub claw_core::SessionControlError::Persistence
 pub claw_core::SessionControlError::SessionClosed(claw_core::SessionId)
 pub claw_core::SessionControlError::WorkerStopped
 pub enum claw_core::SessionCreateError
 pub claw_core::SessionCreateError::Persistence(claw_persistence::persistence::PersistenceError)
 pub claw_core::SessionCreateError::WorkerStopped
+pub enum claw_core::SessionDeleteError
+pub claw_core::SessionDeleteError::Agent(claw_core::AgentCreateError)
+pub claw_core::SessionDeleteError::AlreadyDeleting(claw_core::SessionId)
+pub claw_core::SessionDeleteError::Persistence(claw_persistence::persistence::PersistenceError)
+pub claw_core::SessionDeleteError::SessionNotFound(claw_core::SessionId)
+pub claw_core::SessionDeleteError::WorkerStopped
+pub enum claw_core::SessionError
+pub claw_core::SessionError::RuntimeStopped
 pub enum claw_core::SessionEvent
-pub claw_core::SessionEvent::Closed
-pub claw_core::SessionEvent::Error
-pub claw_core::SessionEvent::Error::message: alloc::string::String
-pub claw_core::SessionEvent::InputRequested
-pub claw_core::SessionEvent::InputRequested::kind: claw_core::InputRequestKind
-pub claw_core::SessionEvent::InputRequested::request: claw_core::InputRequestId
-pub claw_core::SessionEvent::IterationEnded
-pub claw_core::SessionEvent::IterationStarted
-pub claw_core::SessionEvent::IterationStarted::iteration: claw_core::IterationId
-pub claw_core::SessionEvent::Output(claw_utils::stream::StreamPart<alloc::string::String>)
-pub claw_core::SessionEvent::Reasoning(claw_utils::stream::StreamPart<alloc::string::String>)
-pub claw_core::SessionEvent::ToolCalls(claw_utils::stream::StreamPart<claw_api::types::ToolCall>)
-pub claw_core::SessionEvent::TurnEnded
-pub claw_core::SessionEvent::TurnEnded::turn: claw_core::TurnId
-pub claw_core::SessionEvent::TurnStarted
-pub claw_core::SessionEvent::TurnStarted::origin: claw_core::TurnOrigin
-pub claw_core::SessionEvent::TurnStarted::turn: claw_core::TurnId
+pub claw_core::SessionEvent::Closed(claw_core::SessionCloseReason)
+pub claw_core::SessionEvent::Error(claw_core::SessionEventError)
+pub claw_core::SessionEvent::Turn(claw_core::TurnEvent)
+pub enum claw_core::SessionEventError
+pub claw_core::SessionEventError::DeleteFailed
+pub enum claw_core::SessionInputError
+pub claw_core::SessionInputError::AgentApproval(claw_core::AgentApprovalError)
+pub claw_core::SessionInputError::Resolver(claw_core::ApprovalResolverError)
 pub enum claw_core::SessionPersistence
 pub claw_core::SessionPersistence::Ephemeral
 pub claw_core::SessionPersistence::Persistent
+pub enum claw_core::SessionTurnError
+pub claw_core::SessionTurnError::Agent(claw_core::BaseAgentError)
+pub claw_core::SessionTurnError::AgentCreate(claw_core::AgentCreateError)
+pub enum claw_core::TurnEvent
+pub claw_core::TurnEvent::Ended
+pub claw_core::TurnEvent::Ended::turn: claw_core::TurnId
+pub claw_core::TurnEvent::Error(claw_core::TurnEventError)
+pub claw_core::TurnEvent::InputRequested
+pub claw_core::TurnEvent::InputRequested::kind: claw_core::InputRequestKind
+pub claw_core::TurnEvent::InputRequested::request: claw_core::InputRequestId
+pub claw_core::TurnEvent::Iteration(claw_core::IterationEvent)
+pub claw_core::TurnEvent::Output(claw_utils::stream::StreamPart<alloc::string::String>)
+pub claw_core::TurnEvent::Started
+pub claw_core::TurnEvent::Started::origin: claw_core::TurnOrigin
+pub claw_core::TurnEvent::Started::turn: claw_core::TurnId
+pub enum claw_core::TurnEventError
+pub claw_core::TurnEventError::Execution(claw_core::SessionTurnError)
+pub claw_core::TurnEventError::InputResolutionFailed
+pub claw_core::TurnEventError::InputResolutionFailed::request: claw_core::InputRequestId
+pub claw_core::TurnEventError::InputResolutionFailed::source: claw_core::SessionInputError
 pub enum claw_core::TurnOrigin
-pub claw_core::TurnOrigin::Subagent
-pub claw_core::TurnOrigin::Subagent::agent: claw_core::AgentId
+pub claw_core::TurnOrigin::ToolCall
+pub claw_core::TurnOrigin::ToolCall::call: claw_api::types::ToolCall
 pub claw_core::TurnOrigin::User
 pub struct claw_core::AgentId(pub u32)
 impl claw_core::AgentId
@@ -82,6 +147,16 @@ impl serde_core::ser::Serialize for claw_core::AgentId
 pub fn claw_core::AgentId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::AgentId
 pub fn claw_core::AgentId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct claw_core::AgentRuntime
+impl claw_core::AgentRuntime
+pub fn claw_core::AgentRuntime::create_session(&self, claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>
+pub fn claw_core::AgentRuntime::delete_session(&self, claw_core::SessionId) -> core::result::Result<(), claw_core::SessionDeleteError>
+pub fn claw_core::AgentRuntime::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiPurpose, bool) -> core::result::Result<(), claw_api::errors::InitError>
+pub fn claw_core::AgentRuntime::list_sessions(&self) -> alloc::vec::Vec<claw_core::SessionId>
+pub fn claw_core::AgentRuntime::new<Filesystem, Http, Timer, Thread, Executor>(alloc::sync::Arc<claw_tool::registry::ToolRegistry>, claw_persistence::SharedPersistence<Filesystem>, alloc::string::String, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, claw_core::AgentRuntimeBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static, Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
+pub fn claw_core::AgentRuntime::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionStream), claw_core::OpenSessionError>
+impl core::ops::drop::Drop for claw_core::AgentRuntime
+pub fn claw_core::AgentRuntime::drop(&mut self)
 pub struct claw_core::InputRequestId(pub u32)
 impl claw_core::InputRequestId
 pub fn claw_core::InputRequestId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
@@ -117,29 +192,15 @@ pub fn claw_core::IterationId::deserialize<D: serde_core::de::Deserializer<'de>>
 pub struct claw_core::Message
 impl claw_core::Message
 pub fn claw_core::Message::text(impl core::convert::Into<alloc::string::String>) -> Self
-pub struct claw_core::Orchestrator
-impl claw_core::Orchestrator
-pub fn claw_core::Orchestrator::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiPurpose, bool) -> core::result::Result<(), claw_api::errors::InitError>
-pub fn claw_core::Orchestrator::new<Filesystem, Http, Timer, Thread, Executor>(alloc::sync::Arc<claw_tool::registry::ToolRegistry>, claw_persistence::SharedPersistence<Filesystem>, alloc::string::String, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, claw_core::OrchestratorBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static, Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
-pub fn claw_core::Orchestrator::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionEventStream), claw_core::OpenSessionError>
-pub fn claw_core::Orchestrator::session_create(&self, claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>
-pub fn claw_core::Orchestrator::session_delete(&self, claw_core::SessionId) -> core::result::Result<(), claw_core::SessionControlError>
-pub fn claw_core::Orchestrator::session_list(&self) -> alloc::vec::Vec<claw_core::SessionId>
-impl core::ops::drop::Drop for claw_core::Orchestrator
-pub fn claw_core::Orchestrator::drop(&mut self)
 pub struct claw_core::SessionControl
 impl claw_core::SessionControl
+pub async fn claw_core::SessionControl::append(&self, claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::cancel(&self) -> core::result::Result<(), claw_core::SessionControlError>
-pub async fn claw_core::SessionControl::close_session(&self) -> core::result::Result<(), claw_core::SessionControlError>
+pub async fn claw_core::SessionControl::close(&self) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::interrupt(&self) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::respond(&self, claw_core::InputRequestId, claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::set_permission_level(&self, claw_permission::level::PermissionLevel) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::set_reasoning_effort(&self, claw_core::ReasoningEffort) -> core::result::Result<(), claw_core::SessionControlError>
-pub async fn claw_core::SessionControl::submit(&self, claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
-pub struct claw_core::SessionEventStream
-impl futures_core::stream::Stream for claw_core::SessionEventStream
-pub type claw_core::SessionEventStream::Item = claw_core::SessionEvent
-pub fn claw_core::SessionEventStream::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
 pub struct claw_core::SessionId(pub u32)
 impl claw_core::SessionId
 pub fn claw_core::SessionId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
@@ -156,6 +217,28 @@ impl serde_core::ser::Serialize for claw_core::SessionId
 pub fn claw_core::SessionId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::SessionId
 pub fn claw_core::SessionId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct claw_core::SessionStream
+impl core::ops::drop::Drop for claw_core::SessionStream
+pub fn claw_core::SessionStream::drop(&mut self)
+impl futures_core::stream::Stream for claw_core::SessionStream
+pub type claw_core::SessionStream::Item = core::result::Result<claw_core::SessionEvent, claw_core::SessionError>
+pub fn claw_core::SessionStream::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+pub struct claw_core::ToolCallId(pub u32)
+impl claw_core::ToolCallId
+pub fn claw_core::ToolCallId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::ToolCallId::new(u32) -> Self
+pub fn claw_core::ToolCallId::to_wire(&self) -> alloc::string::String
+impl core::convert::From<u32> for claw_core::ToolCallId
+pub fn claw_core::ToolCallId::from(u32) -> Self
+impl core::fmt::Display for claw_core::ToolCallId
+pub fn claw_core::ToolCallId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::str::traits::FromStr for claw_core::ToolCallId
+pub type claw_core::ToolCallId::Err = claw_utils::IdParseError
+pub fn claw_core::ToolCallId::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for claw_core::ToolCallId
+pub fn claw_core::ToolCallId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for claw_core::ToolCallId
+pub fn claw_core::ToolCallId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::TurnId(pub u32)
 impl claw_core::TurnId
 pub fn claw_core::TurnId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>

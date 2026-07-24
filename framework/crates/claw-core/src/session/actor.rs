@@ -1,11 +1,17 @@
+#[cfg(feature = "multiagent")]
+use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
+#[cfg(feature = "multiagent")]
+use std::collections::BTreeMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
 use claw_interface::http::StreamingHttp;
+#[cfg(feature = "multiagent")]
+use claw_interface::Cancel;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
@@ -13,7 +19,7 @@ use futures_core::Stream;
 
 use super::agent_slot::{AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
-    ApprovalCompletion, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
+    ApprovalCompletion, ApprovalDisplay, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
 };
 use super::control::{ControlOp, SessionCommand, SessionControlError};
@@ -25,12 +31,72 @@ use super::{
     SessionId, SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError,
     TurnId, TurnOrigin,
 };
+#[cfg(feature = "multiagent")]
+use crate::agent::AgentDispatchError;
 use crate::agent::{
     AgentCompletion, AgentCreateError, AgentEvent, AgentInputRequest, AgentIterationEvent,
     AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig, ReasoningEffort,
     ToolCallId,
 };
+#[cfg(feature = "multiagent")]
+use crate::multiagent::{
+    DispatchOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError,
+    SubagentTimeout,
+};
 use crate::scheduler::{AgentRunPort, AgentRunSchedulerHandle};
+
+#[cfg(feature = "multiagent")]
+type TimeoutFuture = Pin<Box<dyn Future<Output = crate::agent::AgentId>>>;
+
+#[cfg(feature = "multiagent")]
+struct TimeoutEntry {
+    timeout: SubagentTimeout,
+    future: TimeoutFuture,
+}
+
+#[cfg(feature = "multiagent")]
+#[derive(Default)]
+struct AgentTimeouts {
+    entries: BTreeMap<crate::agent::AgentId, TimeoutEntry>,
+}
+
+#[cfg(feature = "multiagent")]
+impl AgentTimeouts {
+    fn arm<Timer>(&mut self, agent: crate::agent::AgentId, timeout: SubagentTimeout)
+    where
+        Timer: ClawTimer + Default + 'static,
+    {
+        let future = Box::pin(async move {
+            let mut timer = Timer::default();
+            let _ = timer.sleep(timeout.duration(), Cancel::never()).await;
+            agent
+        });
+        self.entries.insert(agent, TimeoutEntry { timeout, future });
+    }
+
+    fn remove(&mut self, agent: crate::agent::AgentId) {
+        self.entries.remove(&agent);
+    }
+
+    fn poll_expired(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<(crate::agent::AgentId, SubagentTimeout)>> {
+        let expired = self.entries.iter_mut().find_map(|(&agent, entry)| {
+            entry
+                .future
+                .as_mut()
+                .poll(context)
+                .is_ready()
+                .then_some((agent, entry.timeout))
+        });
+        let Some((agent, timeout)) = expired else {
+            return Poll::Pending;
+        };
+        self.entries.remove(&agent);
+        Poll::Ready(Some((agent, timeout)))
+    }
+}
 
 struct OpenSession {
     lease: u64,
@@ -125,6 +191,10 @@ enum PollSource {
     Command,
     Approval,
     Agent,
+    #[cfg(feature = "multiagent")]
+    Multiagent,
+    #[cfg(feature = "multiagent")]
+    Timeout,
 }
 
 impl PollSource {
@@ -132,10 +202,22 @@ impl PollSource {
         match self {
             Self::Command => Self::Approval,
             Self::Approval => Self::Agent,
+            #[cfg(feature = "multiagent")]
+            Self::Agent => Self::Multiagent,
+            #[cfg(not(feature = "multiagent"))]
             Self::Agent => Self::Command,
+            #[cfg(feature = "multiagent")]
+            Self::Multiagent => Self::Timeout,
+            #[cfg(feature = "multiagent")]
+            Self::Timeout => Self::Command,
         }
     }
 }
+
+#[cfg(feature = "multiagent")]
+const POLL_SOURCE_COUNT: usize = 5;
+#[cfg(not(feature = "multiagent"))]
+const POLL_SOURCE_COUNT: usize = 3;
 
 pub(super) enum SessionActorExit {
     DeleteReady { session: SessionId },
@@ -172,6 +254,13 @@ where
     active_turn: Option<TurnId>,
     next_turn: u32,
     approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
+    #[cfg(feature = "multiagent")]
+    multiagent: Multiagent,
+    #[cfg(feature = "multiagent")]
+    timeouts: AgentTimeouts,
+    #[cfg(feature = "multiagent")]
+    multiagent_reaping: BTreeSet<crate::agent::AgentId>,
+    managed_agents: BTreeSet<crate::agent::AgentId>,
 
     run_port: AgentRunPort<Http, Timer>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
@@ -211,6 +300,13 @@ where
                 active_turn: None,
                 next_turn: 1,
                 approval: ApprovalFlow::new(approval_resolver),
+                #[cfg(feature = "multiagent")]
+                multiagent: Multiagent::new(),
+                #[cfg(feature = "multiagent")]
+                timeouts: AgentTimeouts::default(),
+                #[cfg(feature = "multiagent")]
+                multiagent_reaping: BTreeSet::new(),
+                managed_agents: BTreeSet::new(),
                 run_port: AgentRunPort::new(scheduler),
                 commands: Box::pin(commands),
                 next_source: PollSource::Command,
@@ -227,7 +323,7 @@ where
             return Poll::Ready(SessionActorStatus::Exit(exit));
         }
 
-        for _ in 0..3 {
+        for _ in 0..POLL_SOURCE_COUNT {
             let source = self.next_source;
             self.next_source = source.next();
             match source {
@@ -251,6 +347,24 @@ where
                         Pin::new(&mut self.run_port).poll_next(context)
                     {
                         self.handle_agent_output(output);
+                        return Poll::Ready(SessionActorStatus::Progress);
+                    }
+                }
+                #[cfg(feature = "multiagent")]
+                PollSource::Multiagent => {
+                    if let Poll::Ready(effect) = self.multiagent.poll_effect(context) {
+                        if let Some(effect) = effect {
+                            self.handle_multiagent_effect(effect);
+                        }
+                        return Poll::Ready(SessionActorStatus::Progress);
+                    }
+                }
+                #[cfg(feature = "multiagent")]
+                PollSource::Timeout => {
+                    if let Poll::Ready(Some((agent, _timeout))) =
+                        self.timeouts.poll_expired(context)
+                    {
+                        self.multiagent.timeout(agent);
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
@@ -370,7 +484,11 @@ where
                 }
             }
         }
-        self.approval.cancel();
+        if let Some(root) = self.root_id() {
+            if let Some(display) = self.approval.cancel_agent(root) {
+                self.emit_approval_display(display);
+            }
+        }
         let _ = ack.try_send(Ok(()));
     }
 
@@ -400,18 +518,26 @@ where
     fn stop_current_run(&mut self, reaping: bool) {
         self.inbox.clear();
         self.approval.cancel();
-        for agent in self.agents.values_mut() {
-            if reaping {
+        if reaping {
+            for agent in self.agents.values_mut() {
                 agent.begin_reaping();
-            } else {
-                agent.cancel();
             }
+            return;
         }
+        if let Some(root) = self.root_mut() {
+            root.cancel();
+        }
+        #[cfg(feature = "multiagent")]
+        self.multiagent.cleanup_subagents();
     }
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
         let reason = self.lifecycle.reason()?;
         if self.agents.values().any(AgentSlot::is_in_flight) {
+            return None;
+        }
+        #[cfg(feature = "multiagent")]
+        if reason != StopReason::Delete && !self.multiagent.root_children().is_empty() {
             return None;
         }
         self.finish_turn();
@@ -501,6 +627,8 @@ where
             return false;
         };
         if message.as_str().trim().is_empty() {
+            self.begin_turn(TurnOrigin::User);
+            self.finish_turn();
             return true;
         }
         if let Err(error) = self.ensure_root() {
@@ -519,36 +647,50 @@ where
     }
 
     fn dispatch_root(&mut self, message: Message) -> Result<(), Message> {
+        let retry = message.clone();
         let agent = self
             .root_id()
             .expect("an Agent run starts only with a root Agent id");
-        let span = tracing::info_span!(
-            "agent",
-            trace.task = %agent,
-            run.agent = %agent,
-        );
+        let turn = self.active_turn.unwrap_or(TurnId(self.next_turn));
+        let span = agent_span(agent, Some(turn));
         let root = self
             .agents
             .get_mut(&agent)
             .expect("an Agent run starts only with a resident root");
         root.dispatch(message, &self.run_port, span)
+            .map_err(|_| retry)
     }
 
     fn delete_agents(&mut self) -> Result<(), AgentCreateError> {
         let root_agent = self.root_id();
         let mut agent_ids = self.agents.keys().copied().collect::<BTreeSet<_>>();
         agent_ids.extend(root_agent);
+        agent_ids.extend(self.managed_agents.iter().copied());
+        #[cfg(feature = "multiagent")]
+        agent_ids.extend(self.multiagent.agent_ids());
         // Drop every live component handle before deleting its canonical
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
         self.agents.clear();
+        let mut first_error = None;
         for agent in agent_ids {
-            self.agent_manager.remove(agent)?;
-            if Some(agent) == root_agent {
-                self.state.get_mut().clear_root();
+            match self.agent_manager.remove(agent) {
+                Ok(()) => {
+                    if Some(agent) == root_agent {
+                        self.state.get_mut().clear_root();
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(name: "session_agent_delete_failed", agent = %agent, error = %error);
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
             }
         }
-        Ok(())
+        #[cfg(feature = "multiagent")]
+        self.multiagent.clear();
+        first_error.map_or(Ok(()), Err)
     }
 
     fn ensure_root(&mut self) -> Result<(), AgentCreateError> {
@@ -561,39 +703,194 @@ where
         let reasoning_effort = self.state.get().reasoning_effort;
         let permission = Arc::new(SessionPermission::new(self.state.clone()));
         let root_agent = self.state.get().root_agent;
-        let (id, agent, reasoning_handle) = if let Some(id) = root_agent {
+        let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
+            let kind = crate::agent::baked::root_kind().clone();
+            #[cfg(feature = "multiagent")]
+            let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
+            #[cfg(not(feature = "multiagent"))]
+            let extension_tools = Vec::new();
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
                 Arc::clone(&permission) as Arc<_>,
                 reasoning_effort,
-                Vec::new(),
+                extension_tools,
             )?;
-            (id, agent, reasoning)
+            (id, kind, agent, reasoning, false)
         } else {
             let id = self.agent_id_allocator.next();
             let persistence = match self.persistence {
                 SessionPersistence::Persistent => PersistenceConfig::Persistent,
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
             };
-            let kind = crate::agent::baked::root_kind();
+            let kind = crate::agent::baked::root_kind().clone();
+            #[cfg(feature = "multiagent")]
+            let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
+            #[cfg(not(feature = "multiagent"))]
+            let extension_tools = Vec::new();
             let (agent, reasoning) = self.agent_manager.create(
                 id,
-                kind,
+                &kind,
                 true,
                 Arc::clone(&permission) as Arc<_>,
                 reasoning_effort,
                 persistence,
-                Vec::new(),
+                extension_tools,
             )?;
-            self.state.get_mut().root_agent = Some(id);
-            (id, agent, reasoning)
+            (id, kind, agent, reasoning, true)
         };
         let previous = self
             .agents
             .insert(id, AgentSlot::new(id, agent, reasoning_handle));
         debug_assert!(previous.is_none());
+        self.managed_agents.insert(id);
+        #[cfg(feature = "multiagent")]
+        if !self.multiagent.register_root(id, kind) {
+            self.agents.remove(&id);
+            if fresh {
+                self.agent_manager.remove(id)?;
+            }
+            return Err(AgentCreateError::AgentAlreadyExists(id));
+        }
+        #[cfg(not(feature = "multiagent"))]
+        let _ = kind;
+        if fresh {
+            self.state.get_mut().root_agent = Some(id);
+        }
         Ok(())
+    }
+
+    #[cfg(feature = "multiagent")]
+    fn handle_multiagent_effect(&mut self, effect: MultiagentEffect) {
+        match effect {
+            MultiagentEffect::Spawn { requester, command } => {
+                self.spawn_subagent(requester, command);
+            }
+            MultiagentEffect::Dispatch {
+                target,
+                message,
+                purpose,
+            } => {
+                let retry = message.clone();
+                let turn = if self.root_id() == Some(target) {
+                    Some(self.active_turn.unwrap_or(TurnId(self.next_turn)))
+                } else {
+                    self.active_turn
+                };
+                let outcome = match self.agents.get_mut(&target) {
+                    Some(slot) => {
+                        let span = agent_span(target, turn);
+                        match slot.dispatch(message, &self.run_port, span) {
+                            Ok(()) => DispatchOutcome::Accepted,
+                            Err((_, AgentDispatchError::Busy)) => DispatchOutcome::Busy,
+                            Err((_, AgentDispatchError::Closed)) => DispatchOutcome::Missing,
+                        }
+                    }
+                    None => DispatchOutcome::Missing,
+                };
+                self.multiagent
+                    .apply_result(MultiagentEffectResult::Dispatched {
+                        target,
+                        message: retry,
+                        purpose,
+                        outcome,
+                    });
+            }
+            MultiagentEffect::RemoveAgents { agents } => {
+                self.begin_multiagent_removal(agents);
+            }
+            MultiagentEffect::ArmTimeout { agent, timeout } => {
+                if self.multiagent.contains(agent) {
+                    self.timeouts.arm::<Timer>(agent, timeout);
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "multiagent")]
+    fn spawn_subagent(
+        &mut self,
+        requester: crate::agent::AgentId,
+        command: crate::multiagent::SpawnCommand,
+    ) {
+        let id = self.agent_id_allocator.next();
+        let kind = command.spec.kind().clone();
+        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
+        let reasoning_effort = self.state.get().reasoning_effort;
+        match self.agent_manager.create(
+            id,
+            &kind,
+            false,
+            permission as Arc<_>,
+            reasoning_effort,
+            PersistenceConfig::InMemory,
+            extension_tools,
+        ) {
+            Ok((agent, reasoning)) => {
+                let previous = self.agents.insert(id, AgentSlot::new(id, agent, reasoning));
+                debug_assert!(previous.is_none());
+                self.managed_agents.insert(id);
+                let rollback = self
+                    .multiagent
+                    .apply_result(MultiagentEffectResult::Spawned {
+                        requester,
+                        command,
+                        id,
+                    });
+                if let Some(rollback) = rollback {
+                    self.rollback_spawn(rollback);
+                }
+            }
+            Err(error) => {
+                self.multiagent
+                    .apply_result(MultiagentEffectResult::SpawnFailed {
+                        command,
+                        detail: error.to_string(),
+                    });
+            }
+        }
+    }
+
+    #[cfg(feature = "multiagent")]
+    fn rollback_spawn(&mut self, id: crate::agent::AgentId) {
+        if self.agents.get(&id).is_some_and(AgentSlot::is_in_flight) {
+            if let Some(slot) = self.agents.get_mut(&id) {
+                slot.begin_reaping();
+            }
+            self.multiagent_reaping.insert(id);
+            return;
+        }
+        self.agents.remove(&id);
+        if let Err(error) = self.agent_manager.remove(id) {
+            tracing::error!(name: "spawn_rollback_failed", agent = %id, error = %error);
+        }
+    }
+
+    #[cfg(feature = "multiagent")]
+    fn begin_multiagent_removal(&mut self, agents: Vec<crate::agent::AgentId>) {
+        let victims = agents.iter().copied().collect::<BTreeSet<_>>();
+        if let Some(display) = self.approval.cancel_agents(&victims) {
+            self.emit_approval_display(display);
+        }
+        for agent in agents {
+            self.timeouts.remove(agent);
+            let in_flight = self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight);
+            if in_flight {
+                if let Some(slot) = self.agents.get_mut(&agent) {
+                    slot.begin_reaping();
+                }
+                self.multiagent_reaping.insert(agent);
+                continue;
+            }
+
+            self.agents.remove(&agent);
+            let result = self
+                .agent_manager
+                .remove(agent)
+                .map_err(|error| MultiagentPhysicalError::new(error.to_string()));
+            self.multiagent.physical_agent_removed(agent, result);
+        }
     }
 
     fn handle_agent_output(&mut self, output: crate::scheduler::AgentRunOutput<Http, Timer>) {
@@ -603,44 +900,136 @@ where
             return;
         };
         let update = slot.accept_output(output);
-        if !is_root {
-            return;
-        }
-        match update {
-            AgentSlotUpdate::Event(Ok(event)) => self.handle_agent_event(event),
-            AgentSlotUpdate::Event(Err(error)) => {
-                self.emit_turn_error(error.into());
-                self.finish_turn();
+        let resume = match update {
+            AgentSlotUpdate::Event {
+                event: Ok(event),
+                resume,
+            } => {
+                self.handle_agent_event(agent, event);
+                resume
             }
-            AgentSlotUpdate::Returned => self.finish_turn(),
+            AgentSlotUpdate::Event {
+                event: Err(error),
+                resume,
+            } => {
+                if is_root {
+                    self.emit_turn_error(error.into());
+                    self.finish_turn();
+                    #[cfg(feature = "multiagent")]
+                    self.multiagent.on_agent_idle(agent);
+                } else {
+                    #[cfg(feature = "multiagent")]
+                    self.multiagent
+                        .on_agent_completed(agent, format!("[failed: {error}]"), false);
+                }
+                resume
+            }
+            AgentSlotUpdate::Returned => {
+                #[cfg(feature = "multiagent")]
+                self.multiagent.on_agent_idle(agent);
+                None
+            }
             AgentSlotUpdate::Reaped => {
-                self.finish_turn();
+                self.finish_reaped_agent(agent);
+                None
             }
-            AgentSlotUpdate::Ignored => {}
+            AgentSlotUpdate::Ignored => None,
+        };
+        #[cfg(feature = "multiagent")]
+        self.drain_ready_multiagent_effects();
+        if let Some(resume) = resume {
+            resume.resume();
         }
     }
 
-    fn handle_agent_event(&mut self, event: AgentEvent) {
+    #[cfg(feature = "multiagent")]
+    fn drain_ready_multiagent_effects(&mut self) {
+        loop {
+            let effect = self.multiagent.take_effect();
+            let Some(effect) = effect else {
+                break;
+            };
+            self.handle_multiagent_effect(effect);
+        }
+    }
+
+    fn finish_reaped_agent(&mut self, agent: crate::agent::AgentId) {
+        self.agents.remove(&agent);
+        let result = self.agent_manager.remove(agent);
+        #[cfg(feature = "multiagent")]
+        {
+            let result = result.map_err(|error| MultiagentPhysicalError::new(error.to_string()));
+            if self.multiagent_reaping.remove(&agent) {
+                self.multiagent.physical_agent_removed(agent, result);
+            } else if let Err(error) = result {
+                tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
+            }
+        }
+        #[cfg(not(feature = "multiagent"))]
+        if let Err(error) = result {
+            tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
+        }
+    }
+
+    fn handle_agent_event(&mut self, agent: crate::agent::AgentId, event: AgentEvent) {
+        let is_root = self.root_id() == Some(agent);
         match event {
             AgentEvent::TurnStarted { origin } => {
+                #[cfg(feature = "multiagent")]
+                self.multiagent.on_agent_started(agent);
+                if !is_root {
+                    return;
+                }
                 let origin = match origin {
                     AgentTurnOrigin::Message => TurnOrigin::User,
                     AgentTurnOrigin::ToolCall { call } => TurnOrigin::ToolCall { call },
                 };
-                self.begin_turn(origin);
+                if self.active_turn.is_none() {
+                    self.begin_turn(origin);
+                }
             }
-            AgentEvent::Iteration(progress) => self.emit_iteration(progress),
+            AgentEvent::Iteration(progress) => {
+                if is_root {
+                    self.emit_iteration(progress);
+                }
+            }
             AgentEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id,
                 tool_call,
                 reason,
-            }) => self.request_approval(tool_call_id, tool_call, reason),
+            }) => {
+                #[cfg(feature = "multiagent")]
+                self.multiagent.on_agent_awaiting_approval(agent);
+                self.request_approval(agent, tool_call_id, tool_call, reason);
+            }
             AgentEvent::TurnEnded { outcome } => {
-                if let AgentOutcome::Completed(AgentCompletion::Synthesized(message)) = outcome {
-                    self.emit_text(message);
+                let (_text, _completed, _cancelled) = match outcome {
+                    AgentOutcome::Completed(AgentCompletion::Synthesized(message)) => {
+                        if is_root {
+                            self.emit_text(message.clone());
+                        }
+                        (message, true, false)
+                    }
+                    AgentOutcome::Completed(AgentCompletion::Streamed(message)) => {
+                        (message, true, false)
+                    }
+                    AgentOutcome::Interrupted => {
+                        ("subagent was interrupted".to_owned(), false, false)
+                    }
+                    AgentOutcome::Cancelled => ("subagent was cancelled".to_owned(), false, true),
+                };
+                #[cfg(feature = "multiagent")]
+                if _cancelled {
+                    self.multiagent.on_agent_cancelled(agent);
+                } else {
+                    self.multiagent.on_agent_completed(agent, _text, _completed);
                 }
-                self.approval.cancel();
-                self.finish_turn();
+                if let Some(display) = self.approval.cancel_agent(agent) {
+                    self.emit_approval_display(display);
+                }
+                if is_root {
+                    self.finish_turn();
+                }
             }
         }
     }
@@ -664,13 +1053,23 @@ where
         self.emit_turn(TurnEvent::Iteration(event));
     }
 
-    fn request_approval(&mut self, tool_call_id: ToolCallId, tool_call: ToolCall, reason: String) {
-        let (request, kind) = self.approval.request(tool_call_id, tool_call, reason);
-        self.emit_turn(TurnEvent::InputRequested { request, kind });
+    fn request_approval(
+        &mut self,
+        agent: crate::agent::AgentId,
+        tool_call_id: ToolCallId,
+        tool_call: ToolCall,
+        reason: String,
+    ) {
+        if let Some(display) = self
+            .approval
+            .request(agent, tool_call_id, tool_call, reason)
+        {
+            self.emit_approval_display(display);
+        }
     }
 
     fn handle_approval_result(&mut self, completion: ApprovalCompletion) {
-        let (request, tool_call_id, result) = completion.into_parts();
+        let (agent, request, tool_call_id, result) = completion.into_parts();
         let decision = match result {
             Ok(decision) => decision,
             Err(error) => {
@@ -680,15 +1079,29 @@ where
             }
         };
         let resolution = self
-            .root()
+            .agents
+            .get(&agent)
             .ok_or(crate::agent::AgentApprovalError::NotAwaitingApproval)
-            .and_then(|root| root.resolve_approval(tool_call_id, decision));
+            .and_then(|slot| slot.resolve_approval(tool_call_id, decision));
         if let Err(error) = resolution {
             self.emit_input_error(request, error.into());
-            if let Some(root) = self.root_mut() {
-                root.cancel();
+            if let Some(slot) = self.agents.get_mut(&agent) {
+                slot.cancel();
             }
+        } else {
+            #[cfg(feature = "multiagent")]
+            self.multiagent.on_approval_resolved(agent);
         }
+        if let Some(display) = self.approval.activate_next() {
+            self.emit_approval_display(display);
+        }
+    }
+
+    fn emit_approval_display(&self, display: ApprovalDisplay) {
+        self.emit_turn(TurnEvent::InputRequested {
+            request: display.request,
+            kind: display.kind,
+        });
     }
 
     fn begin_turn(&mut self, origin: TurnOrigin) {
@@ -717,11 +1130,6 @@ where
 
     fn root_id(&self) -> Option<crate::agent::AgentId> {
         self.state.get().root_agent
-    }
-
-    fn root(&self) -> Option<&AgentSlot<Http, Timer>> {
-        let root = self.root_id()?;
-        self.agents.get(&root)
     }
 
     fn root_mut(&mut self) -> Option<&mut AgentSlot<Http, Timer>> {
@@ -779,6 +1187,22 @@ where
         if let Some(client) = &self.client {
             let _ = client.events.try_send(event);
         }
+    }
+}
+
+fn agent_span(agent: crate::agent::AgentId, turn: Option<TurnId>) -> tracing::Span {
+    match turn {
+        Some(turn) => tracing::info_span!(
+            "agent",
+            trace.task = %agent,
+            run.turn = %turn,
+            run.agent = %agent,
+        ),
+        None => tracing::info_span!(
+            "agent",
+            trace.task = %agent,
+            run.agent = %agent,
+        ),
     }
 }
 

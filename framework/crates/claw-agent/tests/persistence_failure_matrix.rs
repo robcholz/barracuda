@@ -99,9 +99,9 @@ fn setup_disk_state(root: &str, setup: &str) {
             DiskFs::create_dir_all(&format!("{root}/long_term/global/memory_records.jsonl"))
                 .unwrap();
         }
-        "root_transcript_log_dir" => {
-            DiskFs::create_dir_all(&format!("{root}/transcript/1.jsonl")).unwrap();
-        }
+        // Installed after runtime startup in `assert_submit_error`: startup
+        // reconciliation correctly removes orphan transcript paths.
+        "root_transcript_log_dir" => {}
         "profile_user_invalid_utf8" => {
             DiskFs::create_dir_all(&format!("{root}/profile")).unwrap();
             DiskFs::write_atomic(&format!("{root}/profile/user.md"), &[0xff, 0xfe, 0xfd]).unwrap();
@@ -126,6 +126,9 @@ fn assert_submit_error(root: &str, fixture: &Fixture) {
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
+    let log_dir = format!("{root}/transcript/1.jsonl");
+    DiskFs::create_dir_all(&log_dir).unwrap();
+    DiskFs::write_atomic(&format!("{log_dir}/marker"), b"not a journal").unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();

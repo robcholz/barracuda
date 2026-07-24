@@ -31,8 +31,10 @@ impl std::fmt::Display for AgentKind {
 
 pub(crate) struct AgentCatalogEntry {
     kind: AgentKind,
+    #[cfg(feature = "multiagent")]
     description: &'static str,
     runtime: AgentRuntimeManifest,
+    #[cfg(feature = "multiagent")]
     multiagent: MultiagentManifest,
 }
 
@@ -41,6 +43,7 @@ impl AgentCatalogEntry {
         &self.kind
     }
 
+    #[cfg(feature = "multiagent")]
     pub(crate) fn description(&self) -> &'static str {
         self.description
     }
@@ -49,6 +52,7 @@ impl AgentCatalogEntry {
         &self.runtime
     }
 
+    #[cfg(feature = "multiagent")]
     pub(crate) fn multiagent(&self) -> &MultiagentManifest {
         &self.multiagent
     }
@@ -75,12 +79,14 @@ impl AgentRuntimeManifest {
     }
 }
 
-/// Orchestration policy intentionally kept outside the single-agent runtime.
+/// Static orchestration metadata attached to one baked Agent kind.
+#[cfg(feature = "multiagent")]
 pub(crate) struct MultiagentManifest {
     spawn_enabled: bool,
     allowed_kinds: &'static [AgentKind],
 }
 
+#[cfg(feature = "multiagent")]
 impl MultiagentManifest {
     pub(crate) fn spawn_enabled(&self) -> bool {
         self.spawn_enabled

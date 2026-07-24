@@ -3,9 +3,10 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
 
+use async_channel::{Receiver, Sender};
 use futures_core::Stream;
 
-use super::{Tool, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle};
+use super::{Tool, ToolCompletionFuture, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle};
 
 const DETACHED_ACCEPTED: &str = concat!(
     "[detached:accepted]\n",
@@ -13,7 +14,8 @@ const DETACHED_ACCEPTED: &str = concat!(
     "Its result will be delivered automatically."
 );
 
-type ToolRunFuture = Pin<Box<dyn Future<Output = (ToolInvocation, ToolOutput)> + Send + 'static>>;
+type ToolRunFuture =
+    Pin<Box<dyn Future<Output = Option<(ToolInvocation, ToolOutput)>> + Send + 'static>>;
 
 #[derive(Default)]
 struct ToolRuns {
@@ -43,7 +45,8 @@ impl ToolRuns {
                 return Poll::Ready(None);
             };
             match future.as_mut().poll(context) {
-                Poll::Ready(result) => return Poll::Ready(Some(result)),
+                Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
+                Poll::Ready(None) => {}
                 Poll::Pending => self.runs.push_back(future),
             }
         }
@@ -113,7 +116,11 @@ impl<'a> ToolRunner<'a> {
                     continue;
                 }
             };
-            if tool.config().detached {
+            if tool.is_dynamically_detached() {
+                let (completion, receiver) = async_channel::bounded(1);
+                joined.push(start_detached(tool, invocation.clone(), completion));
+                detached.push(await_completion(invocation, receiver));
+            } else if tool.config().detached {
                 joined.push(ready(invocation.clone(), Ok(detached_accepted())));
                 detached.push(run(tool, invocation));
             } else {
@@ -127,13 +134,41 @@ impl<'a> ToolRunner<'a> {
 }
 
 fn ready(invocation: ToolInvocation, output: ToolResult<ToolOutput>) -> ToolRunFuture {
-    Box::pin(async move { (invocation, settle(output)) })
+    Box::pin(async move { Some((invocation, settle(output))) })
 }
 
 fn run(tool: Tool, invocation: ToolInvocation) -> ToolRunFuture {
     Box::pin(async move {
         let output = tool.invoke(&invocation).await;
-        (invocation, settle(output))
+        Some((invocation, settle(output)))
+    })
+}
+
+fn start_detached(
+    tool: Tool,
+    invocation: ToolInvocation,
+    completion: Sender<ToolCompletionFuture>,
+) -> ToolRunFuture {
+    Box::pin(async move {
+        let output = match tool.invoke_detached(&invocation).await {
+            Ok(detached) => {
+                let (accepted, future) = detached.into_parts();
+                let _ = completion.try_send(future);
+                accepted
+            }
+            Err(error) => settle(Err(error)),
+        };
+        Some((invocation, output))
+    })
+}
+
+fn await_completion(
+    invocation: ToolInvocation,
+    completion: Receiver<ToolCompletionFuture>,
+) -> ToolRunFuture {
+    Box::pin(async move {
+        let future = completion.recv().await.ok()?;
+        Some((invocation, settle(future.await)))
     })
 }
 
@@ -160,7 +195,10 @@ mod tests {
     use futures_lite::StreamExt as _;
 
     use super::*;
-    use crate::{SyncToolHandler, ToolConfig, ToolGroup, ToolSet, ToolSpec};
+    use crate::{
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, SyncToolHandler, ToolConfig,
+        ToolGroup, ToolSet, ToolSpec,
+    };
 
     struct EchoTool {
         name: &'static str,
@@ -181,6 +219,37 @@ mod tests {
             Ok(ToolOutput {
                 content: self.name.to_owned(),
                 ok: true,
+            })
+        }
+    }
+
+    struct DynamicDetachedTool;
+
+    impl ToolSpec for DynamicDetachedTool {
+        fn name(&self) -> &str {
+            "dynamic"
+        }
+
+        fn schema(&self) -> &str {
+            r#"{"type":"function","function":{"name":"dynamic","parameters":{"type":"object"}}}"#
+        }
+    }
+
+    impl DetachedToolHandler for DynamicDetachedTool {
+        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
+            Box::pin(async {
+                Ok(DetachedTool::new(
+                    ToolOutput {
+                        content: "accepted-with-id".to_owned(),
+                        ok: true,
+                    },
+                    Box::pin(async {
+                        Ok(ToolOutput {
+                            content: "completed-later".to_owned(),
+                            ok: true,
+                        })
+                    }),
+                ))
             })
         }
     }
@@ -241,5 +310,39 @@ mod tests {
         assert!(detached.iter().any(|(invocation, output)| {
             invocation.id() == Some("call-3") && output.content == "detached_b" && output.ok
         }));
+    }
+
+    #[test]
+    fn dynamic_detached_tool_controls_accepted_and_completed_outputs() {
+        let mut tools = ToolSet::empty();
+        assert!(tools
+            .add_group(ToolGroup::new(
+                "test",
+                true,
+                [Tool::from_detached(DynamicDetachedTool)],
+            ))
+            .is_ok());
+        let Ok(tools) = tools.begin() else {
+            return;
+        };
+        let Ok(call) = ToolInvocation::try_new(Some("call-dynamic"), "dynamic", "{}") else {
+            return;
+        };
+
+        let (join, detach) = ToolRunner::new(&tools).run(vec![call]);
+        let joined = block_on(join.collect::<Vec<_>>());
+        let Some((_, accepted)) = joined.first() else {
+            return;
+        };
+        assert_eq!(accepted.content, "accepted-with-id");
+
+        let Some(detach) = detach else {
+            return;
+        };
+        let completed = block_on(detach.collect::<Vec<_>>());
+        let Some((_, completed)) = completed.first() else {
+            return;
+        };
+        assert_eq!(completed.content, "completed-later");
     }
 }

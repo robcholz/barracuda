@@ -1,30 +1,67 @@
 pub mod claw_agent
+pub use claw_agent::AgentApprovalError
+pub use claw_agent::AgentCreateError
 pub use claw_agent::AgentId
 pub use claw_agent::ApiPurpose
+pub use claw_agent::ApprovalResolverError
+pub use claw_agent::BackendKind
+pub use claw_agent::BaseAgentError
+pub use claw_agent::ClawApiConfig
 pub use claw_agent::InputRequestId
 pub use claw_agent::InputRequestKind
+pub use claw_agent::IterationEvent
 pub use claw_agent::IterationId
+pub use claw_agent::IterationLoopError
 pub use claw_agent::Message
 pub use claw_agent::OpenSessionError
 pub use claw_agent::PermissionLevel
 pub use claw_agent::ReasoningEffort
+pub use claw_agent::SessionCloseReason
 pub use claw_agent::SessionControl
 pub use claw_agent::SessionControlError
 pub use claw_agent::SessionCreateError
+pub use claw_agent::SessionDeleteError
+pub use claw_agent::SessionError
 pub use claw_agent::SessionEvent
-pub use claw_agent::SessionEventStream
+pub use claw_agent::SessionEventError
 pub use claw_agent::SessionId
+pub use claw_agent::SessionInputError
 pub use claw_agent::SessionPersistence
+pub use claw_agent::SessionStream
+pub use claw_agent::SessionTurnError
 pub use claw_agent::ToolCall
+pub use claw_agent::ToolCallId
+pub use claw_agent::ToolGroup
+pub use claw_agent::ToolOutput
+pub use claw_agent::TurnEvent
+pub use claw_agent::TurnEventError
 pub use claw_agent::TurnId
 pub use claw_agent::TurnOrigin
 pub use claw_agent::stream
+pub mod claw_agent::tools
+pub use claw_agent::tools::Action
+pub use claw_agent::tools::AsyncToolHandler
+pub use claw_agent::tools::Resource
+pub use claw_agent::tools::RetryCount
+pub use claw_agent::tools::RiskClass
+pub use claw_agent::tools::SyncToolHandler
+pub use claw_agent::tools::Tool
+pub use claw_agent::tools::ToolConfig
+pub use claw_agent::tools::ToolError
+pub use claw_agent::tools::ToolFuture
+pub use claw_agent::tools::ToolGroup
+pub use claw_agent::tools::ToolInvocation
+pub use claw_agent::tools::ToolInvokeError
+pub use claw_agent::tools::ToolOutput
+pub use claw_agent::tools::ToolResult
+pub use claw_agent::tools::ToolSpec
+pub use claw_agent::tools::tool_metadata
 pub enum claw_agent::AgentError
 pub claw_agent::AgentError::LlmConfig(claw_api::errors::InitError)
-pub claw_agent::AgentError::OpenSession(claw_core::session::api::OpenSessionError)
-pub claw_agent::AgentError::Orchestrator(claw_core::orchestrator::OrchestratorBuildError)
+pub claw_agent::AgentError::OpenSession(claw_core::session::manager::OpenSessionError)
 pub claw_agent::AgentError::Persistence(claw_persistence::persistence::PersistenceError)
-pub claw_agent::AgentError::SessionCreate(claw_core::session::api::SessionCreateError)
+pub claw_agent::AgentError::Runtime(claw_core::runtime::agent_runtime::AgentRuntimeBuildError)
+pub claw_agent::AgentError::SessionCreate(claw_core::session::manager::SessionCreateError)
 pub claw_agent::AgentError::StorageClear
 pub claw_agent::AgentError::StorageClear::path: alloc::string::String
 pub claw_agent::AgentError::StorageClear::source: claw_interface::fs::FsError
@@ -34,13 +71,15 @@ pub claw_agent::AgentPersistenceConfig::persistence_root: alloc::string::String
 pub claw_agent::AgentPersistenceConfig::skill_roots: alloc::vec::Vec<alloc::string::String>
 pub struct claw_agent::AgentSystem<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
 impl<Filesystem, Http, Timer> claw_agent::AgentSystem<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::delete_session(&self, claw_core::protocol::ids::SessionId) -> core::result::Result<(), claw_core::session::api::SessionControlError>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::link_api(&self, claw_api::types::ClawApiConfig, claw_core::config::ApiPurpose, bool) -> claw_agent::AgentResult<()>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::list_sessions(&self) -> alloc::vec::Vec<claw_core::protocol::ids::SessionId>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::delete_session(&self, claw_core::session::manager::SessionId) -> core::result::Result<(), claw_core::session::manager::SessionDeleteError>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::disable_tool(&self, &str) -> claw_agent::AgentResult<()>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::enable_tool(&self, &str) -> claw_agent::AgentResult<()>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::link_api(&self, claw_api::types::ClawApiConfig, claw_core::config::api::ApiPurpose, bool) -> claw_agent::AgentResult<()>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::list_sessions(&self) -> alloc::vec::Vec<claw_core::session::manager::SessionId>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new<Thread, Executor>(claw_agent::AgentPersistenceConfig) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new_session(&self, claw_core::protocol::SessionPersistence) -> claw_agent::AgentResult<claw_core::protocol::ids::SessionId>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::open_session(&self, claw_core::protocol::ids::SessionId) -> claw_agent::AgentResult<(claw_core::session::api::SessionControl, claw_core::session::api::SessionEventStream)>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new_session(&self, claw_core::session::manager::SessionPersistence) -> claw_agent::AgentResult<claw_core::session::manager::SessionId>
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::open_session(&self, claw_core::session::manager::SessionId) -> claw_agent::AgentResult<(claw_core::session::control::SessionControl, claw_core::session::stream::SessionStream)>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::start_all(&self) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::stop_all(&self) -> claw_agent::AgentResult<()>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::tool_registry(&self) -> &claw_tool::registry::ToolRegistry
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::with_tool_groups<Thread, Executor>(claw_agent::AgentPersistenceConfig, impl core::iter::traits::collect::IntoIterator<Item = claw_tool::registry::ToolGroup>) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub type claw_agent::AgentResult<T> = core::result::Result<T, claw_agent::AgentError>

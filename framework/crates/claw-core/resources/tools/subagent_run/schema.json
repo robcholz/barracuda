@@ -1,0 +1,34 @@
+{
+  "type": "function",
+  "function": {
+    "name": "subagent_run",
+    "description": "Delegate a goal to a new subagent and wait for its final result in this tool call.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Which kind of agent to run. Call subagent_list_spawnable to see the kinds you may spawn."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required short name for this subagent."
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The complete standalone goal to delegate."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "Required maximum lifetime of this subagent and its subtree, in milliseconds."
+        }
+      },
+      "required": ["kind", "name", "goal", "timeout_ms"]
+    }
+  }
+}

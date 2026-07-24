@@ -208,7 +208,7 @@ fn tool_calls_for_sequence(sequence: &str) -> Vec<ToolCallSpec> {
                     "kind": "ghost",
                     "name": "bad",
                     "goal": "do impossible work",
-                    "foreground": false,
+                    "timeout_ms": 1,
                 }),
             ),
         ],

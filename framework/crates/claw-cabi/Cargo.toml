@@ -9,6 +9,10 @@ description = "C adapter boundary for the Rust agent runtime"
 name = "claw_cabi"
 crate-type = ["staticlib", "rlib"]
 
+[features]
+default = []
+multiagent = ["claw-agent/multiagent"]
+
 [dependencies]
 
 [target.'cfg(target_os = "espidf")'.dependencies]

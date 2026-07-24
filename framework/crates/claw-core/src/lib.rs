@@ -37,6 +37,7 @@ macro_rules! prompt {
 
 mod agent;
 mod config;
+#[cfg(feature = "multiagent")]
 mod multiagent;
 mod runtime;
 mod scheduler;

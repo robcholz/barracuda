@@ -80,7 +80,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
 
     for row in csv_dicts(include_str!("fixtures/subagent_lifecycle_cases.csv")) {
         let fixture = Fixture::from_row(&row);
-        install_case(fixture.clone(), false);
+        install_case(fixture.clone(), SpawnMode::Detached);
 
         let root = mem_root("subagent-lifecycle");
         let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
@@ -97,7 +97,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         assert_turn(&delegated_turn, TurnId(1), TurnOrigin::User, &fixture.case);
         assert_eq!(
             iteration_ids(&delegated_turn),
-            vec![IterationId(0), IterationId(1), IterationId(0)],
+            vec![IterationId(0), IterationId(1), IterationId(2)],
             "case {}",
             fixture.case
         );
@@ -152,7 +152,7 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
 }
 
 #[test]
-fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
+fn subagent_run_returns_the_child_result_to_the_same_tool_call_and_turn() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -161,7 +161,7 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
         .map(|row| Fixture::from_row(&row))
         .next()
         .expect("subagent fixture");
-    install_case(fixture.clone(), true);
+    install_case(fixture.clone(), SpawnMode::Joined);
 
     let root = mem_root("subagent-foreground");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
@@ -177,7 +177,7 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
     let turn = drain_until_turn_ended(&mut events);
     assert_turn(&turn, TurnId(1), TurnOrigin::User, &fixture.case);
     assert_eq!(iteration_ids(&turn), vec![IterationId(0), IterationId(1)]);
-    assert_eq!(tools_events(&turn), vec!["subagent_spawn".to_string()]);
+    assert_eq!(tools_events(&turn), vec!["subagent_run".to_string()]);
     assert_eq!(output_fragments(&turn), vec![fixture.spawn_ack.clone()]);
 
     let requests = recorded_requests();
@@ -208,7 +208,7 @@ fn foreground_spawn_returns_the_child_result_to_the_same_tool_call_and_turn() {
 }
 
 #[test]
-fn foreground_child_approval_resumes_the_child_without_entering_either_transcript() {
+fn subagent_run_child_approval_resumes_the_child_without_entering_either_transcript() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -230,7 +230,7 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
     assert!(matches!(
         root_kind,
         InputRequestKind::PermissionApproval { tool_call, reason }
-            if tool_call.name == "subagent_spawn" && reason.contains("subagent_spawn")
+            if tool_call.name == "subagent_run" && reason.contains("subagent_run")
     ));
     block_on(control.respond(root_approval, Message::text("approve"))).unwrap();
 
@@ -276,7 +276,7 @@ fn foreground_child_approval_resumes_the_child_without_entering_either_transcrip
 }
 
 #[test]
-fn foreground_child_timeout_cancels_its_pending_approval_and_resumes_the_root() {
+fn subagent_run_child_timeout_cancels_its_pending_approval_and_resumes_the_root() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -363,7 +363,7 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
 }
 
 #[test]
-fn completed_background_child_is_inspectable_until_its_result_enters_root_context() {
+fn completed_background_child_is_removed_before_its_detached_result_enters_context() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -385,20 +385,13 @@ fn completed_background_child_is_inspectable_until_its_result_enters_root_contex
     assert_turn(&turn, TurnId(1), TurnOrigin::User, "pending delivery");
     assert_eq!(
         tools_events(&turn),
-        vec![
-            "subagent_spawn".to_owned(),
-            "subagent_watch".to_owned(),
-            "subagent_watch".to_owned(),
-        ]
+        vec!["subagent_spawn".to_owned(), "subagent_watch".to_owned()]
     );
-    assert_eq!(
-        output_fragments(&turn),
-        vec!["pending status observed", "pending status cleared"]
-    );
+    assert_eq!(output_fragments(&turn), vec!["detached result observed"]);
 }
 
 #[test]
-fn cancelled_foreground_spawn_deletes_its_subagent() {
+fn cancelled_subagent_run_deletes_its_subagent() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -438,11 +431,11 @@ fn cancelled_foreground_spawn_deletes_its_subagent() {
 }
 
 #[test]
-fn foreground_timeout_fails_the_tool_call_and_deletes_the_subtree() {
+fn subagent_run_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    install_timeout_case(true);
+    install_timeout_case(SpawnMode::Joined);
 
     let root = mem_root("subagent-foreground-timeout");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
@@ -472,7 +465,7 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     let _lock = SUBAGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    install_timeout_case(false);
+    install_timeout_case(SpawnMode::Detached);
 
     let root = mem_root("subagent-background-timeout");
     let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
@@ -547,7 +540,7 @@ impl ClawHttp for SubagentHttp {
             delay_once,
             yielded_pending: false,
             wait_for_worker,
-            yielded_after_worker: false,
+            remaining_after_worker_yields: if wait_for_worker { 4 } else { 0 },
         })
     }
 }
@@ -573,7 +566,7 @@ struct SubagentResponseFuture {
     delay_once: bool,
     yielded_pending: bool,
     wait_for_worker: bool,
-    yielded_after_worker: bool,
+    remaining_after_worker_yields: u8,
 }
 
 impl Future for SubagentResponseFuture {
@@ -584,8 +577,8 @@ impl Future for SubagentResponseFuture {
             cx.waker().wake_by_ref();
             return Poll::Pending;
         }
-        if self.wait_for_worker && !self.yielded_after_worker {
-            self.yielded_after_worker = true;
+        if self.wait_for_worker && self.remaining_after_worker_yields > 0 {
+            self.remaining_after_worker_yields -= 1;
             cx.waker().wake_by_ref();
             return Poll::Pending;
         }
@@ -633,11 +626,11 @@ impl Fixture {
 struct SubagentCaseState {
     fixture: Fixture,
     control: Option<String>,
-    foreground: bool,
+    spawn_mode: SpawnMode,
     background_concurrency: bool,
     pending_delivery_inspection: bool,
     approval_flow: bool,
-    timeout_flow: Option<bool>,
+    timeout_flow: Option<SpawnMode>,
     hold_worker: bool,
     wait_root_for_worker: bool,
     root_requests: usize,
@@ -663,18 +656,33 @@ enum RequestKind {
     Other,
 }
 
-fn install_case(fixture: Fixture, foreground: bool) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpawnMode {
+    Joined,
+    Detached,
+}
+
+impl SpawnMode {
+    fn tool_name(self) -> &'static str {
+        match self {
+            Self::Joined => "subagent_run",
+            Self::Detached => "subagent_spawn",
+        }
+    }
+}
+
+fn install_case(fixture: Fixture, spawn_mode: SpawnMode) {
     reset_timers();
     *state() = Some(SubagentCaseState {
         fixture,
         control: None,
-        foreground,
+        spawn_mode,
         background_concurrency: false,
         pending_delivery_inspection: false,
         approval_flow: false,
         timeout_flow: None,
         hold_worker: false,
-        wait_root_for_worker: !foreground,
+        wait_root_for_worker: spawn_mode == SpawnMode::Detached,
         root_requests: 0,
         worker_requests: 0,
         permission_requests: 0,
@@ -700,7 +708,7 @@ fn install_control_case(control: &str) {
             expected_after_delete_fragment: String::new(),
         },
         control: Some(control.to_string()),
-        foreground: true,
+        spawn_mode: SpawnMode::Joined,
         background_concurrency: false,
         pending_delivery_inspection: false,
         approval_flow: false,
@@ -732,7 +740,7 @@ fn install_background_concurrency_case() {
             expected_after_delete_fragment: String::new(),
         },
         control: None,
-        foreground: false,
+        spawn_mode: SpawnMode::Detached,
         background_concurrency: true,
         pending_delivery_inspection: false,
         approval_flow: false,
@@ -762,7 +770,7 @@ fn install_pending_delivery_inspection_case() {
             expected_after_delete_fragment: String::new(),
         },
         control: None,
-        foreground: false,
+        spawn_mode: SpawnMode::Detached,
         background_concurrency: false,
         pending_delivery_inspection: true,
         approval_flow: false,
@@ -792,7 +800,7 @@ fn install_approval_case() {
             expected_after_delete_fragment: String::new(),
         },
         control: None,
-        foreground: true,
+        spawn_mode: SpawnMode::Joined,
         background_concurrency: false,
         pending_delivery_inspection: false,
         approval_flow: true,
@@ -808,13 +816,13 @@ fn install_approval_case() {
     });
 }
 
-fn install_timeout_case(foreground: bool) {
+fn install_timeout_case(spawn_mode: SpawnMode) {
     reset_timers();
     CONTROL_WORKER_POLLS.store(0, Ordering::SeqCst);
     RELEASE_HELD_WORKER.store(false, Ordering::SeqCst);
     *state() = Some(SubagentCaseState {
         fixture: Fixture {
-            case: if foreground {
+            case: if spawn_mode == SpawnMode::Joined {
                 "foreground-timeout".to_owned()
             } else {
                 "background-timeout".to_owned()
@@ -828,11 +836,11 @@ fn install_timeout_case(foreground: bool) {
             expected_after_delete_fragment: String::new(),
         },
         control: None,
-        foreground,
+        spawn_mode,
         background_concurrency: false,
         pending_delivery_inspection: false,
         approval_flow: false,
-        timeout_flow: Some(foreground),
+        timeout_flow: Some(spawn_mode),
         hold_worker: true,
         wait_root_for_worker: false,
         root_requests: 0,
@@ -935,12 +943,11 @@ fn response_for_request(body: &str) -> String {
             match request_index {
                 0 => assistant_tool_calls(vec![tool_call(
                     "call_spawn",
-                    "subagent_spawn",
+                    "subagent_run",
                     json!({
                         "kind": "worker",
                         "name": "approval-worker",
                         "goal": "finish after approval",
-                        "foreground": true,
                         "timeout_ms": 60_000,
                     }),
                 )]),
@@ -957,8 +964,8 @@ fn root_response(state: &mut SubagentCaseState, body: &str) -> String {
     let request_index = state.root_requests;
     state.root_requests += 1;
 
-    if let Some(foreground) = state.timeout_flow {
-        return timeout_root_response(body, request_index, foreground);
+    if let Some(spawn_mode) = state.timeout_flow {
+        return timeout_root_response(body, request_index, spawn_mode);
     }
     if let Some(control) = state.control.clone() {
         return control_root_response(state, body, request_index, &control);
@@ -973,12 +980,11 @@ fn root_response(state: &mut SubagentCaseState, body: &str) -> String {
     match request_index {
         0 => assistant_tool_calls(vec![tool_call(
             "call_spawn",
-            "subagent_spawn",
+            state.spawn_mode.tool_name(),
             json!({
                 "kind": "worker",
                 "name": "helper",
                 "goal": format!("worker goal {}", state.fixture.case),
-                "foreground": state.foreground,
                 "timeout_ms": 60_000,
             }),
         )]),
@@ -1016,7 +1022,7 @@ fn root_response(state: &mut SubagentCaseState, body: &str) -> String {
     }
 }
 
-fn timeout_root_response(body: &str, request_index: usize, foreground: bool) -> String {
+fn timeout_root_response(body: &str, request_index: usize, spawn_mode: SpawnMode) -> String {
     let list_call = || {
         assistant_tool_calls(vec![tool_call(
             "call_list_after_timeout",
@@ -1024,30 +1030,29 @@ fn timeout_root_response(body: &str, request_index: usize, foreground: bool) -> 
             json!({}),
         )])
     };
-    match (foreground, request_index) {
+    match (spawn_mode, request_index) {
         (_, 0) => assistant_tool_calls(vec![tool_call(
             "call_spawn_timeout",
-            "subagent_spawn",
+            spawn_mode.tool_name(),
             json!({
                 "kind": "worker",
                 "name": "timeout-worker",
                 "goal": "hold until runtime timeout",
-                "foreground": foreground,
                 "timeout_ms": 10,
             }),
         )]),
-        (false, 1) => assistant_text("timeout worker requested"),
-        (true, 1) | (false, 2) => {
+        (SpawnMode::Detached, 1) => assistant_text("timeout worker requested"),
+        (SpawnMode::Joined, 1) | (SpawnMode::Detached, 2) => {
             assert!(
                 body.contains("result: false") && body.contains("timed out after 10 ms"),
                 "timeout failure missing from parent request: {body}"
             );
             list_call()
         }
-        (true, 2) => assistant_text("foreground timeout observed"),
-        (false, 3) => assistant_text("background timeout observed"),
+        (SpawnMode::Joined, 2) => assistant_text("foreground timeout observed"),
+        (SpawnMode::Detached, 3) => assistant_text("background timeout observed"),
         _ => {
-            panic!("unexpected timeout root request index {request_index}, foreground={foreground}")
+            panic!("unexpected timeout root request index {request_index}, mode={spawn_mode:?}")
         }
     }
 }
@@ -1065,7 +1070,6 @@ fn background_concurrency_root_response(
                 "kind": "worker",
                 "name": "helper",
                 "goal": "held background work",
-                "foreground": false,
                 "timeout_ms": 60_000,
             }),
         )]),
@@ -1092,7 +1096,6 @@ fn pending_delivery_inspection_root_response(
                 "kind": "worker",
                 "name": "pending-worker",
                 "goal": "finish while the root remains in flight",
-                "foreground": false,
                 "timeout_ms": 60_000,
             }),
         )]),
@@ -1109,31 +1112,30 @@ fn pending_delivery_inspection_root_response(
             assert!(
                 tool_message_content(body)
                     .join("\n")
-                    .contains(r#""status":"completed_pending_delivery""#),
-                "completed child was not inspectable before inbox activation: {body}"
+                    .contains("No subagent"),
+                "completed child remained in the graph: {body}"
             );
-            assistant_text("pending status observed")
-        }
-        3 => {
             let child = state.child_id.as_deref().expect("spawn returned child id");
             assert!(
                 body.contains(&format!("[subagent] id: {child}, result: true")),
                 "background result did not enter root context: {body}"
             );
-            assistant_tool_calls(vec![tool_call(
-                "call_watch_consumed",
-                "subagent_watch",
-                json!({ "agent": child }),
-            )])
-        }
-        4 => {
+            let request: Value =
+                serde_json::from_str(body).expect("background completion request is valid JSON");
             assert!(
-                tool_message_content(body)
-                    .join("\n")
-                    .contains("No subagent"),
-                "completed status remained after inbox activation: {body}"
+                !request["messages"]
+                    .as_array()
+                    .expect("request messages")
+                    .iter()
+                    .any(|message| {
+                        message["role"].as_str() == Some("user")
+                            && message["content"]
+                                .as_str()
+                                .is_some_and(|content| content.starts_with("[subagent]"))
+                    }),
+                "background result was rendered as a user message: {body}"
             );
-            assistant_text("pending status cleared")
+            assistant_text("detached result observed")
         }
         other => panic!("unexpected pending delivery request index {other}"),
     }
@@ -1148,12 +1150,11 @@ fn control_root_response(
     match request_index {
         0 => assistant_tool_calls(vec![tool_call(
             "call_spawn",
-            "subagent_spawn",
+            "subagent_run",
             json!({
                 "kind": "worker",
                 "name": "helper",
                 "goal": format!("worker held for {control}"),
-                "foreground": true,
                 "timeout_ms": 60_000,
             }),
         )]),

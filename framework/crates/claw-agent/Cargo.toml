@@ -22,6 +22,18 @@ required-features = ["dev", "cache_profile"]
 name = "tool_submit_loop"
 required-features = ["dev"]
 
+[[test]]
+name = "builtin_tool_matrix"
+required-features = ["multiagent"]
+
+[[test]]
+name = "nested_subagent_join"
+required-features = ["multiagent"]
+
+[[test]]
+name = "subagent_lifecycle_matrix"
+required-features = ["multiagent"]
+
 [features]
 # Concepts:
 # - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
@@ -31,11 +43,11 @@ required-features = ["dev"]
 # - `dev` is the shared local workflow bundle for examples and host tools.
 # - `cache_profile` forwards provider usage support; `claw-agent-chat` requires it.
 #
-# Nothing is enabled by default so library/device consumers must choose their
-# backend explicitly. Firmware uses
+# Multiagent and backends are selected explicitly at compile time. Firmware uses
 # `AgentSystem::<Filesystem, Http, Timer>::new(...)` with ESP-IDF backends
 # injected by `claw-cabi`.
 default = []
+multiagent = ["claw-core/multiagent"]
 host-backends = [
     "claw-interface/host-backends",
 ]

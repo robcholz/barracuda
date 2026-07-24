@@ -46,6 +46,7 @@ struct PendingApproval<'a> {
 enum ToolBatchUpdate {
     Permission(ToolPermission),
     Execution(Option<(ToolInvocation, ToolOutput)>),
+    Stop(super::super::stream::RunStop),
 }
 
 struct ToolPhase<'a> {
@@ -301,6 +302,10 @@ impl<'a> ToolPhase<'a> {
                 self.results_ended = true;
                 return Ok(Some(IterationLoopEvent::Cancelled));
             }
+            if control.take_interrupt() {
+                self.results_ended = true;
+                return Ok(Some(IterationLoopEvent::Interrupted));
+            }
 
             if self.active_permission.is_none() {
                 self.active_permission = self.pending.pop_front();
@@ -323,20 +328,28 @@ impl<'a> ToolPhase<'a> {
                 return Err(IterationLoopError::IncompleteToolBatch);
             }
 
-            let update = match (self.active_permission.as_mut(), self.joined.as_mut()) {
-                (Some(waiting), Some(joined)) => {
-                    future::or(
-                        async { ToolBatchUpdate::Permission(waiting.permission.as_mut().await) },
-                        async { ToolBatchUpdate::Execution(joined.next().await) },
-                    )
-                    .await
-                }
-                (Some(waiting), None) => {
-                    ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
-                }
-                (None, Some(joined)) => ToolBatchUpdate::Execution(joined.next().await),
-                (None, None) => return Err(IterationLoopError::IncompleteToolBatch),
-            };
+            let update = future::or(
+                async { ToolBatchUpdate::Stop(control.stop_requested().await) },
+                async {
+                    match (self.active_permission.as_mut(), self.joined.as_mut()) {
+                        (Some(waiting), Some(joined)) => {
+                            future::or(
+                                async {
+                                    ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
+                                },
+                                async { ToolBatchUpdate::Execution(joined.next().await) },
+                            )
+                            .await
+                        }
+                        (Some(waiting), None) => {
+                            ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
+                        }
+                        (None, Some(joined)) => ToolBatchUpdate::Execution(joined.next().await),
+                        (None, None) => ToolBatchUpdate::Execution(None),
+                    }
+                },
+            )
+            .await;
 
             match update {
                 ToolBatchUpdate::Execution(Some(result)) => {
@@ -344,6 +357,14 @@ impl<'a> ToolPhase<'a> {
                     return self.tool_result(call, output).map(Some);
                 }
                 ToolBatchUpdate::Execution(None) => self.joined = None,
+                ToolBatchUpdate::Stop(super::super::stream::RunStop::Interrupted) => {
+                    self.results_ended = true;
+                    return Ok(Some(IterationLoopEvent::Interrupted));
+                }
+                ToolBatchUpdate::Stop(super::super::stream::RunStop::Cancelled) => {
+                    self.results_ended = true;
+                    return Ok(Some(IterationLoopEvent::Cancelled));
+                }
                 ToolBatchUpdate::Permission(decision) => {
                     let waiting = self
                         .active_permission

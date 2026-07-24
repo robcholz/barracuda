@@ -19,8 +19,19 @@ use crate::agent::{
 use crate::session::Message;
 
 pub(super) enum AgentRunItem {
-    Event(Result<AgentEvent, AgentError>),
+    Event {
+        event: Result<AgentEvent, AgentError>,
+        resume: AgentRunResume,
+    },
     Returned,
+}
+
+pub(crate) struct AgentRunResume(Sender<()>);
+
+impl AgentRunResume {
+    pub(crate) fn resume(self) {
+        let _ = self.0.try_send(());
+    }
 }
 
 enum RunCommand {
@@ -109,15 +120,14 @@ struct ProgressEnvelope {
     resume: Sender<()>,
 }
 
-type AgentRunFuture<Http, Timer> = Pin<Box<dyn Future<Output = Agent<Http, Timer>>>>;
+type AgentRunFuture<Http, Timer> = Pin<Box<dyn Future<Output = Box<Agent<Http, Timer>>>>>;
 
 /// Scheduler-private polling adapter around the self-contained Agent stream.
 pub(super) struct AgentRun<Http: ClawHttp, Timer: ClawTimer> {
     control: AgentRunControl,
     progress: Pin<Box<Receiver<ProgressEnvelope>>>,
-    resume: Option<Sender<()>>,
     future: Option<AgentRunFuture<Http, Timer>>,
-    agent: Option<Agent<Http, Timer>>,
+    agent: Option<Box<Agent<Http, Timer>>>,
     returned: bool,
 }
 
@@ -128,7 +138,11 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    pub(super) fn start(agent: Agent<Http, Timer>, message: Message, span: tracing::Span) -> Self {
+    pub(super) fn start(
+        agent: Box<Agent<Http, Timer>>,
+        message: Message,
+        span: tracing::Span,
+    ) -> Self {
         let (progress_sender, progress_receiver) = async_channel::bounded(1);
         let (command_sender, command_receiver) = async_channel::unbounded();
         let activity = Rc::new(Cell::new(RunActivity::Running));
@@ -152,7 +166,6 @@ where
         Self {
             control,
             progress: Box::pin(progress_receiver),
-            resume: None,
             future: Some(future),
             agent: None,
             returned: false,
@@ -169,16 +182,16 @@ where
             .map(|event| event.expect("AgentRun ends after returning its Agent"))
     }
 
-    pub(super) fn take_completed_agent(&mut self) -> Option<Agent<Http, Timer>> {
+    pub(super) fn take_completed_agent(&mut self) -> Option<Box<Agent<Http, Timer>>> {
         self.returned.then(|| self.agent.take()).flatten()
     }
 
     fn take_progress(&mut self, context: &mut Context<'_>) -> Poll<Option<AgentRunItem>> {
         match self.progress.as_mut().poll_next(context) {
-            Poll::Ready(Some(envelope)) => {
-                self.resume = Some(envelope.resume);
-                Poll::Ready(Some(AgentRunItem::Event(envelope.item)))
-            }
+            Poll::Ready(Some(envelope)) => Poll::Ready(Some(AgentRunItem::Event {
+                event: envelope.item,
+                resume: AgentRunResume(envelope.resume),
+            })),
             Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
     }
@@ -195,10 +208,6 @@ where
         let this = self.get_mut();
         if this.returned {
             return Poll::Ready(None);
-        }
-
-        if let Some(resume) = this.resume.take() {
-            let _ = resume.try_send(());
         }
 
         if let Poll::Ready(event) = this.take_progress(context) {
@@ -219,13 +228,13 @@ where
 }
 
 async fn drive_agent<Http, Timer>(
-    mut agent: Agent<Http, Timer>,
+    mut agent: Box<Agent<Http, Timer>>,
     message: Message,
     progress: Sender<ProgressEnvelope>,
     commands: Receiver<RunCommand>,
     activity: Rc<Cell<RunActivity>>,
     awaiting_approval: Rc<RefCell<Option<ToolCallId>>>,
-) -> Agent<Http, Timer>
+) -> Box<Agent<Http, Timer>>
 where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
@@ -263,7 +272,9 @@ where
             Wake::Event(Some(item)) => {
                 match &item {
                     Ok(AgentEvent::TurnStarted { .. }) => {
-                        activity.set(RunActivity::Running);
+                        if activity.get() != RunActivity::Closed {
+                            activity.set(RunActivity::Running);
+                        }
                     }
                     Ok(AgentEvent::InputRequired(AgentInputRequest::Approval {
                         tool_call_id,
@@ -273,7 +284,9 @@ where
                     }
                     Ok(AgentEvent::TurnEnded { .. }) => {
                         awaiting_approval.borrow_mut().take();
-                        activity.set(RunActivity::Idle);
+                        if activity.get() != RunActivity::Closed {
+                            activity.set(RunActivity::Idle);
+                        }
                     }
                     Err(_) => {
                         awaiting_approval.borrow_mut().take();

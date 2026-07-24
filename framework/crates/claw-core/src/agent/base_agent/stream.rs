@@ -126,6 +126,11 @@ pub(super) enum ApprovalOutcome {
     Cancelled,
 }
 
+pub(super) enum RunStop {
+    Interrupted,
+    Cancelled,
+}
+
 impl RunControl {
     fn new() -> Self {
         Self {
@@ -173,6 +178,20 @@ impl RunControl {
             }
             if let Some(decision) = self.take_approval_decision() {
                 return Poll::Ready(ApprovalOutcome::Decision(decision));
+            }
+            self.register(context.waker());
+            Poll::Pending
+        })
+        .await
+    }
+
+    pub(super) async fn stop_requested(&self) -> RunStop {
+        future::poll_fn(|context| {
+            if self.is_cancelled() {
+                return Poll::Ready(RunStop::Cancelled);
+            }
+            if self.take_interrupt() {
+                return Poll::Ready(RunStop::Interrupted);
             }
             self.register(context.waker());
             Poll::Pending

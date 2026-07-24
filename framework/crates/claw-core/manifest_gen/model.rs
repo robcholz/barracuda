@@ -22,7 +22,7 @@ pub(crate) struct AgentJson {
 pub(crate) struct SpawnJson {
     /// Whether this kind is the one session root baked into the firmware.
     pub(crate) root: bool,
-    /// Gates the `subagent_spawn` tool.
+    /// Gates the subagent creation tools.
     pub(crate) enabled: bool,
     /// Runtime-enforced allowlist of kinds this agent may spawn
     /// (`"*"` = any known kind).

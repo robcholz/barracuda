@@ -20,6 +20,9 @@ stage_verbose = []
 # Host-side API/cache profiling. Kept out of defaults so firmware does not pay
 # for diagnostic-only response fields and session events.
 cache_profile = ["claw-api/cache_profile"]
+# Compile the Session-scoped subagent graph, tools, and lifecycle driver.
+# Disabled builds contain only the root-Agent Session path.
+multiagent = []
 
 # Compile-time byte cap on accumulated `SessionEvent::Reasoning` deltas in one
 # iteration. EXACTLY ONE may be enabled (event.rs emits a compile_error! for zero

@@ -8,7 +8,34 @@ use claw_permission::{Action, RiskClass};
 use super::validate;
 
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'a>>;
+pub type ToolCompletionFuture =
+    Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'static>>;
+pub type DetachedToolFuture<'a> =
+    Pin<Box<dyn Future<Output = ToolResult<DetachedTool>> + Send + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
+
+/// The two settlements produced by a dynamically detached tool.
+///
+/// The accepted output is returned to the current model turn. The completion
+/// future is transferred to the owning Agent runtime and may finish after that
+/// turn has ended.
+pub struct DetachedTool {
+    accepted: ToolOutput,
+    completion: ToolCompletionFuture,
+}
+
+impl DetachedTool {
+    pub fn new(accepted: ToolOutput, completion: ToolCompletionFuture) -> Self {
+        Self {
+            accepted,
+            completion,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (ToolOutput, ToolCompletionFuture) {
+        (self.accepted, self.completion)
+    }
+}
 
 /// Framework-only execution configuration. It is never rendered into a tool's
 /// model-facing schema or usage text.
@@ -148,6 +175,12 @@ pub trait AsyncToolHandler: ToolSpec {
     fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
 }
 
+/// A tool whose accepted and completed settlements become available at
+/// different times.
+pub trait DetachedToolHandler: ToolSpec {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a>;
+}
+
 #[macro_export]
 macro_rules! tool_metadata {
     ($name:literal) => {
@@ -189,6 +222,7 @@ pub struct Tool {
 enum ToolInner {
     Sync(Box<dyn SyncToolHandler>),
     Async(Box<dyn AsyncToolHandler>),
+    Detached(Box<dyn DetachedToolHandler>),
 }
 
 impl Tool {
@@ -202,6 +236,13 @@ impl Tool {
     pub fn from_async(handler: impl AsyncToolHandler + 'static) -> Self {
         Self {
             inner: Arc::new(ToolInner::Async(Box::new(handler))),
+            config: ToolConfig::default(),
+        }
+    }
+
+    pub fn from_detached(handler: impl DetachedToolHandler + 'static) -> Self {
+        Self {
+            inner: Arc::new(ToolInner::Detached(Box::new(handler))),
             config: ToolConfig::default(),
         }
     }
@@ -244,10 +285,43 @@ impl Tool {
         }
     }
 
+    pub(crate) fn is_dynamically_detached(&self) -> bool {
+        matches!(self.inner.as_ref(), ToolInner::Detached(_))
+    }
+
+    pub(crate) async fn invoke_detached<'a>(
+        &'a self,
+        call: &'a ToolInvocation,
+    ) -> ToolResult<DetachedTool> {
+        let mut remaining = self.spec().retry_count().extra_attempts();
+        loop {
+            let result = match self.inner.as_ref() {
+                ToolInner::Detached(handler) => handler.invoke(call).await,
+                ToolInner::Sync(_) | ToolInner::Async(_) => {
+                    return Err(ToolError::InvokeRejected(
+                        "tool does not support dynamic detached execution".to_owned(),
+                    )
+                    .into());
+                }
+            };
+            match result {
+                Ok(output) => return Ok(output),
+                Err(_) if remaining > 0 => {
+                    remaining = remaining.saturating_sub(1);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         match self.inner.as_ref() {
             ToolInner::Sync(handler) => handler.invoke(call),
             ToolInner::Async(handler) => handler.invoke(call).await,
+            ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
+                "dynamically detached tool requires detached execution".to_owned(),
+            )
+            .into()),
         }
     }
 
@@ -255,6 +329,7 @@ impl Tool {
         match self.inner.as_ref() {
             ToolInner::Sync(handler) => handler.as_ref(),
             ToolInner::Async(handler) => handler.as_ref(),
+            ToolInner::Detached(handler) => handler.as_ref(),
         }
     }
 }

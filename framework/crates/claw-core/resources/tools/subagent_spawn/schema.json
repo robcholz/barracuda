@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "subagent_spawn",
-    "description": "Delegate a goal to a new subagent with a required lifetime timeout. Foreground mode waits for its result in this tool call; background mode returns immediately and reports the result to its parent when it finishes.",
+    "description": "Start a subagent in the background. Returns its agent id after creation; the final result is delivered automatically through this detached tool call.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -21,10 +21,6 @@
           "minLength": 1,
           "description": "The goal to delegate to the subagent."
         },
-        "foreground": {
-          "type": "boolean",
-          "description": "Required execution mode. true waits for the subagent and returns its result from this tool call. false returns the agent id immediately; the result is delivered asynchronously to the spawning parent."
-        },
         "timeout_ms": {
           "type": "integer",
           "minimum": 1,
@@ -32,7 +28,7 @@
           "description": "Required maximum lifetime of this subagent and all work it owns, in milliseconds. On expiry the runtime reports a failed result and atomically deletes this agent's entire subtree."
         }
       },
-      "required": ["kind", "name", "goal", "foreground", "timeout_ms"]
+      "required": ["kind", "name", "goal", "timeout_ms"]
     }
   }
 }

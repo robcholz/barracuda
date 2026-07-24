@@ -9,16 +9,15 @@
 //! through a private bridge; SessionActor polls those commands without holding
 //! a bridge lock across Agent work.
 
+mod component;
 mod model;
-mod plugin;
 mod policy;
 mod state;
 mod tool_port;
 mod tools;
 
-pub(crate) use self::model::{
-    MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentStatus, SubagentTimeout,
-    TranscriptText,
+pub(crate) use self::component::{
+    DispatchOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError,
 };
-pub(crate) use self::plugin::Multiagent;
-pub(crate) use self::tool_port::{MultiagentAction, SpawnCommand};
+pub(crate) use self::model::SubagentTimeout;
+pub(crate) use self::tool_port::SpawnCommand;

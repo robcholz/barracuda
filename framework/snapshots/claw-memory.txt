@@ -109,10 +109,19 @@ pub enum claw_memory::transcript_store::AssistantFinish<'a>
 pub claw_memory::transcript_store::AssistantFinish::PlainText(&'a str)
 pub claw_memory::transcript_store::AssistantFinish::RawJson(&'a str)
 pub claw_memory::transcript_store::AssistantFinish::Value(serde_json::value::Value)
+pub enum claw_memory::transcript_store::TranscriptDeleteError
+pub claw_memory::transcript_store::TranscriptDeleteError::Delete
+pub claw_memory::transcript_store::TranscriptDeleteError::Delete::path: alloc::string::String
+pub claw_memory::transcript_store::TranscriptDeleteError::Delete::source: claw_interface::fs::FsError
 pub enum claw_memory::transcript_store::TranscriptInitError
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable::path: alloc::string::String
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable::source: claw_interface::fs::FsError
+pub enum claw_memory::transcript_store::TranscriptListError
+pub claw_memory::transcript_store::TranscriptListError::InvalidFilename(alloc::string::String)
+pub claw_memory::transcript_store::TranscriptListError::List
+pub claw_memory::transcript_store::TranscriptListError::List::path: alloc::string::String
+pub claw_memory::transcript_store::TranscriptListError::List::source: claw_interface::fs::FsError
 pub enum claw_memory::transcript_store::TurnError
 pub claw_memory::transcript_store::TurnError::AlreadyOpen
 pub claw_memory::transcript_store::TurnError::AssistantWhileUserOpen
@@ -125,7 +134,9 @@ pub claw_memory::transcript_store::TurnError::UserMessageOpen
 pub claw_memory::transcript_store::TurnError::UserWhileAssistantOpen
 pub struct claw_memory::transcript_store::TranscriptStore<F: claw_interface::fs::ClawFs + 'static>
 impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::transcript_store::TranscriptStore<F>
+pub fn claw_memory::transcript_store::TranscriptStore<F>::delete(u32, &str) -> core::result::Result<(), claw_memory::transcript_store::TranscriptDeleteError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::in_memory(u32) -> Self
+pub fn claw_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(&str) -> core::result::Result<alloc::vec::Vec<u32>, claw_memory::transcript_store::TranscriptListError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(u32, &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
@@ -198,10 +209,19 @@ pub claw_memory::StoreOutcome::Created(claw_memory::long_term_memory::MemoryItem
 pub claw_memory::StoreOutcome::Duplicate(claw_memory::long_term_memory::MemoryItem)
 impl claw_memory::long_term_memory::StoreOutcome
 pub fn claw_memory::long_term_memory::StoreOutcome::item(&self) -> &claw_memory::long_term_memory::MemoryItem
+pub enum claw_memory::TranscriptDeleteError
+pub claw_memory::TranscriptDeleteError::Delete
+pub claw_memory::TranscriptDeleteError::Delete::path: alloc::string::String
+pub claw_memory::TranscriptDeleteError::Delete::source: claw_interface::fs::FsError
 pub enum claw_memory::TranscriptInitError
 pub claw_memory::TranscriptInitError::Unreadable
 pub claw_memory::TranscriptInitError::Unreadable::path: alloc::string::String
 pub claw_memory::TranscriptInitError::Unreadable::source: claw_interface::fs::FsError
+pub enum claw_memory::TranscriptListError
+pub claw_memory::TranscriptListError::InvalidFilename(alloc::string::String)
+pub claw_memory::TranscriptListError::List
+pub claw_memory::TranscriptListError::List::path: alloc::string::String
+pub claw_memory::TranscriptListError::List::source: claw_interface::fs::FsError
 pub enum claw_memory::TurnError
 pub claw_memory::TurnError::AlreadyOpen
 pub claw_memory::TurnError::AssistantWhileUserOpen
@@ -275,7 +295,9 @@ impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory
 pub fn claw_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub struct claw_memory::TranscriptStore<F: claw_interface::fs::ClawFs + 'static>
 impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::transcript_store::TranscriptStore<F>
+pub fn claw_memory::transcript_store::TranscriptStore<F>::delete(u32, &str) -> core::result::Result<(), claw_memory::transcript_store::TranscriptDeleteError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::in_memory(u32) -> Self
+pub fn claw_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(&str) -> core::result::Result<alloc::vec::Vec<u32>, claw_memory::transcript_store::TranscriptListError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(u32, &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>

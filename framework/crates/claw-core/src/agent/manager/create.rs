@@ -48,37 +48,6 @@ impl<
         Timer: ClawTimer + Default + 'static,
     > AgentManager<Filesystem, Http, Timer>
 {
-    pub(crate) fn fork_from(
-        &self,
-        id: AgentId,
-        kind: &AgentKind,
-        is_root: bool,
-        permission_policy: Arc<dyn PermissionPolicy + 'static>,
-        reasoning_effort: ReasoningEffort,
-        persistence_config: PersistenceConfig,
-        extension_tools: Vec<ToolGroup>,
-        agent: &Agent<Http, Timer>,
-    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
-        let transcript = self.open_transcript(id, kind, persistence_config)?;
-        let (agent, reasoning_effort_handle) = self.create_agent(
-            id,
-            kind,
-            AgentEnvironment {
-                transcript,
-                is_root,
-                permission_policy,
-                extension_tools,
-                inherited_context: agent.context().fork_blocks(),
-                reasoning_effort,
-                state: None,
-            },
-        )?;
-        if persistence_config == PersistenceConfig::Persistent {
-            self.register_new_agent(id, agent.state())?;
-        }
-        Ok((agent, reasoning_effort_handle))
-    }
-
     pub(crate) fn resume_from(
         &self,
         id: AgentId,
@@ -107,6 +76,7 @@ impl<
         Ok((agent, reasoning_effort_handle))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn create(
         &self,
         id: AgentId,
@@ -255,7 +225,7 @@ impl<
         };
         let base_config = BaseAgentConfig {
             state,
-            transcript: transcript,
+            transcript,
             api_manager: Arc::clone(&self.api_manager),
             api_purpose,
             tools,

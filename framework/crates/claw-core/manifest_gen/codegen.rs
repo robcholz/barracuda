@@ -46,12 +46,14 @@ fn render_entry(kind: &ParsedManifest) -> TokenStream {
     quote! {
         AgentCatalogEntry {
             kind: AgentKind::from_static(#kind_name),
+            #[cfg(feature = "multiagent")]
             description: #description,
             runtime: AgentRuntimeManifest {
                 retries: #retries,
                 tool_blacklist: &[#(#tool_blacklist),*],
                 instructions: #instructions,
             },
+            #[cfg(feature = "multiagent")]
             multiagent: MultiagentManifest {
                 spawn_enabled: #spawn_enabled,
                 allowed_kinds: &[#(AgentKind::from_static(#allowed_kinds)),*],

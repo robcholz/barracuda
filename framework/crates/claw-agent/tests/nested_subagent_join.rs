@@ -149,7 +149,6 @@ fn root_response(body: &str) -> String {
             "kind": "worker",
             "name": "epsilon",
             "goal": EPSILON_GOAL,
-            "foreground": false,
             "timeout_ms": 60_000,
         }),
     )])
@@ -174,7 +173,6 @@ fn worker_response(body: &str) -> String {
                     "kind": "worker",
                     "name": "leaf-one",
                     "goal": LEAF_ONE_GOAL,
-                    "foreground": false,
                     "timeout_ms": 60_000,
                 }),
             ),
@@ -185,7 +183,6 @@ fn worker_response(body: &str) -> String {
                     "kind": "worker",
                     "name": "leaf-two",
                     "goal": LEAF_TWO_GOAL,
-                    "foreground": false,
                     "timeout_ms": 60_000,
                 }),
             ),

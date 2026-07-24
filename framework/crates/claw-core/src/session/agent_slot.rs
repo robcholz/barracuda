@@ -5,12 +5,13 @@ use claw_interface::{ClawHttp, ClawTimer};
 
 use crate::agent::AgentId;
 use crate::agent::{
-    Agent, AgentApprovalError, AgentError, AgentEvent, ApprovalDecision, ReasoningEffort,
-    ReasoningEffortHandle, ToolCallId,
+    Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, ApprovalDecision,
+    ReasoningEffort, ReasoningEffortHandle, ToolCallId,
 };
-use crate::scheduler::{AgentRunOutput, AgentRunOutputItem, AgentRunPort, RunControl, RunId};
-
-use super::Message;
+use crate::scheduler::{
+    AgentRunOutput, AgentRunOutputItem, AgentRunPort, AgentRunResume, RunControl, RunId,
+};
+use crate::session::Message;
 
 pub(super) type AgentSlots<Http, Timer> = BTreeMap<AgentId, AgentSlot<Http, Timer>>;
 
@@ -30,12 +31,15 @@ struct InFlight {
 }
 
 enum Execution<Http: ClawHttp, Timer: ClawTimer> {
-    Resident(Agent<Http, Timer>),
+    Resident(Box<Agent<Http, Timer>>),
     InFlight(InFlight),
 }
 
 pub(super) enum AgentSlotUpdate {
-    Event(Result<AgentEvent, AgentError>),
+    Event {
+        event: Result<AgentEvent, AgentError>,
+        resume: Option<AgentRunResume>,
+    },
     Returned,
     Reaped,
     Ignored,
@@ -63,7 +67,7 @@ where
     ) -> Self {
         Self {
             id,
-            execution: Some(Execution::Resident(agent)),
+            execution: Some(Execution::Resident(Box::new(agent))),
             reasoning_effort,
         }
     }
@@ -95,17 +99,20 @@ where
         message: Message,
         run_port: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
-    ) -> Result<(), Message> {
+    ) -> Result<(), (Message, AgentDispatchError)> {
         match self.execution.as_mut() {
             Some(Execution::InFlight(in_flight)) => {
                 let retry = message.clone();
-                in_flight.control.dispatch(message).map_err(|_| retry)
+                in_flight
+                    .control
+                    .dispatch(message)
+                    .map_err(|error| (retry, error))
             }
             Some(Execution::Resident(_)) => {
                 self.start(message, run_port, span);
                 Ok(())
             }
-            None => Err(message),
+            None => Err((message, AgentDispatchError::Closed)),
         }
     }
 
@@ -171,18 +178,25 @@ where
         }
 
         match output.item {
-            AgentRunOutputItem::Event(_) if in_flight.lifecycle == InFlightLifecycle::Reaping => {
+            AgentRunOutputItem::Event { resume, .. }
+                if in_flight.lifecycle == InFlightLifecycle::Reaping =>
+            {
+                resume.resume();
                 AgentSlotUpdate::Ignored
             }
-            AgentRunOutputItem::Event(event) if event.is_err() => {
+            AgentRunOutputItem::Event { event, resume } if event.is_err() => {
                 debug_assert!(
                     in_flight.terminal.is_none(),
                     "one Agent run has only one terminal event"
                 );
                 in_flight.terminal = Some(event);
+                resume.resume();
                 AgentSlotUpdate::Ignored
             }
-            AgentRunOutputItem::Event(event) => AgentSlotUpdate::Event(event),
+            AgentRunOutputItem::Event { event, resume } => AgentSlotUpdate::Event {
+                event,
+                resume: Some(resume),
+            },
             AgentRunOutputItem::Returned(agent) => {
                 let reaping = in_flight.lifecycle == InFlightLifecycle::Reaping;
                 let terminal = in_flight.terminal.take();
@@ -190,7 +204,10 @@ where
                 if reaping {
                     AgentSlotUpdate::Reaped
                 } else if let Some(terminal) = terminal {
-                    AgentSlotUpdate::Event(terminal)
+                    AgentSlotUpdate::Event {
+                        event: terminal,
+                        resume: None,
+                    }
                 } else {
                     AgentSlotUpdate::Returned
                 }

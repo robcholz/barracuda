@@ -7,7 +7,6 @@ use std::rc::Rc;
 
 use async_channel::{Receiver, TryRecvError};
 use claw_api::ToolCall;
-use claw_context::Context as AgentContext;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
@@ -186,10 +185,6 @@ where
 
     pub(in crate::agent) fn state(&self) -> &DurableState<BaseAgentState> {
         self.base.state()
-    }
-
-    pub(crate) fn context(&self) -> &AgentContext {
-        self.base.context()
     }
 }
 

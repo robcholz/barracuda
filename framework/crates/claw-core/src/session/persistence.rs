@@ -88,10 +88,11 @@ mod tests {
 
     #[test]
     fn session_payload_matches_the_documented_json_shape() {
-        let mut state = SessionPersistentState::default();
-        state.reasoning_effort = ReasoningEffort::Medium;
-        state.permission_level = PermissionLevel::Ask;
-        state.root_agent = Some(AgentId::new(7));
+        let state = SessionPersistentState {
+            reasoning_effort: ReasoningEffort::Medium,
+            permission_level: PermissionLevel::Ask,
+            root_agent: Some(AgentId::new(7)),
+        };
 
         let encoded = state.encode_state().unwrap().into_owned();
         let json: serde_json::Value = serde_json::from_slice(&encoded.bytes).unwrap();

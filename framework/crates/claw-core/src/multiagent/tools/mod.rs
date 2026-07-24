@@ -3,6 +3,7 @@ mod followup;
 mod helper;
 mod list;
 mod list_spawnable;
+mod run;
 mod spawn;
 mod watch;
 
@@ -29,6 +30,7 @@ pub(crate) fn tool_group(
         true,
         [
             list_spawnable::tool(policy.clone()),
+            run::tool(Arc::clone(&control), policy.clone()),
             spawn::tool(Arc::clone(&control), policy),
             list::tool(Arc::clone(&control)),
             watch::tool(Arc::clone(&control)),
