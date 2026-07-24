@@ -81,9 +81,6 @@ claw-core = { path = "../claw-core", default-features = false }
 claw-api = { path = "../claw-api" }
 claw-persistence = { path = "../claw-persistence" }
 claw-tool = { path = "../claw-tool" }
-# Conversation/long-term memory. The compaction policy is wired internally
-# (the LLM-backed `LlmCompactor`), so no stub-compactor feature is needed.
-claw-memory = { path = "../claw-memory" }
 # The DI trait surface (`ClawFs` / `ClawHttp`) is always available; concrete
 # host-target backends are pulled in only by `host-backends`/`dev`, so the device
 # build (via claw-cabi) stays free of reqwest/std-thread.
@@ -104,7 +101,6 @@ rustyline = { version = "18.0.1", default-features = false, optional = true }
 tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
-claw-context = { path = "../claw-context" }
 claw-log = { path = "../claw-log", default-features = false }
 # In-memory fs + scripted HTTP doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API; `stdthread` is the
@@ -115,7 +111,6 @@ claw-interface = { path = "../claw-interface", features = [
     "stdthread",
     "tokioexecutor",
 ] }
-claw-utils = { path = "../claw-utils" }
 serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 # `block_on` for tests (smol family; replaces the removed local spin executor).
