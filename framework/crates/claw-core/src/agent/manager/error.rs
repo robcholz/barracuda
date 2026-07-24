@@ -1,7 +1,7 @@
 use claw_memory::{
     LongTermInitError, TranscriptDeleteError, TranscriptInitError, TranscriptListError,
 };
-use claw_persistence::PersistenceError;
+use claw_persistence::{InvalidInstanceId, PersistenceError};
 use claw_skill::SkillError;
 use claw_tool::ToolSetError;
 
@@ -27,6 +27,9 @@ pub(crate) enum AgentManagerError {
 /// What can go wrong while building one concrete agent from the manager.
 #[derive(Debug, thiserror::Error)]
 pub enum AgentCreateError {
+    /// An internally generated Agent id could not be represented as a persistence key.
+    #[error(transparent)]
+    InvalidInstanceId(#[from] InvalidInstanceId),
     /// The Agent recovery collection could not be accessed or registered.
     #[error("failed to access persisted agent state: {0}")]
     Persistence(#[from] PersistenceError),

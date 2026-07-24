@@ -47,16 +47,17 @@ impl<H: ClawHttp, Timer: ClawTimer> Compactor for LlmCompactor<H, Timer> {
                 max_attempts,
             );
             let response = async {
-                let mut lease = self.api.lease().await;
+                let mut lease = self.api.lease().await?;
+                let api = lease.api_mut()?;
                 if let Some(config) = self
                     .api_manager
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .get_api(ApiPurpose::Compaction)
                 {
-                    let _ = lease.api_mut().set_config(config);
+                    let _ = api.set_config(config);
                 }
-                lease.api_mut().chat(&request, Cancel::new(&abort)).await
+                api.chat(&request, Cancel::new(&abort)).await
             }
             .instrument(chat_span)
             .await

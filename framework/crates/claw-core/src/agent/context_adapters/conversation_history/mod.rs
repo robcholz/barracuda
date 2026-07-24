@@ -254,10 +254,16 @@ fn recent_tail_count(turns: &[(TurnId, &Turn)], keep_recent_tokens: usize) -> us
 // todo: replace this byte-length heuristic with a tokenizer estimate matching
 // the active backend. It only needs to remain monotonic for trigger behavior.
 fn estimate_message_tokens(message: &Value) -> usize {
-    message.to_string().len() / CHARS_PER_TOKEN + 1
+    message
+        .to_string()
+        .len()
+        .checked_div(CHARS_PER_TOKEN)
+        .unwrap_or(0)
+        .saturating_add(1)
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use claw_context::Context;
     use claw_interface::MemFs;

@@ -180,14 +180,16 @@ where
         let Poll::Ready(result) = future.as_mut().poll(context) else {
             return Poll::Pending;
         };
+        let state = self.state.take();
         let Some(ApprovalState::Resolving {
             agent,
             request,
             tool_call_id,
             ..
-        }) = self.state.take()
+        }) = state
         else {
-            unreachable!("a ready approval remains in the resolving state")
+            self.state = state;
+            return Poll::Pending;
         };
         Poll::Ready(Some(ApprovalCompletion {
             agent,
@@ -253,6 +255,7 @@ pub enum ApprovalResolverError {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

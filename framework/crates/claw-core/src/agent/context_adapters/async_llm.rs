@@ -1,33 +1,37 @@
-use async_channel::{Receiver, Sender};
+use std::cell::RefCell;
 
-use claw_api::ClawApiAsync;
+use async_channel::{Receiver, Sender, TrySendError};
+
+use claw_api::{ChatError, ClawApiAsync, ClawApiError};
 use claw_interface::{ClawHttp, ClawTimer};
 
 /// Private shared lease helper used by the concrete memory-side LLM adapters.
 pub(super) struct SharedAsyncLlm<H: ClawHttp, Timer: ClawTimer> {
     api_tx: Sender<ClawApiAsync<H, Timer>>,
     api_rx: Receiver<ClawApiAsync<H, Timer>>,
+    initial_api: RefCell<Option<ClawApiAsync<H, Timer>>>,
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> SharedAsyncLlm<H, Timer> {
     pub(super) fn new(api: ClawApiAsync<H, Timer>) -> Self {
         let (api_tx, api_rx) = async_channel::bounded(1);
-        api_tx
-            .try_send(api)
-            .expect("a new single-item LLM channel has capacity");
-        Self { api_tx, api_rx }
+        Self {
+            api_tx,
+            api_rx,
+            initial_api: RefCell::new(Some(api)),
+        }
     }
 
-    pub(super) async fn lease(&self) -> AsyncLlmLease<'_, H, Timer> {
-        let api = self
-            .api_rx
-            .recv()
-            .await
-            .expect("SharedAsyncLlm owns the channel sender");
-        AsyncLlmLease {
+    pub(super) async fn lease(&self) -> Result<AsyncLlmLease<'_, H, Timer>, ChatError> {
+        let initial_api = self.initial_api.borrow_mut().take();
+        let api = match initial_api {
+            Some(api) => api,
+            None => self.api_rx.recv().await.map_err(|_| channel_error())?,
+        };
+        Ok(AsyncLlmLease {
             owner: self,
             api: Some(api),
-        }
+        })
     }
 }
 
@@ -37,22 +41,32 @@ pub(super) struct AsyncLlmLease<'owner, H: ClawHttp, Timer: ClawTimer> {
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> AsyncLlmLease<'_, H, Timer> {
-    pub(super) fn api_mut(&mut self) -> &mut ClawApiAsync<H, Timer> {
-        self.api
-            .as_mut()
-            .expect("AsyncLlmLease holds its api until Drop")
+    pub(super) fn api_mut(&mut self) -> Result<&mut ClawApiAsync<H, Timer>, ChatError> {
+        self.api.as_mut().ok_or_else(channel_error)
     }
 }
 
 impl<H: ClawHttp, Timer: ClawTimer> Drop for AsyncLlmLease<'_, H, Timer> {
     fn drop(&mut self) {
         if let Some(api) = self.api.take() {
-            self.owner
-                .api_tx
-                .try_send(api)
-                .expect("only one AsyncLlmLease can exist at a time");
+            match self.owner.api_tx.try_send(api) {
+                Ok(()) => {}
+                Err(TrySendError::Closed(api)) => {
+                    *self.owner.initial_api.borrow_mut() = Some(api);
+                    tracing::error!("shared LLM channel closed while returning its client");
+                }
+                Err(TrySendError::Full(_)) => {
+                    tracing::error!("shared LLM channel already held a client");
+                }
+            }
         }
     }
+}
+
+fn channel_error() -> ChatError {
+    ChatError::Api(ClawApiError::ApiError(
+        "shared LLM client channel is unavailable",
+    ))
 }
 
 #[cfg(test)]

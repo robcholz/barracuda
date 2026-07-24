@@ -3,7 +3,8 @@
 use std::borrow::Cow;
 
 use claw_persistence::{
-    DurablePartError, DurableStateCodec, InstanceId, SchemaVersion, StateBlob, StateSlice,
+    DurablePartError, DurableStateCodec, InstanceId, InvalidInstanceId, SchemaVersion, StateBlob,
+    StateSlice,
 };
 
 use super::manager::SessionId;
@@ -56,11 +57,12 @@ impl DurableStateCodec for SessionPersistentState {
     }
 }
 
-pub(super) fn session_instance(session: SessionId) -> InstanceId {
-    InstanceId::new(session.to_wire()).expect("a SessionId wire value is a valid instance id")
+pub(super) fn session_instance(session: SessionId) -> Result<InstanceId, InvalidInstanceId> {
+    InstanceId::new(session.to_wire())
 }
 
 #[cfg(test)]
+#[allow(clippy::indexing_slicing, clippy::unwrap_used)]
 mod tests {
     use claw_permission::PermissionLevel;
     use claw_persistence::{DurableStateCodec, StateSlice};

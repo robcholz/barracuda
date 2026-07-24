@@ -216,10 +216,11 @@ where
         async_stream::stream! {
             let activity = Rc::clone(&self.activity);
             {
-                let Agent { base, ephemeral } = self
-                    .agent
-                    .as_mut()
-                    .expect("an active Agent stream retains its Agent");
+                let Some(Agent { base, ephemeral }) = self.agent.as_mut() else {
+                    activity.set(AgentActivity::Closed);
+                    yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                    return;
+                };
                 let mut turn = PendingTurn::message(first_message);
                 let mut cancel_requested = false;
 
@@ -326,7 +327,11 @@ where
                         break;
                     }
 
-                    let outcome = outcome.expect("active BaseAgent loop exits with an outcome");
+                    let Some(outcome) = outcome else {
+                        ephemeral.clear();
+                        yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                        break;
+                    };
                     match &outcome {
                         AgentOutcome::Completed(_) => {
                             for completion in pending_completions.into_iter().rev() {
@@ -364,11 +369,11 @@ where
             }
 
             activity.set(AgentActivity::Closed);
-            let agent = self
-                .agent
-                .take()
-                .expect("a completed Agent stream returns its Agent");
-            yield AgentStreamItem::Returned(agent);
+            if let Some(agent) = self.agent.take() {
+                yield AgentStreamItem::Returned(agent);
+            } else {
+                yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+            }
         }
     }
 }

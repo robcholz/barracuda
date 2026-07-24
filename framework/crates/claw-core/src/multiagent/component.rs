@@ -448,7 +448,8 @@ impl Multiagent {
         }) {
             removal.failure = None;
             let RemovalCause::Delete { completed, .. } = &mut removal.cause else {
-                unreachable!("the failed retry matched an explicit Delete plan")
+                tracing::error!("failed removal retry no longer has a Delete cause");
+                return;
             };
             *completed = Some(command.completed);
             let agents = removal
@@ -815,6 +816,7 @@ impl Default for Multiagent {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
     use crate::session::Message;

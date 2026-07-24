@@ -172,6 +172,7 @@ impl<Http: ClawHttp, Timer: ClawTimer> Stream for AgentStream<Http, Timer> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 

@@ -97,3 +97,16 @@ claw-interface = { path = "../claw-interface", features = [
 claw-memory = { path = "../claw-memory", features = ["compactor-stub"] }
 # `block_on` for tests (smol family; replaces the removed `claw_utils::block_on`).
 futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

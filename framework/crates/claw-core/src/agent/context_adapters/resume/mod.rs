@@ -96,6 +96,7 @@ fn resume_reminder_kind() -> BlockKind {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::ResumeContextAdapter;
     use crate::agent::base_agent::ContextAdapter;

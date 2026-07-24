@@ -54,6 +54,7 @@ impl SyncToolHandler for EndConversationTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use claw_tool::{SyncToolHandler, ToolInvocation};
 

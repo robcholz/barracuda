@@ -77,9 +77,19 @@ where
         matches!(self.execution, Some(Execution::InFlight(_)))
     }
 
-    fn start(&mut self, message: Message, span: tracing::Span) {
-        let Some(Execution::Resident(agent)) = self.execution.take() else {
-            panic!("only a resident Agent can start a stream");
+    fn start(
+        &mut self,
+        message: Message,
+        span: tracing::Span,
+    ) -> Result<(), (Message, AgentDispatchError)> {
+        let execution = self.execution.take();
+        let agent = match execution {
+            Some(Execution::Resident(agent)) => agent,
+            Some(execution @ Execution::InFlight(_)) => {
+                self.execution = Some(execution);
+                return Err((message, AgentDispatchError::Busy));
+            }
+            None => return Err((message, AgentDispatchError::Closed)),
         };
         let (stream, control) = agent.into_stream(message);
         self.execution = Some(Execution::InFlight(InFlight {
@@ -89,6 +99,7 @@ where
             lifecycle: InFlightLifecycle::Running,
             terminal: None,
         }));
+        Ok(())
     }
 
     pub(super) fn dispatch(
@@ -106,8 +117,7 @@ where
                     .map_err(|error| (retry, error))
             }
             Some(Execution::Resident(_)) => {
-                self.start(message, span);
-                Ok(AgentDispatch::Started)
+                self.start(message, span).map(|()| AgentDispatch::Started)
             }
             None => Err((message, AgentDispatchError::Closed)),
         }
@@ -158,17 +168,23 @@ where
     }
 
     pub(super) fn poll(&mut self, context: &mut Context<'_>) -> Poll<AgentSlotUpdate> {
-        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
-            return Poll::Pending;
-        };
-
-        let item = {
+        let polled = {
+            let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+                return Poll::Pending;
+            };
             let _entered = in_flight.span.enter();
-            match Pin::new(&mut in_flight.stream).poll_next(context) {
-                Poll::Ready(Some(item)) => item,
-                Poll::Ready(None) => panic!("an AgentStream returns its Agent before ending"),
-                Poll::Pending => return Poll::Pending,
+            Pin::new(&mut in_flight.stream).poll_next(context)
+        };
+        let item = match polled {
+            Poll::Ready(Some(item)) => item,
+            Poll::Ready(None) => {
+                self.execution = None;
+                return Poll::Ready(AgentSlotUpdate::Event(Err(AgentError::StateInvariant)));
             }
+            Poll::Pending => return Poll::Pending,
+        };
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return Poll::Ready(AgentSlotUpdate::Event(Err(AgentError::StateInvariant)));
         };
         let update = match item {
             AgentStreamItem::Event(_) if in_flight.lifecycle == InFlightLifecycle::Reaping => {

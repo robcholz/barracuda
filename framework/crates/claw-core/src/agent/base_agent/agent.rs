@@ -377,15 +377,15 @@ impl<'a> IterationConsumer<'a> {
         if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
             return None;
         }
-        let remaining = reasoning_limit() - self.reasoning_bytes;
+        let remaining = reasoning_limit().saturating_sub(self.reasoning_bytes);
         let mut end = remaining.min(fragment.len());
         while end > 0 && !fragment.is_char_boundary(end) {
-            end -= 1;
+            end = end.saturating_sub(1);
         }
         if end == 0 {
             return None;
         }
-        self.reasoning_bytes += end;
+        self.reasoning_bytes = self.reasoning_bytes.saturating_add(end);
         fragment.truncate(end);
         Some(StreamPart::Delta(fragment))
     }
@@ -613,6 +613,10 @@ where
                     drop(render_span);
                     drop(prepare_span);
 
+                    let Some(turn) = self.agent.active_turn.as_mut() else {
+                        yield Err(self.agent.fail(AgentError::StateInvariant));
+                        break;
+                    };
                     let permission = BaseAgentPermissionPolicy {
                         policy: self.agent.permission_policy.as_ref(),
                         control: &control,
@@ -624,11 +628,6 @@ where
                         retry: self.agent.retry_policy,
                     }
                     .run(step));
-                    let turn = self
-                        .agent
-                        .active_turn
-                        .as_mut()
-                        .expect("active turn checked before borrowing iteration fields");
                     let mut consumer = IterationConsumer::new(turn);
 
                     yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
@@ -795,6 +794,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveRunGuard<'_, H, Timer> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use claw_interface::MemFs;
     use claw_memory::TranscriptStore;

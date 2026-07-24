@@ -13,8 +13,8 @@ use super::AgentManager;
 
 const AGENT_STATE_NAME: &str = "agents";
 
-fn agent_instance(id: AgentId) -> InstanceId {
-    InstanceId::new(id.to_wire()).expect("an AgentId wire value is a valid instance id")
+fn agent_instance(id: AgentId) -> Result<InstanceId, AgentCreateError> {
+    InstanceId::new(id.to_wire()).map_err(AgentCreateError::from)
 }
 
 impl<Filesystem, Http, Timer> AgentManager<Filesystem, Http, Timer>
@@ -59,7 +59,7 @@ where
     pub(crate) fn remove(&self, id: AgentId) -> Result<(), AgentCreateError> {
         self.persistence
             .collection::<BaseAgentState>(AGENT_STATE_NAME)?
-            .remove(&agent_instance(id))?;
+            .remove(&agent_instance(id)?)?;
         TranscriptStore::<Filesystem>::delete(id.0, &self.transcript_dir)?;
         Ok(())
     }
@@ -70,7 +70,7 @@ where
     ) -> Result<BaseAgentState, AgentCreateError> {
         self.persistence
             .collection::<BaseAgentState>(AGENT_STATE_NAME)?
-            .load(&agent_instance(id))?
+            .load(&agent_instance(id)?)?
             .ok_or(AgentCreateError::AgentNotFound(id))
     }
 
@@ -82,7 +82,7 @@ where
         let collection = self
             .persistence
             .collection::<BaseAgentState>(AGENT_STATE_NAME)?;
-        let instance = agent_instance(id);
+        let instance = agent_instance(id)?;
         if collection.load(&instance)?.is_some() {
             return Err(AgentCreateError::AgentAlreadyExists(id));
         }
@@ -104,7 +104,7 @@ where
     ) -> Result<(), AgentCreateError> {
         self.persistence
             .collection::<BaseAgentState>(AGENT_STATE_NAME)?
-            .register(&agent_instance(id), state)?;
+            .register(&agent_instance(id)?, state)?;
         Ok(())
     }
 }

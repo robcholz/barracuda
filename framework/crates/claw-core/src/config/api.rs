@@ -81,6 +81,7 @@ impl ClawApiManager {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use claw_api::BackendKind;

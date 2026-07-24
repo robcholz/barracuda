@@ -8,7 +8,7 @@ use std::sync::Arc;
 use async_channel::Sender;
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
-use claw_persistence::{DurableState, PersistenceError, SharedPersistence};
+use claw_persistence::{DurableState, InvalidInstanceId, PersistenceError, SharedPersistence};
 use claw_tool::ToolRegistry;
 
 use crate::agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
@@ -56,6 +56,8 @@ pub enum SessionCreateError {
     WorkerStopped,
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
 /// Failure permanently deleting one Session and all of its Agent-owned stores.
@@ -71,6 +73,8 @@ pub enum SessionDeleteError {
     Agent(#[from] AgentCreateError),
     #[error("failed to delete persisted session state: {0}")]
     Persistence(#[from] PersistenceError),
+    #[error(transparent)]
+    InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
 struct LiveActor<Filesystem, Http, Timer>
@@ -200,9 +204,10 @@ where
         let session = allocate_session_id(&self.state);
         let state = DurableState::new(SessionPersistentState::default());
         if persistence == SessionPersistence::Persistent {
+            let instance = session_instance(session)?;
             self.persistence
                 .collection::<SessionPersistentState>(SESSION_STATE_NAME)?
-                .register(&session_instance(session), &state)?;
+                .register(&instance, &state)?;
         }
         let previous = self.sessions.insert(
             session,
@@ -227,13 +232,17 @@ where
         if !self.sessions.contains_key(&session) {
             return Err(OpenSessionError::SessionNotFound(session));
         }
-        self.ensure_actor(session);
+        if !self.ensure_actor(session) {
+            return Err(OpenSessionError::SessionNotFound(session));
+        }
         let (events, receiver) = async_channel::unbounded::<SessionEvent>();
-        let task = self
+        let Some(task) = self
             .sessions
             .get_mut(&session)
             .and_then(|entry| entry.actor.as_mut())
-            .expect("a known Session was just materialized");
+        else {
+            return Err(OpenSessionError::SessionNotFound(session));
+        };
         let lease = task.actor.open(events)?;
         let control = SessionControl::new(lease, task.commands.clone());
         let stream = SessionStream::new(lease, task.commands.clone(), receiver);
@@ -249,12 +258,18 @@ where
             let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
             return;
         }
-        self.ensure_actor(session);
-        let task = self
+        if !self.ensure_actor(session) {
+            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            return;
+        }
+        let Some(task) = self
             .sessions
             .get_mut(&session)
             .and_then(|entry| entry.actor.as_mut())
-            .expect("a known Session was just materialized");
+        else {
+            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            return;
+        };
         task.actor.request_delete(ack);
     }
 
@@ -333,13 +348,12 @@ where
         Poll::Pending
     }
 
-    fn ensure_actor(&mut self, session: SessionId) {
-        let entry = self
-            .sessions
-            .get(&session)
-            .expect("only a known Session can be materialized");
+    fn ensure_actor(&mut self, session: SessionId) -> bool {
+        let Some(entry) = self.sessions.get(&session) else {
+            return false;
+        };
         if entry.actor.is_some() {
-            return;
+            return true;
         }
         let persistence = entry.persistence;
         let state = entry.state.clone();
@@ -356,15 +370,16 @@ where
             trace.task = %session,
             run.session = %session,
         );
-        self.sessions
-            .get_mut(&session)
-            .expect("the Session remains registered")
-            .actor = Some(LiveActor {
+        let Some(entry) = self.sessions.get_mut(&session) else {
+            return false;
+        };
+        entry.actor = Some(LiveActor {
             commands,
             actor,
             span,
         });
         self.actor_poll_queue.push_back(session);
+        true
     }
 
     fn finish_actor(&mut self, exit: SessionActorExit) {
@@ -372,13 +387,18 @@ where
         match exit {
             SessionActorExit::DeleteReady { .. } => {
                 let result = self.remove_persistent_state(session);
-                let deleted = self
+                let Some(task) = self
                     .sessions
                     .get_mut(&session)
                     .and_then(|entry| entry.actor.as_mut())
-                    .expect("a delete-ready Session still owns its actor")
-                    .actor
-                    .complete_delete(result);
+                else {
+                    tracing::error!(
+                        name: "delete_ready_actor_missing",
+                        session = %session,
+                    );
+                    return;
+                };
+                let deleted = task.actor.complete_delete(result);
                 if deleted {
                     self.actor_poll_queue.retain(|queued| *queued != session);
                     self.sessions.remove(&session);
@@ -400,9 +420,10 @@ where
         if entry.persistence == SessionPersistence::Ephemeral {
             return Ok(());
         }
+        let instance = session_instance(session)?;
         self.persistence
             .collection::<SessionPersistentState>(SESSION_STATE_NAME)
-            .and_then(|states| states.remove(&session_instance(session)))
+            .and_then(|states| states.remove(&instance))
             .map_err(|error| {
                 tracing::error!(
                     name: "session_state_remove_failed",

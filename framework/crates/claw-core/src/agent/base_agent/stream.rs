@@ -244,15 +244,13 @@ impl RunControl {
 
     fn take_approval_decision(&self) -> Option<ApprovalDecision> {
         let mut approval = self.inner.approval.borrow_mut();
-        if !matches!(&*approval, ApprovalState::Resolved(_)) {
-            return None;
+        match std::mem::replace(&mut *approval, ApprovalState::Idle) {
+            ApprovalState::Resolved(decision) => Some(decision),
+            state => {
+                *approval = state;
+                None
+            }
         }
-        let ApprovalState::Resolved(decision) =
-            std::mem::replace(&mut *approval, ApprovalState::Idle)
-        else {
-            unreachable!("checked approval state changed while exclusively borrowed")
-        };
-        Some(decision)
     }
 
     fn register(&self, waker: &Waker) {
@@ -329,6 +327,7 @@ impl Drop for BaseAgentStream<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use std::cell::Cell;
     use std::rc::Rc;

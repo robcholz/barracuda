@@ -94,6 +94,7 @@ impl DurableStateCodec for BaseAgentState {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::BaseAgentState;
     use crate::agent::context_adapters::AgentMode;

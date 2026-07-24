@@ -145,6 +145,7 @@ fn success(output: &str) -> ToolOutput {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use claw_persistence::DurableState;
     use claw_tool::{SyncToolHandler, ToolInvocation};

@@ -80,7 +80,8 @@ impl<H: ClawHttp, Timer: ClawTimer> Extractor for LlmExtractor<H, Timer> {
             let chat_span =
                 tracing::info_span!("api.chat", purpose = "memory_extraction", max_attempts,);
             let response = async {
-                let mut lease = self.api.lease().await;
+                let mut lease = self.api.lease().await?;
+                let api = lease.api_mut()?;
                 // Apply this operation's config from the manager (its explicit
                 // binding, else the default). None / invalid keeps the current one.
                 if let Some(config) = self
@@ -89,9 +90,9 @@ impl<H: ClawHttp, Timer: ClawTimer> Extractor for LlmExtractor<H, Timer> {
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .get_api(ApiPurpose::Memory)
                 {
-                    let _ = lease.api_mut().set_config(config);
+                    let _ = api.set_config(config);
                 }
-                lease.api_mut().chat(&request, Cancel::new(&abort)).await
+                api.chat(&request, Cancel::new(&abort)).await
             }
             .instrument(chat_span)
             .await

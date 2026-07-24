@@ -34,9 +34,9 @@ use super::{
 #[cfg(feature = "multiagent")]
 use crate::agent::AgentDispatchError;
 use crate::agent::{
-    AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest, AgentIterationEvent,
-    AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig, ReasoningEffort,
-    ToolCallId,
+    AgentCompletion, AgentCreateError, AgentError, AgentEvent, AgentId, AgentInputRequest,
+    AgentIterationEvent, AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig,
+    ReasoningEffort, ToolCallId,
 };
 #[cfg(feature = "multiagent")]
 use crate::multiagent::{
@@ -45,6 +45,11 @@ use crate::multiagent::{
 };
 #[cfg(feature = "multiagent")]
 type TimeoutFuture = Pin<Box<dyn Future<Output = crate::agent::AgentId>>>;
+
+enum RootDispatchError {
+    Retry(Message),
+    Invariant,
+}
 
 #[cfg(feature = "multiagent")]
 struct TimeoutEntry {
@@ -170,8 +175,11 @@ impl ActorLifecycle {
                     stopping.delete_ack = delete_ack;
                 }
             }
-            Self::DeleteReady(_) => {
-                unreachable!("a delete-ready actor is completed synchronously by its manager")
+            Self::DeleteReady(stopping) => {
+                stopping.close_acks.extend(close_ack);
+                if stopping.delete_ack.is_none() {
+                    stopping.delete_ack = delete_ack;
+                }
             }
         }
     }
@@ -560,10 +568,10 @@ where
         }
         self.finish_turn();
 
-        let ActorLifecycle::Stopping(stopping) =
-            std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running)
-        else {
-            unreachable!("a stop reason comes only from a stopping lifecycle")
+        let lifecycle = std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
+        let ActorLifecycle::Stopping(stopping) = lifecycle else {
+            self.lifecycle = lifecycle;
+            return None;
         };
 
         match reason {
@@ -593,10 +601,10 @@ where
     }
 
     pub(super) fn complete_delete(&mut self, result: Result<(), SessionDeleteError>) -> bool {
-        let ActorLifecycle::DeleteReady(mut stopping) =
-            std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running)
-        else {
-            unreachable!("only a delete-ready actor can complete Session deletion")
+        let lifecycle = std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
+        let ActorLifecycle::DeleteReady(mut stopping) = lifecycle else {
+            self.lifecycle = lifecycle;
+            return false;
         };
         match result {
             Ok(()) => {
@@ -657,25 +665,31 @@ where
         }
         match self.dispatch_root(message) {
             Ok(()) => true,
-            Err(message) => {
+            Err(RootDispatchError::Retry(message)) => {
                 self.inbox.push_front(message);
                 false
+            }
+            Err(RootDispatchError::Invariant) => {
+                self.begin_turn(TurnOrigin::User);
+                self.emit_turn_error(SessionTurnError::Agent(AgentError::StateInvariant));
+                self.finish_turn();
+                true
             }
         }
     }
 
-    fn dispatch_root(&mut self, message: Message) -> Result<(), Message> {
-        let retry = message.clone();
-        let agent = self
-            .root_id()
-            .expect("an Agent stream starts only with a root Agent id");
+    fn dispatch_root(&mut self, message: Message) -> Result<(), RootDispatchError> {
+        let Some(agent) = self.root_id() else {
+            return Err(RootDispatchError::Invariant);
+        };
         let turn = self.active_turn.unwrap_or(TurnId(self.next_turn));
         let span = agent_span(agent, Some(turn));
-        let root = self
-            .agents
-            .get_mut(&agent)
-            .expect("an Agent stream starts only with a resident root");
-        let dispatch = root.dispatch(message, span).map_err(|_| retry)?;
+        let Some(root) = self.agents.get_mut(&agent) else {
+            return Err(RootDispatchError::Invariant);
+        };
+        let dispatch = root
+            .dispatch(message, span)
+            .map_err(|(message, _)| RootDispatchError::Retry(message))?;
         if dispatch == AgentDispatch::Started {
             self.active_agent_poll_queue.push_back(agent);
         }

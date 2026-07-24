@@ -153,6 +153,7 @@ fn required_nonzero_u32_argument(args: &Value, key: &str) -> Result<NonZeroU32, 
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use serde_json::json;
 

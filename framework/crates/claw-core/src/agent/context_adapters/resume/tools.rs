@@ -96,6 +96,7 @@ impl SyncToolHandler for ToolSearchTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use claw_persistence::DurableState;
     use claw_tool::{

@@ -78,6 +78,7 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use claw_interface::MemFs;
     use claw_memory::{MemoryDraft, StoreOutcome};

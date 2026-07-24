@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 //! Render parsed manifests into Rust source: a single `ENTRIES` array of typed
 //! `AgentCatalogEntry` values. The output is `include!`-d into
 //! `crate::agent::baked`.

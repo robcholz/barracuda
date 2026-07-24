@@ -454,6 +454,7 @@ fn tool_result_parts((invocation, output): (ToolInvocation, ToolOutput)) -> (Too
 }
 
 #[cfg(test)]
+#[allow(clippy::arithmetic_side_effects, clippy::expect_used)]
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::sync::atomic::{AtomicUsize, Ordering};

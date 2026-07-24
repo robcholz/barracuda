@@ -1,3 +1,5 @@
+#![allow(clippy::arithmetic_side_effects)]
+
 //! The **agent-manifest** generator.
 //!
 //! Self-contained codegen step: reads `resources/agents/<kind>/`, parses +

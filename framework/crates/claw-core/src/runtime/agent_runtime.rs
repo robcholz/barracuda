@@ -283,6 +283,9 @@ impl AgentRuntime {
                     SessionDeleteError::Persistence(_) => {
                         tracing::error!(name: "delete_rejected", reason = "persistence");
                     }
+                    SessionDeleteError::InvalidInstanceId(_) => {
+                        tracing::error!(name: "delete_rejected", reason = "invalid_instance_id");
+                    }
                 }
                 Err(error)
             }

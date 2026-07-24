@@ -222,6 +222,7 @@ pub(crate) fn is_strict_descendant(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::{MultiagentSnapshot, SubagentSnapshot, SubagentStatus};
     use crate::agent::{AgentId, AgentKind};
