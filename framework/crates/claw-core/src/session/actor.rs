@@ -951,7 +951,7 @@ where
             }
             AgentSlotUpdate::Event(Err(error)) => {
                 if is_root {
-                    self.emit_turn_error(error.into());
+                    self.emit_turn_error(SessionTurnError::from_agent(error));
                     self.finish_turn();
                     #[cfg(feature = "multiagent")]
                     self.multiagent.on_agent_idle(agent);

@@ -2,6 +2,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::error::Error;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -45,8 +46,10 @@ pub(crate) enum ApprovalDecision {
     Rejected(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum AgentError {
+    #[error("context adapter failed: {0}")]
+    ContextAdapter(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error(transparent)]
     Iteration(#[from] IterationLoopError),
     #[error(transparent)]

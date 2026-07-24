@@ -42,6 +42,7 @@ pub claw_core::ApprovalResolverError::ToolSet(claw_tool::set::ToolSetError)
 pub enum claw_core::BaseAgentError
 pub claw_core::BaseAgentError::ConflictingEffects
 pub claw_core::BaseAgentError::ConflictingEffects::count: usize
+pub claw_core::BaseAgentError::ContextAdapter(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
 pub claw_core::BaseAgentError::Iteration(claw_core::IterationLoopError)
 pub claw_core::BaseAgentError::MalformedAssistantMessage
 pub claw_core::BaseAgentError::StateInvariant
@@ -110,6 +111,7 @@ pub claw_core::SessionPersistence::Persistent
 pub enum claw_core::SessionTurnError
 pub claw_core::SessionTurnError::Agent(claw_core::BaseAgentError)
 pub claw_core::SessionTurnError::AgentCreate(claw_core::AgentCreateError)
+pub claw_core::SessionTurnError::ContextAdapter(claw_core::ContextAdapterError)
 pub enum claw_core::TurnEvent
 pub claw_core::TurnEvent::Ended
 pub claw_core::TurnEvent::Ended::turn: claw_core::TurnId
@@ -157,6 +159,7 @@ pub fn claw_core::AgentRuntime::new<Filesystem, Http, Timer, Thread, Executor>(a
 pub fn claw_core::AgentRuntime::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionStream), claw_core::OpenSessionError>
 impl core::ops::drop::Drop for claw_core::AgentRuntime
 pub fn claw_core::AgentRuntime::drop(&mut self)
+pub struct claw_core::ContextAdapterError(_)
 pub struct claw_core::InputRequestId(pub u32)
 impl claw_core::InputRequestId
 pub fn claw_core::InputRequestId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>

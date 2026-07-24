@@ -19,7 +19,7 @@ pub use manager::{
 pub(crate) use manager::{SessionManager, SessionManagerInitError};
 pub use message::Message;
 pub use stream::{
-    InputRequestId, InputRequestKind, IterationEvent, SessionCloseReason, SessionError,
-    SessionEvent, SessionEventError, SessionInputError, SessionStream, SessionTurnError, TurnEvent,
-    TurnEventError, TurnId, TurnOrigin,
+    ContextAdapterError, InputRequestId, InputRequestKind, IterationEvent, SessionCloseReason,
+    SessionError, SessionEvent, SessionEventError, SessionInputError, SessionStream,
+    SessionTurnError, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };

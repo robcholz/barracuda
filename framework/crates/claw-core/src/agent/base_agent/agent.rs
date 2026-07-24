@@ -267,18 +267,24 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         Ok(())
     }
 
-    async fn prepare_adapter_context(&mut self) {
+    async fn prepare_adapter_context(&mut self) -> Result<(), AgentError> {
         for adapter in &mut self.context_adapters {
-            adapter.prepare(self.transcript.as_ref()).await;
+            adapter
+                .prepare(self.transcript.as_ref())
+                .await
+                .map_err(AgentError::ContextAdapter)?;
         }
+        Ok(())
     }
 
-    fn render_adapter_context(&mut self) -> serde_json::Value {
+    fn render_adapter_context(&mut self) -> Result<serde_json::Value, AgentError> {
         let mut sink = self.context.sink();
         for adapter in &mut self.context_adapters {
-            adapter.contribute(&mut sink);
+            adapter
+                .contribute(&mut sink)
+                .map_err(AgentError::ContextAdapter)?;
         }
-        sink.into_history()
+        Ok(sink.into_history())
     }
 
     fn refresh_llm_config(&mut self) {
@@ -577,14 +583,26 @@ where
                     run.iteration = %iteration_id,
                     adapter_count,
                 );
-                self.agent
+                if let Err(error) = self.agent
                     .prepare_adapter_context()
                     .instrument(prepare_span.clone())
-                    .await;
+                    .await
+                {
+                    yield Err(self.agent.fail(error));
+                    break;
+                }
 
                 let render_span = prepare_span
                     .in_scope(|| tracing::info_span!("context.render", adapter_count));
-                let history = render_span.in_scope(|| self.agent.render_adapter_context());
+                let history = match render_span
+                    .in_scope(|| self.agent.render_adapter_context())
+                {
+                    Ok(history) => history,
+                    Err(error) => {
+                        yield Err(self.agent.fail(error));
+                        break;
+                    }
+                };
                 let result = {
                     let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
                     Ok(tools) => tools,

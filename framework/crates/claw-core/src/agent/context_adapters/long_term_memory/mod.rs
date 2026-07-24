@@ -10,7 +10,7 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{LongTermInitError, LongTermMemory, Transcript};
 use claw_tool::ToolGroup;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, ContextAdapterResult};
 use crate::config::SharedApiManager;
 
 mod extraction;
@@ -23,11 +23,19 @@ use self::llm_extractor::LlmExtractor;
 use self::stores::{agent_store, global_store, MemoryStores};
 use self::tools::memory_tools;
 mod tools;
-use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
+use extraction::{ExtractError, ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
 
 type AdapterBuilder<F> =
     dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextAdapter<F>;
+
+/// Failure while preparing long-term-memory context.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum LongTermMemoryAdapterError {
+    /// Extracting memory operations from the transcript failed.
+    #[error(transparent)]
+    Extraction(#[from] ExtractError),
+}
 
 /// The adapter's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
@@ -117,12 +125,15 @@ impl<F: ClawFs + 'static> ContextAdapter for LongTermMemoryContextAdapter<F> {
         Box::pin(async move {
             // Pull, not push: reading the transcript here is where this adapter
             // decides whether new conversation warrants extraction.
-            self.maybe_schedule_extraction(transcript).await;
+            self.maybe_schedule_extraction(transcript)
+                .await
+                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?;
             self.refresh_catalog();
+            Ok(())
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         // Borrow the cached strings into the blocks; `Context::with` copies them
         // only on a real change, so an unchanged catalog allocates nothing here.
         output.block(Block::new(
@@ -133,6 +144,7 @@ impl<F: ClawFs + 'static> ContextAdapter for LongTermMemoryContextAdapter<F> {
             BlockKind::AgentMemory,
             self.catalog.agent_block.as_str(),
         ));
+        Ok(())
     }
 
     fn tools(&self) -> Option<ToolGroup> {

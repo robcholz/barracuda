@@ -5,6 +5,7 @@
 //! [`prepare`](ContextAdapter::prepare), project request context, and may expose
 //! one adapter-owned tool group.
 
+use core::error::Error;
 use core::future::Future;
 use core::pin::Pin;
 
@@ -19,8 +20,12 @@ pub(in crate::agent) enum TurnLifecycle {
     Ended,
 }
 
+/// Result returned through the adapter port.
+pub(in crate::agent) type ContextAdapterResult = Result<(), Box<dyn Error + Send + Sync + 'static>>;
+
 /// Future returned by [`ContextAdapter::prepare`].
-pub(in crate::agent) type ContextAdapterFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
+pub(in crate::agent) type ContextAdapterFuture<'a> =
+    Pin<Box<dyn Future<Output = ContextAdapterResult> + 'a>>;
 
 /// A pluggable source that contributes to the next LLM request and may provide
 /// model-callable tools.
@@ -38,11 +43,11 @@ pub(in crate::agent) trait ContextAdapter {
     /// [`contribute`](Self::contribute).
     /// The default is a no-op for purely synchronous projectors.
     fn prepare<'a>(&'a mut self, _transcript: &'a dyn Transcript) -> ContextAdapterFuture<'a> {
-        Box::pin(async {})
+        Box::pin(async { Ok(()) })
     }
 
     /// Project this source into the request context for the current iteration.
-    fn contribute(&mut self, output: &mut ContextSink<'_>);
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult;
 
     /// The model-callable tools this adapter provides.
     ///

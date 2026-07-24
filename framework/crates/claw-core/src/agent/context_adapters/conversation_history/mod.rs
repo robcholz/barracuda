@@ -12,11 +12,11 @@ mod llm_compactor;
 
 use claw_context::{BlockKind, ContextSink};
 use claw_interface::{ClawHttp, ClawTimer};
-use claw_memory::{Compactor, Transcript, Turn, TurnId};
+use claw_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, ContextAdapterResult};
 use crate::config::SharedApiManager;
 
 use llm_compactor::LlmCompactor;
@@ -44,6 +44,14 @@ impl CompactionPolicy {
             segment_token_budget,
         }
     }
+}
+
+/// Failure while preparing the conversation-history projection.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ConversationHistoryAdapterError {
+    /// Summarizing an aged transcript window failed.
+    #[error(transparent)]
+    Compaction(#[from] CompactError),
 }
 
 /// Owns the complete request-time projection of one conversation transcript.
@@ -101,7 +109,10 @@ impl ConversationHistoryContextAdapter {
     }
 
     /// Compact at most one aged prefix, then cache the exact complementary tail.
-    async fn prepare_projection(&mut self, transcript: &dyn Transcript) {
+    async fn prepare_projection(
+        &mut self,
+        transcript: &dyn Transcript,
+    ) -> Result<(), ConversationHistoryAdapterError> {
         if let Some((id_end, window_messages, estimated_tokens)) = self.select_window(transcript) {
             let span = tracing::info_span!(
                 "context.compact",
@@ -132,14 +143,16 @@ impl ConversationHistoryContextAdapter {
                     let kind: &'static str = (&error).into();
                     log::warn!("conversation compaction failed: kind={kind}");
                     span.in_scope(|| tracing::warn!(name: "failed", kind));
+                    return Err(error.into());
                 }
             }
         }
 
-        // Refresh only after a successful boundary advance (or failed/no-op
-        // compaction), so the cached tail always complements the summary state
-        // this same object will contribute.
+        // Refresh only after a successful boundary advance or no-op compaction,
+        // so the cached tail always complements the summary state this same
+        // object will contribute.
         self.refresh_verbatim_tail(transcript);
+        Ok(())
     }
 
     fn refresh_verbatim_tail(&mut self, transcript: &dyn Transcript) {
@@ -221,11 +234,13 @@ fn is_uncovered(turn: &Turn, covered_through: Option<TurnId>) -> bool {
 impl ContextAdapter for ConversationHistoryContextAdapter {
     fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextAdapterFuture<'a> {
         Box::pin(async move {
-            self.prepare_projection(transcript).await;
+            self.prepare_projection(transcript)
+                .await
+                .map_err(|error| Box::new(error) as _)
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         // The transcript is only borrowed during `prepare`, which the production
         // lifecycle always runs first and which caches the summary + verbatim
         // tail. `contribute` therefore just emits that cached projection.
@@ -235,6 +250,7 @@ impl ContextAdapter for ConversationHistoryContextAdapter {
         for message in &self.verbatim_tail {
             output.message(BlockKind::RecentContext, message);
         }
+        Ok(())
     }
 }
 
@@ -321,11 +337,11 @@ mod tests {
             Box::new(WindowEchoCompactor),
             CompactionPolicy::new(0, 1, usize::MAX),
         );
-        block_on(adapter.prepare(&transcript as &dyn Transcript));
+        assert!(block_on(adapter.prepare(&transcript as &dyn Transcript)).is_ok());
 
         let mut context = Context::new();
         let mut sink = context.sink();
-        adapter.contribute(&mut sink);
+        assert!(adapter.contribute(&mut sink).is_ok());
         let rendered = sink.into_history();
 
         assert_eq!(adapter.covered_through, Some(expected_covered_through));

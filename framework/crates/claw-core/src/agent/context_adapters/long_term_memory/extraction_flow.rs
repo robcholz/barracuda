@@ -3,7 +3,7 @@ use claw_memory::{MemoryDraft, MemoryPatch, Transcript};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use super::{ExtractionInput, LongTermMemoryContextAdapter, MemoryOp};
+use super::{ExtractionInput, LongTermMemoryAdapterError, LongTermMemoryContextAdapter, MemoryOp};
 
 /// Extraction throttle: after the first extraction, the transcript version must
 /// advance by at least this much before the next extraction runs.
@@ -15,21 +15,24 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     /// Pull, not push: called from `prepare` at the iteration boundary, it self-detects
     /// new conversation via the transcript version. Store dedup absorbs facts
     /// re-extracted across turns.
-    pub(super) async fn maybe_schedule_extraction(&mut self, transcript: &dyn Transcript) {
+    pub(super) async fn maybe_schedule_extraction(
+        &mut self,
+        transcript: &dyn Transcript,
+    ) -> Result<(), LongTermMemoryAdapterError> {
         let version = transcript.version();
         if version == self.extract_cursor {
-            return; // transcript unchanged since the last extraction
+            return Ok(()); // transcript unchanged since the last extraction
         }
         if self.extract_cursor != 0
             && version.saturating_sub(self.extract_cursor) < EXTRACT_MIN_VERSION_DELTA
         {
-            return;
+            return Ok(());
         }
 
         let turns = transcript.turns();
         let transcript = flatten_transcript(turns.iter().flat_map(|turn| turn.messages.iter()));
         if transcript.trim().is_empty() {
-            return;
+            return Ok(());
         }
         let version_delta = version.saturating_sub(self.extract_cursor);
         self.extract_cursor = version;
@@ -84,8 +87,10 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
                 let kind: &'static str = (&error).into();
                 log::warn!("long-term memory extraction failed: kind={kind}");
                 span.in_scope(|| tracing::warn!(name: "failed", kind));
+                return Err(error.into());
             }
         }
+        Ok(())
     }
 
     fn apply_op(&self, op: MemoryOp) {

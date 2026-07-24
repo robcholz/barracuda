@@ -11,7 +11,7 @@ use claw_skill::SkillSet;
 use claw_tool::ToolGroup;
 
 use self::tools::skill_tools;
-use crate::agent::base_agent::ContextAdapter;
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
 
 mod tools;
 
@@ -28,10 +28,11 @@ impl SkillContextAdapter {
 }
 
 impl ContextAdapter for SkillContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         let mut skills = lock_skill_set(&self.skills);
         let rendered = skills.catalog_context();
         output.block(Block::new(BlockKind::SkillList, rendered));
+        Ok(())
     }
 
     fn tools(&self) -> Option<ToolGroup> {

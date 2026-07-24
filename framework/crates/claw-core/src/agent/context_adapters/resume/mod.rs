@@ -6,7 +6,7 @@ use claw_context::{Band, BlockKind, ContextSink, Scope};
 use claw_persistence::DurableState;
 use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 
-use crate::agent::base_agent::ContextAdapter;
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
 use crate::agent::BaseAgentState;
 
 use self::tools::discovery_tools;
@@ -36,9 +36,10 @@ impl ResumeContextAdapter {
 }
 
 impl ContextAdapter for ResumeContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         let reminder = self.reminder.take();
         output.reminder(resume_reminder_kind(), reminder.as_deref());
+        Ok(())
     }
 
     fn tools(&self) -> Option<ToolGroup> {
@@ -129,7 +130,7 @@ mod tests {
         let mut context = Context::new();
         let first = {
             let mut sink = context.sink();
-            adapter.contribute(&mut sink);
+            assert!(adapter.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         let request = context.request(&first);
@@ -140,7 +141,7 @@ mod tests {
 
         let second = {
             let mut sink = context.sink();
-            adapter.contribute(&mut sink);
+            assert!(adapter.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         assert!(context.request(&second).reminders().is_empty());
@@ -170,7 +171,7 @@ mod tests {
         let mut context = Context::new();
         let history = {
             let mut sink = context.sink();
-            adapter.contribute(&mut sink);
+            assert!(adapter.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         let request = context.request(&history);

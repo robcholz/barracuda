@@ -126,9 +126,11 @@ fn assert_submit_error(root: &str, fixture: &Fixture) {
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
-    let log_dir = format!("{root}/transcript/1.jsonl");
-    DiskFs::create_dir_all(&log_dir).unwrap();
-    DiskFs::write_atomic(&format!("{log_dir}/marker"), b"not a journal").unwrap();
+    if fixture.setup == "root_transcript_log_dir" {
+        let log_dir = format!("{root}/transcript/1.jsonl");
+        DiskFs::create_dir_all(&log_dir).unwrap();
+        DiskFs::write_atomic(&format!("{log_dir}/marker"), b"not a journal").unwrap();
+    }
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();

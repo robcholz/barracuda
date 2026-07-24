@@ -9,6 +9,7 @@
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::error::Error;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
@@ -160,10 +161,27 @@ pub enum SessionTurnError {
     /// The root Agent could not be constructed or restored.
     #[error(transparent)]
     AgentCreate(#[from] AgentCreateError),
+    /// A context adapter could not prepare or project the request context.
+    #[error(transparent)]
+    ContextAdapter(#[from] ContextAdapterError),
     /// The active Agent turn failed.
     #[error(transparent)]
-    Agent(#[from] AgentError),
+    Agent(AgentError),
 }
+
+impl SessionTurnError {
+    pub(crate) fn from_agent(error: AgentError) -> Self {
+        match error {
+            AgentError::ContextAdapter(source) => Self::ContextAdapter(ContextAdapterError(source)),
+            error => Self::Agent(error),
+        }
+    }
+}
+
+/// A concrete adapter failure erased at the Session event-stream boundary.
+#[derive(Debug, thiserror::Error)]
+#[error("context adapter failed: {0}")]
+pub struct ContextAdapterError(#[source] Box<dyn Error + Send + Sync + 'static>);
 
 /// A typed lower-layer failure while resolving caller input.
 #[derive(Debug, thiserror::Error)]

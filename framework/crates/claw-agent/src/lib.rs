@@ -14,8 +14,8 @@ pub use claw_api::{BackendKind, ClawApiConfig};
 pub use claw_core::stream;
 pub use claw_core::{
     AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, ApprovalResolverError,
-    BaseAgentError, InputRequestId, InputRequestKind, IterationEvent, IterationId,
-    IterationLoopError, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
+    BaseAgentError, ContextAdapterError, InputRequestId, InputRequestKind, IterationEvent,
+    IterationId, IterationLoopError, Message, OpenSessionError, PermissionLevel, ReasoningEffort,
     SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
     SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
     SessionInputError, SessionPersistence, SessionStream, SessionTurnError, ToolCall, ToolCallId,

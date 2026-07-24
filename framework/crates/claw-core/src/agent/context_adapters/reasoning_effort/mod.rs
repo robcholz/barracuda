@@ -4,7 +4,7 @@ use async_channel::{Receiver, Sender};
 use claw_context::{Block, BlockKind, ContextSink};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::base_agent::ContextAdapter;
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
 
 const LOW_PROMPT: &str = prompt!("effort/low.md");
 const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
@@ -73,11 +73,12 @@ impl ReasoningEffortContextAdapter {
 }
 
 impl ContextAdapter for ReasoningEffortContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         while let Ok(effort) = self.updates.try_recv() {
             self.effort = effort;
         }
         output.block(self.effort.context_block());
+        Ok(())
     }
 }
 
@@ -91,7 +92,7 @@ mod tests {
     fn render(adapter: &mut ReasoningEffortContextAdapter, context: &mut Context) -> String {
         let history = {
             let mut sink = context.sink();
-            adapter.contribute(&mut sink);
+            assert!(adapter.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         context.request(&history).system().to_owned()

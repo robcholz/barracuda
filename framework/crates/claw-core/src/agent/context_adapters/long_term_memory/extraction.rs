@@ -83,8 +83,7 @@ pub(crate) enum MemoryOp {
 
 /// Failure from an [`Extractor`].
 ///
-/// Extraction is best-effort: on error the adapter logs the reason and keeps the
-/// existing memory, but the concrete source is still preserved for diagnostics.
+/// The concrete source is preserved for propagation through the adapter port.
 #[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ExtractError {
     /// The extraction backend (e.g. the LLM client) failed.

@@ -12,7 +12,8 @@ use claw_agent::tools::{
     SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec,
 };
 use claw_agent::{
-    stream::StreamPart, AgentError, AgentSystem, IterationEvent, Message, SessionEvent, TurnEvent,
+    stream::StreamPart, AgentError, AgentSystem, IterationEvent, Message, SessionEvent,
+    SessionTurnError, TurnEvent, TurnEventError,
 };
 use claw_interface::{
     Cancel, ClawFile, ClawFs, ClawHttp, ClawTimer, FsError, HttpError, HttpJsonRequest,
@@ -69,6 +70,31 @@ fn backend_csv_failure_matrix_covers_fs_http_and_timer_failures() {
             "case {case}: unexpected timer sleep count"
         );
     }
+}
+
+#[test]
+fn context_adapter_failure_has_a_typed_sse_error() {
+    let _guard = BACKEND_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    reset_counters();
+
+    MemFs::new();
+    let system = PermanentHttpSystem::new::<StdThread, TokioExecutor>(persistence(&mem_root(
+        "context-adapter-failure",
+    )))
+    .unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
+        .unwrap();
+
+    let events = drive_one_turn(&system, "surface adapter failure");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        SessionEvent::Turn(TurnEvent::Error(TurnEventError::Execution(
+            SessionTurnError::ContextAdapter(_)
+        )))
+    )));
 }
 
 #[derive(Default)]

@@ -9,7 +9,7 @@ use claw_tool::ToolGroup;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::AgentEffectEmitter;
-use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
+use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult, TurnLifecycle};
 use crate::agent::BaseAgentState;
 
 use self::tools::plan_tools;
@@ -39,12 +39,13 @@ impl AgentModeContextAdapter {
 }
 
 impl ContextAdapter for AgentModeContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
         let framing = match self.state.get().mode() {
             AgentMode::Normal => "",
             AgentMode::Plan => PLAN_MODE_FRAMING,
         };
         output.block(Block::new(BlockKind::ModeFraming, framing));
+        Ok(())
     }
 
     fn tools(&self) -> Option<ToolGroup> {
@@ -78,7 +79,7 @@ mod tests {
     fn render(adapter: &mut AgentModeContextAdapter, context: &mut Context) -> String {
         let history = {
             let mut sink = context.sink();
-            adapter.contribute(&mut sink);
+            assert!(adapter.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         context.request(&history).system().to_owned()
