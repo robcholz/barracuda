@@ -115,6 +115,10 @@ impl ConversationHistoryContextAdapter {
                 .await;
             match result {
                 Ok(messages) => {
+                    log::info!(
+                        "conversation compaction completed: summaries={}",
+                        messages.len()
+                    );
                     span.in_scope(|| {
                         tracing::info!(name: "completed", summary_count = messages.len() as u64);
                     });
@@ -126,6 +130,7 @@ impl ConversationHistoryContextAdapter {
                 }
                 Err(error) => {
                     let kind: &'static str = (&error).into();
+                    log::warn!("conversation compaction failed: kind={kind}");
                     span.in_scope(|| tracing::warn!(name: "failed", kind));
                 }
             }

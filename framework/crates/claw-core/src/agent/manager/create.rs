@@ -118,6 +118,10 @@ impl<
                 TranscriptStore::<Filesystem>::new(id.0, &self.transcript_dir)
                     .map(|store| Box::new(store) as Box<dyn Transcript>)
                     .map_err(|error| {
+                        log::error!(
+                            "Agent {id} ({}) transcript open failed: {error}",
+                            kind.as_str()
+                        );
                         tracing::error!(
                             name: "transcript_open_failed",
                             agent = %id,
@@ -161,6 +165,7 @@ impl<
         } = environment;
 
         let manifest = baked::find(kind).ok_or_else(|| {
+            log::error!("unknown Agent kind: {}", kind.as_str());
             tracing::error!(name: "unknown_kind", kind = %kind.as_str());
             AgentCreateError::UnknownKind(kind.as_str().to_owned())
         })?;
@@ -193,6 +198,10 @@ impl<
         let adapter = match self.long_term.adapter(kind.as_str()) {
             Ok(adapter) => adapter,
             Err(error) => {
+                log::error!(
+                    "Agent {id} ({}) failed to attach long-term context adapter: {error}",
+                    kind.as_str()
+                );
                 tracing::error!(
                     name: "context_adapter_attach_failed",
                     agent = %id,
@@ -242,6 +251,7 @@ impl<
         let base = BaseAgent::<Http, Timer>::build(base_config)?;
         let agent = Agent::new(base);
 
+        log::info!("Agent {id} ({}) created", kind.as_str());
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
         Ok((agent, reasoning_effort_handle))
     }

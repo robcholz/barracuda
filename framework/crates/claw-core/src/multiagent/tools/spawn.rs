@@ -106,6 +106,7 @@ fn validate_kind(
     tool_name: &str,
 ) -> Result<(), ToolInvokeError> {
     if !policy.allows(kind) {
+        log::warn!("subagent spawn kind rejected by policy: {}", kind.as_str());
         tracing::warn!(name: "spawn_kind_rejected", kind = %kind.as_str());
         return Err(ToolError::InvokeRejected(format!(
             "{tool_name}: kind '{kind}' is not permitted for this agent. Allowed: {}",
@@ -117,6 +118,7 @@ fn validate_kind(
         return Ok(());
     }
 
+    log::warn!("unknown subagent spawn kind rejected: {}", kind.as_str());
     tracing::warn!(name: "spawn_unknown_kind_rejected", kind = %kind.as_str());
     let available = policy
         .catalog()

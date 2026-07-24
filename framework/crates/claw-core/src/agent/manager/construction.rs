@@ -38,6 +38,7 @@ impl<
         let span = tracing::info_span!("agent.manager");
         let _enter = span.enter();
         if memory_directory.trim().is_empty() {
+            log::error!("Agent manager persistence directory is empty");
             tracing::error!(name: "missing_persistence_dir", reason = "empty");
             return Err(AgentManagerError::MissingPersistenceDir);
         }
@@ -49,6 +50,7 @@ impl<
         ) {
             Ok(deps) => deps,
             Err(error) => {
+                log::error!("long-term memory initialization failed: {error}");
                 tracing::error!(name: "long_term_memory_init_failed", kind = "init");
                 return Err(error.into());
             }
@@ -85,12 +87,14 @@ fn build_skill_registry<F: ClawFs + 'static>(
     let mut registry = FsSkillRegistry::<F>::new();
     for root in skill_roots {
         if !F::exists(root.as_str()) {
+            log::warn!("skill catalog root is missing: {root}");
             tracing::warn!(name: "root_missing", "");
             continue;
         }
         match registry.set_root(root) {
             Ok(next) => registry = next,
             Err(error) => {
+                log::warn!("skill catalog scan failed: {error}");
                 tracing::warn!(name: "scan_failed", kind = "set_root");
                 return Err(error);
             }

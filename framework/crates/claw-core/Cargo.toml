@@ -71,6 +71,9 @@ claw-context = { path = "../claw-context" }
 claw-permission = { path = "../claw-permission" }
 # The tool runtime used by core agents.
 claw-tool = { path = "../claw-tool" }
+# Flat production diagnostics. Compile-time level ceilings are selected by the
+# final application through `log`'s max-level features.
+log = "0.4"
 # Observability facade reserved for the trace instrumentation pass. `log-always`
 # is intentionally NOT enabled: with a real subscriber it would double-emit every
 # event (once via the log bridge, once via the subscriber). `std` kept;

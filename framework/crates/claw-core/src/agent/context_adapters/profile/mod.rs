@@ -40,6 +40,7 @@ impl<F: ClawFs + 'static> ProfileContextAdapter<F> {
                 output.block(Block::new(kind, ""));
             }
             Err(error) => {
+                log::warn!("profile context read failed for {document}: {error}");
                 tracing::warn!(
                     name: "profile_context_read_failed",
                     document = %document,

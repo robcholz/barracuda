@@ -53,9 +53,11 @@ impl<H: ClawHttp, Timer: ClawTimer> Drop for AsyncLlmLease<'_, H, Timer> {
                 Ok(()) => {}
                 Err(TrySendError::Closed(api)) => {
                     *self.owner.initial_api.borrow_mut() = Some(api);
+                    log::error!("shared LLM channel closed while returning its client");
                     tracing::error!("shared LLM channel closed while returning its client");
                 }
                 Err(TrySendError::Full(_)) => {
+                    log::error!("shared LLM channel already held a client");
                     tracing::error!("shared LLM channel already held a client");
                 }
             }

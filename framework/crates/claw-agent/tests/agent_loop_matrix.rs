@@ -190,6 +190,9 @@ fn agent_loop_csv_llm_response_matrix_reports_errors_and_bounds_reasoning() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     for row in csv_dicts(include_str!("fixtures/llm_response_cases.csv")) {
+        if !reasoning_tier_enabled(field(&row, "reasoning_tier")) {
+            continue;
+        }
         let case = field(&row, "case");
         install_agent_replies(vec![llm_response_for_case(
             field(&row, "response_kind"),
@@ -221,6 +224,16 @@ fn agent_loop_csv_llm_response_matrix_reports_errors_and_bounds_reasoning() {
             field(&row, "expected_reasoning_suffix"),
             case,
         );
+    }
+}
+
+fn reasoning_tier_enabled(tier: &str) -> bool {
+    match tier {
+        "" => true,
+        "short" => cfg!(feature = "reasoning_short"),
+        "medium" => cfg!(feature = "reasoning_medium"),
+        "long" => cfg!(feature = "reasoning_long"),
+        unknown => panic!("unknown reasoning tier in LLM response fixture: {unknown}"),
     }
 }
 

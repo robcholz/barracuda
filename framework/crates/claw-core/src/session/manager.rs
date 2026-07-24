@@ -392,6 +392,7 @@ where
                     .get_mut(&session)
                     .and_then(|entry| entry.actor.as_mut())
                 else {
+                    log::error!("session {session} delete-ready actor is missing");
                     tracing::error!(
                         name: "delete_ready_actor_missing",
                         session = %session,
@@ -425,6 +426,7 @@ where
             .collection::<SessionPersistentState>(SESSION_STATE_NAME)
             .and_then(|states| states.remove(&instance))
             .map_err(|error| {
+                log::error!("session {session} state removal failed: {error}");
                 tracing::error!(
                     name: "session_state_remove_failed",
                     session = %session,

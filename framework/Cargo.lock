@@ -293,6 +293,7 @@ dependencies = [
  "futures-core",
  "futures-lite 2.6.1",
  "getset",
+ "log",
  "proc-macro2",
  "quote",
  "serde",

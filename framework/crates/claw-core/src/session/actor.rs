@@ -717,6 +717,10 @@ where
                     }
                 }
                 Err(error) => {
+                    log::error!(
+                        "session {} Agent {agent} delete failed: {error}",
+                        self.session
+                    );
                     tracing::error!(name: "session_agent_delete_failed", agent = %agent, error = %error);
                     if first_error.is_none() {
                         first_error = Some(error);
@@ -905,6 +909,10 @@ where
         }
         self.agents.remove(&id);
         if let Err(error) = self.agent_manager.remove(id) {
+            log::error!(
+                "session {} Agent {id} spawn rollback failed: {error}",
+                self.session
+            );
             tracing::error!(name: "spawn_rollback_failed", agent = %id, error = %error);
         }
     }
@@ -988,11 +996,19 @@ where
             if self.multiagent_reaping.remove(&agent) {
                 self.multiagent.physical_agent_removed(agent, result);
             } else if let Err(error) = result {
+                log::error!(
+                    "session {} Agent {agent} cleanup failed: {error}",
+                    self.session
+                );
                 tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
             }
         }
         #[cfg(not(feature = "multiagent"))]
         if let Err(error) = result {
+            log::error!(
+                "session {} Agent {agent} cleanup failed: {error}",
+                self.session
+            );
             tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
         }
     }
@@ -1192,6 +1208,7 @@ where
     }
 
     fn emit_event_error(&self, error: SessionEventError) {
+        log::error!("session {} execution failed: {error}", self.session);
         tracing::error!(
             name: "session_execution_error",
             error = %error,

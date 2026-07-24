@@ -448,6 +448,7 @@ impl Multiagent {
         }) {
             removal.failure = None;
             let RemovalCause::Delete { completed, .. } = &mut removal.cause else {
+                log::error!("failed removal retry no longer has a Delete cause");
                 tracing::error!("failed removal retry no longer has a Delete cause");
                 return;
             };
@@ -677,6 +678,10 @@ impl Multiagent {
                     RemovalCause::Retire { .. }
                     | RemovalCause::Timeout { .. }
                     | RemovalCause::Cleanup => {
+                        log::error!(
+                            "physical Agent storage cleanup failed; \
+                             completing transient logical cleanup: {error}"
+                        );
                         tracing::error!(
                             name: "multiagent_cleanup_failed",
                             error = %error,

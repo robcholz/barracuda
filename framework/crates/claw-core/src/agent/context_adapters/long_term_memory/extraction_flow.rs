@@ -62,6 +62,11 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
                         }
                     }
                 }
+                log::info!(
+                    "long-term memory extraction completed: operations={}, \
+                     added={add_count}, replaced={replace_count}, forgotten={forget_count}",
+                    ops.len()
+                );
                 span.in_scope(|| {
                     tracing::info!(
                         name: "completed",
@@ -77,6 +82,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
             }
             Err(error) => {
                 let kind: &'static str = (&error).into();
+                log::warn!("long-term memory extraction failed: kind={kind}");
                 span.in_scope(|| tracing::warn!(name: "failed", kind));
             }
         }

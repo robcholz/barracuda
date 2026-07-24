@@ -177,29 +177,35 @@ impl AgentRuntime {
         self.commands
             .try_send(RuntimeCommand::OpenSession { session, ack })
             .map_err(|_| {
+                log::error!("session {session} open rejected: runtime stopped");
                 tracing::error!(name: "open_rejected", reason = "runtime_stopped");
                 OpenSessionError::WorkerStopped
             })?;
         match result.recv_blocking() {
             Ok(Ok(connection)) => {
+                log::info!("session {session} opened");
                 tracing::info!(name: "opened", "");
                 Ok(connection)
             }
             Ok(Err(error)) => {
                 match &error {
                     OpenSessionError::SessionNotFound(_) => {
+                        log::warn!("session {session} open rejected: session not found");
                         tracing::warn!(name: "open_rejected", reason = "session_not_found");
                     }
                     OpenSessionError::AlreadyOpen(_) => {
+                        log::warn!("session {session} open rejected: already open");
                         tracing::warn!(name: "open_rejected", reason = "already_open");
                     }
                     OpenSessionError::WorkerStopped => {
+                        log::error!("session {session} open rejected: runtime stopped");
                         tracing::error!(name: "open_rejected", reason = "runtime_stopped");
                     }
                 }
                 Err(error)
             }
             Err(_) => {
+                log::error!("session {session} open rejected: runtime stopped");
                 tracing::error!(name: "open_rejected", reason = "runtime_stopped");
                 Err(OpenSessionError::WorkerStopped)
             }
@@ -228,6 +234,7 @@ impl AgentRuntime {
             run.session = %session,
         );
         let _enter = span.enter();
+        log::info!("session {session} created: persistence={persistence:?}");
         tracing::info!(name: "created", persistence = ?persistence);
         Ok(session)
     }
@@ -261,6 +268,7 @@ impl AgentRuntime {
         self.commands
             .try_send(RuntimeCommand::DeleteSession { session, ack })
             .map_err(|_| {
+                log::error!("session {session} delete rejected: runtime stopped");
                 tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
                 SessionDeleteError::WorkerStopped
             })?;
@@ -269,27 +277,34 @@ impl AgentRuntime {
             Ok(Err(error)) => {
                 match &error {
                     SessionDeleteError::SessionNotFound(_) => {
+                        log::warn!("session {session} delete rejected: session not found");
                         tracing::warn!(name: "delete_rejected", reason = "session_not_found");
                     }
                     SessionDeleteError::AlreadyDeleting(_) => {
+                        log::warn!("session {session} delete rejected: already deleting");
                         tracing::warn!(name: "delete_rejected", reason = "already_deleting");
                     }
                     SessionDeleteError::WorkerStopped => {
+                        log::error!("session {session} delete rejected: runtime stopped");
                         tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
                     }
                     SessionDeleteError::Agent(_) => {
+                        log::error!("session {session} delete rejected: agent cleanup failed");
                         tracing::error!(name: "delete_rejected", reason = "agent");
                     }
                     SessionDeleteError::Persistence(_) => {
+                        log::error!("session {session} delete rejected: persistence failed");
                         tracing::error!(name: "delete_rejected", reason = "persistence");
                     }
                     SessionDeleteError::InvalidInstanceId(_) => {
+                        log::error!("session {session} delete rejected: invalid instance id");
                         tracing::error!(name: "delete_rejected", reason = "invalid_instance_id");
                     }
                 }
                 Err(error)
             }
             Err(_) => {
+                log::error!("session {session} delete rejected: runtime stopped");
                 tracing::error!(name: "delete_rejected", reason = "runtime_stopped");
                 Err(SessionDeleteError::WorkerStopped)
             }

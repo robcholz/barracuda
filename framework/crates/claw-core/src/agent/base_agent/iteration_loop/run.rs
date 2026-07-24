@@ -78,6 +78,7 @@ where
         async_stream::try_stream! {
             let loop_ = self;
             if loop_.control.is_cancelled() {
+                log::warn!("Agent iteration cancelled before LLM HTTP request");
                 tracing::warn!(name: "cancelled", checkpoint = "before_llm_http");
                 yield IterationLoopEvent::Cancelled;
                 return;
@@ -106,11 +107,13 @@ where
             let mut stream = match stream_result {
                 Ok(stream) => stream,
                 Err(error) if loop_.control.is_cancelled() || error.is_aborted() => {
+                    log::warn!("Agent iteration cancelled during LLM HTTP request");
                     tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
                     yield IterationLoopEvent::Cancelled;
                     return;
                 }
                 Err(error) => {
+                    log::error!("Agent LLM chat failed");
                     tracing::error!(name: "chat_failed", kind = "chat");
                     Err(IterationLoopError::Chat(error))?
                 }
@@ -137,11 +140,13 @@ where
                         yield IterationLoopEvent::Iteration(IterationEvent::Usage(usage));
                     }
                     Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
+                        log::warn!("Agent iteration cancelled during LLM HTTP request");
                         tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
                         yield IterationLoopEvent::Cancelled;
                         return;
                     }
                     Some(Err(error)) => {
+                        log::error!("Agent LLM chat failed");
                         tracing::error!(name: "chat_failed", kind = "chat");
                         Err(IterationLoopError::Chat(error))?;
                     }
@@ -150,6 +155,7 @@ where
             }
 
             if loop_.control.is_cancelled() {
+                log::warn!("Agent iteration cancelled after LLM response");
                 tracing::warn!(name: "cancelled", checkpoint = "after_llm");
                 yield IterationLoopEvent::Cancelled;
                 return;

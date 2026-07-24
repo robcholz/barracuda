@@ -173,6 +173,7 @@ where
         }
 
         if let Err(error) = this.persistence.maybe_persist() {
+            log::error!("runtime persistence failed: {error}");
             tracing::error!(name: "persistence_failed", error = %error);
         }
 

@@ -145,6 +145,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         let RunState::Stopped(previous) = self.run_state else {
             return Err(AgentSubmitError::Running);
         };
+        log::debug!("Agent message accepted: previous_state={previous:?}");
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
         self.iteration_id_allocator = IterationIdAllocator::new();
         let mut turn = self.transcript.open_turn()?;
@@ -199,6 +200,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         let mut effects = self.effect_inbox.drain();
         if effects.len() > 1 {
             let count = effects.len();
+            log::error!("Agent effect conflict: count={count}");
             tracing::error!(name: "agent_effect_conflict", count = count as u64);
             return Err(AgentError::ConflictingEffects { count });
         }
@@ -287,6 +289,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             .get_api(self.api_purpose);
         if let Some(config) = config {
             if self.llm.set_config(config).is_err() {
+                log::error!("invalid LLM configuration for {:?}", self.api_purpose);
                 tracing::error!(name: "llm_config_invalid", purpose = ?self.api_purpose);
             }
         }
