@@ -24,17 +24,6 @@ cache_profile = ["claw-api/cache_profile"]
 # Disabled builds contain only the root-Agent Session path.
 multiagent = []
 
-# Release-only compile-time ceilings for tracing instrumentation. Cargo unifies
-# these `tracing` features across claw-core, claw-api, and claw-tool, so the
-# final crate can control the whole runtime graph from one feature selection.
-# No ceiling is selected by default, preserving the current full trace output.
-trace_max_off = ["tracing/release_max_level_off"]
-trace_max_error = ["tracing/release_max_level_error"]
-trace_max_warn = ["tracing/release_max_level_warn"]
-trace_max_info = ["tracing/release_max_level_info"]
-trace_max_debug = ["tracing/release_max_level_debug"]
-trace_max_trace = ["tracing/release_max_level_trace"]
-
 # Compile-time byte cap on accumulated `SessionEvent::Reasoning` deltas in one
 # iteration. EXACTLY ONE may be enabled (event.rs emits a compile_error! for zero
 # or multiple). Default is `reasoning_short`; to change the tier, disable

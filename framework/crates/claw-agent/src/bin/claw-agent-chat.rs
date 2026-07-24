@@ -15,9 +15,11 @@ mod command;
 #[path = "claw-agent-chat/line_editor.rs"]
 mod line_editor;
 
+use std::fs::File;
 use std::future::Future;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
+use std::sync::Mutex;
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
@@ -28,13 +30,27 @@ use claw_agent::{
     ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
 use claw_interface::{DiskFs, RealHttp, StdThread, TokioExecutor, TokioTimer};
-use claw_log::{LevelFilter, LogOutput, TracingConfig};
+use claw_log::{FlatTreeSubscriber, LevelFilter, LogOutput, TraceSink};
 use futures_lite::StreamExt;
 
 use command::{parse_input, CliInput};
 use line_editor::{ChatLineEditor, LineInput};
 
 const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
+
+struct ChatTraceSink {
+    file: Mutex<File>,
+}
+
+impl TraceSink for ChatTraceSink {
+    fn write_line(&self, _level: tracing::Level, _tag: &str, line: &str) {
+        let mut file = self
+            .file
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = writeln!(file, "{line}");
+    }
+}
 
 struct ChatDriver {
     control: SessionControl,
@@ -505,15 +521,13 @@ async fn main() {
 }
 
 async fn run() -> Result<()> {
+    let crate_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     claw_log::init_logger(
-        LevelFilter::Info,
-        LogOutput::File(Path::new(env!("CARGO_MANIFEST_DIR")).join("../claw-agent/simulator.log")),
+        LevelFilter::Trace,
+        LogOutput::File(crate_dir.join("../claw-agent/logger.log")),
     )?;
-    claw_log::init_tracing(
-        TracingConfig::default()
-            .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]),
-    )?;
-    let env_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../claw-agent/.env.local");
+    init_chat_tracing(&crate_dir.join("../claw-agent/simulator.log"))?;
+    let env_path = crate_dir.join("../claw-agent/.env.local");
     if env_path.is_file() {
         if let Err(error) = dotenvy::from_path(&env_path) {
             eprintln!("warning: failed to load {}: {error}", env_path.display());
@@ -628,6 +642,16 @@ async fn run() -> Result<()> {
     } else {
         eprintln!("Goodbye.");
     }
+    Ok(())
+}
+
+fn init_chat_tracing(path: &Path) -> Result<()> {
+    let subscriber = FlatTreeSubscriber::with_sink(ChatTraceSink {
+        file: Mutex::new(File::create(path)?),
+    })
+    .with_allowed_target_prefix("claw")
+    .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]);
+    tracing::subscriber::set_global_default(subscriber)?;
     Ok(())
 }
 

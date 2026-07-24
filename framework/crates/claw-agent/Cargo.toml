@@ -10,8 +10,8 @@ name = "claw_agent"
 path = "src/lib.rs"
 
 # A minimal REPL that drives the whole agent system against a live LLM with
-# on-disk memory. It uses host-target backends, dev workflow dependencies, and
-# cache profiling, so both features are required.
+# on-disk memory. `dev` supplies the host backends plus both logging facades;
+# cache profiling supplies the usage events rendered by the chat UI.
 [[bin]]
 name = "claw-agent-chat"
 path = "src/bin/claw-agent-chat.rs"
@@ -61,6 +61,7 @@ dev = [
     "dep:futures-lite",
     "dep:anstyle",
     "dep:rustyline",
+    "dep:tracing",
 ]
 # Provider token/cache usage diagnostics, kept separate from `dev` so examples
 # and other host workflows do not enable it implicitly.
@@ -75,16 +76,6 @@ reasoning_short = ["claw-core/reasoning_short"]
 reasoning_medium = ["claw-core/reasoning_medium"]
 reasoning_long = ["claw-core/reasoning_long"]
 
-# Release-only compile-time tracing ceilings for the complete runtime graph.
-# `trace_max_off` removes all statically-levelled span/event instrumentation;
-# debug builds remain fully observable for local development.
-trace_max_off = ["claw-core/trace_max_off"]
-trace_max_error = ["claw-core/trace_max_error"]
-trace_max_warn = ["claw-core/trace_max_warn"]
-trace_max_info = ["claw-core/trace_max_info"]
-trace_max_debug = ["claw-core/trace_max_debug"]
-trace_max_trace = ["claw-core/trace_max_trace"]
-
 [dependencies]
 claw-core = { path = "../claw-core", default-features = false }
 claw-api = { path = "../claw-api" }
@@ -97,7 +88,7 @@ claw-memory = { path = "../claw-memory" }
 # host-target backends are pulled in only by `host-backends`/`dev`, so the device
 # build (via claw-cabi) stays free of reqwest/std-thread.
 claw-interface = { path = "../claw-interface" }
-claw-log = { path = "../claw-log", optional = true }
+claw-log = { path = "../claw-log", optional = true, default-features = false }
 thiserror = "2"
 # Dev-only: ergonomic errors for the `claw-agent-chat` bin and the examples.
 anyhow = { version = "1", optional = true }
@@ -110,10 +101,11 @@ futures-lite = { version = "2", optional = true }
 anstyle = { version = "1", optional = true }
 # Dev-only: editable input, history, and inline slash-command hints.
 rustyline = { version = "18.0.1", default-features = false, optional = true }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 claw-context = { path = "../claw-context" }
-claw-log = { path = "../claw-log" }
+claw-log = { path = "../claw-log", default-features = false }
 # In-memory fs + scripted HTTP doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API; `stdthread` is the
 # host-target executor backend used by agent tests.
