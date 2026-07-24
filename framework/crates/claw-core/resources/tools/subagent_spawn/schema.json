@@ -2,30 +2,25 @@
   "type": "function",
   "function": {
     "name": "subagent_spawn",
-    "description": "Start a subagent in the background. Returns its agent id after creation; the final result is delivered automatically through this detached tool call.",
+    "description": "Start a background subagent.",
     "parameters": {
       "type": "object",
       "properties": {
         "kind": {
           "type": "string",
-          "minLength": 1,
-          "description": "Which kind of agent to spawn (the role best suited to the goal, e.g. \"worker\"). Call subagent_list_spawnable to see the kinds you may spawn."
+          "description": "Agent kind from subagent_list_spawnable."
         },
         "name": {
           "type": "string",
-          "minLength": 1,
-          "description": "Required short name for this subagent, shown by subagent_list/subagent_watch so you can tell several subagents of the same kind apart. It is a label only — subagent_delete and everything else still use the returned agent id."
+          "description": "Short label for the subagent."
         },
         "goal": {
           "type": "string",
-          "minLength": 1,
-          "description": "The goal to delegate to the subagent."
+          "description": "Standalone task for the subagent."
         },
         "timeout_ms": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 4294967295,
-          "description": "Required maximum lifetime of this subagent and all work it owns, in milliseconds. On expiry the runtime reports a failed result and atomically deletes this agent's entire subtree."
+          "description": "Maximum lifetime in milliseconds."
         }
       },
       "required": ["kind", "name", "goal", "timeout_ms"]
