@@ -111,7 +111,7 @@ struct RemovalPlan {
 ///
 /// It owns topology, join state, pending result delivery, command validation,
 /// and timeout policy. It never owns live Agents, Agent slots, AgentManager,
-/// Scheduler, Session identity, timers, or persistence.
+/// Session identity, timers, or persistence.
 pub(crate) struct Multiagent {
     state: MultiagentState,
     bridge: Arc<MultiagentBridge>,

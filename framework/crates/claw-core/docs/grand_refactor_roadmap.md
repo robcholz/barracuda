@@ -1,5 +1,11 @@
 # claw-core Grand Refactor Roadmap
 
+> Historical note: this roadmap records the original migration through a
+> process-global Agent scheduler. The implemented design later replaced that
+> scheduler with hierarchical fair polling: SessionManager rotates
+> SessionActors, and each SessionActor rotates its own Agents. See
+> [architecture.md](architecture.md) for the current design.
+
 This document turns [architecture.md](architecture.md) into an executable
 refactor plan. The architecture document defines the target system; this
 roadmap defines the migration order, temporary states, verification gates, and

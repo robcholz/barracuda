@@ -18,7 +18,8 @@ use super::base_agent::{
     AgentInputRequest, AgentOutcome, AgentSubmitError, BaseAgent, BaseAgentEvent,
 };
 use super::stream::{
-    AgentActivity, AgentCommand, AgentEvent, AgentHandle, AgentStream, AgentTurnOrigin,
+    AgentActivity, AgentCommand, AgentEvent, AgentHandle, AgentStream, AgentStreamItem,
+    AgentTurnOrigin,
 };
 use super::{AgentError, AgentIterationEvent, BaseAgentState};
 use crate::session::Message;
@@ -173,13 +174,14 @@ where
         }
     }
 
-    pub(crate) fn submit(&mut self, message: Message) -> (AgentStream<'_>, AgentHandle) {
+    pub(crate) fn into_stream(self, message: Message) -> (AgentStream<H, Timer>, AgentHandle)
+    where
+        H: 'static,
+        Timer: 'static,
+    {
         let (handle, commands, activity, awaiting_approval) = AgentHandle::channel();
-        let stream = ActiveStreamGuard::new(self, activity).into_stream(
-            message,
-            commands,
-            awaiting_approval,
-        );
+        let stream =
+            OwnedAgentGuard::new(self, activity).into_stream(message, commands, awaiting_approval);
         (AgentStream::new(stream), handle)
     }
 
@@ -188,180 +190,195 @@ where
     }
 }
 
-struct ActiveStreamGuard<'a, H: ClawHttp, Timer: ClawTimer> {
-    agent: &'a mut Agent<H, Timer>,
+struct OwnedAgentGuard<H: ClawHttp, Timer: ClawTimer> {
+    agent: Option<Agent<H, Timer>>,
     activity: Rc<Cell<AgentActivity>>,
 }
 
-impl<'a, H, Timer> ActiveStreamGuard<'a, H, Timer>
+impl<H, Timer> OwnedAgentGuard<H, Timer>
 where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
+    H: ClawHttp + StreamingHttp + 'static,
+    Timer: ClawTimer + 'static,
 {
-    fn new(agent: &'a mut Agent<H, Timer>, activity: Rc<Cell<AgentActivity>>) -> Self {
-        Self { agent, activity }
+    fn new(agent: Agent<H, Timer>, activity: Rc<Cell<AgentActivity>>) -> Self {
+        Self {
+            agent: Some(agent),
+            activity,
+        }
     }
 
     fn into_stream(
-        self,
+        mut self,
         first_message: Message,
         commands: Receiver<AgentCommand>,
         awaiting_approval: Rc<std::cell::RefCell<Option<super::ToolCallId>>>,
-    ) -> impl futures_core::Stream<Item = Result<AgentEvent, AgentError>> + 'a {
+    ) -> impl futures_core::Stream<Item = AgentStreamItem<H, Timer>> + 'static {
         async_stream::stream! {
-            let Agent { base, ephemeral } = self.agent;
-            let mut turn = PendingTurn::message(first_message);
-            let mut cancel_requested = false;
+            let activity = Rc::clone(&self.activity);
+            {
+                let Agent { base, ephemeral } = self
+                    .agent
+                    .as_mut()
+                    .expect("an active Agent stream retains its Agent");
+                let mut turn = PendingTurn::message(first_message);
+                let mut cancel_requested = false;
 
-            loop {
-                yield Ok(AgentEvent::TurnStarted {
-                    origin: turn.origin.clone(),
-                });
+                loop {
+                    yield AgentStreamItem::Event(Ok(AgentEvent::TurnStarted {
+                        origin: turn.origin.clone(),
+                    }));
 
-                let mut run = match base.submit(turn.message) {
-                    Ok(run) => run,
-                    Err(AgentSubmitError::Transcript(error)) => {
-                        yield Err(AgentError::Transcript(error));
-                        ephemeral.clear();
-                        break;
-                    }
-                    Err(AgentSubmitError::Running) => {
-                        yield Err(AgentError::StateInvariant);
-                        ephemeral.clear();
-                        break;
-                    }
-                };
-                let mut applied_completions = turn.applied_completions;
-                let mut pending_completions = Vec::new();
-                let mut outcome = None;
-                let mut failure = None;
+                    let mut run = match base.submit(turn.message) {
+                        Ok(run) => run,
+                        Err(AgentSubmitError::Transcript(error)) => {
+                            yield AgentStreamItem::Event(Err(AgentError::Transcript(error)));
+                            ephemeral.clear();
+                            break;
+                        }
+                        Err(AgentSubmitError::Running) => {
+                            yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                            ephemeral.clear();
+                            break;
+                        }
+                    };
+                    let mut applied_completions = turn.applied_completions;
+                    let mut pending_completions = Vec::new();
+                    let mut outcome = None;
+                    let mut failure = None;
 
-                while outcome.is_none() && failure.is_none() {
-                    enum ActiveWake {
-                        Command(Option<AgentCommand>),
-                        Detached(DetachedCompletion),
-                        Base(Option<Result<BaseAgentEvent, AgentError>>),
-                    }
-                    let wake = future::or(
-                        async { ActiveWake::Command(commands.recv().await.ok()) },
-                        future::or(
-                            async {
-                                ActiveWake::Detached(
-                                    future::poll_fn(|context| {
-                                        ephemeral.poll_completion(context)
-                                    })
-                                    .await,
-                                )
-                            },
-                            async { ActiveWake::Base(run.next().await) },
-                        ),
-                    )
-                    .await;
+                    while outcome.is_none() && failure.is_none() {
+                        enum ActiveWake {
+                            Command(Option<AgentCommand>),
+                            Detached(DetachedCompletion),
+                            Base(Option<Result<BaseAgentEvent, AgentError>>),
+                        }
+                        let wake = future::or(
+                            async { ActiveWake::Command(commands.recv().await.ok()) },
+                            future::or(
+                                async {
+                                    ActiveWake::Detached(
+                                        future::poll_fn(|context| {
+                                            ephemeral.poll_completion(context)
+                                        })
+                                        .await,
+                                    )
+                                },
+                                async { ActiveWake::Base(run.next().await) },
+                            ),
+                        )
+                        .await;
 
-                    match wake {
-                        ActiveWake::Command(Some(AgentCommand::Dispatch(_))) => {
-                            failure = Some(AgentError::StateInvariant);
-                        }
-                        ActiveWake::Command(Some(AgentCommand::Interrupt)) => run.interrupt(),
-                        ActiveWake::Command(Some(AgentCommand::Cancel))
-                        | ActiveWake::Command(None) => {
-                            cancel_requested = true;
-                            run.cancel();
-                        }
-                        ActiveWake::Command(Some(AgentCommand::ResolveApproval {
-                            tool_call_id,
-                            decision,
-                        })) => {
-                            let _ = run.resolve_approval(tool_call_id, decision);
-                        }
-                        ActiveWake::Detached(completion) => {
-                            run.continue_with(Message::text(render_completions(
-                                std::slice::from_ref(&completion),
-                            )));
-                            pending_completions.push(completion);
-                        }
-                        ActiveWake::Base(Some(Ok(BaseAgentEvent::Iteration(progress)))) => {
-                            if matches!(
-                                &progress,
-                                claw_utils::stream::StreamPart::Delta(
-                                    AgentIterationEvent::Started(_)
-                                )
-                            ) {
-                                applied_completions.append(&mut pending_completions);
+                        match wake {
+                            ActiveWake::Command(Some(AgentCommand::Dispatch(_))) => {
+                                failure = Some(AgentError::StateInvariant);
                             }
-                            yield Ok(AgentEvent::Iteration(progress));
+                            ActiveWake::Command(Some(AgentCommand::Interrupt)) => run.interrupt(),
+                            ActiveWake::Command(Some(AgentCommand::Cancel))
+                            | ActiveWake::Command(None) => {
+                                cancel_requested = true;
+                                run.cancel();
+                            }
+                            ActiveWake::Command(Some(AgentCommand::ResolveApproval {
+                                tool_call_id,
+                                decision,
+                            })) => {
+                                let _ = run.resolve_approval(tool_call_id, decision);
+                            }
+                            ActiveWake::Detached(completion) => {
+                                run.continue_with(Message::text(render_completions(
+                                    std::slice::from_ref(&completion),
+                                )));
+                                pending_completions.push(completion);
+                            }
+                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Iteration(progress)))) => {
+                                if matches!(
+                                    &progress,
+                                    claw_utils::stream::StreamPart::Delta(
+                                        AgentIterationEvent::Started(_)
+                                    )
+                                ) {
+                                    applied_completions.append(&mut pending_completions);
+                                }
+                                yield AgentStreamItem::Event(Ok(AgentEvent::Iteration(progress)));
+                            }
+                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Detached(handle)))) => {
+                                ephemeral.push(handle);
+                            }
+                            ActiveWake::Base(Some(Ok(BaseAgentEvent::InputRequired(request)))) => {
+                                let AgentInputRequest::Approval { tool_call_id, .. } = &request;
+                                *awaiting_approval.borrow_mut() = Some(*tool_call_id);
+                                yield AgentStreamItem::Event(Ok(AgentEvent::InputRequired(request)));
+                            }
+                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Finished(finished)))) => {
+                                outcome = Some(finished);
+                            }
+                            ActiveWake::Base(Some(Err(error))) => failure = Some(error),
+                            ActiveWake::Base(None) => failure = Some(AgentError::StateInvariant),
                         }
-                        ActiveWake::Base(Some(Ok(BaseAgentEvent::Detached(handle)))) => {
-                            ephemeral.push(handle);
-                        }
-                        ActiveWake::Base(Some(Ok(BaseAgentEvent::InputRequired(request)))) => {
-                            let AgentInputRequest::Approval { tool_call_id, .. } = &request;
-                            *awaiting_approval.borrow_mut() = Some(*tool_call_id);
-                            yield Ok(AgentEvent::InputRequired(request));
-                        }
-                        ActiveWake::Base(Some(Ok(BaseAgentEvent::Finished(finished)))) => {
-                            outcome = Some(finished);
-                        }
-                        ActiveWake::Base(Some(Err(error))) => failure = Some(error),
-                        ActiveWake::Base(None) => failure = Some(AgentError::StateInvariant),
                     }
-                }
 
-                drop(run);
-                *awaiting_approval.borrow_mut() = None;
+                    drop(run);
+                    *awaiting_approval.borrow_mut() = None;
 
-                if let Some(error) = failure {
-                    ephemeral.clear();
-                    yield Err(error);
-                    break;
-                }
-
-                let outcome = outcome.expect("active BaseAgent loop exits with an outcome");
-                match &outcome {
-                    AgentOutcome::Completed(_) => {
-                        for completion in pending_completions.into_iter().rev() {
-                            ephemeral.ready_detached_toolcalls.push_front(completion);
-                        }
-                    }
-                    AgentOutcome::Interrupted => {
-                        pending_completions.append(&mut applied_completions);
-                        for completion in pending_completions.into_iter().rev() {
-                            ephemeral.ready_detached_toolcalls.push_front(completion);
-                        }
-                    }
-                    AgentOutcome::Cancelled => {
+                    if let Some(error) = failure {
                         ephemeral.clear();
-                        cancel_requested = true;
+                        yield AgentStreamItem::Event(Err(error));
+                        break;
                     }
-                }
-                if cancel_requested {
-                    self.activity.set(AgentActivity::Closed);
-                } else {
-                    self.activity.set(AgentActivity::Idle);
-                }
-                yield Ok(AgentEvent::TurnEnded { outcome });
 
-                if cancel_requested {
-                    ephemeral.clear();
-                    break;
-                }
+                    let outcome = outcome.expect("active BaseAgent loop exits with an outcome");
+                    match &outcome {
+                        AgentOutcome::Completed(_) => {
+                            for completion in pending_completions.into_iter().rev() {
+                                ephemeral.ready_detached_toolcalls.push_front(completion);
+                            }
+                        }
+                        AgentOutcome::Interrupted => {
+                            pending_completions.append(&mut applied_completions);
+                            for completion in pending_completions.into_iter().rev() {
+                                ephemeral.ready_detached_toolcalls.push_front(completion);
+                            }
+                        }
+                        AgentOutcome::Cancelled => {
+                            ephemeral.clear();
+                            cancel_requested = true;
+                        }
+                    }
+                    if cancel_requested {
+                        activity.set(AgentActivity::Closed);
+                    } else {
+                        activity.set(AgentActivity::Idle);
+                    }
+                    yield AgentStreamItem::Event(Ok(AgentEvent::TurnEnded { outcome }));
 
-                let Some(next_turn) = ephemeral
-                    .next_turn(&commands, self.activity.as_ref())
-                    .await
-                else {
-                    break;
-                };
-                turn = next_turn;
+                    if cancel_requested {
+                        ephemeral.clear();
+                        break;
+                    }
+
+                    let Some(next_turn) = ephemeral.next_turn(&commands, activity.as_ref()).await else {
+                        break;
+                    };
+                    turn = next_turn;
+                }
             }
+
+            activity.set(AgentActivity::Closed);
+            let agent = self
+                .agent
+                .take()
+                .expect("a completed Agent stream returns its Agent");
+            yield AgentStreamItem::Returned(agent);
         }
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveStreamGuard<'_, H, Timer> {
+impl<H: ClawHttp, Timer: ClawTimer> Drop for OwnedAgentGuard<H, Timer> {
     fn drop(&mut self) {
         self.activity.set(AgentActivity::Closed);
-        self.agent.ephemeral.clear();
+        if let Some(agent) = &mut self.agent {
+            agent.ephemeral.clear();
+        }
     }
 }
 

@@ -1,15 +1,15 @@
+use core::pin::Pin;
 use std::collections::BTreeMap;
+use std::task::{Context, Poll};
 
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
+use futures_core::Stream;
 
-use crate::agent::AgentId;
 use crate::agent::{
-    Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, ApprovalDecision,
-    ReasoningEffort, ReasoningEffortHandle, ToolCallId,
-};
-use crate::scheduler::{
-    AgentRunOutput, AgentRunOutputItem, AgentRunPort, AgentRunResume, RunControl, RunId,
+    Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, AgentHandle, AgentId,
+    AgentStream, AgentStreamItem, ApprovalDecision, ReasoningEffort, ReasoningEffortHandle,
+    ToolCallId,
 };
 use crate::session::Message;
 
@@ -23,23 +23,30 @@ enum InFlightLifecycle {
     Reaping,
 }
 
-struct InFlight {
-    run: RunId,
-    control: RunControl,
+struct InFlight<Http: ClawHttp, Timer: ClawTimer> {
+    stream: AgentStream<Http, Timer>,
+    control: AgentHandle,
+    span: tracing::Span,
     lifecycle: InFlightLifecycle,
     terminal: Option<Result<AgentEvent, AgentError>>,
 }
 
+// `Agent` is intentionally stored inline in its owning slot. Boxing it only to
+// equalize enum variants adds one allocation to every resident Agent.
+#[allow(clippy::large_enum_variant)]
 enum Execution<Http: ClawHttp, Timer: ClawTimer> {
-    Resident(Box<Agent<Http, Timer>>),
-    InFlight(InFlight),
+    Resident(Agent<Http, Timer>),
+    InFlight(InFlight<Http, Timer>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AgentDispatch {
+    Started,
+    Queued,
 }
 
 pub(super) enum AgentSlotUpdate {
-    Event {
-        event: Result<AgentEvent, AgentError>,
-        resume: Option<AgentRunResume>,
-    },
+    Event(Result<AgentEvent, AgentError>),
     Returned,
     Reaped,
     Ignored,
@@ -47,10 +54,9 @@ pub(super) enum AgentSlotUpdate {
 
 /// The authoritative ownership record for one Agent.
 ///
-/// A resident slot owns the Agent. While the global Scheduler polls that
-/// Agent, the slot retains only the checkout epoch and its control capability.
+/// A resident slot owns the Agent directly. While it is running, the slot owns
+/// the AgentStream and its control capability.
 pub(super) struct AgentSlot<Http: ClawHttp, Timer: ClawTimer> {
-    id: AgentId,
     execution: Option<Execution<Http, Timer>>,
     reasoning_effort: ReasoningEffortHandle,
 }
@@ -60,14 +66,9 @@ where
     Http: ClawHttp + StreamingHttp + 'static,
     Timer: ClawTimer + 'static,
 {
-    pub(super) fn new(
-        id: AgentId,
-        agent: Agent<Http, Timer>,
-        reasoning_effort: ReasoningEffortHandle,
-    ) -> Self {
+    pub(super) fn new(agent: Agent<Http, Timer>, reasoning_effort: ReasoningEffortHandle) -> Self {
         Self {
-            id,
-            execution: Some(Execution::Resident(Box::new(agent))),
+            execution: Some(Execution::Resident(agent)),
             reasoning_effort,
         }
     }
@@ -76,19 +77,15 @@ where
         matches!(self.execution, Some(Execution::InFlight(_)))
     }
 
-    fn start(
-        &mut self,
-        message: Message,
-        run_port: &AgentRunPort<Http, Timer>,
-        span: tracing::Span,
-    ) {
+    fn start(&mut self, message: Message, span: tracing::Span) {
         let Some(Execution::Resident(agent)) = self.execution.take() else {
-            panic!("only a resident Agent can start a run");
+            panic!("only a resident Agent can start a stream");
         };
-        let scheduled = run_port.submit(self.id, agent, message, span);
+        let (stream, control) = agent.into_stream(message);
         self.execution = Some(Execution::InFlight(InFlight {
-            run: scheduled.run,
-            control: scheduled.control,
+            stream,
+            control,
+            span,
             lifecycle: InFlightLifecycle::Running,
             terminal: None,
         }));
@@ -97,20 +94,20 @@ where
     pub(super) fn dispatch(
         &mut self,
         message: Message,
-        run_port: &AgentRunPort<Http, Timer>,
         span: tracing::Span,
-    ) -> Result<(), (Message, AgentDispatchError)> {
+    ) -> Result<AgentDispatch, (Message, AgentDispatchError)> {
         match self.execution.as_mut() {
             Some(Execution::InFlight(in_flight)) => {
                 let retry = message.clone();
                 in_flight
                     .control
                     .dispatch(message)
+                    .map(|()| AgentDispatch::Queued)
                     .map_err(|error| (retry, error))
             }
             Some(Execution::Resident(_)) => {
-                self.start(message, run_port, span);
-                Ok(())
+                self.start(message, span);
+                Ok(AgentDispatch::Started)
             }
             None => Err((message, AgentDispatchError::Closed)),
         }
@@ -160,58 +157,45 @@ where
         self.reasoning_effort.set(effort);
     }
 
-    pub(super) fn accept_output(&mut self, output: AgentRunOutput<Http, Timer>) -> AgentSlotUpdate {
-        if output.agent != self.id {
-            return AgentSlotUpdate::Ignored;
-        }
+    pub(super) fn poll(&mut self, context: &mut Context<'_>) -> Poll<AgentSlotUpdate> {
         let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
-            return AgentSlotUpdate::Ignored;
+            return Poll::Pending;
         };
-        if output.run != in_flight.run {
-            tracing::warn!(
-                name: "stale_agent_run_output",
-                agent = %self.id,
-                expected = ?in_flight.run,
-                received = ?output.run,
-            );
-            return AgentSlotUpdate::Ignored;
-        }
 
-        match output.item {
-            AgentRunOutputItem::Event { resume, .. }
-                if in_flight.lifecycle == InFlightLifecycle::Reaping =>
-            {
-                resume.resume();
+        let item = {
+            let _entered = in_flight.span.enter();
+            match Pin::new(&mut in_flight.stream).poll_next(context) {
+                Poll::Ready(Some(item)) => item,
+                Poll::Ready(None) => panic!("an AgentStream returns its Agent before ending"),
+                Poll::Pending => return Poll::Pending,
+            }
+        };
+        let update = match item {
+            AgentStreamItem::Event(_) if in_flight.lifecycle == InFlightLifecycle::Reaping => {
                 AgentSlotUpdate::Ignored
             }
-            AgentRunOutputItem::Event { event, resume } if event.is_err() => {
+            AgentStreamItem::Event(event) if event.is_err() => {
                 debug_assert!(
                     in_flight.terminal.is_none(),
-                    "one Agent run has only one terminal event"
+                    "one Agent stream has only one terminal event"
                 );
                 in_flight.terminal = Some(event);
-                resume.resume();
                 AgentSlotUpdate::Ignored
             }
-            AgentRunOutputItem::Event { event, resume } => AgentSlotUpdate::Event {
-                event,
-                resume: Some(resume),
-            },
-            AgentRunOutputItem::Returned(agent) => {
+            AgentStreamItem::Event(event) => AgentSlotUpdate::Event(event),
+            AgentStreamItem::Returned(agent) => {
                 let reaping = in_flight.lifecycle == InFlightLifecycle::Reaping;
                 let terminal = in_flight.terminal.take();
                 self.execution = Some(Execution::Resident(agent));
                 if reaping {
                     AgentSlotUpdate::Reaped
                 } else if let Some(terminal) = terminal {
-                    AgentSlotUpdate::Event {
-                        event: terminal,
-                        resume: None,
-                    }
+                    AgentSlotUpdate::Event(terminal)
                 } else {
                     AgentSlotUpdate::Returned
                 }
             }
-        }
+        };
+        Poll::Ready(update)
     }
 }

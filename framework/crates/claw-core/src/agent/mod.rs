@@ -23,4 +23,6 @@ pub(crate) use context_adapters::ReasoningEffortHandle;
 pub(crate) use instance::Agent;
 pub use manager::{AgentCreateError, AgentId};
 pub(crate) use manager::{AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig};
-pub(crate) use stream::{AgentDispatchError, AgentEvent, AgentHandle, AgentTurnOrigin};
+pub(crate) use stream::{
+    AgentDispatchError, AgentEvent, AgentHandle, AgentStream, AgentStreamItem, AgentTurnOrigin,
+};

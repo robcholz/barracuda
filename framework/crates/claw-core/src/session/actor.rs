@@ -17,7 +17,7 @@ use claw_persistence::DurableState;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 
-use super::agent_slot::{AgentSlot, AgentSlotUpdate, AgentSlots};
+use super::agent_slot::{AgentDispatch, AgentSlot, AgentSlotUpdate, AgentSlots};
 use super::approval::{
     ApprovalCompletion, ApprovalDisplay, ApprovalFlow, ApprovalRespondError, LlmApprovalResolver,
     SharedApprovalResolver,
@@ -34,7 +34,7 @@ use super::{
 #[cfg(feature = "multiagent")]
 use crate::agent::AgentDispatchError;
 use crate::agent::{
-    AgentCompletion, AgentCreateError, AgentEvent, AgentInputRequest, AgentIterationEvent,
+    AgentCompletion, AgentCreateError, AgentEvent, AgentId, AgentInputRequest, AgentIterationEvent,
     AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig, ReasoningEffort,
     ToolCallId,
 };
@@ -43,8 +43,6 @@ use crate::multiagent::{
     DispatchOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError,
     SubagentTimeout,
 };
-use crate::scheduler::{AgentRunPort, AgentRunSchedulerHandle};
-
 #[cfg(feature = "multiagent")]
 type TimeoutFuture = Pin<Box<dyn Future<Output = crate::agent::AgentId>>>;
 
@@ -234,9 +232,8 @@ impl SessionActorExit {
 
 /// One long-lived Session stream backed by Session-owned Agent slots.
 ///
-/// The actor never polls an Agent directly. It moves each resident Agent into
-/// the process-global Scheduler, reduces scheduler outputs back into its slot,
-/// and projects only root-Agent events onto the public Session stream.
+/// The actor polls its active Agents fairly and projects only root-Agent events
+/// onto the public Session stream.
 pub(super) struct SessionActor<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
@@ -262,7 +259,7 @@ where
     multiagent_reaping: BTreeSet<crate::agent::AgentId>,
     managed_agents: BTreeSet<crate::agent::AgentId>,
 
-    run_port: AgentRunPort<Http, Timer>,
+    active_agent_poll_queue: VecDeque<AgentId>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
     next_source: PollSource,
 
@@ -277,7 +274,6 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         session: SessionId,
         persistence: SessionPersistence,
@@ -285,7 +281,6 @@ where
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
         approval_resolver: SharedApprovalResolver<Http, Timer>,
-        scheduler: AgentRunSchedulerHandle<Http, Timer>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = async_channel::unbounded();
         (
@@ -307,7 +302,7 @@ where
                 #[cfg(feature = "multiagent")]
                 multiagent_reaping: BTreeSet::new(),
                 managed_agents: BTreeSet::new(),
-                run_port: AgentRunPort::new(scheduler),
+                active_agent_poll_queue: VecDeque::new(),
                 commands: Box::pin(commands),
                 next_source: PollSource::Command,
                 client: None,
@@ -343,10 +338,8 @@ where
                     }
                 }
                 PollSource::Agent => {
-                    if let Poll::Ready(Some(output)) =
-                        Pin::new(&mut self.run_port).poll_next(context)
-                    {
-                        self.handle_agent_output(output);
+                    if let Poll::Ready((agent, update)) = self.poll_agents(context) {
+                        self.handle_agent_output(agent, update);
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
@@ -375,6 +368,31 @@ where
             return Poll::Ready(SessionActorStatus::Progress);
         }
 
+        Poll::Pending
+    }
+
+    /// Advance at most one ready Agent, rotating the queue after every poll.
+    fn poll_agents(&mut self, context: &mut Context<'_>) -> Poll<(AgentId, AgentSlotUpdate)> {
+        let active_count = self.active_agent_poll_queue.len();
+        for _ in 0..active_count {
+            let Some(agent) = self.active_agent_poll_queue.pop_front() else {
+                break;
+            };
+            let Some(slot) = self.agents.get_mut(&agent) else {
+                continue;
+            };
+            match slot.poll(context) {
+                Poll::Ready(update) => {
+                    if slot.is_in_flight() {
+                        self.active_agent_poll_queue.push_back(agent);
+                    }
+                    return Poll::Ready((agent, update));
+                }
+                Poll::Pending => {
+                    self.active_agent_poll_queue.push_back(agent);
+                }
+            }
+        }
         Poll::Pending
     }
 
@@ -650,15 +668,18 @@ where
         let retry = message.clone();
         let agent = self
             .root_id()
-            .expect("an Agent run starts only with a root Agent id");
+            .expect("an Agent stream starts only with a root Agent id");
         let turn = self.active_turn.unwrap_or(TurnId(self.next_turn));
         let span = agent_span(agent, Some(turn));
         let root = self
             .agents
             .get_mut(&agent)
-            .expect("an Agent run starts only with a resident root");
-        root.dispatch(message, &self.run_port, span)
-            .map_err(|_| retry)
+            .expect("an Agent stream starts only with a resident root");
+        let dispatch = root.dispatch(message, span).map_err(|_| retry)?;
+        if dispatch == AgentDispatch::Started {
+            self.active_agent_poll_queue.push_back(agent);
+        }
+        Ok(())
     }
 
     fn delete_agents(&mut self) -> Result<(), AgentCreateError> {
@@ -672,6 +693,7 @@ where
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
         self.agents.clear();
+        self.active_agent_poll_queue.clear();
         let mut first_error = None;
         for agent in agent_ids {
             match self.agent_manager.remove(agent) {
@@ -741,7 +763,7 @@ where
         };
         let previous = self
             .agents
-            .insert(id, AgentSlot::new(id, agent, reasoning_handle));
+            .insert(id, AgentSlot::new(agent, reasoning_handle));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(id);
         #[cfg(feature = "multiagent")]
@@ -777,16 +799,22 @@ where
                 } else {
                     self.active_turn
                 };
-                let outcome = match self.agents.get_mut(&target) {
+                let dispatch = match self.agents.get_mut(&target) {
                     Some(slot) => {
                         let span = agent_span(target, turn);
-                        match slot.dispatch(message, &self.run_port, span) {
-                            Ok(()) => DispatchOutcome::Accepted,
-                            Err((_, AgentDispatchError::Busy)) => DispatchOutcome::Busy,
-                            Err((_, AgentDispatchError::Closed)) => DispatchOutcome::Missing,
-                        }
+                        Some(slot.dispatch(message, span))
                     }
-                    None => DispatchOutcome::Missing,
+                    None => None,
+                };
+                let outcome = match dispatch {
+                    Some(Ok(started)) => {
+                        if started == AgentDispatch::Started {
+                            self.active_agent_poll_queue.push_back(target);
+                        }
+                        DispatchOutcome::Accepted
+                    }
+                    Some(Err((_, AgentDispatchError::Busy))) => DispatchOutcome::Busy,
+                    Some(Err((_, AgentDispatchError::Closed))) | None => DispatchOutcome::Missing,
                 };
                 self.multiagent
                     .apply_result(MultiagentEffectResult::Dispatched {
@@ -828,7 +856,7 @@ where
             extension_tools,
         ) {
             Ok((agent, reasoning)) => {
-                let previous = self.agents.insert(id, AgentSlot::new(id, agent, reasoning));
+                let previous = self.agents.insert(id, AgentSlot::new(agent, reasoning));
                 debug_assert!(previous.is_none());
                 self.managed_agents.insert(id);
                 let rollback = self
@@ -893,25 +921,13 @@ where
         }
     }
 
-    fn handle_agent_output(&mut self, output: crate::scheduler::AgentRunOutput<Http, Timer>) {
-        let agent = output.agent;
+    fn handle_agent_output(&mut self, agent: AgentId, update: AgentSlotUpdate) {
         let is_root = self.root_id() == Some(agent);
-        let Some(slot) = self.agents.get_mut(&agent) else {
-            return;
-        };
-        let update = slot.accept_output(output);
-        let resume = match update {
-            AgentSlotUpdate::Event {
-                event: Ok(event),
-                resume,
-            } => {
+        match update {
+            AgentSlotUpdate::Event(Ok(event)) => {
                 self.handle_agent_event(agent, event);
-                resume
             }
-            AgentSlotUpdate::Event {
-                event: Err(error),
-                resume,
-            } => {
+            AgentSlotUpdate::Event(Err(error)) => {
                 if is_root {
                     self.emit_turn_error(error.into());
                     self.finish_turn();
@@ -922,24 +938,18 @@ where
                     self.multiagent
                         .on_agent_completed(agent, format!("[failed: {error}]"), false);
                 }
-                resume
             }
             AgentSlotUpdate::Returned => {
                 #[cfg(feature = "multiagent")]
                 self.multiagent.on_agent_idle(agent);
-                None
             }
             AgentSlotUpdate::Reaped => {
                 self.finish_reaped_agent(agent);
-                None
             }
-            AgentSlotUpdate::Ignored => None,
-        };
+            AgentSlotUpdate::Ignored => {}
+        }
         #[cfg(feature = "multiagent")]
         self.drain_ready_multiagent_effects();
-        if let Some(resume) = resume {
-            resume.resume();
-        }
     }
 
     #[cfg(feature = "multiagent")]
@@ -955,6 +965,8 @@ where
 
     fn finish_reaped_agent(&mut self, agent: crate::agent::AgentId) {
         self.agents.remove(&agent);
+        self.active_agent_poll_queue
+            .retain(|queued| *queued != agent);
         let result = self.agent_manager.remove(agent);
         #[cfg(feature = "multiagent")]
         {

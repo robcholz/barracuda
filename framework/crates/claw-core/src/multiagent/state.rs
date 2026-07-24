@@ -67,7 +67,7 @@ impl NodeMeta {
 ///
 /// Live Agents and timers stay outside this type. Every status transition is
 /// nevertheless recorded here before the corresponding physical effect is
-/// issued, making late scheduler and timeout events recognizable as stale.
+/// issued, making late Agent and timeout events recognizable as stale.
 #[derive(Default)]
 pub(crate) struct MultiagentState {
     nodes: BTreeMap<AgentId, NodeMeta>,

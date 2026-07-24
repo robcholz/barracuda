@@ -175,12 +175,12 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
 }
 
 #[test]
-fn global_scheduler_interleaves_ready_agents_across_sessions() {
+fn session_actor_polling_interleaves_ready_sessions() {
     YIELDING_HTTP_CALLS.store(0, Ordering::SeqCst);
     YIELDING_HTTP_POLLS.store(0, Ordering::SeqCst);
     fair_poll_log().clear();
 
-    let root = mem_root("global-scheduler-fairness");
+    let root = mem_root("session-actor-fairness");
     let system = YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
@@ -212,7 +212,7 @@ fn global_scheduler_interleaves_ready_agents_across_sessions() {
     let both_ready = polls
         .iter()
         .position(|agent| *agent == "b")
-        .expect("the second Session Agent must enter the Scheduler");
+        .expect("the second Session Agent must enter the polling queue");
     let fair_window = polls
         .get(both_ready..)
         .expect("the second Agent index belongs to the poll log")

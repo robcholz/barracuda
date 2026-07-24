@@ -13,7 +13,6 @@ use claw_tool::ToolRegistry;
 
 use crate::agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
 use crate::config::SharedApiManager;
-use crate::scheduler::AgentRunSchedulerHandle;
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::approval::{LlmApprovalResolver, SharedApprovalResolver};
@@ -125,7 +124,6 @@ where
     state: DurableState<SessionManagerState>,
     agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
     approval_resolver: SharedApprovalResolver<Http, Timer>,
-    scheduler: AgentRunSchedulerHandle<Http, Timer>,
     sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>>,
     actor_poll_queue: VecDeque<SessionId>,
 }
@@ -136,14 +134,12 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-        scheduler: AgentRunSchedulerHandle<Http, Timer>,
     ) -> Result<Self, SessionManagerInitError> {
         let state = {
             let entry = persistence.singleton::<SessionManagerState>(SESSION_MANAGER_STATE_NAME)?;
@@ -190,7 +186,6 @@ where
             state,
             agent_manager,
             approval_resolver,
-            scheduler,
             sessions,
             actor_poll_queue: VecDeque::new(),
         };
@@ -355,7 +350,6 @@ where
             AgentIdAllocatorHandle::new(&self.state),
             state,
             Rc::clone(&self.approval_resolver),
-            self.scheduler.clone(),
         );
         let span = tracing::info_span!(
             "session",

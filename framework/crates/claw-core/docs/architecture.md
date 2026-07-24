@@ -5,7 +5,8 @@ By Finn (Ziheng) Sheng <zsheng2@ncsu.edu> or <robcholz00@gmail.com>
 ## Hard constraints
 
 - The entire Agent system runs on exactly one OS thread.
-- There is exactly one process-global physical Agent scheduler.
+- Physical polling is hierarchical: SessionManager rotates live SessionActors,
+  and each SessionActor rotates its own active Agents.
 - The design provides cooperative async I/O concurrency, not preemption or
   parallel execution of synchronous CPU work.
 - No lock, `RefCell` borrow, persistence guard, or slot borrow may be held while
@@ -18,7 +19,6 @@ AgentRuntime
 ├── SharedApiManager
 └── RuntimeWorker<F, H, T>
     ├── SharedPersistence<F> flush boundary
-    ├── AgentRunScheduler<H, T>
     └── SessionManager<F, H, T>
         ├── process-global durable ID allocators
         ├── AgentManager<F, H, T>
@@ -26,23 +26,22 @@ AgentRuntime
             ├── durable SessionPersistentState
             └── optional live SessionActor<F, H, T>
                 ├── AgentSlots<H, T>
+                │   └── optional AgentStream<H, T>
                 ├── memory/context assembly policy
                 └── optional Multiagent domain state
 
-AgentRunScheduler<H, T>
-└── AgentRun<H, T>
-    └── checked-out Agent<H, T>
-        ├── BaseAgent<H, T>
-        └── transient detached-tool runtime
+AgentStream<H, T>
+└── checked-out Agent<H, T>
+    ├── BaseAgent<H, T>
+    └── transient detached-tool runtime
 ~~~
 
 ### AgentRuntime
 
 - `AgentRuntime` owns process-level execution: `SharedApiManager`, `link_api`,
-  the single worker lifetime, the global Scheduler, and the physical
-  persistence flush boundary.
-- Its private `RuntimeWorker<F, H, T>` fairly rotates runtime control, Session
-  ingress, live SessionActors, and the Scheduler.
+  the single worker lifetime, and the physical persistence flush boundary.
+- Its private `RuntimeWorker<F, H, T>` fairly rotates runtime command ingress
+  and SessionManager work.
 - RuntimeWorker directly calls the SessionManager. There is no second Session
   handle, client, collection, or request protocol.
 
@@ -51,8 +50,8 @@ AgentRunScheduler<H, T>
 - `SessionManager<F, H, T>` owns every Session record, AgentManager, durable ID
   allocator, and live SessionActor.
 - It implements create, list, open, delete, shutdown, and one fair actor-poll
-  round. It does not own the Runtime worker, global Scheduler, API
-  configuration, or persistence flush.
+  round. It does not own the Runtime worker, API configuration, or persistence
+  flush.
 - A managed Session consists of its persistence policy, one
   `DurableState<SessionPersistentState>`, and an optional live `SessionActor`.
   Persistent Sessions may remain dormant without an actor until open or delete.
@@ -76,7 +75,7 @@ AgentRunScheduler<H, T>
 - `SessionActor` stores one authoritative `AgentSlot` for every logically live
   Agent, keyed by the globally unique `AgentId`.
 - A resident Agent is physically stored in its slot. At checkout, the Agent is
-  moved exactly once into an `AgentRun`; it is not moved on every poll.
+  moved exactly once into an owned `AgentStream`; it is not moved on every poll.
 - While checked out, the slot retains lifecycle and overview metadata but not a
   second reference to the Agent.
 - Every terminal path returns the Agent exactly once before the slot is removed
@@ -89,7 +88,7 @@ AgentSlot<H, T>
 │     metadata: AgentSlotMetadata,
 │   }
 └── InFlight {
-      run_id: RunId,
+      stream: AgentStream<H, T>,
       metadata: AgentSlotMetadata,
       lifecycle: Running | Cancelling | Reaping,
     }
@@ -109,42 +108,38 @@ There is no second Agent-owning registry or `AgentDirectory`.
 out and cancelling Agents. SessionManager may aggregate these projections
 across Sessions; a future directory cache must remain a rebuildable read model.
 
-### AgentRunScheduler
+### Agent polling
 
-- RuntimeWorker owns and polls exactly one `AgentRunScheduler<H, T>`.
-- Scheduler is the only component allowed to poll `AgentRun`.
-- It fairly polls all checked-out root and worker Agents across all Sessions.
-- Scheduler knows no Session, Multiagent graph, parent/child, persistence, or
-  memory semantics. It only understands the run protocol and opaque routes.
-- Scheduler owns its active queue/state machine. It is not an
-  `Arc<Mutex<AgentRunScheduler>>`; a lightweight single-thread-local submission
-  handle or mailbox may be shared.
-- Each logical Agent owner holds one `AgentRunPort`. The port combines the
-  shared submission handle with its opaque return route and output stream;
-  SessionActor and AgentSlot never manage those scheduler internals separately.
-- One fair round polls each run eligible for that round at most once before any
-  of those runs receives a second poll.
+- SessionManager owns a round-robin queue of live SessionActors. One manager
+  poll gives each actor at most one opportunity to make progress before any
+  actor receives another.
+- Each SessionActor owns a round-robin queue of its active Agent slots. One
+  actor poll advances at most one ready Agent, and a ready Agent is moved to the
+  back of that Session's queue.
+- This gives Sessions equal top-level polling opportunity regardless of how
+  many Agents each Session owns. Agents within one Session share that
+  Session's polling opportunity fairly.
 - Fairness exists only at poll/yield boundaries. Synchronous blocking work in a
   poll blocks the sole OS thread and must remain bounded.
-- `AgentRun` is a Scheduler-private ownership/poll wrapper around a checked-out
-  `Agent` and that Agent's `AgentStream`. It must not define a second semantic
-  event or outcome protocol. It forwards `Result<AgentEvent, AgentError>`
-  unchanged and retains the completed Agent until its owner takes it back
-  exactly once.
+- `AgentStream` consumes and owns the checked-out `Agent`; there is no separate
+  run/scheduler adapter. AgentSlot polls the stream directly. Normal items carry
+  `Result<AgentEvent, AgentError>`, and one final internal item returns the
+  Agent to its slot exactly once.
 
 ### Agent and BaseAgent
 
 - `Agent<H, T>` is the concrete object created by `AgentManager`, stored in an
-  `AgentSlot`, and checked out by the Scheduler. It is a small, non-polymorphic
-  lifecycle wrapper around `BaseAgent<H, T>`; there is no `GenericAgent` or
-  `dyn Agent` ownership layer.
+  `AgentSlot`, and checked out into an owned `AgentStream`. It is a small,
+  non-polymorphic lifecycle wrapper around `BaseAgent<H, T>`; there is no
+  `GenericAgent` or `dyn Agent` ownership layer.
 - `Agent` owns only cross-task runtime semantics: its BaseAgent and transient
   detached-tool runs and completions. `BaseAgent` remains the single-task
   LLM/tool execution core; SessionActor remains the only message-queue owner.
-- `Agent::submit(&mut self, Message)` returns a borrowing `AgentStream<'_>` and
-  an independent `AgentHandle`. The stream emits turn brackets and BaseAgent
-  progress. The handle provides interrupt, cancel, approval resolution, and an
-  internal `dispatch(Message)` operation.
+- `Agent::into_stream(self, Message)` consumes the Agent and returns an owned
+  `AgentStream` plus one independent `AgentHandle`. The stream emits turn
+  brackets and BaseAgent progress, then returns the Agent. The handle provides
+  interrupt, cancel, approval resolution, and an internal `dispatch(Message)`
+  operation.
 - `dispatch` accepts exactly one message only while Agent is idle between
   turns. It never queues a second message and never appends directly into a
   running BaseAgent task.
@@ -170,7 +165,7 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   state machine.
 - `BaseAgent::submit` accepts an Agent-private `AgentTask`: either an ordinary
   `Message` or a detached `ToolCompletion` carrying the original call identity.
-  SessionActor, AgentSlot, and Scheduler still dispatch only `Message`.
+  SessionActor and AgentSlot still dispatch only `Message`.
   BaseAgent returns a crate-private borrowing stream used only by Agent; there
   is no tick API, output sender, or second terminal-outcome protocol.
 - Dropping that inner stream before terminal completion cancels the active task
@@ -250,19 +245,16 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   dispatched `ToolPermissionPolicy`; `AllowAll` is the YOLO implementation,
   while BaseAgent injects the implementation that evaluates its configured
   policy, emits `ApprovalRequired`, and awaits its stream handle.
-- Scheduler schedules an entire `AgentRun`, not individual tool calls.
+- SessionActor polls an entire `AgentStream`, not individual tool calls.
 - `BaseAgent` does not own `SharedPersistence`, perform storage I/O, or depend
   on the filesystem type `F`.
 
 ## Identity
 
-- `AgentId`, `RunId`, and `ToolCallId` are distinct newtypes with different
-  scopes.
+- `AgentId` and `ToolCallId` are distinct newtypes with different scopes.
 - `AgentId` is globally unique within the persisted installation and is never
   reused. SessionManager owns its durable allocator and injects an allocation
   handle into SessionActor.
-- `RunId` identifies one checkout epoch so a stale completion cannot overwrite
-  a newer slot state.
 - `ToolCallId(u32)` identifies one call only inside one iteration. A fresh
   allocator starts at zero for every iteration and assigns IDs in provider call
   order. It is transient: it is never serialized, checkpointed, restored, or
@@ -319,15 +311,15 @@ The persisted schema is versioned. Loaded tool groups use stable canonical
 order. Provider tool calls that crossed the durable pre-execution boundary
 remain until their transcript results are recorded. Conversation history is
 absent because the canonical transcript reconstructs it. Iteration-local
-`ToolCallId`, physical tool-executor state, active futures, and scheduler state
+`ToolCallId`, physical tool-executor state, active futures, and polling queues
 are absent because they are transient.
 
 Each Agent's BaseAgent owns one `DurableState<AgentState>` projection. BaseAgent
 refreshes that projection from authoritative adapters at iteration and terminal
 boundaries. For a persistent root, AgentManager registers the same DurableState
 with the Agent collection during create or restore; ephemeral Agents leave it
-unregistered. No snapshot crosses the Scheduler protocol, and neither
-SessionActor nor RuntimeWorker borrows a checked-out Agent for persistence.
+unregistered. Neither SessionActor nor RuntimeWorker borrows a checked-out
+Agent for persistence.
 
 RuntimeWorker calls the process-wide `SharedPersistence::maybe_persist()` boundary
 after every top-level poll. It does not interpret AgentState or
@@ -351,9 +343,9 @@ rather than changing the scope of `ToolCallId`.
   only Session-owned recovery metadata.
 - Agent states, transcripts, profiles, and long-term memory are
   separate canonical stores; snapshots do not duplicate transcript contents.
-- `AgentRun`, Scheduler queues/readiness, active LLM/tool futures, Wakers,
-  detached-tool futures/completions, an accepted idle Agent dispatch, `RunId`,
-  checkout state, and checkpoint waiters are transient.
+- `AgentStream`, actor polling queues/readiness, active LLM/tool futures, Wakers,
+  detached-tool futures/completions, an accepted idle Agent dispatch, checkout
+  state, and checkpoint waiters are transient.
 - After a crash, Manager reconstructs Agents from durable recovery state and
   canonical stores. It never restores a physical future or checkout.
 - Agent, tool, LLM, and persistence failures are outcomes. They cannot destroy
@@ -366,17 +358,17 @@ rather than changing the scope of `ToolCallId`.
   cloneable command capability for concurrent writers.
 - `append(Message)` only appends to the SessionActor's FIFO inbox. It does not
   poll the Agent and does not wait for the resulting turn to finish.
-- SessionActor starts a resident root by moving it into the global Scheduler.
-  If that Agent remains checked out for detached work after a turn ends,
-  SessionActor removes exactly one message from its FIFO only when the Agent's
-  control capability accepts an idle dispatch. A busy rejection leaves the
-  message at the front of the Session inbox. Agent contains no second message
-  queue, and SessionActor never mutates BaseAgent's active task.
+- SessionActor starts a resident root by moving it into its slot-owned
+  `AgentStream`. If that Agent remains checked out for detached work after a
+  turn ends, SessionActor removes exactly one message from its FIFO only when
+  the Agent's control capability accepts an idle dispatch. A busy rejection
+  leaves the message at the front of the Session inbox. Agent contains no
+  second message queue, and SessionActor never mutates BaseAgent's active task.
 - `interrupt` affects the current Agent turn. `cancel` ends the checked-out
   Agent stream and discards its transient detached runtime. Neither operation
   removes messages still waiting in the SessionActor inbox. Queue ownership and
   append semantics never enter BaseAgent.
-- `close` and permanent Session deletion cancel the active run and discard the
+- `close` and permanent Session deletion cancel the active stream and discard the
   Session inbox. Deletion waits for physical Agent return before removing the
   slot or its durable record.
 - Dropping `SessionStream` sends a non-blocking close request so its exclusive
@@ -385,17 +377,17 @@ rather than changing the scope of `ToolCallId`.
 - SessionActor maps Agent events into Session events, owns input-request
   correlation, mutates its injected `DurableState<SessionPersistentState>`,
   and manages Agent lifecycle through AgentManager. SessionManager owns the
-  Session record lifecycle. SessionActor never polls Agent, BaseAgent, or AgentRun
-  directly.
+  Session record lifecycle. SessionActor polls AgentStream only through the
+  owning AgentSlot and never polls Agent or BaseAgent directly.
 
 ## Multiagent
 
 - Multiagent is an optional tool/domain component, not a physical Agent owner
-  or scheduler.
+  or polling loop.
 - It owns graph policy, parent/child relationships, readiness, joins,
   follow-up/delete/cancel semantics, and timeout policy.
-- It has no dependency on `BaseAgent`, `AgentRun`, `AgentSlot`,
-  `AgentManager`, `AgentRunScheduler`, `SessionActor`, or `SessionId`.
+- It has no dependency on `BaseAgent`, `AgentStream`, `AgentSlot`,
+  `AgentManager`, `SessionActor`, or `SessionId`.
 - A `MultiagentBridge` transports typed commands and correlated results.
   Multiagent validates domain intent and emits typed effects; SessionActor
   executes accepted physical effects without reimplementing graph policy.
@@ -426,20 +418,18 @@ external command
 → optional Multiagent command/effects
 → SessionActor asks AgentManager to materialize Agent
 → SessionActor checks out Agent from AgentSlot
-→ Scheduler submission mailbox
-→ global Scheduler fair sweep
+→ SessionActor fair active-Agent sweep
 → Agent turn/detached-tool stream events or terminal completion
 → RuntimeWorker services the global persistence flush boundary
 → SessionActor restores AgentSlot before applying terminal outcome
 → Session event stream
 ~~~
 
-RuntimeWorker rotates across command ingress, SessionManager, and Scheduler
-work. `SessionManager::poll_actors` polls every currently live SessionActor at most
-once; the global Scheduler independently gives every active AgentRun at most
-one poll per fair sweep. Polling SessionManager or SessionActor never polls
-an `AgentRun` directly. Persistence is serviced after every top-level worker
-poll.
+RuntimeWorker rotates across command ingress and SessionManager work.
+`SessionManager::poll_actors` gives every currently live SessionActor at most
+one progress result before revisiting an actor. Each SessionActor independently
+gives every active AgentSlot at most one poll before revisiting a slot.
+Persistence is serviced after every top-level worker poll.
 
 ## Module dependency direction
 
@@ -447,7 +437,6 @@ poll.
 runtime
 ├── AgentRuntime
 ├── RuntimeWorker
-├── scheduler
 ├── session
 └── persistence flush boundary
 
@@ -455,12 +444,9 @@ session
 ├── SessionManager
 ├── SessionActor
 ├── AgentManager and Agent types
-├── scheduler submission protocol
+├── AgentSlot and AgentStream polling
 ├── memory
 └── multiagent port/domain
-
-scheduler
-└── agent run protocol
 
 multiagent
 └── domain protocol and bridge port
@@ -472,9 +458,8 @@ agent runtime
 
 Forbidden reverse dependencies:
 
-- scheduler must not depend on session, multiagent, or persistence;
 - session must not depend on runtime;
-- multiagent must not depend on physical Agent, scheduler, or session types;
+- multiagent must not depend on physical Agent or session types;
 - Agent/BaseAgent and the Agent iteration loop must not depend on session,
   multiagent domain state, `SessionManager`, `SharedPersistence`, or filesystem
   type `F`.

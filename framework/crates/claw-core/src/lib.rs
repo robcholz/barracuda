@@ -40,7 +40,6 @@ mod config;
 #[cfg(feature = "multiagent")]
 mod multiagent;
 mod runtime;
-mod scheduler;
 mod session;
 
 pub(crate) const SYSTEM_TRACE_SCOPE: &str = "agent-system";

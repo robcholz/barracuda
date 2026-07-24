@@ -14,7 +14,6 @@ use futures_core::Stream;
 use tracing::Instrument as _;
 
 use crate::config::SharedApiManager;
-use crate::scheduler::AgentRunScheduler;
 use crate::session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
@@ -50,7 +49,6 @@ where
 {
     persistence: SharedPersistence<Filesystem>,
     session_manager: SessionManager<Filesystem, Http, Timer>,
-    scheduler: AgentRunScheduler<Http, Timer>,
     commands: Pin<Box<Receiver<RuntimeCommand>>>,
     stopping: bool,
     next_task: WorkerTask,
@@ -62,7 +60,6 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
@@ -71,20 +68,17 @@ where
         api_manager: SharedApiManager,
         commands: Receiver<RuntimeCommand>,
     ) -> Result<Self, AgentRuntimeBuildError> {
-        let (scheduler, scheduler_handle) = AgentRunScheduler::new();
         let session_manager = SessionManager::new(
             tool_registry,
             Arc::clone(&persistence),
             persistence_dir,
             skill_roots,
             api_manager,
-            scheduler_handle,
         )
         .map_err(map_session_manager_init_error)?;
         Ok(Self {
             persistence,
             session_manager,
-            scheduler,
             commands: Box::pin(commands),
             stopping: false,
             next_task: WorkerTask::Ingress,
@@ -133,7 +127,7 @@ where
     }
 
     fn shutdown_complete(&self) -> bool {
-        !self.session_manager.has_live_actors() && self.scheduler.is_idle()
+        !self.session_manager.has_live_actors()
     }
 }
 
@@ -157,7 +151,7 @@ where
         let this = self.get_mut();
         let mut progressed = false;
 
-        for _ in 0..3 {
+        for _ in 0..2 {
             let task = this.next_task;
             this.next_task = task.next();
             match task {
@@ -170,13 +164,6 @@ where
                 }
                 WorkerTask::Sessions => {
                     if let Poll::Ready(()) = this.session_manager.poll_actors(context) {
-                        progressed = true;
-                        break;
-                    }
-                }
-                WorkerTask::Scheduler => {
-                    if let Poll::Ready(Some(())) = Pin::new(&mut this.scheduler).poll_next(context)
-                    {
                         progressed = true;
                         break;
                     }
@@ -205,15 +192,13 @@ where
 enum WorkerTask {
     Ingress,
     Sessions,
-    Scheduler,
 }
 
 impl WorkerTask {
     fn next(self) -> Self {
         match self {
             Self::Ingress => Self::Sessions,
-            Self::Sessions => Self::Scheduler,
-            Self::Scheduler => Self::Ingress,
+            Self::Sessions => Self::Ingress,
         }
     }
 }
