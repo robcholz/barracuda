@@ -114,8 +114,8 @@ where
                 }
                 Err(error) => {
                     log::error!("Agent LLM chat failed");
-                    tracing::error!(name: "chat_failed", kind = "chat");
-                    Err(IterationLoopError::Chat(error))?
+                    tracing::error!(name: "chat_failed", kind = "chat_init");
+                    Err(IterationLoopError::ChatInit(error))?
                 }
             };
 
@@ -147,8 +147,8 @@ where
                     }
                     Some(Err(error)) => {
                         log::error!("Agent LLM chat failed");
-                        tracing::error!(name: "chat_failed", kind = "chat");
-                        Err(IterationLoopError::Chat(error))?;
+                        tracing::error!(name: "chat_failed", kind = "chat_stream");
+                        Err(IterationLoopError::ChatStream(error))?;
                     }
                     None => break,
                 }
@@ -466,6 +466,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    use claw_api::{ChatError, ClawApiError};
+    use claw_interface::http::{HttpError, HttpRequestFailure};
     use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
         SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
@@ -661,5 +663,34 @@ mod tests {
             IterationLoopError::DuplicateProviderToolCallId("duplicate".to_owned())
         );
         assert_eq!(executions.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn chat_phase_errors_preserve_nested_http_debug_context() {
+        let chat_error =
+            ChatError::Api(ClawApiError::TransientTransport(HttpError::RequestFailed(
+                HttpRequestFailure::driver("esp_http_client_perform", "async transport errno=104"),
+            )));
+
+        let init = format!("{:?}", IterationLoopError::ChatInit(chat_error.clone()));
+        let stream = format!("{:?}", IterationLoopError::ChatStream(chat_error));
+
+        assert!(init.starts_with("ChatInit("), "{init}");
+        assert!(stream.starts_with("ChatStream("), "{stream}");
+        assert!(!init.contains('\n'), "{init}");
+        assert!(!stream.contains('\n'), "{stream}");
+        for expected in [
+            "TransientTransport(",
+            "RequestFailed(",
+            "Driver {",
+            "operation: \"esp_http_client_perform\"",
+            "message: \"async transport errno=104\"",
+        ] {
+            assert!(init.contains(expected), "missing `{expected}` in {init}");
+            assert!(
+                stream.contains(expected),
+                "missing `{expected}` in {stream}"
+            );
+        }
     }
 }

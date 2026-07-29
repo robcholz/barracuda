@@ -60,7 +60,8 @@ pub claw_core::IterationEvent::Started
 pub claw_core::IterationEvent::Started::iteration: claw_core::IterationId
 pub claw_core::IterationEvent::ToolResult(claw_utils::stream::StreamPart<(claw_api::types::ToolCall, claw_tool::tool::ToolOutput)>)
 pub enum claw_core::IterationLoopError
-pub claw_core::IterationLoopError::Chat(claw_api::errors::ChatError)
+pub claw_core::IterationLoopError::ChatInit(claw_api::errors::ChatError)
+pub claw_core::IterationLoopError::ChatStream(claw_api::errors::ChatError)
 pub claw_core::IterationLoopError::DuplicateProviderToolCallId(alloc::string::String)
 pub claw_core::IterationLoopError::IncompleteToolBatch
 pub claw_core::IterationLoopError::MissingProviderToolCallId

@@ -18,7 +18,8 @@ use claw_api::{
     InitError,
 };
 use claw_interface::http::{
-    blocking::ClawHttp, HttpError, HttpJsonRequest, HttpResponse, HttpStatusCode,
+    blocking::ClawHttp, HttpError, HttpJsonRequest, HttpRequestFailure, HttpResponse,
+    HttpStatusCode,
 };
 
 /// Never actually reached: `init` validates config before touching transport.
@@ -105,13 +106,17 @@ fn infer_media_error_label(error: &InferMediaError) -> &'static str {
     }
 }
 
+fn transport_error(message: &str) -> HttpError {
+    HttpError::RequestFailed(HttpRequestFailure::transport(message))
+}
+
 fn main() {
     show_init_errors();
 
     // Shared transport/parse failures, and their retry classification.
     let api_errors = [
-        ClawApiError::Transport("connection reset".into()),
-        ClawApiError::TransientTransport("HTTP 503".into()),
+        ClawApiError::Transport(transport_error("connection reset")),
+        ClawApiError::TransientTransport(transport_error("HTTP 503")),
         ClawApiError::Parse,
         ClawApiError::EmptyResponse,
         ClawApiError::MalformedResponse("missing choices"),
@@ -128,7 +133,9 @@ fn main() {
     // Chat errors: the tool-JSON case plus a wrapped transient transport failure.
     let chat_errors = [
         ChatError::InvalidToolsJson,
-        ChatError::Api(ClawApiError::TransientTransport("HTTP 429".into())),
+        ChatError::Api(ClawApiError::TransientTransport(transport_error(
+            "HTTP 429",
+        ))),
     ];
     for error in &chat_errors {
         println!(
@@ -144,7 +151,7 @@ fn main() {
         ChatJsonError::InvalidOutput("expected integer".into()),
         ChatJsonError::MissingOutputSchema,
         ChatJsonError::Chat(ChatError::Api(ClawApiError::TransientTransport(
-            "HTTP 500".into(),
+            transport_error("HTTP 500"),
         ))),
     ];
     for error in &chat_json_errors {
@@ -171,7 +178,7 @@ fn main() {
         InferMediaError::RemoteOnlyProfile,
         InferMediaError::RequiresLocalImage,
         InferMediaError::PayloadPrepFailed,
-        InferMediaError::Api(ClawApiError::Transport("io".into())),
+        InferMediaError::Api(ClawApiError::Transport(transport_error("io"))),
     ];
     for error in &media_errors {
         println!(

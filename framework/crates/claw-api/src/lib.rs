@@ -29,7 +29,7 @@
 //! [`Cancel`](claw_interface::http::Cancel). For streaming, that token covers
 //! send, headers, and response-body reads; dropping [`ChatStream`] also cancels
 //! the body. An abort surfaces as a non-retryable [`ClawApiError::Transport`]
-//! whose message contains `"aborted"`.
+//! containing [`HttpError::Aborted`](claw_interface::HttpError::Aborted).
 //!
 //! # Retries
 //!

@@ -12,7 +12,7 @@ use tracing::Instrument as _;
 
 use claw_interface::http::blocking::ClawHttp as BlockingClawHttp;
 use claw_interface::http::StreamingHttp;
-use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_interface::{Cancel, ClawHttp, ClawTimer, HttpError};
 
 use super::backends::Backend;
 use super::chat_stream::ChatStream;
@@ -21,10 +21,6 @@ use super::retry::{run_with_retry, sleep_abortable_async};
 use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest,
 };
-
-/// Message used when the abort flag fires during a retry backoff sleep. Kept
-/// containing "aborted" so upstream string-based abort detection still matches.
-const ABORTED_DURING_BACKOFF: &str = "LLM request aborted during retry backoff";
 
 /// The LLM client: a resolved backend + model profile behind an injected
 /// [`ClawHttp`] transport.
@@ -180,7 +176,7 @@ impl<H: BlockingClawHttp> ClawApi<H> {
             &policy,
             abort,
             ChatError::is_retryable,
-            || ChatError::Api(ClawApiError::Transport(ABORTED_DURING_BACKOFF.to_string())),
+            || ChatError::Api(ClawApiError::Transport(HttpError::Aborted)),
             || backend.chat(&mut *http, request, abort),
         )
     }
@@ -262,11 +258,7 @@ impl<H: BlockingClawHttp> ClawApi<H> {
             &policy,
             abort,
             ChatJsonError::is_retryable,
-            || {
-                ChatJsonError::Chat(ChatError::Api(ClawApiError::Transport(
-                    ABORTED_DURING_BACKOFF.to_string(),
-                )))
-            },
+            || ChatJsonError::Chat(ChatError::Api(ClawApiError::Transport(HttpError::Aborted))),
             || {
                 let response = backend
                     .chat_json(&mut *http, request, spec.name, &schema, abort)
@@ -320,7 +312,7 @@ impl<H: BlockingClawHttp> ClawApi<H> {
             &policy,
             abort,
             InferMediaError::is_retryable,
-            || InferMediaError::Api(ClawApiError::Transport(ABORTED_DURING_BACKOFF.to_string())),
+            || InferMediaError::Api(ClawApiError::Transport(HttpError::Aborted)),
             || backend.infer_media(&mut *http, request, abort),
         )
     }
@@ -425,9 +417,7 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
                     ))
                     .await;
                     if !completed {
-                        return Err(ChatError::Api(ClawApiError::Transport(
-                            ABORTED_DURING_BACKOFF.to_string(),
-                        )));
+                        return Err(ChatError::Api(ClawApiError::Transport(HttpError::Aborted)));
                     }
                 }
             }
@@ -512,7 +502,7 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
                         .await
                     {
                         return Err(ChatJsonError::Chat(ChatError::Api(
-                            ClawApiError::Transport(ABORTED_DURING_BACKOFF.to_string()),
+                            ClawApiError::Transport(HttpError::Aborted),
                         )));
                     }
                 }
@@ -544,7 +534,7 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
                         .await
                     {
                         return Err(InferMediaError::Api(ClawApiError::Transport(
-                            ABORTED_DURING_BACKOFF.to_string(),
+                            HttpError::Aborted,
                         )));
                     }
                 }

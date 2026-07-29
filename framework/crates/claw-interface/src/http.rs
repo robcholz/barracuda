@@ -162,7 +162,7 @@ pub enum HttpError {
     #[error("failed to create HTTP client")]
     ClientInitFailed,
     #[error("HTTP request failed: {0}")]
-    RequestFailed(HttpRequestFailure),
+    RequestFailed(#[source] HttpRequestFailure),
     /// Non-success response; message matches C `parse_error_message_body` shape.
     #[error("{message}")]
     UnexpectedStatus {

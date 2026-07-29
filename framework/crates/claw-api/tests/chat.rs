@@ -1163,7 +1163,7 @@ fn abort_is_not_retried() {
         .unwrap_err();
     assert!(matches!(
         &err,
-        ChatError::Api(ClawApiError::Transport(msg)) if msg.contains("aborted")
+        ChatError::Api(ClawApiError::Transport(HttpError::Aborted))
     ));
     assert_eq!(*lock(&http.calls), 1);
 }
@@ -1180,7 +1180,7 @@ fn default_policy_applies_when_retry_unset() {
         .unwrap_err();
     assert!(matches!(
         &err,
-        ChatError::Api(ClawApiError::Transport(msg)) if msg.contains("aborted")
+        ChatError::Api(ClawApiError::Transport(HttpError::Aborted))
     ));
     assert_eq!(*lock(&http.calls), 1);
     assert_eq!(RetryPolicy::default().max_retries, 2);

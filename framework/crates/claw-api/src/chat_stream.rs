@@ -96,7 +96,7 @@ where
 /// A transport read error mid-body: the stream already started, so this is a
 /// permanent (non-retryable) transport failure rather than a connect error.
 fn read_error(error: HttpError) -> ChatError {
-    ClawApiError::Transport(error.to_string()).into()
+    ClawApiError::Transport(error).into()
 }
 
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body

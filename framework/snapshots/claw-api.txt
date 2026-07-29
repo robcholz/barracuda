@@ -34,8 +34,8 @@ pub claw_api::ClawApiError::EmptyResponse
 pub claw_api::ClawApiError::MalformedResponse(&'static str)
 pub claw_api::ClawApiError::NotConfigured
 pub claw_api::ClawApiError::Parse
-pub claw_api::ClawApiError::TransientTransport(alloc::string::String)
-pub claw_api::ClawApiError::Transport(alloc::string::String)
+pub claw_api::ClawApiError::TransientTransport(claw_interface::http::HttpError)
+pub claw_api::ClawApiError::Transport(claw_interface::http::HttpError)
 impl claw_api::ClawApiError
 pub fn claw_api::ClawApiError::is_aborted(&self) -> bool
 pub fn claw_api::ClawApiError::is_retryable(&self) -> bool

@@ -533,7 +533,7 @@ fn receive(
             Ok(())
         }
         Some(Err(error)) => {
-            write_error_event(out_event, &error.to_string())?;
+            write_debug_error_event(out_event, &error)?;
             session.terminal.store(true, Ordering::Release);
             remove_open_session(session_id, &session);
             Ok(())
@@ -659,7 +659,7 @@ fn running_agent(runtime: &RuntimeController) -> Result<&DeviceAgent, CabiError>
 fn write_event(out_event: &mut ClawAgentEvent, event: SessionEvent) -> Result<(), CabiError> {
     let event = match event {
         SessionEvent::Turn(event) => write_turn_event(event)?,
-        SessionEvent::Error(error) => error_event(&error.to_string())?,
+        SessionEvent::Error(error) => debug_error_event(&error)?,
         SessionEvent::Closed(_) => empty_event(CLAW_AGENT_EVENT_KIND_CLOSED),
     };
     *out_event = event;
@@ -707,7 +707,7 @@ fn write_turn_event(event: TurnEvent) -> Result<ClawAgentEvent, CabiError> {
             text_event(CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA, &text)
         }
         TurnEvent::Output(StreamPart::End) => Ok(empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END)),
-        TurnEvent::Error(error) => error_event(&error.to_string()),
+        TurnEvent::Error(error) => debug_error_event(&error),
         TurnEvent::Ended { turn } => Ok(ClawAgentEvent {
             kind: CLAW_AGENT_EVENT_KIND_TURN_ENDED,
             data: ClawAgentEventData {
@@ -797,8 +797,15 @@ fn error_event(message: &str) -> Result<ClawAgentEvent, CabiError> {
     })
 }
 
-fn write_error_event(out_event: &mut ClawAgentEvent, message: &str) -> Result<(), CabiError> {
-    *out_event = error_event(message)?;
+fn debug_error_event(error: &impl core::fmt::Debug) -> Result<ClawAgentEvent, CabiError> {
+    error_event(&format!("{error:?}"))
+}
+
+fn write_debug_error_event(
+    out_event: &mut ClawAgentEvent,
+    error: &impl core::fmt::Debug,
+) -> Result<(), CabiError> {
+    *out_event = debug_error_event(error)?;
     Ok(())
 }
 

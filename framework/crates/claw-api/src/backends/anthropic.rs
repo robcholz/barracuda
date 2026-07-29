@@ -11,7 +11,8 @@ use core::sync::atomic::AtomicBool;
 use serde_json::{json, Map, Value};
 
 use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpHeader, StreamingHttp,
+    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, HttpHeader,
+    StreamingHttp,
 };
 
 use super::super::chat_stream::{drain_body, ChatStream};
@@ -623,7 +624,11 @@ impl BackendImpl for Anthropic {
             .map_err(map_http_error)?;
         if !status.is_success() {
             let body = drain_body(stream).await.map_err(map_http_error)?;
-            return Err(ClawApiError::Transport(format!("HTTP {status}: {body}")).into());
+            return Err(ClawApiError::Transport(HttpError::UnexpectedStatus {
+                status,
+                message: format!("HTTP {status}: {body}"),
+            })
+            .into());
         }
         Ok(ChatStream::new(
             stream,

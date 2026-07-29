@@ -20,9 +20,12 @@ pub enum IterationLoopError {
     #[strum(serialize = "incomplete_tool_batch")]
     #[error("tool batch ended before every tool call id produced a result")]
     IncompleteToolBatch,
-    #[strum(serialize = "chat")]
-    #[error(transparent)]
-    Chat(#[from] ChatError),
+    #[strum(serialize = "chat_init")]
+    #[error("failed to initialize LLM chat: {0}")]
+    ChatInit(#[source] ChatError),
+    #[strum(serialize = "chat_stream")]
+    #[error("LLM chat stream failed: {0}")]
+    ChatStream(#[source] ChatError),
     #[strum(serialize = "tools")]
     #[error(transparent)]
     Tools(#[from] ToolSetError),

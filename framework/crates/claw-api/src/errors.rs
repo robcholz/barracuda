@@ -6,9 +6,10 @@
 //! the media pipeline are disjoint. The shared API/transport/parse failures live
 //! in [`ClawApiError`], which the per-function enums wrap via `#[from]`.
 //!
-//! All variants carry only `&'static str` (or, for the genuinely dynamic HTTP
-//! transport message, an owned `String`); `Display` text comes from `thiserror`.
+//! Transport variants retain the typed [`HttpError`] source; other dynamic
+//! messages are limited to the variants whose domain data is itself text.
 
+use claw_interface::http::HttpError;
 use strum::IntoStaticStr;
 use thiserror::Error;
 
@@ -20,17 +21,17 @@ pub enum ClawApiError {
     #[strum(serialize = "not_configured")]
     #[error("LLM API is not configured")]
     NotConfigured,
-    /// Permanent transport failure (aborts, bad URL/body, 4xx, ...). Carries the
-    /// backend/transport detail (e.g. `"HTTP 401: invalid api key"`), which is
-    /// inherently dynamic. Never retried.
+    /// Permanent transport failure (aborts, bad URL/body, 4xx, ...). Never
+    /// retried. The typed HTTP failure is retained for matching and nested debug
+    /// output.
     #[strum(serialize = "transport")]
     #[error("HTTP transport error: {0}")]
-    Transport(String),
+    Transport(#[source] HttpError),
     /// Transient transport failure (network error, HTTP 408/429/5xx) eligible
     /// for retry by the [`crate::ClawApi`] retry loop.
     #[strum(serialize = "transient_transport")]
     #[error("transient HTTP transport error: {0}")]
-    TransientTransport(String),
+    TransientTransport(#[source] HttpError),
     /// The response body was not valid JSON.
     #[strum(serialize = "parse")]
     #[error("failed to parse LLM JSON response")]
@@ -60,7 +61,7 @@ impl ClawApiError {
     /// Whether this failure came from aborting an in-flight request.
     #[must_use]
     pub fn is_aborted(&self) -> bool {
-        matches!(self, ClawApiError::Transport(message) if message.contains("aborted"))
+        matches!(self, ClawApiError::Transport(HttpError::Aborted))
     }
 }
 
@@ -114,8 +115,8 @@ impl ChatJsonError {
 /// use claw_api::{ChatError, ClawApiError};
 /// fn handle(err: &ChatError) {
 ///     match err {
-///         ChatError::Api(ClawApiError::TransientTransport(msg)) => {
-///             eprintln!("transient, may retry: {msg}");
+///         ChatError::Api(ClawApiError::TransientTransport(http)) => {
+///             eprintln!("transient, may retry: {http}");
 ///         }
 ///         other => eprintln!("permanent failure: {other}"),
 ///     }
