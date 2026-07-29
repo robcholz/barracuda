@@ -585,9 +585,14 @@ mod espidf_driver {
         /// transfer is still in progress; `Ok(true)` means `perform` completed.
         /// An EAGAIN with a non-pending errno is a transport failure.
         fn perform_raw_step(&mut self) -> Result<bool, HttpError> {
+            // `esp_http_client_close` leaves the transport's saved socket errno
+            // intact. Drain it before starting a new step, then immediately
+            // take the errno produced by this step so failures cannot leak
+            // across steps or reconnected sockets.
+            let _ = unsafe { esp_http_client_get_errno(self.raw) };
             let err = unsafe { esp_http_client_perform(self.raw) };
+            let transport_errno = unsafe { esp_http_client_get_errno(self.raw) };
             if err == ESP_ERR_HTTP_EAGAIN {
-                let transport_errno = unsafe { esp_http_client_get_errno(self.raw) };
                 if matches!(
                     transport_errno,
                     ERRNO_NONE | ERRNO_EAGAIN | ERRNO_EINPROGRESS
