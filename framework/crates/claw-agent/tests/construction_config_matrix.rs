@@ -240,7 +240,7 @@ fn assert_construction_case<System: ConstructionSystem>(
                 events.iter().any(|event| matches!(
                     event,
                     SessionEvent::Turn(
-                        TurnEvent::Output(StreamPart::Delta(text))
+                        TurnEvent::EffectOutput(StreamPart::Delta(text))
                             | TurnEvent::Iteration(IterationEvent::Output(
                                 StreamPart::Delta(text)
                             ))

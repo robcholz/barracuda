@@ -166,7 +166,7 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
         events.iter().any(|event| matches!(
             event,
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(text))
+                TurnEvent::EffectOutput(StreamPart::Delta(text))
                     | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
             ) if text == &fixture.final_output
         )),

@@ -118,7 +118,7 @@ impl ChatDriver {
                 self.content.reasoning(part)?;
                 RenderOutcome::Continue
             }
-            SessionEvent::Turn(TurnEvent::Output(part))
+            SessionEvent::Turn(TurnEvent::EffectOutput(part))
             | SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(part))) => {
                 self.saw_output |= self.content.output(part)?;
                 RenderOutcome::Continue

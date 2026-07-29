@@ -117,6 +117,7 @@ pub claw_core::SessionTurnError::Agent(claw_core::BaseAgentError)
 pub claw_core::SessionTurnError::AgentCreate(claw_core::AgentCreateError)
 pub claw_core::SessionTurnError::ContextProvider(claw_core::ContextProviderError)
 pub enum claw_core::TurnEvent
+pub claw_core::TurnEvent::EffectOutput(claw_utils::stream::StreamPart<alloc::string::String>)
 pub claw_core::TurnEvent::Ended
 pub claw_core::TurnEvent::Ended::turn: claw_core::TurnId
 pub claw_core::TurnEvent::Error(claw_core::TurnEventError)
@@ -124,7 +125,6 @@ pub claw_core::TurnEvent::InputRequested
 pub claw_core::TurnEvent::InputRequested::kind: claw_core::InputRequestKind
 pub claw_core::TurnEvent::InputRequested::request: claw_core::InputRequestId
 pub claw_core::TurnEvent::Iteration(claw_core::IterationEvent)
-pub claw_core::TurnEvent::Output(claw_utils::stream::StreamPart<alloc::string::String>)
 pub claw_core::TurnEvent::Started
 pub claw_core::TurnEvent::Started::origin: claw_core::TurnOrigin
 pub claw_core::TurnEvent::Started::turn: claw_core::TurnId

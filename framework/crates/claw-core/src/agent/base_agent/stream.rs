@@ -100,8 +100,8 @@ pub(crate) enum AgentOutcome {
 pub(crate) enum AgentCompletion {
     /// A model response already exposed through `Output(_)` events.
     Streamed(String),
-    /// A final message synthesized by an Agent effect and not streamed before.
-    Synthesized(String),
+    /// A final message supplied by an Agent effect and not streamed before.
+    EffectOutput(String),
 }
 
 #[derive(Clone)]
@@ -395,7 +395,7 @@ mod tests {
             }));
             let terminal = match driver_control.approval().await {
                 ApprovalOutcome::Decision(ApprovalDecision::Approved) => {
-                    AgentOutcome::Completed(AgentCompletion::Synthesized("approved".to_owned()))
+                    AgentOutcome::Completed(AgentCompletion::EffectOutput("approved".to_owned()))
                 }
                 ApprovalOutcome::Decision(ApprovalDecision::Rejected(_)) => {
                     AgentOutcome::Cancelled
@@ -420,7 +420,7 @@ mod tests {
             assert!(matches!(
                 stream.next().await,
                 Some(Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
-                    AgentCompletion::Synthesized(message)
+                    AgentCompletion::EffectOutput(message)
                 ))))
                 if message == "approved"
             ));

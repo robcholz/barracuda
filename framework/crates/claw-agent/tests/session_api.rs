@@ -137,7 +137,7 @@ fn session_streams_root_reply_as_output() {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(text))
+                TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
             ) => Some(text.as_str()),
             _ => None,
@@ -208,7 +208,7 @@ fn append_queues_while_current_turn_runs() {
     assert!(first_events.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(
-            TurnEvent::Output(StreamPart::Delta(text))
+            TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
         ) if text == "first"
     )));
@@ -216,7 +216,7 @@ fn append_queues_while_current_turn_runs() {
     assert!(second_events.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(
-            TurnEvent::Output(StreamPart::Delta(text))
+            TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
         ) if text == "second"
     )));
@@ -296,7 +296,7 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
     assert!(queued.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(
-            TurnEvent::Output(StreamPart::Delta(text))
+            TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text)))
         ) if text == "queued message ran"
     )));
@@ -326,7 +326,7 @@ fn close_session_cancels_active_work_and_closes_events() {
         !events.iter().any(|event| matches!(
             event,
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(_))
+                TurnEvent::EffectOutput(StreamPart::Delta(_))
                     | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(_)))
             )
         )),

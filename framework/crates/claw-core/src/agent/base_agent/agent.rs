@@ -213,20 +213,20 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<BaseAgentEvent, AgentError> {
         let message = match effect {
             AgentEffect::Finish { final_message } => {
-                self.finish_synthesized_assistant(&final_message)?;
+                self.finish_effect_assistant(&final_message)?;
                 self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
                 final_message
             }
             AgentEffect::Yield { message } => {
-                self.finish_synthesized_assistant(&message)?;
+                self.finish_effect_assistant(&message)?;
                 self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
                 message
             }
         };
         Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
-            AgentCompletion::Synthesized(message),
+            AgentCompletion::EffectOutput(message),
         )))
     }
 
@@ -252,7 +252,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         error
     }
 
-    fn finish_synthesized_assistant(&mut self, message: &str) -> Result<(), AgentError> {
+    fn finish_effect_assistant(&mut self, message: &str) -> Result<(), AgentError> {
         let turn = self
             .active_turn
             .as_mut()

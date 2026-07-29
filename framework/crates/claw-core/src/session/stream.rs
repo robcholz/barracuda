@@ -85,8 +85,9 @@ pub enum TurnEvent {
     },
     /// An event scoped to the active root Agent iteration.
     Iteration(IterationEvent),
-    /// Assistant-visible output synthesized after an iteration has ended.
-    Output(StreamPart<String>),
+    /// Assistant-visible output supplied by an Agent effect after an iteration
+    /// has ended.
+    EffectOutput(StreamPart<String>),
     /// A recoverable problem scoped to this turn.
     Error(TurnEventError),
     /// The turn ended.

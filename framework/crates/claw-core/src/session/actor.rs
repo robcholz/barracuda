@@ -1046,9 +1046,9 @@ where
             }
             AgentEvent::TurnEnded { outcome } => {
                 let (_text, _completed, _cancelled) = match outcome {
-                    AgentOutcome::Completed(AgentCompletion::Synthesized(message)) => {
+                    AgentOutcome::Completed(AgentCompletion::EffectOutput(message)) => {
                         if is_root {
-                            self.emit_text(message.clone());
+                            self.emit_effect_output(message.clone());
                         }
                         (message, true, false)
                     }
@@ -1191,9 +1191,9 @@ where
         let _ = ack.try_send(Err(SessionControlError::SessionClosed(self.session)));
     }
 
-    fn emit_text(&self, message: String) {
-        self.emit_turn(TurnEvent::Output(StreamPart::Delta(message)));
-        self.emit_turn(TurnEvent::Output(StreamPart::End));
+    fn emit_effect_output(&self, message: String) {
+        self.emit_turn(TurnEvent::EffectOutput(StreamPart::Delta(message)));
+        self.emit_turn(TurnEvent::EffectOutput(StreamPart::End));
     }
 
     fn emit_turn_error(&self, source: SessionTurnError) {

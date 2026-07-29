@@ -401,7 +401,7 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(text))
+                TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
             ) => Some(text.clone()),
             _ => None,

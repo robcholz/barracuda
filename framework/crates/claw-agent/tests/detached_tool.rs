@@ -136,7 +136,7 @@ fn outputs(events: &[SessionEvent]) -> Vec<&str> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(text))
+                TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
             ) => Some(text.as_str()),
             _ => None,

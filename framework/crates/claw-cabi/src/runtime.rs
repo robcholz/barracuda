@@ -703,10 +703,12 @@ fn write_turn_event(event: TurnEvent) -> Result<ClawAgentEvent, CabiError> {
             })
         }
         TurnEvent::Iteration(event) => write_iteration_event(event),
-        TurnEvent::Output(StreamPart::Delta(text)) => {
+        TurnEvent::EffectOutput(StreamPart::Delta(text)) => {
             text_event(CLAW_AGENT_EVENT_KIND_OUTPUT_DELTA, &text)
         }
-        TurnEvent::Output(StreamPart::End) => Ok(empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END)),
+        TurnEvent::EffectOutput(StreamPart::End) => {
+            Ok(empty_event(CLAW_AGENT_EVENT_KIND_OUTPUT_END))
+        }
         TurnEvent::Error(error) => debug_error_event(&error),
         TurnEvent::Ended { turn } => Ok(ClawAgentEvent {
             kind: CLAW_AGENT_EVENT_KIND_TURN_ENDED,

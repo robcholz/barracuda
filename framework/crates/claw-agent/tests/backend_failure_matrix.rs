@@ -406,7 +406,7 @@ fn first_failure_text(events: Vec<SessionEvent>) -> Option<String> {
         SessionEvent::Error(error) => Some(error.to_string()),
         SessionEvent::Turn(TurnEvent::Error(error)) => Some(error.to_string()),
         SessionEvent::Turn(
-            TurnEvent::Output(StreamPart::Delta(text))
+            TurnEvent::EffectOutput(StreamPart::Delta(text))
             | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
         ) if text.contains("[failed:") => Some(text),
         _ => None,
@@ -418,7 +418,7 @@ fn output_fragments(events: &[SessionEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match event {
             SessionEvent::Turn(
-                TurnEvent::Output(StreamPart::Delta(text))
+                TurnEvent::EffectOutput(StreamPart::Delta(text))
                 | TurnEvent::Iteration(IterationEvent::Output(StreamPart::Delta(text))),
             ) => Some(text.clone()),
             _ => None,

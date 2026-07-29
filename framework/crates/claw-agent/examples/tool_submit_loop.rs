@@ -158,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
     while let Some(event) = events.next().await {
         let event = event?;
         match event {
-            SessionEvent::Turn(TurnEvent::Output(StreamPart::Delta(text)))
+            SessionEvent::Turn(TurnEvent::EffectOutput(StreamPart::Delta(text)))
             | SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(
                 StreamPart::Delta(text),
             ))) => {
@@ -182,7 +182,7 @@ async fn main() -> anyhow::Result<()> {
                 | IterationEvent::Output(StreamPart::End)
                 | IterationEvent::ToolResult(StreamPart::End),
             ))
-            | SessionEvent::Turn(TurnEvent::Output(StreamPart::End)) => {}
+            | SessionEvent::Turn(TurnEvent::EffectOutput(StreamPart::End)) => {}
             SessionEvent::Error(error) => println!("  [error] {error}"),
             SessionEvent::Turn(TurnEvent::Error(error)) => println!("  [error] {error}"),
             SessionEvent::Turn(TurnEvent::Ended { .. }) => break,
