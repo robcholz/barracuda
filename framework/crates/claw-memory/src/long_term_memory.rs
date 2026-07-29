@@ -49,7 +49,7 @@ const DEFAULT_COMPACT_DEAD_THRESHOLD: u32 = 32;
 ///
 /// Minted by the store at first [`store`](LongTermMemory::store) as
 /// `{id_prefix}{seq}` (e.g. `g-7`, `a-3`) and stable across updates. The prefix
-/// is opaque to this crate — the `claw_core` adapter uses it to route an id back
+/// is opaque to this crate — the `claw_core` provider uses it to route an id back
 /// to the tier (global vs. agent) that owns it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -239,7 +239,7 @@ struct Inner<F: ClawFs + 'static> {
 /// the storage layout and concurrency model.
 ///
 /// Cheap to [`Clone`] (clones the `Arc`, not the backend); every clone refers to
-/// the same store, so context adapters and memory tools share one live view.
+/// the same store, so context providers and memory tools share one live view.
 ///
 /// # Examples
 ///

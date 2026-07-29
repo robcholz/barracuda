@@ -8,7 +8,7 @@
 //! Compaction is **not** a storage concern: the [`TranscriptStore`](crate::TranscriptStore)
 //! keeps the full verbatim record and knows nothing of summaries. The *policy*
 //! (when to compact, which window, where the summary goes) lives in the agent
-//! layer's rolling-summary context adapter, which drives a `Compactor`. This seam
+//! layer's rolling-summary context provider, which drives a `Compactor`. This seam
 //! is defined here only so it stays free of any LLM dependency, exactly like the
 //! crate depends on the `ClawFs` trait and never on its implementation.
 

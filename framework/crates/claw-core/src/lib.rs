@@ -57,7 +57,7 @@ pub use claw_tool::ToolOutput;
 pub use config::ApiPurpose;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{
-    ApprovalResolverError, ContextAdapterError, InputRequestId, InputRequestKind, IterationEvent,
+    ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     Message, OpenSessionError, SessionCloseReason, SessionControl, SessionControlError,
     SessionCreateError, SessionDeleteError, SessionError, SessionEvent, SessionEventError,
     SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,

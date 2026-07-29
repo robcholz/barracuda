@@ -1,4 +1,4 @@
-//! Skill tools owned by the skill context adapter.
+//! Skill tools owned by the skill context provider.
 
 use std::sync::{Arc, Mutex};
 

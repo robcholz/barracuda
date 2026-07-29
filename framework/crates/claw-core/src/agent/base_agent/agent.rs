@@ -16,7 +16,7 @@ use tracing::Instrument as _;
 use crate::config::{ApiPurpose, SharedApiManager};
 use crate::session::Message;
 
-use super::context::ContextAdapter;
+use super::context_provider::ContextProvider;
 use super::effect::{AgentEffect, AgentEffectInbox};
 use super::iteration_loop::{
     IterationEvent, IterationIdAllocator, IterationLoop, IterationLoopError, IterationLoopEvent,
@@ -34,7 +34,7 @@ pub(in crate::agent) struct BaseAgentConfig {
     pub(in crate::agent) transcript: Box<dyn Transcript>,
     pub(in crate::agent) agent_instruction: Block<'static>,
     pub(in crate::agent) inherited_context: Vec<Block<'static>>,
-    pub(in crate::agent) context_adapters: Vec<Box<dyn ContextAdapter>>,
+    pub(in crate::agent) context_providers: Vec<Box<dyn ContextProvider>>,
     pub(in crate::agent) api_manager: SharedApiManager,
     pub(in crate::agent) api_purpose: ApiPurpose,
     pub(in crate::agent) tools: ToolSet,
@@ -81,7 +81,7 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     context: Context,
     run_state: RunState,
     iteration_id_allocator: IterationIdAllocator,
-    context_adapters: Vec<Box<dyn ContextAdapter>>,
+    context_providers: Vec<Box<dyn ContextProvider>>,
 }
 
 impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
@@ -91,8 +91,8 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         Timer: Default,
     {
         let mut tools = config.tools;
-        for adapter in &config.context_adapters {
-            if let Some(group) = adapter.tools() {
+        for provider in &config.context_providers {
+            if let Some(group) = provider.tools() {
                 tools.add_group(group)?;
             }
         }
@@ -117,7 +117,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             context,
             run_state: RunState::Stopped(StopReason::Ready),
             iteration_id_allocator: IterationIdAllocator::new(),
-            context_adapters: config.context_adapters,
+            context_providers: config.context_providers,
         })
     }
 
@@ -267,22 +267,22 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         Ok(())
     }
 
-    async fn prepare_adapter_context(&mut self) -> Result<(), AgentError> {
-        for adapter in &mut self.context_adapters {
-            adapter
+    async fn prepare_provider_context(&mut self) -> Result<(), AgentError> {
+        for provider in &mut self.context_providers {
+            provider
                 .prepare(self.transcript.as_ref())
                 .await
-                .map_err(AgentError::ContextAdapter)?;
+                .map_err(AgentError::ContextProvider)?;
         }
         Ok(())
     }
 
-    fn render_adapter_context(&mut self) -> Result<serde_json::Value, AgentError> {
+    fn render_provider_context(&mut self) -> Result<serde_json::Value, AgentError> {
         let mut sink = self.context.sink();
-        for adapter in &mut self.context_adapters {
-            adapter
+        for provider in &mut self.context_providers {
+            provider
                 .contribute(&mut sink)
-                .map_err(AgentError::ContextAdapter)?;
+                .map_err(AgentError::ContextProvider)?;
         }
         Ok(sink.into_history())
     }
@@ -482,8 +482,8 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
     fn stop(&mut self, reason: StopReason) {
         self.run_state = RunState::Stopped(reason);
-        for adapter in &mut self.context_adapters {
-            adapter.on_turn_lifecycle(TurnLifecycle::Ended);
+        for provider in &mut self.context_providers {
+            provider.on_turn_lifecycle(TurnLifecycle::Ended);
         }
     }
 
@@ -577,14 +577,14 @@ where
                     break;
                 }
 
-                let adapter_count = self.agent.context_adapters.len() as u64;
+                let provider_count = self.agent.context_providers.len() as u64;
                 let prepare_span = tracing::info_span!(
                     "iteration.prepare",
                     run.iteration = %iteration_id,
-                    adapter_count,
+                    provider_count,
                 );
                 if let Err(error) = self.agent
-                    .prepare_adapter_context()
+                    .prepare_provider_context()
                     .instrument(prepare_span.clone())
                     .await
                 {
@@ -593,9 +593,9 @@ where
                 }
 
                 let render_span = prepare_span
-                    .in_scope(|| tracing::info_span!("context.render", adapter_count));
+                    .in_scope(|| tracing::info_span!("context.render", provider_count));
                 let history = match render_span
-                    .in_scope(|| self.agent.render_adapter_context())
+                    .in_scope(|| self.agent.render_provider_context())
                 {
                     Ok(history) => history,
                     Err(error) => {

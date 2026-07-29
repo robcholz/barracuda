@@ -5,7 +5,7 @@ use async_channel::{Receiver, Sender, TrySendError};
 use claw_api::{ChatError, ClawApiAsync, ClawApiError};
 use claw_interface::{ClawHttp, ClawTimer};
 
-/// Private shared lease helper used by the concrete memory-side LLM adapters.
+/// Private shared lease helper used by the concrete memory-side LLM providers.
 pub(super) struct SharedAsyncLlm<H: ClawHttp, Timer: ClawTimer> {
     api_tx: Sender<ClawApiAsync<H, Timer>>,
     api_rx: Receiver<ClawApiAsync<H, Timer>>,

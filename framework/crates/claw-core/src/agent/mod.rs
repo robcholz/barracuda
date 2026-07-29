@@ -1,12 +1,12 @@
 //! Runtime for one agent in isolation.
 //!
-//! This module owns the agent state machine, LLM/tool loop, context adapters,
+//! This module owns the agent state machine, LLM/tool loop, context providers,
 //! and construction. Graphs, child lifecycles, and subagent tools belong to
 //! Multiagent and enter here only as ordinary injected tool groups.
 
 pub(crate) mod baked;
 mod base_agent;
-mod context_adapters;
+mod context_providers;
 mod instance;
 mod manager;
 mod stream;
@@ -18,8 +18,8 @@ pub use base_agent::{AgentApprovalError, AgentError, IterationId, IterationLoopE
 pub(crate) use base_agent::{
     AgentCompletion, AgentInputRequest, AgentIterationEvent, AgentOutcome, ApprovalDecision,
 };
-pub use context_adapters::ReasoningEffort;
-pub(crate) use context_adapters::ReasoningEffortHandle;
+pub use context_providers::ReasoningEffort;
+pub(crate) use context_providers::ReasoningEffortHandle;
 pub(crate) use instance::Agent;
 pub use manager::{AgentCreateError, AgentId};
 pub(crate) use manager::{AgentIdAllocator, AgentManager, AgentManagerError, PersistenceConfig};

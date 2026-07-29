@@ -48,8 +48,8 @@ pub(crate) enum ApprovalDecision {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-    #[error("context adapter failed: {0}")]
-    ContextAdapter(#[source] Box<dyn Error + Send + Sync + 'static>),
+    #[error("context provider failed: {0}")]
+    ContextProvider(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error(transparent)]
     Iteration(#[from] IterationLoopError),
     #[error(transparent)]

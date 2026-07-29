@@ -7,7 +7,7 @@ use claw_api::ToolCall;
 use claw_persistence::{DurablePartError, DurableStateCodec, SchemaVersion, StateBlob, StateSlice};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::context_adapters::AgentMode;
+use crate::agent::context_providers::AgentMode;
 use crate::agent::AgentKind;
 
 /// Complete currently implemented BaseAgent recovery DTO.
@@ -97,7 +97,7 @@ impl DurableStateCodec for BaseAgentState {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::BaseAgentState;
-    use crate::agent::context_adapters::AgentMode;
+    use crate::agent::context_providers::AgentMode;
     use crate::agent::AgentKind;
     use claw_api::ToolCall;
     use claw_persistence::{DurableStateCodec, StateSlice};

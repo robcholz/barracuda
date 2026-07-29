@@ -4,7 +4,7 @@ use async_channel::{Receiver, Sender};
 use claw_context::{Block, BlockKind, ContextSink};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 
 const LOW_PROMPT: &str = prompt!("effort/low.md");
 const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
@@ -53,13 +53,13 @@ impl ReasoningEffortHandle {
     }
 }
 
-pub(crate) struct ReasoningEffortContextAdapter {
+pub(crate) struct ReasoningEffortContextProvider {
     effort: ReasoningEffort,
     updates: Receiver<ReasoningEffort>,
 }
 
-impl ReasoningEffortContextAdapter {
-    /// Create the adapter and its owner-facing sending handle together.
+impl ReasoningEffortContextProvider {
+    /// Create the provider and its owner-facing sending handle together.
     pub(crate) fn new(effort: ReasoningEffort) -> (Self, ReasoningEffortHandle) {
         let (updates, receiver) = async_channel::unbounded();
         (
@@ -72,8 +72,8 @@ impl ReasoningEffortContextAdapter {
     }
 }
 
-impl ContextAdapter for ReasoningEffortContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+impl ContextProvider for ReasoningEffortContextProvider {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         while let Ok(effort) = self.updates.try_recv() {
             self.effort = effort;
         }
@@ -86,29 +86,29 @@ impl ContextAdapter for ReasoningEffortContextAdapter {
 mod tests {
     use claw_context::{BlockKind, Context};
 
-    use super::{ReasoningEffort, ReasoningEffortContextAdapter};
-    use crate::agent::base_agent::ContextAdapter;
+    use super::{ReasoningEffort, ReasoningEffortContextProvider};
+    use crate::agent::base_agent::ContextProvider;
 
-    fn render(adapter: &mut ReasoningEffortContextAdapter, context: &mut Context) -> String {
+    fn render(provider: &mut ReasoningEffortContextProvider, context: &mut Context) -> String {
         let history = {
             let mut sink = context.sink();
-            assert!(adapter.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         context.request(&history).system().to_owned()
     }
 
     #[test]
-    fn update_changes_only_this_adapter() {
-        let (mut adapter, handle) = ReasoningEffortContextAdapter::new(ReasoningEffort::Low);
-        let (mut other, _other_handle) = ReasoningEffortContextAdapter::new(ReasoningEffort::Low);
+    fn update_changes_only_this_provider() {
+        let (mut provider, handle) = ReasoningEffortContextProvider::new(ReasoningEffort::Low);
+        let (mut other, _other_handle) = ReasoningEffortContextProvider::new(ReasoningEffort::Low);
         let mut context = Context::new();
 
-        let low = render(&mut adapter, &mut context);
+        let low = render(&mut provider, &mut context);
         assert!(low.contains("Reasoning effort: low"));
 
         handle.set(ReasoningEffort::Ultra);
-        let ultra = render(&mut adapter, &mut context);
+        let ultra = render(&mut provider, &mut context);
         assert!(ultra.contains("Reasoning effort: ultra"));
         assert!(!ultra.contains("Reasoning effort: low"));
 

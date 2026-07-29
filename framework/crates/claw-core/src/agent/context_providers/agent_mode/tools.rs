@@ -1,4 +1,4 @@
-//! The `plan` tool group owned by [`AgentModeContextAdapter`](super::AgentModeContextAdapter).
+//! The `plan` tool group owned by [`AgentModeContextProvider`](super::AgentModeContextProvider).
 
 use claw_permission::{Action, RiskClass};
 use claw_persistence::DurableState;
@@ -93,7 +93,7 @@ impl SyncToolHandler for ExitPlanModeTool {
         let output = match outcome.as_str() {
             "execute" => {
                 // The approved plan remains in this tool call's transcript
-                // arguments; the adapter only changes the next context frame.
+                // arguments; the provider only changes the next context frame.
                 let _plan = non_blank_argument(&args, "plan")?;
                 "Plan Mode exited. Begin executing the approved plan."
             }

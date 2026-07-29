@@ -10,10 +10,10 @@ use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
 
 use crate::agent::baked;
-use crate::agent::base_agent::{agent_effect_channel, BaseAgent, BaseAgentConfig, ContextAdapter};
-use crate::agent::context_adapters::{
-    AgentModeContextAdapter, ConversationHistoryContextAdapter, ProfileContextAdapter,
-    ReasoningEffortContextAdapter, ResumeContextAdapter, SkillContextAdapter,
+use crate::agent::base_agent::{agent_effect_channel, BaseAgent, BaseAgentConfig, ContextProvider};
+use crate::agent::context_providers::{
+    AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
+    ReasoningEffortContextProvider, ResumeContextProvider, SkillContextProvider,
 };
 use crate::agent::tools::internal_tools;
 use crate::agent::{Agent, AgentKind, BaseAgentState, ReasoningEffort, ReasoningEffortHandle};
@@ -183,49 +183,49 @@ impl<
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
-        let resume_adapter = ResumeContextAdapter::new(state.clone(), tools.discovery());
+        let resume_provider = ResumeContextProvider::new(state.clone(), tools.discovery());
 
         // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
-        // adapters read it through the `&dyn Transcript` lent to `prepare`.
+        // providers read it through the `&dyn Transcript` lent to `prepare`.
         let conversation_history =
-            ConversationHistoryContextAdapter::with_llm_compaction::<Http, Timer>(
+            ConversationHistoryContextProvider::with_llm_compaction::<Http, Timer>(
                 Arc::clone(&self.api_manager),
                 COMPACTION_TRIGGER_TOKENS,
                 COMPACTION_KEEP_RECENT_TOKENS,
                 COMPACTION_SEGMENT_TOKEN_BUDGET,
             );
-        let profile_adapter = ProfileContextAdapter::new(self.profile_store.clone());
-        let adapter = match self.long_term.adapter(kind.as_str()) {
-            Ok(adapter) => adapter,
+        let profile_provider = ProfileContextProvider::new(self.profile_store.clone());
+        let provider = match self.long_term.provider(kind.as_str()) {
+            Ok(provider) => provider,
             Err(error) => {
                 log::error!(
-                    "Agent {id} ({}) failed to attach long-term context adapter: {error}",
+                    "Agent {id} ({}) failed to attach long-term context provider: {error}",
                     kind.as_str()
                 );
                 tracing::error!(
-                    name: "context_adapter_attach_failed",
+                    name: "context_provider_attach_failed",
                     agent = %id,
-                    adapter = "long_term",
+                    provider = "long_term",
                     kind = %kind.as_str(),
                 );
                 return Err(AgentCreateError::LongTerm(error));
             }
         };
         // AgentManager is the only configured-agent assembly point. BaseAgent sees
-        // one generic, immutable adapter set; concrete mode, memory, and skill
-        // semantics do not leak into its runtime protocol. ResumeContextAdapter
+        // one generic, immutable provider set; concrete mode, memory, and skill
+        // semantics do not leak into its runtime protocol. ResumeContextProvider
         // is the boundary that contributes resume context and exposes the pure
-        // discovery group implemented alongside the resume adapter.
-        let (reasoning_effort_adapter, reasoning_effort_handle) =
-            ReasoningEffortContextAdapter::new(reasoning_effort);
-        let context_adapters: Vec<Box<dyn ContextAdapter>> = vec![
-            Box::new(AgentModeContextAdapter::new(state.clone(), effect_emitter)),
-            Box::new(reasoning_effort_adapter),
-            Box::new(resume_adapter),
+        // discovery group implemented alongside the resume provider.
+        let (reasoning_effort_provider, reasoning_effort_handle) =
+            ReasoningEffortContextProvider::new(reasoning_effort);
+        let context_providers: Vec<Box<dyn ContextProvider>> = vec![
+            Box::new(AgentModeContextProvider::new(state.clone(), effect_emitter)),
+            Box::new(reasoning_effort_provider),
+            Box::new(resume_provider),
             Box::new(conversation_history),
-            Box::new(SkillContextAdapter::new(skill_set)),
-            Box::new(profile_adapter),
-            Box::new(adapter),
+            Box::new(SkillContextProvider::new(skill_set)),
+            Box::new(profile_provider),
+            Box::new(provider),
         ];
         let api_purpose = if is_root {
             ApiPurpose::RootAgent
@@ -245,7 +245,7 @@ impl<
                 runtime.instructions().trim().to_owned(),
             ),
             inherited_context,
-            context_adapters,
+            context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
         let base = BaseAgent::<Http, Timer>::build(base_config)?;

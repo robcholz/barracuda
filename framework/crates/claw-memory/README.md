@@ -8,12 +8,12 @@ editable global profile documents (`soul.md`, `identity.md`, `user.md`), and
 **long-term memory** (durable facts). These stores know nothing about prompt
 assembly, summarization, token budgets, or agent tools. Assembling an LLM
 context window is the *agent layer's* job, built on top of the stores via
-context adapters in `claw-core`.
+context providers in `claw-core`.
 
 The crate only defines the `Compactor` **seam** — the contract for folding an
 aged window of messages into a shorter summary. It carries no LLM dependency;
 the ready-made LLM-backed compactor (`LlmCompactor`) and the rolling-summary
-adapter that drives it both live in `claw_core` (the layer that owns the LLM
+provider that drives it both live in `claw_core` (the layer that owns the LLM
 client). The store is never asked to compact.
 
 As a core crate it depends only on the `claw-interface` `ClawFs` persistence
@@ -49,9 +49,9 @@ fully host-testable.
    store is dropped; no explicit checkpoint call.
 
 **Compaction is not the store's concern.** In `claw-core`, a
-`RollingSummaryContextAdapter` reads aged turns via `turns()`,
+`RollingSummaryContextProvider` reads aged turns via `turns()`,
 summarizes them through an injected `Compactor`, and a
-`RecentMessagesContextAdapter` renders the verbatim tail. The two coordinate
+`RecentMessagesContextProvider` renders the verbatim tail. The two coordinate
 through a shared cursor marking the boundary between the summarized prefix and
 the verbatim tail. Bounding on-disk growth (retention) is likewise a separate,
 future concern — not the store's.

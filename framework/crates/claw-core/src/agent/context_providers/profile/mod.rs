@@ -1,6 +1,6 @@
-//! Profile context adapter: project editable profile documents into context.
+//! Profile context provider: project editable profile documents into context.
 //!
-//! The store lives in `claw-memory`; this adapter is the agent-runtime layer that
+//! The store lives in `claw-memory`; this provider is the agent-runtime layer that
 //! maps documents to `BlockKind`s and exposes profile-specific tools. Per-agent
 //! read/write projection is owned by the baked tool blacklist.
 
@@ -9,7 +9,7 @@ use claw_interface::ClawFs;
 use claw_memory::{ProfileDocument, ProfileError, ProfileStore};
 use claw_tool::ToolGroup;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 
 use self::tools::profile_tools;
 
@@ -17,19 +17,19 @@ mod tools;
 
 /// Failure while projecting profile documents into model context.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ProfileAdapterError {
+pub(crate) enum ProfileProviderError {
     /// Reading one profile document failed.
     #[error(transparent)]
     Read(#[from] ProfileError),
 }
 
 /// Pulls global profile documents into the current agent context.
-pub(crate) struct ProfileContextAdapter<F: ClawFs + 'static> {
+pub(crate) struct ProfileContextProvider<F: ClawFs + 'static> {
     store: ProfileStore<F>,
 }
 
-impl<F: ClawFs + 'static> ProfileContextAdapter<F> {
-    /// Build an adapter over `store`.
+impl<F: ClawFs + 'static> ProfileContextProvider<F> {
+    /// Build an provider over `store`.
     pub(crate) fn new(store: ProfileStore<F>) -> Self {
         Self { store }
     }
@@ -38,7 +38,7 @@ impl<F: ClawFs + 'static> ProfileContextAdapter<F> {
         &self,
         document: ProfileDocument,
         output: &mut ContextSink<'_>,
-    ) -> Result<(), ProfileAdapterError> {
+    ) -> Result<(), ProfileProviderError> {
         let kind = match document {
             ProfileDocument::Soul => BlockKind::Soul,
             ProfileDocument::AssistantIdentity => BlockKind::AssistantIdentity,
@@ -65,8 +65,8 @@ impl<F: ClawFs + 'static> ProfileContextAdapter<F> {
     }
 }
 
-impl<F: ClawFs + 'static> ContextAdapter for ProfileContextAdapter<F> {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+impl<F: ClawFs + 'static> ContextProvider for ProfileContextProvider<F> {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         for document in ProfileDocument::all() {
             self.contribute_document(document, output)
                 .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?;

@@ -6,7 +6,7 @@ use claw_context::{Band, BlockKind, ContextSink, Scope};
 use claw_persistence::DurableState;
 use claw_tool::{ToolDiscoveryHandle, ToolGroup};
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 use crate::agent::BaseAgentState;
 
 use self::tools::discovery_tools;
@@ -15,13 +15,13 @@ mod tools;
 
 /// Contributes a one-shot reminder derived from restored Agent state and
 /// exposes tool discovery.
-pub(in crate::agent) struct ResumeContextAdapter {
+pub(in crate::agent) struct ResumeContextProvider {
     state: DurableState<BaseAgentState>,
     reminder: Option<String>,
     discovery: ToolDiscoveryHandle,
 }
 
-impl ResumeContextAdapter {
+impl ResumeContextProvider {
     pub(in crate::agent) fn new(
         state: DurableState<BaseAgentState>,
         discovery: ToolDiscoveryHandle,
@@ -35,8 +35,8 @@ impl ResumeContextAdapter {
     }
 }
 
-impl ContextAdapter for ResumeContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+impl ContextProvider for ResumeContextProvider {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         let reminder = self.reminder.take();
         output.reminder(resume_reminder_kind(), reminder.as_deref());
         Ok(())
@@ -99,8 +99,8 @@ fn resume_reminder_kind() -> BlockKind {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use super::ResumeContextAdapter;
-    use crate::agent::base_agent::ContextAdapter;
+    use super::ResumeContextProvider;
+    use crate::agent::base_agent::ContextProvider;
     use crate::agent::{AgentKind, BaseAgentState};
     use claw_api::ToolCall;
     use claw_context::Context;
@@ -118,9 +118,9 @@ mod tests {
             name: "profile_read".to_owned(),
             arguments_json: r#"{"document":"user"}"#.to_owned(),
         }]);
-        let mut adapter = ResumeContextAdapter::new(state, tool_set.discovery());
+        let mut provider = ResumeContextProvider::new(state, tool_set.discovery());
         tool_set
-            .add_group(adapter.tools().expect("discovery group exists"))
+            .add_group(provider.tools().expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
         let schemas = tools.schemas_json();
@@ -130,7 +130,7 @@ mod tests {
         let mut context = Context::new();
         let first = {
             let mut sink = context.sink();
-            assert!(adapter.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         let request = context.request(&first);
@@ -141,7 +141,7 @@ mod tests {
 
         let second = {
             let mut sink = context.sink();
-            assert!(adapter.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         assert!(context.request(&second).reminders().is_empty());
@@ -161,9 +161,9 @@ mod tests {
         state
             .get_mut()
             .record_loaded_tool_group("hidden".to_owned());
-        let mut adapter = ResumeContextAdapter::new(state, tool_set.discovery());
+        let mut provider = ResumeContextProvider::new(state, tool_set.discovery());
         tool_set
-            .add_group(adapter.tools().expect("discovery group exists"))
+            .add_group(provider.tools().expect("discovery group exists"))
             .expect("discovery group attaches");
         let tools = tool_set.begin().expect("tool set begins");
         assert!(!tools.schemas_json().contains("hidden_test"));
@@ -171,7 +171,7 @@ mod tests {
         let mut context = Context::new();
         let history = {
             let mut sink = context.sink();
-            assert!(adapter.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         let request = context.request(&history);

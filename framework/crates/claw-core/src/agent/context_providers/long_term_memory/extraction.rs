@@ -4,7 +4,7 @@
 //! what should change, and emit a few [`MemoryOp`]s". *How* that is done (an LLM
 //! call, a heuristic, nothing) is a policy injected as an [`Extractor`],
 //! mirroring how [`Compactor`](claw_memory::Compactor) is injected into the
-//! conversation tape. The long-term memory adapter owns the *mechanism* (when to
+//! conversation tape. The long-term memory provider owns the *mechanism* (when to
 //! extract, routing new facts to a tier, applying edits/removals, persisting);
 //! the `Extractor` owns only the *transformation*, so it stays free of any
 //! storage concern.
@@ -60,7 +60,7 @@ pub(crate) struct ExtractionInput<'a> {
 
 /// A single change an [`Extractor`] proposes against long-term memory.
 ///
-/// The adapter applies each op: `Add` stores a new fact, `Replace` edits the
+/// The provider applies each op: `Add` stores a new fact, `Replace` edits the
 /// cited fact in place, `Forget` removes it. `Replace`/`Forget` name a fact by
 /// the [`MemoryId`] the extractor saw in a [`MemorySnapshot`].
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub(crate) enum MemoryOp {
 
 /// Failure from an [`Extractor`].
 ///
-/// The concrete source is preserved for propagation through the adapter port.
+/// The concrete source is preserved for propagation through the provider port.
 #[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ExtractError {
     /// The extraction backend (e.g. the LLM client) failed.

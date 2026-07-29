@@ -1,10 +1,10 @@
 //! Conversation-history projection and compaction for one agent.
 //!
-//! [`ConversationHistoryContextAdapter`] owns both sides of the request-time
+//! [`ConversationHistoryContextProvider`] owns both sides of the request-time
 //! history boundary: summary messages for the compacted prefix and a cached
 //! verbatim tail for everything after that prefix. Keeping the transcript,
 //! coverage cursor, summary, and tail cache in one object makes one
-//! [`ContextAdapter::prepare`]/[`ContextAdapter::contribute`] cycle an atomic
+//! [`ContextProvider::prepare`]/[`ContextProvider::contribute`] cycle an atomic
 //! projection: every committed turn is represented exactly once, while the open
 //! turn always remains verbatim.
 
@@ -16,7 +16,7 @@ use claw_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 use crate::config::SharedApiManager;
 
 use llm_compactor::LlmCompactor;
@@ -25,7 +25,7 @@ use llm_compactor::LlmCompactor;
 /// [`estimate_message_tokens`].
 const CHARS_PER_TOKEN: usize = 4;
 
-/// The conversation-compaction policy knobs the adapter applies.
+/// The conversation-compaction policy knobs the provider applies.
 #[derive(Clone, Copy, Debug)]
 struct CompactionPolicy {
     /// Start compacting once the verbatim history past the cursor exceeds this.
@@ -48,7 +48,7 @@ impl CompactionPolicy {
 
 /// Failure while preparing the conversation-history projection.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum ConversationHistoryAdapterError {
+pub(crate) enum ConversationHistoryProviderError {
     /// Summarizing an aged transcript window failed.
     #[error(transparent)]
     Compaction(#[from] CompactError),
@@ -57,9 +57,9 @@ pub(crate) enum ConversationHistoryAdapterError {
 /// Owns the complete request-time projection of one conversation transcript.
 ///
 /// The transcript itself is owned by `BaseAgent` (as `dyn Transcript`) and is
-/// lent to this adapter for the duration of each [`ContextAdapter::prepare`]
-/// call; the adapter holds only the derived projection (summary + verbatim tail).
-pub(in crate::agent) struct ConversationHistoryContextAdapter {
+/// lent to this provider for the duration of each [`ContextProvider::prepare`]
+/// call; the provider holds only the derived projection (summary + verbatim tail).
+pub(in crate::agent) struct ConversationHistoryContextProvider {
     /// Transformation used to summarize one aged prefix window.
     compactor: Box<dyn Compactor>,
     policy: CompactionPolicy,
@@ -76,7 +76,7 @@ pub(in crate::agent) struct ConversationHistoryContextAdapter {
     primed: bool,
 }
 
-impl ConversationHistoryContextAdapter {
+impl ConversationHistoryContextProvider {
     fn new(compactor: Box<dyn Compactor>, policy: CompactionPolicy) -> Self {
         Self {
             compactor,
@@ -112,7 +112,7 @@ impl ConversationHistoryContextAdapter {
     async fn prepare_projection(
         &mut self,
         transcript: &dyn Transcript,
-    ) -> Result<(), ConversationHistoryAdapterError> {
+    ) -> Result<(), ConversationHistoryProviderError> {
         if let Some((id_end, window_messages, estimated_tokens)) = self.select_window(transcript) {
             let span = tracing::info_span!(
                 "context.compact",
@@ -231,8 +231,8 @@ fn is_uncovered(turn: &Turn, covered_through: Option<TurnId>) -> bool {
     }
 }
 
-impl ContextAdapter for ConversationHistoryContextAdapter {
-    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextAdapterFuture<'a> {
+impl ContextProvider for ConversationHistoryContextProvider {
+    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
         Box::pin(async move {
             self.prepare_projection(transcript)
                 .await
@@ -240,7 +240,7 @@ impl ContextAdapter for ConversationHistoryContextAdapter {
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         // The transcript is only borrowed during `prepare`, which the production
         // lifecycle always runs first and which caches the summary + verbatim
         // tail. `contribute` therefore just emits that cached projection.
@@ -292,7 +292,7 @@ mod tests {
     use futures_lite::future::block_on;
     use serde_json::{json, Value};
 
-    use super::{CompactionPolicy, ContextAdapter, ConversationHistoryContextAdapter};
+    use super::{CompactionPolicy, ContextProvider, ConversationHistoryContextProvider};
 
     struct WindowEchoCompactor;
 
@@ -333,18 +333,18 @@ mod tests {
             .nth(1)
             .expect("two committed turns exist");
 
-        let mut adapter = ConversationHistoryContextAdapter::new(
+        let mut provider = ConversationHistoryContextProvider::new(
             Box::new(WindowEchoCompactor),
             CompactionPolicy::new(0, 1, usize::MAX),
         );
-        assert!(block_on(adapter.prepare(&transcript as &dyn Transcript)).is_ok());
+        assert!(block_on(provider.prepare(&transcript as &dyn Transcript)).is_ok());
 
         let mut context = Context::new();
         let mut sink = context.sink();
-        assert!(adapter.contribute(&mut sink).is_ok());
+        assert!(provider.contribute(&mut sink).is_ok());
         let rendered = sink.into_history();
 
-        assert_eq!(adapter.covered_through, Some(expected_covered_through));
+        assert_eq!(provider.covered_through, Some(expected_covered_through));
         assert_eq!(
             rendered,
             json!([

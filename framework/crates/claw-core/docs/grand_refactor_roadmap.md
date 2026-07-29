@@ -174,7 +174,7 @@ across these boundaries.
 
 - BaseAgent owns the generic run/snapshot protocol but no concrete mode or
   memory semantics. Authoritative recovery values stay with their components:
-  the mode adapter and resumed adapter. BaseAgent owns no persistence manager
+  the mode provider and resumed provider. BaseAgent owns no persistence manager
   or filesystem capability.
 - BaseAgent exposes one synchronous, I/O-free
   `recovery_state() -> AgentState` API. The returned value is an
@@ -188,13 +188,13 @@ AgentState {
 }
 ~~~
 
-- Component DTOs are defined beside their owners. Context-adapter State DTOs
-  are re-exported with their adapters from `context_adapters/mod.rs`; consumers
-  do not import adapter-internal module paths. The complete aggregate and its
+- Component DTOs are defined beside their owners. Context-provider State DTOs
+  are re-exported with their providers from `context_providers/mod.rs`; consumers
+  do not import provider-internal module paths. The complete aggregate and its
   assembly sink live in `base_agent/persistence.rs`.
-- `ResumedContextAdapter` contributes the one-shot resume reminder and exposes
-  its co-located discovery ToolGroup from `context_adapters/resumed/tools.rs`.
-  `tool_load` records accepted groups into adapter-owned `ResumedState`; the
+- `ResumeContextProvider` contributes the one-shot resume reminder and exposes
+  its co-located discovery ToolGroup from `context_providers/resume/tools.rs`.
+  `tool_load` records accepted groups into provider-owned `ResumedState`; the
   existing `ToolDiscoveryHandle` updates ToolSet's runtime visibility. On
   restart those recorded groups become one-shot reminder context rather than
   being reloaded into the fresh ToolSet. ToolSet gains no persistence DTO or
@@ -317,7 +317,7 @@ multiagent
 └── domain protocol and bridge port
 
 agent
-├── memory adapters
+├── memory providers
 └── tool interfaces
 ~~~
 
@@ -516,9 +516,9 @@ path, without performing runtime checkpoints yet.
 - Implement it as a projection over authoritative live components, not a second
   mutable snapshot cache that can drift from mode or resumed state.
 - Make BaseAgent coordinate a generic recovery projection over authoritative
-  components: `AgentModeState` is owned by `AgentModeContextAdapter`,
-  and `ResumedState` by `ResumedContextAdapter`. BaseAgent must not match on
-  concrete modes or adapters. Preserve the direct
+  components: `AgentModeState` is owned by `AgentModeContextProvider`,
+  and `ResumedState` by `ResumeContextProvider`. BaseAgent must not match on
+  concrete modes or providers. Preserve the direct
   `IterationEvent::BeforeToolCalls` stream boundary without an observer inside the
   tool executor.
 - Keep `BaseAgent::submit(&mut self, Message)` as the crate-private single-task
@@ -529,18 +529,18 @@ path, without performing runtime checkpoints yet.
 - Keep cross-task message queues outside BaseAgent. SessionActor accepts
   and queues messages. A checked-out Agent accepts exactly one dispatch while
   idle between turns and never owns a second message queue.
-- Model reasoning effort as independent per-Agent adapter state.
+- Model reasoning effort as independent per-Agent provider state.
   `SessionPersistentState` retains the Session-wide default; changing it
   broadcasts an owner update to
   all live AgentSlots through independent typed queues and supplies the initial
-  value for future Agents. ReasoningEffortContextAdapter creates its own queue
-  and returns only its sending handle to the AgentSlot. Do not bind adapters to
+  value for future Agents. ReasoningEffortContextProvider creates its own queue
+  and returns only its sending handle to the AgentSlot. Do not bind providers to
   a shared reasoning-effort source or add a ReasoningEffort update method to the
-  generic ContextAdapter port.
+  generic ContextProvider port.
 - Give `AgentManager<F, H, T>` explicit `create_new` and `restore` entry
   points that converge on one private Agent builder. Manager loads or
   initializes recovery state and assembles transcript, tools, mode, and memory
-  adapters, builds BaseAgent, and returns Agent.
+  providers, builds BaseAgent, and returns Agent.
 - Keep F in RuntimeWorker, SessionManager, SessionActor/AgentEnvironment, Manager,
   transcript, and AgentStateStore. Confirm it does not propagate into BaseAgent, AgentRun,
   AgentSlot, or Scheduler.
@@ -906,7 +906,7 @@ without giving BaseAgent a persistence dependency.
 - claw-core/src/agent/base_agent/iteration_loop/run.rs
 - claw-core/src/agent/event.rs
 - claw-core/src/agent/manager/
-- claw-core/src/agent/base_agent/context_adapter.rs
+- claw-core/src/agent/base_agent/context_provider.rs
 - claw-core/src/agent/base_agent/transcript.rs
 - claw-core/src/agent/manager/transcript.rs
 - claw-core/src/protocol/tool.rs
@@ -931,7 +931,7 @@ AgentState {
   and checkout state are never serialized.
 - BaseAgent coordinates the generic snapshot export. Each component mutates and
   contributes its own live semantics; BaseAgent does not inspect concrete
-  adapter state. It owns no SharedPersistence, DurableState, AgentStateStore,
+  provider state. It owns no SharedPersistence, DurableState, AgentStateStore,
   filesystem generic, or persistence callback.
 - SessionManager owns `AgentStateStore<F>` and runtime checkpoint I/O.
   `AgentManager<F, H, T>` uses that store only for initial create/restore and
@@ -1068,9 +1068,9 @@ documents any deliberate difference:
   replace/clear/write operations;
 - long-term memory retains the current global plus Agent-kind visibility rules;
 - skills and tools are filtered by the baked configuration;
-- root and worker construction use the same ContextAdapter-based assembly path.
-- adapter-owned ToolGroups are co-located with their adapter; `agent/tools`
-  contains only pure Agent groups with no adapter domain owner, one group per
+- root and worker construction use the same ContextProvider-based assembly path.
+- provider-owned ToolGroups are co-located with their provider; `agent/tools`
+  contains only pure Agent groups with no provider domain owner, one group per
   file.
 
 Do not optimize context size in this phase. Test both visibility and mutation
@@ -1090,7 +1090,7 @@ contract that later optimization must preserve or intentionally revise.
       cross-Session isolation and baked worker restrictions.
 - [ ] PersistentRoot, EphemeralRoot, and TransientWorker transcript durability
       matches AgentPersistencePolicy.
-- [ ] Checkout/return does not clone transcript or context adapters.
+- [ ] Checkout/return does not clone transcript or context providers.
 - [ ] Root and worker use one assembly path with explicit policy differences.
 
 ## 14. Phase 9 — Audit deletions and verify the architecture

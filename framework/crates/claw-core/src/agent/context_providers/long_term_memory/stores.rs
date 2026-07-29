@@ -34,7 +34,7 @@ pub(super) fn agent_store<F: ClawFs + 'static>(
     LongTermMemory::new(dir, AGENT_ID_PREFIX)
 }
 
-/// The two stores, shared (by cheap clone) between the adapter and every memory
+/// The two stores, shared (by cheap clone) between the provider and every memory
 /// tool handler.
 pub(super) struct MemoryStores<F: ClawFs + 'static> {
     pub(super) global: LongTermMemory<F>,

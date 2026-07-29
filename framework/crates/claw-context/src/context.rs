@@ -269,7 +269,7 @@ impl<'a> ContextItem<'a> {
 /// Blocks and reminders are applied immediately to the owning [`Context`], which
 /// keeps their caches and dirty gates. Message items are cloned into this sink's
 /// request-local history buffer; this preserves the existing `Value::Array`
-/// request shape without making adapters own the final history.
+/// request shape without making providers own the final history.
 pub struct ContextSink<'a> {
     context: &'a mut Context,
     messages: Vec<(BlockKind, Value)>,

@@ -3,7 +3,7 @@
 //! [`BaseAgent::submit`] executes one linear task for the outer [`super::Agent`].
 
 mod agent;
-mod context;
+mod context_provider;
 mod effect;
 mod iteration_loop;
 mod persistence;
@@ -11,8 +11,8 @@ mod stream;
 
 pub(crate) use self::agent::BaseAgent;
 pub(super) use self::agent::BaseAgentConfig;
-pub(in crate::agent) use self::context::{
-    ContextAdapter, ContextAdapterFuture, ContextAdapterResult, TurnLifecycle,
+pub(in crate::agent) use self::context_provider::{
+    ContextProvider, ContextProviderFuture, ContextProviderResult, TurnLifecycle,
 };
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
 pub(in crate::agent) use self::persistence::BaseAgentState;

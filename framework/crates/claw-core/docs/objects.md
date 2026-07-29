@@ -9,7 +9,7 @@
 - `Arc<dyn PermissionPolicy>`
 - assembled `Context`
 - `SharedApiManager` and this Agent's `ApiPurpose`
-- `Vec<Box<dyn ContextAdapter>>`
+- `Vec<Box<dyn ContextProvider>>`
 - `AgentEffectInbox`
 
 For each tool round, BaseAgent statically injects its permission implementation

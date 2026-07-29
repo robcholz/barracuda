@@ -184,7 +184,7 @@ across Sessions; a future directory cache must remain a rebuildable read model.
 - `BaseAgent` owns only the generic run protocol and already assembled
   dependencies: type-erased transcript, `ToolSet`, `PermissionPolicy`, agent
   instruction, inherited context, `SharedApiManager` plus its Agent `ApiPurpose`,
-  `Vec<Box<dyn ContextAdapter>>`, and the transient `AgentEffectInbox` used to
+  `Vec<Box<dyn ContextProvider>>`, and the transient `AgentEffectInbox` used to
   reduce typed tool effects.
 - At the beginning of every LLM iteration, BaseAgent snapshots its current API
   config from `SharedApiManager`, drops the manager lock, and applies that
@@ -193,48 +193,48 @@ across Sessions; a future directory cache must remain a rebuildable read model.
   LLM. Memory extraction and transcript compaction keep their own manager
   clones and dedicated usages.
 - Concrete mode, conversation, profile, skill, and memory semantics live under
-  `agent/context_adapters`. In particular, the BaseAgent runtime neither
+  `agent/context_providers`. In particular, the BaseAgent runtime neither
   recognizes Normal/Plan nor matches on mode-specific tools.
-- Every Agent owns an independent `ReasoningEffortContextAdapter` value. The
+- Every Agent owns an independent `ReasoningEffortContextProvider` value. The
   durable Session setting is the default for future Agents and a Session-level
-  update is fanned out through one typed queue per live Agent; adapters do not
-  share a mutable reasoning-effort source. Each adapter creates and owns its
+  update is fanned out through one typed queue per live Agent; providers do not
+  share a mutable reasoning-effort source. Each provider creates and owns its
   receiver, returns only the sending handle to its AgentSlot, and drains its
   inbox when it contributes the next iteration's context.
-- `ContextAdapter` and transcript-facing traits are consumer-owned ports under
-  `agent/base_agent`; `agent/context_adapters` contains implementations only.
+- `ContextProvider` and transcript-facing traits are consumer-owned ports under
+  `agent/base_agent`; `agent/context_providers` contains implementations only.
   The concrete `TranscriptStore<F>` binding lives at the filesystem-aware
   Manager boundary.
 - Each component's durable DTO is defined beside that component:
-  `AgentModeState` beside `AgentModeContextAdapter`, and `ResumedState` beside
-  `ResumedContextAdapter`. `agent/context_adapters/mod.rs` re-exports each
-  adapter together with its State DTO so consumers never depend on
-  adapter-internal module paths. The complete aggregate `AgentState` and its
+  `AgentModeState` beside `AgentModeContextProvider`, and `ResumedState` beside
+  `ResumeContextProvider`. `agent/context_providers/mod.rs` re-exports each
+  provider together with its State DTO so consumers never depend on
+  provider-internal module paths. The complete aggregate `AgentState` and its
   assembly sink live in `agent/base_agent/persistence.rs`; BaseAgent coordinates
   collection but does not interpret component fields.
-- A ToolGroup that operates on adapter-owned state is co-located with that
-  adapter (for example `context_adapters/agent_mode/tools.rs`). Only pure Agent
-  tool groups with no adapter domain owner live under `agent/tools`, one group
+- A ToolGroup that operates on provider-owned state is co-located with that
+  provider (for example `context_providers/agent_mode/tools.rs`). Only pure Agent
+  tool groups with no provider domain owner live under `agent/tools`, one group
   per file.
-- `ResumedContextAdapter` owns the optional, one-shot resume reminder and
-  its `context_adapters/resumed/tools.rs` discovery group. `tool_load` records
-  accepted groups into the adapter-owned `ResumedState` while the existing
+- `ResumeContextProvider` owns the optional, one-shot resume reminder and
+  its `context_providers/resume/tools.rs` discovery group. `tool_load` records
+  accepted groups into the provider-owned `ResumedState` while the existing
   `ToolDiscoveryHandle` asks ToolSet to update its runtime visibility. After a
   restart, recorded groups are rendered into the one-shot reminder; they are
   not automatically loaded into the fresh ToolSet.
 - Other pure ToolGroups are assembled directly into ToolSet by Manager; they
-  are not wrapped in fake context adapters merely to deliver an Agent effect.
+  are not wrapped in fake context providers merely to deliver an Agent effect.
 - Manager creates one synchronous tool-to-Agent effect channel. BaseAgent owns
-  its unique, non-cloneable `AgentEffectInbox`; pure tools and adapter-owned
-  tools receive clones of `AgentEffectEmitter`. `ContextAdapter` has no generic
-  reverse drain/message or configuration-update API; an adapter that needs
+  its unique, non-cloneable `AgentEffectInbox`; pure tools and provider-owned
+  tools receive clones of `AgentEffectEmitter`. `ContextProvider` has no generic
+  reverse drain/message or configuration-update API; an provider that needs
   typed control owns its concrete inbox.
 - Tools emit typed effects while they run; BaseAgent drains and reduces them
   only after the complete tool round. The channel mutex is held only for a
   bounded emit/drain operation and never across an `await`. More than one
   mutually exclusive task-boundary effect in a round fails deterministically.
 - Each authoritative component owns its live recovery semantics: the mode
-  adapter owns mode and the resumed adapter owns loaded-group recovery state.
+  provider owns mode and the resumed provider owns loaded-group recovery state.
   ToolSet retains only its existing runtime projection and has no persistence
   API.
 - Tool execution and permission are separate. `ToolRunner::run` receives only
@@ -315,7 +315,7 @@ absent because the canonical transcript reconstructs it. Iteration-local
 are absent because they are transient.
 
 Each Agent's BaseAgent owns one `DurableState<AgentState>` projection. BaseAgent
-refreshes that projection from authoritative adapters at iteration and terminal
+refreshes that projection from authoritative providers at iteration and terminal
 boundaries. For a persistent root, AgentManager registers the same DurableState
 with the Agent collection during create or restore; ephemeral Agents leave it
 unregistered. Neither SessionActor nor RuntimeWorker borrows a checked-out
@@ -396,7 +396,7 @@ rather than changing the scope of `ToolCallId`.
 
 ## Memory components
 
-- Memory uses `ContextAdapter` to decouple from concrete Agent ownership.
+- Memory uses `ContextProvider` to decouple from concrete Agent ownership.
 - Each Agent sees its own transcript and conversation-history projection unless
   explicit spawn-time context is provided.
 - Transcript implementations may be durable or in-memory and provide the
@@ -452,7 +452,7 @@ multiagent
 └── domain protocol and bridge port
 
 agent runtime
-├── context adapters
+├── context providers
 └── tool interfaces
 ~~~
 

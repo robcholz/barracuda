@@ -83,7 +83,7 @@ body as:
 - DATA roots should be added before SYSTEM roots so user-installed skills shadow
   firmware-baked skills with the same id.
 - `SkillSet` owns reusable `catalog_buffer` and `document_buffer`. Share one
-  `SkillSet` between the context adapter and skill tools, typically behind a
+  `SkillSet` between the context provider and skill tools, typically behind a
   mutex, so both paths use the same buffers.
 - `reload()` re-scans the registry roots after external filesystem changes; a
   failed reload leaves the previous snapshot in place.

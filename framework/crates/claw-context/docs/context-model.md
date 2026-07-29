@@ -103,9 +103,9 @@ runtime lifecycle.
 The current user input is not a `BlockKind`. It lives in the transcript:
 
 1. `BaseAgent::run` / `AppendMessage` appends the text as the open user turn.
-2. `RecentMessagesContextAdapter` reads committed turns after the summary cursor
+2. `RecentMessagesContextProvider` reads committed turns after the summary cursor
    plus the in-progress open turn.
-3. The adapter contributes those messages as `RecentContext` in the history tail.
+3. The provider contributes those messages as `RecentContext` in the history tail.
 
 This keeps the user message in the model's normal conversation channel and
 prevents duplicating it in the system prefix. Only systems that cannot represent
@@ -298,7 +298,7 @@ blocks:
 
 | Context | Legacy behavior on `master` | Rust status / direction |
 |---|---|---|
-| Soul / AssistantIdentity / UserProfile | `claw_memory_profile_provider` pushed editable profile files (`user.md`, `soul.md`, `identity.md`) into the system prompt. | Implemented as first-class global blocks backed by `ProfileStore` and `ProfileContextAdapter`. |
+| Soul / AssistantIdentity / UserProfile | `claw_memory_profile_provider` pushed editable profile files (`user.md`, `soul.md`, `identity.md`) into the system prompt. | Implemented as first-class global blocks backed by `ProfileStore` and `ProfileContextProvider`. |
 | SessionContext | No clear legacy equivalent beyond request metadata such as source channel/chat. | Product decision. Implement only if sessions gain stable shared framing; otherwise drop the block kind. |
 | SessionMemory | No durable session-scope `MEMORY.md` equivalent. Legacy Session History was transcript storage, not session memory. | Missing by design. Implement only if we need session-wide durable notes distinct from conversation transcript/summary. |
 | ModeFraming | Root/subagent role and subagent type prompts were folded into the agent system prompt by the agent manager. | Mostly absorbed by `AgentInstruction` today. Extract to `ModeFraming` only when conversation/working/review/etc. modes need to swap framing independently of agent identity. |

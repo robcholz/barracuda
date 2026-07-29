@@ -22,7 +22,7 @@
 //! Compaction — summarizing an aged prefix so the transcript fits the model's
 //! context window — is **not** this store's job. Compaction is a property of the
 //! *LLM request*, not of the record: the summary is a derived artifact assembled
-//! at request time by the agent layer's rolling-summary context adapter, which
+//! at request time by the agent layer's rolling-summary context provider, which
 //! *reads* this store ([`turns`](Transcript::turns)) and
 //! keeps its own summary. This store never deletes a turn, never folds turns into
 //! a summary, and has no token budget. It just stores and replays the verbatim
@@ -42,7 +42,7 @@
 //!
 //! All state mutation (appends, commits, persistence) happens on the
 //! **foreground** thread that owns the store. A single store must be driven from
-//! one thread; the `Arc`-backed state lets a reader (a context adapter) hold a
+//! one thread; the `Arc`-backed state lets a reader (a context provider) hold a
 //! clone for its read snapshots.
 //!
 //! # Identity and persistence
@@ -163,11 +163,11 @@ impl ByteLen {
     }
 }
 
-/// One committed turn, lent read-only to context adapters.
+/// One committed turn, lent read-only to context providers.
 ///
 /// Returned (as one element of the shared snapshot) by
 /// [`turns`](Transcript::turns). Carries the turn's messages plus, for a
-/// committed turn, its stable [`TurnId`], so an adapter computing a
+/// committed turn, its stable [`TurnId`], so an provider computing a
 /// summarization boundary or a recent-tail cutoff can reason about *which* turns
 /// it has covered.
 ///
@@ -321,7 +321,7 @@ impl StoreState {
     }
 }
 
-/// Shared inner state — held behind an `Arc` so a context adapter can keep its
+/// Shared inner state — held behind an `Arc` so a context provider can keep its
 /// own clone of the store and read the same transcript the agent writes.
 #[derive(Clone, Copy)]
 struct PersistenceFns {

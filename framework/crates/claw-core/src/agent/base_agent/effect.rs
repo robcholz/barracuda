@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 /// A tool-level request that changes the current task boundary.
 ///
-/// The protocol contains no concrete tool or context-adapter semantics.
+/// The protocol contains no concrete tool or context-provider semantics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AgentEffect {
     /// Finish the current task with the supplied assistant message.

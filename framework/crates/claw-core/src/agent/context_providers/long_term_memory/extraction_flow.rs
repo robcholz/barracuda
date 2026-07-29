@@ -3,13 +3,15 @@ use claw_memory::{MemoryDraft, MemoryPatch, Transcript};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use super::{ExtractionInput, LongTermMemoryAdapterError, LongTermMemoryContextAdapter, MemoryOp};
+use super::{
+    ExtractionInput, LongTermMemoryContextProvider, LongTermMemoryProviderError, MemoryOp,
+};
 
 /// Extraction throttle: after the first extraction, the transcript version must
 /// advance by at least this much before the next extraction runs.
 const EXTRACT_MIN_VERSION_DELTA: u64 = 8;
 
-impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
+impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
     /// Run extraction when the transcript has advanced.
     ///
     /// Pull, not push: called from `prepare` at the iteration boundary, it self-detects
@@ -18,7 +20,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     pub(super) async fn maybe_schedule_extraction(
         &mut self,
         transcript: &dyn Transcript,
-    ) -> Result<(), LongTermMemoryAdapterError> {
+    ) -> Result<(), LongTermMemoryProviderError> {
         let version = transcript.version();
         if version == self.extract_cursor {
             return Ok(()); // transcript unchanged since the last extraction

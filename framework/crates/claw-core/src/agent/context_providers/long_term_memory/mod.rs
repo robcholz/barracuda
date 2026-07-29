@@ -10,7 +10,7 @@ use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{LongTermInitError, LongTermMemory, Transcript};
 use claw_tool::ToolGroup;
 
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterFuture, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 use crate::config::SharedApiManager;
 
 mod extraction;
@@ -26,18 +26,18 @@ mod tools;
 use extraction::{ExtractError, ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
 
-type AdapterBuilder<F> =
-    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextAdapter<F>;
+type ProviderBuilder<F> =
+    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextProvider<F>;
 
 /// Failure while preparing long-term-memory context.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum LongTermMemoryAdapterError {
+pub(crate) enum LongTermMemoryProviderError {
     /// Extracting memory operations from the transcript failed.
     #[error(transparent)]
     Extraction(#[from] ExtractError),
 }
 
-/// The adapter's rendered-catalog cache, keyed on each store's change version.
+/// The provider's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
 struct CatalogCache {
     global_version: u64,
@@ -49,8 +49,8 @@ struct CatalogCache {
     primed: bool,
 }
 
-/// A [`ContextAdapter`] over a dual-tier long-term store. See the module docs.
-pub(in crate::agent) struct LongTermMemoryContextAdapter<F: ClawFs + 'static> {
+/// A [`ContextProvider`] over a dual-tier long-term store. See the module docs.
+pub(in crate::agent) struct LongTermMemoryContextProvider<F: ClawFs + 'static> {
     stores: MemoryStores<F>,
     extractor: Arc<dyn Extractor>,
     /// Rebuilt only when a store version advances.
@@ -59,8 +59,8 @@ pub(in crate::agent) struct LongTermMemoryContextAdapter<F: ClawFs + 'static> {
     extract_cursor: u64,
 }
 
-impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
-    /// Build an adapter over the two stores and an `extractor`.
+impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
+    /// Build an provider over the two stores and an `extractor`.
     fn new(
         agent: LongTermMemory<F>,
         global: LongTermMemory<F>,
@@ -74,24 +74,24 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
         }
     }
 
-    /// Open the shared tier with the adapter's canonical ID namespace.
+    /// Open the shared tier with the provider's canonical ID namespace.
     pub(in crate::agent) fn open_global_store(
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
         global_store(dir)
     }
 
-    /// Open an Agent tier with the adapter's canonical ID namespace.
+    /// Open an Agent tier with the provider's canonical ID namespace.
     pub(in crate::agent) fn open_agent_store(
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
         agent_store(dir)
     }
 
-    /// Build the shared LLM-backed adapter constructor used by AgentManager.
+    /// Build the shared LLM-backed provider constructor used by AgentManager.
     pub(in crate::agent) fn llm_builder<H, Timer>(
         api_manager: SharedApiManager,
-    ) -> Arc<AdapterBuilder<F>>
+    ) -> Arc<ProviderBuilder<F>>
     where
         H: ClawHttp + Default + 'static,
         Timer: ClawTimer + Default + 'static,
@@ -120,10 +120,10 @@ impl<F: ClawFs + 'static> LongTermMemoryContextAdapter<F> {
     }
 }
 
-impl<F: ClawFs + 'static> ContextAdapter for LongTermMemoryContextAdapter<F> {
-    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextAdapterFuture<'a> {
+impl<F: ClawFs + 'static> ContextProvider for LongTermMemoryContextProvider<F> {
+    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
         Box::pin(async move {
-            // Pull, not push: reading the transcript here is where this adapter
+            // Pull, not push: reading the transcript here is where this provider
             // decides whether new conversation warrants extraction.
             self.maybe_schedule_extraction(transcript)
                 .await
@@ -133,7 +133,7 @@ impl<F: ClawFs + 'static> ContextAdapter for LongTermMemoryContextAdapter<F> {
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         // Borrow the cached strings into the blocks; `Context::with` copies them
         // only on a real change, so an unchanged catalog allocates nothing here.
         output.block(Block::new(

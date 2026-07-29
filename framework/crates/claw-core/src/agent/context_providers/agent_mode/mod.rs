@@ -1,6 +1,6 @@
-//! Agent-mode adapter: state, context projection, and lifecycle behavior.
+//! Agent-mode provider: state, context projection, and lifecycle behavior.
 //!
-//! BaseAgent only drives the generic adapter, effect, and task-lifecycle
+//! BaseAgent only drives the generic provider, effect, and task-lifecycle
 //! protocols; mode is stored in the Agent's shared durable state.
 
 use claw_context::{Block, BlockKind, ContextSink};
@@ -9,7 +9,7 @@ use claw_tool::ToolGroup;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::AgentEffectEmitter;
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult, TurnLifecycle};
+use crate::agent::base_agent::{ContextProvider, ContextProviderResult, TurnLifecycle};
 use crate::agent::BaseAgentState;
 
 use self::tools::plan_tools;
@@ -27,19 +27,19 @@ pub(in crate::agent) enum AgentMode {
 }
 
 /// Projects the shared Agent mode and provides all mode-specific tools.
-pub(crate) struct AgentModeContextAdapter {
+pub(crate) struct AgentModeContextProvider {
     state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 }
 
-impl AgentModeContextAdapter {
+impl AgentModeContextProvider {
     pub(crate) fn new(state: DurableState<BaseAgentState>, effects: AgentEffectEmitter) -> Self {
         Self { state, effects }
     }
 }
 
-impl ContextAdapter for AgentModeContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+impl ContextProvider for AgentModeContextProvider {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         let framing = match self.state.get().mode() {
             AgentMode::Normal => "",
             AgentMode::Plan => PLAN_MODE_FRAMING,
@@ -64,22 +64,22 @@ mod tests {
     use claw_context::Context;
     use claw_persistence::DurableState;
 
-    use super::{AgentMode, AgentModeContextAdapter};
+    use super::{AgentMode, AgentModeContextProvider};
     use crate::agent::base_agent::agent_effect_channel;
-    use crate::agent::base_agent::{ContextAdapter, TurnLifecycle};
+    use crate::agent::base_agent::{ContextProvider, TurnLifecycle};
     use crate::agent::{AgentKind, BaseAgentState};
 
-    fn adapter(mode: AgentMode) -> AgentModeContextAdapter {
+    fn provider(mode: AgentMode) -> AgentModeContextProvider {
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state.get_mut().set_mode(mode);
         let (effects, _inbox) = agent_effect_channel();
-        AgentModeContextAdapter::new(state, effects)
+        AgentModeContextProvider::new(state, effects)
     }
 
-    fn render(adapter: &mut AgentModeContextAdapter, context: &mut Context) -> String {
+    fn render(provider: &mut AgentModeContextProvider, context: &mut Context) -> String {
         let history = {
             let mut sink = context.sink();
-            assert!(adapter.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&mut sink).is_ok());
             sink.into_history()
         };
         context.request(&history).system().to_owned()
@@ -87,25 +87,25 @@ mod tests {
 
     #[test]
     fn plan_mode_projects_framing() {
-        let mut adapter = adapter(AgentMode::Plan);
+        let mut provider = provider(AgentMode::Plan);
         let mut context = Context::new();
-        assert!(render(&mut adapter, &mut context).contains("Do not implement"));
+        assert!(render(&mut provider, &mut context).contains("Do not implement"));
     }
 
     #[test]
     fn ended_turn_resets_shared_agent_mode() {
-        let mut adapter = adapter(AgentMode::Plan);
-        adapter.on_turn_lifecycle(TurnLifecycle::Ended);
+        let mut provider = provider(AgentMode::Plan);
+        provider.on_turn_lifecycle(TurnLifecycle::Ended);
 
         let mut context = Context::new();
-        assert_eq!(render(&mut adapter, &mut context), "");
+        assert_eq!(render(&mut provider, &mut context), "");
     }
 
     #[test]
     fn normal_mode_has_no_framing() {
-        let mut adapter = adapter(AgentMode::Normal);
+        let mut provider = provider(AgentMode::Normal);
         let mut context = Context::new();
 
-        assert_eq!(render(&mut adapter, &mut context), "");
+        assert_eq!(render(&mut provider, &mut context), "");
     }
 }

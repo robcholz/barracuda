@@ -73,7 +73,7 @@ fn backend_csv_failure_matrix_covers_fs_http_and_timer_failures() {
 }
 
 #[test]
-fn context_adapter_failure_has_a_typed_sse_error() {
+fn context_provider_failure_has_a_typed_sse_error() {
     let _guard = BACKEND_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -81,18 +81,18 @@ fn context_adapter_failure_has_a_typed_sse_error() {
 
     MemFs::new();
     let system = PermanentHttpSystem::new::<StdThread, TokioExecutor>(persistence(&mem_root(
-        "context-adapter-failure",
+        "context-provider-failure",
     )))
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
 
-    let events = drive_one_turn(&system, "surface adapter failure");
+    let events = drive_one_turn(&system, "surface provider failure");
     assert!(events.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(TurnEvent::Error(TurnEventError::Execution(
-            SessionTurnError::ContextAdapter(_)
+            SessionTurnError::ContextProvider(_)
         )))
     )));
 }

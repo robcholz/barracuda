@@ -27,3 +27,17 @@ The command uses `claw-log`'s canonical Python exporter. Its synthetic Chrome
 process/thread mapping (including `run.system`, session grouping, and the
 `unattributed` fallback) is documented in
 [`crates/claw-log/scripts/README.md`](crates/claw-log/scripts/README.md).
+
+## Flashing
+
+Enable rich logging by:
+
+```bash
+export CLAW_DEBUG=1
+```
+
+Clear it with:
+
+```bash
+unset CLAW_DEBUG
+```

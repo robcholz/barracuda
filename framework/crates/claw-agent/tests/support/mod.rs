@@ -22,7 +22,7 @@ pub type MemAgentSystem =
 
 /// Wraps any [`ClawHttp`] test double so it can back the streaming iteration
 /// loop: the one-shot seam returns the scripted OpenAI JSON verbatim (for the
-/// memory adapters' `chat`), while the streaming seam converts that same JSON
+/// memory providers' `chat`), while the streaming seam converts that same JSON
 /// into a single-shot SSE body (for the iteration loop's `chat_stream`). This
 /// keeps every existing non-streaming fixture usable unchanged, and lives only
 /// in the test harness — the shared `claw-interface` stays format-agnostic.

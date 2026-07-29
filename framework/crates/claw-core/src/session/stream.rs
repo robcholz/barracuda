@@ -161,9 +161,9 @@ pub enum SessionTurnError {
     /// The root Agent could not be constructed or restored.
     #[error(transparent)]
     AgentCreate(#[from] AgentCreateError),
-    /// A context adapter could not prepare or project the request context.
+    /// A context provider could not prepare or project the request context.
     #[error(transparent)]
-    ContextAdapter(#[from] ContextAdapterError),
+    ContextProvider(#[from] ContextProviderError),
     /// The active Agent turn failed.
     #[error(transparent)]
     Agent(AgentError),
@@ -172,16 +172,18 @@ pub enum SessionTurnError {
 impl SessionTurnError {
     pub(crate) fn from_agent(error: AgentError) -> Self {
         match error {
-            AgentError::ContextAdapter(source) => Self::ContextAdapter(ContextAdapterError(source)),
+            AgentError::ContextProvider(source) => {
+                Self::ContextProvider(ContextProviderError(source))
+            }
             error => Self::Agent(error),
         }
     }
 }
 
-/// A concrete adapter failure erased at the Session event-stream boundary.
+/// A concrete provider failure erased at the Session event-stream boundary.
 #[derive(Debug, thiserror::Error)]
-#[error("context adapter failed: {0}")]
-pub struct ContextAdapterError(#[source] Box<dyn Error + Send + Sync + 'static>);
+#[error("context provider failed: {0}")]
+pub struct ContextProviderError(#[source] Box<dyn Error + Send + Sync + 'static>);
 
 /// A typed lower-layer failure while resolving caller input.
 #[derive(Debug, thiserror::Error)]

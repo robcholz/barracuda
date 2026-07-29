@@ -19,7 +19,7 @@
 //! The [`TranscriptStore`] therefore never summarizes or deletes turns; it just
 //! stores them. This crate only defines the [`Compactor`] *seam* — the
 //! transformation "turn a window of messages into a summary" — which the agent
-//! layer's rolling-summary context adapter (in `claw_core`) owns and drives. The
+//! layer's rolling-summary context provider (in `claw_core`) owns and drives. The
 //! ready-made LLM-backed compactor (`LlmCompactor`) lives in `claw_core`, which
 //! has the LLM client.
 //!

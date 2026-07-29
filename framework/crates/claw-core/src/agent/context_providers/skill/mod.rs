@@ -1,6 +1,6 @@
-//! Skill context adapter.
+//! Skill context provider.
 //!
-//! This adapter owns the runtime [`SkillSet`] source for an agent. It projects
+//! This provider owns the runtime [`SkillSet`] source for an agent. It projects
 //! the skill catalog into `BlockKind::SkillList` and exposes skill tools that
 //! read from the same buffered source.
 
@@ -11,15 +11,15 @@ use claw_skill::SkillSet;
 use claw_tool::ToolGroup;
 
 use self::tools::skill_tools;
-use crate::agent::base_agent::{ContextAdapter, ContextAdapterResult};
+use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 
 mod tools;
 
-pub(crate) struct SkillContextAdapter {
+pub(crate) struct SkillContextProvider {
     skills: Arc<Mutex<SkillSet>>,
 }
 
-impl SkillContextAdapter {
+impl SkillContextProvider {
     pub(crate) fn new(skills: SkillSet) -> Self {
         Self {
             skills: Arc::new(Mutex::new(skills)),
@@ -27,8 +27,8 @@ impl SkillContextAdapter {
     }
 }
 
-impl ContextAdapter for SkillContextAdapter {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextAdapterResult {
+impl ContextProvider for SkillContextProvider {
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         let mut skills = lock_skill_set(&self.skills);
         let rendered = skills.catalog_context();
         output.block(Block::new(BlockKind::SkillList, rendered));

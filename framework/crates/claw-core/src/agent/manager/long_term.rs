@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{LongTermInitError, LongTermMemory};
 
-use crate::agent::context_adapters::LongTermMemoryContextAdapter;
+use crate::agent::context_providers::LongTermMemoryContextProvider;
 use crate::config::SharedApiManager;
 
 use super::layout::join_storage_path;
@@ -12,13 +12,13 @@ use super::layout::join_storage_path;
 const GLOBAL_LONG_TERM_DIR: &str = "global";
 const AGENT_LONG_TERM_DIR: &str = "agents";
 
-type BuildAdapter<F> =
-    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextAdapter<F>;
+type BuildProvider<F> =
+    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextProvider<F>;
 
 pub(super) struct LongTermDeps<F: ClawFs + 'static> {
     global: LongTermMemory<F>,
     agent_stores: AgentMemoryStores<F>,
-    build_adapter: Arc<BuildAdapter<F>>,
+    build_provider: Arc<BuildProvider<F>>,
 }
 
 struct AgentMemoryStores<F: ClawFs + 'static> {
@@ -44,7 +44,7 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
         }
 
         let dir = join_storage_path(&self.root_dir, kind);
-        let store = LongTermMemoryContextAdapter::<F>::open_agent_store(&dir)?;
+        let store = LongTermMemoryContextProvider::<F>::open_agent_store(&dir)?;
         stores.insert(kind.to_owned(), store.clone());
         Ok(store)
     }
@@ -62,18 +62,20 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
         let global_dir = join_storage_path(long_term_dir, GLOBAL_LONG_TERM_DIR);
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         Ok(Self {
-            global: LongTermMemoryContextAdapter::<F>::open_global_store(&global_dir)?,
+            global: LongTermMemoryContextProvider::<F>::open_global_store(&global_dir)?,
             agent_stores: AgentMemoryStores::new(agent_root_dir),
-            build_adapter: LongTermMemoryContextAdapter::<F>::llm_builder::<H, Timer>(api_manager),
+            build_provider: LongTermMemoryContextProvider::<F>::llm_builder::<H, Timer>(
+                api_manager,
+            ),
         })
     }
 
-    pub(super) fn adapter(
+    pub(super) fn provider(
         &self,
         kind: &str,
-    ) -> Result<LongTermMemoryContextAdapter<F>, LongTermInitError> {
+    ) -> Result<LongTermMemoryContextProvider<F>, LongTermInitError> {
         let agent = self.agent_stores.get(kind)?;
-        Ok((self.build_adapter)(agent, self.global.clone()))
+        Ok((self.build_provider)(agent, self.global.clone()))
     }
 }
 

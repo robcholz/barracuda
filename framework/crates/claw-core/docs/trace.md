@@ -227,7 +227,7 @@ span-name: `agent.create`
 `unknown_tool`: Manifest referenced a tool that is not available.
 `transcript_open_failed`: Agent transcript store could not be opened.
 `agent_build_failed`: Agent object could not be built.
-`context_adapter_attach_failed`: Profile or long-term memory context adapter could not be attached.
+`context_provider_attach_failed`: Profile or long-term memory context provider could not be attached.
 `goal_seed_failed`: Initial goal could not be appended to the agent.
 `created`: Agent was built and returned to the instance.
 
@@ -237,7 +237,7 @@ span-name: `agent.create`
 `unknown_tool`: `kind`, `tool`.
 `transcript_open_failed`: `agent`, `kind`.
 `agent_build_failed`: `agent`, `kind`.
-`context_adapter_attach_failed`: `agent`, `adapter`, `kind`.
+`context_provider_attach_failed`: `agent`, `provider`, `kind`.
 `goal_seed_failed`: `agent`, `kind`.
 `created`: `agent`, `kind`.
 
@@ -302,10 +302,10 @@ by the sibling `iteration_loop` span.
 
 ### Span Fields
 
-`adapter_count`: Number of context adapters prepared and rendered for the request.
+`provider_count`: Number of context providers prepared and rendered for the request.
 
 This span brackets all work that must complete before `iteration_loop` starts,
-including async context adapters, tool-policy projection, and request-context
+including async context providers, tool-policy projection, and request-context
 rendering.
 
 ## Context Compaction
@@ -364,12 +364,12 @@ It is a child of `iteration.prepare`.
 
 span-name: `context.render`
 
-This synchronous child of `iteration.prepare` covers adapter contribution,
+This synchronous child of `iteration.prepare` covers provider contribution,
 context cache updates, and construction of the model-facing request view.
 
 ### Span Fields
 
-`adapter_count`: Number of context adapters rendered into the request.
+`provider_count`: Number of context providers rendered into the request.
 
 ## LLM Chat
 

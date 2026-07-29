@@ -1,10 +1,10 @@
 //! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApiAsync`].
 //!
 //! It asks the model to read a conversation transcript and return a JSON array of
-//! durable facts. Like the conversation adapter's LLM compactor, it lives in
+//! durable facts. Like the conversation provider's LLM compactor, it lives in
 //! `claw_core` (the agent wiring layer) rather than `claw-memory`, because the
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
-//! injected into the long-term memory adapter.
+//! injected into the long-term memory provider.
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
