@@ -15,7 +15,7 @@
 //! # Storage layout
 //!
 //! A single append-only journal, `memory_records.jsonl`, under the `dir` passed
-//! to [`LongTermMemory::new`]. Each line is one [`Record`]:
+//! to [`LongTermMemory::new`]. Each line is one `Record`:
 //! - `Put` — a full snapshot of an item (a fresh store *or* an update). On
 //!   replay, the last `Put` for an id wins, so an update just appends.
 //! - `Del` — a tombstone removing an id.

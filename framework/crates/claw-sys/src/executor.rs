@@ -1,4 +1,4 @@
-//! ESP-IDF executor: the device-side [`ClawExecutor`].
+//! ESP-IDF executor: the device-side [`claw_interface::ClawExecutor`].
 //!
 //! Drives the orchestrator's `!Send` engine future on the device worker via
 //! `edge-executor`'s cooperative `LocalExecutor` + `block_on`. No tokio: the esp
@@ -10,7 +10,7 @@ use claw_interface::ClawExecutor;
 #[cfg(target_os = "espidf")]
 use core::future::Future;
 
-/// Device [`ClawExecutor`] backed by `edge-executor`.
+/// Device [`claw_interface::ClawExecutor`] backed by `edge-executor`.
 #[cfg(target_os = "espidf")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EspIdfExecutor;

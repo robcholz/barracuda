@@ -14,7 +14,7 @@
 //! zero-sized, so the bound adds no size and no indirection.
 //!
 //! The device implementation (`EspIdfThread`) lives in `claw-sys`; the host
-//! implementation ([`StdThread`]) lives here behind the `stdthread` feature.
+//! implementation (`StdThread`) lives here behind the `stdthread` feature.
 
 use std::io;
 use std::thread::JoinHandle;

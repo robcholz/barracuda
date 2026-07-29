@@ -1,11 +1,12 @@
 //! Worker-thread spawning that mirrors the C `claw_task` behavior.
 //!
-//! [`EspIdfThread`] is the device implementation of [`claw_interface::ClawThread`]:
+//! `EspIdfThread` is the device implementation of [`claw_interface::ClawThread`]:
 //! the C firmware created its long-running worker tasks
 //! (`xTaskCreatePinnedToCoreWithCaps`) with a PSRAM-backed stack, and a bare
 //! `std::thread` would use the small default pthread stack in internal RAM and
 //! overflow under the agent / extraction workloads (LLM, mbedTLS, serde_json).
-//! `EspIdfThread` applies the requested stack size, [`Priority`], [`CoreAffinity`],
+//! `EspIdfThread` applies the requested stack size, [`claw_interface::Priority`],
+//! [`claw_interface::CoreAffinity`],
 //! and PSRAM stack caps to the next `pthread_create` (which `std::thread::spawn`
 //! uses on ESP-IDF) via `esp_pthread`, then restores the previous config so
 //! unrelated spawns are unaffected.

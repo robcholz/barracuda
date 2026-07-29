@@ -8,7 +8,7 @@ use strum::IntoStaticStr;
 
 use super::{IterationId, ToolCallId};
 
-/// Errors from one [`super::IterationLoop::run`] step.
+/// Errors from one `IterationLoop::run` step.
 #[derive(Clone, Debug, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
 pub enum IterationLoopError {
     #[strum(serialize = "missing_provider_tool_call_id")]

@@ -3,8 +3,8 @@
 //!
 //! This is the inbound boundary (C / OS -> Rust): it defines the
 //! dependency-injection traits that abstract over platform facilities —
-//! filesystem ([`ClawFs`](fs::ClawFs)) and networking
-//! ([`ClawHttp`](http::ClawHttp) plus [`StreamingHttp`](http::StreamingHttp)) — plus
+//! filesystem ([`ClawFs`]) and networking
+//! ([`ClawHttp`] plus [`StreamingHttp`]) — plus
 //! the shared types those traits work with. The pure-Rust core crates
 //! (`claw-api`, `claw_core`, `claw-tool`, `claw-memory`, `claw-sandbox`, ...)
 //! depend only on these traits, never on a platform directly, so the device

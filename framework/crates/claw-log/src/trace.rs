@@ -51,7 +51,7 @@
 //!   not per poll; the per-thread span stack is maintained on the `tracing`
 //!   enter/exit callbacks so events resolve their enclosing span.
 //! - Incremental context is grouped: a span field named `group.key` whose `group`
-//!   is a registered [`ContextGroup`] is rendered once, on the `enter` line of the
+//!   is a registered `ContextGroup` is rendered once, on the `enter` line of the
 //!   span that opens it, as a `<context=<group> …>` block. A span that opens a
 //!   logical task repeats the complete inherited context so that task's stream
 //!   is independently replayable; other descendants emit only their delta.
@@ -98,7 +98,7 @@ struct ContextGroup {
 }
 
 /// Per-group inherited context: the outer `Vec` is indexed parallel to the
-/// subscriber's registered [`ContextGroup`]s; each inner `Vec` holds the
+/// subscriber's registered `ContextGroup`s; each inner `Vec` holds the
 /// `(key, value)` entries in effect for that group.
 type GroupedContext = Vec<Vec<(&'static str, String)>>;
 
@@ -215,7 +215,7 @@ fn physical_task_label() -> String {
 }
 
 /// Collects a span/event's fields, routing each `group.key` field to its
-/// registered [`ContextGroup`] bucket and the rest into a space-joined custom
+/// registered `ContextGroup` bucket and the rest into a space-joined custom
 /// `key=value` string; captures the special `message` field separately (events
 /// carry their text there).
 struct FieldVisitor<'groups> {

@@ -28,7 +28,7 @@ const LOG_SNIPPET_LEN: usize = usize::MAX;
 
 /// Log-safe view of text: at most `limit` bytes on a char boundary, plus `"..."`
 /// when truncated. [`new`](Self::new) uses the platform default
-/// ([`LOG_SNIPPET_LEN`]); [`with_limit`](Self::with_limit) overrides it.
+/// (`LOG_SNIPPET_LEN`); [`with_limit`](Self::with_limit) overrides it.
 pub struct TruncatedText<T> {
     text: T,
     limit: usize,
@@ -197,7 +197,7 @@ macro_rules! define_prefixed_id {
 ///   (cloned into several holders) → wrap it in the caller's own
 ///   `Arc<Mutex<_>>` at that one shared owner.
 ///
-/// `next` post-increments: the stored value is the *next* id to hand out. [`new`]
+/// `next` post-increments: the stored value is the *next* id to hand out. `new`
 /// starts at `first`; `starting_at` resumes past a known id (e.g. the highest id
 /// restored from persistence).
 ///

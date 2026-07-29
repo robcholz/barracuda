@@ -37,7 +37,7 @@ impl ToolCall {
 /// Within one response the three logical streams are contiguous and explicitly
 /// closed in this order: `Reasoning(Delta)* -> Reasoning(End) ->
 /// Output(Delta)* -> Output(End) -> ToolCalls(Delta)* -> ToolCalls(End)`.
-/// When cache profiling is enabled, one final [`ChatStreamEvent::Usage`] may
+/// When cache profiling is enabled, one final `ChatStreamEvent::Usage` may
 /// follow those boundaries. Reasoning/output deltas are append fragments. Each
 /// tool-call delta is one complete call, emitted only after its arguments
 /// finish streaming.
