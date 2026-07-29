@@ -57,6 +57,7 @@ use crate::tool::capability_tool_groups;
 type DeviceAgent = AgentSystem<EspIdfFs, EspIdfHttp, EspIdfTimer>;
 
 const AGENT_BOOTSTRAP_STACK_SIZE: usize = 64 * 1024;
+const RUST_OWNED_CAPABILITY_GROUPS: &[&str] = &["cap_skill"];
 
 static RUNTIME: AtomicPtr<RuntimeController> = AtomicPtr::new(ptr::null_mut());
 static RUNTIME_LOCK: Mutex<()> = Mutex::new(());
@@ -331,7 +332,7 @@ fn build_agent(
     api: Option<ClawApiConfig>,
     persistence: AgentPersistenceConfig,
 ) -> Result<DeviceAgent, CabiError> {
-    let tool_groups = capability_tool_groups()?;
+    let tool_groups = capability_tool_groups(RUST_OWNED_CAPABILITY_GROUPS)?;
     let agent =
         DeviceAgent::with_tool_groups::<EspIdfThread, EspIdfExecutor>(persistence, tool_groups)?;
     if let Some(api) = api {

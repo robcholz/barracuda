@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/*",
+    "c-legacy/*",
     "bench/*",
     # Device-only (`#![cfg(target_os = "espidf")]`) staticlib crates that back
     # the on-device ESP-IDF integration test apps. They build to empty archives

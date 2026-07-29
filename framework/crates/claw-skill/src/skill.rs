@@ -73,6 +73,23 @@ pub struct SkillFrontmatterMetadata {
 }
 
 impl SkillFrontmatterMetadata {
+    /// Build normalized metadata supplied by an external skill registry.
+    pub fn new(
+        cap_groups: Vec<String>,
+        manage_mode: SkillManageMode,
+        category: Vec<String>,
+        peripherals: Vec<String>,
+        tags: Vec<String>,
+    ) -> Self {
+        Self {
+            cap_groups,
+            manage_mode,
+            category,
+            peripherals,
+            tags,
+        }
+    }
+
     /// Capability groups declared by this skill. Parsed but not wired to tool
     /// visibility in this Rust implementation pass.
     pub fn cap_groups(&self) -> &[String] {
@@ -113,6 +130,25 @@ pub struct Skill {
 }
 
 impl Skill {
+    /// Build a catalog entry supplied by an external skill registry.
+    pub fn from_catalog_entry(
+        id: SkillId,
+        description: String,
+        file: String,
+        metadata: SkillFrontmatterMetadata,
+    ) -> Self {
+        let name = id.as_str().to_owned();
+        Self {
+            id,
+            name,
+            description,
+            author: None,
+            metadata,
+            file,
+            root: String::new(),
+        }
+    }
+
     /// The skill id, equal to the containing directory name.
     pub fn id(&self) -> &SkillId {
         &self.id
@@ -193,6 +229,14 @@ pub enum SkillError {
     /// A skill's front-matter is valid JSON but violates the skill contract.
     #[error("skill '{0}' has invalid front-matter: {1}")]
     InvalidFrontmatter(SkillId, String),
+    /// A non-filesystem registry operation failed.
+    #[error("skill backend operation '{operation}' failed with code {code}")]
+    Backend {
+        /// Stable operation label supplied by the backend.
+        operation: &'static str,
+        /// Backend-native error code.
+        code: i32,
+    },
 }
 
 #[derive(Deserialize)]

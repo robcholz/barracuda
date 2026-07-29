@@ -6,8 +6,13 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
 use claw_persistence::SharedPersistence;
-use claw_skill::{FsSkillRegistry, SkillError};
+use claw_skill::SkillRegistry;
 use claw_tool::ToolRegistry;
+
+#[cfg(all(feature = "use_legacy_skill", target_os = "espidf"))]
+use claw_c_legacy_skill::LegacySkillRegistry;
+#[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
+use claw_skill::{FsSkillRegistry, SkillError};
 
 use super::error::AgentManagerError;
 use super::layout::AgentManagerLayout;
@@ -57,7 +62,14 @@ impl<
         };
 
         let profile_store = ProfileStore::new(&layout.profile_dir);
-        let skill_registry = build_skill_registry::<Filesystem>(skill_roots)?;
+        #[cfg(all(feature = "use_legacy_skill", target_os = "espidf"))]
+        let skill_registry: Arc<dyn SkillRegistry> = {
+            drop(skill_roots);
+            Arc::new(LegacySkillRegistry::attach()?)
+        };
+        #[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
+        let skill_registry: Arc<dyn SkillRegistry> =
+            build_fs_skill_registry::<Filesystem>(skill_roots)?;
 
         let manager = Self {
             persistence,
@@ -79,7 +91,8 @@ impl<
 ///
 /// A missing root is skipped so the agent still starts; a real scan failure
 /// (e.g. a malformed `SKILL.md`) aborts construction.
-fn build_skill_registry<F: ClawFs + 'static>(
+#[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
+fn build_fs_skill_registry<F: ClawFs + 'static>(
     skill_roots: Vec<String>,
 ) -> Result<Arc<FsSkillRegistry<F>>, SkillError> {
     let span = tracing::info_span!("skill.catalog");

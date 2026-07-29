@@ -18,10 +18,16 @@ set(claw_rust_target "xtensa-esp32s3-espidf")
 set(claw_rust_profile "release")
 set(claw_rust_lib "${CMAKE_CURRENT_SOURCE_DIR}/target/${claw_rust_target}/${claw_rust_profile}/libclaw_cabi.a")
 
+if("$ENV{CLAW_DEBUG}" STREQUAL "1")
+    set(claw_rust_logging_feature "rich_logging")
+else()
+    set(claw_rust_logging_feature "prod_logging")
+endif()
+
 add_custom_target(claw_rust_build
     BYPRODUCTS "${claw_rust_lib}"
     COMMAND cargo +esp build --release -p claw-cabi
-            --features prod_logging,claw-agent/reasoning_medium
+            --features ${claw_rust_logging_feature},use_legacy_skill,claw-agent/reasoning_medium
             --target ${claw_rust_target} -Z build-std=std,panic_abort
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building claw-cabi Rust staticlib (${claw_rust_target})"

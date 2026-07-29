@@ -3,7 +3,61 @@
 use std::sync::Arc;
 
 use claw_interface::{ClawFs, MemFs};
-use claw_skill::{FsSkillRegistry, SkillError, SkillId, SkillManageMode};
+use claw_skill::{
+    CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillFrontmatterMetadata, SkillId,
+    SkillManageMode, SkillRegistry,
+};
+
+struct ExternalRegistry {
+    catalog: Arc<CatalogSnapshot>,
+}
+
+impl SkillRegistry for ExternalRegistry {
+    fn catalog(&self) -> Arc<CatalogSnapshot> {
+        Arc::clone(&self.catalog)
+    }
+
+    fn reload(&self) -> Result<(), SkillError> {
+        Ok(())
+    }
+
+    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError> {
+        if self.catalog.get(id).is_none() {
+            return Err(SkillError::NotFound(id.clone()));
+        }
+        out.push_str("<skill_content name=\"external\">\nbody\n</skill_content>");
+        Ok(())
+    }
+}
+
+#[test]
+fn public_registry_trait_drives_skill_set() {
+    let skill = Skill::from_catalog_entry(
+        SkillId::new("external"),
+        "external backend".to_owned(),
+        "external/SKILL.md".to_owned(),
+        SkillFrontmatterMetadata::new(
+            Vec::new(),
+            SkillManageMode::Readonly,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ),
+    );
+    let registry: Arc<dyn SkillRegistry> = Arc::new(ExternalRegistry {
+        catalog: Arc::new(CatalogSnapshot::from_skills(1, vec![skill])),
+    });
+    let mut skills = registry.skill_set();
+
+    assert!(skills.catalog_context().contains("external backend"));
+    assert_eq!(
+        skills
+            .activate_skill(&SkillId::new("external"))
+            .unwrap()
+            .content(),
+        "<skill_content name=\"external\">\nbody\n</skill_content>"
+    );
+}
 
 #[test]
 fn registry_parses_master_front_matter_shape() {

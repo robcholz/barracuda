@@ -25,7 +25,9 @@ pub(crate) enum CapToolError {
     InvalidSchema(String),
 }
 
-pub(crate) fn capability_tool_groups() -> Result<Vec<ToolGroup>, CapToolError> {
+pub(crate) fn capability_tool_groups(
+    filtered_group_ids: &[&str],
+) -> Result<Vec<ToolGroup>, CapToolError> {
     let list = unsafe { claw_cap_list() };
     if list.count > 0 && list.items.is_null() {
         return Err(CapToolError::InvalidList);
@@ -38,10 +40,13 @@ pub(crate) fn capability_tool_groups() -> Result<Vec<ToolGroup>, CapToolError> {
         if !is_llm_tool(descriptor) {
             continue;
         }
+        let group_id = descriptor_group_id(descriptor)?;
+        if filtered_group_ids.contains(&group_id.as_str()) {
+            continue;
+        }
         if !is_available_to_root_agent(descriptor)? {
             continue;
         }
-        let group_id = descriptor_group_id(descriptor)?;
         groups
             .entry(group_id)
             .or_default()

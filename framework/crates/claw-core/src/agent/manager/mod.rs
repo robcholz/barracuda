@@ -15,7 +15,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::ProfileStore;
 use claw_persistence::SharedPersistence;
-use claw_skill::FsSkillRegistry;
+use claw_skill::SkillRegistry;
 use claw_tool::ToolRegistry;
 
 use self::long_term::LongTermDeps;
@@ -44,5 +44,5 @@ pub(crate) struct AgentManager<
     transcript_dir: String,
     long_term: LongTermDeps<Filesystem>,
     profile_store: ProfileStore<Filesystem>,
-    skill_registry: Arc<FsSkillRegistry<Filesystem>>,
+    skill_registry: Arc<dyn SkillRegistry>,
 }

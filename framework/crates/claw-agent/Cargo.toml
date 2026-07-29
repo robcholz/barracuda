@@ -49,6 +49,8 @@ required-features = ["multiagent"]
 default = ["reasoning_medium"]
 stage_verbose = ["claw-core/stage_verbose"]
 multiagent = ["claw-core/multiagent"]
+# Select the device-only C skill registry through claw-core.
+use_legacy_skill = ["claw-core/use_legacy_skill"]
 host-backends = [
     "claw-interface/host-backends",
 ]

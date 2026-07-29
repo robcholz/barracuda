@@ -22,6 +22,8 @@ prod_logging = [
     "log/release_max_level_info",
     "tracing/release_max_level_off",
 ]
+# Use the pre-initialized C skill registry on ESP-IDF firmware builds.
+use_legacy_skill = ["claw-agent/use_legacy_skill"]
 
 [dependencies]
 

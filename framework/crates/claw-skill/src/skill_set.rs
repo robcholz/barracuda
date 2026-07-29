@@ -3,9 +3,7 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use super::registry::{
-    CatalogSnapshot, EmptySkillRegistry, SkillRegistryBackend, SkillRegistryVersion,
-};
+use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
 use super::skill::{SkillDocument, SkillError, SkillId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,7 +15,7 @@ enum CatalogBufferKind {
 
 /// Per-agent skill view and cache.
 pub struct SkillSet {
-    registry: Arc<dyn SkillRegistryBackend>,
+    registry: Arc<dyn SkillRegistry>,
     catalog_version: SkillRegistryVersion,
     catalog_buffer_kind: CatalogBufferKind,
     catalog_buffer: String,
@@ -30,7 +28,7 @@ impl SkillSet {
         Self::from_registry(Arc::new(EmptySkillRegistry))
     }
 
-    pub(crate) fn from_registry(registry: Arc<dyn SkillRegistryBackend>) -> Self {
+    pub(crate) fn from_registry(registry: Arc<dyn SkillRegistry>) -> Self {
         Self {
             registry,
             catalog_version: 0,

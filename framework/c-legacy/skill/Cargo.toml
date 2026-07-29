@@ -1,0 +1,27 @@
+[package]
+name = "claw-c-legacy-skill"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Device-only Rust adapter over the pre-initialized C claw_skill registry"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+claw-skill = { path = "../../crates/claw-skill" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

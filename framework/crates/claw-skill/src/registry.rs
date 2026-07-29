@@ -29,6 +29,14 @@ impl CatalogSnapshot {
         }
     }
 
+    /// Build an owned catalog snapshot supplied by an external registry.
+    pub fn from_skills(version: SkillRegistryVersion, skills: Vec<Skill>) -> Self {
+        Self {
+            version,
+            skills: Arc::from(skills),
+        }
+    }
+
     /// Snapshot version, bumped by every successful registry reload.
     pub fn version(&self) -> SkillRegistryVersion {
         self.version
@@ -45,16 +53,45 @@ impl CatalogSnapshot {
     }
 }
 
-/// Minimal public registry surface used by agent resolvers.
-pub trait SkillRegistry: Send + Sync {
+/// Shared skill catalog and document backend.
+///
+/// Implementations own discovery and document loading. [`SkillSet`] adds the
+/// per-agent render buffers over this shared registry.
+pub trait SkillRegistry: Send + Sync + 'static {
     /// Create a per-agent [`SkillSet`] projection backed by this registry.
-    fn skill_set(self: Arc<Self>) -> SkillSet;
+    fn skill_set(self: Arc<Self>) -> SkillSet {
+        let registry: Arc<dyn SkillRegistry> = Arc::new(ErasedSkillRegistry(self));
+        SkillSet::from_registry(registry)
+    }
+
+    /// Return the current immutable catalog snapshot.
+    fn catalog(&self) -> Arc<CatalogSnapshot>;
+
+    /// Refresh the registry while preserving the previous snapshot on failure.
+    fn reload(&self) -> Result<(), SkillError>;
+
+    /// Render one activated skill document into `out`.
+    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError>;
 }
 
-pub(crate) trait SkillRegistryBackend: Send + Sync {
-    fn catalog(&self) -> Arc<CatalogSnapshot>;
-    fn reload(&self) -> Result<(), SkillError>;
-    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError>;
+struct ErasedSkillRegistry<R: SkillRegistry + ?Sized>(Arc<R>);
+
+impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
+    fn skill_set(self: Arc<Self>) -> SkillSet {
+        SkillSet::from_registry(self)
+    }
+
+    fn catalog(&self) -> Arc<CatalogSnapshot> {
+        self.0.catalog()
+    }
+
+    fn reload(&self) -> Result<(), SkillError> {
+        self.0.reload()
+    }
+
+    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError> {
+        self.0.load_document_into(id, out)
+    }
 }
 
 /// Empty registry used by agents without skill backing.
@@ -65,9 +102,7 @@ impl SkillRegistry for EmptySkillRegistry {
     fn skill_set(self: Arc<Self>) -> SkillSet {
         SkillSet::from_registry(self)
     }
-}
 
-impl SkillRegistryBackend for EmptySkillRegistry {
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         Arc::new(CatalogSnapshot::empty())
     }
@@ -115,7 +150,7 @@ impl<F: ClawFs> FsSkillRegistry<F> {
     where
         F: 'static,
     {
-        let registry: Arc<dyn SkillRegistryBackend> = self.clone();
+        let registry: Arc<dyn SkillRegistry> = self.clone();
         SkillSet::from_registry(registry)
     }
 
@@ -177,12 +212,9 @@ impl<F: ClawFs> Default for FsSkillRegistry<F> {
 
 impl<F: ClawFs + 'static> SkillRegistry for FsSkillRegistry<F> {
     fn skill_set(self: Arc<Self>) -> SkillSet {
-        let registry: Arc<dyn SkillRegistryBackend> = self;
-        SkillSet::from_registry(registry)
+        SkillSet::from_registry(self)
     }
-}
 
-impl<F: ClawFs> SkillRegistryBackend for FsSkillRegistry<F> {
     fn catalog(&self) -> Arc<CatalogSnapshot> {
         FsSkillRegistry::catalog(self)
     }

@@ -248,6 +248,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "claw-c-legacy-skill"
+version = "0.1.0"
+dependencies = [
+ "claw-skill",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "claw-cabi"
 version = "0.1.0"
 dependencies = [
@@ -280,6 +289,7 @@ dependencies = [
  "async-channel",
  "async-stream",
  "claw-api",
+ "claw-c-legacy-skill",
  "claw-context",
  "claw-interface",
  "claw-memory",
