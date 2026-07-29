@@ -51,7 +51,7 @@ The main entry point is `application/edge_agent/main/main.c`.
 1. IM channels, scheduler jobs, Lua scripts, startup hooks, or CLI commands publish events or submit requests.
 2. `claw_event_router` matches events against the DATA root's `router_rules/router_rules.json` and can call capabilities, run scripts, run the agent, send messages, emit events, or drop events.
 3. `claw_core` builds context from memory, session history, skills, and other providers; calls the configured LLM backend; executes capability tool calls; persists context; and returns responses.
-4. Outbound messages are routed back through registered IM bindings or local/web channels.
+4. Outbound messages call the unified IM Gateway, which selects a private platform backend by `channel + chat_id`.
 
 ## Key Subsystems
 

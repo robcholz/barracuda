@@ -26,6 +26,18 @@ Run exactly one bundled Lua script with `lua_run_script`:
 If script execution returns an error, report that error directly to the user.
 Do not retry with changed arguments or run another script in the same turn unless the user explicitly asks.
 
+IM user messages have this envelope:
+
+```xml
+<message channel="qq" chat_id="c2c:123456">
+user text
+</message>
+```
+
+When the user refers to the current chat, copy `channel` to `chat_channel`
+and `chat_id` to `chat_id`. Only use another target when the user explicitly
+provides one.
+
 ## Script Args Schema
 
 ```json
