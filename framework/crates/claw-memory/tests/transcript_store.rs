@@ -3,237 +3,206 @@
 use std::sync::Arc;
 
 use claw_interface::MemFs;
-use claw_memory::{AssistantFinish, Transcript, TranscriptStore, TurnError, TurnHandle};
+use claw_memory::{AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId};
 
 #[test]
-fn streamed_drafts_are_visible_and_commit_on_drop() {
-    let store = store();
-    {
-        let mut turn = store.open_turn().unwrap();
-        turn.append_user("hel").unwrap();
-        turn.append_user("lo").unwrap();
-        // Before commit the open turn is the sole (trailing, id == None) entry.
-        assert_eq!(store.turns()[0].messages[0]["content"], "hello");
-        turn.finish_user().unwrap();
+fn turn_id_uses_the_shared_prefixed_wire_format() {
+    let id = TurnId::new(7);
 
-        turn.append_assistant("wo").unwrap();
-        turn.append_assistant("rld").unwrap();
+    assert_eq!(id.to_string(), "turn-7");
+    assert_eq!(serde_json::to_value(id).unwrap(), "turn-7");
+    assert_eq!(
+        serde_json::from_value::<TurnId>("turn-7".into()).unwrap(),
+        id
+    );
+}
+
+#[test]
+fn message_handles_expose_drafts_and_finish_on_drop() {
+    let store = store();
+    let turn = store.clone().open_turn().unwrap();
+
+    {
+        let mut user = turn.user().unwrap();
+        user.append("hel");
+        user.append("lo");
+        assert_eq!(store.turns()[0].messages[0]["content"], "hello");
+    }
+
+    {
+        let mut assistant = turn.assistant().unwrap();
+        assistant.append(AssistantFragment::Content("wo"));
+        assistant.append(AssistantFragment::Content("rld"));
         assert_eq!(store.turns()[0].messages[1]["content"], "world");
     }
 
+    drop(turn);
     let turns = store.turns();
     assert_eq!(turns.len(), 1);
-    assert!(turns[0].id.is_some()); // committed turns carry a stable id
+    assert!(turns[0].id.is_some());
     assert_eq!(turns[0].messages[0]["content"], "hello");
     assert_eq!(turns[0].messages[1]["content"], "world");
 }
 
 #[test]
-fn assistant_finish_replaces_streamed_draft_with_authoritative_json() {
+fn assistant_handle_builds_structured_message() {
     let store = store();
-    let mut turn = store.open_turn().unwrap();
-    turn.append_assistant("visible").unwrap();
-    turn.finish_assistant(AssistantFinish::RawJson(
-        r#"{"role":"assistant","content":"visible","reasoning_content":"hidden"}"#,
-    ))
-    .unwrap();
-
-    let turns = store.turns();
-    assert_eq!(turns[0].messages[0]["content"], "visible");
-    assert_eq!(turns[0].messages[0]["reasoning_content"], "hidden");
-}
-
-#[test]
-fn content_version_advances_only_when_streamed_messages_finish() {
-    let store = store();
-    let initial_content_version = store.content_version();
-    let initial_turn_version = store.turn_version();
-    let mut turn = store.open_turn().unwrap();
-
-    turn.append_user("hel").unwrap();
-    turn.append_user("lo").unwrap();
-    assert_eq!(store.content_version(), initial_content_version);
-    assert_eq!(store.turn_version(), initial_turn_version);
-
-    turn.finish_user().unwrap();
-    let user_content_version = initial_content_version.saturating_add(1);
-    assert_eq!(store.content_version(), user_content_version);
-    assert_eq!(store.turn_version(), initial_turn_version);
-
-    turn.append_assistant("wo").unwrap();
-    turn.append_assistant("rld").unwrap();
-    assert_eq!(store.content_version(), user_content_version);
-    assert_eq!(store.turn_version(), initial_turn_version);
-
-    assert_eq!(
-        turn.finish_streamed_assistant(String::new(), Vec::new())
-            .unwrap(),
-        Some("world".to_owned())
-    );
-    let assistant_content_version = user_content_version.saturating_add(1);
-    assert_eq!(store.content_version(), assistant_content_version);
-    assert_eq!(store.turn_version(), initial_turn_version);
-
-    turn.commit().unwrap();
-    assert_eq!(store.content_version(), assistant_content_version);
-    assert_eq!(store.turn_version(), initial_turn_version.saturating_add(1));
-}
-
-#[test]
-fn commit_implicitly_finishes_a_draft_once() {
-    let store = store();
-    let initial_content_version = store.content_version();
-    let initial_turn_version = store.turn_version();
-    let mut turn = store.open_turn().unwrap();
-    turn.append_user("implicit finish").unwrap();
-
-    turn.commit().unwrap();
-
-    assert_eq!(
-        store.content_version(),
-        initial_content_version.saturating_add(1)
-    );
-    assert_eq!(store.turn_version(), initial_turn_version.saturating_add(1));
-}
-
-#[test]
-fn discarding_only_a_draft_does_not_advance_versions() {
-    let store = store();
-    let mut turn = store.open_turn().unwrap();
-    turn.append_user("partial").unwrap();
-    let content_before = store.content_version();
-    let turn_before = store.turn_version();
-
-    turn.discard();
-
-    assert_eq!(store.content_version(), content_before);
-    assert_eq!(store.turn_version(), turn_before);
-    assert!(store.turns().is_empty());
-}
-
-#[test]
-fn discarding_finished_messages_advances_only_content_version() {
-    let store = store();
-    let mut turn = store.open_turn().unwrap();
-    turn.append_user("finished").unwrap();
-    turn.finish_user().unwrap();
-    let content_before = store.content_version();
-    let turn_before = store.turn_version();
-
-    turn.discard();
-
-    assert_eq!(store.content_version(), content_before.saturating_add(1));
-    assert_eq!(store.turn_version(), turn_before);
-    assert!(store.turns().is_empty());
-}
-
-#[test]
-fn discard_keeps_committed_history() {
-    let store = store();
+    let turn = store.clone().open_turn().unwrap();
     {
-        let mut turn = store.open_turn().unwrap();
-        turn.append_user("committed").unwrap();
+        let mut assistant = turn.assistant().unwrap();
+        assistant.append(AssistantFragment::Content("visible"));
+        assistant.append(AssistantFragment::Reasoning("hidden"));
+        assistant.append(AssistantFragment::ToolCall(
+            serde_json::json!({"id": "call-1"}),
+        ));
     }
 
-    let mut turn = store.open_turn().unwrap();
-    turn.append_user("partial").unwrap();
-    turn.discard();
-
-    let turns = store.turns();
-    assert_eq!(turns.len(), 1);
-    assert_eq!(turns[0].messages[0]["content"], "committed");
+    let message = &store.turns()[0].messages[0];
+    assert_eq!(message["content"], "visible");
+    assert_eq!(message["reasoning_content"], "hidden");
+    assert_eq!(message["tool_calls"][0]["id"], "call-1");
 }
 
 #[test]
-fn a_second_turn_cannot_open_until_the_handle_finishes() {
+fn turn_version_advances_only_when_the_turn_drops() {
     let store = store();
-    let turn = store.open_turn().unwrap();
+    let initial_turn_version = store.turn_version();
+    let turn = store.clone().open_turn().unwrap();
 
-    assert!(matches!(store.open_turn(), Err(TurnError::AlreadyOpen)));
+    {
+        let mut user = turn.user().unwrap();
+        user.append("hello");
+    }
+    assert_eq!(store.turn_version(), initial_turn_version);
 
-    turn.discard();
-    assert!(store.open_turn().is_ok());
+    {
+        let mut assistant = turn.assistant().unwrap();
+        assistant.append(AssistantFragment::Content("world"));
+    }
+    assert_eq!(store.turn_version(), initial_turn_version);
+
+    drop(turn);
+    assert_eq!(store.turn_version(), initial_turn_version.saturating_add(1));
 }
 
 #[test]
-fn an_invalid_transition_poisons_and_discards_the_turn() {
+fn an_empty_turn_does_not_advance_turn_version() {
     let store = store();
-    let mut turn = store.open_turn().unwrap();
-    turn.append_user("partial").unwrap();
+    let initial_turn_version = store.turn_version();
 
-    assert_eq!(
-        turn.append_assistant("invalid"),
-        Err(TurnError::AssistantWhileUserOpen)
-    );
-    assert_eq!(turn.commit(), Err(TurnError::Poisoned));
+    drop(store.clone().open_turn().unwrap());
+
+    assert_eq!(store.turn_version(), initial_turn_version);
     assert!(store.turns().is_empty());
 }
 
 #[test]
-fn tool_results_are_recorded_atomically() {
+fn a_second_turn_cannot_open_until_the_handle_drops() {
     let store = store();
-    let initial_content_version = store.content_version();
-    let initial_turn_version = store.turn_version();
-    let mut turn = store.open_turn().unwrap();
-    turn.record_tool_result("call-1", r#"{"temp_c":21}"#, false)
-        .unwrap();
-    assert_eq!(
-        store.content_version(),
-        initial_content_version.saturating_add(1)
-    );
-    assert_eq!(store.turn_version(), initial_turn_version);
-    let content_before_commit = store.content_version();
-    turn.commit().unwrap();
-    assert_eq!(store.content_version(), content_before_commit);
-    assert_eq!(store.turn_version(), initial_turn_version.saturating_add(1));
+    let turn = store.clone().open_turn().unwrap();
 
-    let turns = store.turns();
-    assert_eq!(turns[0].messages[0]["role"], "tool");
-    assert_eq!(turns[0].messages[0]["tool_call_id"], "call-1");
-    assert_eq!(turns[0].messages[0]["is_error"], false);
+    assert!(matches!(
+        store.clone().open_turn(),
+        Err(TurnError::AlreadyOpen)
+    ));
+
+    drop(turn);
+    assert!(store.clone().open_turn().is_ok());
 }
 
 #[test]
-fn transcript_trait_erases_only_the_store_filesystem_type() {
+fn a_second_message_cannot_open_until_the_child_handle_drops() {
     let store = store();
-    let transcript: Box<dyn Transcript> = Box::new(store.clone());
+    let turn = store.open_turn().unwrap();
+    let user = turn.user().unwrap();
 
-    let mut turn: TurnHandle = transcript.open_turn().unwrap();
-    turn.append_user("erased filesystem").unwrap();
-    turn.commit().unwrap();
+    assert!(matches!(
+        turn.assistant(),
+        Err(TurnError::MessageAlreadyOpen)
+    ));
+
+    drop(user);
+    assert!(turn.assistant().is_ok());
+}
+
+#[test]
+fn tool_handle_records_one_atomic_result() {
+    let store = store();
+    let turn = store.clone().open_turn().unwrap();
+    {
+        let mut tool = turn.tool("call-1", false).unwrap();
+        tool.append(r#"{"temp_"#);
+        tool.append(r#"c":21}"#);
+    }
+
+    let message = &store.turns()[0].messages[0];
+    assert_eq!(message["role"], "tool");
+    assert_eq!(message["tool_call_id"], "call-1");
+    assert_eq!(message["content"], r#"{"temp_c":21}"#);
+    assert_eq!(message["is_error"], false);
+}
+
+#[test]
+fn turn_drop_can_persist_after_the_store_drops() {
+    let filesystem = Arc::new(MemFs::new());
+    let store =
+        TranscriptStore::new(Arc::clone(&filesystem), 9, "/transcript-detached-turn").unwrap();
+    let turn = store.open_turn().unwrap();
+    {
+        let mut user = turn.user().unwrap();
+        user.append("still persists");
+    }
+
+    drop(store);
+    drop(turn);
+
+    let reloaded = TranscriptStore::new(filesystem, 9, "/transcript-detached-turn").unwrap();
+    assert_eq!(reloaded.turns()[0].messages[0]["content"], "still persists");
+}
+
+#[test]
+fn transcript_trait_is_the_only_type_erased_boundary() {
+    let transcript: Arc<dyn Transcript> = store();
+
+    let turn: TurnHandle = transcript.clone().open_turn().unwrap();
+    {
+        let mut user = turn.user().unwrap();
+        user.append("erased filesystem");
+    }
+    drop(turn);
 
     assert_eq!(
         transcript.turns()[0].messages[0]["content"],
         "erased filesystem"
     );
     assert_eq!(transcript.turn_version(), 1);
-    assert_eq!(transcript.content_version(), 1);
 }
 
 #[test]
-fn persisted_transcript_restores_both_versions() {
+fn persisted_transcript_restores_turn_version() {
     let filesystem = Arc::new(MemFs::new());
-    let store =
+    let store = Arc::new(
         TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 7, "/transcript-version-reload")
-            .unwrap();
+            .unwrap(),
+    );
     {
-        let mut turn = store.open_turn().unwrap();
-        turn.append_user("hello").unwrap();
-        turn.finish_user().unwrap();
-        turn.append_assistant("world").unwrap();
-        turn.finish_assistant(AssistantFinish::PlainText("world"))
-            .unwrap();
-        turn.commit().unwrap();
+        let turn = store.clone().open_turn().unwrap();
+        {
+            let mut user = turn.user().unwrap();
+            user.append("hello");
+        }
+        {
+            let mut assistant = turn.assistant().unwrap();
+            assistant.append(AssistantFragment::Content("world"));
+        }
     }
     assert_eq!(store.turn_version(), 1);
-    assert_eq!(store.content_version(), 2);
 
     let reloaded =
         TranscriptStore::<MemFs>::new(filesystem, 7, "/transcript-version-reload").unwrap();
     assert_eq!(reloaded.turn_version(), 1);
-    assert_eq!(reloaded.content_version(), 2);
 }
 
-fn store() -> TranscriptStore<MemFs> {
-    TranscriptStore::new(Arc::new(MemFs::new()), 1, "/transcript-store-tests").unwrap()
+fn store() -> Arc<TranscriptStore<MemFs>> {
+    Arc::new(TranscriptStore::new(Arc::new(MemFs::new()), 1, "/transcript-store-tests").unwrap())
 }

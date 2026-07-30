@@ -27,39 +27,37 @@
 //!
 //! ```no_run
 //! use claw_interface::MemFs;
-//! use claw_memory::{AssistantFinish, Transcript, TranscriptStore};
+//! use claw_memory::{AssistantFragment, TranscriptStore};
 //! use std::sync::Arc;
 //!
 //! // A filesystem for persistence. On device this is the espidf `ClawFs` over
-//! // the DATA root; here it is the in-memory host double. The store holds the
-//! // type parameter `F`.
+//! // the DATA root; here it is the in-memory host double.
 //! let filesystem = Arc::new(MemFs::new());
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
 //! let transcript_id = 42;
-//! let store = TranscriptStore::<MemFs>::new(filesystem, transcript_id, "/data/transcripts")
+//! let store = TranscriptStore::new(filesystem, transcript_id, "/data/transcripts")
 //!     .expect("a fresh MemFs has no data log, so the transcript starts empty");
-//! let transcript: &dyn Transcript = &store;
 //!
-//! // One handle owns the turn; dropping it commits the turn as one record.
+//! // Child handles finish messages; the turn handle commits the record.
+//! let turn = store.open_turn().expect("the store has no active turn");
 //! {
-//!     let mut turn = transcript.open_turn().expect("the store has no active turn");
-//!     turn.append_user("what's the weather?").unwrap();
-//!     turn.finish_user().unwrap();
-//!     turn.append_assistant("Sun").unwrap();
-//!     turn.append_assistant("ny.").unwrap();
-//!     turn
-//!         .finish_assistant(AssistantFinish::PlainText("Sunny."))
-//!         .unwrap();
+//!     let mut user = turn.user().unwrap();
+//!     user.append("what's the weather?");
+//! }
+//! {
+//!     let mut assistant = turn.assistant().unwrap();
+//!     assistant.append(AssistantFragment::Content("Sun"));
+//!     assistant.append(AssistantFragment::Content("ny."));
+//! }
 //!
-//!     // turns() includes the open turn (id == None) as the trailing element;
-//!     // the flat model-facing transcript is its messages flattened.
-//!     let turns = transcript.turns();
-//!     let _messages: Vec<_> = turns.iter().flat_map(|t| &t.messages).collect();
-//! } // drop → the turn is committed
+//! // turns() includes the open turn (id == None) as the trailing element;
+//! // the flat model-facing transcript is its messages flattened.
+//! let turns = store.turns();
+//! let _messages: Vec<_> = turns.iter().flat_map(|t| &t.messages).collect();
+//! drop(turn); // commit + persist
 //!
-//! // Persistence is automatic: debounced writes plus a best-effort flush when
-//! // the store is dropped.
+//! // Persistence is automatic at the turn boundary.
 //! ```
 
 pub mod compaction;
@@ -79,6 +77,7 @@ pub use profile::{
     ASSISTANT_IDENTITY_FILE, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES, SOUL_FILE, USER_PROFILE_FILE,
 };
 pub use transcript_store::{
-    AssistantFinish, Transcript, TranscriptDeleteError, TranscriptInitError, TranscriptListError,
-    TranscriptStore, Turn, TurnError, TurnHandle, TurnId,
+    AssistantFragment, AssistantHandle, ToolHandle, Transcript, TranscriptDeleteError,
+    TranscriptInitError, TranscriptListError, TranscriptStore, Turn, TurnError, TurnHandle, TurnId,
+    UserHandle,
 };

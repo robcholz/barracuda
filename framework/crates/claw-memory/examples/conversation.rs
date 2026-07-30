@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use claw_interface::MemFs;
-use claw_memory::{AssistantFinish, TranscriptStore};
+use claw_memory::{AssistantFragment, TranscriptStore};
 
 fn main() -> anyhow::Result<()> {
     let conversation_id = 42;
@@ -22,22 +22,40 @@ fn main() -> anyhow::Result<()> {
 
     // One handle owns the turn and commits it as one record on drop.
     {
-        let mut turn = store.open_turn()?;
-        turn.append_user("what's the weather in Shanghai?")?;
-        turn.finish_user()?;
-        turn.finish_assistant(AssistantFinish::RawJson(
-            r#"{"role":"assistant","content":"Let me check.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Shanghai\"}"}}]}"#,
-        ))?;
-        turn.record_tool_result("call_1", r#"{"temp_c":21,"sky":"clear"}"#, false)?;
+        let turn = store.open_turn()?;
+        {
+            let mut user = turn.user()?;
+            user.append("what's the weather in Shanghai?");
+        }
+        {
+            let mut assistant = turn.assistant()?;
+            assistant.append(AssistantFragment::Content("Let me check."));
+            assistant.append(AssistantFragment::ToolCall(serde_json::json!({
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "weather",
+                    "arguments": "{\"city\":\"Shanghai\"}",
+                },
+            })));
+        }
+        {
+            let mut tool = turn.tool("call_1", false)?;
+            tool.append(r#"{"temp_c":21,"sky":"clear"}"#);
+        }
     }
 
     {
-        let mut turn = store.open_turn()?;
-        turn.append_user("and tomorrow?")?;
-        turn.finish_user()?;
-        turn.append_assistant("Sunny, ")?;
-        turn.append_assistant("around 23C.")?;
-        turn.finish_assistant(AssistantFinish::PlainText("Sunny, around 23C."))?;
+        let turn = store.open_turn()?;
+        {
+            let mut user = turn.user()?;
+            user.append("and tomorrow?");
+        }
+        {
+            let mut assistant = turn.assistant()?;
+            assistant.append(AssistantFragment::Content("Sunny, "));
+            assistant.append(AssistantFragment::Content("around 23C."));
+        }
     }
 
     // `turns()` is the read surface — committed turns plus any open one. The
@@ -50,7 +68,6 @@ fn main() -> anyhow::Result<()> {
     );
     println!("{}", serde_json::to_string_pretty(&messages)?);
 
-    // Persistence is automatic: the store flushes any debounced writes when it
-    // is dropped at the end of `main`.
+    // Each turn was persisted when its handle dropped.
     Ok(())
 }

@@ -69,11 +69,6 @@ pub(in crate::agent) struct ConversationHistoryContextProvider {
     summary_messages: Vec<Value>,
     /// Verbatim committed turns after `covered_through`, plus the open turn.
     verbatim_tail: Vec<Value>,
-    /// Transcript content version represented by `verbatim_tail`.
-    cached_content_version: u64,
-    /// Coverage boundary represented by `verbatim_tail`.
-    cached_covered_through: Option<TurnId>,
-    primed: bool,
 }
 
 impl ConversationHistoryContextProvider {
@@ -84,9 +79,6 @@ impl ConversationHistoryContextProvider {
             covered_through: None,
             summary_messages: Vec::new(),
             verbatim_tail: Vec::new(),
-            cached_content_version: 0,
-            cached_covered_through: None,
-            primed: false,
         }
     }
 
@@ -156,14 +148,6 @@ impl ConversationHistoryContextProvider {
     }
 
     fn refresh_verbatim_tail(&mut self, transcript: &dyn Transcript) {
-        let content_version = transcript.content_version();
-        if self.primed
-            && content_version == self.cached_content_version
-            && self.covered_through == self.cached_covered_through
-        {
-            return;
-        }
-
         self.verbatim_tail.clear();
         let turns = transcript.turns();
         for turn in turns
@@ -172,9 +156,6 @@ impl ConversationHistoryContextProvider {
         {
             self.verbatim_tail.extend(turn.messages.iter().cloned());
         }
-        self.cached_content_version = content_version;
-        self.cached_covered_through = self.covered_through;
-        self.primed = true;
     }
 
     /// Pick the oldest uncovered committed turns eligible for the next summary.
@@ -319,16 +300,18 @@ mod tests {
         let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
             .expect("in-memory transcript opens");
         for text in ["turn-one", "turn-two", "turn-three"] {
-            let mut turn = transcript.open_turn().expect("test turn opens");
-            turn.append_user(text).expect("user delta appends");
-            turn.finish_user().expect("user message finishes");
-            turn.commit().expect("test turn commits");
+            let turn = transcript.open_turn().expect("test turn opens");
+            {
+                let mut user = turn.user().expect("user message opens");
+                user.append(text);
+            }
+            drop(turn);
         }
-        let mut open_turn = transcript.open_turn().expect("test turn opens");
-        open_turn
-            .append_user("open-four")
-            .expect("user delta appends");
-        open_turn.finish_user().expect("user message finishes");
+        let open_turn = transcript.open_turn().expect("test turn opens");
+        {
+            let mut user = open_turn.user().expect("user message opens");
+            user.append("open-four");
+        }
         let expected_covered_through = transcript
             .turns()
             .iter()

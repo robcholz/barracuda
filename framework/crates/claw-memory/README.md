@@ -26,10 +26,11 @@ fully host-testable.
 
 | Item | Role |
 |---|---|
-| `Transcript` | The sole type-erased transcript interface used by the agent runtime. It hides the concrete filesystem-backed store type: `open_turn()`, `turns()`, `version()`. |
-| `TranscriptStore<F>` | The concrete per-conversation verbatim store for filesystem `F`, constructed with `new(id, dir)`. Persistence is automatic (debounced writes plus a best-effort flush on drop); all reads go through the `Transcript` trait. |
+| `Transcript` | The sole type-erased transcript interface used by the agent runtime. It hides the concrete filesystem-backed store type: `open_turn()`, `turns()`, and the two version counters. |
+| `TranscriptStore<F>` | The concrete per-conversation verbatim store for filesystem `F`. A non-empty turn is persisted when its handle drops. |
 | `Turn` / `TurnId` | One turn (`id: Option<TurnId>` + `messages`) yielded by `turns()`, and its monotonic logical id. Committed turns carry `Some(id)`; the trailing open turn carries `None`. |
-| `TurnHandle` | The concrete, non-generic RAII writer returned by `open_turn()`. Streams user/assistant fragments, records complete tool results, commits on drop, and supports explicit `commit`/`discard`. |
+| `TurnHandle` | The non-generic RAII scope returned by `open_turn()`. It opens role-specific child handles and commits plus persists the turn on drop. |
+| `UserHandle` / `AssistantHandle` / `ToolHandle` | Nested message scopes. Their only mutation is `append()`; dropping one finishes its message. |
 | `Compactor` / `CompactError` | The summarization seam: fold an aged message window into a shorter summary. Driven by the agent layer, **not** the store. |
 | `ProfileStore` and friends | Editable global profile documents: `Soul`, assistant identity, and user profile. Pure whole-file storage over `ClawFs`; projected into context by `claw-core`. |
 | `LongTermMemory` and friends | Durable per-agent / global fact storage. |
@@ -37,16 +38,16 @@ fully host-testable.
 
 ### How a turn flows
 
-1. Call `store.open_turn()` and stream messages through the returned `TurnHandle`.
-2. Each fragment immediately advances `version()` and is visible through
-   `turns()` as the trailing open turn (`id == None`); when the handle drops, the
-   whole turn is committed as one durable record.
+1. Call `store.open_turn()`, then open `user()`, `assistant()`, or `tool()` child
+   scopes and append role-specific fragments.
+2. Appended fragments are visible through `turns()` as the trailing open turn
+   (`id == None`). Dropping a child finishes its message; dropping the turn
+   commits it, advances `turn_version`, and persists one durable record.
 3. `store.turns()` is the sole read surface: committed turns (`id == Some(_)`)
    followed by any open turn. The full verbatim transcript you feed to the model
    is `turns().iter().flat_map(|t| &t.messages)` — no summaries spliced in; the
    store keeps everything.
-4. Persistence is automatic — debounced writes plus a best-effort flush when the
-   store is dropped; no explicit checkpoint call.
+4. Persistence is automatic at turn drop; no explicit finish or checkpoint call.
 
 **Compaction is not the store's concern.** In `claw-core`, a
 `RollingSummaryContextProvider` reads aged turns via `turns()`,

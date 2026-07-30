@@ -4,7 +4,7 @@ use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind, Context};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};
-use claw_memory::{AssistantFinish, Transcript, TurnHandle};
+use claw_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_persistence::DurableState;
 use claw_tool::ToolSet;
@@ -148,9 +148,11 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
         log::debug!("Agent message accepted: previous_state={previous:?}");
         tracing::debug!(name: "agent_message_accepted", previous = ?previous);
         self.iteration_id_allocator = IterationIdAllocator::new();
-        let mut turn = self.transcript.open_turn()?;
-        turn.append_user(message.as_str())?;
-        turn.finish_user()?;
+        let turn = self.transcript.open_turn()?;
+        {
+            let mut user = turn.user()?;
+            user.append(message.as_str());
+        }
         self.active_turn = Some(turn);
         self.run_state = RunState::Running;
         Ok(())
@@ -240,8 +242,8 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             .as_mut()
             .ok_or(AgentError::StateInvariant)?;
         for message in continuations {
-            turn.append_user(message.as_str())?;
-            turn.finish_user()?;
+            let mut user = turn.user()?;
+            user.append(message.as_str());
         }
         Ok(true)
     }
@@ -257,13 +259,13 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
             .active_turn
             .as_mut()
             .ok_or(AgentError::StateInvariant)?;
-        turn.finish_assistant(AssistantFinish::PlainText(message))?;
+        let mut assistant = turn.assistant()?;
+        assistant.append(AssistantFragment::Content(message));
         Ok(())
     }
 
     fn commit_active_turn(&mut self) -> Result<(), AgentError> {
-        let turn = self.active_turn.take().ok_or(AgentError::StateInvariant)?;
-        turn.commit()?;
+        drop(self.active_turn.take().ok_or(AgentError::StateInvariant)?);
         Ok(())
     }
 
@@ -311,7 +313,7 @@ enum ContentPhase {
 
 #[derive(Default)]
 struct AssistantDraft {
-    reasoning: String,
+    output: String,
     response: Option<String>,
 }
 
@@ -321,7 +323,8 @@ struct AssistantDraft {
 /// owner-facing progress semantics: each stream part is incorporated into the
 /// active turn before the corresponding progress item is forwarded.
 struct IterationConsumer<'a> {
-    turn: &'a mut TurnHandle,
+    turn: &'a TurnHandle,
+    assistant: Option<AssistantHandle<'a>>,
     draft: AssistantDraft,
     phase: ContentPhase,
     reasoning_bytes: usize,
@@ -330,15 +333,17 @@ struct IterationConsumer<'a> {
 }
 
 impl<'a> IterationConsumer<'a> {
-    fn new(turn: &'a mut TurnHandle) -> Self {
-        Self {
+    fn new(turn: &'a TurnHandle) -> Result<Self, AgentError> {
+        let assistant = turn.assistant()?;
+        Ok(Self {
             turn,
+            assistant: Some(assistant),
             draft: AssistantDraft::default(),
             phase: ContentPhase::Reasoning,
             reasoning_bytes: 0,
             assistant_finished: false,
             saw_tool_calls: false,
-        }
+        })
     }
 
     /// Apply one reasoning part before returning the matching owner-facing
@@ -348,7 +353,9 @@ impl<'a> IterationConsumer<'a> {
         match part {
             StreamPart::Delta(fragment) => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
-                self.draft.reasoning.push_str(&fragment);
+                if let Some(assistant) = self.assistant.as_mut() {
+                    assistant.append(AssistantFragment::Reasoning(&fragment));
+                }
                 self.reasoning_progress(fragment)
             }
             StreamPart::End => {
@@ -368,9 +375,10 @@ impl<'a> IterationConsumer<'a> {
         match part {
             StreamPart::Delta(fragment) => {
                 debug_assert_eq!(self.phase, ContentPhase::Output);
-                // Mutate the transcript first. If that fails, the fragment must
-                // not appear on the owner-facing stream as if it were durable.
-                self.turn.append_assistant(&fragment)?;
+                if let Some(assistant) = self.assistant.as_mut() {
+                    assistant.append(AssistantFragment::Content(&fragment));
+                }
+                self.draft.output.push_str(&fragment);
                 Ok(StreamPart::Delta(fragment))
             }
             StreamPart::End => {
@@ -444,9 +452,12 @@ impl<'a> IterationConsumer<'a> {
             })
             .collect::<Vec<_>>();
         self.saw_tool_calls = !tool_calls.is_empty();
-        self.draft.response = self
-            .turn
-            .finish_streamed_assistant(std::mem::take(&mut self.draft.reasoning), tool_calls)?;
+        self.draft.response = tool_calls.is_empty().then(|| self.draft.output.clone());
+        if let Some(mut assistant) = self.assistant.take() {
+            for tool_call in tool_calls {
+                assistant.append(AssistantFragment::ToolCall(tool_call));
+            }
+        }
         self.assistant_finished = true;
         Ok(())
     }
@@ -489,9 +500,7 @@ impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
     fn abandon_open_task(&mut self) {
         self.effect_inbox.clear();
-        if let Some(turn) = self.active_turn.take() {
-            turn.discard();
-        }
+        drop(self.active_turn.take());
     }
 }
 
@@ -553,7 +562,7 @@ where
         control: RunControl,
     ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a {
         async_stream::stream! {
-            loop {
+            'agent_run: loop {
                 if !matches!(self.agent.run_state, RunState::Running) {
                     yield Err(self.agent.fail(AgentError::StateInvariant));
                     break;
@@ -600,17 +609,17 @@ where
                     Ok(history) => history,
                     Err(error) => {
                         yield Err(self.agent.fail(error));
-                        break;
+                        break 'agent_run;
                     }
                 };
-                let result = {
+                let result = 'run_iteration: {
                     let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
                     Ok(tools) => tools,
                     Err(error) => {
                         yield Err(self.agent.fail(AgentError::from(
                             IterationLoopError::from(error),
                         )));
-                        break;
+                        break 'agent_run;
                     }
                     };
                     render_span.in_scope(|| {
@@ -636,7 +645,11 @@ where
 
                     let Some(turn) = self.agent.active_turn.as_mut() else {
                         yield Err(self.agent.fail(AgentError::StateInvariant));
-                        break;
+                        break 'agent_run;
+                    };
+                    let mut consumer = match IterationConsumer::new(turn) {
+                        Ok(consumer) => consumer,
+                        Err(error) => break 'run_iteration Err(error),
                     };
                     let permission = BaseAgentPermissionPolicy {
                         policy: self.agent.permission_policy.as_ref(),
@@ -653,7 +666,6 @@ where
                         "iteration_loop",
                         run.iteration = %iteration_id,
                     );
-                    let mut consumer = IterationConsumer::new(turn);
 
                     yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
                         AgentIterationEvent::Started(iteration_id),
@@ -719,13 +731,12 @@ where
                                         result = Some(Err(AgentError::StateInvariant));
                                         break;
                                     }
-                                    if let Err(error) = consumer.turn.record_tool_result(
-                                        &call.id,
-                                        &output.content,
-                                        !output.ok,
-                                    ) {
-                                        result = Some(Err(AgentError::from(error)));
-                                        break;
+                                    match consumer.turn.tool(&call.id, !output.ok) {
+                                        Ok(mut tool) => tool.append(&output.content),
+                                        Err(error) => {
+                                            result = Some(Err(AgentError::from(error)));
+                                            break;
+                                        }
                                     }
                                     self.agent
                                         .state
@@ -835,11 +846,13 @@ mod tests {
     fn streamed_output_reaches_the_transcript_before_progress() {
         let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
             .expect("in-memory transcript opens");
-        let mut turn = transcript.open_turn().expect("turn opens");
-        turn.append_user("hello").expect("user fragment appends");
-        turn.finish_user().expect("user message finishes");
+        let turn = transcript.open_turn().expect("turn opens");
+        {
+            let mut user = turn.user().expect("user message opens");
+            user.append("hello");
+        }
 
-        let mut consumer = IterationConsumer::new(&mut turn);
+        let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
         let mut actual = vec![AgentIterationEvent::Reasoning(
             consumer
                 .consume_reasoning(StreamPart::End)
@@ -877,17 +890,19 @@ mod tests {
                 AgentIterationEvent::Output(StreamPart::End),
             ]
         );
-        turn.discard();
+        drop(turn);
     }
 
     #[test]
     fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
         let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 2, "/transcript")
             .expect("in-memory transcript opens");
-        let mut turn = transcript.open_turn().expect("turn opens");
-        turn.append_user("hello").expect("user fragment appends");
-        turn.finish_user().expect("user message finishes");
-        let mut consumer = IterationConsumer::new(&mut turn);
+        let turn = transcript.open_turn().expect("turn opens");
+        {
+            let mut user = turn.user().expect("user message opens");
+            user.append("hello");
+        }
+        let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
         consumer.consume_reasoning(StreamPart::Delta("think".to_owned()));
         consumer.consume_reasoning(StreamPart::End);
         consumer
@@ -926,7 +941,7 @@ mod tests {
                 }],
             })
         );
-        turn.discard();
+        drop(turn);
     }
 
     fn assistant_content(transcript: &TranscriptStore<MemFs>) -> Option<String> {
