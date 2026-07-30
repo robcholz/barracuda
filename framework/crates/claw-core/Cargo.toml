@@ -20,6 +20,8 @@ stage_verbose = []
 # Host-side API/cache profiling. Kept out of defaults so firmware does not pay
 # for diagnostic-only response fields and session events.
 cache_profile = ["claw-api/cache_profile"]
+# Raw Context snapshots and their intrusive WebSocket observer.
+intrusive-observability = ["claw-context/intrusive-observability"]
 # Compile the Session-scoped subagent graph, tools, and lifecycle driver.
 # Disabled builds contain only the root-Agent Session path.
 multiagent = []

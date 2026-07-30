@@ -649,6 +649,10 @@ where
                         retry: self.agent.retry_policy,
                     }
                     .run(step));
+                    let iteration_span = tracing::info_span!(
+                        "iteration_loop",
+                        run.iteration = %iteration_id,
+                    );
                     let mut consumer = IterationConsumer::new(turn);
 
                     yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
@@ -657,7 +661,11 @@ where
 
                     let mut result = None;
                     let mut tool_results_ended = false;
-                    while let Some(item) = iteration.next().await {
+                    while let Some(item) = iteration
+                        .next()
+                        .instrument(iteration_span.clone())
+                        .await
+                    {
                     let event = match item {
                         Ok(event) => event,
                         Err(error) => {

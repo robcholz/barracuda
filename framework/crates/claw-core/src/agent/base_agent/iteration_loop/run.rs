@@ -120,6 +120,7 @@ where
             };
 
             let mut tool_calls = Vec::new();
+            let mut output_bytes = 0_u64;
             loop {
                 let next = StreamExt::next(&mut stream)
                     .instrument(chat_span.clone())
@@ -129,6 +130,9 @@ where
                         yield IterationLoopEvent::Iteration(IterationEvent::Reasoning(part));
                     }
                     Some(Ok(ChatStreamEvent::Output(part))) => {
+                        if let StreamPart::Delta(output) = &part {
+                            output_bytes = output_bytes.saturating_add(output.len() as u64);
+                        }
                         yield IterationLoopEvent::Iteration(IterationEvent::Output(part));
                     }
                     Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))) => {
@@ -161,10 +165,12 @@ where
                 return;
             }
             if tool_calls.is_empty() {
+                tracing::info!(name: "completed", output_bytes);
                 yield IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::End));
                 return;
             }
 
+            tracing::info!(name: "tool_calls", count = tool_calls.len() as u64);
             yield IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(
                 tool_calls.clone(),
             ));
@@ -220,6 +226,12 @@ impl<'a> ToolPhase<'a> {
             ) {
                 Ok(invocation) => invocation,
                 Err(error) => {
+                    trace_immediate_tool_result(
+                        &tool_call,
+                        false,
+                        false,
+                        Some("invalid_invocation"),
+                    );
                     ready_results.push_back((
                         tool_call,
                         ToolOutput {
@@ -233,6 +245,7 @@ impl<'a> ToolPhase<'a> {
             let action = match tools.classify(&invocation) {
                 Ok(action) => action,
                 Err(error) => {
+                    trace_immediate_tool_result(&tool_call, false, true, None);
                     ready_results.push_back((
                         tool_call,
                         ToolOutput {
@@ -250,13 +263,17 @@ impl<'a> ToolPhase<'a> {
                 action: &action,
             }) {
                 ToolAuthorization::Allow => allowed.push(scheduled),
-                ToolAuthorization::Deny(reason) => ready_results.push_back((
-                    scheduled.tool_call(),
-                    ToolOutput {
-                        content: reason,
-                        ok: false,
-                    },
-                )),
+                ToolAuthorization::Deny(reason) => {
+                    let tool_call = scheduled.tool_call();
+                    trace_immediate_tool_result(&tool_call, false, true, None);
+                    ready_results.push_back((
+                        tool_call,
+                        ToolOutput {
+                            content: reason,
+                            ok: false,
+                        },
+                    ));
+                }
                 ToolAuthorization::Pending {
                     reason,
                     activate,
@@ -305,10 +322,12 @@ impl<'a> ToolPhase<'a> {
                 )));
             }
             if control.is_cancelled() {
+                tracing::warn!(name: "cancelled", checkpoint = "tool_phase");
                 self.results_ended = true;
                 return Ok(Some(IterationLoopEvent::Cancelled));
             }
             if control.take_interrupt() {
+                tracing::warn!(name: "preempted", checkpoint = "before_tool");
                 self.results_ended = true;
                 return Ok(Some(IterationLoopEvent::Interrupted));
             }
@@ -364,10 +383,12 @@ impl<'a> ToolPhase<'a> {
                 }
                 ToolBatchUpdate::Execution(None) => self.joined = None,
                 ToolBatchUpdate::Stop(super::super::stream::RunStop::Interrupted) => {
+                    tracing::warn!(name: "preempted", checkpoint = "tool_phase");
                     self.results_ended = true;
                     return Ok(Some(IterationLoopEvent::Interrupted));
                 }
                 ToolBatchUpdate::Stop(super::super::stream::RunStop::Cancelled) => {
+                    tracing::warn!(name: "cancelled", checkpoint = "tool_phase");
                     self.results_ended = true;
                     return Ok(Some(IterationLoopEvent::Cancelled));
                 }
@@ -384,9 +405,11 @@ impl<'a> ToolPhase<'a> {
                             self.detached.extend(detached);
                         }
                         ToolPermission::Deny(reason) => {
+                            let tool_call = waiting.call.tool_call();
+                            trace_immediate_tool_result(&tool_call, false, true, None);
                             return self
                                 .tool_result(
-                                    waiting.call.tool_call(),
+                                    tool_call,
                                     ToolOutput {
                                         content: reason,
                                         ok: false,
@@ -457,6 +480,29 @@ fn tool_result_parts((invocation, output): (ToolInvocation, ToolOutput)) -> (Too
         },
         output,
     )
+}
+
+fn trace_immediate_tool_result(
+    call: &ToolCall,
+    ok: bool,
+    blocked: bool,
+    parse_failure: Option<&'static str>,
+) {
+    let span = tracing::info_span!("toolcall", tool = %call.name);
+    span.in_scope(|| {
+        tracing::info!(
+            name: "arguments",
+            argument_bytes = call.arguments_json.len() as u64,
+        );
+        if let Some(kind) = parse_failure {
+            tracing::warn!(name: "parse_failed", kind);
+        }
+        if ok {
+            tracing::info!(name: "result", ok, blocked);
+        } else {
+            tracing::warn!(name: "result", ok, blocked);
+        }
+    });
 }
 
 #[cfg(test)]

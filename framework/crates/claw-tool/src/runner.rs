@@ -1,10 +1,12 @@
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
 
 use async_channel::{Receiver, Sender};
 use futures_core::Stream;
+use tracing::Instrument as _;
 
 use super::{Tool, ToolCompletionFuture, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle};
 
@@ -16,6 +18,8 @@ const DETACHED_ACCEPTED: &str = concat!(
 
 type ToolRunFuture =
     Pin<Box<dyn Future<Output = Option<(ToolInvocation, ToolOutput)>> + Send + 'static>>;
+
+static NEXT_TOOL_TASK_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Default)]
 struct ToolRuns {
@@ -109,22 +113,28 @@ impl<'a> ToolRunner<'a> {
         let mut detached = ToolRuns::default();
 
         for invocation in calls {
+            let span = toolcall_span(&invocation);
             let tool = match self.tools.runnable_tool(&invocation) {
                 Ok(tool) => tool,
                 Err(error) => {
-                    joined.push(ready(invocation, Err(error)));
+                    joined.push(traced_ready(invocation, Err(error), span, true));
                     continue;
                 }
             };
             if tool.is_dynamically_detached() {
                 let (completion, receiver) = async_channel::bounded(1);
-                joined.push(start_detached(tool, invocation.clone(), completion));
-                detached.push(await_completion(invocation, receiver));
+                joined.push(start_detached(
+                    tool,
+                    invocation.clone(),
+                    completion,
+                    span.clone(),
+                ));
+                detached.push(await_completion(invocation, receiver, span));
             } else if tool.config().detached {
                 joined.push(ready(invocation.clone(), Ok(detached_accepted())));
-                detached.push(run(tool, invocation));
+                detached.push(run(tool, invocation, span));
             } else {
-                joined.push(run(tool, invocation));
+                joined.push(run(tool, invocation, span));
             }
         }
 
@@ -137,39 +147,99 @@ fn ready(invocation: ToolInvocation, output: ToolResult<ToolOutput>) -> ToolRunF
     Box::pin(async move { Some((invocation, settle(output))) })
 }
 
-fn run(tool: Tool, invocation: ToolInvocation) -> ToolRunFuture {
-    Box::pin(async move {
-        let output = tool.invoke(&invocation).await;
-        Some((invocation, settle(output)))
-    })
+fn traced_ready(
+    invocation: ToolInvocation,
+    output: ToolResult<ToolOutput>,
+    span: tracing::Span,
+    blocked: bool,
+) -> ToolRunFuture {
+    Box::pin(
+        async move {
+            let output = settle(output);
+            trace_result(&output, blocked);
+            Some((invocation, output))
+        }
+        .instrument(span),
+    )
+}
+
+fn run(tool: Tool, invocation: ToolInvocation, span: tracing::Span) -> ToolRunFuture {
+    Box::pin(
+        async move {
+            let output = tool.invoke(&invocation).await;
+            let output = settle(output);
+            trace_result(&output, false);
+            Some((invocation, output))
+        }
+        .instrument(span),
+    )
 }
 
 fn start_detached(
     tool: Tool,
     invocation: ToolInvocation,
     completion: Sender<ToolCompletionFuture>,
+    span: tracing::Span,
 ) -> ToolRunFuture {
-    Box::pin(async move {
-        let output = match tool.invoke_detached(&invocation).await {
-            Ok(detached) => {
-                let (accepted, future) = detached.into_parts();
-                let _ = completion.try_send(future);
-                accepted
-            }
-            Err(error) => settle(Err(error)),
-        };
-        Some((invocation, output))
-    })
+    Box::pin(
+        async move {
+            let output = match tool.invoke_detached(&invocation).await {
+                Ok(detached) => {
+                    let (accepted, future) = detached.into_parts();
+                    let _ = completion.try_send(future);
+                    accepted
+                }
+                Err(error) => {
+                    let output = settle(Err(error));
+                    trace_result(&output, false);
+                    output
+                }
+            };
+            Some((invocation, output))
+        }
+        .instrument(span),
+    )
 }
 
 fn await_completion(
     invocation: ToolInvocation,
     completion: Receiver<ToolCompletionFuture>,
+    span: tracing::Span,
 ) -> ToolRunFuture {
-    Box::pin(async move {
-        let future = completion.recv().await.ok()?;
-        Some((invocation, settle(future.await)))
-    })
+    Box::pin(
+        async move {
+            let future = completion.recv().await.ok()?;
+            let output = settle(future.await);
+            trace_result(&output, false);
+            Some((invocation, output))
+        }
+        .instrument(span),
+    )
+}
+
+fn toolcall_span(invocation: &ToolInvocation) -> tracing::Span {
+    let task_id = NEXT_TOOL_TASK_ID.fetch_add(1, Ordering::Relaxed);
+    let task = format!("toolcall-{task_id}");
+    let span = tracing::info_span!(
+        "toolcall",
+        trace.task = %task,
+        tool = %invocation.name(),
+    );
+    span.in_scope(|| {
+        tracing::info!(
+            name: "arguments",
+            argument_bytes = invocation.arguments_json().len() as u64,
+        );
+    });
+    span
+}
+
+fn trace_result(output: &ToolOutput, blocked: bool) {
+    if output.ok {
+        tracing::info!(name: "result", ok = output.ok, blocked);
+    } else {
+        tracing::warn!(name: "result", ok = output.ok, blocked);
+    }
 }
 
 fn detached_accepted() -> ToolOutput {

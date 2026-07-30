@@ -1,11 +1,11 @@
 # claw-core Trace
 
-This document defines the `claw-core` trace vocabulary on top of
+This document defines the Agent runtime trace vocabulary on top of
 `claw-log`'s flat-tree trace format. `claw-log` owns the line grammar
 (`tracing-context`, `incremental-context`, and `custom-context`); this file owns
-the first-party runtime span names and event names emitted by `claw-core` and
-its `claw-api` LLM request path, plus incremental `run.*` keys and custom
-context fields.
+the first-party runtime span names and event names emitted by `claw-core`, its
+`claw-api` LLM request path, and the `claw-tool` execution path, plus
+incremental `run.*` keys and custom context fields.
 
 The `run` context is prefix-closed in this order:
 `system → session → turn → agent → iteration`. `run.system` is the outer
@@ -443,6 +443,7 @@ span-name: `iteration_loop`
 
 `completed`: LLM produced final text without tool calls.
 `preempted`: Iteration stopped at an interrupt checkpoint.
+`cancelled`: Iteration stopped after cancellation was requested.
 `chat_failed`: LLM chat failed for a non-interrupt reason.
 `tool_calls`: LLM requested one or more tool calls.
 `assistant_tool_calls_invalid`: Assistant tool-call message was missing, malformed, or could not be appended.
@@ -451,6 +452,7 @@ span-name: `iteration_loop`
 
 `completed`: `output_bytes`.
 `preempted`: `checkpoint`.
+`cancelled`: `checkpoint`.
 `chat_failed`: `kind`.
 `tool_calls`: `count`.
 `assistant_tool_calls_invalid`: `kind`.
@@ -476,6 +478,18 @@ span-name: `skill.catalog`
 
 span-name: `toolcall`
 
+Joined and detached calls are traced at the `claw-tool` runner boundary after
+authorization. Each runner-owned call opens a unique `trace.task` logical lane
+because calls in one batch may overlap and detached work may outlive the
+originating `iteration_loop`. Opening the lane repeats the complete inherited
+`run` context, including the originating iteration.
+
+The span begins when the authorized call is dispatched. For a joined call it
+ends with the model-facing result. For a detached call it remains open until
+the real background completion; the immediate accepted result does not close
+the span or emit `result`. Calls rejected before dispatch use a synchronous
+`toolcall` span on the agent lane.
+
 ### Span Fields
 
 `tool`: Tool name. Use `none` as a placeholder when no tool was called.
@@ -484,8 +498,7 @@ span-name: `toolcall`
 
 `arguments`: Tool argument metadata was recorded.
 `parse_failed`: Tool invocation could not be parsed from the model call.
-`result`: Tool completed, was blocked, or requested approval.
-`preempted`: Interrupt was observed before the tool call ran.
+`result`: Tool completed or was rejected before execution.
 `spawn_kind_rejected`: a subagent creation tool rejected a kind outside the caller's allowed kinds.
 `spawn_unknown_kind_rejected`: a subagent creation tool rejected a kind without a baked manifest.
 
@@ -494,6 +507,5 @@ span-name: `toolcall`
 `arguments`: `argument_bytes`.
 `parse_failed`: `kind`.
 `result`: `ok`, `blocked`.
-`preempted`: `checkpoint`.
 `spawn_kind_rejected`: `kind`.
 `spawn_unknown_kind_rejected`: `kind`.
