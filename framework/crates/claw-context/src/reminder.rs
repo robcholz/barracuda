@@ -34,6 +34,7 @@ use crate::block::BlockKind;
 /// The agent's ephemeral reminder channel. Holds the source texts plus a reused
 /// render buffer; call [`refresh`](Self::refresh) once per tick before reading
 /// [`as_slice`](Self::as_slice).
+#[cfg_attr(feature = "intrusive-observability", derive(Clone))]
 pub(crate) struct Reminders {
     /// Source reminder texts, keyed by context kind. The single source of truth.
     texts: BTreeMap<BlockKind, String>,

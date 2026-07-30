@@ -101,9 +101,9 @@ run_claw_core_feature_matrix() {
     # Cargo to unify impossible combinations via --all-features.
     for feature in "${reasoning_tier_features[@]}"; do
         if [[ "$cargo_cmd" == "clippy" ]]; then
-            run cargo "$cargo_cmd" -p claw-core --all-targets --no-default-features --features "$feature stage_verbose multiagent" -- -D warnings
+            run cargo "$cargo_cmd" -p claw-core --all-targets --no-default-features --features "$feature multiagent intrusive-observability" -- -D warnings
         else
-            run cargo "$cargo_cmd" -p claw-core --all-targets --no-default-features --features "$feature stage_verbose multiagent"
+            run cargo "$cargo_cmd" -p claw-core --all-targets --no-default-features --features "$feature multiagent intrusive-observability"
         fi
     done
 }
@@ -118,12 +118,12 @@ run_claw_agent_feature_matrix() {
         if [[ "$cargo_cmd" == "clippy" ]]; then
             run cargo "$cargo_cmd" -p claw-agent --all-targets \
                 --no-default-features \
-                --features "$feature stage_verbose multiagent cache_profile dev" \
+                --features "$feature multiagent cache_profile intrusive-observability" \
                 -- -D warnings
         else
             run cargo "$cargo_cmd" -p claw-agent --all-targets \
                 --no-default-features \
-                --features "$feature stage_verbose multiagent cache_profile dev"
+                --features "$feature multiagent cache_profile intrusive-observability"
         fi
     done
 }

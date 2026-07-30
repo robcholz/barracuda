@@ -14,6 +14,8 @@ cargo run --profile profiling -p claw-agent-profile -- agent-init
 
 ## Debugging
 
+### Export Trace
+
 ```bash
 cd crates/claw-log
 uv run claw-trace-chrome <path-to-log> -o <where-you-want-to-emit-chrome-trace>
@@ -27,6 +29,12 @@ The command uses `claw-log`'s canonical Python exporter. Its synthetic Chrome
 process/thread mapping (including `run.system`, session grouping, and the
 `unattributed` fallback) is documented in
 [`crates/claw-log/scripts/README.md`](crates/claw-log/scripts/README.md).
+
+### Context Visualization
+
+```bash
+uv run --script crates/claw-context/scripts/context_viewer.py
+```
 
 ## Flashing
 

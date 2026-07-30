@@ -16,7 +16,7 @@ reasoning_medium = ["claw-agent/reasoning_medium"]
 reasoning_long = ["claw-agent/reasoning_long"]
 
 [dependencies]
-claw-agent = { path = "../claw-agent", default-features = false, features=["stage_verbose", "cache_profile", "multiagent", "intrusive-observability"] }
+claw-agent = { path = "../claw-agent", default-features = false, features=["cache_profile", "multiagent", "intrusive-observability"] }
 claw-interface = { path = "../claw-interface", features = ["host-backends"] }
 claw-log = { path = "../claw-log" }
 anyhow = "1"

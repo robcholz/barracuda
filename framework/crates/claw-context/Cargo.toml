@@ -11,8 +11,26 @@ name = "claw_context"
 # staticlib that the firmware links.
 crate-type = ["rlib"]
 
+[features]
+default = []
+# Raw Context snapshots streamed by the internal WebSocket observer. Compiled
+# only when explicitly selected by a consumer.
+intrusive-observability = [
+    "dep:axum",
+    "dep:futures-util",
+    "dep:serde",
+    "dep:tokio",
+]
+
 [dependencies]
 serde_json = "1"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"], optional = true }
+futures-util = { version = "0.3", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
 
 [lints.rust]
 unsafe_code = "forbid"

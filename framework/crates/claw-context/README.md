@@ -81,8 +81,30 @@ cargo run -p claw-context --example build_context --target x86_64-unknown-linux-
 
 ## Where it fits
 
-Pure-Rust, depends only on `serde_json` (to carry the structured `messages`
-tail). It bundles into the firmware's `claw_rt` staticlib and is fully
-host-testable. Content providers (instruction loaders, memory providers, skill
-sets, summarizers) live in other crates and feed their prose/items in via
-`with` or `sink`; the conversation `history` is passed in by the agent.
+The default build is pure Rust and depends only on `serde_json` (to carry the
+structured `messages` tail). It bundles into the firmware's `claw_rt` staticlib
+and is fully host-testable. Content providers (instruction loaders, memory
+providers, skill sets, summarizers) live in other crates and feed their
+prose/items in via `with` or `sink`; the conversation `history` is passed in by
+the agent.
+
+## Intrusive observation
+
+Enable `intrusive-observability` at the application boundary to start the
+private context WebSocket server on `127.0.0.1:9464`. Every
+`Context::request()` made while a client is connected publishes the final
+structured context to `ws://127.0.0.1:9464/ws/context`.
+
+```bash
+cargo run -p claw-cli
+```
+
+Run the live viewer from the framework root:
+
+```bash
+uv run --script crates/claw-context/scripts/context_viewer.py
+```
+
+The viewer is a scrollable terminal UI. Use the mouse wheel, arrow keys,
+Page Up/Page Down, Home, or End to inspect the full snapshot; press `q` to
+quit.

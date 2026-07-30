@@ -15,6 +15,6 @@
 `claw-skill`: skill registry — scans `SKILL.md` skill files over a `ClawFs`, renders the catalog, and assembles loaded skill documents into prompt context blocks.
 `claw-capability`: capability adapter — maps registered `Capability` items into internal runtime projections with an orthogonal enable/disable lifecycle.
 `claw-core`: runtime core — orchestrator shell, session/channel management, and the per-iteration LLM + tool-call loop. uses all the domain crates and `claw-api` but depends on no platform crate directly.
-`claw-agent`: agent system api — the public entry point above `claw-core`: builds an `AgentSystem`, wires the `Registry` of capabilities, and drives registered channels. the `dev` feature enables a host-target repl binary (`claw-agent-chat`).
+`claw-agent`: agent system api — the public entry point above `claw-core`: builds an `AgentSystem`, wires the `Registry` of capabilities, and drives registered channels.
+`claw-cli`: host CLI applications — includes `claw-agent-chat`, which drives `claw-agent` against a live LLM with on-disk memory for off-device manual testing. not linked into firmware.
 `claw-cabi`: outbound C ABI boundary — the single `extern "C"` layer (Rust → C): C registers capabilities and pushes inbound messages; the agent runtime and all business logic stay on the Rust side. the only crate in the workspace where `unsafe_code = "allow"`.
-`cli` (`claw-agent-cli`): host CLI — drives claw agents against a live LLM with on-disk memory for off-device manual testing. not linked into firmware.
