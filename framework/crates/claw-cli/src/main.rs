@@ -2,17 +2,15 @@
 //! the public [`claw_agent`] API: build an [`AgentSystem`], create a session,
 //! append user text, and print each turn's replies.
 //!
-//! LLM config is read from `claw-core/.env.local` (the same file the integration
-//! tests use): `CLAW_LLM_API_KEY`, `CLAW_LLM_BASE_URL`, `CLAW_LLM_MODEL`. Memory
-//! is written under this crate's `output/claw-agent-chat/`.
+//! LLM config is read from this crate's `.env.local`:
+//! `CLAW_LLM_API_KEY`, `CLAW_LLM_BASE_URL`, and `CLAW_LLM_MODEL`. Memory is
+//! written under this crate's `output/claw-agent-chat/`.
 //!
 //! ```
-//! cargo run -p claw-agent --features dev,cache_profile --bin claw-agent-chat
+//! cargo run -p claw-cli --features cache_profile --bin claw-agent-chat
 //! ```
 //!
-#[path = "claw-agent-chat/command.rs"]
 mod command;
-#[path = "claw-agent-chat/line_editor.rs"]
 mod line_editor;
 
 use std::collections::VecDeque;
@@ -291,6 +289,11 @@ impl ContentRenderer {
         self.finish(editor)?;
         self.above_prompt = above_prompt;
         Ok(())
+    }
+
+    fn abandon_live_render(&mut self) {
+        self.reasoning.finish();
+        self.output.finish();
     }
 
     fn reasoning(&mut self, part: StreamPart<String>, editor: &mut ChatLineEditor) -> Result<()> {
@@ -591,9 +594,9 @@ fn has_usage(usage: ProviderUsage) -> bool {
         || usage.cache_write_tokens.is_some()
 }
 
-fn show_prompt(editor: &ChatLineEditor, prompt_active: &mut bool) -> Result<()> {
+async fn show_prompt(editor: &mut ChatLineEditor, prompt_active: &mut bool) -> Result<()> {
     if !*prompt_active {
-        editor.show_prompt()?;
+        editor.show_prompt().await?;
         *prompt_active = true;
     }
     Ok(())
@@ -610,13 +613,13 @@ async fn main() {
 async fn run() -> Result<()> {
     claw_log::init_logger(
         LevelFilter::Info,
-        LogOutput::File(Path::new(env!("CARGO_MANIFEST_DIR")).join("../claw-agent/simulator.log")),
+        LogOutput::File(Path::new(env!("CARGO_MANIFEST_DIR")).join("simulator.log")),
     )?;
     claw_log::init_tracing(
         TracingConfig::default()
             .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]),
     )?;
-    let env_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../claw-agent/.env.local");
+    let env_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(".env.local");
     if env_path.is_file() {
         if let Err(error) = dotenvy::from_path(&env_path) {
             eprintln!("warning: failed to load {}: {error}", env_path.display());
@@ -655,7 +658,7 @@ async fn run() -> Result<()> {
     let mut waiting_ticks =
         tokio::time::interval_at(tokio::time::Instant::now() + WAITING_TICK, WAITING_TICK);
     waiting_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    show_prompt(&editor, &mut prompt_active)?;
+    show_prompt(&mut editor, &mut prompt_active).await?;
 
     loop {
         let activity = next_activity(editor.next_input(), chat.events.next(), async {
@@ -664,7 +667,8 @@ async fn run() -> Result<()> {
         .await;
         match activity {
             ReplActivity::Input(Some(LineInput::Line(line))) => {
-                editor.abandon_live_render();
+                editor.abandon_live_render(Some(&line))?;
+                chat.content.abandon_live_render();
                 prompt_active = false;
                 let input = line.trim();
                 if input.is_empty() {
@@ -676,19 +680,22 @@ async fn run() -> Result<()> {
                             if chat.append(message).await {
                                 pending_user_turns.push_back(UserTurnDisplay::AlreadyRendered);
                                 state = ReplState::Running;
+                                show_prompt(&mut editor, &mut prompt_active).await?;
                                 editor.start_waiting()?;
                                 waiting_ticks.reset();
                             } else {
-                                show_prompt(&editor, &mut prompt_active)?;
+                                show_prompt(&mut editor, &mut prompt_active).await?;
                             }
                         }
                         ReplState::AwaitingInput(request) => {
                             if chat.respond(request, message).await {
                                 state = ReplState::Running;
+                                show_prompt(&mut editor, &mut prompt_active).await?;
                                 editor.start_waiting()?;
                                 waiting_ticks.reset();
+                            } else {
+                                show_prompt(&mut editor, &mut prompt_active).await?;
                             }
-                            show_prompt(&editor, &mut prompt_active)?;
                         }
                         ReplState::Running => {
                             print_event(
@@ -696,7 +703,7 @@ async fn run() -> Result<()> {
                                 "turn is running; use /append <message> to queue another turn",
                                 EventStyle::Error,
                             );
-                            show_prompt(&editor, &mut prompt_active)?;
+                            show_prompt(&mut editor, &mut prompt_active).await?;
                         }
                     },
                     Ok(CliInput::Append(message)) => {
@@ -707,78 +714,80 @@ async fn run() -> Result<()> {
                             print_event("append", "queued", EventStyle::Control);
                             if was_idle {
                                 state = ReplState::Running;
+                                show_prompt(&mut editor, &mut prompt_active).await?;
                                 editor.start_waiting()?;
                                 waiting_ticks.reset();
                             }
                         } else {
-                            show_prompt(&editor, &mut prompt_active)?;
+                            show_prompt(&mut editor, &mut prompt_active).await?;
                             continue;
                         }
                         if !was_idle {
-                            show_prompt(&editor, &mut prompt_active)?;
+                            show_prompt(&mut editor, &mut prompt_active).await?;
                         }
                     }
                     Ok(CliInput::Interrupt) => {
                         if state == ReplState::Idle {
                             print_event("error", "no active turn to interrupt", EventStyle::Error);
-                            show_prompt(&editor, &mut prompt_active)?;
+                            show_prompt(&mut editor, &mut prompt_active).await?;
                         } else if chat.interrupt().await
                             && pending_stop != Some(StopRequest::Cancel)
                         {
                             pending_stop = Some(StopRequest::Interrupt);
-                        } else if pending_stop != Some(StopRequest::Cancel) {
-                            show_prompt(&editor, &mut prompt_active)?;
                         }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Ok(CliInput::Cancel) => {
                         if state == ReplState::Idle {
                             print_event("error", "no active turn to cancel", EventStyle::Error);
-                            show_prompt(&editor, &mut prompt_active)?;
                         } else if chat.cancel().await {
                             pending_stop = Some(StopRequest::Cancel);
-                        } else {
-                            show_prompt(&editor, &mut prompt_active)?;
                         }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Ok(CliInput::SetPermission(level)) => {
                         chat.set_permission_level(level).await;
-                        show_prompt(&editor, &mut prompt_active)?;
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Ok(CliInput::SetReasoningEffort(effort)) => {
                         chat.set_reasoning_effort(effort).await;
-                        show_prompt(&editor, &mut prompt_active)?;
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Err(error) => {
                         print_event("error", &error.to_string(), EventStyle::Error);
-                        show_prompt(&editor, &mut prompt_active)?;
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                 }
             }
             ReplActivity::Input(Some(LineInput::Interrupted)) => {
-                editor.abandon_live_render();
+                editor.abandon_live_render(None)?;
+                chat.content.abandon_live_render();
                 prompt_active = false;
                 match ctrl_c_action(state) {
                     CtrlCAction::Exit => break,
                     CtrlCAction::Cancel => {
                         if chat.cancel().await {
                             pending_stop = Some(StopRequest::Cancel);
-                        } else {
-                            show_prompt(&editor, &mut prompt_active)?;
                         }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                 }
             }
             ReplActivity::Input(Some(LineInput::Eof) | None) => {
-                editor.abandon_live_render();
+                editor.abandon_live_render(None)?;
                 prompt_active = false;
                 break;
             }
             ReplActivity::Input(Some(LineInput::Failed(error))) => {
-                editor.abandon_live_render();
+                editor.abandon_live_render(None)?;
                 return Err(error.into());
+            }
+            ReplActivity::Input(Some(LineInput::PromptReady)) => {
+                prompt_active = true;
             }
             ReplActivity::Session(Some(Ok(event))) => {
                 if let SessionEvent::Turn(TurnEvent::Started { origin, .. }) = &event {
+                    show_prompt(&mut editor, &mut prompt_active).await?;
                     if let Some(message) =
                         take_deferred_user_message(&mut pending_user_turns, origin)
                     {
@@ -786,14 +795,13 @@ async fn run() -> Result<()> {
                     }
                     editor.start_waiting()?;
                     waiting_ticks.reset();
-                    show_prompt(&editor, &mut prompt_active)?;
                 }
                 match chat.render(event, &mut editor, prompt_active)? {
                     RenderOutcome::Continue => {}
                     RenderOutcome::TurnStarted => state = ReplState::Running,
                     RenderOutcome::InputRequested(request) => {
                         state = ReplState::AwaitingInput(request);
-                        show_prompt(&editor, &mut prompt_active)?;
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     RenderOutcome::TurnEnded { user, saw_output } => {
                         state = ReplState::Idle;
@@ -814,7 +822,7 @@ async fn run() -> Result<()> {
                         } else {
                             editor.clear_waiting()?;
                         }
-                        show_prompt(&editor, &mut prompt_active)?;
+                        show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     RenderOutcome::Closed => {
                         editor.clear_waiting()?;
@@ -856,7 +864,7 @@ async fn run() -> Result<()> {
 fn required(key: &str) -> Result<String> {
     match std::env::var(key) {
         Ok(value) if !value.is_empty() => Ok(value),
-        _ => bail!("{key} must be set (in env or claw-core/.env.local)"),
+        _ => bail!("{key} must be set (in env or claw-cli/.env.local)"),
     }
 }
 

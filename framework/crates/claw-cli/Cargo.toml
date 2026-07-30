@@ -1,0 +1,36 @@
+[package]
+name = "claw-cli"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Host CLI applications for the ESP-Claw agent framework"
+
+[[bin]]
+name = "claw-agent-chat"
+path = "src/main.rs"
+required-features = ["cache_profile"]
+
+[features]
+default = ["reasoning_medium"]
+cache_profile = ["claw-agent/cache_profile"]
+stage_verbose = ["claw-agent/stage_verbose"]
+multiagent = ["claw-agent/multiagent"]
+use_legacy_skill = ["claw-agent/use_legacy_skill"]
+reasoning_short = ["claw-agent/reasoning_short"]
+reasoning_medium = ["claw-agent/reasoning_medium"]
+reasoning_long = ["claw-agent/reasoning_long"]
+
+[dependencies]
+claw-agent = { path = "../claw-agent", default-features = false }
+claw-interface = { path = "../claw-interface", features = ["host-backends"] }
+claw-log = { path = "../claw-log" }
+anyhow = "1"
+dotenvy = "0.15"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
+futures-lite = "2"
+anstyle = "1"
+rustyline = { version = "18.0.1", default-features = false }
+strum = { version = "0.28", features = ["derive"] }
+terminal_size = "0.4.4"
+unicode-width = "0.2.2"
+thiserror = "2"

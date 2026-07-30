@@ -9,19 +9,6 @@ description = "Assembled agent-system API over claw-core runtime and Sessions"
 name = "claw_agent"
 path = "src/lib.rs"
 
-# A minimal REPL that drives the whole agent system against a live LLM with
-# on-disk memory. It uses host-target backends, dev workflow dependencies, and
-# cache profiling, so both features are required.
-[[bin]]
-name = "claw-agent-chat"
-path = "src/bin/claw-agent-chat.rs"
-required-features = ["dev", "cache_profile"]
-
-# The tool/submit reference example uses test doubles plus dev workflow deps.
-[[example]]
-name = "tool_submit_loop"
-required-features = ["dev"]
-
 [[test]]
 name = "builtin_tool_matrix"
 required-features = ["multiagent"]
@@ -39,9 +26,7 @@ required-features = ["multiagent"]
 # - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
 #   feature. The firmware path reaches ESP-IDF implementations through
 #   `claw-cabi` + `claw-sys`.
-# - `host-backends` enables host-target concrete implementations for host tools.
-# - `dev` is the shared local workflow bundle for examples and host tools.
-# - `cache_profile` forwards provider usage support; `claw-agent-chat` requires it.
+# - `cache_profile` forwards provider usage support.
 #
 # `claw-agent` is the public feature-selection boundary. It disables
 # `claw-core`'s implicit defaults below and forwards every runtime-shape choice,
@@ -51,22 +36,7 @@ stage_verbose = ["claw-core/stage_verbose"]
 multiagent = ["claw-core/multiagent"]
 # Select the device-only C skill registry through claw-core.
 use_legacy_skill = ["claw-core/use_legacy_skill"]
-host-backends = [
-    "claw-interface/host-backends",
-]
-dev = [
-    "host-backends",
-    "dep:claw-log",
-    "dep:dotenvy",
-    "dep:anyhow",
-    "dep:tokio",
-    "dep:futures-lite",
-    "dep:anstyle",
-    "dep:rustyline",
-    "dep:strum",
-]
-# Provider token/cache usage diagnostics, kept separate from `dev` so examples
-# and other host workflows do not enable it implicitly.
+# Provider token/cache usage diagnostics.
 cache_profile = [
     "claw-api/cache_profile",
     "claw-core/cache_profile",
@@ -83,28 +53,16 @@ claw-core = { path = "../claw-core", default-features = false }
 claw-api = { path = "../claw-api" }
 claw-persistence = { path = "../claw-persistence" }
 claw-tool = { path = "../claw-tool" }
-# The DI trait surface (`ClawFs` / `ClawHttp`) is always available; concrete
-# host-target backends are pulled in only by `host-backends`/`dev`, so the device
-# build (via claw-cabi) stays free of reqwest/std-thread.
+# `claw-agent` consumes only the DI trait surface (`ClawFs` / `ClawHttp`).
+# Applications select concrete host or device backends at their own boundary.
 claw-interface = { path = "../claw-interface" }
-claw-log = { path = "../claw-log", optional = true }
 thiserror = "2"
-# Dev-only: ergonomic errors for the `claw-agent-chat` bin and the examples.
-anyhow = { version = "1", optional = true }
-# Dev-only: the `claw-agent-chat` bin loads `claw-core/.env.local`.
-dotenvy = { version = "0.15", optional = true }
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"], optional = true }
-# Dev-only: `StreamExt` to drain the session event stream in the REPL/examples.
-futures-lite = { version = "2", optional = true }
-# Dev-only: colored, aligned event labels for the `claw-agent-chat` REPL.
-anstyle = { version = "1", optional = true }
-# Dev-only: editable input, history, and inline slash-command hints.
-rustyline = { version = "18.0.1", default-features = false, optional = true }
-# Dev-only: derive parsing for `claw-agent-chat` command arguments.
-strum = { version = "0.28", features = ["derive"], optional = true }
 
 [dev-dependencies]
+# Host-only dependencies used by tests and the `tool_submit_loop` API example.
+anyhow = "1"
 claw-log = { path = "../claw-log" }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted HTTP doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API; `stdthread` is the
 # host-target executor backend used by agent tests.

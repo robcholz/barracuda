@@ -12,7 +12,7 @@
 //! example runs hermetically (no network, no API key):
 //!
 //! ```bash
-//! cargo run -p claw-agent --features dev --example tool_submit_loop \
+//! cargo run -p claw-agent --example tool_submit_loop \
 //!   --target x86_64-unknown-linux-gnu
 //! ```
 
