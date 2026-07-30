@@ -19,6 +19,12 @@
 use std::io;
 use std::thread::JoinHandle;
 
+#[cfg(feature = "stdthread")]
+mod std_thread;
+
+#[cfg(feature = "stdthread")]
+pub use std_thread::StdThread;
+
 /// An opaque handle to a spawned worker, returned by
 /// [`ClawThread::spawn_worker`].
 ///
@@ -106,33 +112,4 @@ pub trait ClawThread: Send + Sync {
     ) -> io::Result<WorkerHandle>
     where
         F: FnOnce() + Send + 'static;
-}
-
-/// Host implementation of [`ClawThread`] over `std::thread`. Zero-sized.
-///
-/// The embedded stack sizes (8-16 KiB) would overflow std's deeper frames, so
-/// the requested `stack_size` is ignored and the platform default (multi-MiB)
-/// stack is used; `priority` / `affinity` have no host analogue.
-#[cfg(feature = "stdthread")]
-#[derive(Clone, Copy, Default)]
-pub struct StdThread;
-
-#[cfg(feature = "stdthread")]
-impl ClawThread for StdThread {
-    fn spawn_worker<F>(
-        name: &str,
-        stack_size: usize,
-        priority: Priority,
-        affinity: CoreAffinity,
-        f: F,
-    ) -> io::Result<WorkerHandle>
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let _ = (stack_size, priority, affinity);
-        std::thread::Builder::new()
-            .name(name.to_string())
-            .spawn(f)
-            .map(WorkerHandle::new)
-    }
 }

@@ -10,6 +10,12 @@
 
 use core::future::Future;
 
+#[cfg(feature = "tokioexecutor")]
+mod tokio;
+
+#[cfg(feature = "tokioexecutor")]
+pub use tokio::TokioExecutor;
+
 /// Injection point for "run this future to completion on the current thread".
 ///
 /// The engine future is `!Send` and self-driving — it multiplexes every session
@@ -20,32 +26,4 @@ use core::future::Future;
 pub trait ClawExecutor {
     /// Drive `future` (which may be `!Send`) to completion, returning its output.
     fn block_on<Fut: Future>(future: Fut) -> Fut::Output;
-}
-
-#[cfg(feature = "tokioexecutor")]
-pub use tokio_executor::TokioExecutor;
-
-#[cfg(feature = "tokioexecutor")]
-mod tokio_executor {
-    use super::{ClawExecutor, Future};
-
-    /// Host executor backed by a current-thread tokio runtime.
-    ///
-    /// The orchestrator's worker calls `block_on` exactly once and stays parked in
-    /// it for the whole session lifetime, so building a runtime here is not a hot
-    /// path. `enable_all` turns on the time + IO drivers that async `reqwest` and
-    /// `TokioTimer` poll against. A current-thread runtime's `block_on` accepts the
-    /// `!Send` engine future.
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct TokioExecutor;
-
-    impl ClawExecutor for TokioExecutor {
-        fn block_on<Fut: Future>(future: Fut) -> Fut::Output {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("build current-thread tokio runtime for the orchestrator engine");
-            runtime.block_on(future)
-        }
-    }
 }
