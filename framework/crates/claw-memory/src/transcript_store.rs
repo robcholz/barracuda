@@ -248,9 +248,14 @@ struct OpenTurn {
 }
 
 impl OpenTurn {
-    fn finish_draft(&mut self) {
+    /// Finish the current draft, returning whether one complete message was
+    /// produced.
+    fn finish_draft(&mut self) -> bool {
         if let Some(draft) = self.draft.take() {
             self.messages.push(draft.into_message());
+            true
+        } else {
+            false
         }
     }
 
@@ -297,11 +302,12 @@ struct StoreState {
     /// plus the open turn). Rebuilt lazily and shared as an `Arc`; invalidated
     /// whenever content changes.
     turns_cache: Option<Arc<Vec<Turn>>>,
-    /// Monotonic content version, bumped on any content change (an open-turn
-    /// append/finish or a commit/discard). A pull-based reader caches work keyed
-    /// on this and recomputes only when it advances — see
-    /// [`TranscriptStore::version`].
-    version: u64,
+    /// Monotonic committed-turn version. A non-empty turn advances it exactly
+    /// once when it commits.
+    turn_version: u64,
+    /// Monotonic completed-content version. Streaming fragments invalidate the
+    /// snapshot cache without advancing this counter; finishing a message does.
+    content_version: u64,
 
     last_persist: Option<Instant>,
 
@@ -313,11 +319,21 @@ struct StoreState {
 }
 
 impl StoreState {
-    /// Content changed: drop the cached snapshot and bump the version so
-    /// pull-based readers rebuild.
-    fn mark_changed(&mut self) {
+    /// Any draft or structural change makes the cached snapshot stale.
+    fn invalidate_turns_cache(&mut self) {
         self.turns_cache = None;
-        self.version = self.version.saturating_add(1);
+    }
+
+    /// A complete message was added or removed.
+    fn mark_content_boundary(&mut self) {
+        self.invalidate_turns_cache();
+        self.content_version = self.content_version.saturating_add(1);
+    }
+
+    /// A non-empty turn was committed.
+    fn mark_turn_boundary(&mut self) {
+        self.invalidate_turns_cache();
+        self.turn_version = self.turn_version.saturating_add(1);
     }
 }
 
@@ -418,13 +434,25 @@ pub trait Transcript {
     /// transcript is `turns().iter().flat_map(|t| &t.messages)`, the committed
     /// turns are those with an id, and the volatile tail is the `None` entry.
     ///
-    /// Shared as an `Arc`; gate calls on [`version`](Self::version) to rebuild
-    /// only when the transcript changed.
+    /// Shared as an `Arc`. Streaming fragments can change this snapshot without
+    /// advancing either version; consumers interested in complete-message
+    /// changes should cache against [`content_version`](Self::content_version).
     fn turns(&self) -> Arc<Vec<Turn>>;
 
-    /// Monotonic content version, bumped on any change (open-turn append/finish
-    /// or commit/discard). Used by pull-based readers to cache work.
-    fn version(&self) -> u64;
+    /// Monotonic committed-turn version.
+    ///
+    /// A non-empty turn advances it exactly once when committed. Message
+    /// completion, tool results, streaming fragments, and discarded open turns
+    /// do not advance it.
+    fn turn_version(&self) -> u64;
+
+    /// Monotonic completed-content version.
+    ///
+    /// Appending a streaming fragment does not advance it. Finishing a user or
+    /// assistant message, recording an atomic tool result, or implicitly
+    /// finishing a draft during commit advances it once. Removing finished
+    /// content by discarding an open turn also advances it once.
+    fn content_version(&self) -> u64;
 }
 
 /// The authoritative assistant message used to finish a streamed draft.
@@ -648,13 +676,19 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
         delete_transcript_file::<F>(transcript_path(dir, transcript_id, DATA_EXT))
     }
 
-    /// A monotonic counter bumped whenever the transcript content changes (an
-    /// open-turn append/finish or a commit/discard).
+    /// A monotonic counter bumped once for every non-empty committed turn.
+    pub fn turn_version(&self) -> u64 {
+        self.lock_state().turn_version
+    }
+
+    /// A monotonic counter bumped at complete-message boundaries.
     ///
-    /// Lets a pull-based reader cache output keyed on the transcript and rebuild
-    /// only when this advances, without diffing [`turns`](Self::turns).
-    pub fn version(&self) -> u64 {
-        self.lock_state().version
+    /// Streaming user/assistant fragments only invalidate the snapshot cache.
+    /// Finishing either message, recording a complete tool result, or implicitly
+    /// finishing a draft during commit advances this counter once. Removing
+    /// finished content by discarding an open turn also advances it once.
+    pub fn content_version(&self) -> u64 {
+        self.lock_state().content_version
     }
 
     /// Open a turn. Append streaming message fragments through the returned
@@ -732,8 +766,12 @@ impl<F: ClawFs + 'static> Transcript for TranscriptStore<F> {
         TranscriptStore::turns(self)
     }
 
-    fn version(&self) -> u64 {
-        TranscriptStore::version(self)
+    fn turn_version(&self) -> u64 {
+        TranscriptStore::turn_version(self)
+    }
+
+    fn content_version(&self) -> u64 {
+        TranscriptStore::content_version(self)
     }
 }
 
@@ -820,7 +858,7 @@ impl TurnHandle {
         reasoning_content: String,
         tool_calls: Vec<Value>,
     ) -> Result<Option<String>, TurnError> {
-        self.mutate_with(move |turn| {
+        self.mutate_with(true, move |turn| {
             let content = match turn.draft.take() {
                 Some(MessageDraft::Assistant(content)) => content,
                 Some(draft @ MessageDraft::User(_)) => {
@@ -892,11 +930,15 @@ impl TurnHandle {
     }
 
     fn mutate(&mut self, mutation: TurnMutation<'_>) -> Result<(), TurnError> {
-        self.mutate_with(|turn| apply_turn_mutation(turn, mutation))
+        let completes_message = mutation.completes_message();
+        self.mutate_with(completes_message, |turn| {
+            apply_turn_mutation(turn, mutation)
+        })
     }
 
     fn mutate_with<T>(
         &mut self,
+        completes_message: bool,
         apply: impl FnOnce(&mut OpenTurn) -> Result<T, TurnError>,
     ) -> Result<T, TurnError> {
         if !self.active {
@@ -909,7 +951,11 @@ impl TurnHandle {
             };
             let result = apply(turn);
             if result.is_ok() {
-                state.mark_changed();
+                if completes_message {
+                    state.mark_content_boundary();
+                } else {
+                    state.invalidate_turns_cache();
+                }
             }
             result
         };
@@ -944,6 +990,15 @@ enum TurnMutation<'a> {
         content: &'a str,
         is_error: bool,
     },
+}
+
+impl TurnMutation<'_> {
+    fn completes_message(&self) -> bool {
+        matches!(
+            self,
+            Self::FinishUser | Self::FinishAssistant(_) | Self::RecordToolResult { .. }
+        )
+    }
 }
 
 fn apply_turn_mutation(turn: &mut OpenTurn, mutation: TurnMutation<'_>) -> Result<(), TurnError> {
@@ -1017,7 +1072,7 @@ fn commit_open_turn(inner: &StoreInner) {
         let Some(mut open_turn) = state.open_turn.take() else {
             return;
         };
-        open_turn.finish_draft();
+        let finished_draft = open_turn.finish_draft();
         if open_turn.messages.is_empty() {
             return;
         }
@@ -1033,9 +1088,14 @@ fn commit_open_turn(inner: &StoreInner) {
             msgs,
             loc: None,
         });
-        // A committed turn changes the turn-structured snapshot (a new turn
-        // appears), so invalidate caches and bump the version.
-        state.mark_changed();
+        // Committing changes only the turn's structural identity (`None` to a
+        // stable id). Its already-finished messages have each advanced the
+        // content version, but a draft implicitly finished here still needs one
+        // content boundary. The commit itself advances the turn version once.
+        if finished_draft {
+            state.mark_content_boundary();
+        }
+        state.mark_turn_boundary();
         persist_due(&state)
     };
     if due {
@@ -1048,8 +1108,12 @@ fn discard_open_turn(inner: &StoreInner) {
     let Some(open_turn) = state.open_turn.take() else {
         return;
     };
-    if !open_turn.is_empty() {
-        state.mark_changed();
+    if !open_turn.messages.is_empty() {
+        // Finished messages were previously visible and versioned; their
+        // removal is another stable transcript boundary.
+        state.mark_content_boundary();
+    } else if open_turn.draft.is_some() {
+        state.invalidate_turns_cache();
     }
 }
 
@@ -1402,7 +1466,10 @@ fn scan_tail(state: &mut StoreState, tail: &[u8], base_off: ByteOffset) {
 fn apply_record(state: &mut StoreState, record: LogRecord, loc: Option<(ByteOffset, ByteLen)>) {
     match record {
         LogRecord::Group { id, msgs } => {
+            let content_count = u64::try_from(msgs.len()).unwrap_or(u64::MAX);
             state.groups.push(StoredGroup { id, msgs, loc });
+            state.turn_version = state.turn_version.saturating_add(1);
+            state.content_version = state.content_version.saturating_add(content_count);
         }
     }
 }
