@@ -63,6 +63,7 @@ dev = [
     "dep:futures-lite",
     "dep:anstyle",
     "dep:rustyline",
+    "dep:strum",
 ]
 # Provider token/cache usage diagnostics, kept separate from `dev` so examples
 # and other host workflows do not enable it implicitly.
@@ -99,6 +100,8 @@ futures-lite = { version = "2", optional = true }
 anstyle = { version = "1", optional = true }
 # Dev-only: editable input, history, and inline slash-command hints.
 rustyline = { version = "18.0.1", default-features = false, optional = true }
+# Dev-only: derive parsing for `claw-agent-chat` command arguments.
+strum = { version = "0.28", features = ["derive"], optional = true }
 
 [dev-dependencies]
 claw-log = { path = "../claw-log" }

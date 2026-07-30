@@ -23,15 +23,15 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, AgentSystem, ApiPurpose, BackendKind,
-    ClawApiConfig, InputRequestId, InputRequestKind, IterationEvent, Message, PermissionLevel,
-    ProviderUsage, SessionControl, SessionError, SessionEvent, SessionPersistence, SessionStream,
-    ToolCall, ToolOutput, TurnEvent, TurnOrigin,
+    ClawApiConfig, InputRequestId, InputRequestKind, IterationEvent, Message, ProviderUsage,
+    SessionControl, SessionError, SessionEvent, SessionPersistence, SessionStream, ToolCall,
+    ToolOutput, TurnEvent, TurnOrigin,
 };
 use claw_interface::{DiskFs, RealHttp, StdThread, TokioExecutor, TokioTimer};
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use futures_lite::StreamExt;
 
-use command::{parse_input, CliInput};
+use command::{parse_input, CliInput, PermissionLevelArg, ReasoningEffortArg};
 use line_editor::{ChatLineEditor, LineInput};
 
 const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
@@ -81,14 +81,29 @@ impl ChatDriver {
         true
     }
 
-    async fn set_permission_level(&self, level: PermissionLevel) -> bool {
-        if let Err(error) = self.control.set_permission_level(level).await {
+    async fn set_permission_level(&self, level: PermissionLevelArg) -> bool {
+        if let Err(error) = self.control.set_permission_level(level.into()).await {
             print_event("error", &error.to_string(), EventStyle::Error);
             return false;
         }
+        let level_name: &'static str = level.into();
         print_event(
             "permission",
-            &format!("set to {}", permission_level_name(level)),
+            &format!("set to {level_name}"),
+            EventStyle::Permission,
+        );
+        true
+    }
+
+    async fn set_reasoning_effort(&self, effort: ReasoningEffortArg) -> bool {
+        if let Err(error) = self.control.set_reasoning_effort(effort.into()).await {
+            print_event("error", &error.to_string(), EventStyle::Error);
+            return false;
+        }
+        let effort_name: &'static str = effort.into();
+        print_event(
+            "reasoning effort",
+            &format!("set to {effort_name}"),
             EventStyle::Permission,
         );
         true
@@ -430,14 +445,6 @@ fn print_above_prompt(editor: &mut ChatLineEditor, message: String) -> Result<()
     Ok(())
 }
 
-fn permission_level_name(level: PermissionLevel) -> &'static str {
-    match level {
-        PermissionLevel::Deny => "deny",
-        PermissionLevel::Ask => "ask",
-        PermissionLevel::AllowAll => "allow-all",
-    }
-}
-
 fn format_input_request(kind: &InputRequestKind) -> String {
     match kind {
         InputRequestKind::PermissionApproval { tool_call, reason } => format!(
@@ -574,6 +581,10 @@ async fn run() -> Result<()> {
                     }
                     Ok(CliInput::SetPermission(level)) => {
                         chat.set_permission_level(level).await;
+                        show_prompt(&editor, &mut prompt_active)?;
+                    }
+                    Ok(CliInput::SetReasoningEffort(effort)) => {
+                        chat.set_reasoning_effort(effort).await;
                         show_prompt(&editor, &mut prompt_active)?;
                     }
                     Err(error) => {

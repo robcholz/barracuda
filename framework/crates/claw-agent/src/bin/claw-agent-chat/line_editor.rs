@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn command_hint_is_rendered_in_gray() {
-        let rendered = CommandHelper.highlight_hint("permissions <deny|ask|allow-all>");
+        let rendered = CommandHelper.highlight_hint("permissions <deny|ask|allow_all>");
 
         assert!(rendered.starts_with("\u{1b}[90m"));
         assert!(rendered.ends_with("\u{1b}[0m"));
