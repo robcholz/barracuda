@@ -7,10 +7,12 @@ on ``chrometrace``; all Chrome-specific translation lives here.
 
 Mapping:
 
-- each **span** -> a *complete* event (``X``): ``enter`` timestamp + duration, so
-  the viewer renders the span tree as a flame chart (nesting comes from
-  overlapping intervals on the same thread). An unclosed span becomes a
-  *duration begin* (``B``) with no end.
+- each **span** -> a *complete* event (``X``). An unclosed span extends to the
+  observed trace end (bounded by a closed ancestor) and carries
+  ``incomplete=true``.
+- each cross-lane **span parent** edge -> a standard Chrome flow (``s``/``f``)
+  named ``span_parent``. Same-lane parent edges are represented by nested
+  complete-event intervals.
 - each **event** -> an *instant* event (``i``, thread scope). Only explicitly
   marked ``counter.<series>=<number>`` fields additionally become a *counter*
   event (``C``); ordinary numeric fields remain instant-event arguments.
@@ -53,6 +55,11 @@ _FLOW_TARGET_TASK_FIELD = 'flow.target_task'
 _FLOW_TARGET_SPAN_FIELD = 'flow.target_span'
 _FLOW_ARG_PREFIX = 'flow.arg.'
 _FLOW_CATEGORY = 'flow'
+_SPAN_PARENT_FLOW_NAME = 'span_parent'
+# Give each generated flow proxy a distinct nanosecond-scale timestamp on
+# either side of its target. TRACE input is millisecond-resolution, so this
+# avoids collisions without changing any observed record timestamp.
+_FLOW_ANCHOR_STEP_US = 0.001
 
 # Resolves a (pid, tid) lane from a span/event's context + task.
 _Lane = Callable[[GroupedContext, str], 'tuple[int, int]']
@@ -65,6 +72,14 @@ class _FlowLink:
     target_task: str
     target_span: str | None
     args: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedFlow:
+    source: SpanNode
+    target: SpanNode
+    name: str
+    args: dict[str, object]
 
 
 class _FlowTraceEvent:
@@ -132,6 +147,57 @@ def _custom_args(custom: str) -> dict[str, object]:
     return args
 
 
+def _process_scope(context: GroupedContext) -> tuple[object, str]:
+    """Return the stable process key and display name for effective context."""
+    run_context = context.get('run', {})
+    system = run_context.get('system')
+    session = run_context.get('session')
+    if session is not None:
+        if system is None:
+            raise ValueError(
+                'invalid trace context: run.session requires run.system; '
+                'legacy traces are not supported'
+            )
+        return ('session', system, session), session
+    if system is not None:
+        return ('system', system), system
+    return ('unattributed',), _UNATTRIBUTED_PROCESS
+
+
+def _lane_key(context: GroupedContext, task: str) -> tuple[object, str]:
+    process_key, _ = _process_scope(context)
+    return process_key, task
+
+
+def _trace_end_ms(forest: Forest) -> int:
+    """Return the latest timestamp observed anywhere in a reconstructed trace."""
+    timestamps = [event.ts for event in forest.events]
+    for span in forest.spans.values():
+        timestamps.append(span.enter_ts)
+        if span.exit_ts is not None:
+            timestamps.append(span.exit_ts)
+    return max(timestamps, default=0)
+
+
+def _effective_exit_ts(forest: Forest, span: SpanNode, trace_end: int) -> int:
+    """Close an incomplete span at the observable boundary of its parent tree."""
+    if span.exit_ts is not None:
+        return span.exit_ts
+
+    effective_end = trace_end
+    parent_id = span.parent_id
+    visited = {span.id}
+    while parent_id is not None and parent_id not in visited:
+        visited.add(parent_id)
+        parent = forest.spans.get(parent_id)
+        if parent is None:
+            break
+        if parent.exit_ts is not None:
+            effective_end = min(effective_end, parent.exit_ts)
+        parent_id = parent.parent_id
+    return max(span.enter_ts, effective_end)
+
+
 def chrome_trace_events(forest: Forest) -> list[TraceEvent | _FlowTraceEvent]:
     """Translate ``forest`` into a flat list of ``chrometrace.TraceEvent``.
 
@@ -148,23 +214,7 @@ def chrome_trace_events(forest: Forest) -> list[TraceEvent | _FlowTraceEvent]:
 
     def lane(context: GroupedContext, task: str) -> tuple[int, int]:
         """Resolve a scoped process/task lane, emitting naming metadata once."""
-        run_context = context.get('run', {})
-        system = run_context.get('system')
-        session = run_context.get('session')
-        if session is not None:
-            if system is None:
-                raise ValueError(
-                    'invalid trace context: run.session requires run.system; '
-                    'legacy traces are not supported'
-                )
-            process_key: object = ('session', system, session)
-            process_name = session
-        elif system is not None:
-            process_key = ('system', system)
-            process_name = system
-        else:
-            process_key = ('unattributed',)
-            process_name = _UNATTRIBUTED_PROCESS
+        process_key, process_name = _process_scope(context)
 
         pid = pids.get(process_key)
         tid = tids.get((process_key, task))
@@ -182,12 +232,28 @@ def chrome_trace_events(forest: Forest) -> list[TraceEvent | _FlowTraceEvent]:
 
     flow_links = _flow_links(forest)
     flow_source_args = _flow_source_args(flow_links)
+    resolved_flows = [
+        (flow_id, flow)
+        for flow_id, flow in enumerate(
+            [*_span_parent_flows(forest), *_resolve_explicit_flows(forest, flow_links)],
+            start=1,
+        )
+    ]
+
+    trace_end = _trace_end_ms(forest)
     for span in forest.spans.values():
-        out.append(_span_event(span, lane, flow_source_args.get(span.id)))
-    # Chrome flow starts bind to the most recent event on their lane. Emit
-    # flows before ordinary instants so a same-timestamp instant cannot replace
-    # the intended source span as the binding point.
-    out.extend(_flow_events(forest, lane, flow_links))
+        out.append(
+            _span_event(
+                span,
+                lane,
+                _effective_exit_ts(forest, span, trace_end),
+                extra_args=flow_source_args.get(span.id),
+            )
+        )
+    # Legacy Chrome flow endpoints cannot name source/target slice ids. Emit
+    # dedicated instant proxies on both lanes around the target timestamp; the
+    # proxies carry the authoritative source_span/target_span relationship.
+    out.extend(_flow_events(resolved_flows, lane))
     for event in forest.events:
         out.extend(_event_events(event, lane))
     return out
@@ -196,33 +262,27 @@ def chrome_trace_events(forest: Forest) -> list[TraceEvent | _FlowTraceEvent]:
 def _span_event(
     span: SpanNode,
     lane: _Lane,
+    exit_ts: int,
     extra_args: dict[str, object] | None = None,
 ) -> TraceEvent:
     pid, tid = lane(span.context, span.task)
     args: dict[str, object] = {
-        'span': span.id,
         'target': span.target,
         **flatten_context(span.context),
         **_custom_args(span.custom),
         **(extra_args or {}),
+        # Structural identity is authoritative over any same-named display arg.
+        'span': span.id,
     }
     if span.parent_id is not None:
         args['parent'] = span.parent_id
+    if span.exit_ts is None:
+        args['incomplete'] = True
     start_us = span.enter_ts * _US_PER_MS
-    if span.duration_ms is not None:
-        return TraceEvent.complete(
-            name=span.name,
-            timestamp_us=start_us,
-            duration_us=span.duration_ms * _US_PER_MS,
-            process_id=pid,
-            thread_id=tid,
-            categories=[span.target],
-            args=args,
-        )
-    # Unclosed span: open-ended begin (the viewer extends it to the trace end).
-    return TraceEvent.duration_begin(
+    return TraceEvent.complete(
         name=span.name,
         timestamp_us=start_us,
+        duration_us=(exit_ts - span.enter_ts) * _US_PER_MS,
         process_id=pid,
         thread_id=tid,
         categories=[span.target],
@@ -281,13 +341,129 @@ def _flow_source_args(links: list[_FlowLink]) -> dict[int, dict[str, object]]:
 
 
 def _flow_events(
-    forest: Forest,
+    flows: list[tuple[int, _ResolvedFlow]],
     lane: _Lane,
-    links: list[_FlowLink],
 ) -> list[_FlowTraceEvent]:
-    flows: list[_FlowTraceEvent] = []
+    events: list[_FlowTraceEvent] = []
+    for flow_id, flow in flows:
+        source_pid, source_tid = lane(flow.source.context, flow.source.task)
+        target_pid, target_tid = lane(flow.target.context, flow.target.task)
+        target_start_us = flow.target.enter_ts * _US_PER_MS
+        offset_us = flow_id * 3 * _FLOW_ANCHOR_STEP_US
+        before_target = target_start_us - offset_us
+        anchor_ts = (
+            before_target
+            if before_target >= flow.source.enter_ts * _US_PER_MS
+            else target_start_us + offset_us
+        )
+        target_anchor_ts = max(
+            target_start_us + offset_us + _FLOW_ANCHOR_STEP_US,
+            anchor_ts + _FLOW_ANCHOR_STEP_US,
+        )
+        args: dict[str, object] = {
+            'source_span': flow.source.id,
+            'target_span': flow.target.id,
+            **flow.args,
+        }
+        events.extend(
+            [
+                _FlowTraceEvent(
+                    {
+                        'name': f'{flow.source.name} → {flow.name}',
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 'I',
+                        'ts': anchor_ts,
+                        'pid': source_pid,
+                        'tid': source_tid,
+                        's': 't',
+                        'args': {
+                            'flow_anchor': True,
+                            'flow_anchor_role': 'source',
+                            'source_name': flow.source.name,
+                            'target_name': flow.target.name,
+                            **args,
+                        },
+                    }
+                ),
+                _FlowTraceEvent(
+                    {
+                        'name': flow.name,
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 's',
+                        'ts': anchor_ts,
+                        'pid': source_pid,
+                        'tid': source_tid,
+                        'id': flow_id,
+                        'args': args,
+                    }
+                ),
+                _FlowTraceEvent(
+                    {
+                        'name': f'{flow.name} → {flow.target.name}',
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 'I',
+                        'ts': target_anchor_ts,
+                        'pid': target_pid,
+                        'tid': target_tid,
+                        's': 't',
+                        'args': {
+                            'flow_anchor': True,
+                            'flow_anchor_role': 'target',
+                            'source_name': flow.source.name,
+                            'target_name': flow.target.name,
+                            **args,
+                        },
+                    }
+                ),
+                _FlowTraceEvent(
+                    {
+                        'name': flow.name,
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 'f',
+                        'ts': target_anchor_ts,
+                        'pid': target_pid,
+                        'tid': target_tid,
+                        'id': flow_id,
+                        'bp': 'e',
+                        'args': args,
+                    }
+                ),
+            ]
+        )
+    return events
+
+
+def _span_parent_flows(forest: Forest) -> list[_ResolvedFlow]:
+    """Project parent edges that cannot be represented by same-lane nesting."""
+    flows: list[_ResolvedFlow] = []
+    for child in forest.spans.values():
+        if child.parent_id is None:
+            continue
+        parent = forest.spans.get(child.parent_id)
+        if parent is None or _lane_key(parent.context, parent.task) == _lane_key(
+            child.context, child.task
+        ):
+            continue
+        flows.append(
+            _ResolvedFlow(
+                source=parent,
+                target=child,
+                name=_SPAN_PARENT_FLOW_NAME,
+                args={
+                    'parent_span': parent.id,
+                    'child_span': child.id,
+                },
+            )
+        )
+    return flows
+
+
+def _resolve_explicit_flows(
+    forest: Forest, links: list[_FlowLink]
+) -> list[_ResolvedFlow]:
+    resolved: list[_ResolvedFlow] = []
     spans = list(forest.spans.values())
-    for flow_id, link in enumerate(links, start=1):
+    for link in links:
         source = forest.spans.get(link.source_span_id)
         if source is None:
             continue
@@ -305,43 +481,21 @@ def _flow_events(
         if not candidates:
             continue
         target = min(candidates, key=lambda span: (span.enter_ts, span.id))
-        source_pid, source_tid = lane(source.context, source.task)
-        target_pid, target_tid = lane(target.context, target.task)
         args: dict[str, object] = {
             'source_span': source.id,
+            'target_span': target.id,
             'target_task': link.target_task,
             **link.args,
         }
-        flows.extend(
-            [
-                _FlowTraceEvent(
-                    {
-                        'name': link.name,
-                        'cat': _FLOW_CATEGORY,
-                        'ph': 's',
-                        'ts': source.enter_ts * _US_PER_MS,
-                        'pid': source_pid,
-                        'tid': source_tid,
-                        'id': flow_id,
-                        'args': args,
-                    }
-                ),
-                _FlowTraceEvent(
-                    {
-                        'name': link.name,
-                        'cat': _FLOW_CATEGORY,
-                        'ph': 'f',
-                        'ts': target.enter_ts * _US_PER_MS,
-                        'pid': target_pid,
-                        'tid': target_tid,
-                        'id': flow_id,
-                        'bp': 'e',
-                        'args': args,
-                    }
-                ),
-            ]
+        resolved.append(
+            _ResolvedFlow(
+                source=source,
+                target=target,
+                name=link.name,
+                args=args,
+            )
         )
-    return flows
+    return resolved
 
 
 def _event_events(event: EventNode, lane: _Lane) -> list[TraceEvent]:
@@ -352,6 +506,10 @@ def _event_events(event: EventNode, lane: _Lane) -> list[TraceEvent]:
         **flatten_context(event.context),
         **_custom_args(event.custom),
     }
+    if event.span_id is not None:
+        # Preserve the event's structural anchor for joins such as
+        # event.args.span == child_span.args.parent.
+        args['span'] = event.span_id
     out = [
         TraceEvent(
             name=event.name,

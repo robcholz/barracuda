@@ -42,8 +42,32 @@ def test_subagent_args_carry_shadowed_context() -> None:
 
 def test_events_become_instant_events() -> None:
     events = chrome_trace_events(build_forest(SPEC_EXAMPLE))
-    instants = {e.to_dict()['name'] for e in _by_phase(events, 'I')}
-    assert {'spawned', 'completion'} <= instants
+    instants = {
+        event.to_dict()['name']: event.to_dict() for event in _by_phase(events, 'I')
+    }
+    assert {'spawned', 'completion'} <= instants.keys()
+    assert instants['spawned']['args']['span'] == 5
+    assert instants['completion']['args']['span'] == 4
+
+
+def test_structural_span_arg_wins_and_orphan_event_has_no_span_arg() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 10 enter <span=7 parent=none task=main span-name=parent target=t> span=custom-span',
+            'TRACE 11 event <span=7 task=main event-name=inside target=t> span=custom-event',
+            'TRACE 12 event <span=none task=other event-name=orphan target=t> note=outside',
+            'TRACE 20 exit <span=7 task=main>',
+        ]
+    )
+
+    bodies = [event.to_dict() for event in chrome_trace_events(build_forest(log))]
+    parent = next(event for event in bodies if event.get('name') == 'parent')
+    inside = next(event for event in bodies if event.get('name') == 'inside')
+    orphan = next(event for event in bodies if event.get('name') == 'orphan')
+
+    assert parent['args']['span'] == 7
+    assert inside['args']['span'] == 7
+    assert 'span' not in orphan['args']
 
 
 def test_flow_link_enriches_source_and_emits_cross_lane_flow(tmp_path) -> None:
@@ -70,18 +94,37 @@ def test_flow_link_enriches_source_and_emits_cross_lane_flow(tmp_path) -> None:
 
     flow_start = next(event for event in bodies if event['ph'] == 's')
     flow_end = next(event for event in bodies if event['ph'] == 'f')
+    flow_anchor = next(
+        event
+        for event in bodies
+        if event['ph'] == 'I'
+        and event['args'].get('flow_anchor') is True
+        and event['args'].get('flow_anchor_role') == 'source'
+    )
+    target_anchor = next(
+        event
+        for event in bodies
+        if event['ph'] == 'I'
+        and event['args'].get('flow_anchor') is True
+        and event['args'].get('flow_anchor_role') == 'target'
+    )
     same_timestamp_instant = next(
         event for event in bodies if event['ph'] == 'I' and event['name'] == 'queued'
     )
     assert flow_start['name'] == flow_end['name'] == 'dispatch'
     assert flow_start['cat'] == flow_end['cat'] == 'flow'
     assert flow_start['id'] == flow_end['id'] == 1
-    assert flow_start['ts'] == source['ts']
-    assert flow_end['ts'] == target['ts']
+    assert flow_anchor['ts'] == flow_start['ts']
+    assert source['ts'] < flow_start['ts'] < target['ts']
+    assert target_anchor['ts'] == flow_end['ts']
+    assert flow_end['ts'] > target['ts']
     assert flow_end['bp'] == 'e'
     assert (
         bodies.index(source)
+        < bodies.index(flow_anchor)
         < bodies.index(flow_start)
+        < bodies.index(target_anchor)
+        < bodies.index(flow_end)
         < bodies.index(same_timestamp_instant)
     )
     assert (flow_start['pid'], flow_start['tid']) == (
@@ -97,6 +140,77 @@ def test_flow_link_enriches_source_and_emits_cross_lane_flow(tmp_path) -> None:
     written = json.loads(path.read_text(encoding='utf-8'))
     assert any(event['ph'] == 's' for event in written)
     assert any(event['ph'] == 'f' and event['bp'] == 'e' for event in written)
+
+
+def test_cross_lane_span_parent_becomes_native_flow() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 10 enter <span=1 parent=none task=producer span-name=parent target=t> <context=run system=system-1 session=session-1>',
+            'TRACE 12 enter <span=2 parent=1 task=consumer span-name=child target=t> <context=run system=system-1 session=session-1>',
+            'TRACE 20 exit <span=2 task=consumer>',
+            'TRACE 21 exit <span=1 task=producer>',
+        ]
+    )
+
+    bodies = [event.to_dict() for event in chrome_trace_events(build_forest(log))]
+    parent = next(event for event in bodies if event.get('name') == 'parent')
+    child = next(event for event in bodies if event.get('name') == 'child')
+    flow_start = next(
+        event
+        for event in bodies
+        if event.get('ph') == 's' and event.get('name') == 'span_parent'
+    )
+    flow_end = next(
+        event
+        for event in bodies
+        if event.get('ph') == 'f' and event.get('name') == 'span_parent'
+    )
+
+    assert flow_start['id'] == flow_end['id'] == 1
+    assert parent['ph'] == 'X'
+    assert parent['ts'] < flow_start['ts'] < child['ts']
+    assert flow_end['ts'] > child['ts']
+    assert flow_end['bp'] == 'e'
+    assert (flow_start['pid'], flow_start['tid']) == (
+        parent['pid'],
+        parent['tid'],
+    )
+    assert (flow_end['pid'], flow_end['tid']) == (child['pid'], child['tid'])
+    assert (
+        flow_start['args']
+        == flow_end['args']
+        == {
+            'source_span': 1,
+            'target_span': 2,
+            'parent_span': 1,
+            'child_span': 2,
+        }
+    )
+
+
+def test_parent_and_explicit_flows_share_unique_ids() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 10 enter <span=1 parent=none task=producer span-name=parent target=t> <context=run system=system-1 session=session-1>',
+            'TRACE 11 event <span=1 task=producer event-name=flow_link target=t> flow.name=dispatch flow.target_task=consumer flow.target_span=child',
+            'TRACE 12 enter <span=2 parent=1 task=consumer span-name=child target=t> <context=run system=system-1 session=session-1>',
+            'TRACE 20 exit <span=2 task=consumer>',
+            'TRACE 21 exit <span=1 task=producer>',
+        ]
+    )
+
+    bodies = [event.to_dict() for event in chrome_trace_events(build_forest(log))]
+    starts = [event for event in bodies if event.get('ph') == 's']
+    finishes = [event for event in bodies if event.get('ph') == 'f']
+
+    assert {(event['name'], event['id']) for event in starts} == {
+        ('span_parent', 1),
+        ('dispatch', 2),
+    }
+    assert {(event['name'], event['id']) for event in finishes} == {
+        ('span_parent', 1),
+        ('dispatch', 2),
+    }
 
 
 def test_flow_link_requires_target_task() -> None:
@@ -266,9 +380,45 @@ def test_write_chrome_trace_produces_valid_json_array(tmp_path) -> None:
         assert 'ph' in entry and 'name' in entry
 
 
-def test_unclosed_span_becomes_duration_begin(tmp_path) -> None:
-    log = 'TRACE 5 enter <span=1 parent=none task=main span-name=turn target=t> <context=run system=agent-system turn=1>'
-    events = chrome_trace_events(build_forest(log))
-    begins = _by_phase(events, 'B')
-    assert len(begins) == 1
-    assert begins[0].to_dict()['name'] == 'turn'
+def test_unclosed_span_becomes_bounded_incomplete_complete_event() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 5 enter <span=1 parent=none task=main span-name=turn target=t> <context=run system=agent-system>',
+            'TRACE 5 enter <span=2 parent=1 task=main span-name=iteration target=t>',
+            'TRACE 8 exit <span=2 task=main>',
+            'TRACE 12 event <span=1 task=main event-name=still_running target=t>',
+        ]
+    )
+
+    bodies = [event.to_dict() for event in chrome_trace_events(build_forest(log))]
+    turn = next(event for event in bodies if event.get('name') == 'turn')
+    iteration = next(event for event in bodies if event.get('name') == 'iteration')
+
+    assert _by_phase(chrome_trace_events(build_forest(log)), 'B') == []
+    assert turn['ph'] == 'X'
+    assert turn['dur'] == 7 * 1000
+    assert turn['args']['incomplete'] is True
+    assert iteration['ph'] == 'X'
+    assert 'incomplete' not in iteration['args']
+    assert not any(
+        event.get('name') == 'span_parent' and event.get('ph') == 's'
+        for event in bodies
+    )
+
+
+def test_unclosed_span_is_capped_by_closed_ancestor() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 5 enter <span=1 parent=none task=main span-name=parent target=t>',
+            'TRACE 6 enter <span=2 parent=1 task=main span-name=child target=t>',
+            'TRACE 10 exit <span=1 task=main>',
+            'TRACE 20 event <span=none task=other event-name=later target=t>',
+        ]
+    )
+
+    bodies = [event.to_dict() for event in chrome_trace_events(build_forest(log))]
+    child = next(event for event in bodies if event.get('name') == 'child')
+
+    assert child['ph'] == 'X'
+    assert child['dur'] == 4 * 1000
+    assert child['args']['incomplete'] is True

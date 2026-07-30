@@ -343,8 +343,8 @@ It is a child of `iteration.prepare`.
 
 ### Span Fields
 
-`transcript_version`: Transcript version selected for extraction.
-`version_delta`: Change since the previous extraction cursor.
+`transcript_turn_version`: Committed-turn version selected for extraction.
+`turn_version_delta`: Committed turns since the previous extraction cursor.
 `transcript_bytes`: Byte length of the flattened transcript; never its text.
 `existing_count`: Number of existing memory items supplied for reconciliation.
 

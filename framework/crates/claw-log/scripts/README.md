@@ -87,7 +87,7 @@ standalone, dependency-free project with its own `pyproject.toml`.
 | Package | Role |
 |---------|------|
 | `claw_trace` | Pure parser: `parse_line` / `parse` turn lines into `TraceRecord`s; `build_forest` rebuilds the span tree, timing, and inherited context; `render_tree` dumps it. No extra deps. |
-| `chrome_export` | Consumes a `claw_trace` forest and writes Chrome Trace Event JSON (`write_chrome_trace`). Spans → complete events, events → instant events, explicit `counter.<series>` fields → counter tracks. Exposed as the `claw-trace-chrome` CLI. Depends on `chrometrace`. |
+| `chrome_export` | Consumes a `claw_trace` forest and writes Chrome Trace Event JSON (`write_chrome_trace`). Spans → duration slices, same-lane parents → slice nesting, cross-lane parents → native `span_parent` flows, events → instant events, explicit `counter.<series>` fields → counter tracks. Exposed as the `claw-trace-chrome` CLI. Depends on `chrometrace`. |
 | `serial_log` | Standalone, dependency-free: `LogStream` runs a subprocess and pushes each complete stdout line to `on_log` callbacks (strips ANSI, configurable encoding). See `serial_log/README.md`. |
 | `trace_capture` | Glue only: wires `serial_log` → `claw_trace` → `chrome_export` behind `claw-trace-capture`. |
 
@@ -99,11 +99,25 @@ as a console script.
 CLIs above call this Python package; there is no second Rust exporter whose
 mapping could drift from it.
 
+Every exported span slice carries its structural id in `args.span`. An instant
+event inside a span carries the same enclosing id, while an orphan event omits
+it. This preserves exact event-to-child joins in Perfetto without changing
+slice timing or adding subsystem-specific exporter logic.
+
 The exporter recognizes the generic `flow_link` event described in
 [`../docs/trace-format.md`](../docs/trace-format.md). It emits a Chrome flow
 from the enclosing span to a span selected by logical task and optional span
 name. `flow.arg.*` fields are copied onto the source slice and both flow
-endpoints for Perfetto search and SQL queries.
+endpoints for Perfetto search and SQL queries. Independently, every structural
+span-parent edge crossing process/task lanes becomes a native Chrome flow named
+`span_parent`; same-lane parents are rendered through nested complete slices.
+Both kinds use one flow-id sequence. Since legacy Chrome flow starts cannot
+name endpoint slice ids, each flow connects generated instant proxies on the
+source and target lanes; their arguments identify both real span ids. Those
+explicit ids remain authoritative if other slices temporally enclose the proxy
+timestamps. If capture stops before a span exits, the exporter closes its
+complete slice at the observable trace/ancestor boundary and marks it with
+`incomplete=true`, avoiding unmatched duration events.
 
 ## Develop / test
 

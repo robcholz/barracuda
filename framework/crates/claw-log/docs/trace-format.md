@@ -95,6 +95,33 @@ Each span/event's own content — **developer-defined, no format requirement, no
   event arguments. A field opts into a Chrome counter only with the explicit
   `counter.<series>=<number>` form; the exported series name omits the
   `counter.` prefix. A nonnumeric explicitly marked value is an export error.
+- In exported Chrome arguments, `span` is a reserved structural field. A span
+  slice carries its own id; an instant event carries the id of its enclosing
+  span, and an orphan event carries no structural `span` argument. This
+  structural value takes precedence over a same-named custom `span=...` token.
+  Consequently an event-to-child relation can be joined exactly with
+  `event.args.span == child.args.parent`.
+
+### Chrome projection of span parents
+
+The canonical Chrome exporter consumes the structural `parent` relation; it is
+not merely copied into display arguments:
+
+- A parent and child on the same exported process/task lane become nested
+  complete (`ph=X`) slices. Their timestamps determine the visible nesting.
+- A parent and child on different lanes are connected with a standard Chrome
+  flow (`ph=s` / `ph=f`) named `span_parent`. Because legacy Chrome flow starts
+  and finishes cannot carry source/target slice ids, the exporter emits
+  thread-scoped instant proxies on the parent and child lanes and connects those
+  proxies. Proxy/endpoint arguments identify `source_span`, `target_span`,
+  `parent_span`, and `child_span`.
+- A capture may end before a span's `exit` is observed. The exporter ends that
+  slice at the latest observed trace timestamp, bounded by any closed ancestor,
+  and adds `incomplete=true`. It does not emit an unmatched duration-begin.
+
+This projection is generic: it depends only on span identity, parent identity,
+lane identity, and timing. It does not contain runtime-specific knowledge of
+agents, tools, or multiagent operations.
 
 ### Cross-task flow links
 
@@ -114,9 +141,16 @@ TRACE 13 event <span=7 task=request-1 event-name=flow_link target=producer> flow
 - Source and destination must share their effective `run.system` and
   `run.session` scopes. The destination is the earliest matching span whose
   start falls within the source span's lifetime.
-- The Chrome exporter emits the standard flow start after its source slice but
-  before ordinary same-timestamp instant events. It marks the flow finish with
-  `bp=e`, binding both endpoints to the intended enclosing slices in Perfetto.
+- The Chrome exporter places distinct thread-scoped instant proxies around the
+  destination start, then connects them with the standard flow. Their visible
+  names include the source/target span names and flow name. Both carry
+  `flow_anchor=true`, `flow_anchor_role`, `source_span`, and `target_span`;
+  those span ids are authoritative. Chrome JSON has no field that can force an
+  endpoint's `slice.parent_id` to a structural span when a different same-lane
+  slice temporally encloses that timestamp.
+- Explicit `flow_link` flows and automatically projected `span_parent` flows
+  share one exporter-wide flow-id sequence, so their native Chrome flow ids
+  never collide.
 
 These fields are a generic trace/export contract. The low-level parser and
 Chrome exporter do not know which runtime subsystem emitted the link.
