@@ -5,6 +5,10 @@ const PERMISSIONS_COMMAND: &str = "/permissions";
 const PERMISSION_LEVELS: &str = "<deny|ask|allow_all>";
 const REASONING_EFFORT_COMMAND: &str = "/reasoning_effort";
 const REASONING_EFFORT_LEVELS: &str = "<low|medium|high|ultra>";
+const APPEND_COMMAND: &str = "/append";
+const APPEND_MESSAGE: &str = "<message>";
+const INTERRUPT_COMMAND: &str = "/interrupt";
+const CANCEL_COMMAND: &str = "/cancel";
 
 #[derive(Clone, Copy, Debug, EnumString, IntoStaticStr, PartialEq, Eq)]
 #[strum(serialize_all = "snake_case")]
@@ -47,6 +51,9 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum CliInput<'a> {
     Message(&'a str),
+    Append(&'a str),
+    Interrupt,
+    Cancel,
     SetPermission(PermissionLevelArg),
     SetReasoningEffort(ReasoningEffortArg),
 }
@@ -67,6 +74,13 @@ pub(super) enum CommandParseError {
     UnknownReasoningEffort(String),
     #[error("unexpected argument '{0}'; usage: /reasoning_effort {REASONING_EFFORT_LEVELS}")]
     UnexpectedReasoningEffortArgument(String),
+    #[error("usage: /append {APPEND_MESSAGE}")]
+    MissingAppendMessage,
+    #[error("unexpected argument '{argument}'; usage: /{command}")]
+    UnexpectedControlArgument {
+        command: &'static str,
+        argument: String,
+    },
 }
 
 pub(super) fn parse_input(input: &str) -> Result<CliInput<'_>, CommandParseError> {
@@ -103,6 +117,35 @@ pub(super) fn parse_input(input: &str) -> Result<CliInput<'_>, CommandParseError
                 .map_err(|_| CommandParseError::UnknownReasoningEffort(effort.to_string()))?;
             Ok(CliInput::SetReasoningEffort(effort))
         }
+        "append" => {
+            let message = command_line
+                .strip_prefix(command)
+                .unwrap_or_default()
+                .trim();
+            if message.is_empty() {
+                Err(CommandParseError::MissingAppendMessage)
+            } else {
+                Ok(CliInput::Append(message))
+            }
+        }
+        "interrupt" => {
+            if let Some(argument) = parts.next() {
+                return Err(CommandParseError::UnexpectedControlArgument {
+                    command: "interrupt",
+                    argument: argument.to_string(),
+                });
+            }
+            Ok(CliInput::Interrupt)
+        }
+        "cancel" => {
+            if let Some(argument) = parts.next() {
+                return Err(CommandParseError::UnexpectedControlArgument {
+                    command: "cancel",
+                    argument: argument.to_string(),
+                });
+            }
+            Ok(CliInput::Cancel)
+        }
         _ => Err(CommandParseError::UnknownCommand(command.to_string())),
     }
 }
@@ -113,8 +156,20 @@ pub(super) fn command_hint(line: &str, cursor: usize) -> Option<String> {
     }
     if line == "/" {
         return Some(format!(
-            "permissions {PERMISSION_LEVELS} | reasoning_effort {REASONING_EFFORT_LEVELS}"
+            "append {APPEND_MESSAGE} | interrupt | cancel | permissions {PERMISSION_LEVELS} | reasoning_effort {REASONING_EFFORT_LEVELS}"
         ));
+    }
+    if let Some(suffix) = APPEND_COMMAND.strip_prefix(line) {
+        return Some(format!("{suffix} {APPEND_MESSAGE}"));
+    }
+    if line.strip_prefix(APPEND_COMMAND) == Some(" ") {
+        return Some(APPEND_MESSAGE.to_string());
+    }
+    if let Some(suffix) = INTERRUPT_COMMAND.strip_prefix(line) {
+        return Some(suffix.to_string());
+    }
+    if let Some(suffix) = CANCEL_COMMAND.strip_prefix(line) {
+        return Some(suffix.to_string());
     }
     if let Some(suffix) = PERMISSIONS_COMMAND.strip_prefix(line) {
         return Some(format!("{suffix} {PERMISSION_LEVELS}"));
@@ -180,6 +235,16 @@ mod tests {
     }
 
     #[test]
+    fn session_control_commands_parse() {
+        assert_eq!(
+            parse_input("/append  keep the queued work  "),
+            Ok(CliInput::Append("keep the queued work"))
+        );
+        assert_eq!(parse_input("/interrupt"), Ok(CliInput::Interrupt));
+        assert_eq!(parse_input("/cancel"), Ok(CliInput::Cancel));
+    }
+
+    #[test]
     fn invalid_commands_and_arguments_are_rejected() {
         assert_eq!(
             parse_input("/permissions"),
@@ -227,6 +292,24 @@ mod tests {
                 "reasoning-effort".to_string()
             ))
         );
+        assert_eq!(
+            parse_input("/append"),
+            Err(CommandParseError::MissingAppendMessage)
+        );
+        assert_eq!(
+            parse_input("/interrupt now"),
+            Err(CommandParseError::UnexpectedControlArgument {
+                command: "interrupt",
+                argument: "now".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_input("/cancel now"),
+            Err(CommandParseError::UnexpectedControlArgument {
+                command: "cancel",
+                argument: "now".to_string(),
+            })
+        );
     }
 
     #[test]
@@ -234,8 +317,14 @@ mod tests {
         assert_eq!(command_hint("", 0), None);
         assert_eq!(
             command_hint("/", 1).as_deref(),
-            Some("permissions <deny|ask|allow_all> | reasoning_effort <low|medium|high|ultra>")
+            Some(
+                "append <message> | interrupt | cancel | permissions <deny|ask|allow_all> | reasoning_effort <low|medium|high|ultra>"
+            )
         );
+        assert_eq!(command_hint("/app", 4).as_deref(), Some("end <message>"));
+        assert_eq!(command_hint("/append ", 8).as_deref(), Some("<message>"));
+        assert_eq!(command_hint("/inter", 6).as_deref(), Some("rupt"));
+        assert_eq!(command_hint("/can", 4).as_deref(), Some("cel"));
         assert_eq!(
             command_hint("/perm", 5).as_deref(),
             Some("issions <deny|ask|allow_all>")

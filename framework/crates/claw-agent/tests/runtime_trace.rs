@@ -114,14 +114,22 @@ fn assert_iteration_sibling(lines: &[String], prepare: &str, agent: &str) {
         Some(agent_id),
         "iteration.prepare must be a direct child of agent: {prepare}"
     );
-    let iteration_chat = find_child_with_field(lines, agent_id, "api.chat", "purpose", "iteration");
+    let iteration_loop = find_child(lines, agent_id, "iteration_loop");
     assert_eq!(
-        token(iteration_chat, "iteration"),
+        token(iteration_loop, "iteration"),
         token(prepare, "iteration"),
-        "prepare and api.chat siblings must identify the same iteration"
+        "prepare and iteration_loop siblings must identify the same iteration"
+    );
+    let iteration_chat = find_child_with_field(
+        lines,
+        span_id(iteration_loop),
+        "api.chat",
+        "purpose",
+        "iteration",
     );
     assert_attempt_child(lines, iteration_chat);
     assert_has_exit(lines, iteration_chat);
+    assert_has_exit(lines, iteration_loop);
 }
 
 fn assert_render_child(lines: &[String], prepare: &str) {

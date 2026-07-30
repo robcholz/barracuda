@@ -15,9 +15,11 @@ mod command;
 #[path = "claw-agent-chat/line_editor.rs"]
 mod line_editor;
 
+use std::collections::VecDeque;
 use std::future::Future;
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{bail, Result};
@@ -35,6 +37,7 @@ use command::{parse_input, CliInput, PermissionLevelArg, ReasoningEffortArg};
 use line_editor::{ChatLineEditor, LineInput};
 
 const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
+const WAITING_TICK: Duration = Duration::from_millis(400);
 
 struct ChatDriver {
     control: SessionControl,
@@ -109,6 +112,22 @@ impl ChatDriver {
         true
     }
 
+    async fn interrupt(&self) -> bool {
+        if let Err(error) = self.control.interrupt().await {
+            print_event("error", &error.to_string(), EventStyle::Error);
+            return false;
+        }
+        true
+    }
+
+    async fn cancel(&self) -> bool {
+        if let Err(error) = self.control.cancel().await {
+            print_event("error", &error.to_string(), EventStyle::Error);
+            return false;
+        }
+        true
+    }
+
     fn render(
         &mut self,
         event: SessionEvent,
@@ -124,18 +143,18 @@ impl ChatDriver {
             }
             SessionEvent::Turn(TurnEvent::InputRequested { request, kind }) => {
                 self.content
-                    .output(StreamPart::Delta(format_input_request(&kind)))?;
-                self.content.output(StreamPart::End)?;
+                    .output(StreamPart::Delta(format_input_request(&kind)), editor)?;
+                self.content.output(StreamPart::End, editor)?;
                 self.content.finish(editor)?;
                 RenderOutcome::InputRequested(request)
             }
             SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Reasoning(part))) => {
-                self.content.reasoning(part)?;
+                self.content.reasoning(part, editor)?;
                 RenderOutcome::Continue
             }
             SessionEvent::Turn(TurnEvent::EffectOutput(part))
             | SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Output(part))) => {
-                self.saw_output |= self.content.output(part)?;
+                self.saw_output |= self.content.output(part, editor)?;
                 RenderOutcome::Continue
             }
             SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::ToolResult(part))) => {
@@ -195,31 +214,69 @@ enum ReplState {
     AwaitingInput(InputRequestId),
 }
 
-enum IdleActivity {
-    Input(Option<LineInput>),
-    Session(Option<Result<SessionEvent, SessionError>>),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StopRequest {
+    Interrupt,
+    Cancel,
 }
 
-async fn next_idle_activity(
-    input: impl Future<Output = Option<LineInput>>,
-    event: impl Future<Output = Option<Result<SessionEvent, SessionError>>>,
-) -> IdleActivity {
-    futures_lite::future::race(
-        async move { IdleActivity::Input(input.await) },
-        async move { IdleActivity::Session(event.await) },
-    )
-    .await
+impl StopRequest {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Interrupt => "interrupt",
+            Self::Cancel => "cancel",
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::Interrupt => "turn interrupted",
+            Self::Cancel => "turn cancelled",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CtrlCAction {
+    Exit,
+    Cancel,
+}
+
+fn ctrl_c_action(state: ReplState) -> CtrlCAction {
+    match state {
+        ReplState::Idle => CtrlCAction::Exit,
+        ReplState::Running | ReplState::AwaitingInput(_) => CtrlCAction::Cancel,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum UserTurnDisplay {
+    AlreadyRendered,
+    Deferred(String),
+}
+
+enum ReplActivity {
+    Input(Option<LineInput>),
+    Session(Option<Result<SessionEvent, SessionError>>),
+    WaitingTick,
 }
 
 async fn next_activity(
-    state: ReplState,
     input: impl Future<Output = Option<LineInput>>,
     event: impl Future<Output = Option<Result<SessionEvent, SessionError>>>,
-) -> IdleActivity {
-    match state {
-        ReplState::Running => IdleActivity::Session(event.await),
-        ReplState::Idle | ReplState::AwaitingInput(_) => next_idle_activity(input, event).await,
-    }
+    waiting_tick: impl Future<Output = ()>,
+) -> ReplActivity {
+    futures_lite::future::race(
+        futures_lite::future::race(
+            async move { ReplActivity::Input(input.await) },
+            async move { ReplActivity::Session(event.await) },
+        ),
+        async move {
+            waiting_tick.await;
+            ReplActivity::WaitingTick
+        },
+    )
+    .await
 }
 
 #[derive(Default)]
@@ -227,7 +284,6 @@ struct ContentRenderer {
     reasoning: LineState,
     output: LineState,
     above_prompt: bool,
-    buffer: String,
 }
 
 impl ContentRenderer {
@@ -237,21 +293,21 @@ impl ContentRenderer {
         Ok(())
     }
 
-    fn reasoning(&mut self, part: StreamPart<String>) -> Result<()> {
+    fn reasoning(&mut self, part: StreamPart<String>, editor: &mut ChatLineEditor) -> Result<()> {
         match part {
-            StreamPart::Delta(fragment) => self.reasoning_delta(&fragment)?,
-            StreamPart::End => self.finish_reasoning(),
+            StreamPart::Delta(fragment) => self.reasoning_delta(&fragment, editor)?,
+            StreamPart::End => self.finish_reasoning(editor, true)?,
         }
         Ok(())
     }
 
-    fn output(&mut self, part: StreamPart<String>) -> Result<bool> {
+    fn output(&mut self, part: StreamPart<String>, editor: &mut ChatLineEditor) -> Result<bool> {
         match part {
             StreamPart::Delta(fragment) => {
-                self.finish_reasoning();
+                self.finish_reasoning(editor, true)?;
                 self.output.observe(&fragment);
                 if self.above_prompt {
-                    self.buffer.push_str(&fragment);
+                    editor.print_stream_fragment(&fragment)?;
                 } else {
                     print!("{fragment}");
                     io::stdout().flush()?;
@@ -259,7 +315,7 @@ impl ContentRenderer {
                 Ok(true)
             }
             StreamPart::End => {
-                self.finish_output();
+                self.finish_output(editor);
                 Ok(false)
             }
         }
@@ -298,51 +354,62 @@ impl ContentRenderer {
         Ok(())
     }
 
-    fn reasoning_delta(&mut self, fragment: &str) -> Result<()> {
+    fn reasoning_delta(&mut self, fragment: &str, editor: &mut ChatLineEditor) -> Result<()> {
         if fragment.is_empty() {
             return Ok(());
         }
 
         let style = EventStyle::Thinking.style();
-        if !self.reasoning.is_open() {
-            if self.above_prompt {
-                self.buffer
-                    .push_str(&format!("  {style}{:<5}{style:#}  ", "think"));
+        let starts_line = !self.reasoning.is_open();
+        if self.above_prompt {
+            let rendered = if starts_line {
+                format!("  {style}{:<5}{style:#}  {fragment}", "think")
             } else {
+                fragment.to_string()
+            };
+            editor.print_stream_fragment(&rendered)?;
+        } else {
+            if starts_line {
                 eprint!("  {style}{:<5}{style:#}  ", "think");
             }
-        }
-        self.reasoning.observe(fragment);
-        if self.above_prompt {
-            self.buffer.push_str(fragment);
-        } else {
             eprint!("{fragment}");
             io::stderr().flush()?;
         }
+        self.reasoning.observe(fragment);
         Ok(())
     }
 
     fn finish(&mut self, editor: &mut ChatLineEditor) -> Result<()> {
-        self.finish_reasoning();
-        self.finish_output();
-        if self.above_prompt && !self.buffer.is_empty() {
-            let output = std::mem::take(&mut self.buffer);
-            print_above_prompt(editor, output)?;
+        if self.above_prompt {
+            self.reasoning.finish();
+            self.output.finish();
+            editor.finish_stream();
+        } else {
+            finish_line(&mut self.reasoning, io::stderr());
+            finish_line(&mut self.output, io::stdout());
         }
         Ok(())
     }
 
-    fn finish_reasoning(&mut self) {
+    fn finish_reasoning(
+        &mut self,
+        editor: &mut ChatLineEditor,
+        continue_stream: bool,
+    ) -> Result<()> {
         if self.above_prompt {
-            finish_buffered_line(&mut self.reasoning, &mut self.buffer);
+            if self.reasoning.finish() == Some(true) && continue_stream {
+                editor.finish_stream_line()?;
+            }
         } else {
             finish_line(&mut self.reasoning, io::stderr());
         }
+        Ok(())
     }
 
-    fn finish_output(&mut self) {
+    fn finish_output(&mut self, editor: &mut ChatLineEditor) {
         if self.above_prompt {
-            finish_buffered_line(&mut self.output, &mut self.buffer);
+            self.output.finish();
+            editor.finish_stream();
         } else {
             finish_line(&mut self.output, io::stdout());
         }
@@ -386,16 +453,11 @@ fn finish_line(line: &mut LineState, mut writer: impl Write) {
     }
 }
 
-fn finish_buffered_line(line: &mut LineState, buffer: &mut String) {
-    if line.finish() == Some(true) {
-        buffer.push('\n');
-    }
-}
-
 enum EventStyle {
     Thinking,
     Tools,
     Permission,
+    Control,
     Usage,
     Error,
 }
@@ -409,7 +471,7 @@ impl EventStyle {
         match self {
             Self::Thinking => Style::new().dimmed().fg_color(Some(AnsiColor::Cyan.into())),
             Self::Tools => Style::new().bold().fg_color(Some(AnsiColor::Green.into())),
-            Self::Permission => Style::new().fg_color(Some(AnsiColor::Cyan.into())),
+            Self::Permission | Self::Control => Style::new().fg_color(Some(AnsiColor::Cyan.into())),
             Self::Usage => Style::new()
                 .dimmed()
                 .fg_color(Some(AnsiColor::Yellow.into())),
@@ -420,6 +482,48 @@ impl EventStyle {
 
 fn print_event(label: &str, message: &str, event_style: EventStyle) {
     eprintln!("{}", format_event(label, message, event_style));
+}
+
+fn print_above_or_below_prompt(
+    editor: &mut ChatLineEditor,
+    prompt_active: bool,
+    label: &str,
+    message: &str,
+    style: EventStyle,
+) -> Result<()> {
+    if prompt_active {
+        editor.print(format_event(label, message, style))
+    } else {
+        print_event(label, message, style);
+        Ok(())
+    }
+}
+
+fn print_user_prompt(
+    editor: &mut ChatLineEditor,
+    prompt_active: bool,
+    message: &str,
+) -> Result<()> {
+    let rendered = format!("> {message}");
+    if prompt_active {
+        editor.print(rendered)
+    } else {
+        println!("{rendered}");
+        Ok(())
+    }
+}
+
+fn take_deferred_user_message(
+    pending: &mut VecDeque<UserTurnDisplay>,
+    origin: &TurnOrigin,
+) -> Option<String> {
+    if !matches!(origin, TurnOrigin::User) {
+        return None;
+    }
+    match pending.pop_front() {
+        Some(UserTurnDisplay::Deferred(message)) => Some(message),
+        Some(UserTurnDisplay::AlreadyRendered) | None => None,
+    }
 }
 
 fn format_event(label: &str, message: &str, event_style: EventStyle) -> String {
@@ -435,14 +539,6 @@ fn format_event(label: &str, message: &str, event_style: EventStyle) -> String {
         rendered.push_str(line);
     }
     rendered
-}
-
-fn print_above_prompt(editor: &mut ChatLineEditor, message: String) -> Result<()> {
-    let message = message.trim_end_matches(['\r', '\n']);
-    if !message.is_empty() {
-        editor.print(message.to_string())?;
-    }
-    Ok(())
 }
 
 fn format_input_request(kind: &InputRequestKind) -> String {
@@ -547,34 +643,99 @@ async fn run() -> Result<()> {
     let mut chat = ChatDriver::new(control, events);
 
     eprintln!("Memory:  {MEMORY_DIR}");
-    eprintln!("Type a message, or / for commands. Empty line or Ctrl-D to quit.\n");
+    eprintln!(
+        "Type a message, or / for commands. Ctrl-C cancels an active turn or quits while idle.\n"
+    );
 
     let mut editor = ChatLineEditor::new()?;
     let mut state = ReplState::Idle;
+    let mut pending_stop = None;
+    let mut pending_user_turns = VecDeque::new();
     let mut prompt_active = false;
+    let mut waiting_ticks =
+        tokio::time::interval_at(tokio::time::Instant::now() + WAITING_TICK, WAITING_TICK);
+    waiting_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     show_prompt(&editor, &mut prompt_active)?;
 
     loop {
-        let activity = next_activity(state, editor.next_input(), chat.events.next()).await;
+        let activity = next_activity(editor.next_input(), chat.events.next(), async {
+            waiting_ticks.tick().await;
+        })
+        .await;
         match activity {
-            IdleActivity::Input(Some(LineInput::Line(line))) => {
+            ReplActivity::Input(Some(LineInput::Line(line))) => {
+                editor.abandon_live_render();
                 prompt_active = false;
                 let input = line.trim();
                 if input.is_empty() {
                     break;
                 }
                 match parse_input(input) {
-                    Ok(CliInput::Message(message)) => {
-                        let accepted = match state {
-                            ReplState::Idle => chat.append(message).await,
-                            ReplState::AwaitingInput(request) => {
-                                chat.respond(request, message).await
+                    Ok(CliInput::Message(message)) => match state {
+                        ReplState::Idle => {
+                            if chat.append(message).await {
+                                pending_user_turns.push_back(UserTurnDisplay::AlreadyRendered);
+                                state = ReplState::Running;
+                                editor.start_waiting()?;
+                                waiting_ticks.reset();
+                            } else {
+                                show_prompt(&editor, &mut prompt_active)?;
                             }
-                            ReplState::Running => false,
-                        };
-                        if accepted {
-                            state = ReplState::Running;
-                            prompt_active = false;
+                        }
+                        ReplState::AwaitingInput(request) => {
+                            if chat.respond(request, message).await {
+                                state = ReplState::Running;
+                                editor.start_waiting()?;
+                                waiting_ticks.reset();
+                            }
+                            show_prompt(&editor, &mut prompt_active)?;
+                        }
+                        ReplState::Running => {
+                            print_event(
+                                "error",
+                                "turn is running; use /append <message> to queue another turn",
+                                EventStyle::Error,
+                            );
+                            show_prompt(&editor, &mut prompt_active)?;
+                        }
+                    },
+                    Ok(CliInput::Append(message)) => {
+                        let was_idle = state == ReplState::Idle;
+                        if chat.append(message).await {
+                            pending_user_turns
+                                .push_back(UserTurnDisplay::Deferred(message.to_owned()));
+                            print_event("append", "queued", EventStyle::Control);
+                            if was_idle {
+                                state = ReplState::Running;
+                                editor.start_waiting()?;
+                                waiting_ticks.reset();
+                            }
+                        } else {
+                            show_prompt(&editor, &mut prompt_active)?;
+                            continue;
+                        }
+                        if !was_idle {
+                            show_prompt(&editor, &mut prompt_active)?;
+                        }
+                    }
+                    Ok(CliInput::Interrupt) => {
+                        if state == ReplState::Idle {
+                            print_event("error", "no active turn to interrupt", EventStyle::Error);
+                            show_prompt(&editor, &mut prompt_active)?;
+                        } else if chat.interrupt().await
+                            && pending_stop != Some(StopRequest::Cancel)
+                        {
+                            pending_stop = Some(StopRequest::Interrupt);
+                        } else if pending_stop != Some(StopRequest::Cancel) {
+                            show_prompt(&editor, &mut prompt_active)?;
+                        }
+                    }
+                    Ok(CliInput::Cancel) => {
+                        if state == ReplState::Idle {
+                            print_event("error", "no active turn to cancel", EventStyle::Error);
+                            show_prompt(&editor, &mut prompt_active)?;
+                        } else if chat.cancel().await {
+                            pending_stop = Some(StopRequest::Cancel);
                         } else {
                             show_prompt(&editor, &mut prompt_active)?;
                         }
@@ -593,13 +754,40 @@ async fn run() -> Result<()> {
                     }
                 }
             }
-            IdleActivity::Input(Some(LineInput::Interrupted)) => {
+            ReplActivity::Input(Some(LineInput::Interrupted)) => {
+                editor.abandon_live_render();
                 prompt_active = false;
-                show_prompt(&editor, &mut prompt_active)?;
+                match ctrl_c_action(state) {
+                    CtrlCAction::Exit => break,
+                    CtrlCAction::Cancel => {
+                        if chat.cancel().await {
+                            pending_stop = Some(StopRequest::Cancel);
+                        } else {
+                            show_prompt(&editor, &mut prompt_active)?;
+                        }
+                    }
+                }
             }
-            IdleActivity::Input(Some(LineInput::Eof) | None) => break,
-            IdleActivity::Input(Some(LineInput::Failed(error))) => return Err(error.into()),
-            IdleActivity::Session(Some(Ok(event))) => {
+            ReplActivity::Input(Some(LineInput::Eof) | None) => {
+                editor.abandon_live_render();
+                prompt_active = false;
+                break;
+            }
+            ReplActivity::Input(Some(LineInput::Failed(error))) => {
+                editor.abandon_live_render();
+                return Err(error.into());
+            }
+            ReplActivity::Session(Some(Ok(event))) => {
+                if let SessionEvent::Turn(TurnEvent::Started { origin, .. }) = &event {
+                    if let Some(message) =
+                        take_deferred_user_message(&mut pending_user_turns, origin)
+                    {
+                        print_user_prompt(&mut editor, prompt_active, &message)?;
+                    }
+                    editor.start_waiting()?;
+                    waiting_ticks.reset();
+                    show_prompt(&editor, &mut prompt_active)?;
+                }
                 match chat.render(event, &mut editor, prompt_active)? {
                     RenderOutcome::Continue => {}
                     RenderOutcome::TurnStarted => state = ReplState::Running,
@@ -609,19 +797,41 @@ async fn run() -> Result<()> {
                     }
                     RenderOutcome::TurnEnded { user, saw_output } => {
                         state = ReplState::Idle;
-                        if user && !saw_output {
-                            println!("\n(no reply)\n");
+                        if let Some(stop) = pending_stop.take() {
+                            print_above_or_below_prompt(
+                                &mut editor,
+                                prompt_active,
+                                stop.label(),
+                                stop.message(),
+                                EventStyle::Error,
+                            )?;
+                        } else if user && !saw_output {
+                            if prompt_active {
+                                editor.print("(no reply)".to_string())?;
+                            } else {
+                                println!("\n(no reply)\n");
+                            }
+                        } else {
+                            editor.clear_waiting()?;
                         }
                         show_prompt(&editor, &mut prompt_active)?;
                     }
-                    RenderOutcome::Closed => break,
+                    RenderOutcome::Closed => {
+                        editor.clear_waiting()?;
+                        break;
+                    }
                 }
             }
-            IdleActivity::Session(Some(Err(error))) => return Err(error.into()),
-            IdleActivity::Session(None) => break,
+            ReplActivity::Session(Some(Err(error))) => {
+                editor.clear_waiting()?;
+                return Err(error.into());
+            }
+            ReplActivity::Session(None) => break,
+            ReplActivity::WaitingTick => editor.advance_waiting()?,
         }
     }
 
+    editor.clear_waiting()?;
     if let Some(usage) = chat.total_usage() {
         if prompt_active {
             editor.print(format_event(
@@ -727,14 +937,15 @@ mod tests {
             },
         });
 
-        let activity = futures_lite::future::block_on(next_idle_activity(
+        let activity = futures_lite::future::block_on(next_activity(
             std::future::pending(),
             std::future::ready(Some(Ok(event))),
+            std::future::pending(),
         ));
 
         assert!(matches!(
             activity,
-            IdleActivity::Session(Some(Ok(SessionEvent::Turn(TurnEvent::Started {
+            ReplActivity::Session(Some(Ok(SessionEvent::Turn(TurnEvent::Started {
                 turn: claw_agent::TurnId(7),
                 origin: TurnOrigin::ToolCall { .. },
             }))))
@@ -742,17 +953,28 @@ mod tests {
     }
 
     #[test]
-    fn awaiting_input_repl_reads_the_callers_response() {
+    fn repl_accepts_input_while_session_events_are_pending() {
         let activity = futures_lite::future::block_on(next_activity(
-            ReplState::AwaitingInput(InputRequestId(7)),
-            std::future::ready(Some(LineInput::Line("approve".to_owned()))),
+            std::future::ready(Some(LineInput::Line("/interrupt".to_owned()))),
+            std::future::pending(),
             std::future::pending(),
         ));
 
         assert!(matches!(
             activity,
-            IdleActivity::Input(Some(LineInput::Line(line))) if line == "approve"
+            ReplActivity::Input(Some(LineInput::Line(line))) if line == "/interrupt"
         ));
+    }
+
+    #[test]
+    fn repl_emits_waiting_ticks() {
+        let activity = futures_lite::future::block_on(next_activity(
+            std::future::pending(),
+            std::future::pending(),
+            std::future::ready(()),
+        ));
+
+        assert!(matches!(activity, ReplActivity::WaitingTick));
     }
 
     #[test]
@@ -768,5 +990,50 @@ mod tests {
             }),
             "Permission approval needed:\nTool call ID: call-1\nTool: skill_reload\nArguments: {\"name\":\"demo\"}\nReason: 'skill_reload' is a High-risk action and needs approval.\n\nReply with approval or rejection."
         );
+    }
+
+    #[test]
+    fn stop_requests_have_explicit_terminal_statuses() {
+        assert_eq!(StopRequest::Interrupt.label(), "interrupt");
+        assert_eq!(StopRequest::Interrupt.message(), "turn interrupted");
+        assert_eq!(StopRequest::Cancel.label(), "cancel");
+        assert_eq!(StopRequest::Cancel.message(), "turn cancelled");
+    }
+
+    #[test]
+    fn ctrl_c_exits_only_while_idle() {
+        assert_eq!(ctrl_c_action(ReplState::Idle), CtrlCAction::Exit);
+        assert_eq!(ctrl_c_action(ReplState::Running), CtrlCAction::Cancel);
+        assert_eq!(
+            ctrl_c_action(ReplState::AwaitingInput(InputRequestId(7))),
+            CtrlCAction::Cancel
+        );
+    }
+
+    #[test]
+    fn deferred_user_messages_render_only_for_their_user_turn() {
+        let mut pending = VecDeque::from([
+            UserTurnDisplay::AlreadyRendered,
+            UserTurnDisplay::Deferred("queued message".to_owned()),
+        ]);
+        let tool_origin = TurnOrigin::ToolCall {
+            call: ToolCall {
+                id: "call-4".to_owned(),
+                name: "background_work".to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+        };
+
+        assert_eq!(take_deferred_user_message(&mut pending, &tool_origin), None);
+        assert_eq!(pending.len(), 2);
+        assert_eq!(
+            take_deferred_user_message(&mut pending, &TurnOrigin::User),
+            None
+        );
+        assert_eq!(
+            take_deferred_user_message(&mut pending, &TurnOrigin::User),
+            Some("queued message".to_owned())
+        );
+        assert!(pending.is_empty());
     }
 }
