@@ -7,7 +7,7 @@
 //! written under this crate's `output/claw-agent-chat/`.
 //!
 //! ```
-//! cargo run -p claw-cli --features cache_profile --bin claw-agent-chat
+//! cargo run -p claw-cli --bin claw-agent-chat
 //! ```
 //!
 mod command;
@@ -20,46 +20,46 @@ use std::path::Path;
 use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, AgentSystem, ApiPurpose, BackendKind,
     ClawApiConfig, InputRequestId, InputRequestKind, IterationEvent, Message, ProviderUsage,
-    SessionControl, SessionError, SessionEvent, SessionPersistence, SessionStream, ToolCall,
-    ToolOutput, TurnEvent, TurnOrigin,
+    SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence, SessionStream,
+    ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
 use claw_interface::{DiskFs, RealHttp, StdThread, TokioExecutor, TokioTimer};
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use futures_lite::StreamExt;
 
-use command::{parse_input, CliInput, PermissionLevelArg, ReasoningEffortArg};
+use command::{
+    parse_input, CliInput, PermissionLevelArg, ReasoningEffortArg, SessionPersistenceArg,
+};
 use line_editor::{ChatLineEditor, LineInput};
 
 const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
 const WAITING_TICK: Duration = Duration::from_millis(400);
 
+type ChatSystem = AgentSystem<DiskFs, RealHttp, TokioTimer>;
+
 struct ChatDriver {
+    session: SessionId,
     control: SessionControl,
     events: SessionStream,
-    total_usage: ProviderUsage,
     content: ContentRenderer,
     active_origin: Option<TurnOrigin>,
     saw_output: bool,
 }
 
 impl ChatDriver {
-    fn new(control: SessionControl, events: SessionStream) -> Self {
+    fn new(session: SessionId, control: SessionControl, events: SessionStream) -> Self {
         Self {
+            session,
             control,
             events,
-            total_usage: ProviderUsage::default(),
             content: ContentRenderer::default(),
             active_origin: None,
             saw_output: false,
         }
-    }
-
-    fn total_usage(&self) -> Option<ProviderUsage> {
-        has_usage(self.total_usage).then_some(self.total_usage)
     }
 
     async fn append(&self, text: impl Into<String>) -> bool {
@@ -131,6 +131,7 @@ impl ChatDriver {
         event: SessionEvent,
         editor: &mut ChatLineEditor,
         above_prompt: bool,
+        total_usage: &mut ProviderUsage,
     ) -> Result<RenderOutcome> {
         let outcome = match event {
             SessionEvent::Turn(TurnEvent::Started { origin, .. }) => {
@@ -160,7 +161,7 @@ impl ChatDriver {
                 RenderOutcome::Continue
             }
             SessionEvent::Turn(TurnEvent::Iteration(IterationEvent::Usage { usage })) => {
-                accumulate_usage(&mut self.total_usage, usage);
+                accumulate_usage(total_usage, usage);
                 self.content.finish(editor)?;
                 self.content
                     .event(editor, "usage", &format_usage(usage), EventStyle::Usage)?;
@@ -194,6 +195,247 @@ impl ChatDriver {
         };
         Ok(outcome)
     }
+}
+
+#[derive(Default)]
+struct PendingSessionSettings {
+    permission: Option<PermissionLevelArg>,
+    reasoning_effort: Option<ReasoningEffortArg>,
+}
+
+impl PendingSessionSettings {
+    fn set_permission(&mut self, level: PermissionLevelArg) {
+        self.permission = Some(level);
+        let level_name: &'static str = level.into();
+        print_event(
+            "permission",
+            &format!("will use {level_name} when a session starts"),
+            EventStyle::Permission,
+        );
+    }
+
+    fn set_reasoning_effort(&mut self, effort: ReasoningEffortArg) {
+        self.reasoning_effort = Some(effort);
+        let effort_name: &'static str = effort.into();
+        print_event(
+            "reasoning effort",
+            &format!("will use {effort_name} when a session starts"),
+            EventStyle::Permission,
+        );
+    }
+
+    async fn apply(&mut self, chat: &ChatDriver) -> bool {
+        if let Some(level) = self.permission {
+            if !chat.set_permission_level(level).await {
+                return false;
+            }
+            self.permission = None;
+        }
+        if let Some(effort) = self.reasoning_effort {
+            if !chat.set_reasoning_effort(effort).await {
+                return false;
+            }
+            self.reasoning_effort = None;
+        }
+        true
+    }
+}
+
+fn open_chat(system: &ChatSystem, session: SessionId) -> Result<ChatDriver> {
+    let (control, events) = system.open_session(session)?;
+    Ok(ChatDriver::new(session, control, events))
+}
+
+fn new_persistent_chat(system: &ChatSystem) -> Result<ChatDriver> {
+    let session = system.new_session(SessionPersistence::Persistent)?;
+    match open_chat(system, session) {
+        Ok(chat) => Ok(chat),
+        Err(error) => {
+            system.delete_session(session).map_err(|rollback| {
+                anyhow!(
+                    "failed to open new session {session}: {error}; failed to remove it: {rollback}"
+                )
+            })?;
+            Err(error)
+        }
+    }
+}
+
+fn ensure_lazy_session<'a>(
+    system: &ChatSystem,
+    chat: &'a mut Option<ChatDriver>,
+) -> Result<&'a mut ChatDriver> {
+    if chat.is_none() {
+        let next = new_persistent_chat(system)?;
+        let session = next.session;
+        print_event(
+            "session",
+            &format!("created persistent and entered {session}"),
+            EventStyle::Control,
+        );
+        return Ok(chat.insert(next));
+    }
+
+    chat.as_mut()
+        .ok_or_else(|| anyhow!("failed to access the active session"))
+}
+
+async fn switch_session(
+    system: &ChatSystem,
+    chat: &mut Option<ChatDriver>,
+    session: SessionId,
+    verb: &str,
+) -> Result<bool> {
+    if chat.as_ref().is_some_and(|chat| chat.session == session) {
+        print_event(
+            "session",
+            &format!("already active: {session}"),
+            EventStyle::Control,
+        );
+        return Ok(false);
+    }
+
+    let next = open_chat(system, session)?;
+    let previous = chat.as_ref().map(|chat| chat.session);
+    if let Some(current) = chat.as_ref() {
+        if let Err(error) = current.control.close().await {
+            drop(next);
+            return Err(error.into());
+        }
+    }
+    *chat = Some(next);
+    let message = previous.map_or_else(
+        || format!("{verb} and entered {session}"),
+        |previous| format!("closed {previous}; {verb} and entered {session}"),
+    );
+    print_event("session", &message, EventStyle::Control);
+    Ok(true)
+}
+
+async fn new_session(
+    system: &ChatSystem,
+    chat: &mut Option<ChatDriver>,
+    persistence: SessionPersistenceArg,
+) -> Result<bool> {
+    let persistence_name: &'static str = persistence.into();
+    let session = system.new_session(persistence.into())?;
+    let verb = format!("created {persistence_name}");
+    match switch_session(system, chat, session, &verb).await {
+        Ok(switched) => Ok(switched),
+        Err(error) => {
+            system.delete_session(session).map_err(|rollback| {
+                anyhow!(
+                    "failed to switch to new session {session}: {error}; failed to remove it: \
+                     {rollback}"
+                )
+            })?;
+            Err(error)
+        }
+    }
+}
+
+async fn resume_session(
+    system: &ChatSystem,
+    chat: &mut Option<ChatDriver>,
+    session: SessionId,
+) -> Result<bool> {
+    switch_session(system, chat, session, "resumed").await
+}
+
+fn session_list(system: &ChatSystem, active: Option<SessionId>) {
+    print_event(
+        "session",
+        &format_session_list(system.list_sessions(), active),
+        EventStyle::Control,
+    );
+}
+
+fn format_session_list(mut sessions: Vec<SessionId>, active: Option<SessionId>) -> String {
+    sessions.sort_unstable();
+    if sessions.is_empty() {
+        return "available IDs: none".to_string();
+    }
+
+    let sessions = sessions
+        .into_iter()
+        .map(|session| {
+            if Some(session) == active {
+                format!("{session} (active)")
+            } else {
+                session.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("available IDs: {sessions}")
+}
+
+fn delete_session(
+    system: &ChatSystem,
+    chat: &mut Option<ChatDriver>,
+    requested: Option<SessionId>,
+) -> Result<bool> {
+    let active = chat.as_ref().map(|chat| chat.session);
+    let session = requested
+        .or(active)
+        .ok_or_else(|| anyhow!("no active session; specify /session delete <session_id>"))?;
+    if Some(session) != active {
+        system.delete_session(session)?;
+        print_event(
+            "session",
+            &format!("deleted {session}"),
+            EventStyle::Control,
+        );
+        return Ok(false);
+    }
+
+    let replacement = choose_replacement_session(session, system.list_sessions());
+    let Some(replacement) = replacement else {
+        system.delete_session(session)?;
+        *chat = None;
+        print_event(
+            "session",
+            &format!("deleted {session}; next session will be created on first message"),
+            EventStyle::Control,
+        );
+        return Ok(true);
+    };
+
+    let next = open_chat(system, replacement)?;
+    if let Err(error) = system.delete_session(session) {
+        drop(next);
+        return Err(error.into());
+    }
+
+    *chat = Some(next);
+    print_event(
+        "session",
+        &format!("deleted {session}; active {replacement}"),
+        EventStyle::Control,
+    );
+    Ok(true)
+}
+
+fn choose_replacement_session(
+    current: SessionId,
+    sessions: impl IntoIterator<Item = SessionId>,
+) -> Option<SessionId> {
+    sessions
+        .into_iter()
+        .filter(|session| *session != current)
+        .max()
+}
+
+fn session_command_allowed(state: ReplState, command: &str) -> bool {
+    if state == ReplState::Idle {
+        return true;
+    }
+    print_event(
+        "error",
+        &format!("cannot {command} while a turn is active; use /cancel first"),
+        EventStyle::Error,
+    );
+    false
 }
 
 enum RenderOutcome {
@@ -257,6 +499,20 @@ enum ReplActivity {
     Input(Option<LineInput>),
     Session(Option<Result<SessionEvent, SessionError>>),
     WaitingTick,
+}
+
+async fn next_session_event(
+    chat: &mut Option<ChatDriver>,
+) -> Option<Result<SessionEvent, SessionError>> {
+    match chat {
+        Some(chat) => chat.events.next().await,
+        None => std::future::pending().await,
+    }
+}
+
+fn active_chat(chat: &mut Option<ChatDriver>) -> Result<&mut ChatDriver> {
+    chat.as_mut()
+        .ok_or_else(|| anyhow!("REPL state requires an active session"))
 }
 
 async fn next_activity(
@@ -637,15 +893,14 @@ async fn run() -> Result<()> {
         required("CLAW_LLM_BASE_URL")?,
     );
     llm_config.timeout_ms = 60_000;
-    let system =
+    let system: ChatSystem =
         AgentSystem::<DiskFs, RealHttp, TokioTimer>::new::<StdThread, TokioExecutor>(persistence)?;
     system.link_api(llm_config, ApiPurpose::RootAgent, true)?;
     system.start_all()?;
-    let session = system.new_session(SessionPersistence::Persistent)?;
-    let (control, events) = system.open_session(session)?;
-    let mut chat = ChatDriver::new(control, events);
+    let mut chat = None;
 
     eprintln!("Memory:  {MEMORY_DIR}");
+    eprintln!("Session: none (created on first message)");
     eprintln!(
         "Type a message, or / for commands. Ctrl-C cancels an active turn or quits while idle.\n"
     );
@@ -654,6 +909,8 @@ async fn run() -> Result<()> {
     let mut state = ReplState::Idle;
     let mut pending_stop = None;
     let mut pending_user_turns = VecDeque::new();
+    let mut pending_settings = PendingSessionSettings::default();
+    let mut total_usage = ProviderUsage::default();
     let mut prompt_active = false;
     let mut waiting_ticks =
         tokio::time::interval_at(tokio::time::Instant::now() + WAITING_TICK, WAITING_TICK);
@@ -661,14 +918,16 @@ async fn run() -> Result<()> {
     show_prompt(&mut editor, &mut prompt_active).await?;
 
     loop {
-        let activity = next_activity(editor.next_input(), chat.events.next(), async {
+        let activity = next_activity(editor.next_input(), next_session_event(&mut chat), async {
             waiting_ticks.tick().await;
         })
         .await;
         match activity {
             ReplActivity::Input(Some(LineInput::Line(line))) => {
                 editor.abandon_live_render(Some(&line))?;
-                chat.content.abandon_live_render();
+                if let Some(chat) = chat.as_mut() {
+                    chat.content.abandon_live_render();
+                }
                 prompt_active = false;
                 let input = line.trim();
                 if input.is_empty() {
@@ -677,7 +936,19 @@ async fn run() -> Result<()> {
                 match parse_input(input) {
                     Ok(CliInput::Message(message)) => match state {
                         ReplState::Idle => {
-                            if chat.append(message).await {
+                            let active = match ensure_lazy_session(&system, &mut chat) {
+                                Ok(active) => active,
+                                Err(error) => {
+                                    print_event("error", &error.to_string(), EventStyle::Error);
+                                    show_prompt(&mut editor, &mut prompt_active).await?;
+                                    continue;
+                                }
+                            };
+                            if !pending_settings.apply(active).await {
+                                show_prompt(&mut editor, &mut prompt_active).await?;
+                                continue;
+                            }
+                            if active.append(message).await {
                                 pending_user_turns.push_back(UserTurnDisplay::AlreadyRendered);
                                 state = ReplState::Running;
                                 show_prompt(&mut editor, &mut prompt_active).await?;
@@ -688,7 +959,7 @@ async fn run() -> Result<()> {
                             }
                         }
                         ReplState::AwaitingInput(request) => {
-                            if chat.respond(request, message).await {
+                            if active_chat(&mut chat)?.respond(request, message).await {
                                 state = ReplState::Running;
                                 show_prompt(&mut editor, &mut prompt_active).await?;
                                 editor.start_waiting()?;
@@ -708,7 +979,19 @@ async fn run() -> Result<()> {
                     },
                     Ok(CliInput::Append(message)) => {
                         let was_idle = state == ReplState::Idle;
-                        if chat.append(message).await {
+                        let active = match ensure_lazy_session(&system, &mut chat) {
+                            Ok(active) => active,
+                            Err(error) => {
+                                print_event("error", &error.to_string(), EventStyle::Error);
+                                show_prompt(&mut editor, &mut prompt_active).await?;
+                                continue;
+                            }
+                        };
+                        if !pending_settings.apply(active).await {
+                            show_prompt(&mut editor, &mut prompt_active).await?;
+                            continue;
+                        }
+                        if active.append(message).await {
                             pending_user_turns
                                 .push_back(UserTurnDisplay::Deferred(message.to_owned()));
                             print_event("append", "queued", EventStyle::Control);
@@ -730,7 +1013,7 @@ async fn run() -> Result<()> {
                         if state == ReplState::Idle {
                             print_event("error", "no active turn to interrupt", EventStyle::Error);
                             show_prompt(&mut editor, &mut prompt_active).await?;
-                        } else if chat.interrupt().await
+                        } else if active_chat(&mut chat)?.interrupt().await
                             && pending_stop != Some(StopRequest::Cancel)
                         {
                             pending_stop = Some(StopRequest::Interrupt);
@@ -740,33 +1023,95 @@ async fn run() -> Result<()> {
                     Ok(CliInput::Cancel) => {
                         if state == ReplState::Idle {
                             print_event("error", "no active turn to cancel", EventStyle::Error);
-                        } else if chat.cancel().await {
+                        } else if active_chat(&mut chat)?.cancel().await {
                             pending_stop = Some(StopRequest::Cancel);
                         }
                         show_prompt(&mut editor, &mut prompt_active).await?;
                     }
+                    Ok(CliInput::SessionNew(persistence)) => {
+                        if session_command_allowed(state, "create a session") {
+                            match new_session(&system, &mut chat, persistence).await {
+                                Ok(true) => {
+                                    pending_stop = None;
+                                    pending_user_turns.clear();
+                                    let _ = pending_settings.apply(active_chat(&mut chat)?).await;
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    print_event("error", &error.to_string(), EventStyle::Error);
+                                }
+                            }
+                        }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
+                    }
+                    Ok(CliInput::SessionResume(session)) => {
+                        if session_command_allowed(state, "resume a session") {
+                            match resume_session(&system, &mut chat, session).await {
+                                Ok(true) => {
+                                    pending_stop = None;
+                                    pending_user_turns.clear();
+                                    let _ = pending_settings.apply(active_chat(&mut chat)?).await;
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    print_event("error", &error.to_string(), EventStyle::Error);
+                                    session_list(&system, chat.as_ref().map(|chat| chat.session));
+                                }
+                            }
+                        }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
+                    }
+                    Ok(CliInput::SessionDelete(session)) => {
+                        if session_command_allowed(state, "delete a session") {
+                            match delete_session(&system, &mut chat, session) {
+                                Ok(true) => {
+                                    pending_stop = None;
+                                    pending_user_turns.clear();
+                                }
+                                Ok(false) => {}
+                                Err(error) => {
+                                    print_event("error", &error.to_string(), EventStyle::Error);
+                                }
+                            }
+                        }
+                        show_prompt(&mut editor, &mut prompt_active).await?;
+                    }
                     Ok(CliInput::SetPermission(level)) => {
-                        chat.set_permission_level(level).await;
+                        if let Some(chat) = chat.as_ref() {
+                            chat.set_permission_level(level).await;
+                        } else {
+                            pending_settings.set_permission(level);
+                        }
                         show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Ok(CliInput::SetReasoningEffort(effort)) => {
-                        chat.set_reasoning_effort(effort).await;
+                        if let Some(chat) = chat.as_ref() {
+                            chat.set_reasoning_effort(effort).await;
+                        } else {
+                            pending_settings.set_reasoning_effort(effort);
+                        }
                         show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                     Err(error) => {
+                        let show_session_list = error.should_show_session_list();
                         print_event("error", &error.to_string(), EventStyle::Error);
+                        if show_session_list {
+                            session_list(&system, chat.as_ref().map(|chat| chat.session));
+                        }
                         show_prompt(&mut editor, &mut prompt_active).await?;
                     }
                 }
             }
             ReplActivity::Input(Some(LineInput::Interrupted)) => {
                 editor.abandon_live_render(None)?;
-                chat.content.abandon_live_render();
+                if let Some(chat) = chat.as_mut() {
+                    chat.content.abandon_live_render();
+                }
                 prompt_active = false;
                 match ctrl_c_action(state) {
                     CtrlCAction::Exit => break,
                     CtrlCAction::Cancel => {
-                        if chat.cancel().await {
+                        if active_chat(&mut chat)?.cancel().await {
                             pending_stop = Some(StopRequest::Cancel);
                         }
                         show_prompt(&mut editor, &mut prompt_active).await?;
@@ -796,7 +1141,12 @@ async fn run() -> Result<()> {
                     editor.start_waiting()?;
                     waiting_ticks.reset();
                 }
-                match chat.render(event, &mut editor, prompt_active)? {
+                match active_chat(&mut chat)?.render(
+                    event,
+                    &mut editor,
+                    prompt_active,
+                    &mut total_usage,
+                )? {
                     RenderOutcome::Continue => {}
                     RenderOutcome::TurnStarted => state = ReplState::Running,
                     RenderOutcome::InputRequested(request) => {
@@ -840,16 +1190,16 @@ async fn run() -> Result<()> {
     }
 
     editor.clear_waiting()?;
-    if let Some(usage) = chat.total_usage() {
+    if has_usage(total_usage) {
         if prompt_active {
             editor.print(format_event(
                 "total",
-                &format_usage(usage),
+                &format_usage(total_usage),
                 EventStyle::Usage,
             ))?;
         } else {
             eprintln!("\n");
-            print_event("total", &format_usage(usage), EventStyle::Usage);
+            print_event("total", &format_usage(total_usage), EventStyle::Usage);
         }
     }
     if prompt_active {
@@ -870,7 +1220,20 @@ fn required(key: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use tempdir::TempDir;
+
     use super::*;
+
+    fn test_system(root: &TempDir) -> ChatSystem {
+        let persistence = AgentPersistenceConfig {
+            persistence_root: root.path().to_string_lossy().into_owned(),
+            skill_roots: Vec::new(),
+        };
+        let system =
+            ChatSystem::new::<StdThread, TokioExecutor>(persistence).expect("agent system");
+        system.start_all().expect("start tools");
+        system
+    }
 
     #[test]
     fn usage_line_includes_provider_cache_counters() {
@@ -975,6 +1338,22 @@ mod tests {
     }
 
     #[test]
+    fn repl_accepts_first_input_without_an_active_session() {
+        let mut chat = None;
+        let activity = futures_lite::future::block_on(next_activity(
+            std::future::ready(Some(LineInput::Line("hello".to_owned()))),
+            next_session_event(&mut chat),
+            std::future::pending(),
+        ));
+
+        assert!(matches!(
+            activity,
+            ReplActivity::Input(Some(LineInput::Line(line))) if line == "hello"
+        ));
+        assert!(chat.is_none());
+    }
+
+    #[test]
     fn repl_emits_waiting_ticks() {
         let activity = futures_lite::future::block_on(next_activity(
             std::future::pending(),
@@ -1016,6 +1395,162 @@ mod tests {
             ctrl_c_action(ReplState::AwaitingInput(InputRequestId(7))),
             CtrlCAction::Cancel
         );
+    }
+
+    #[test]
+    fn session_commands_are_allowed_only_while_idle() {
+        assert!(session_command_allowed(ReplState::Idle, "switch sessions"));
+        assert!(!session_command_allowed(
+            ReplState::Running,
+            "switch sessions"
+        ));
+        assert!(!session_command_allowed(
+            ReplState::AwaitingInput(InputRequestId(3)),
+            "switch sessions"
+        ));
+    }
+
+    #[test]
+    fn current_session_is_excluded_from_delete_replacement() {
+        assert_eq!(
+            choose_replacement_session(
+                SessionId(4),
+                [SessionId(1), SessionId(4), SessionId(7), SessionId(3)]
+            ),
+            Some(SessionId(7))
+        );
+        assert_eq!(
+            choose_replacement_session(SessionId(4), [SessionId(4)]),
+            None
+        );
+    }
+
+    #[test]
+    fn session_list_sorts_ids_and_marks_the_active_session() {
+        assert_eq!(
+            format_session_list(
+                vec![SessionId(43), SessionId(41), SessionId(42)],
+                Some(SessionId(42))
+            ),
+            "available IDs: session-41, session-42 (active), session-43"
+        );
+        assert_eq!(format_session_list(Vec::new(), None), "available IDs: none");
+        assert_eq!(
+            format_session_list(vec![SessionId(2), SessionId(1)], None),
+            "available IDs: session-1, session-2"
+        );
+    }
+
+    #[tokio::test]
+    async fn session_lifecycle_helpers_switch_and_replace_real_sessions() {
+        let root = TempDir::new("claw-cli-session-lifecycle").expect("temporary directory");
+        let system = test_system(&root);
+
+        let existing = system
+            .new_session(SessionPersistence::Persistent)
+            .expect("existing session");
+        let mut chat = None;
+        assert!(resume_session(&system, &mut chat, existing)
+            .await
+            .expect("resume without active session"));
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(existing));
+        assert_eq!(system.list_sessions(), vec![existing]);
+        active_chat(&mut chat)
+            .expect("active")
+            .control
+            .close()
+            .await
+            .expect("close existing");
+        chat = None;
+        system
+            .delete_session(existing)
+            .expect("delete existing session");
+
+        assert!(system.list_sessions().is_empty());
+        assert!(delete_session(&system, &mut chat, None).is_err());
+        assert!(system.list_sessions().is_empty());
+
+        let first = ensure_lazy_session(&system, &mut chat)
+            .expect("lazy session")
+            .session;
+        assert_eq!(system.list_sessions(), vec![first]);
+
+        assert!(
+            new_session(&system, &mut chat, SessionPersistenceArg::Ephemeral)
+                .await
+                .expect("new and switch")
+        );
+        let second = chat.as_ref().map(|chat| chat.session).expect("active");
+        assert_ne!(first, second);
+
+        assert!(resume_session(&system, &mut chat, SessionId(999))
+            .await
+            .is_err());
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(second));
+
+        assert!(resume_session(&system, &mut chat, first)
+            .await
+            .expect("resume first"));
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
+
+        assert!(delete_session(&system, &mut chat, Some(SessionId(999))).is_err());
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
+
+        let third = system
+            .new_session(SessionPersistence::Persistent)
+            .expect("third session");
+        assert!(!delete_session(&system, &mut chat, Some(third)).expect("delete inactive"));
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
+        assert!(!system.list_sessions().contains(&third));
+
+        assert!(delete_session(&system, &mut chat, None).expect("delete active"));
+        assert_eq!(chat.as_ref().map(|chat| chat.session), Some(second));
+        assert!(!system.list_sessions().contains(&first));
+
+        assert!(delete_session(&system, &mut chat, None).expect("delete last active"));
+        assert!(chat.is_none());
+        assert!(system.list_sessions().is_empty());
+
+        let replacement = ensure_lazy_session(&system, &mut chat)
+            .expect("recreate lazily")
+            .session;
+        assert_ne!(replacement, second);
+        assert_eq!(system.list_sessions(), vec![replacement]);
+    }
+
+    #[tokio::test]
+    async fn session_new_honors_persistence_across_runtime_rebuilds() {
+        let root = TempDir::new("claw-cli-session-persistence").expect("temporary directory");
+        let (ephemeral, persistent) = {
+            let system = test_system(&root);
+            let mut chat = None;
+
+            assert!(
+                new_session(&system, &mut chat, SessionPersistenceArg::Ephemeral)
+                    .await
+                    .expect("new ephemeral")
+            );
+            let ephemeral = active_chat(&mut chat).expect("active ephemeral").session;
+
+            assert!(
+                new_session(&system, &mut chat, SessionPersistenceArg::Persistent)
+                    .await
+                    .expect("new persistent")
+            );
+            let persistent = active_chat(&mut chat).expect("active persistent").session;
+            active_chat(&mut chat)
+                .expect("active persistent")
+                .control
+                .close()
+                .await
+                .expect("close persistent");
+
+            (ephemeral, persistent)
+        };
+
+        let rebuilt = test_system(&root);
+        assert!(!rebuilt.list_sessions().contains(&ephemeral));
+        assert_eq!(rebuilt.list_sessions(), vec![persistent]);
     }
 
     #[test]

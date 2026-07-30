@@ -1,4 +1,4 @@
-use claw_agent::{PermissionLevel, ReasoningEffort};
+use claw_agent::{PermissionLevel, ReasoningEffort, SessionId, SessionPersistence};
 use strum::{EnumString, IntoStaticStr};
 
 const PERMISSIONS_COMMAND: &str = "/permissions";
@@ -9,6 +9,10 @@ const APPEND_COMMAND: &str = "/append";
 const APPEND_MESSAGE: &str = "<message>";
 const INTERRUPT_COMMAND: &str = "/interrupt";
 const CANCEL_COMMAND: &str = "/cancel";
+const SESSION_COMMAND: &str = "/session";
+const SESSION_SUBCOMMANDS: &str = "<new|resume|delete>";
+const SESSION_ID: &str = "<session_id>";
+const SESSION_PERSISTENCE: &str = "[persistent|ephemeral]";
 
 #[derive(Clone, Copy, Debug, EnumString, IntoStaticStr, PartialEq, Eq)]
 #[strum(serialize_all = "snake_case")]
@@ -48,12 +52,40 @@ impl From<ReasoningEffortArg> for ReasoningEffort {
     }
 }
 
+#[derive(Clone, Copy, Debug, EnumString, PartialEq, Eq)]
+#[strum(serialize_all = "snake_case")]
+enum SessionSubcommandArg {
+    New,
+    Resume,
+    Delete,
+}
+
+#[derive(Clone, Copy, Debug, Default, EnumString, IntoStaticStr, PartialEq, Eq)]
+#[strum(serialize_all = "snake_case")]
+pub(super) enum SessionPersistenceArg {
+    #[default]
+    Persistent,
+    Ephemeral,
+}
+
+impl From<SessionPersistenceArg> for SessionPersistence {
+    fn from(persistence: SessionPersistenceArg) -> Self {
+        match persistence {
+            SessionPersistenceArg::Persistent => Self::Persistent,
+            SessionPersistenceArg::Ephemeral => Self::Ephemeral,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum CliInput<'a> {
     Message(&'a str),
     Append(&'a str),
     Interrupt,
     Cancel,
+    SessionNew(SessionPersistenceArg),
+    SessionResume(SessionId),
+    SessionDelete(Option<SessionId>),
     SetPermission(PermissionLevelArg),
     SetReasoningEffort(ReasoningEffortArg),
 }
@@ -81,6 +113,37 @@ pub(super) enum CommandParseError {
         command: &'static str,
         argument: String,
     },
+    #[error("usage: /session {SESSION_SUBCOMMANDS}")]
+    MissingSessionSubcommand,
+    #[error("unknown session command '{0}'; expected new, resume, or delete")]
+    UnknownSessionSubcommand(String),
+    #[error("usage: /session resume {SESSION_ID}")]
+    MissingResumeSessionId,
+    #[error("invalid session id '{value}' for /session {command}; expected session-N")]
+    InvalidSessionId {
+        command: &'static str,
+        value: String,
+    },
+    #[error("unexpected argument '{argument}'; usage: /session {usage}")]
+    UnexpectedSessionArgument {
+        usage: &'static str,
+        argument: String,
+    },
+    #[error("unknown session persistence '{0}'; expected persistent or ephemeral")]
+    UnknownSessionPersistence(String),
+}
+
+impl CommandParseError {
+    pub(super) fn should_show_session_list(&self) -> bool {
+        matches!(
+            self,
+            Self::MissingResumeSessionId
+                | Self::InvalidSessionId {
+                    command: "resume",
+                    ..
+                }
+        )
+    }
 }
 
 pub(super) fn parse_input(input: &str) -> Result<CliInput<'_>, CommandParseError> {
@@ -146,6 +209,74 @@ pub(super) fn parse_input(input: &str) -> Result<CliInput<'_>, CommandParseError
             }
             Ok(CliInput::Cancel)
         }
+        "session" => {
+            let subcommand = parts
+                .next()
+                .ok_or(CommandParseError::MissingSessionSubcommand)?;
+            let subcommand = subcommand
+                .parse::<SessionSubcommandArg>()
+                .map_err(|_| CommandParseError::UnknownSessionSubcommand(subcommand.to_string()))?;
+            match subcommand {
+                SessionSubcommandArg::New => {
+                    let persistence = parts
+                        .next()
+                        .map(|persistence| {
+                            persistence.parse::<SessionPersistenceArg>().map_err(|_| {
+                                CommandParseError::UnknownSessionPersistence(
+                                    persistence.to_string(),
+                                )
+                            })
+                        })
+                        .transpose()?
+                        .unwrap_or_default();
+                    if let Some(argument) = parts.next() {
+                        return Err(CommandParseError::UnexpectedSessionArgument {
+                            usage: "new [persistent|ephemeral]",
+                            argument: argument.to_string(),
+                        });
+                    }
+                    Ok(CliInput::SessionNew(persistence))
+                }
+                SessionSubcommandArg::Resume => {
+                    let session = parts
+                        .next()
+                        .ok_or(CommandParseError::MissingResumeSessionId)?;
+                    let parsed = session.parse::<SessionId>().map_err(|_| {
+                        CommandParseError::InvalidSessionId {
+                            command: "resume",
+                            value: session.to_string(),
+                        }
+                    })?;
+                    if let Some(argument) = parts.next() {
+                        return Err(CommandParseError::UnexpectedSessionArgument {
+                            usage: "resume <session_id>",
+                            argument: argument.to_string(),
+                        });
+                    }
+                    Ok(CliInput::SessionResume(parsed))
+                }
+                SessionSubcommandArg::Delete => {
+                    let session = parts
+                        .next()
+                        .map(|session| {
+                            session.parse::<SessionId>().map_err(|_| {
+                                CommandParseError::InvalidSessionId {
+                                    command: "delete",
+                                    value: session.to_string(),
+                                }
+                            })
+                        })
+                        .transpose()?;
+                    if let Some(argument) = parts.next() {
+                        return Err(CommandParseError::UnexpectedSessionArgument {
+                            usage: "delete [session_id]",
+                            argument: argument.to_string(),
+                        });
+                    }
+                    Ok(CliInput::SessionDelete(session))
+                }
+            }
+        }
         _ => Err(CommandParseError::UnknownCommand(command.to_string())),
     }
 }
@@ -156,7 +287,7 @@ pub(super) fn command_hint(line: &str, cursor: usize) -> Option<String> {
     }
     if line == "/" {
         return Some(format!(
-            "append {APPEND_MESSAGE} | interrupt | cancel | permissions {PERMISSION_LEVELS} | reasoning_effort {REASONING_EFFORT_LEVELS}"
+            "append {APPEND_MESSAGE} | interrupt | cancel | session {SESSION_SUBCOMMANDS} | permissions {PERMISSION_LEVELS} | reasoning_effort {REASONING_EFFORT_LEVELS}"
         ));
     }
     if let Some(suffix) = APPEND_COMMAND.strip_prefix(line) {
@@ -170,6 +301,40 @@ pub(super) fn command_hint(line: &str, cursor: usize) -> Option<String> {
     }
     if let Some(suffix) = CANCEL_COMMAND.strip_prefix(line) {
         return Some(suffix.to_string());
+    }
+    if let Some(suffix) = SESSION_COMMAND.strip_prefix(line) {
+        return Some(format!("{suffix} {SESSION_SUBCOMMANDS}"));
+    }
+    if let Some(subcommand) = line.strip_prefix("/session ") {
+        if subcommand.is_empty() {
+            return Some("new | resume <session_id> | delete [session_id]".to_string());
+        }
+        if let Some(suffix) = "new".strip_prefix(subcommand) {
+            return Some(format!("{suffix} {SESSION_PERSISTENCE}"));
+        }
+        if let Some(persistence) = subcommand.strip_prefix("new ") {
+            if persistence.is_empty() {
+                return Some(SESSION_PERSISTENCE.to_string());
+            }
+            if let Some(suffix) = "persistent".strip_prefix(persistence) {
+                return Some(suffix.to_string());
+            }
+            if let Some(suffix) = "ephemeral".strip_prefix(persistence) {
+                return Some(suffix.to_string());
+            }
+        }
+        if let Some(suffix) = "resume".strip_prefix(subcommand) {
+            return Some(format!("{suffix} {SESSION_ID}"));
+        }
+        if subcommand == "resume " {
+            return Some(SESSION_ID.to_string());
+        }
+        if let Some(suffix) = "delete".strip_prefix(subcommand) {
+            return Some(format!("{suffix} [session_id]"));
+        }
+        if subcommand == "delete " {
+            return Some("[session_id]".to_string());
+        }
     }
     if let Some(suffix) = PERMISSIONS_COMMAND.strip_prefix(line) {
         return Some(format!("{suffix} {PERMISSION_LEVELS}"));
@@ -245,6 +410,34 @@ mod tests {
     }
 
     #[test]
+    fn session_lifecycle_commands_parse_typed_ids() {
+        assert_eq!(
+            parse_input("/session new"),
+            Ok(CliInput::SessionNew(SessionPersistenceArg::Persistent))
+        );
+        assert_eq!(
+            parse_input("/session new persistent"),
+            Ok(CliInput::SessionNew(SessionPersistenceArg::Persistent))
+        );
+        assert_eq!(
+            parse_input("/session new ephemeral"),
+            Ok(CliInput::SessionNew(SessionPersistenceArg::Ephemeral))
+        );
+        assert_eq!(
+            parse_input("/session resume session-12"),
+            Ok(CliInput::SessionResume(SessionId(12)))
+        );
+        assert_eq!(
+            parse_input("/session delete"),
+            Ok(CliInput::SessionDelete(None))
+        );
+        assert_eq!(
+            parse_input("/session delete session-9"),
+            Ok(CliInput::SessionDelete(Some(SessionId(9))))
+        );
+    }
+
+    #[test]
     fn invalid_commands_and_arguments_are_rejected() {
         assert_eq!(
             parse_input("/permissions"),
@@ -310,6 +503,75 @@ mod tests {
                 argument: "now".to_string(),
             })
         );
+        assert_eq!(
+            parse_input("/session"),
+            Err(CommandParseError::MissingSessionSubcommand)
+        );
+        assert_eq!(
+            parse_input("/session open session-1"),
+            Err(CommandParseError::UnknownSessionSubcommand(
+                "open".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_input("/session list"),
+            Err(CommandParseError::UnknownSessionSubcommand(
+                "list".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_input("/session resume"),
+            Err(CommandParseError::MissingResumeSessionId)
+        );
+        assert_eq!(
+            parse_input("/session resume 7"),
+            Err(CommandParseError::InvalidSessionId {
+                command: "resume",
+                value: "7".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_input("/session delete nope"),
+            Err(CommandParseError::InvalidSessionId {
+                command: "delete",
+                value: "nope".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_input("/session new now"),
+            Err(CommandParseError::UnknownSessionPersistence(
+                "now".to_string()
+            ))
+        );
+        assert_eq!(
+            parse_input("/session new ephemeral now"),
+            Err(CommandParseError::UnexpectedSessionArgument {
+                usage: "new [persistent|ephemeral]",
+                argument: "now".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_input("/session resume session-1 now"),
+            Err(CommandParseError::UnexpectedSessionArgument {
+                usage: "resume <session_id>",
+                argument: "now".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn resume_id_errors_request_the_session_list() {
+        assert!(CommandParseError::MissingResumeSessionId.should_show_session_list());
+        assert!(CommandParseError::InvalidSessionId {
+            command: "resume",
+            value: "invalid".to_string(),
+        }
+        .should_show_session_list());
+        assert!(!CommandParseError::InvalidSessionId {
+            command: "delete",
+            value: "invalid".to_string(),
+        }
+        .should_show_session_list());
     }
 
     #[test]
@@ -318,13 +580,49 @@ mod tests {
         assert_eq!(
             command_hint("/", 1).as_deref(),
             Some(
-                "append <message> | interrupt | cancel | permissions <deny|ask|allow_all> | reasoning_effort <low|medium|high|ultra>"
+                "append <message> | interrupt | cancel | session <new|resume|delete> | permissions <deny|ask|allow_all> | reasoning_effort <low|medium|high|ultra>"
             )
         );
         assert_eq!(command_hint("/app", 4).as_deref(), Some("end <message>"));
         assert_eq!(command_hint("/append ", 8).as_deref(), Some("<message>"));
         assert_eq!(command_hint("/inter", 6).as_deref(), Some("rupt"));
         assert_eq!(command_hint("/can", 4).as_deref(), Some("cel"));
+        assert_eq!(
+            command_hint("/sess", 5).as_deref(),
+            Some("ion <new|resume|delete>")
+        );
+        assert_eq!(
+            command_hint("/session ", 9).as_deref(),
+            Some("new | resume <session_id> | delete [session_id]")
+        );
+        assert_eq!(
+            command_hint("/session n", 10).as_deref(),
+            Some("ew [persistent|ephemeral]")
+        );
+        assert_eq!(
+            command_hint("/session new ", 13).as_deref(),
+            Some("[persistent|ephemeral]")
+        );
+        assert_eq!(
+            command_hint("/session new p", 14).as_deref(),
+            Some("ersistent")
+        );
+        assert_eq!(
+            command_hint("/session new e", 14).as_deref(),
+            Some("phemeral")
+        );
+        assert_eq!(
+            command_hint("/session r", 10).as_deref(),
+            Some("esume <session_id>")
+        );
+        assert_eq!(
+            command_hint("/session resume ", 16).as_deref(),
+            Some("<session_id>")
+        );
+        assert_eq!(
+            command_hint("/session d", 10).as_deref(),
+            Some("elete [session_id]")
+        );
         assert_eq!(
             command_hint("/perm", 5).as_deref(),
             Some("issions <deny|ask|allow_all>")

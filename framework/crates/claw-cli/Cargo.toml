@@ -8,20 +8,15 @@ description = "Host CLI applications for the ESP-Claw agent framework"
 [[bin]]
 name = "claw-agent-chat"
 path = "src/main.rs"
-required-features = ["cache_profile"]
 
 [features]
 default = ["reasoning_medium"]
-cache_profile = ["claw-agent/cache_profile"]
-stage_verbose = ["claw-agent/stage_verbose"]
-multiagent = ["claw-agent/multiagent"]
-use_legacy_skill = ["claw-agent/use_legacy_skill"]
 reasoning_short = ["claw-agent/reasoning_short"]
 reasoning_medium = ["claw-agent/reasoning_medium"]
 reasoning_long = ["claw-agent/reasoning_long"]
 
 [dependencies]
-claw-agent = { path = "../claw-agent", default-features = false }
+claw-agent = { path = "../claw-agent", default-features = false, features=["stage_verbose", "cache_profile", "multiagent", "intrusive-observability"] }
 claw-interface = { path = "../claw-interface", features = ["host-backends"] }
 claw-log = { path = "../claw-log" }
 anyhow = "1"
@@ -34,3 +29,6 @@ strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
 thiserror = "2"
+
+[dev-dependencies]
+tempdir = "0.3"
