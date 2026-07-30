@@ -3,5 +3,5 @@ fs-read-fails-at-construction,fs_read_fail,persistence storage operation failed,
 fs-write-is-deferred-from-tool-override,fs_write_fail,,0,0
 fs-write-is-deferred-from-session-create,fs_write_fail_session_create,,0,0
 http-permanent-error-no-retry,http_permanent,invalid URL,1,0
-http-transient-then-success,http_transient_then_success,,4,1
-http-transient-exhausts-retries,http_transient_exhausts_retries,retry backoff should be cancelled,4,2
+http-transient-then-success,http_transient_then_success,,11,1
+http-transient-exhausts-retries,http_transient_exhausts_retries,,12,2

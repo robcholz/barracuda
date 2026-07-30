@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
-use claw_memory::{LongTermInitError, LongTermMemory, Transcript};
+use claw_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
 use claw_tool::ToolGroup;
 
 use crate::agent::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
@@ -23,19 +23,11 @@ use self::llm_extractor::LlmExtractor;
 use self::stores::{agent_store, global_store, MemoryStores};
 use self::tools::memory_tools;
 mod tools;
-use extraction::{ExtractError, ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
+use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
 
 type ProviderBuilder<F> =
     dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextProvider<F>;
-
-/// Failure while preparing long-term-memory context.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum LongTermMemoryProviderError {
-    /// Extracting memory operations from the transcript failed.
-    #[error(transparent)]
-    Extraction(#[from] ExtractError),
-}
 
 /// The provider's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
@@ -49,14 +41,28 @@ struct CatalogCache {
     primed: bool,
 }
 
+/// The most recent committed transcript boundary accounted for by this provider.
+///
+/// Existing history becomes the initial baseline. After that this is an attempt
+/// cursor, not a success cursor: the extractor already owns its backend retry
+/// policy, so an exhausted batch is not retried on every LLM iteration. A later
+/// batch gets a fresh attempt after enough new turns arrive.
+#[derive(Default)]
+struct ExtractionCursor {
+    /// `None` until the provider observes its transcript for the first time.
+    /// Existing history becomes the baseline instead of being re-extracted
+    /// whenever an agent/provider is reconstructed.
+    turn_version: Option<u64>,
+    through: Option<TurnId>,
+}
+
 /// A [`ContextProvider`] over a dual-tier long-term store. See the module docs.
 pub(in crate::agent) struct LongTermMemoryContextProvider<F: ClawFs + 'static> {
     stores: MemoryStores<F>,
     extractor: Arc<dyn Extractor>,
     /// Rebuilt only when a store version advances.
     catalog: CatalogCache,
-    /// Highest committed-turn version already handed to extraction.
-    extract_turn_cursor: u64,
+    extraction_cursor: ExtractionCursor,
 }
 
 impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
@@ -70,7 +76,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
             stores: MemoryStores { global, agent },
             extractor,
             catalog: CatalogCache::default(),
-            extract_turn_cursor: 0,
+            extraction_cursor: ExtractionCursor::default(),
         }
     }
 
@@ -127,9 +133,7 @@ impl<F: ClawFs + 'static> ContextProvider for LongTermMemoryContextProvider<F> {
         Box::pin(async move {
             // Pull, not push: reading the transcript here is where this provider
             // decides whether new conversation warrants extraction.
-            self.maybe_schedule_extraction(transcript)
-                .await
-                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?;
+            self.maybe_extract_batch(transcript).await;
             self.refresh_catalog();
             Ok(())
         })

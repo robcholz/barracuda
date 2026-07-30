@@ -27,7 +27,9 @@ use support::{
 
 type PermanentHttpSystem = AgentSystem<MemFs, Sse<PermanentHttp>, CountingTimer>;
 type ContextProviderFailureSystem =
-    AgentSystem<MemFs, Sse<IterationThenPermanentHttp>, CountingTimer>;
+    AgentSystem<MemFs, Sse<TwoIterationsThenPermanentHttp>, CountingTimer>;
+type MemoryExtractionFailureSystem =
+    AgentSystem<MemFs, Sse<MemoryExtractionFailureHttp>, CountingTimer>;
 type TransientThenSuccessSystem = AgentSystem<MemFs, Sse<TransientThenSuccessHttp>, CountingTimer>;
 type TransientExhaustSystem = AgentSystem<MemFs, Sse<TransientOnlyHttp>, CountingTimer>;
 type FsReadFailSystem = AgentSystem<AlwaysFailFs, Sse<PermanentHttp>, ImmediateTimer>;
@@ -36,6 +38,9 @@ type FsWriteFailSystem = AgentSystem<WriteFailFs, Sse<PermanentHttp>, ImmediateT
 static BACKEND_LOCK: Mutex<()> = Mutex::new(());
 static HTTP_CALLS: AtomicUsize = AtomicUsize::new(0);
 static TIMER_SLEEPS: AtomicUsize = AtomicUsize::new(0);
+const LARGE_TURN_BYTES: usize = 13_000;
+const MEMORY_EXTRACTION_FAILURE_CALL: usize = 8;
+const MEMORY_EXTRACTION_LAST_RETRY_CALL: usize = 10;
 
 #[test]
 fn backend_csv_failure_matrix_covers_fs_http_and_timer_failures() {
@@ -94,9 +99,11 @@ fn context_provider_failure_has_a_typed_sse_error() {
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.append(Message::text("commit one turn"))).unwrap();
-    let seed_events = drain_until_turn_ended(&mut events);
-    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    for _ in 0..2 {
+        block_on(control.append(Message::text("x".repeat(LARGE_TURN_BYTES)))).unwrap();
+        let seed_events = drain_until_turn_ended(&mut events);
+        assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    }
     block_on(control.append(Message::text("surface provider failure"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
     assert!(events.iter().any(|event| matches!(
@@ -105,6 +112,42 @@ fn context_provider_failure_has_a_typed_sse_error() {
             SessionTurnError::ContextProvider(_)
         )))
     )));
+}
+
+#[test]
+fn memory_extraction_failure_does_not_fail_the_turn() {
+    let _guard = BACKEND_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    reset_counters();
+
+    let system = MemoryExtractionFailureSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        persistence(&mem_root("memory-extraction-failure")),
+    )
+    .unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
+        .unwrap();
+
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    for sequence in 0..8 {
+        block_on(control.append(Message::text(format!("commit turn {sequence}")))).unwrap();
+        let completed = drain_until_turn_ended(&mut events);
+        assert_eq!(output_fragments(&completed), vec!["ok".to_string()]);
+    }
+
+    block_on(control.append(Message::text("extraction fails, turn continues"))).unwrap();
+    let completed = drain_until_turn_ended(&mut events);
+    assert_eq!(output_fragments(&completed), vec!["ok".to_string()]);
+    assert!(!completed.iter().any(|event| matches!(
+        event,
+        SessionEvent::Error(_) | SessionEvent::Turn(TurnEvent::Error(_))
+    )));
+    assert_eq!(HTTP_CALLS.load(Ordering::SeqCst), 10);
 }
 
 #[derive(Default)]
@@ -124,9 +167,9 @@ impl ClawHttp for PermanentHttp {
 }
 
 #[derive(Default)]
-struct IterationThenPermanentHttp;
+struct TwoIterationsThenPermanentHttp;
 
-impl ClawHttp for IterationThenPermanentHttp {
+impl ClawHttp for TwoIterationsThenPermanentHttp {
     fn post_json<'a>(
         &'a mut self,
         _request: &'a HttpJsonRequest<'a>,
@@ -134,13 +177,36 @@ impl ClawHttp for IterationThenPermanentHttp {
     ) -> HttpResponseFuture<'a> {
         Box::pin(async move {
             let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
-            if call == 0 {
+            if call < 2 {
                 Ok(HttpResponse {
                     status_code: HttpStatusCode::OK,
                     body: assistant_text("seed"),
                 })
             } else {
                 Err(HttpError::InvalidUrl)
+            }
+        })
+    }
+}
+
+#[derive(Default)]
+struct MemoryExtractionFailureHttp;
+
+impl ClawHttp for MemoryExtractionFailureHttp {
+    fn post_json<'a>(
+        &'a mut self,
+        _request: &'a HttpJsonRequest<'a>,
+        _cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        Box::pin(async move {
+            let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
+            if call == MEMORY_EXTRACTION_FAILURE_CALL {
+                Err(HttpError::InvalidUrl)
+            } else {
+                Ok(HttpResponse {
+                    status_code: HttpStatusCode::OK,
+                    body: assistant_text("ok"),
+                })
             }
         })
     }
@@ -157,14 +223,14 @@ impl ClawHttp for TransientThenSuccessHttp {
     ) -> HttpResponseFuture<'a> {
         Box::pin(async move {
             let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
-            if call == 1 {
+            if call == MEMORY_EXTRACTION_FAILURE_CALL {
                 Err(HttpError::RequestFailed(HttpRequestFailure::transport(
                     "temporary backend outage",
                 )))
             } else {
                 Ok(HttpResponse {
                     status_code: HttpStatusCode::OK,
-                    body: assistant_text(if call == 0 {
+                    body: assistant_text(if call < MEMORY_EXTRACTION_FAILURE_CALL {
                         "seed"
                     } else {
                         "recovered-after-retry"
@@ -186,15 +252,20 @@ impl ClawHttp for TransientOnlyHttp {
     ) -> HttpResponseFuture<'a> {
         Box::pin(async move {
             let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
-            if call == 0 {
+            if call < MEMORY_EXTRACTION_FAILURE_CALL {
                 Ok(HttpResponse {
                     status_code: HttpStatusCode::OK,
                     body: assistant_text("seed"),
                 })
-            } else {
+            } else if call <= MEMORY_EXTRACTION_LAST_RETRY_CALL {
                 Err(HttpError::RequestFailed(HttpRequestFailure::transport(
                     "retry backoff should be cancelled",
                 )))
+            } else {
+                Ok(HttpResponse {
+                    status_code: HttpStatusCode::OK,
+                    body: assistant_text("recovered-after-extraction-failure"),
+                })
             }
         })
     }
@@ -386,9 +457,11 @@ fn http_transient_then_success(case: &str) -> Option<String> {
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.append(Message::text("commit one turn"))).unwrap();
-    let seed_events = drain_until_turn_ended(&mut events);
-    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    for sequence in 0..8 {
+        block_on(control.append(Message::text(format!("commit turn {sequence}")))).unwrap();
+        let seed_events = drain_until_turn_ended(&mut events);
+        assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    }
     block_on(control.append(Message::text("recover"))).unwrap();
     let events = drain_until_turn_ended(&mut events);
     assert_eq!(
@@ -412,11 +485,18 @@ fn http_transient_exhausts_retries() -> Option<String> {
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
-    block_on(control.append(Message::text("commit one turn"))).unwrap();
-    let seed_events = drain_until_turn_ended(&mut events);
-    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    for sequence in 0..8 {
+        block_on(control.append(Message::text(format!("commit turn {sequence}")))).unwrap();
+        let seed_events = drain_until_turn_ended(&mut events);
+        assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    }
     block_on(control.append(Message::text("exhaust transient retries"))).unwrap();
-    first_failure_text(drain_until_turn_ended(&mut events))
+    let completed = drain_until_turn_ended(&mut events);
+    assert_eq!(
+        output_fragments(&completed),
+        vec!["recovered-after-extraction-failure".to_string()]
+    );
+    first_failure_text(completed)
 }
 
 fn build_fs_read_fail_system() -> Result<FsReadFailSystem, AgentError> {

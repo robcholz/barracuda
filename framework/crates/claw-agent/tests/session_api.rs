@@ -192,11 +192,7 @@ fn append_queues_while_current_turn_runs() {
     let root = mem_root("agent-submit-busy");
     let system = build_slow_system(
         &root,
-        vec![
-            assistant_text("first"),
-            assistant_text("[]"),
-            assistant_text("second"),
-        ],
+        vec![assistant_text("first"), assistant_text("second")],
     );
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -266,7 +262,6 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
         &root,
         vec![
             assistant_text("queued message ran"),
-            assistant_text("[]"),
             assistant_text("queued message ran"),
         ],
     );

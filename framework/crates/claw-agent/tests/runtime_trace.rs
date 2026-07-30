@@ -52,11 +52,15 @@ fn iteration_preparation_traces_auxiliary_llm_work_without_payloads() {
         .unwrap();
     let (control, mut events) = system.open_session(session).unwrap();
 
-    // Two committed turns are needed for compaction: the first becomes the aged
-    // prefix and the second alone exceeds the configured verbatim-tail budget.
+    // Two oversized committed turns make compaction eligible. Six more turns
+    // fill the long-term-memory extraction batch.
     let oversized_input = USER_PAYLOAD_SECRET.repeat(1_024);
     for input in [oversized_input.clone(), oversized_input] {
         block_on(control.append(Message::text(input))).unwrap();
+        let _ = drain_until_turn_ended(&mut events);
+    }
+    for sequence in 0..6 {
+        block_on(control.append(Message::text(format!("batch filler {sequence}")))).unwrap();
         let _ = drain_until_turn_ended(&mut events);
     }
     block_on(control.append(Message::text("trigger the next context preparation"))).unwrap();
