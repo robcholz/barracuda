@@ -15,6 +15,7 @@ use serde_json::Value;
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
 use super::super::tool_port::SubagentControl;
+use super::helper::trace_subagent_bound;
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
     Tool::from_detached(SpawnSubagentTool { control, policy })
@@ -53,6 +54,7 @@ impl SpawnSubagentTool {
             .spawn(kind, Some(name.clone()), goal, timeout)
             .await
             .map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
+        trace_subagent_bound(child);
         let accepted = ToolOutput {
             content: format!(
                 "Subagent {child} named '{name}' started with a {} ms timeout; its result will be delivered automatically.",

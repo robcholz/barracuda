@@ -75,6 +75,25 @@ fn context_group_fields_are_emitted_as_context_and_other_fields_stay_custom() {
 }
 
 #[test]
+fn literal_dotted_event_fields_stay_custom() {
+    let sink = VecSink::default();
+    tracing::subscriber::with_default(FlatTreeSubscriber::with_sink(sink.clone()), || {
+        tracing::event!(
+            name: "flow_link",
+            tracing::Level::INFO,
+            {
+                "flow.name" = "dispatch",
+                "flow.target_task" = "worker-2",
+            }
+        );
+    });
+
+    let event = event_line(&sink);
+    assert_eq!(token(&event, "flow.name"), Some("dispatch"));
+    assert_eq!(token(&event, "flow.target_task"), Some("worker-2"));
+}
+
+#[test]
 fn enter_line_carries_timestamp_and_type() {
     let sink = VecSink::default();
     tracing::subscriber::with_default(run_subscriber(sink.clone()), || {

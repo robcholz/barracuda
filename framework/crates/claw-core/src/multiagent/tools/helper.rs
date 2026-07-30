@@ -5,6 +5,19 @@ use serde_json::Value;
 use crate::agent::tools::helper::optional_string_argument;
 use crate::agent::AgentId;
 
+pub(super) fn trace_subagent_bound(child: AgentId) {
+    tracing::event!(
+        name: "flow_link",
+        tracing::Level::INFO,
+        {
+            "flow.name" = "subagent",
+            "flow.target_task" = %child,
+            "flow.target_span" = "agent",
+            "flow.arg.child_agent" = %child,
+        }
+    );
+}
+
 pub(super) fn required_agent_id(args: &Value, tool: &str) -> Result<AgentId, ToolInvokeError> {
     let raw = optional_string_argument(args, "agent")?
         .ok_or_else(|| ToolError::InvalidArguments(format!("{tool} 'agent' is required")))?;

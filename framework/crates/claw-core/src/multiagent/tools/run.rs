@@ -9,6 +9,7 @@ use claw_tool::{
 use super::super::model::TranscriptText;
 use super::super::policy::SpawnPolicy;
 use super::super::tool_port::SubagentControl;
+use super::helper::trace_subagent_bound;
 use super::spawn::SpawnRequest;
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
@@ -42,6 +43,7 @@ impl AsyncToolHandler for RunSubagentTool {
                 )
                 .await
                 .map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
+            trace_subagent_bound(child);
             let result = result.recv().await.map_err(|_| {
                 ToolError::InvokeRejected(format!("subagent {child} result channel closed"))
             })?;

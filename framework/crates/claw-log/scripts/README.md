@@ -99,6 +99,12 @@ as a console script.
 CLIs above call this Python package; there is no second Rust exporter whose
 mapping could drift from it.
 
+The exporter recognizes the generic `flow_link` event described in
+[`../docs/trace-format.md`](../docs/trace-format.md). It emits a Chrome flow
+from the enclosing span to a span selected by logical task and optional span
+name. `flow.arg.*` fields are copied onto the source slice and both flow
+endpoints for Perfetto search and SQL queries.
+
 ## Develop / test
 
 ```bash

@@ -46,6 +46,72 @@ def test_events_become_instant_events() -> None:
     assert {'spawned', 'completion'} <= instants
 
 
+def test_flow_link_enriches_source_and_emits_cross_lane_flow(tmp_path) -> None:
+    log = '\n'.join(
+        [
+            'TRACE 10 enter <span=1 parent=none task=request-1 span-name=request target=producer> <context=run system=system-1 session=session-1> route=async',
+            'TRACE 10 event <span=1 task=request-1 event-name=queued target=producer> priority=normal',
+            'TRACE 12 enter <span=2 parent=none task=worker-2 span-name=worker target=consumer> <context=run system=system-1 session=session-1>',
+            'TRACE 13 event <span=1 task=request-1 event-name=flow_link target=producer> flow.name=dispatch flow.target_task=worker-2 flow.target_span=worker flow.arg.request=request-1',
+            'TRACE 90 exit <span=2 task=worker-2>',
+            'TRACE 92 exit <span=1 task=request-1>',
+        ]
+    )
+    events = chrome_trace_events(build_forest(log))
+    bodies = [event.to_dict() for event in events]
+
+    source = next(
+        event for event in bodies if event['ph'] == 'X' and event['name'] == 'request'
+    )
+    target = next(
+        event for event in bodies if event['ph'] == 'X' and event['name'] == 'worker'
+    )
+    assert source['args']['request'] == 'request-1'
+
+    flow_start = next(event for event in bodies if event['ph'] == 's')
+    flow_end = next(event for event in bodies if event['ph'] == 'f')
+    same_timestamp_instant = next(
+        event for event in bodies if event['ph'] == 'I' and event['name'] == 'queued'
+    )
+    assert flow_start['name'] == flow_end['name'] == 'dispatch'
+    assert flow_start['cat'] == flow_end['cat'] == 'flow'
+    assert flow_start['id'] == flow_end['id'] == 1
+    assert flow_start['ts'] == source['ts']
+    assert flow_end['ts'] == target['ts']
+    assert flow_end['bp'] == 'e'
+    assert (
+        bodies.index(source)
+        < bodies.index(flow_start)
+        < bodies.index(same_timestamp_instant)
+    )
+    assert (flow_start['pid'], flow_start['tid']) == (
+        source['pid'],
+        source['tid'],
+    )
+    assert (flow_end['pid'], flow_end['tid']) == (target['pid'], target['tid'])
+    assert flow_start['args']['request'] == 'request-1'
+    assert flow_end['args']['request'] == 'request-1'
+
+    path = tmp_path / 'flow.json'
+    assert write_chrome_trace(build_forest(log), path) == len(events)
+    written = json.loads(path.read_text(encoding='utf-8'))
+    assert any(event['ph'] == 's' for event in written)
+    assert any(event['ph'] == 'f' and event['bp'] == 'e' for event in written)
+
+
+def test_flow_link_requires_target_task() -> None:
+    log = '\n'.join(
+        [
+            'TRACE 10 enter <span=1 parent=none task=request-1 span-name=request target=producer>',
+            'TRACE 11 event <span=1 task=request-1 event-name=flow_link target=producer> flow.name=dispatch',
+            'TRACE 12 exit <span=1 task=request-1>',
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r'flow_link requires flow\.target_task'):
+        chrome_trace_events(build_forest(log))
+
+
 def test_process_and_thread_metadata_emitted_once() -> None:
     events = chrome_trace_events(build_forest(SPEC_EXAMPLE))
     metas = _by_phase(events, 'M')

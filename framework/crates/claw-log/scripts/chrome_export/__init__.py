@@ -14,6 +14,9 @@ Mapping:
 - each **event** -> an *instant* event (``i``, thread scope). Only explicitly
   marked ``counter.<series>=<number>`` fields additionally become a *counter*
   event (``C``); ordinary numeric fields remain instant-event arguments.
+- each ``flow_link`` event -> a Chrome flow (``s``/``f``) from its enclosing
+  span to a span selected by logical task and, optionally, span name. Generic
+  ``flow.arg.*`` fields are copied to the source span and flow endpoints.
 - ``run.session`` selects a session process and requires ``run.system``;
   ``run.system`` by itself selects a system process; records with neither use
   the ``unattributed`` process. ``task`` -> thread (``tid``). The inherited
@@ -25,6 +28,7 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from typing import Callable
 
 import chrometrace
@@ -43,9 +47,34 @@ _UNATTRIBUTED_PROCESS = 'unattributed'
 # the free-form custom context for nicer ``args`` and explicit counter series.
 _KV_TOKEN = re.compile(r'^([^\s=]+)=(\S+)$')
 _COUNTER_PREFIX = 'counter.'
+_FLOW_LINK_EVENT = 'flow_link'
+_FLOW_NAME_FIELD = 'flow.name'
+_FLOW_TARGET_TASK_FIELD = 'flow.target_task'
+_FLOW_TARGET_SPAN_FIELD = 'flow.target_span'
+_FLOW_ARG_PREFIX = 'flow.arg.'
+_FLOW_CATEGORY = 'flow'
 
 # Resolves a (pid, tid) lane from a span/event's context + task.
 _Lane = Callable[[GroupedContext, str], 'tuple[int, int]']
+
+
+@dataclass(frozen=True, slots=True)
+class _FlowLink:
+    source_span_id: int
+    name: str
+    target_task: str
+    target_span: str | None
+    args: dict[str, str]
+
+
+class _FlowTraceEvent:
+    """Small adapter for Chrome flow fields unsupported by ``chrometrace``."""
+
+    def __init__(self, body: dict[str, object]) -> None:
+        self._body = body
+
+    def to_dict(self) -> dict[str, object]:
+        return dict(self._body)
 
 
 class _IdAllocator:
@@ -103,7 +132,7 @@ def _custom_args(custom: str) -> dict[str, object]:
     return args
 
 
-def chrome_trace_events(forest: Forest) -> list[TraceEvent]:
+def chrome_trace_events(forest: Forest) -> list[TraceEvent | _FlowTraceEvent]:
     """Translate ``forest`` into a flat list of ``chrometrace.TraceEvent``.
 
     Pure (no I/O): emits process/thread name metadata, one event per span, and
@@ -115,7 +144,7 @@ def chrome_trace_events(forest: Forest) -> list[TraceEvent]:
     tids = _IdAllocator()
     seen_pid: set[int] = set()
     seen_tid: set[tuple[int, int]] = set()
-    out: list[TraceEvent] = []
+    out: list[TraceEvent | _FlowTraceEvent] = []
 
     def lane(context: GroupedContext, task: str) -> tuple[int, int]:
         """Resolve a scoped process/task lane, emitting naming metadata once."""
@@ -151,20 +180,31 @@ def chrome_trace_events(forest: Forest) -> list[TraceEvent]:
             seen_tid.add((pid, tid))
         return pid, tid
 
+    flow_links = _flow_links(forest)
+    flow_source_args = _flow_source_args(flow_links)
     for span in forest.spans.values():
-        out.append(_span_event(span, lane))
+        out.append(_span_event(span, lane, flow_source_args.get(span.id)))
+    # Chrome flow starts bind to the most recent event on their lane. Emit
+    # flows before ordinary instants so a same-timestamp instant cannot replace
+    # the intended source span as the binding point.
+    out.extend(_flow_events(forest, lane, flow_links))
     for event in forest.events:
         out.extend(_event_events(event, lane))
     return out
 
 
-def _span_event(span: SpanNode, lane: _Lane) -> TraceEvent:
+def _span_event(
+    span: SpanNode,
+    lane: _Lane,
+    extra_args: dict[str, object] | None = None,
+) -> TraceEvent:
     pid, tid = lane(span.context, span.task)
     args: dict[str, object] = {
         'span': span.id,
         'target': span.target,
         **flatten_context(span.context),
         **_custom_args(span.custom),
+        **(extra_args or {}),
     }
     if span.parent_id is not None:
         args['parent'] = span.parent_id
@@ -188,6 +228,120 @@ def _span_event(span: SpanNode, lane: _Lane) -> TraceEvent:
         categories=[span.target],
         args=args,
     )
+
+
+def _required_flow_field(fields: dict[str, str], name: str) -> str:
+    value = fields.get(name)
+    if not value:
+        raise ValueError(f'{_FLOW_LINK_EVENT} requires {name}')
+    return value
+
+
+def _flow_links(forest: Forest) -> list[_FlowLink]:
+    links: list[_FlowLink] = []
+    for event in forest.events:
+        if event.name != _FLOW_LINK_EVENT:
+            continue
+        if event.span_id is None:
+            raise ValueError(f'{_FLOW_LINK_EVENT} requires an enclosing source span')
+        fields = _loose_kv(event.custom)
+        args: dict[str, str] = {}
+        for key, value in fields.items():
+            if not key.startswith(_FLOW_ARG_PREFIX):
+                continue
+            arg_name = key.removeprefix(_FLOW_ARG_PREFIX)
+            if not arg_name:
+                raise ValueError(f'{_FLOW_ARG_PREFIX}<key> requires a non-empty key')
+            args[arg_name] = value
+        links.append(
+            _FlowLink(
+                source_span_id=event.span_id,
+                name=_required_flow_field(fields, _FLOW_NAME_FIELD),
+                target_task=_required_flow_field(fields, _FLOW_TARGET_TASK_FIELD),
+                target_span=fields.get(_FLOW_TARGET_SPAN_FIELD),
+                args=args,
+            )
+        )
+    return links
+
+
+def _flow_source_args(links: list[_FlowLink]) -> dict[int, dict[str, object]]:
+    source_args: dict[int, dict[str, object]] = {}
+    for link in links:
+        args = source_args.setdefault(link.source_span_id, {})
+        for key, value in link.args.items():
+            previous = args.get(key)
+            if previous is None:
+                args[key] = value
+            elif isinstance(previous, list):
+                previous.append(value)
+            else:
+                args[key] = [previous, value]
+    return source_args
+
+
+def _flow_events(
+    forest: Forest,
+    lane: _Lane,
+    links: list[_FlowLink],
+) -> list[_FlowTraceEvent]:
+    flows: list[_FlowTraceEvent] = []
+    spans = list(forest.spans.values())
+    for flow_id, link in enumerate(links, start=1):
+        source = forest.spans.get(link.source_span_id)
+        if source is None:
+            continue
+        source_run = source.context.get('run', {})
+        candidates = [
+            span
+            for span in spans
+            if span.task == link.target_task
+            and (link.target_span is None or span.name == link.target_span)
+            and span.context.get('run', {}).get('system') == source_run.get('system')
+            and span.context.get('run', {}).get('session') == source_run.get('session')
+            and span.enter_ts >= source.enter_ts
+            and (source.exit_ts is None or span.enter_ts <= source.exit_ts)
+        ]
+        if not candidates:
+            continue
+        target = min(candidates, key=lambda span: (span.enter_ts, span.id))
+        source_pid, source_tid = lane(source.context, source.task)
+        target_pid, target_tid = lane(target.context, target.task)
+        args: dict[str, object] = {
+            'source_span': source.id,
+            'target_task': link.target_task,
+            **link.args,
+        }
+        flows.extend(
+            [
+                _FlowTraceEvent(
+                    {
+                        'name': link.name,
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 's',
+                        'ts': source.enter_ts * _US_PER_MS,
+                        'pid': source_pid,
+                        'tid': source_tid,
+                        'id': flow_id,
+                        'args': args,
+                    }
+                ),
+                _FlowTraceEvent(
+                    {
+                        'name': link.name,
+                        'cat': _FLOW_CATEGORY,
+                        'ph': 'f',
+                        'ts': target.enter_ts * _US_PER_MS,
+                        'pid': target_pid,
+                        'tid': target_tid,
+                        'id': flow_id,
+                        'bp': 'e',
+                        'args': args,
+                    }
+                ),
+            ]
+        )
+    return flows
 
 
 def _event_events(event: EventNode, lane: _Lane) -> list[TraceEvent]:

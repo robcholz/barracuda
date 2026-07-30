@@ -96,6 +96,31 @@ Each span/event's own content — **developer-defined, no format requirement, no
   `counter.<series>=<number>` form; the exported series name omits the
   `counter.` prefix. A nonnumeric explicitly marked value is an export error.
 
+### Cross-task flow links
+
+An ordinary event named `flow_link` declares a viewer-level relationship from
+its enclosing source span to a span on another logical task:
+
+```text
+TRACE 13 event <span=7 task=request-1 event-name=flow_link target=producer> flow.name=dispatch flow.target_task=worker-2 flow.target_span=worker flow.arg.request=request-1
+```
+
+- `flow.name` is required and becomes the Chrome/Perfetto flow name.
+- `flow.target_task` is required and selects the destination logical task.
+- `flow.target_span` is optional; when present it restricts the destination by
+  span name.
+- Every `flow.arg.<key>=<value>` is copied to the source span and both exported
+  flow endpoints with the `flow.arg.` prefix removed.
+- Source and destination must share their effective `run.system` and
+  `run.session` scopes. The destination is the earliest matching span whose
+  start falls within the source span's lifetime.
+- The Chrome exporter emits the standard flow start after its source slice but
+  before ordinary same-timestamp instant events. It marks the flow finish with
+  `bp=e`, binding both endpoints to the intended enclosing slices in Perfetto.
+
+These fields are a generic trace/export contract. The low-level parser and
+Chrome exporter do not know which runtime subsystem emitted the link.
+
 ## Span Hierarchy
 
 `orchestrator` (opens `system`) > `session` (opens `session`) > `turn`

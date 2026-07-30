@@ -499,6 +499,9 @@ the span or emit `result`. Calls rejected before dispatch use a synchronous
 `arguments`: Tool argument metadata was recorded.
 `parse_failed`: Tool invocation could not be parsed from the model call.
 `result`: Tool completed or was rejected before execution.
+`flow_link`: A subagent creation tool used the generic `claw-log` cross-task
+flow protocol to link this tool call to the created child's initial `agent`
+span. The domain-specific child id is carried as an exported flow argument.
 `spawn_kind_rejected`: a subagent creation tool rejected a kind outside the caller's allowed kinds.
 `spawn_unknown_kind_rejected`: a subagent creation tool rejected a kind without a baked manifest.
 
@@ -507,5 +510,7 @@ the span or emit `result`. Calls rejected before dispatch use a synchronous
 `arguments`: `argument_bytes`.
 `parse_failed`: `kind`.
 `result`: `ok`, `blocked`.
+`flow_link`: `flow.name`, `flow.target_task`, `flow.target_span`,
+`flow.arg.child_agent`.
 `spawn_kind_rejected`: `kind`.
 `spawn_unknown_kind_rejected`: `kind`.
