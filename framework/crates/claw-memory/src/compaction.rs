@@ -24,36 +24,28 @@ pub type CompactFuture<'a> = Pin<Box<dyn Future<Output = Result<Vec<Value>, Comp
 /// Failure from a [`Compactor`].
 ///
 /// Compaction is best-effort: on error the tape keeps the un-compacted groups
-/// and tries again later, but concrete backend failures still keep their source
+/// and tries again later, while summary-generation failures keep their source
 /// chain for diagnostics.
 #[derive(Debug, IntoStaticStr, thiserror::Error)]
 pub enum CompactError {
-    /// The summarization backend (e.g. the LLM client) failed.
-    #[strum(serialize = "backend")]
-    #[error("compaction backend failed")]
-    Backend(#[from] CompactBackendError),
-    /// The backend returned no summary text.
+    /// Generating the summary failed.
+    #[strum(serialize = "summary_generation")]
+    #[error("failed to generate conversation summary")]
+    SummaryGeneration {
+        #[source]
+        source: Box<dyn Error + Send + Sync + 'static>,
+    },
+    /// The compactor returned no summary text.
     #[strum(serialize = "empty_summary")]
-    #[error("compaction backend returned an empty summary")]
+    #[error("conversation compactor returned an empty summary")]
     EmptySummary,
 }
 
-/// Backend failure captured by the backend-agnostic [`Compactor`] seam.
-///
-/// `claw-memory` deliberately has no dependency on any LLM crate, so concrete
-/// compactor implementations wrap their native error here instead of flattening
-/// it into a string.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct CompactBackendError {
-    #[from]
-    source: Box<dyn Error + Send + Sync + 'static>,
-}
-
-impl CompactBackendError {
-    /// Preserve a concrete backend error behind the backend-agnostic seam.
-    pub fn new(error: impl Error + Send + Sync + 'static) -> Self {
-        Self {
+impl CompactError {
+    /// Preserve a concrete summary-generation error behind the [`Compactor`]
+    /// seam.
+    pub fn summary_generation(error: impl Error + Send + Sync + 'static) -> Self {
+        Self::SummaryGeneration {
             source: Box::new(error),
         }
     }
@@ -121,17 +113,22 @@ impl Compactor for NoopCompactor {
 
 #[cfg(test)]
 mod tests {
-    use super::{CompactBackendError, CompactError};
+    use std::error::Error as _;
+
+    use super::CompactError;
 
     #[test]
-    fn compact_error_converts_variants_to_stable_trace_kinds() {
-        let backend = CompactError::Backend(CompactBackendError::new(std::fmt::Error));
+    fn compact_error_preserves_source_and_converts_variants_to_stable_trace_kinds() {
+        let summary_generation = CompactError::summary_generation(std::fmt::Error);
         let empty_summary = CompactError::EmptySummary;
 
-        let backend_kind: &'static str = (&backend).into();
+        let summary_generation_kind: &'static str = (&summary_generation).into();
         let empty_summary_kind: &'static str = (&empty_summary).into();
 
-        assert_eq!(backend_kind, "backend");
+        assert_eq!(summary_generation_kind, "summary_generation");
         assert_eq!(empty_summary_kind, "empty_summary");
+        assert!(summary_generation
+            .source()
+            .is_some_and(|source| source.is::<std::fmt::Error>()));
     }
 }

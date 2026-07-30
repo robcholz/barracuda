@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 use claw_api::{ChatRequest, ClawApiAsync};
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
-use claw_memory::{CompactBackendError, CompactError, CompactFuture, Compactor};
+use claw_memory::{CompactError, CompactFuture, Compactor};
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
@@ -61,7 +61,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Compactor for LlmCompactor<H, Timer> {
             }
             .instrument(chat_span)
             .await
-            .map_err(|error| CompactError::Backend(CompactBackendError::new(error)))?;
+            .map_err(CompactError::summary_generation)?;
 
             let Some(summary) = response.text else {
                 return Err(CompactError::EmptySummary);
