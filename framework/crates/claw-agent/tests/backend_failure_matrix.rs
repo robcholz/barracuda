@@ -26,6 +26,8 @@ use support::{
 };
 
 type PermanentHttpSystem = AgentSystem<MemFs, Sse<PermanentHttp>, CountingTimer>;
+type ContextProviderFailureSystem =
+    AgentSystem<MemFs, Sse<IterationThenPermanentHttp>, CountingTimer>;
 type TransientThenSuccessSystem = AgentSystem<MemFs, Sse<TransientThenSuccessHttp>, CountingTimer>;
 type TransientExhaustSystem = AgentSystem<MemFs, Sse<TransientOnlyHttp>, CountingTimer>;
 type FsReadFailSystem = AgentSystem<AlwaysFailFs, Sse<PermanentHttp>, ImmediateTimer>;
@@ -79,16 +81,24 @@ fn context_provider_failure_has_a_typed_sse_error() {
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     reset_counters();
 
-    MemFs::new();
-    let system = PermanentHttpSystem::new::<StdThread, TokioExecutor>(persistence(&mem_root(
-        "context-provider-failure",
-    )))
+    let system = ContextProviderFailureSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        persistence(&mem_root("context-provider-failure")),
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
 
-    let events = drive_one_turn(&system, "surface provider failure");
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    block_on(control.append(Message::text("commit one turn"))).unwrap();
+    let seed_events = drain_until_turn_ended(&mut events);
+    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    block_on(control.append(Message::text("surface provider failure"))).unwrap();
+    let events = drain_until_turn_ended(&mut events);
     assert!(events.iter().any(|event| matches!(
         event,
         SessionEvent::Turn(TurnEvent::Error(TurnEventError::Execution(
@@ -114,6 +124,29 @@ impl ClawHttp for PermanentHttp {
 }
 
 #[derive(Default)]
+struct IterationThenPermanentHttp;
+
+impl ClawHttp for IterationThenPermanentHttp {
+    fn post_json<'a>(
+        &'a mut self,
+        _request: &'a HttpJsonRequest<'a>,
+        _cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        Box::pin(async move {
+            let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                Ok(HttpResponse {
+                    status_code: HttpStatusCode::OK,
+                    body: assistant_text("seed"),
+                })
+            } else {
+                Err(HttpError::InvalidUrl)
+            }
+        })
+    }
+}
+
+#[derive(Default)]
 struct TransientThenSuccessHttp;
 
 impl ClawHttp for TransientThenSuccessHttp {
@@ -124,14 +157,18 @@ impl ClawHttp for TransientThenSuccessHttp {
     ) -> HttpResponseFuture<'a> {
         Box::pin(async move {
             let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
-            if call == 0 {
+            if call == 1 {
                 Err(HttpError::RequestFailed(HttpRequestFailure::transport(
                     "temporary backend outage",
                 )))
             } else {
                 Ok(HttpResponse {
                     status_code: HttpStatusCode::OK,
-                    body: assistant_text("recovered-after-retry"),
+                    body: assistant_text(if call == 0 {
+                        "seed"
+                    } else {
+                        "recovered-after-retry"
+                    }),
                 })
             }
         })
@@ -148,10 +185,17 @@ impl ClawHttp for TransientOnlyHttp {
         _cancel: Cancel<'a>,
     ) -> HttpResponseFuture<'a> {
         Box::pin(async move {
-            HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
-            Err(HttpError::RequestFailed(HttpRequestFailure::transport(
-                "retry backoff should be cancelled",
-            )))
+            let call = HTTP_CALLS.fetch_add(1, Ordering::SeqCst);
+            if call == 0 {
+                Ok(HttpResponse {
+                    status_code: HttpStatusCode::OK,
+                    body: assistant_text("seed"),
+                })
+            } else {
+                Err(HttpError::RequestFailed(HttpRequestFailure::transport(
+                    "retry backoff should be cancelled",
+                )))
+            }
         })
     }
 }
@@ -198,35 +242,35 @@ struct AlwaysFailFs;
 impl ClawFs for AlwaysFailFs {
     type File = FailingFile;
 
-    fn open(_path: &str) -> Result<Self::File, FsError> {
+    fn open(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::io_message("open failed"))
     }
 
-    fn create(_path: &str) -> Result<Self::File, FsError> {
+    fn create(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::io_message("create failed"))
     }
 
-    fn open_append(_path: &str) -> Result<Self::File, FsError> {
+    fn open_append(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::io_message("append failed"))
     }
 
-    fn rename(_from: &str, _to: &str) -> Result<(), FsError> {
+    fn rename(&self, _from: &str, _to: &str) -> Result<(), FsError> {
         Err(FsError::io_message("rename failed"))
     }
 
-    fn create_dir_all(_path: &str) -> Result<(), FsError> {
+    fn create_dir_all(&self, _path: &str) -> Result<(), FsError> {
         Err(FsError::io_message("mkdir failed"))
     }
 
-    fn exists(_path: &str) -> bool {
+    fn exists(&self, _path: &str) -> bool {
         false
     }
 
-    fn remove(_path: &str) -> Result<(), FsError> {
+    fn remove(&self, _path: &str) -> Result<(), FsError> {
         Err(FsError::io_message("remove failed"))
     }
 
-    fn list_dir(_path: &str) -> Result<Vec<String>, FsError> {
+    fn list_dir(&self, _path: &str) -> Result<Vec<String>, FsError> {
         Err(FsError::io_message("list failed"))
     }
 }
@@ -236,35 +280,35 @@ struct WriteFailFs;
 impl ClawFs for WriteFailFs {
     type File = FailingFile;
 
-    fn open(_path: &str) -> Result<Self::File, FsError> {
+    fn open(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::NotFound)
     }
 
-    fn create(_path: &str) -> Result<Self::File, FsError> {
+    fn create(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::io_message("persistence create failed"))
     }
 
-    fn open_append(_path: &str) -> Result<Self::File, FsError> {
+    fn open_append(&self, _path: &str) -> Result<Self::File, FsError> {
         Err(FsError::io_message("append failed"))
     }
 
-    fn rename(_from: &str, _to: &str) -> Result<(), FsError> {
+    fn rename(&self, _from: &str, _to: &str) -> Result<(), FsError> {
         Err(FsError::io_message("rename failed"))
     }
 
-    fn create_dir_all(_path: &str) -> Result<(), FsError> {
+    fn create_dir_all(&self, _path: &str) -> Result<(), FsError> {
         Ok(())
     }
 
-    fn exists(_path: &str) -> bool {
+    fn exists(&self, _path: &str) -> bool {
         false
     }
 
-    fn remove(_path: &str) -> Result<(), FsError> {
+    fn remove(&self, _path: &str) -> Result<(), FsError> {
         Ok(())
     }
 
-    fn list_dir(_path: &str) -> Result<Vec<String>, FsError> {
+    fn list_dir(&self, _path: &str) -> Result<Vec<String>, FsError> {
         Ok(Vec::new())
     }
 }
@@ -318,10 +362,10 @@ fn fs_session_create_write_is_deferred() -> Option<String> {
 }
 
 fn http_permanent_failure() -> Option<String> {
-    MemFs::new();
-    let system = PermanentHttpSystem::new::<StdThread, TokioExecutor>(persistence(&mem_root(
-        "http-permanent",
-    )))
+    let system = PermanentHttpSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        persistence(&mem_root("http-permanent")),
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
@@ -330,37 +374,56 @@ fn http_permanent_failure() -> Option<String> {
 }
 
 fn http_transient_then_success(case: &str) -> Option<String> {
-    MemFs::new();
-    let system = TransientThenSuccessSystem::new::<StdThread, TokioExecutor>(persistence(
-        &mem_root("http-transient-success"),
-    ))
+    let system = TransientThenSuccessSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        persistence(&mem_root("http-transient-success")),
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
-    let events = drive_one_turn(&system, "recover");
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    block_on(control.append(Message::text("commit one turn"))).unwrap();
+    let seed_events = drain_until_turn_ended(&mut events);
+    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    block_on(control.append(Message::text("recover"))).unwrap();
+    let events = drain_until_turn_ended(&mut events);
     assert_eq!(
         output_fragments(&events),
         vec!["recovered-after-retry".to_string()],
-        "case {case}"
+        "case {case}: events={events:#?}"
     );
     first_failure_text(events)
 }
 
 fn http_transient_exhausts_retries() -> Option<String> {
-    MemFs::new();
-    let system = TransientExhaustSystem::new::<StdThread, TokioExecutor>(persistence(&mem_root(
-        "transient-exhaust",
-    )))
+    let system = TransientExhaustSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        persistence(&mem_root("transient-exhaust")),
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
-    first_failure_text(drive_one_turn(&system, "exhaust transient retries"))
+    let session = system
+        .new_session(claw_agent::SessionPersistence::Persistent)
+        .unwrap();
+    let (control, mut events) = system.open_session(session).unwrap();
+    block_on(control.append(Message::text("commit one turn"))).unwrap();
+    let seed_events = drain_until_turn_ended(&mut events);
+    assert_eq!(output_fragments(&seed_events), vec!["seed".to_string()]);
+    block_on(control.append(Message::text("exhaust transient retries"))).unwrap();
+    first_failure_text(drain_until_turn_ended(&mut events))
 }
 
 fn build_fs_read_fail_system() -> Result<FsReadFailSystem, AgentError> {
-    let system = FsReadFailSystem::new::<StdThread, TokioExecutor>(persistence("/fs-read-fail"))?;
+    let system = FsReadFailSystem::new::<StdThread, TokioExecutor>(
+        AlwaysFailFs,
+        persistence("/fs-read-fail"),
+    )?;
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -375,6 +438,7 @@ fn build_fs_write_fail_system_with_tool_groups(
     tool_groups: impl IntoIterator<Item = ToolGroup>,
 ) -> Result<FsWriteFailSystem, AgentError> {
     let system = FsWriteFailSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        WriteFailFs,
         persistence("/fs-write-fail"),
         tool_groups,
     )?;

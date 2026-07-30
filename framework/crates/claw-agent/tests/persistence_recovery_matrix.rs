@@ -15,11 +15,12 @@ type DiskSystem = AgentSystem<DiskFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>
 #[test]
 fn short_session_manager_header_rejects_startup() {
     let root = TempDir::new("claw-persistence-short-header").unwrap();
-    DiskFs::write_atomic(
-        &format!("{}/session_manager.bin", root.path().display()),
-        b"x",
-    )
-    .unwrap();
+    DiskFs::absolute()
+        .write_atomic(
+            &format!("{}/session_manager.bin", root.path().display()),
+            b"x",
+        )
+        .unwrap();
 
     assert_startup_error(root.path().to_str().unwrap(), "too short");
 }
@@ -81,10 +82,13 @@ fn unsupported_session_schema_rejects_rebuild() {
 }
 
 fn build(root: &str) -> Result<DiskSystem, claw_agent::AgentError> {
-    DiskSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
-        persistence_root: root.to_owned(),
-        skill_roots: Vec::new(),
-    })
+    DiskSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        AgentPersistenceConfig {
+            persistence_root: root.to_owned(),
+            skill_roots: Vec::new(),
+        },
+    )
 }
 
 fn assert_startup_error(root: &str, expected: &str) {
@@ -107,5 +111,5 @@ fn assert_startup_error(root: &str, expected: &str) {
 fn write_state(path: &str, schema_version: u32, payload: &[u8]) {
     let mut bytes = schema_version.to_le_bytes().to_vec();
     bytes.extend_from_slice(payload);
-    DiskFs::write_atomic(path, &bytes).unwrap();
+    DiskFs::absolute().write_atomic(path, &bytes).unwrap();
 }

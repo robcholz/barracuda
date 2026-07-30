@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use claw_interface::MemFs;
 use claw_memory::{AssistantFinish, Transcript, TranscriptStore, TurnError, TurnHandle};
 
@@ -210,8 +212,10 @@ fn transcript_trait_erases_only_the_store_filesystem_type() {
 
 #[test]
 fn persisted_transcript_restores_both_versions() {
-    MemFs::new();
-    let store = TranscriptStore::<MemFs>::new(7, "/transcript-version-reload").unwrap();
+    let filesystem = Arc::new(MemFs::new());
+    let store =
+        TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 7, "/transcript-version-reload")
+            .unwrap();
     {
         let mut turn = store.open_turn().unwrap();
         turn.append_user("hello").unwrap();
@@ -224,12 +228,12 @@ fn persisted_transcript_restores_both_versions() {
     assert_eq!(store.turn_version(), 1);
     assert_eq!(store.content_version(), 2);
 
-    let reloaded = TranscriptStore::<MemFs>::new(7, "/transcript-version-reload").unwrap();
+    let reloaded =
+        TranscriptStore::<MemFs>::new(filesystem, 7, "/transcript-version-reload").unwrap();
     assert_eq!(reloaded.turn_version(), 1);
     assert_eq!(reloaded.content_version(), 2);
 }
 
 fn store() -> TranscriptStore<MemFs> {
-    MemFs::new();
-    TranscriptStore::new(1, "/transcript-store-tests").unwrap()
+    TranscriptStore::new(Arc::new(MemFs::new()), 1, "/transcript-store-tests").unwrap()
 }

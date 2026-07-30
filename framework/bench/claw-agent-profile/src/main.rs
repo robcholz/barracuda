@@ -110,12 +110,14 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 }
 
 fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, claw_agent::AgentError> {
-    MemFs::clear();
     let profile = HeapProfile::start(output_file);
-    let system = ProfileAgentSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
-        persistence_root: "/profile/agent-init".to_owned(),
-        skill_roots: Vec::new(),
-    })?;
+    let system = ProfileAgentSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        AgentPersistenceConfig {
+            persistence_root: "/profile/agent-init".to_owned(),
+            skill_roots: Vec::new(),
+        },
+    )?;
 
     // Finish while the system is alive: `current_bytes` then represents memory
     // retained by a fully initialized AgentSystem.

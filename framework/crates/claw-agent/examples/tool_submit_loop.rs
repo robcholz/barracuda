@@ -132,6 +132,7 @@ async fn main() -> anyhow::Result<()> {
         Sse<BlockingHttpAdapter<SharedScriptHttp>>,
         ImmediateTimer,
     >::with_tool_groups::<StdThread, TokioExecutor>(
+        MemFs::new(),
         claw_agent::AgentPersistenceConfig {
             persistence_root: "/mem".to_string(),
             skill_roots: Vec::new(),

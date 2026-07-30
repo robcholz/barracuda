@@ -4,7 +4,7 @@
 //! documents edited by users or by profile-specific tools and later projected into
 //! context by `claw-core`.
 
-use std::marker::PhantomData;
+use std::sync::Arc;
 
 use claw_interface::{ClawFs, FsError};
 use strum::{EnumString, IntoStaticStr};
@@ -127,30 +127,30 @@ pub struct ProfileSnapshot {
 
 /// Pure storage for the editable profile documents.
 pub struct ProfileStore<F: ClawFs + 'static> {
+    filesystem: Arc<F>,
     /// Directory holding `soul.md`, `identity.md`, and `user.md`.
     dir: String,
     /// Maximum accepted byte length for each profile document.
     max_document_bytes: usize,
-    _fs: PhantomData<fn() -> F>,
 }
 
 impl<F: ClawFs + 'static> Clone for ProfileStore<F> {
     fn clone(&self) -> Self {
         Self {
+            filesystem: Arc::clone(&self.filesystem),
             dir: self.dir.clone(),
             max_document_bytes: self.max_document_bytes,
-            _fs: PhantomData,
         }
     }
 }
 
 impl<F: ClawFs + 'static> ProfileStore<F> {
     /// Build a store rooted at `dir` over the selected filesystem backend.
-    pub fn new(dir: &str) -> Self {
+    pub fn new(filesystem: Arc<F>, dir: &str) -> Self {
         Self {
+            filesystem,
             dir: dir.to_string(),
             max_document_bytes: DEFAULT_PROFILE_DOCUMENT_MAX_BYTES,
-            _fs: PhantomData,
         }
     }
 
@@ -167,7 +167,7 @@ impl<F: ClawFs + 'static> ProfileStore<F> {
     /// Read one document. Missing files are normal absence, not an error.
     pub fn read(&self, document: ProfileDocument) -> Result<Option<String>, ProfileError> {
         let path = self.path(document);
-        let bytes = match F::read(&path) {
+        let bytes = match self.filesystem.read(&path) {
             Ok(bytes) => bytes,
             Err(FsError::NotFound) => return Ok(None),
             Err(source) => return Err(ProfileError::File { document, source }),
@@ -193,7 +193,9 @@ impl<F: ClawFs + 'static> ProfileStore<F> {
         let bytes = content.as_ref().as_bytes();
         self.check_size(document, bytes.len())?;
         let path = self.path(document);
-        F::write_atomic(&path, bytes).map_err(|source| ProfileError::File { document, source })
+        self.filesystem
+            .write_atomic(&path, bytes)
+            .map_err(|source| ProfileError::File { document, source })
     }
 
     /// Create a document with `content` only when it does not already exist.
@@ -204,7 +206,7 @@ impl<F: ClawFs + 'static> ProfileStore<F> {
         document: ProfileDocument,
         content: impl AsRef<str>,
     ) -> Result<bool, ProfileError> {
-        if F::exists(&self.path(document)) {
+        if self.filesystem.exists(&self.path(document)) {
             return Ok(false);
         }
         self.replace(document, content)?;

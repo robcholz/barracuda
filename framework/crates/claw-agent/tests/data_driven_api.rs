@@ -14,7 +14,8 @@ use claw_agent::{
     TurnId, TurnOrigin,
 };
 use claw_interface::{
-    BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
+    BlockingHttpAdapter, ClawFs, DiskFs, ImmediateTimer, MemFs, SharedScriptHttp, StdThread,
+    TokioExecutor,
 };
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
@@ -190,7 +191,7 @@ fn construction_csv_roots_accept_tempdirs_and_reject_blank_roots() {
             assert_eq!(system.list_sessions(), vec![session], "case {case}");
             drop(system);
             assert!(
-                DiskFs::exists(&format!(
+                DiskFs::absolute().exists(&format!(
                     "{}/session_manager.bin",
                     root.trim_end_matches('/')
                 )),
@@ -419,7 +420,8 @@ fn expected_output_fragments(expected_output: &str) -> Vec<String> {
 
 fn try_build_mem_system(root: &str) -> Result<support::MemAgentSystem, AgentError> {
     install_script(Vec::<String>::new());
-    let system = support::MemAgentSystem::new::<StdThread, TokioExecutor>(persistence(root))?;
+    let system =
+        support::MemAgentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(root))?;
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -428,7 +430,8 @@ fn try_build_mem_system(root: &str) -> Result<support::MemAgentSystem, AgentErro
 
 fn try_build_disk_system(root: &str) -> Result<DiskAgentSystem, AgentError> {
     install_script(Vec::<String>::new());
-    let system = DiskAgentSystem::new::<StdThread, TokioExecutor>(persistence(root))?;
+    let system =
+        DiskAgentSystem::new::<StdThread, TokioExecutor>(DiskFs::absolute(), persistence(root))?;
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

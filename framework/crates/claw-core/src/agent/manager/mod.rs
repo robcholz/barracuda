@@ -36,6 +36,7 @@ pub(crate) struct AgentManager<
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 > {
+    filesystem: Arc<Filesystem>,
     persistence: SharedPersistence<Filesystem>,
     api_manager: SharedApiManager,
     tool_registry: Arc<ToolRegistry>,

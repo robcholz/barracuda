@@ -48,7 +48,11 @@ fn pending_request_control_ends_the_turn_before_returning() {
         install_case(fixture.clone());
 
         let root = mem_root("pending-request-control");
-        let system = ControlSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+        let system = ControlSystem::new::<StdThread, TokioExecutor>(
+            PersistenceFailFs::default(),
+            persistence(&root),
+        )
+        .unwrap();
         system
             .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
@@ -126,10 +130,12 @@ fn close_is_not_a_synchronous_persistence_barrier() {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     FAIL_PERSISTENCE_WRITES.store(false, Ordering::SeqCst);
-    MemFs::new();
-
     let root = mem_root("close-persistence-failure");
-    let system = ControlSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system = ControlSystem::new::<StdThread, TokioExecutor>(
+        PersistenceFailFs::default(),
+        persistence(&root),
+    )
+    .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
@@ -171,47 +177,50 @@ struct PendingResponse<'a> {
     cancel: Cancel<'a>,
 }
 
-struct PersistenceFailFs;
+#[derive(Default)]
+struct PersistenceFailFs {
+    inner: MemFs,
+}
 
 impl ClawFs for PersistenceFailFs {
     type File = MemFile;
 
-    fn open(path: &str) -> Result<Self::File, FsError> {
-        MemFs::open(path)
+    fn open(&self, path: &str) -> Result<Self::File, FsError> {
+        self.inner.open(path)
     }
 
-    fn create(path: &str) -> Result<Self::File, FsError> {
+    fn create(&self, path: &str) -> Result<Self::File, FsError> {
         if persistence_write_is_disabled(path) {
             return Err(FsError::io_message("persistence write disabled"));
         }
-        MemFs::create(path)
+        self.inner.create(path)
     }
 
-    fn open_append(path: &str) -> Result<Self::File, FsError> {
-        MemFs::open_append(path)
+    fn open_append(&self, path: &str) -> Result<Self::File, FsError> {
+        self.inner.open_append(path)
     }
 
-    fn rename(from: &str, to: &str) -> Result<(), FsError> {
+    fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
         if persistence_write_is_disabled(to) {
             return Err(FsError::io_message("persistence write disabled"));
         }
-        MemFs::rename(from, to)
+        self.inner.rename(from, to)
     }
 
-    fn create_dir_all(path: &str) -> Result<(), FsError> {
-        MemFs::create_dir_all(path)
+    fn create_dir_all(&self, path: &str) -> Result<(), FsError> {
+        self.inner.create_dir_all(path)
     }
 
-    fn exists(path: &str) -> bool {
-        MemFs::exists(path)
+    fn exists(&self, path: &str) -> bool {
+        self.inner.exists(path)
     }
 
-    fn remove(path: &str) -> Result<(), FsError> {
-        MemFs::remove(path)
+    fn remove(&self, path: &str) -> Result<(), FsError> {
+        self.inner.remove(path)
     }
 
-    fn list_dir(path: &str) -> Result<Vec<String>, FsError> {
-        MemFs::list_dir(path)
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, FsError> {
+        self.inner.list_dir(path)
     }
 }
 

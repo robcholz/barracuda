@@ -139,6 +139,7 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     pub(crate) fn new(
+        filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
@@ -152,6 +153,7 @@ where
             state
         };
         let agent_manager = Rc::new(AgentManager::new(
+            filesystem,
             tool_registry,
             Arc::clone(&persistence),
             persistence_dir,

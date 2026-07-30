@@ -61,6 +61,7 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     fn new(
+        filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
@@ -69,6 +70,7 @@ where
         commands: Receiver<RuntimeCommand>,
     ) -> Result<Self, AgentRuntimeBuildError> {
         let session_manager = SessionManager::new(
+            filesystem,
             tool_registry,
             Arc::clone(&persistence),
             persistence_dir,
@@ -220,6 +222,7 @@ fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntim
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_runtime_worker<Filesystem, Http, Timer, Executor>(
+    filesystem: Arc<Filesystem>,
     tool_registry: Arc<ToolRegistry>,
     persistence: SharedPersistence<Filesystem>,
     persistence_dir: String,
@@ -240,6 +243,7 @@ pub(super) fn run_runtime_worker<Filesystem, Http, Timer, Executor>(
     );
     let worker = match span.in_scope(|| {
         RuntimeWorker::<Filesystem, Http, Timer>::new(
+            filesystem,
             tool_registry,
             persistence,
             persistence_dir,

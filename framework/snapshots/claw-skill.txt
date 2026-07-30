@@ -28,7 +28,7 @@ pub fn claw_skill::EmptySkillRegistry::reload(&self) -> core::result::Result<(),
 pub fn claw_skill::EmptySkillRegistry::skill_set(alloc::sync::Arc<Self>) -> claw_skill::SkillSet
 pub struct claw_skill::FsSkillRegistry<F: claw_interface::fs::ClawFs>
 impl<F: claw_interface::fs::ClawFs> claw_skill::FsSkillRegistry<F>
-pub fn claw_skill::FsSkillRegistry<F>::new() -> Self
+pub fn claw_skill::FsSkillRegistry<F>::new(alloc::sync::Arc<F>) -> Self
 pub fn claw_skill::FsSkillRegistry<F>::set_root(self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::skill_set(&alloc::sync::Arc<Self>) -> claw_skill::SkillSet where F: 'static
 impl<F: claw_interface::fs::ClawFs + 'static> claw_skill::SkillRegistry for claw_skill::FsSkillRegistry<F>
@@ -36,8 +36,6 @@ pub fn claw_skill::FsSkillRegistry<F>::catalog(&self) -> alloc::sync::Arc<claw_s
 pub fn claw_skill::FsSkillRegistry<F>::load_document_into(&self, &claw_skill::SkillId, &mut alloc::string::String) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::reload(&self) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::skill_set(alloc::sync::Arc<Self>) -> claw_skill::SkillSet
-impl<F: claw_interface::fs::ClawFs> core::default::Default for claw_skill::FsSkillRegistry<F>
-pub fn claw_skill::FsSkillRegistry<F>::default() -> Self
 pub struct claw_skill::ParseSkillManageModeError
 pub struct claw_skill::Skill
 impl claw_skill::Skill

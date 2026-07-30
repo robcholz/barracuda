@@ -148,11 +148,12 @@ fn builtin_memory_journal_torn_tail_keeps_committed_records_after_rebuild() {
         "Torn-tail durable fact",
     );
 
-    DiskFs::append(
-        &format!("{root}/long_term/global/memory_records.jsonl"),
-        br#"{"torn":"record""#,
-    )
-    .unwrap();
+    DiskFs::absolute()
+        .append(
+            &format!("{root}/long_term/global/memory_records.jsonl"),
+            br#"{"torn":"record""#,
+        )
+        .unwrap();
 
     let verify = run_phase(
         &root,
@@ -411,8 +412,11 @@ fn run_phase(
         assistant_text(final_output),
     ]);
 
-    let system =
-        BuiltinPersistenceSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    let system = BuiltinPersistenceSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        persistence(root),
+    )
+    .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -539,7 +543,9 @@ fn assert_fragments(text: &str, fragments: &str, case: &str) {
 
 fn assert_disk_file_contains(root: &str, relative: &str, fragment: &str) {
     let path = format!("{root}/{relative}");
-    let bytes = DiskFs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+    let bytes = DiskFs::absolute()
+        .read(&path)
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
     let text = String::from_utf8(bytes).unwrap_or_else(|error| panic!("{path}: {error}"));
     assert!(
         text.contains(fragment),
@@ -549,7 +555,9 @@ fn assert_disk_file_contains(root: &str, relative: &str, fragment: &str) {
 
 fn assert_disk_file_equals(root: &str, relative: &str, expected: &str) {
     let path = format!("{root}/{relative}");
-    let bytes = DiskFs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+    let bytes = DiskFs::absolute()
+        .read(&path)
+        .unwrap_or_else(|error| panic!("{path}: {error}"));
     let text = String::from_utf8(bytes).unwrap_or_else(|error| panic!("{path}: {error}"));
     assert_eq!(text, expected, "expected {path} to equal {expected:?}");
 }

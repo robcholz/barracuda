@@ -26,9 +26,9 @@ fn update_golden() -> bool {
 }
 
 fn registry() -> Arc<FsSkillRegistry<DiskFs>> {
-    DiskFs::rooted(data_dir());
+    let filesystem = Arc::new(DiskFs::rooted(data_dir()));
     Arc::new(
-        FsSkillRegistry::<DiskFs>::new()
+        FsSkillRegistry::new(filesystem)
             .set_root(SKILLS_ROOT)
             .expect("scan skills fixtures"),
     )

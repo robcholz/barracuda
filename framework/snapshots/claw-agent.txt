@@ -77,10 +77,10 @@ pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::disable_tool(&self, &st
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::enable_tool(&self, &str) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::link_api(&self, claw_api::types::ClawApiConfig, claw_core::config::api::ApiPurpose, bool) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::list_sessions(&self) -> alloc::vec::Vec<claw_core::session::manager::SessionId>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new<Thread, Executor>(claw_agent::AgentPersistenceConfig) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new<Thread, Executor>(Filesystem, claw_agent::AgentPersistenceConfig) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::new_session(&self, claw_core::session::manager::SessionPersistence) -> claw_agent::AgentResult<claw_core::session::manager::SessionId>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::open_session(&self, claw_core::session::manager::SessionId) -> claw_agent::AgentResult<(claw_core::session::control::SessionControl, claw_core::session::stream::SessionStream)>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::start_all(&self) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::stop_all(&self) -> claw_agent::AgentResult<()>
-pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::with_tool_groups<Thread, Executor>(claw_agent::AgentPersistenceConfig, impl core::iter::traits::collect::IntoIterator<Item = claw_tool::registry::ToolGroup>) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
+pub fn claw_agent::AgentSystem<Filesystem, Http, Timer>::with_tool_groups<Thread, Executor>(Filesystem, claw_agent::AgentPersistenceConfig, impl core::iter::traits::collect::IntoIterator<Item = claw_tool::registry::ToolGroup>) -> claw_agent::AgentResult<Self> where Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
 pub type claw_agent::AgentResult<T> = core::result::Result<T, claw_agent::AgentError>

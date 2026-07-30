@@ -125,7 +125,7 @@ mod espidf {
     impl ClawFs for EspIdfFs {
         type File = EspIdfFile;
 
-        fn open(path: &str) -> Result<Self::File, FsError> {
+        fn open(&self, path: &str) -> Result<Self::File, FsError> {
             let full = std::path::Path::new(path);
             Self::restore_backup_if_needed(full)?;
             std::fs::File::open(full)
@@ -133,7 +133,7 @@ mod espidf {
                 .map_err(FsError::from)
         }
 
-        fn create(path: &str) -> Result<Self::File, FsError> {
+        fn create(&self, path: &str) -> Result<Self::File, FsError> {
             let full = std::path::Path::new(path);
             Self::ensure_parent(full)?;
             std::fs::File::create(full)
@@ -141,7 +141,7 @@ mod espidf {
                 .map_err(FsError::from)
         }
 
-        fn open_append(path: &str) -> Result<Self::File, FsError> {
+        fn open_append(&self, path: &str) -> Result<Self::File, FsError> {
             let full = std::path::Path::new(path);
             Self::ensure_parent(full)?;
             Self::restore_backup_if_needed(full)?;
@@ -153,21 +153,21 @@ mod espidf {
                 .map_err(FsError::from)
         }
 
-        fn rename(from: &str, to: &str) -> Result<(), FsError> {
+        fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
             Self::replace(std::path::Path::new(from), std::path::Path::new(to))
         }
 
-        fn create_dir_all(path: &str) -> Result<(), FsError> {
+        fn create_dir_all(&self, path: &str) -> Result<(), FsError> {
             std::fs::create_dir_all(path).map_err(FsError::from)
         }
 
-        fn exists(path: &str) -> bool {
+        fn exists(&self, path: &str) -> bool {
             let full = std::path::Path::new(path);
             let _ = Self::restore_backup_if_needed(full);
             full.exists()
         }
 
-        fn remove(path: &str) -> Result<(), FsError> {
+        fn remove(&self, path: &str) -> Result<(), FsError> {
             // ESP-IDF/FatFS has no symlink semantics to preserve, and Rust's
             // `symlink_metadata` pulls in the unsupported POSIX `lstat` symbol.
             let result = match std::fs::metadata(path) {
@@ -184,7 +184,7 @@ mod espidf {
             Self::remove_file_if_exists(&Self::backup_path(std::path::Path::new(path)))
         }
 
-        fn list_dir(path: &str) -> Result<Vec<String>, FsError> {
+        fn list_dir(&self, path: &str) -> Result<Vec<String>, FsError> {
             let entries = std::fs::read_dir(path).map_err(FsError::from)?;
             let mut names = Vec::new();
             for entry in entries {
@@ -196,7 +196,7 @@ mod espidf {
             Ok(names)
         }
 
-        fn len(path: &str) -> Result<u64, FsError> {
+        fn len(&self, path: &str) -> Result<u64, FsError> {
             let full = std::path::Path::new(path);
             Self::restore_backup_if_needed(full)?;
             std::fs::metadata(full)
@@ -204,7 +204,7 @@ mod espidf {
                 .map_err(FsError::from)
         }
 
-        fn write_atomic(path: &str, data: &[u8]) -> Result<(), FsError> {
+        fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
             let full = std::path::Path::new(path);
             Self::ensure_parent(full)?;
             let tmp = format!("{path}.tmp");

@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use claw_interface::{ClawFs, MemFs};
 use claw_sandbox::{RealRoots, Sandbox, SandboxError, SandboxFs};
 
@@ -12,14 +14,14 @@ const REAL: RealRoots = RealRoots {
 
 #[test]
 fn routes_each_visible_root_to_its_real_path() {
-    MemFs::new();
-    let sb = Sandbox::<MemFs>::new("/host/sandbox", REAL).unwrap();
+    let filesystem = Arc::new(MemFs::new());
+    let sb = Sandbox::<MemFs>::new(Arc::clone(&filesystem), "/host/sandbox", REAL).unwrap();
 
     sb.write_atomic("/sandbox/tmp/a", b"1").unwrap();
     sb.write_atomic("/shared/data/b", b"2").unwrap();
 
-    assert_eq!(MemFs::read("/host/sandbox/tmp/a").unwrap(), b"1");
-    assert_eq!(MemFs::read("/real/shared/data/b").unwrap(), b"2");
+    assert_eq!(filesystem.read("/host/sandbox/tmp/a").unwrap(), b"1");
+    assert_eq!(filesystem.read("/real/shared/data/b").unwrap(), b"2");
 }
 
 #[test]
@@ -86,9 +88,11 @@ fn system_root_is_read_only() {
 
 #[test]
 fn system_root_is_readable() {
-    MemFs::new();
-    MemFs::write_atomic("/real/system/skills/doc", b"hi").unwrap();
-    let sb = Sandbox::<MemFs>::new("/host/sandbox", REAL).unwrap();
+    let filesystem = Arc::new(MemFs::new());
+    filesystem
+        .write_atomic("/real/system/skills/doc", b"hi")
+        .unwrap();
+    let sb = Sandbox::<MemFs>::new(filesystem, "/host/sandbox", REAL).unwrap();
     assert_eq!(sb.read("/system/skills/doc").unwrap(), b"hi");
 }
 
@@ -103,6 +107,5 @@ fn exists_distinguishes_absent_from_inaccessible() {
 }
 
 fn sandbox() -> Sandbox<MemFs> {
-    MemFs::new();
-    Sandbox::<MemFs>::new("/real/sandbox/inst-1", REAL).unwrap()
+    Sandbox::<MemFs>::new(Arc::new(MemFs::new()), "/real/sandbox/inst-1", REAL).unwrap()
 }

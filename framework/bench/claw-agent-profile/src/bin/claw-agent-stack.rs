@@ -70,11 +70,13 @@ impl ClawThread for BoundedThread {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    MemFs::clear();
-    let system = StackAgentSystem::new::<BoundedThread, TokioExecutor>(AgentPersistenceConfig {
-        persistence_root: "/profile/agent-init-stack".to_owned(),
-        skill_roots: Vec::new(),
-    })?;
+    let system = StackAgentSystem::new::<BoundedThread, TokioExecutor>(
+        MemFs::new(),
+        AgentPersistenceConfig {
+            persistence_root: "/profile/agent-init-stack".to_owned(),
+            skill_roots: Vec::new(),
+        },
+    )?;
 
     drop(system);
     println!("scenario=agent-init-stack");

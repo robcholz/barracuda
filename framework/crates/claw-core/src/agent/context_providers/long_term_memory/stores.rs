@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use claw_interface::ClawFs;
 use claw_memory::{
     LongTermError, LongTermInitError, LongTermMemory, MemoryDraft, MemoryId, MemoryItem,
@@ -18,9 +20,10 @@ pub(super) const AGENT_ID_PREFIX: &str = "a-";
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
 pub(super) fn global_store<F: ClawFs + 'static>(
+    filesystem: Arc<F>,
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
-    LongTermMemory::new(dir, GLOBAL_ID_PREFIX)
+    LongTermMemory::new(filesystem, dir, GLOBAL_ID_PREFIX)
 }
 
 /// Build a per-agent long-term store under `dir` (minting `a-` ids).
@@ -29,9 +32,10 @@ pub(super) fn global_store<F: ClawFs + 'static>(
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
 pub(super) fn agent_store<F: ClawFs + 'static>(
+    filesystem: Arc<F>,
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
-    LongTermMemory::new(dir, AGENT_ID_PREFIX)
+    LongTermMemory::new(filesystem, dir, AGENT_ID_PREFIX)
 }
 
 /// The two stores, shared (by cheap clone) between the provider and every memory

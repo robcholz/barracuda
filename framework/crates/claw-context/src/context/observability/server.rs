@@ -151,31 +151,24 @@ fn gap_payload(skipped: u64) -> String {
 #[cfg(test)]
 mod tests {
     use std::io;
-    use std::time::Duration;
+    use std::net::SocketAddr;
 
     use futures_util::StreamExt;
     use serde_json::{json, Value};
     use tokio_tungstenite::connect_async;
 
-    use super::{DEFAULT_PORT, READY_PAYLOAD, WEBSOCKET_PATH};
+    use super::{ObservationServer, READY_PAYLOAD, WEBSOCKET_PATH};
     use crate::{Block, BlockKind, Context};
 
     #[tokio::test]
     async fn private_server_streams_request_snapshot() -> Result<(), Box<dyn std::error::Error>> {
+        let server = ObservationServer::bind(SocketAddr::from(([127, 0, 0, 1], 0))).await?;
+        let address = server.listener.local_addr()?;
+        let server_task = tokio::spawn(server.run());
+
         let mut context = Context::new();
-        let uri = format!("ws://127.0.0.1:{DEFAULT_PORT}{WEBSOCKET_PATH}");
-        let mut connection = None;
-        for _attempt in 0..100 {
-            match connect_async(&uri).await {
-                Ok(connected) => {
-                    connection = Some(connected);
-                    break;
-                }
-                Err(_error) => tokio::time::sleep(Duration::from_millis(10)).await,
-            }
-        }
-        let (mut websocket, _response) =
-            connection.ok_or_else(|| io::Error::other("private WebSocket server did not start"))?;
+        let uri = format!("ws://{address}{WEBSOCKET_PATH}");
+        let (mut websocket, _response) = connect_async(&uri).await?;
 
         let ready = websocket
             .next()
@@ -204,6 +197,7 @@ mod tests {
             Some(&json!("agent_instruction"))
         );
 
+        server_task.abort();
         Ok(())
     }
 }

@@ -8,8 +8,9 @@
 //!
 //! # Two layers: a filesystem backend that produces file handles
 //!
-//! The seam is shaped like a statically dispatched `std::fs` HAL:
-//! - [`ClawFs`] is the platform filesystem backend selected by type. It locates
+//! The seam is shaped like a statically dispatched filesystem handle:
+//! - [`ClawFs`] is the platform filesystem backend selected by type and owned by
+//!   each storage component. It locates
 //!   paths and produces handles ([`open`](ClawFs::open) /
 //!   [`create`](ClawFs::create) / [`open_append`](ClawFs::open_append)) and
 //!   performs whole-path operations that have no handle (`rename`, `remove`,
@@ -36,12 +37,10 @@ use std::sync::Arc;
 
 #[cfg(feature = "diskfs")]
 mod disk;
-#[cfg(feature = "memfs")]
 mod mem;
 
 #[cfg(feature = "diskfs")]
 pub use disk::{DiskFile, DiskFs};
-#[cfg(feature = "memfs")]
 pub use mem::{MemFile, MemFs};
 
 /// Filesystem failure.
@@ -163,10 +162,14 @@ pub trait ClawFile {
 /// Byte-oriented persistence injection point: a filesystem backend that hands out
 /// [`ClawFile`] handles.
 ///
-/// This is a `std::fs`-like HAL: operations are associated functions on the
-/// selected backend type rather than methods on a runtime-owned filesystem
-/// handle. Per-platform state such as mount tables, DATA roots, or test fixtures
-/// lives behind the implementation.
+/// This is a `std::fs`-like HAL owned as a runtime filesystem instance.
+/// Filesystem identity is explicit: stateful implementations such as [`MemFs`]
+/// keep their namespace in the instance, and owners that intentionally share
+/// one instance do so through an [`Arc`].
+///
+/// Implementations must provide any synchronization required for concurrent
+/// calls through `&self`; callers do not wrap the filesystem in a lock.
+/// [`Arc`] is used only when multiple long-lived owners need the same instance.
 ///
 /// Two write disciplines coexist:
 /// - [`open_append`](ClawFs::open_append) +
@@ -184,11 +187,11 @@ pub trait ClawFs: Send + Sync + 'static {
 
     /// Open an existing file for reading. Returns [`FsError::NotFound`] when
     /// `path` is absent.
-    fn open(path: &str) -> Result<Self::File, FsError>;
+    fn open(&self, path: &str) -> Result<Self::File, FsError>;
 
     /// Create (or truncate) `path` for writing, creating parent directories as
     /// needed. The returned handle starts empty at offset 0.
-    fn create(path: &str) -> Result<Self::File, FsError>;
+    fn create(&self, path: &str) -> Result<Self::File, FsError>;
 
     /// Open `path` for appending, creating it (and parents) if absent.
     ///
@@ -196,7 +199,7 @@ pub trait ClawFs: Send + Sync + 'static {
     /// prior records are never rewritten. A crash mid-append may leave a torn
     /// trailing record, which readers discard; it must never corrupt earlier
     /// records.
-    fn open_append(path: &str) -> Result<Self::File, FsError>;
+    fn open_append(&self, path: &str) -> Result<Self::File, FsError>;
 
     /// Rename `from` to `to`, replacing `to` if it exists. Returns
     /// [`FsError::NotFound`] when `from` is absent.
@@ -204,7 +207,7 @@ pub trait ClawFs: Send + Sync + 'static {
     /// This is the atomic-replace primitive behind
     /// [`write_atomic`](Self::write_atomic): a crash mid-rename leaves either the
     /// old target or the new one, never a torn mix.
-    fn rename(from: &str, to: &str) -> Result<(), FsError>;
+    fn rename(&self, from: &str, to: &str) -> Result<(), FsError>;
 
     /// Recursively create directory `path`, including any missing parents.
     ///
@@ -213,14 +216,14 @@ pub trait ClawFs: Send + Sync + 'static {
     /// no-op — their directories exist implicitly the moment a file is written
     /// beneath them, and [`list_dir`](ClawFs::list_dir) on such a path already
     /// reports an empty listing rather than [`FsError::NotFound`].
-    fn create_dir_all(path: &str) -> Result<(), FsError>;
+    fn create_dir_all(&self, path: &str) -> Result<(), FsError>;
 
     /// Whether `path` currently exists.
-    fn exists(path: &str) -> bool;
+    fn exists(&self, path: &str) -> bool;
 
     /// Remove a file or empty directory at `path`. Removing a missing path
     /// succeeds (idempotent).
-    fn remove(path: &str) -> Result<(), FsError>;
+    fn remove(&self, path: &str) -> Result<(), FsError>;
 
     /// List the immediate entry names within directory `path`.
     ///
@@ -228,7 +231,7 @@ pub trait ClawFs: Send + Sync + 'static {
     /// not joined paths, and in unspecified order — callers that need ordering
     /// sort themselves. Both files and subdirectories are included. Returns
     /// [`FsError::NotFound`] when `path` does not exist.
-    fn list_dir(path: &str) -> Result<Vec<String>, FsError>;
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, FsError>;
 
     // ----------------------------------------------------------------------
     // Path-addressed conveniences (default methods over the handle primitives).
@@ -240,25 +243,25 @@ pub trait ClawFs: Send + Sync + 'static {
     // ----------------------------------------------------------------------
 
     /// Read the whole file. Returns [`FsError::NotFound`] when `path` is absent.
-    fn read(path: &str) -> Result<Vec<u8>, FsError> {
-        Self::open(path)?.read_to_end()
+    fn read(&self, path: &str) -> Result<Vec<u8>, FsError> {
+        self.open(path)?.read_to_end()
     }
 
     /// Read `len` bytes starting at byte `offset` (a one-shot
     /// [`open`](Self::open) + [`read_exact_at`](ClawFile::read_exact_at)).
-    fn read_at(path: &str, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
-        Self::open(path)?.read_exact_at(offset, len)
+    fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
+        self.open(path)?.read_exact_at(offset, len)
     }
 
     /// Byte length of `path`. Returns [`FsError::NotFound`] when absent.
-    fn len(path: &str) -> Result<u64, FsError> {
-        Self::open(path)?.size()
+    fn len(&self, path: &str) -> Result<u64, FsError> {
+        self.open(path)?.size()
     }
 
     /// Append `data` to the end of `path`, creating it if absent (a one-shot
     /// [`open_append`](Self::open_append) + [`write_all`](ClawFile::write_all)).
-    fn append(path: &str, data: &[u8]) -> Result<(), FsError> {
-        Self::open_append(path)?.write_all(data)
+    fn append(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
+        self.open_append(path)?.write_all(data)
     }
 
     /// Durably replace `path` with `data`.
@@ -267,12 +270,12 @@ pub trait ClawFs: Send + Sync + 'static {
     /// [`rename`](Self::rename)s it over the target so a crash mid-write never
     /// leaves a half-written file — the file is either the old contents or the
     /// new contents, never a torn mix.
-    fn write_atomic(path: &str, data: &[u8]) -> Result<(), FsError> {
+    fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
         let tmp = format!("{path}.tmp");
         {
-            let mut file = Self::create(&tmp)?;
+            let mut file = self.create(&tmp)?;
             file.write_all(data)?;
         }
-        Self::rename(&tmp, path)
+        self.rename(&tmp, path)
     }
 }

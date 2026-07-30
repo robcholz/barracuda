@@ -55,8 +55,8 @@ pub(in crate::agent) struct LongTermMemoryContextProvider<F: ClawFs + 'static> {
     extractor: Arc<dyn Extractor>,
     /// Rebuilt only when a store version advances.
     catalog: CatalogCache,
-    /// Highest transcript version already handed to extraction.
-    extract_cursor: u64,
+    /// Highest committed-turn version already handed to extraction.
+    extract_turn_cursor: u64,
 }
 
 impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
@@ -70,22 +70,24 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
             stores: MemoryStores { global, agent },
             extractor,
             catalog: CatalogCache::default(),
-            extract_cursor: 0,
+            extract_turn_cursor: 0,
         }
     }
 
     /// Open the shared tier with the provider's canonical ID namespace.
     pub(in crate::agent) fn open_global_store(
+        filesystem: Arc<F>,
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
-        global_store(dir)
+        global_store(filesystem, dir)
     }
 
     /// Open an Agent tier with the provider's canonical ID namespace.
     pub(in crate::agent) fn open_agent_store(
+        filesystem: Arc<F>,
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
-        agent_store(dir)
+        agent_store(filesystem, dir)
     }
 
     /// Build the shared LLM-backed provider constructor used by AgentManager.

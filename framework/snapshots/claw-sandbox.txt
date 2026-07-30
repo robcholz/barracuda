@@ -32,7 +32,7 @@ pub claw_sandbox::sandbox::RealRoots::shared_tmp: &'static str
 pub claw_sandbox::sandbox::RealRoots::system_skills: &'static str
 pub struct claw_sandbox::sandbox::Sandbox<F: claw_interface::fs::ClawFs>
 impl<F: claw_interface::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
-pub fn claw_sandbox::sandbox::Sandbox<F>::new(impl core::convert::Into<alloc::string::String>, claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
+pub fn claw_sandbox::sandbox::Sandbox<F>::new(alloc::sync::Arc<F>, impl core::convert::Into<alloc::string::String>, claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
 impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, &str, &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>
@@ -53,7 +53,7 @@ pub claw_sandbox::RealRoots::shared_tmp: &'static str
 pub claw_sandbox::RealRoots::system_skills: &'static str
 pub struct claw_sandbox::Sandbox<F: claw_interface::fs::ClawFs>
 impl<F: claw_interface::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
-pub fn claw_sandbox::sandbox::Sandbox<F>::new(impl core::convert::Into<alloc::string::String>, claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
+pub fn claw_sandbox::sandbox::Sandbox<F>::new(alloc::sync::Arc<F>, impl core::convert::Into<alloc::string::String>, claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
 impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, &str, &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>

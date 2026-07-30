@@ -82,10 +82,10 @@ pub enum AgentError {
 
 /// A ready-to-drive agent runtime.
 ///
-/// The `Filesystem`/`Http`/`Timer` backends select which concrete filesystem,
-/// HTTP, and timer the core runtime worker uses; they are only needed at
-/// construction, so they are held as a marker (the built [`AgentRuntime`] handle
-/// is backend-erased and `Send + Sync`).
+/// The `Filesystem`/`Http`/`Timer` parameters record which concrete backends the
+/// core runtime worker owns. The backend-erased [`AgentRuntime`] handle retains
+/// the actual filesystem instance; this marker only preserves the public
+/// `AgentSystem` type relationship.
 type BackendMarker<Filesystem, Http, Timer> = PhantomData<fn() -> (Filesystem, Http, Timer)>;
 
 pub struct AgentSystem<Filesystem, Http, Timer>
@@ -110,18 +110,26 @@ where
     /// host, `EspIdfThread` on device) and driving its `!Send` engine with the
     /// injected [`ClawExecutor`] `Executor` (`TokioExecutor` on host,
     /// `EspIdfExecutor` on device).
-    /// Both are zero-sized policies selected purely by type parameter, like the
-    /// `Filesystem`/`Http`/`Timer` backends.
+    /// `Thread` and `Executor` are policies selected purely by type parameter.
+    /// `filesystem` is a concrete instance moved into the runtime and shared by
+    /// the storage components it constructs.
     ///
     /// # Errors
     ///
     /// Returns [`AgentError`] when storage cleanup or runtime construction fails.
-    pub fn new<Thread, Executor>(persistence: AgentPersistenceConfig) -> AgentResult<Self>
+    pub fn new<Thread, Executor>(
+        filesystem: Filesystem,
+        persistence: AgentPersistenceConfig,
+    ) -> AgentResult<Self>
     where
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        Self::with_tool_groups::<Thread, Executor>(persistence, std::iter::empty::<ToolGroup>())
+        Self::with_tool_groups::<Thread, Executor>(
+            filesystem,
+            persistence,
+            std::iter::empty::<ToolGroup>(),
+        )
     }
 
     /// Build a fully injectable agent system with its initial tool groups.
@@ -135,6 +143,7 @@ where
     /// Returns [`AgentError`] when persistence, tool registration, or runtime
     /// construction fails.
     pub fn with_tool_groups<Thread, Executor>(
+        filesystem: Filesystem,
         persistence: AgentPersistenceConfig,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
     ) -> AgentResult<Self>
@@ -142,13 +151,17 @@ where
         Thread: ClawThread,
         Executor: ClawExecutor + 'static,
     {
-        let shared_persistence: SharedPersistence<Filesystem> =
-            Arc::new(Persistence::new(persistence.persistence_root.clone())?);
+        let filesystem = Arc::new(filesystem);
+        let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
+            Arc::clone(&filesystem),
+            persistence.persistence_root.clone(),
+        )?);
         let tools = Arc::new(ToolRegistry::new(Arc::clone(&shared_persistence))?);
         for group in tool_groups {
             tools.register_group(group)?;
         }
         let runtime = AgentRuntime::new::<Filesystem, Http, Timer, Thread, Executor>(
+            filesystem,
             Arc::clone(&tools),
             shared_persistence,
             persistence.persistence_root,

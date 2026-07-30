@@ -83,7 +83,9 @@ fn subagent_lifecycle_csv_matrix_drives_background_results_and_graph_updates() {
         install_case(fixture.clone(), SpawnMode::Detached);
 
         let root = mem_root("subagent-lifecycle");
-        let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+        let system =
+            SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root))
+                .unwrap();
         system
             .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
@@ -164,7 +166,8 @@ fn subagent_run_returns_the_child_result_to_the_same_tool_call_and_turn() {
     install_case(fixture.clone(), SpawnMode::Joined);
 
     let root = mem_root("subagent-foreground");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -215,7 +218,8 @@ fn subagent_run_child_approval_resumes_the_child_without_entering_either_transcr
     install_approval_case();
 
     let root = mem_root("subagent-foreground-approval");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -283,7 +287,8 @@ fn subagent_run_child_timeout_cancels_its_pending_approval_and_resumes_the_root(
     install_approval_case();
 
     let root = mem_root("subagent-approval-timeout");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -324,7 +329,8 @@ fn a_user_turn_can_run_while_a_background_subagent_is_still_working() {
     install_background_concurrency_case();
 
     let root = mem_root("subagent-background-concurrency");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -370,7 +376,8 @@ fn completed_background_child_is_removed_before_its_detached_result_enters_conte
     install_pending_delivery_inspection_case();
 
     let root = mem_root("subagent-pending-delivery-inspection");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -399,7 +406,8 @@ fn cancelled_subagent_run_deletes_its_subagent() {
     let control_name = "cancel";
     install_control_case(control_name);
     let root = mem_root("subagent-turn-control");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -438,7 +446,8 @@ fn subagent_run_timeout_fails_the_tool_call_and_deletes_the_subtree() {
     install_timeout_case(SpawnMode::Joined);
 
     let root = mem_root("subagent-foreground-timeout");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -468,7 +477,8 @@ fn background_timeout_reports_a_failed_subagent_turn_and_deletes_the_subtree() {
     install_timeout_case(SpawnMode::Detached);
 
     let root = mem_root("subagent-background-timeout");
-    let system = SubagentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        SubagentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 claw-agent = { path = "../../crates/claw-agent" }
 claw-interface = { path = "../../crates/claw-interface", features = [
-    "memfs",
     "httpmock",
     "timermock",
     "stdthread",

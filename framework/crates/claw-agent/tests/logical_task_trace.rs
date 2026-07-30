@@ -158,10 +158,13 @@ fn line_type(line: &str) -> Option<&str> {
 
 fn build_trace_system(root: &str, bodies: Vec<String>) -> TraceAgentSystem {
     install_script(bodies);
-    let system = TraceAgentSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
-        persistence_root: root.to_string(),
-        skill_roots: Vec::new(),
-    })
+    let system = TraceAgentSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        AgentPersistenceConfig {
+            persistence_root: root.to_string(),
+            skill_roots: Vec::new(),
+        },
+    )
     .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)

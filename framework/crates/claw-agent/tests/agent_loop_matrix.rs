@@ -798,6 +798,7 @@ fn build_matrix_system_with_tool_groups(
     tool_groups: impl IntoIterator<Item = ToolGroup>,
 ) -> MatrixAgentSystem {
     let system = MatrixAgentSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        MemFs::new(),
         persistence(root),
         tool_groups,
     )

@@ -61,10 +61,10 @@ fn public_registry_trait_drives_skill_set() {
 
 #[test]
 fn registry_parses_master_front_matter_shape() {
-    let _fs = MemFs::new();
-    write_skill("x", &skill_md("x"));
+    let filesystem = Arc::new(MemFs::new());
+    write_skill(filesystem.as_ref(), "x", &skill_md("x"));
 
-    let registry = Arc::new(FsSkillRegistry::<MemFs>::new().set_root("skills").unwrap());
+    let registry = Arc::new(FsSkillRegistry::new(filesystem).set_root("skills").unwrap());
     let mut skills = registry.skill_set();
     let catalog: serde_json::Value = serde_json::from_str(skills.list_skill().unwrap()).unwrap();
     let rows = catalog.as_array().unwrap();
@@ -85,37 +85,37 @@ fn registry_parses_master_front_matter_shape() {
 
 #[test]
 fn missing_opening_fence_errors() {
-    let _fs = MemFs::new();
-    write_skill("x", "no front matter");
+    let filesystem = MemFs::new();
+    write_skill(&filesystem, "x", "no front matter");
 
-    let error = registry_error();
+    let error = registry_error(filesystem);
     assert!(matches!(error, SkillError::MissingOpeningFence(_)));
 }
 
 #[test]
 fn missing_close_fence_errors() {
-    let _fs = MemFs::new();
-    write_skill("x", "---\n{}\n");
+    let filesystem = MemFs::new();
+    write_skill(&filesystem, "x", "---\n{}\n");
 
-    let error = registry_error();
+    let error = registry_error(filesystem);
     assert!(matches!(error, SkillError::MissingClosingFence(_)));
 }
 
 #[test]
 fn invalid_json_errors() {
-    let _fs = MemFs::new();
-    write_skill("x", "---\nnot json\n---\nbody");
+    let filesystem = MemFs::new();
+    write_skill(&filesystem, "x", "---\nnot json\n---\nbody");
 
-    let error = registry_error();
+    let error = registry_error(filesystem);
     assert!(matches!(error, SkillError::InvalidJson(_, _)));
 }
 
 #[test]
 fn front_matter_name_must_match_directory() {
-    let _fs = MemFs::new();
-    write_skill("x", &skill_md("other"));
+    let filesystem = MemFs::new();
+    write_skill(&filesystem, "x", &skill_md("other"));
 
-    let error = registry_error();
+    let error = registry_error(filesystem);
     assert!(matches!(error, SkillError::InvalidFrontmatter(_, _)));
 }
 
@@ -137,12 +137,14 @@ fn skill_manage_mode_uses_canonical_labels_and_aliases() {
     );
 }
 
-fn write_skill(id: &str, document: &str) {
-    MemFs::write_atomic(&format!("skills/{id}/SKILL.md"), document.as_bytes()).unwrap();
+fn write_skill(filesystem: &MemFs, id: &str, document: &str) {
+    filesystem
+        .write_atomic(&format!("skills/{id}/SKILL.md"), document.as_bytes())
+        .unwrap();
 }
 
-fn registry_error() -> SkillError {
-    match FsSkillRegistry::<MemFs>::new().set_root("skills") {
+fn registry_error(filesystem: MemFs) -> SkillError {
+    match FsSkillRegistry::new(Arc::new(filesystem)).set_root("skills") {
         Ok(_) => panic!("registry load should fail"),
         Err(error) => error,
     }

@@ -22,16 +22,14 @@ crate-type = ["rlib"]
 # Nothing is enabled by default so pure core/device crates only see the traits.
 default = []
 host-backends = ["diskfs", "realhttp", "stdthread", "tokiotimer", "tokioexecutor"]
-test-doubles = ["memfs", "httpmock", "timermock"]
+test-doubles = ["httpmock", "timermock"]
 
-# - `memfs`:        in-memory test double (no extra deps).
 # - `diskfs`:       `std::fs` backend for host CLIs and disk-backed tests.
 # - `diskfs-pretty`: pretty-print `.json` writes via serde_json (implies diskfs).
 # - `httpmock`:     scripted / failing / never-called ClawHttp test doubles.
 # - `timermock`:    immediate/yielding ClawTimer test doubles.
 # - `realhttp`:     reqwest ClawHttp and blocking::ClawHttp backends for host CLIs / live tests.
 # - `tokiotimer`:   tokio-backed ClawTimer for host async clients.
-memfs = []
 diskfs = []
 diskfs-pretty = ["diskfs", "dep:serde_json"]
 httpmock = ["dep:serde_json"]

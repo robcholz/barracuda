@@ -84,6 +84,7 @@ impl AgentRuntime {
     /// Returns [`AgentRuntimeBuildError`] when persistent state cannot be
     /// restored or the worker cannot be started.
     pub fn new<Filesystem, Http, Timer, Thread, Executor>(
+        filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
@@ -109,6 +110,7 @@ impl AgentRuntime {
             CoreAffinity::Any,
             move || {
                 run_runtime_worker::<Filesystem, Http, Timer, Executor>(
+                    filesystem,
                     tool_registry,
                     persistence,
                     persistence_dir,

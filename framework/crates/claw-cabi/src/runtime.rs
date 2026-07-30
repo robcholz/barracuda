@@ -333,8 +333,11 @@ fn build_agent(
     persistence: AgentPersistenceConfig,
 ) -> Result<DeviceAgent, CabiError> {
     let tool_groups = capability_tool_groups(RUST_OWNED_CAPABILITY_GROUPS)?;
-    let agent =
-        DeviceAgent::with_tool_groups::<EspIdfThread, EspIdfExecutor>(persistence, tool_groups)?;
+    let agent = DeviceAgent::with_tool_groups::<EspIdfThread, EspIdfExecutor>(
+        EspIdfFs,
+        persistence,
+        tool_groups,
+    )?;
     if let Some(api) = api {
         agent.link_api(api, ApiPurpose::RootAgent, true)?;
     }

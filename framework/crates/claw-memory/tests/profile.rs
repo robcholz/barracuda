@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use claw_interface::{ClawFs, MemFs};
 use claw_memory::{
     ProfileDocument, ProfileError, ProfileStore, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES,
@@ -46,8 +48,8 @@ fn rejects_too_large_document() {
 
 #[test]
 fn invalid_utf8_is_an_error() {
-    let store = store();
-    MemFs::write_atomic("/memory/soul.md", &[0xff]).unwrap();
+    let (filesystem, store) = store_with_fs();
+    filesystem.write_atomic("/memory/soul.md", &[0xff]).unwrap();
     let error = store.read(ProfileDocument::Soul).unwrap_err();
     assert!(matches!(error, ProfileError::InvalidUtf8 { .. }));
 }
@@ -79,6 +81,11 @@ fn document_ids_use_canonical_labels() {
 }
 
 fn store() -> ProfileStore<MemFs> {
-    MemFs::new();
-    ProfileStore::new("/memory")
+    store_with_fs().1
+}
+
+fn store_with_fs() -> (Arc<MemFs>, ProfileStore<MemFs>) {
+    let filesystem = Arc::new(MemFs::new());
+    let store = ProfileStore::new(Arc::clone(&filesystem), "/memory");
+    (filesystem, store)
 }

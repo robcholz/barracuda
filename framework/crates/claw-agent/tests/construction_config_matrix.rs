@@ -26,11 +26,12 @@ static CONSTRUCTION_REQUESTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 #[test]
 fn turn_without_linked_api_reports_not_configured() {
-    MemFs::new();
     let root = mem_root("construction-without-api");
-    let system =
-        MemConstructionSystem::new::<StdThread, TokioExecutor>(mem_persistence(&root, "none"))
-            .unwrap();
+    let system = MemConstructionSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        mem_persistence(&root, "none"),
+    )
+    .unwrap();
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
@@ -67,7 +68,6 @@ fn construction_csv_config_matrix_validates_llm_config_and_skill_roots() {
 
         match field(&row, "fs") {
             "mem" => {
-                MemFs::new();
                 let root = mem_root("construction-config");
                 let persistence = mem_persistence(&root, field(&row, "skill_roots_mode"));
                 assert_construction_case::<MemConstructionSystem>(
@@ -98,11 +98,12 @@ fn construction_csv_config_matrix_validates_llm_config_and_skill_roots() {
 #[test]
 #[cfg(not(feature = "multiagent"))]
 fn compile_time_disabled_multiagent_omits_subagent_tools() {
-    MemFs::new();
     let root = mem_root("construction-no-multiagent");
-    let system =
-        MemConstructionSystem::new::<StdThread, TokioExecutor>(mem_persistence(&root, "none"))
-            .unwrap();
+    let system = MemConstructionSystem::new::<StdThread, TokioExecutor>(
+        MemFs::new(),
+        mem_persistence(&root, "none"),
+    )
+    .unwrap();
     system
         .link_api(
             ClawApiConfig::new(
@@ -182,7 +183,7 @@ impl ConstructionSystem for MemConstructionSystem {
         config: ClawApiConfig,
         persistence: AgentPersistenceConfig,
     ) -> Result<Self, claw_agent::AgentError> {
-        let system = Self::new::<StdThread, TokioExecutor>(persistence)?;
+        let system = Self::new::<StdThread, TokioExecutor>(MemFs::new(), persistence)?;
         system.link_api(config, claw_agent::ApiPurpose::RootAgent, true)?;
         Ok(system)
     }
@@ -205,7 +206,7 @@ impl ConstructionSystem for DiskConstructionSystem {
         config: ClawApiConfig,
         persistence: AgentPersistenceConfig,
     ) -> Result<Self, claw_agent::AgentError> {
-        let system = Self::new::<StdThread, TokioExecutor>(persistence)?;
+        let system = Self::new::<StdThread, TokioExecutor>(DiskFs::absolute(), persistence)?;
         system.link_api(config, claw_agent::ApiPurpose::RootAgent, true)?;
         Ok(system)
     }

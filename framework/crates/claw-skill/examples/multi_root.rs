@@ -6,6 +6,8 @@
 //! Mirrors the firmware layout: user-installed skills under the writable DATA
 //! root can shadow firmware-baked skills under the read-only SYSTEM root.
 
+use std::sync::Arc;
+
 use claw_interface::{ClawFs, MemFs};
 use claw_skill::{FsSkillRegistry, SkillId};
 
@@ -18,18 +20,18 @@ fn skill_md(id: &str, description: &str) -> Vec<u8> {
 
 fn main() -> anyhow::Result<()> {
     // Two distinct roots, each contributing different skills.
-    MemFs::new();
-    MemFs::write_atomic(
+    let filesystem = Arc::new(MemFs::new());
+    filesystem.write_atomic(
         "system/time/SKILL.md",
         &skill_md("time", "Built-in time helper."),
     )?;
-    MemFs::write_atomic(
+    filesystem.write_atomic(
         "data/notes/SKILL.md",
         &skill_md("notes", "User-installed notes skill."),
     )?;
 
-    let registry = std::sync::Arc::new(
-        FsSkillRegistry::<MemFs>::new()
+    let registry = Arc::new(
+        FsSkillRegistry::new(Arc::clone(&filesystem))
             .set_root("data")?
             .set_root("system")?,
     );
@@ -39,13 +41,13 @@ fn main() -> anyhow::Result<()> {
 
     // Now use a collision: the same id `time` exists in both roots, and the
     // earlier DATA root shadows the later SYSTEM root.
-    MemFs::new();
-    MemFs::write_atomic("system/time/SKILL.md", &skill_md("time", "baked"))?;
-    MemFs::write_atomic("data/time/SKILL.md", &skill_md("time", "installed"))?;
+    let filesystem = Arc::new(MemFs::new());
+    filesystem.write_atomic("system/time/SKILL.md", &skill_md("time", "baked"))?;
+    filesystem.write_atomic("data/time/SKILL.md", &skill_md("time", "installed"))?;
 
     println!("\n== scanning roots with a clashing id ==");
-    let registry = std::sync::Arc::new(
-        FsSkillRegistry::<MemFs>::new()
+    let registry = Arc::new(
+        FsSkillRegistry::new(filesystem)
             .set_root("data")?
             .set_root("system")?,
     );

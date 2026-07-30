@@ -893,8 +893,10 @@ async fn run() -> Result<()> {
         required("CLAW_LLM_BASE_URL")?,
     );
     llm_config.timeout_ms = 60_000;
-    let system: ChatSystem =
-        AgentSystem::<DiskFs, RealHttp, TokioTimer>::new::<StdThread, TokioExecutor>(persistence)?;
+    let system: ChatSystem = AgentSystem::<DiskFs, RealHttp, TokioTimer>::new::<
+        StdThread,
+        TokioExecutor,
+    >(DiskFs::absolute(), persistence)?;
     system.link_api(llm_config, ApiPurpose::RootAgent, true)?;
     system.start_all()?;
     let mut chat = None;
@@ -1229,8 +1231,8 @@ mod tests {
             persistence_root: root.path().to_string_lossy().into_owned(),
             skill_roots: Vec::new(),
         };
-        let system =
-            ChatSystem::new::<StdThread, TokioExecutor>(persistence).expect("agent system");
+        let system = ChatSystem::new::<StdThread, TokioExecutor>(DiskFs::absolute(), persistence)
+            .expect("agent system");
         system.start_all().expect("start tools");
         system
     }

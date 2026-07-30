@@ -48,7 +48,7 @@ pub struct claw_persistence::Persistence<Filesystem: claw_interface::fs::ClawFs>
 impl<Filesystem: claw_interface::fs::ClawFs> claw_persistence::Persistence<Filesystem>
 pub fn claw_persistence::Persistence<Filesystem>::collection<T>(&self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<claw_persistence::Collection<'_, Filesystem, T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + core::marker::Send + 'static
 pub fn claw_persistence::Persistence<Filesystem>::maybe_persist(&self) -> core::result::Result<(), claw_persistence::PersistenceError>
-pub fn claw_persistence::Persistence<Filesystem>::new(impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_persistence::PersistenceError>
+pub fn claw_persistence::Persistence<Filesystem>::new(alloc::sync::Arc<Filesystem>, impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_persistence::PersistenceError>
 pub fn claw_persistence::Persistence<Filesystem>::singleton<T>(&self, impl core::convert::Into<alloc::string::String>) -> core::result::Result<claw_persistence::Singleton<'_, Filesystem, T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + core::marker::Send + 'static
 pub struct claw_persistence::Singleton<'a, Filesystem: claw_interface::fs::ClawFs, T>
 impl<Filesystem, T> claw_persistence::Singleton<'_, Filesystem, T> where Filesystem: claw_interface::fs::ClawFs, T: claw_persistence::DurableStateCodec + core::marker::Send + 'static

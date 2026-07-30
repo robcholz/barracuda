@@ -9,7 +9,7 @@
 //! directory whose `skills/` and `tmp/` subdirectories are materialized when the
 //! sandbox is constructed.
 
-use std::marker::PhantomData;
+use std::sync::Arc;
 
 use claw_interface::ClawFs;
 
@@ -49,8 +49,8 @@ struct Route {
 /// Construct with [`Sandbox::new`], then use it through the [`SandboxFs`] trait.
 #[derive(Debug)]
 pub struct Sandbox<F: ClawFs> {
+    filesystem: Arc<F>,
     routes: Vec<Route>,
-    _fs: PhantomData<fn() -> F>,
 }
 
 impl<F: ClawFs> Sandbox<F> {
@@ -64,7 +64,11 @@ impl<F: ClawFs> Sandbox<F> {
     ///
     /// Returns [`SandboxError::Fs`] if materializing the scratch directories
     /// fails.
-    pub fn new(sandbox_host_dir: impl Into<String>, real: RealRoots) -> Result<Self, SandboxError> {
+    pub fn new(
+        filesystem: Arc<F>,
+        sandbox_host_dir: impl Into<String>,
+        real: RealRoots,
+    ) -> Result<Self, SandboxError> {
         let host = trim_trailing_slash(&sandbox_host_dir.into());
         let routes = vec![
             Route {
@@ -93,13 +97,10 @@ impl<F: ClawFs> Sandbox<F> {
                 read_only: true,
             },
         ];
-        let sandbox = Self {
-            routes,
-            _fs: PhantomData,
-        };
+        let sandbox = Self { filesystem, routes };
         for scratch in ["/sandbox/skills", "/sandbox/tmp"] {
             let (_, real_path) = sandbox.route(scratch)?;
-            F::create_dir_all(&real_path)?;
+            sandbox.filesystem.create_dir_all(&real_path)?;
         }
         Ok(sandbox)
     }
@@ -135,42 +136,42 @@ impl<F: ClawFs> Sandbox<F> {
 impl<F: ClawFs> SandboxFs for Sandbox<F> {
     fn read(&self, path: &str) -> Result<Vec<u8>, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(F::read(&real_path)?)
+        Ok(self.filesystem.read(&real_path)?)
     }
 
     fn read_at(&self, path: &str, offset: u64, len: usize) -> Result<Vec<u8>, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(F::read_at(&real_path, offset, len)?)
+        Ok(self.filesystem.read_at(&real_path, offset, len)?)
     }
 
     fn len(&self, path: &str) -> Result<u64, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(F::len(&real_path)?)
+        Ok(self.filesystem.len(&real_path)?)
     }
 
     fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), SandboxError> {
         let real_path = self.route_mut(path)?;
-        Ok(F::write_atomic(&real_path, data)?)
+        Ok(self.filesystem.write_atomic(&real_path, data)?)
     }
 
     fn append(&self, path: &str, data: &[u8]) -> Result<(), SandboxError> {
         let real_path = self.route_mut(path)?;
-        Ok(F::append(&real_path, data)?)
+        Ok(self.filesystem.append(&real_path, data)?)
     }
 
     fn exists(&self, path: &str) -> Result<bool, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(F::exists(&real_path))
+        Ok(self.filesystem.exists(&real_path))
     }
 
     fn remove(&self, path: &str) -> Result<(), SandboxError> {
         let real_path = self.route_mut(path)?;
-        Ok(F::remove(&real_path)?)
+        Ok(self.filesystem.remove(&real_path)?)
     }
 
     fn list_dir(&self, path: &str) -> Result<Vec<String>, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(F::list_dir(&real_path)?)
+        Ok(self.filesystem.list_dir(&real_path)?)
     }
 }
 

@@ -22,7 +22,6 @@ pub use executor::TokioExecutor;
 pub use fs::{ClawFile, ClawFs, FsError, FsIoError};
 #[cfg(feature = "diskfs")]
 pub use fs::{DiskFile, DiskFs};
-#[cfg(feature = "memfs")]
 pub use fs::{MemFile, MemFs};
 #[cfg(feature = "realhttp")]
 pub use http::RealHttp;

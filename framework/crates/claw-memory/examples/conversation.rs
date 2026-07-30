@@ -10,13 +10,15 @@
 //! The store is pure storage — no summarization, no LLM. Persistence is an
 //! in-memory [`MemFs`]; on device the same code runs over the DATA root.
 
+use std::sync::Arc;
+
 use claw_interface::MemFs;
 use claw_memory::{AssistantFinish, TranscriptStore};
 
 fn main() -> anyhow::Result<()> {
     let conversation_id = 42;
-    MemFs::new();
-    let store = TranscriptStore::<MemFs>::new(conversation_id, "/data/conversations")?;
+    let filesystem = Arc::new(MemFs::new());
+    let store = TranscriptStore::<MemFs>::new(filesystem, conversation_id, "/data/conversations")?;
 
     // One handle owns the turn and commits it as one record on drop.
     {

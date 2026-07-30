@@ -143,6 +143,7 @@ pub fn try_build_mem_system_with_tool_groups(
 ) -> Result<MemAgentSystem, AgentError> {
     install_script(bodies);
     let system = MemAgentSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        MemFs::new(),
         persistence(root),
         tool_groups,
     )?;
@@ -173,12 +174,7 @@ pub fn drain_until_turn_ended(events: &mut SessionStream) -> Vec<SessionEvent> {
 }
 
 pub fn install_script(bodies: Vec<String>) {
-    let mut script = Vec::with_capacity(bodies.len().saturating_add(1));
-    if !bodies.is_empty() {
-        script.push(assistant_text("[]"));
-    }
-    script.extend(bodies);
-    SharedScriptHttp::install(script);
+    SharedScriptHttp::install(bodies);
 }
 
 pub fn persistence(root: &str) -> AgentPersistenceConfig {

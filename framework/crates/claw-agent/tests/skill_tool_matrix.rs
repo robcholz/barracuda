@@ -42,10 +42,13 @@ fn skill_tools_csv_matrix_scans_roots_reloads_and_activates_documents() {
         materialize_root(&runtime_root);
 
         install_case(fixture.clone());
-        let system = SkillToolSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
-            persistence_root,
-            skill_roots: vec![data_root.clone(), system_root.clone(), runtime_root.clone()],
-        })
+        let system = SkillToolSystem::new::<StdThread, TokioExecutor>(
+            DiskFs::absolute(),
+            AgentPersistenceConfig {
+                persistence_root,
+                skill_roots: vec![data_root.clone(), system_root.clone(), runtime_root.clone()],
+            },
+        )
         .unwrap();
         system
             .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
@@ -245,11 +248,13 @@ fn write_skill(root: &str, id: &str, description: &str, manage_mode: &str, body:
         }),
         body
     );
-    DiskFs::write_atomic(&format!("{root}/{id}/SKILL.md"), document.as_bytes()).unwrap();
+    DiskFs::absolute()
+        .write_atomic(&format!("{root}/{id}/SKILL.md"), document.as_bytes())
+        .unwrap();
 }
 
 fn materialize_root(root: &str) {
-    DiskFs::create_dir_all(root).unwrap();
+    DiskFs::absolute().create_dir_all(root).unwrap();
 }
 
 fn assistant_tool_calls(calls: Vec<Value>) -> String {

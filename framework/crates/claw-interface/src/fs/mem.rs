@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -6,26 +5,18 @@ use super::{ClawFile, ClawFs, FsError};
 
 type Files = Arc<Mutex<HashMap<String, Vec<u8>>>>;
 
-thread_local! {
-    static FILES: RefCell<Files> = RefCell::new(Arc::new(Mutex::new(HashMap::new())));
-}
-
-/// In-memory [`ClawFs`] backed by a thread-local path → bytes map.
+/// In-memory [`ClawFs`] backed by a shared path → bytes map.
 ///
-/// `MemFs` is a backend type, not a storage handle. [`MemFs::new`] resets the
-/// current thread's test fixture and returns the zero-sized selector. File
-/// handles keep an `Arc` to the fixture they were opened against, so already
-/// opened handles remain valid even if a later test reset installs a fresh
-/// fixture.
-///
-/// Hermetic per test thread, so host tests can exercise persistence without
-/// touching the real filesystem.
+/// Each [`MemFs::new`] creates an independent namespace. The filesystem itself
+/// is deliberately not [`Clone`]; owners that intentionally share one instance
+/// do so explicitly through an [`Arc`]. Dropping the last filesystem or open
+/// file handle releases every file.
 /// `list_dir` derives entries from the key prefixes, mirroring a real
 /// directory tree.
-///
-/// [`DiskFs`]: super::DiskFs
-#[derive(Debug, Clone, Copy)]
-pub struct MemFs;
+#[derive(Debug)]
+pub struct MemFs {
+    files: Files,
+}
 
 impl Default for MemFs {
     fn default() -> Self {
@@ -36,22 +27,14 @@ impl Default for MemFs {
 impl MemFs {
     /// An empty filesystem.
     pub fn new() -> Self {
-        FILES.with(|slot| *slot.borrow_mut() = Arc::new(Mutex::new(HashMap::new())));
-        Self
+        Self {
+            files: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    /// Clear the current thread's in-memory filesystem fixture.
-    pub fn clear() {
-        FILES.with(|slot| {
-            slot.borrow()
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clear();
-        });
-    }
-
-    fn files() -> Files {
-        FILES.with(|slot| Arc::clone(&slot.borrow()))
+    /// Remove every file from this namespace.
+    pub fn clear(&self) {
+        Self::lock(&self.files).clear();
     }
 
     fn lock(files: &Files) -> MutexGuard<'_, HashMap<String, Vec<u8>>> {
@@ -119,8 +102,8 @@ impl ClawFile for MemFile {
 impl ClawFs for MemFs {
     type File = MemFile;
 
-    fn open(path: &str) -> Result<Self::File, FsError> {
-        let files = Self::files();
+    fn open(&self, path: &str) -> Result<Self::File, FsError> {
+        let files = Arc::clone(&self.files);
         if Self::lock(&files).contains_key(path) {
             Ok(MemFile {
                 files,
@@ -131,8 +114,8 @@ impl ClawFs for MemFs {
         }
     }
 
-    fn create(path: &str) -> Result<Self::File, FsError> {
-        let files = Self::files();
+    fn create(&self, path: &str) -> Result<Self::File, FsError> {
+        let files = Arc::clone(&self.files);
         // Truncate: an empty entry that subsequent `write_all`s extend.
         Self::lock(&files).insert(path.to_string(), Vec::new());
         Ok(MemFile {
@@ -141,8 +124,8 @@ impl ClawFs for MemFs {
         })
     }
 
-    fn open_append(path: &str) -> Result<Self::File, FsError> {
-        let files = Self::files();
+    fn open_append(&self, path: &str) -> Result<Self::File, FsError> {
+        let files = Arc::clone(&self.files);
         Self::lock(&files).entry(path.to_string()).or_default();
         Ok(MemFile {
             files,
@@ -150,37 +133,37 @@ impl ClawFs for MemFs {
         })
     }
 
-    fn rename(from: &str, to: &str) -> Result<(), FsError> {
-        let files = Self::files();
+    fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
+        let files = Arc::clone(&self.files);
         let mut files = Self::lock(&files);
         let bytes = files.remove(from).ok_or(FsError::NotFound)?;
         files.insert(to.to_string(), bytes);
         Ok(())
     }
 
-    fn create_dir_all(_path: &str) -> Result<(), FsError> {
+    fn create_dir_all(&self, _path: &str) -> Result<(), FsError> {
         // Flat key→bytes map: directories are implicit in key prefixes, so
         // there is nothing to materialize. `list_dir` of an empty prefix
         // already returns an empty listing.
         Ok(())
     }
 
-    fn exists(path: &str) -> bool {
-        let files = Self::files();
+    fn exists(&self, path: &str) -> bool {
+        let files = Arc::clone(&self.files);
         let exists = Self::lock(&files).contains_key(path);
         exists
     }
 
-    fn remove(path: &str) -> Result<(), FsError> {
-        let files = Self::files();
+    fn remove(&self, path: &str) -> Result<(), FsError> {
+        let files = Arc::clone(&self.files);
         Self::lock(&files).remove(path);
         Ok(())
     }
 
-    fn list_dir(path: &str) -> Result<Vec<String>, FsError> {
+    fn list_dir(&self, path: &str) -> Result<Vec<String>, FsError> {
         let prefix = format!("{}/", path.trim_end_matches('/'));
         let mut names = BTreeSet::new();
-        let files = Self::files();
+        let files = Arc::clone(&self.files);
         for key in Self::lock(&files).keys() {
             if let Some(rest) = key.strip_prefix(&prefix) {
                 if let Some(name) = rest.split('/').next().filter(|name| !name.is_empty()) {
@@ -189,5 +172,28 @@ impl ClawFs for MemFs {
             }
         }
         Ok(names.into_iter().collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filesystem_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<MemFs>();
+    }
+
+    #[test]
+    fn new_instances_have_independent_namespaces() {
+        let first = MemFs::new();
+        let second = MemFs::new();
+
+        first.write_atomic("/state", b"first").unwrap();
+
+        assert_eq!(first.read("/state").unwrap(), b"first");
+        assert_eq!(second.read("/state"), Err(FsError::NotFound));
     }
 }

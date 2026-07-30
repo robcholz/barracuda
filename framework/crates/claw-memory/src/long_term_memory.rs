@@ -33,7 +33,6 @@
 //! handle. The store itself is thread-safe; higher layers decide whether a
 //! particular extraction or tool path is local or worker-driven.
 
-use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
@@ -229,17 +228,18 @@ struct State {
 }
 
 struct Inner<F: ClawFs + 'static> {
+    filesystem: Arc<F>,
     path: String,
     id_prefix: String,
-    _fs: PhantomData<fn() -> F>,
     state: Mutex<State>,
 }
 
 /// A durable, label-indexed store of distilled facts. See the module docs for
 /// the storage layout and concurrency model.
 ///
-/// Cheap to [`Clone`] (clones the `Arc`, not the backend); every clone refers to
-/// the same store, so context providers and memory tools share one live view.
+/// Cheap to [`Clone`] (clones the store `Arc`, not the filesystem); every clone
+/// refers to the same store, so context providers and memory tools share one
+/// live view.
 ///
 /// # Examples
 ///
@@ -247,8 +247,8 @@ struct Inner<F: ClawFs + 'static> {
 /// use claw_interface::MemFs;
 /// use claw_memory::{LongTermMemory, MemoryDraft, StoreOutcome};
 ///
-/// # MemFs::new();
-/// let memory = LongTermMemory::<MemFs>::new("/m", "g-")
+/// # let filesystem = std::sync::Arc::new(MemFs::new());
+/// let memory = LongTermMemory::<MemFs>::new(filesystem, "/m", "g-")
 ///     .expect("a fresh MemFs has no journal, so the store starts empty");
 ///
 /// // Store a fact tagged `preference`, then recall by that label.
@@ -287,20 +287,22 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
     /// [`LongTermInitError::Unreadable`] when the journal exists but cannot be
     /// read — a genuine I/O failure is never silently mistaken for an empty
     /// store. A *missing* journal is not an error: the store starts empty.
-    pub fn new(dir: &str, id_prefix: &str) -> Result<Self, LongTermInitError> {
+    pub fn new(filesystem: Arc<F>, dir: &str, id_prefix: &str) -> Result<Self, LongTermInitError> {
         let path = journal_path(dir);
-        if let Err(error) = F::create_dir_all(dir) {
+        if let Err(error) = filesystem.create_dir_all(dir) {
             log::warn!("long-term memory {dir}: create dir failed: {error}");
         }
-        let state = load_state::<F>(&path).map_err(|source| LongTermInitError::Unreadable {
-            path: path.clone(),
-            source,
+        let state = load_state(filesystem.as_ref(), &path).map_err(|source| {
+            LongTermInitError::Unreadable {
+                path: path.clone(),
+                source,
+            }
         })?;
         Ok(Self {
             inner: Arc::new(Inner {
+                filesystem,
                 path,
                 id_prefix: id_prefix.to_string(),
-                _fs: PhantomData,
                 state: Mutex::new(state),
             }),
         })
@@ -473,7 +475,7 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
         let mut line = serde_json::to_vec(record)
             .map_err(|error| FsError::io(LongTermPersistError::SerializeRecord(error)))?;
         line.push(b'\n');
-        F::append(&self.inner.path, &line)
+        self.inner.filesystem.append(&self.inner.path, &line)
     }
 
     /// Rewrite the journal from the live set when dead lines pass the threshold.
@@ -502,7 +504,11 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
                 }
             }
         }
-        match F::write_atomic(&self.inner.path, &buffer) {
+        match self
+            .inner
+            .filesystem
+            .write_atomic(&self.inner.path, &buffer)
+        {
             Ok(()) => {
                 state.dead = 0;
                 state.last_persist_error = None;
@@ -529,9 +535,9 @@ fn journal_path(dir: &str) -> String {
 /// read failure is returned as an error so a genuine I/O fault is not silently
 /// mistaken for an empty store. A torn trailing line (crash mid-append) still
 /// fails to parse and is skipped without aborting the replay.
-fn load_state<F: ClawFs>(path: &str) -> Result<State, FsError> {
+fn load_state<F: ClawFs>(filesystem: &F, path: &str) -> Result<State, FsError> {
     let mut state = State::default();
-    let bytes = match F::read(path) {
+    let bytes = match filesystem.read(path) {
         Ok(bytes) => bytes,
         Err(FsError::NotFound) => return Ok(state),
         Err(error) => return Err(error),

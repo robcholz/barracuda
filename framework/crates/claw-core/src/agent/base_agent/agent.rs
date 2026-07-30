@@ -833,7 +833,8 @@ mod tests {
 
     #[test]
     fn streamed_output_reaches_the_transcript_before_progress() {
-        let transcript = TranscriptStore::<MemFs>::in_memory(1);
+        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
+            .expect("in-memory transcript opens");
         let mut turn = transcript.open_turn().expect("turn opens");
         turn.append_user("hello").expect("user fragment appends");
         turn.finish_user().expect("user message finishes");
@@ -881,7 +882,8 @@ mod tests {
 
     #[test]
     fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
-        let transcript = TranscriptStore::<MemFs>::in_memory(2);
+        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 2, "/transcript")
+            .expect("in-memory transcript opens");
         let mut turn = transcript.open_turn().expect("turn opens");
         turn.append_user("hello").expect("user fragment appends");
         turn.finish_user().expect("user message finishes");

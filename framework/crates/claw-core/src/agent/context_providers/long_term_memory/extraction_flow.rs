@@ -7,26 +7,26 @@ use super::{
     ExtractionInput, LongTermMemoryContextProvider, LongTermMemoryProviderError, MemoryOp,
 };
 
-/// Extraction throttle: after the first extraction, the transcript version must
-/// advance by at least this much before the next extraction runs.
-const EXTRACT_MIN_VERSION_DELTA: u64 = 8;
+/// Extraction throttle: after the first extraction, the transcript must commit
+/// at least this many additional turns before the next extraction runs.
+const EXTRACT_MIN_TURN_DELTA: u64 = 8;
 
 impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
     /// Run extraction when the transcript has advanced.
     ///
     /// Pull, not push: called from `prepare` at the iteration boundary, it self-detects
-    /// new conversation via the transcript version. Store dedup absorbs facts
-    /// re-extracted across turns.
+    /// new committed conversation turns via the transcript turn version. Store
+    /// dedup absorbs facts re-extracted across turns.
     pub(super) async fn maybe_schedule_extraction(
         &mut self,
         transcript: &dyn Transcript,
     ) -> Result<(), LongTermMemoryProviderError> {
-        let version = transcript.version();
-        if version == self.extract_cursor {
+        let turn_version = transcript.turn_version();
+        if turn_version == self.extract_turn_cursor {
             return Ok(()); // transcript unchanged since the last extraction
         }
-        if self.extract_cursor != 0
-            && version.saturating_sub(self.extract_cursor) < EXTRACT_MIN_VERSION_DELTA
+        if self.extract_turn_cursor != 0
+            && turn_version.saturating_sub(self.extract_turn_cursor) < EXTRACT_MIN_TURN_DELTA
         {
             return Ok(());
         }
@@ -36,8 +36,8 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
         if transcript.trim().is_empty() {
             return Ok(());
         }
-        let version_delta = version.saturating_sub(self.extract_cursor);
-        self.extract_cursor = version;
+        let turn_version_delta = turn_version.saturating_sub(self.extract_turn_cursor);
+        self.extract_turn_cursor = turn_version;
         let existing = self.stores.snapshot();
         let input = ExtractionInput {
             transcript: &transcript,
@@ -45,8 +45,8 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
         };
         let span = tracing::info_span!(
             "context.extract",
-            transcript_version = version,
-            version_delta,
+            transcript_turn_version = turn_version,
+            turn_version_delta,
             transcript_bytes = transcript.len() as u64,
             existing_count = existing.len() as u64,
         );

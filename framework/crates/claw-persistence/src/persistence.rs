@@ -53,7 +53,7 @@ pub struct Persistence<Filesystem: ClawFs> {
     entry_types: Mutex<HashMap<EntryKey, RegisteredEntryType>>,
     parts: Mutex<HashMap<StateAddress, Arc<dyn RegisteredPart>>>,
     operation_lock: Mutex<()>,
-    filesystem: PhantomData<Filesystem>,
+    filesystem: Arc<Filesystem>,
 }
 
 /// One typed singleton entry.
@@ -72,26 +72,31 @@ pub struct Collection<'a, Filesystem: ClawFs, T> {
 
 impl<Filesystem: ClawFs> Persistence<Filesystem> {
     /// Create a persistence registry rooted at `persistence_directory`.
-    pub fn new(persistence_directory: impl Into<String>) -> Result<Self, PersistenceError> {
+    pub fn new(
+        filesystem: Arc<Filesystem>,
+        persistence_directory: impl Into<String>,
+    ) -> Result<Self, PersistenceError> {
         let persistence_directory = persistence_directory.into();
         if persistence_directory.trim().is_empty() {
             return Err(PersistenceError::EmptyDirectory);
         }
 
-        Filesystem::create_dir_all(&persistence_directory).map_err(|source| {
-            PersistenceError::storage(
-                "create persistence directory",
-                persistence_directory.clone(),
-                source,
-            )
-        })?;
+        filesystem
+            .create_dir_all(&persistence_directory)
+            .map_err(|source| {
+                PersistenceError::storage(
+                    "create persistence directory",
+                    persistence_directory.clone(),
+                    source,
+                )
+            })?;
 
         Ok(Self {
             persistence_directory,
             entry_types: Mutex::new(HashMap::new()),
             parts: Mutex::new(HashMap::new()),
             operation_lock: Mutex::new(()),
-            filesystem: PhantomData,
+            filesystem,
         })
     }
 
@@ -151,7 +156,8 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
                 PartStatus::Clean => {}
                 PartStatus::Dirty(snapshot) => {
                     let file = encode_file(snapshot.schema_version, snapshot.state);
-                    Filesystem::write_atomic(&path, &file)
+                    self.filesystem
+                        .write_atomic(&path, &file)
                         .map_err(|source| PersistenceError::storage("write state", path, source))?;
                     part.mark_persisted(snapshot.generation);
                 }
@@ -204,7 +210,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     {
         let _operation = lock(&self.operation_lock);
         let path = self.state_path(address);
-        let file = match Filesystem::read(&path) {
+        let file = match self.filesystem.read(&path) {
             Ok(file) => file,
             Err(FsError::NotFound) => return Ok(None),
             Err(source) => return Err(PersistenceError::storage("read state", path, source)),
@@ -263,7 +269,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     fn remove_at(&self, address: &StateAddress) -> Result<(), PersistenceError> {
         let _operation = lock(&self.operation_lock);
         let path = self.state_path(address);
-        match Filesystem::remove(&path) {
+        match self.filesystem.remove(&path) {
             Ok(()) | Err(FsError::NotFound) => {}
             Err(source) => {
                 return Err(PersistenceError::storage("remove state", path, source));
@@ -276,7 +282,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     fn list_collection(&self, name: &str) -> Result<Vec<InstanceId>, PersistenceError> {
         let _operation = lock(&self.operation_lock);
         let path = self.join_path(name);
-        let entries = match Filesystem::list_dir(&path) {
+        let entries = match self.filesystem.list_dir(&path) {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
             Err(source) => {
@@ -657,10 +663,17 @@ mod tests {
         InstanceId::new(id).expect("test instance id is valid")
     }
 
+    fn fixture(root: &str) -> (Arc<MemFs>, Persistence<MemFs>) {
+        let filesystem = Arc::new(MemFs::new());
+        let persistence =
+            Persistence::new(Arc::clone(&filesystem), root).expect("persistence initializes");
+        (filesystem, persistence)
+    }
+
     #[test]
     fn singleton_registers_persists_and_loads() {
         let root = "/claw-persistence-singleton";
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
+        let (filesystem, persistence) = fixture(root);
         let singleton = persistence
             .singleton::<TestState>("state")
             .expect("singleton opens");
@@ -674,11 +687,14 @@ mod tests {
         state.get_mut().value = 2;
         persistence.maybe_persist().expect("dirty state persists");
 
-        let file = MemFs::read(&format!("{root}/state.bin")).expect("state file exists");
+        let file = filesystem
+            .read(&format!("{root}/state.bin"))
+            .expect("state file exists");
         assert_eq!(&file[..SCHEMA_VERSION_SIZE], &1_u32.to_le_bytes());
         assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
 
-        let restored = Persistence::<MemFs>::new(root).expect("persistence reinitializes");
+        let restored =
+            Persistence::new(Arc::clone(&filesystem), root).expect("persistence reinitializes");
         let singleton = restored
             .singleton::<TestState>("state")
             .expect("singleton reopens");
@@ -688,7 +704,7 @@ mod tests {
     #[test]
     fn collection_serves_multiple_instances() {
         let root = "/claw-persistence-collection";
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
+        let (_filesystem, persistence) = fixture(root);
         let collection = persistence
             .collection::<TestState>("sessions")
             .expect("collection opens");
@@ -711,19 +727,19 @@ mod tests {
     #[test]
     fn registration_is_non_owning() {
         let root = "/claw-persistence-weak-registration";
-        let persistence = Persistence::<MemFs>::new(root).expect("persistence initializes");
+        let (filesystem, persistence) = fixture(root);
         let singleton = persistence.singleton::<TestState>("state").unwrap();
         let state = DurableState::new(TestState { value: 1 });
         singleton.register(&state).unwrap();
         drop(state);
 
         persistence.maybe_persist().unwrap();
-        assert!(!MemFs::exists(&format!("{root}/state.bin")));
+        assert!(!filesystem.exists(&format!("{root}/state.bin")));
     }
 
     #[test]
     fn a_dropped_owner_can_be_replaced_before_cleanup() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-reregister").unwrap();
+        let (_filesystem, persistence) = fixture("/claw-persistence-reregister");
         let singleton = persistence.singleton::<TestState>("state").unwrap();
         let first = DurableState::new(TestState { value: 1 });
         singleton.register(&first).unwrap();
@@ -737,7 +753,7 @@ mod tests {
 
     #[test]
     fn duplicate_live_registration_is_rejected() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-duplicate").unwrap();
+        let (_filesystem, persistence) = fixture("/claw-persistence-duplicate");
         let singleton = persistence.singleton::<TestState>("state").unwrap();
         let first = DurableState::new(TestState { value: 1 });
         let second = DurableState::new(TestState { value: 2 });
@@ -751,7 +767,7 @@ mod tests {
 
     #[test]
     fn entry_type_is_stable() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-type").unwrap();
+        let (_filesystem, persistence) = fixture("/claw-persistence-type");
         persistence.singleton::<TestState>("state").unwrap();
         persistence.singleton::<TestState>("state").unwrap();
         assert!(matches!(
@@ -763,7 +779,7 @@ mod tests {
     #[test]
     fn singleton_and_collection_names_do_not_collide() {
         let root = "/claw-persistence-peer-entries";
-        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let (filesystem, persistence) = fixture(root);
         let singleton = persistence.singleton::<TestState>("sessions").unwrap();
         let collection = persistence.collection::<OtherState>("sessions").unwrap();
         let singleton_state = DurableState::new(TestState { value: 1 });
@@ -774,13 +790,13 @@ mod tests {
             .unwrap();
         persistence.maybe_persist().unwrap();
 
-        assert!(MemFs::exists(&format!("{root}/sessions.bin")));
-        assert!(MemFs::exists(&format!("{root}/sessions/session-1.bin")));
+        assert!(filesystem.exists(&format!("{root}/sessions.bin")));
+        assert!(filesystem.exists(&format!("{root}/sessions/session-1.bin")));
     }
 
     #[test]
     fn entry_names_are_identifiers_not_paths() {
-        let persistence = Persistence::<MemFs>::new("/claw-persistence-names").unwrap();
+        let (_filesystem, persistence) = fixture("/claw-persistence-names");
         assert!(matches!(
             persistence.singleton::<TestState>("nested/state"),
             Err(PersistenceError::InvalidSingleton { .. })
@@ -794,7 +810,7 @@ mod tests {
     #[test]
     fn remove_deletes_state_and_registration() {
         let root = "/claw-persistence-remove";
-        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let (filesystem, persistence) = fixture(root);
         let collection = persistence.collection::<TestState>("sessions").unwrap();
         let id = instance_id("session-1");
         let state = DurableState::new(TestState { value: 1 });
@@ -805,17 +821,23 @@ mod tests {
         persistence.maybe_persist().unwrap();
 
         assert!(collection.load(&id).unwrap().is_none());
-        assert!(!MemFs::exists(&format!("{root}/sessions/session-1.bin")));
+        assert!(!filesystem.exists(&format!("{root}/sessions/session-1.bin")));
     }
 
     #[test]
     fn list_filters_non_state_entries() {
         let root = "/claw-persistence-list";
-        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let (filesystem, persistence) = fixture(root);
         let collection = persistence.collection::<TestState>("sessions").unwrap();
-        MemFs::write_atomic(&format!("{root}/sessions/session-1.bin"), b"state").unwrap();
-        MemFs::write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored").unwrap();
-        MemFs::write_atomic(&format!("{root}/sessions/...bin"), b"ignored").unwrap();
+        filesystem
+            .write_atomic(&format!("{root}/sessions/session-1.bin"), b"state")
+            .unwrap();
+        filesystem
+            .write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored")
+            .unwrap();
+        filesystem
+            .write_atomic(&format!("{root}/sessions/...bin"), b"ignored")
+            .unwrap();
 
         assert_eq!(collection.list().unwrap(), vec![instance_id("session-1")]);
     }
@@ -824,9 +846,9 @@ mod tests {
     fn load_rejects_a_truncated_schema_version() {
         let root = "/claw-persistence-truncated";
         let path = format!("{root}/state.bin");
-        let persistence = Persistence::<MemFs>::new(root).unwrap();
+        let (filesystem, persistence) = fixture(root);
         let singleton = persistence.singleton::<TestState>("state").unwrap();
-        MemFs::write_atomic(&path, &[1, 0, 0]).unwrap();
+        filesystem.write_atomic(&path, &[1, 0, 0]).unwrap();
 
         let error = singleton.load().expect_err("truncated state is rejected");
         assert!(matches!(&error, PersistenceError::CorruptState(_)));

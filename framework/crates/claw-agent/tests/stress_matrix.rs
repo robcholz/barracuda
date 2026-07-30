@@ -132,7 +132,8 @@ fn async_csv_control_storm_on_cloned_controls_finishes_and_accepts_next_submit()
         YIELDING_HTTP_POLLS.store(0, Ordering::SeqCst);
 
         let system =
-            YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+            YieldingAgentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root))
+                .unwrap();
         system
             .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
             .unwrap();
@@ -181,7 +182,9 @@ fn session_actor_polling_interleaves_ready_sessions() {
     fair_poll_log().clear();
 
     let root = mem_root("session-actor-fairness");
-    let system = YieldingAgentSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        YieldingAgentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root))
+            .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -314,9 +317,9 @@ fn run_mem_stress_case(
     expected_outputs: &[String],
 ) {
     let root = mem_root("session-stress");
-    MemFs::new();
     install_stress_outputs(expected_outputs);
-    let system = MemStressSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        MemStressSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -351,7 +354,7 @@ fn run_disk_stress_case(
         expected_outputs,
     );
     assert!(
-        DiskFs::exists(&format!("{root}/session_manager.bin")),
+        DiskFs::absolute().exists(&format!("{root}/session_manager.bin")),
         "case {case}: id allocator state missing"
     );
 
@@ -460,7 +463,9 @@ impl DriveSystem for DiskStressSystem {
 }
 
 fn build_disk_stress_system(root: &str) -> DiskStressSystem {
-    let system = DiskStressSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    let system =
+        DiskStressSystem::new::<StdThread, TokioExecutor>(DiskFs::absolute(), persistence(root))
+            .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

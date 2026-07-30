@@ -32,16 +32,16 @@ fn detached_completion_opens_a_tool_call_turn_after_the_root_becomes_idle() {
     let temp = TempDir::new("detached-tool-turn").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
     SharedScriptHttp::install(vec![
-        assistant_text("[]"),
         assistant_tool_call("background_tool"),
         assistant_text("background accepted"),
-        assistant_text("foreground reply"),
         assistant_text("[]"),
+        assistant_text("foreground reply"),
         assistant_text("background delivered"),
     ]);
 
     let gate = Arc::new(ToolGate::default());
     let system = TestSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
         claw_agent::AgentPersistenceConfig {
             persistence_root: root,
             skill_roots: Vec::new(),

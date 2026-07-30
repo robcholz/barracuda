@@ -22,13 +22,15 @@ pub(super) struct LongTermDeps<F: ClawFs + 'static> {
 }
 
 struct AgentMemoryStores<F: ClawFs + 'static> {
+    filesystem: Arc<F>,
     root_dir: String,
     by_kind: Mutex<BTreeMap<String, LongTermMemory<F>>>,
 }
 
 impl<F: ClawFs + 'static> AgentMemoryStores<F> {
-    fn new(root_dir: String) -> Self {
+    fn new(filesystem: Arc<F>, root_dir: String) -> Self {
         Self {
+            filesystem,
             root_dir,
             by_kind: Mutex::new(BTreeMap::new()),
         }
@@ -44,7 +46,10 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
         }
 
         let dir = join_storage_path(&self.root_dir, kind);
-        let store = LongTermMemoryContextProvider::<F>::open_agent_store(&dir)?;
+        let store = LongTermMemoryContextProvider::<F>::open_agent_store(
+            Arc::clone(&self.filesystem),
+            &dir,
+        )?;
         stores.insert(kind.to_owned(), store.clone());
         Ok(store)
     }
@@ -52,6 +57,7 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
 
 impl<F: ClawFs + 'static> LongTermDeps<F> {
     pub(super) fn from_root<H, Timer>(
+        filesystem: Arc<F>,
         long_term_dir: &str,
         api_manager: SharedApiManager,
     ) -> Result<Self, LongTermInitError>
@@ -62,8 +68,11 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
         let global_dir = join_storage_path(long_term_dir, GLOBAL_LONG_TERM_DIR);
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         Ok(Self {
-            global: LongTermMemoryContextProvider::<F>::open_global_store(&global_dir)?,
-            agent_stores: AgentMemoryStores::new(agent_root_dir),
+            global: LongTermMemoryContextProvider::<F>::open_global_store(
+                Arc::clone(&filesystem),
+                &global_dir,
+            )?,
+            agent_stores: AgentMemoryStores::new(filesystem, agent_root_dir),
             build_provider: LongTermMemoryContextProvider::<F>::llm_builder::<H, Timer>(
                 api_manager,
             ),
@@ -82,6 +91,8 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::sync::Arc;
+
     use claw_interface::MemFs;
     use claw_memory::{MemoryDraft, StoreOutcome};
 
@@ -89,8 +100,8 @@ mod tests {
 
     #[test]
     fn same_kind_reuses_one_live_store_owner() {
-        MemFs::new();
-        let stores = AgentMemoryStores::<MemFs>::new("/memory/agents".to_owned());
+        let stores =
+            AgentMemoryStores::<MemFs>::new(Arc::new(MemFs::new()), "/memory/agents".to_owned());
         let first = stores.get("conversation").expect("first store opens");
         let second = stores.get("conversation").expect("second store opens");
 

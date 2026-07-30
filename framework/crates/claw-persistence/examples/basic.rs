@@ -9,7 +9,7 @@
 //! `MemFs` keeps the example hermetic. A production caller supplies its own
 //! `ClawFs` implementation without changing the persistence API.
 
-use std::{borrow::Cow, error::Error};
+use std::{borrow::Cow, error::Error, sync::Arc};
 
 use claw_interface::MemFs;
 use claw_persistence::{
@@ -50,12 +50,12 @@ impl DurableStateCodec for ExampleState {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    MemFs::new();
+    let filesystem = Arc::new(MemFs::new());
 
     let root = "/example";
     let session_id = InstanceId::new("session-1")?;
 
-    let persistence = Persistence::<MemFs>::new(root)?;
+    let persistence = Persistence::<MemFs>::new(Arc::clone(&filesystem), root)?;
     let runtime_entry = persistence.singleton::<ExampleState>("runtime")?;
     let sessions_entry = persistence.collection::<ExampleState>("sessions")?;
 
@@ -82,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Typed entries are reopened when the process starts again. Loading returns
     // only the decoded DTO; a runtime owner creates its own DurableState.
-    let resumed = Persistence::<MemFs>::new(root)?;
+    let resumed = Persistence::<MemFs>::new(filesystem, root)?;
     let runtime_entry = resumed.singleton::<ExampleState>("runtime")?;
     let sessions_entry = resumed.collection::<ExampleState>("sessions")?;
 

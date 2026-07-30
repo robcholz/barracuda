@@ -3,7 +3,7 @@ use std::sync::Arc;
 use claw_api::RetryPolicy;
 use claw_context::{Block, BlockKind};
 use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_interface::{ClawFs, ClawHttp, ClawTimer, MemFs};
 use claw_memory::{Transcript, TranscriptStore};
 use claw_permission::PermissionPolicy;
 use claw_persistence::DurableState;
@@ -114,24 +114,28 @@ impl<
         persistence: PersistenceConfig,
     ) -> Result<Box<dyn Transcript>, AgentCreateError> {
         match persistence {
-            PersistenceConfig::Persistent => {
-                TranscriptStore::<Filesystem>::new(id.0, &self.transcript_dir)
-                    .map(|store| Box::new(store) as Box<dyn Transcript>)
-                    .map_err(|error| {
-                        log::error!(
-                            "Agent {id} ({}) transcript open failed: {error}",
-                            kind.as_str()
-                        );
-                        tracing::error!(
-                            name: "transcript_open_failed",
-                            agent = %id,
-                            kind = %kind.as_str(),
-                        );
-                        AgentCreateError::Transcript(error)
-                    })
-            }
+            PersistenceConfig::Persistent => TranscriptStore::<Filesystem>::new(
+                Arc::clone(&self.filesystem),
+                id.0,
+                &self.transcript_dir,
+            )
+            .map(|store| Box::new(store) as Box<dyn Transcript>)
+            .map_err(|error| {
+                log::error!(
+                    "Agent {id} ({}) transcript open failed: {error}",
+                    kind.as_str()
+                );
+                tracing::error!(
+                    name: "transcript_open_failed",
+                    agent = %id,
+                    kind = %kind.as_str(),
+                );
+                AgentCreateError::Transcript(error)
+            }),
             PersistenceConfig::InMemory => {
-                Ok(Box::new(TranscriptStore::<Filesystem>::in_memory(id.0)))
+                TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), id.0, "/transcript")
+                    .map(|store| Box::new(store) as Box<dyn Transcript>)
+                    .map_err(AgentCreateError::Transcript)
             }
         }
     }

@@ -43,7 +43,7 @@ one place. They are **never** enabled in a device build.
 
 | Feature | Provides |
 |---|---|
-| `memfs` | `MemFs` — an in-memory `ClawFs` test double (no extra deps). |
+| built in | `MemFs` — a per-instance in-memory `ClawFs` implementation (no extra deps). |
 | `diskfs` | `DiskFs` — a `std::fs`-backed `ClawFs` for host CLIs and disk tests. |
 | `diskfs-pretty` | `DiskFs` that pretty-prints `.json` writes (implies `diskfs`). |
 | `httpmock` | Buffered doubles and adapters (`ScriptedHttp`, `CapturingHttp`, `FailingHttp`, `NeverHttp`, `NoopHttp`, `BlockingHttpAdapter`, `YieldingHttpAdapter`) plus `ChunkedHttp` for streaming tests. |
@@ -53,7 +53,7 @@ one place. They are **never** enabled in a device build.
 
 ```bash
 cargo run -p claw-interface --example di_seams \
-    --features memfs,httpmock --target x86_64-unknown-linux-gnu
+    --features httpmock --target x86_64-unknown-linux-gnu
 ```
 
 Exercises both seams with host doubles: a `MemFs` for the `ClawFs` operations

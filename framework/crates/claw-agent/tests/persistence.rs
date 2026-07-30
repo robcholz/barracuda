@@ -48,12 +48,9 @@ fn persistent_sessions_use_the_documented_layout_and_restore() {
         let system = build_system(&root, Vec::new());
         system.new_session(SessionPersistence::Persistent).unwrap()
     };
-    assert!(DiskFs::exists(&format!("{root}/session_manager.bin")));
-    assert!(DiskFs::exists(&format!("{root}/tool_registry.bin")));
-    assert!(DiskFs::exists(&format!(
-        "{root}/sessions/{}.bin",
-        first.to_wire()
-    )));
+    assert!(DiskFs::absolute().exists(&format!("{root}/session_manager.bin")));
+    assert!(DiskFs::absolute().exists(&format!("{root}/tool_registry.bin")));
+    assert!(DiskFs::absolute().exists(&format!("{root}/sessions/{}.bin", first.to_wire())));
 
     let system = build_system(&root, Vec::new());
     assert_eq!(system.list_sessions(), vec![first]);
@@ -68,12 +65,14 @@ fn persistent_session_keeps_only_the_root_agent_on_disk() {
     PERSISTENT_SUBAGENT_POLLS.store(0, Ordering::SeqCst);
     let temp = TempDir::new("in-memory-subagent").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
-    let system =
-        PersistentSubagentSystem::new::<StdThread, TokioExecutor>(AgentPersistenceConfig {
+    let system = PersistentSubagentSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        AgentPersistenceConfig {
             persistence_root: root.clone(),
             skill_roots: Vec::new(),
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
@@ -84,12 +83,12 @@ fn persistent_session_keeps_only_the_root_agent_on_disk() {
     let _ = support::drain_until_turn_ended(&mut events);
     wait_until_subagent_is_pending();
 
-    assert!(DiskFs::exists(&format!("{root}/agents/agent-1.bin")));
-    assert!(DiskFs::exists(&format!("{root}/transcript/1.jsonl")));
-    assert!(DiskFs::exists(&format!("{root}/transcript/1.json")));
-    assert!(!DiskFs::exists(&format!("{root}/agents/agent-2.bin")));
-    assert!(!DiskFs::exists(&format!("{root}/transcript/2.jsonl")));
-    assert!(!DiskFs::exists(&format!("{root}/transcript/2.json")));
+    assert!(DiskFs::absolute().exists(&format!("{root}/agents/agent-1.bin")));
+    assert!(DiskFs::absolute().exists(&format!("{root}/transcript/1.jsonl")));
+    assert!(DiskFs::absolute().exists(&format!("{root}/transcript/1.json")));
+    assert!(!DiskFs::absolute().exists(&format!("{root}/agents/agent-2.bin")));
+    assert!(!DiskFs::absolute().exists(&format!("{root}/transcript/2.jsonl")));
+    assert!(!DiskFs::absolute().exists(&format!("{root}/transcript/2.json")));
 
     block_on(control.close()).unwrap();
 }
@@ -192,20 +191,17 @@ fn deleting_an_inflight_session_removes_its_root_agent_and_transcript() {
     let agent_state = format!("{root}/agents/agent-1.bin");
     let transcript_data = format!("{root}/transcript/1.jsonl");
     let transcript_index = format!("{root}/transcript/1.json");
-    assert!(DiskFs::exists(&agent_state));
+    assert!(DiskFs::absolute().exists(&agent_state));
 
     let deleting = Arc::clone(&system);
     let delete = thread::spawn(move || deleting.delete_session(session));
     gate.release();
     delete.join().unwrap().unwrap();
 
-    assert!(!DiskFs::exists(&agent_state));
-    assert!(!DiskFs::exists(&transcript_data));
-    assert!(!DiskFs::exists(&transcript_index));
-    assert!(!DiskFs::exists(&format!(
-        "{root}/sessions/{}.bin",
-        session.to_wire()
-    )));
+    assert!(!DiskFs::absolute().exists(&agent_state));
+    assert!(!DiskFs::absolute().exists(&transcript_data));
+    assert!(!DiskFs::absolute().exists(&transcript_index));
+    assert!(!DiskFs::absolute().exists(&format!("{root}/sessions/{}.bin", session.to_wire())));
     block_on(async {
         while let Some(event) = events.next().await {
             let event = event.expect("Session stream failed");
@@ -249,16 +245,16 @@ fn startup_purges_agent_and_transcript_without_a_referencing_session() {
     let transcript_data = format!("{root}/transcript/1.jsonl");
     let transcript_index = format!("{root}/transcript/1.json");
 
-    DiskFs::remove(&session_state).unwrap();
-    assert!(DiskFs::exists(&agent_state));
-    assert!(DiskFs::exists(&transcript_data));
-    assert!(DiskFs::exists(&transcript_index));
+    DiskFs::absolute().remove(&session_state).unwrap();
+    assert!(DiskFs::absolute().exists(&agent_state));
+    assert!(DiskFs::absolute().exists(&transcript_data));
+    assert!(DiskFs::absolute().exists(&transcript_index));
 
     drop(build_system(&root, Vec::new()));
 
-    assert!(!DiskFs::exists(&agent_state));
-    assert!(!DiskFs::exists(&transcript_data));
-    assert!(!DiskFs::exists(&transcript_index));
+    assert!(!DiskFs::absolute().exists(&agent_state));
+    assert!(!DiskFs::absolute().exists(&transcript_data));
+    assert!(!DiskFs::absolute().exists(&transcript_index));
 }
 
 #[test]
@@ -269,15 +265,19 @@ fn startup_purges_transcript_without_an_agent_record() {
     let transcript_data = format!("{root}/transcript/41.jsonl");
     let transcript_index = format!("{root}/transcript/41.json");
 
-    DiskFs::write_atomic(&transcript_data, b"").unwrap();
-    DiskFs::write_atomic(&transcript_index, b"").unwrap();
-    assert!(DiskFs::exists(&transcript_data));
-    assert!(DiskFs::exists(&transcript_index));
+    DiskFs::absolute()
+        .write_atomic(&transcript_data, b"")
+        .unwrap();
+    DiskFs::absolute()
+        .write_atomic(&transcript_index, b"")
+        .unwrap();
+    assert!(DiskFs::absolute().exists(&transcript_data));
+    assert!(DiskFs::absolute().exists(&transcript_index));
 
     drop(build_system(&root, Vec::new()));
 
-    assert!(!DiskFs::exists(&transcript_data));
-    assert!(!DiskFs::exists(&transcript_index));
+    assert!(!DiskFs::absolute().exists(&transcript_data));
+    assert!(!DiskFs::absolute().exists(&transcript_index));
 }
 
 #[test]
@@ -291,17 +291,17 @@ fn startup_clears_a_session_root_whose_agent_record_is_missing() {
     let transcript_data = format!("{root}/transcript/1.jsonl");
     let transcript_index = format!("{root}/transcript/1.json");
 
-    DiskFs::remove(&agent_state).unwrap();
-    assert!(DiskFs::exists(&transcript_data));
-    assert!(DiskFs::exists(&transcript_index));
+    DiskFs::absolute().remove(&agent_state).unwrap();
+    assert!(DiskFs::absolute().exists(&transcript_data));
+    assert!(DiskFs::absolute().exists(&transcript_index));
 
     drop(build_system(&root, Vec::new()));
 
     let state = read_payload(&session_state);
     assert_eq!(state["root_agent"], Value::Null);
     assert!(state.get("root_inflight_toolcalls").is_none());
-    assert!(!DiskFs::exists(&transcript_data));
-    assert!(!DiskFs::exists(&transcript_index));
+    assert!(!DiskFs::absolute().exists(&transcript_data));
+    assert!(!DiskFs::absolute().exists(&transcript_index));
 }
 
 #[test]
@@ -314,10 +314,7 @@ fn ephemeral_sessions_do_not_enter_the_persisted_collection() {
         let system = build_system(&root, Vec::new());
         let session = system.new_session(SessionPersistence::Ephemeral).unwrap();
         assert_eq!(system.list_sessions(), vec![session]);
-        assert!(!DiskFs::exists(&format!(
-            "{root}/sessions/{}.bin",
-            session.to_wire()
-        )));
+        assert!(!DiskFs::absolute().exists(&format!("{root}/sessions/{}.bin", session.to_wire())));
         session
     };
 
@@ -364,10 +361,7 @@ fn deleting_a_session_removes_it_from_the_directory_registry() {
         let system = build_system(&root, Vec::new());
         let session = system.new_session(SessionPersistence::Persistent).unwrap();
         system.delete_session(session).unwrap();
-        assert!(!DiskFs::exists(&format!(
-            "{root}/sessions/{}.bin",
-            session.to_wire()
-        )));
+        assert!(!DiskFs::absolute().exists(&format!("{root}/sessions/{}.bin", session.to_wire())));
         session
     };
 
@@ -388,7 +382,7 @@ fn create_persisted_root(root: &str) -> SessionId {
 }
 
 fn read_payload(path: &str) -> Value {
-    let bytes = DiskFs::read(path).unwrap();
+    let bytes = DiskFs::absolute().read(path).unwrap();
     assert!(bytes.len() >= std::mem::size_of::<u32>());
     serde_json::from_slice(&bytes[std::mem::size_of::<u32>()..]).unwrap()
 }
@@ -407,6 +401,7 @@ fn build_configured_system_with_tool_groups(
     tool_groups: impl IntoIterator<Item = ToolGroup>,
 ) -> DiskSystem {
     let system = DiskSystem::with_tool_groups::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
         AgentPersistenceConfig {
             persistence_root: root.to_owned(),
             skill_roots: Vec::new(),

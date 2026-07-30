@@ -69,8 +69,8 @@ pub(in crate::agent) struct ConversationHistoryContextProvider {
     summary_messages: Vec<Value>,
     /// Verbatim committed turns after `covered_through`, plus the open turn.
     verbatim_tail: Vec<Value>,
-    /// Transcript version represented by `verbatim_tail`.
-    cached_version: u64,
+    /// Transcript content version represented by `verbatim_tail`.
+    cached_content_version: u64,
     /// Coverage boundary represented by `verbatim_tail`.
     cached_covered_through: Option<TurnId>,
     primed: bool,
@@ -84,7 +84,7 @@ impl ConversationHistoryContextProvider {
             covered_through: None,
             summary_messages: Vec::new(),
             verbatim_tail: Vec::new(),
-            cached_version: 0,
+            cached_content_version: 0,
             cached_covered_through: None,
             primed: false,
         }
@@ -156,9 +156,9 @@ impl ConversationHistoryContextProvider {
     }
 
     fn refresh_verbatim_tail(&mut self, transcript: &dyn Transcript) {
-        let version = transcript.version();
+        let content_version = transcript.content_version();
         if self.primed
-            && version == self.cached_version
+            && content_version == self.cached_content_version
             && self.covered_through == self.cached_covered_through
         {
             return;
@@ -172,7 +172,7 @@ impl ConversationHistoryContextProvider {
         {
             self.verbatim_tail.extend(turn.messages.iter().cloned());
         }
-        self.cached_version = version;
+        self.cached_content_version = content_version;
         self.cached_covered_through = self.covered_through;
         self.primed = true;
     }
@@ -286,6 +286,8 @@ fn estimate_message_tokens(message: &Value) -> usize {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::sync::Arc;
+
     use claw_context::Context;
     use claw_interface::MemFs;
     use claw_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
@@ -314,7 +316,8 @@ mod tests {
 
     #[test]
     fn one_projection_has_summary_prefix_and_exact_complementary_tail() {
-        let transcript = TranscriptStore::<MemFs>::in_memory(1);
+        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
+            .expect("in-memory transcript opens");
         for text in ["turn-one", "turn-two", "turn-three"] {
             let mut turn = transcript.open_turn().expect("test turn opens");
             turn.append_user(text).expect("user delta appends");

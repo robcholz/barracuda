@@ -27,10 +27,10 @@ strum = { version = "0.28", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
-# Host-target helpers for tests/examples/doctests: `memfs` is the hermetic test
-# double, `diskfs-pretty` is a disk-backed inspection backend, and `stdthread`
+# Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
+# disk-backed inspection backend, and `stdthread`
 # drives background work on the host target. None of these reach device builds.
-claw-interface = { path = "../claw-interface", features = ["memfs", "diskfs-pretty", "stdthread"] }
+claw-interface = { path = "../claw-interface", features = ["diskfs-pretty", "stdthread"] }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

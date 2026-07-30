@@ -39,7 +39,8 @@ fn nested_background_children_join_before_their_parent_reports_upward() {
         .clear();
 
     let root = mem_root("nested-subagent-join");
-    let system = NestedSystem::new::<StdThread, TokioExecutor>(persistence(&root)).unwrap();
+    let system =
+        NestedSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(&root)).unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

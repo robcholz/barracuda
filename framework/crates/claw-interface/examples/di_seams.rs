@@ -5,14 +5,13 @@
 //!
 //! ```bash
 //! cargo run -p claw-interface --example di_seams \
-//!     --features memfs,httpmock --target x86_64-unknown-linux-gnu
+//!     --features httpmock --target x86_64-unknown-linux-gnu
 //! ```
 //!
 //! Core crates depend only on the `ClawFs` / `ClawHttp` *traits*; on device the
 //! espidf layer implements them over FATFS and `esp_http_client`, while tests
 //! and host tools substitute doubles like the `MemFs` and `ScriptedHttp` used
-//! here. Both doubles live behind opt-in features and are never built into the
-//! firmware.
+//! here.
 
 use core::sync::atomic::AtomicBool;
 
@@ -28,25 +27,31 @@ fn main() -> anyhow::Result<()> {
 /// `ClawFs`: byte-oriented persistence. The in-memory `MemFs` behaves like the
 /// on-device FATFS backend for the operations the modules rely on.
 fn filesystem_seam() -> anyhow::Result<()> {
-    MemFs::new();
+    let filesystem = MemFs::new();
 
-    MemFs::create_dir_all("/data/conversations")?;
-    MemFs::write_atomic("/data/conversations/42.json", b"{\"version\":1}")?;
-    MemFs::append("/data/conversations/42.jsonl", b"{\"t\":\"group\"}\n")?;
+    filesystem.create_dir_all("/data/conversations")?;
+    filesystem.write_atomic("/data/conversations/42.json", b"{\"version\":1}")?;
+    filesystem.append("/data/conversations/42.jsonl", b"{\"t\":\"group\"}\n")?;
 
     println!("== ClawFs (MemFs) ==");
     println!(
         "exists  -> {}",
-        MemFs::exists("/data/conversations/42.json")
+        filesystem.exists("/data/conversations/42.json")
     );
     println!(
         "len     -> {} bytes",
-        MemFs::len("/data/conversations/42.jsonl")?
+        filesystem.len("/data/conversations/42.jsonl")?
     );
-    println!("listing -> {:?}", MemFs::list_dir("/data/conversations")?);
+    println!(
+        "listing -> {:?}",
+        filesystem.list_dir("/data/conversations")?
+    );
 
     // A missing path is a typed error, not a panic.
-    println!("missing -> {:?}", MemFs::read("/data/conversations/none"));
+    println!(
+        "missing -> {:?}",
+        filesystem.read("/data/conversations/none")
+    );
     Ok(())
 }
 

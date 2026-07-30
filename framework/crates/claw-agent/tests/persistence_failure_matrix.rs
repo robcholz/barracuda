@@ -96,15 +96,20 @@ impl Fixture {
 fn setup_disk_state(root: &str, setup: &str) {
     match setup {
         "global_memory_journal_dir" => {
-            DiskFs::create_dir_all(&format!("{root}/long_term/global/memory_records.jsonl"))
+            DiskFs::absolute()
+                .create_dir_all(&format!("{root}/long_term/global/memory_records.jsonl"))
                 .unwrap();
         }
         // Installed after runtime startup in `assert_submit_error`: startup
         // reconciliation correctly removes orphan transcript paths.
         "root_transcript_log_dir" => {}
         "profile_user_invalid_utf8" => {
-            DiskFs::create_dir_all(&format!("{root}/profile")).unwrap();
-            DiskFs::write_atomic(&format!("{root}/profile/user.md"), &[0xff, 0xfe, 0xfd]).unwrap();
+            DiskFs::absolute()
+                .create_dir_all(&format!("{root}/profile"))
+                .unwrap();
+            DiskFs::absolute()
+                .write_atomic(&format!("{root}/profile/user.md"), &[0xff, 0xfe, 0xfd])
+                .unwrap();
         }
         other => panic!("unknown persistence failure setup: {other}"),
     }
@@ -112,7 +117,10 @@ fn setup_disk_state(root: &str, setup: &str) {
 
 fn assert_startup_error(root: &str, fixture: &Fixture) {
     install_replies(Vec::new());
-    let error = match PersistenceFailureSystem::new::<StdThread, TokioExecutor>(persistence(root)) {
+    let error = match PersistenceFailureSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        persistence(root),
+    ) {
         Ok(_) => panic!("case {}: startup should fail", fixture.case),
         Err(error) => error.to_string(),
     };
@@ -121,15 +129,20 @@ fn assert_startup_error(root: &str, fixture: &Fixture) {
 
 fn assert_submit_error(root: &str, fixture: &Fixture) {
     install_replies(Vec::new());
-    let system =
-        PersistenceFailureSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    let system = PersistenceFailureSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        persistence(root),
+    )
+    .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
     if fixture.setup == "root_transcript_log_dir" {
         let log_dir = format!("{root}/transcript/1.jsonl");
-        DiskFs::create_dir_all(&log_dir).unwrap();
-        DiskFs::write_atomic(&format!("{log_dir}/marker"), b"not a journal").unwrap();
+        DiskFs::absolute().create_dir_all(&log_dir).unwrap();
+        DiskFs::absolute()
+            .write_atomic(&format!("{log_dir}/marker"), b"not a journal")
+            .unwrap();
     }
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
@@ -150,8 +163,11 @@ fn assert_tool_error(root: &str, fixture: &Fixture) {
         )]),
         assistant_text(&fixture.final_output),
     ]);
-    let system =
-        PersistenceFailureSystem::new::<StdThread, TokioExecutor>(persistence(root)).unwrap();
+    let system = PersistenceFailureSystem::new::<StdThread, TokioExecutor>(
+        DiskFs::absolute(),
+        persistence(root),
+    )
+    .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();

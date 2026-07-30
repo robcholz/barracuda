@@ -26,14 +26,15 @@ impl<
     > AgentManager<Filesystem, Http, Timer>
 {
     /// The manager owns the memory layout below `persistence_dir`: transcripts,
-    /// editable profile documents, and long-term memory. `Filesystem` selects
-    /// the static filesystem HAL backend used by those stores.
+    /// editable profile documents, and long-term memory. All durable stores
+    /// explicitly share the supplied filesystem instance.
     ///
     /// # Errors
     ///
     /// Returns [`AgentManagerError::MissingPersistenceDir`] when the
     /// persistence root is blank.
     pub(crate) fn new(
+        filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         memory_directory: String,
@@ -50,6 +51,7 @@ impl<
         let layout = AgentManagerLayout::new(memory_directory);
 
         let long_term = match LongTermDeps::<Filesystem>::from_root::<Http, Timer>(
+            Arc::clone(&filesystem),
             &layout.long_term_dir,
             Arc::clone(&api_manager),
         ) {
@@ -61,7 +63,7 @@ impl<
             }
         };
 
-        let profile_store = ProfileStore::new(&layout.profile_dir);
+        let profile_store = ProfileStore::new(Arc::clone(&filesystem), &layout.profile_dir);
         #[cfg(all(feature = "use_legacy_skill", target_os = "espidf"))]
         let skill_registry: Arc<dyn SkillRegistry> = {
             drop(skill_roots);
@@ -69,9 +71,10 @@ impl<
         };
         #[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
         let skill_registry: Arc<dyn SkillRegistry> =
-            build_fs_skill_registry::<Filesystem>(skill_roots)?;
+            build_fs_skill_registry(Arc::clone(&filesystem), skill_roots)?;
 
         let manager = Self {
+            filesystem,
             persistence,
             api_manager,
             tool_registry,
@@ -93,13 +96,14 @@ impl<
 /// (e.g. a malformed `SKILL.md`) aborts construction.
 #[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
 fn build_fs_skill_registry<F: ClawFs + 'static>(
+    filesystem: Arc<F>,
     skill_roots: Vec<String>,
 ) -> Result<Arc<FsSkillRegistry<F>>, SkillError> {
     let span = tracing::info_span!("skill.catalog");
     let _enter = span.enter();
-    let mut registry = FsSkillRegistry::<F>::new();
+    let mut registry = FsSkillRegistry::new(Arc::clone(&filesystem));
     for root in skill_roots {
-        if !F::exists(root.as_str()) {
+        if !filesystem.exists(root.as_str()) {
             log::warn!("skill catalog root is missing: {root}");
             tracing::warn!(name: "root_missing", "");
             continue;

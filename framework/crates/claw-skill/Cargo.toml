@@ -13,8 +13,8 @@ strum = { version = "0.28", features = ["derive"] }
 thiserror = "2"
 
 [dev-dependencies]
-# Filesystem backends for host-target tests: `memfs` is the hermetic test double,
-# `diskfs` reads the data-driven golden fixtures from the checkout.
-claw-interface = { path = "../claw-interface", features = ["memfs", "diskfs"] }
+# `diskfs` reads the data-driven golden fixtures from the checkout; `MemFs` is
+# part of the base interface crate.
+claw-interface = { path = "../claw-interface", features = ["diskfs"] }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"

@@ -28,15 +28,16 @@
 //! ```no_run
 //! use claw_interface::MemFs;
 //! use claw_memory::{AssistantFinish, Transcript, TranscriptStore};
+//! use std::sync::Arc;
 //!
 //! // A filesystem for persistence. On device this is the espidf `ClawFs` over
 //! // the DATA root; here it is the in-memory host double. The store holds the
 //! // type parameter `F`.
-//! MemFs::new();
+//! let filesystem = Arc::new(MemFs::new());
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
 //! let transcript_id = 42;
-//! let store = TranscriptStore::<MemFs>::new(transcript_id, "/data/transcripts")
+//! let store = TranscriptStore::<MemFs>::new(filesystem, transcript_id, "/data/transcripts")
 //!     .expect("a fresh MemFs has no data log, so the transcript starts empty");
 //! let transcript: &dyn Transcript = &store;
 //!

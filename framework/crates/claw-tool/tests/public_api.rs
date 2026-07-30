@@ -591,8 +591,10 @@ fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<T
 }
 
 fn persistence() -> Result<SharedPersistence<MemFs>> {
-    MemFs::new();
-    Ok(Arc::new(Persistence::new("/claw-tool-tests")?))
+    Ok(Arc::new(Persistence::new(
+        Arc::new(MemFs::new()),
+        "/claw-tool-tests",
+    )?))
 }
 
 fn registry() -> Result<Arc<ToolRegistry>> {

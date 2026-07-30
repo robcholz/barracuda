@@ -56,10 +56,11 @@
 //!   `(off, len)` of every record plus `covered_len` and `next_id`, rewritten
 //!   atomically as turns are appended.
 //!
-//! An **in-memory** store (built with [`TranscriptStore::in_memory`]) holds the
-//! same transcript but never touches the filesystem: it starts empty and every
-//! persist is a no-op. Subagents use it — their transcripts are context-management
-//! scratch that is never enumerated or resumed, so it need not survive a restart.
+//! Ephemeral transcripts use the same code path with their own [`MemFs`]
+//! instance. Persistence behavior therefore comes entirely from the injected
+//! filesystem instead of a separate store mode.
+//!
+//! [`MemFs`]: claw_interface::MemFs
 
 use std::collections::BTreeSet;
 use std::marker::PhantomData;
@@ -339,17 +340,39 @@ impl StoreState {
 
 /// Shared inner state — held behind an `Arc` so a context provider can keep its
 /// own clone of the store and read the same transcript the agent writes.
-#[derive(Clone, Copy)]
-struct PersistenceFns {
-    append: fn(&str, &[u8]) -> Result<(), FsError>,
-    write_atomic: fn(&str, &[u8]) -> Result<(), FsError>,
+trait TranscriptPersistence: Send + Sync {
+    fn append(&self, path: &str, data: &[u8]) -> Result<(), FsError>;
+    fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError>;
 }
 
-impl PersistenceFns {
-    fn new<F: ClawFs>() -> Self {
+struct FsPersistence<F: ClawFs> {
+    filesystem: Arc<F>,
+}
+
+impl<F: ClawFs> TranscriptPersistence for FsPersistence<F> {
+    fn append(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
+        self.filesystem.append(path, data)
+    }
+
+    fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
+        self.filesystem.write_atomic(path, data)
+    }
+}
+
+impl StoreInner {
+    fn new<F: ClawFs>(
+        filesystem: Arc<F>,
+        transcript_id: u32,
+        data_path: String,
+        index_path: String,
+        state: StoreState,
+    ) -> Self {
         Self {
-            append: F::append,
-            write_atomic: F::write_atomic,
+            transcript_id,
+            data_path,
+            index_path,
+            persistence: Box::new(FsPersistence { filesystem }),
+            state: Mutex::new(state),
         }
     }
 }
@@ -358,19 +381,14 @@ struct StoreInner {
     transcript_id: u32,
     data_path: String,
     index_path: String,
-    /// When true this store is in-memory only: it loads nothing at construction
-    /// and every persist is a no-op, so it never touches the filesystem. The
-    /// paths are unused (left empty) in this mode.
-    volatile: bool,
-    persistence: PersistenceFns,
+    persistence: Box<dyn TranscriptPersistence>,
     state: Mutex<StoreState>,
 }
 
 impl Drop for StoreInner {
     /// Best-effort final checkpoint: when the last store clone (and any live
     /// [`TurnHandle`], which holds its own `Arc<StoreInner>`) is gone, flush any
-    /// debounced-but-unwritten committed turns. A no-op for a volatile store or
-    /// when nothing is pending.
+    /// debounced-but-unwritten committed turns.
     fn drop(&mut self) {
         persist(self, true);
     }
@@ -390,8 +408,8 @@ impl Drop for StoreInner {
 /// ```
 /// # use claw_interface::MemFs;
 /// # use claw_memory::{AssistantFinish, TranscriptStore};
-/// MemFs::new();
-/// let store = TranscriptStore::<MemFs>::new(42, "/data/transcripts")
+/// let filesystem = std::sync::Arc::new(MemFs::new());
+/// let store = TranscriptStore::<MemFs>::new(filesystem, 42, "/data/transcripts")
 ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
 ///
 /// // One turn = one handle; the whole turn commits when the handle drops.
@@ -565,8 +583,8 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     ///
     /// A missing directory is empty. When only one half of a transcript remains,
     /// its id is still returned so the owner can reconcile or delete it.
-    pub fn list_persisted_ids(dir: &str) -> Result<Vec<u32>, TranscriptListError> {
-        let entries = match F::list_dir(dir) {
+    pub fn list_persisted_ids(filesystem: &F, dir: &str) -> Result<Vec<u32>, TranscriptListError> {
+        let entries = match filesystem.list_dir(dir) {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
             Err(source) => {
@@ -604,8 +622,8 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     /// ```
     /// # use claw_interface::MemFs;
     /// # use claw_memory::TranscriptStore;
-    /// MemFs::new();
-    /// let store = TranscriptStore::<MemFs>::new(7, "/data/transcripts")
+    /// let filesystem = std::sync::Arc::new(MemFs::new());
+    /// let store = TranscriptStore::<MemFs>::new(filesystem, 7, "/data/transcripts")
     ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
     /// assert!(store.turns().is_empty()); // missing files start empty
     /// ```
@@ -615,50 +633,37 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     /// [`TranscriptInitError::Unreadable`] when the transcript *data log*
     /// exists but cannot be read. A missing transcript starts empty, and a
     /// corrupt/mismatched *index* is transparently rebuilt from the data log.
-    pub fn new(transcript_id: u32, dir: &str) -> Result<Self, TranscriptInitError> {
+    pub fn new(
+        filesystem: Arc<F>,
+        transcript_id: u32,
+        dir: &str,
+    ) -> Result<Self, TranscriptInitError> {
         let data_path = transcript_path(dir, transcript_id, DATA_EXT);
         let index_path = transcript_path(dir, transcript_id, INDEX_EXT);
-        let (mut state, needs_rebuild) =
-            load_state::<F>(&data_path, &index_path).map_err(|source| {
-                TranscriptInitError::Unreadable {
-                    path: data_path.clone(),
-                    source,
-                }
-            })?;
+        let (mut state, needs_rebuild) = load_state(filesystem.as_ref(), &data_path, &index_path)
+            .map_err(|source| TranscriptInitError::Unreadable {
+            path: data_path.clone(),
+            source,
+        })?;
         if needs_rebuild {
-            write_live_set_to_files::<F>(&data_path, &index_path, &mut state, transcript_id);
+            write_live_set_to_files(
+                filesystem.as_ref(),
+                &data_path,
+                &index_path,
+                &mut state,
+                transcript_id,
+            );
         }
         Ok(Self {
-            inner: Arc::new(StoreInner {
+            inner: Arc::new(StoreInner::new(
+                filesystem,
                 transcript_id,
                 data_path,
                 index_path,
-                volatile: false,
-                persistence: PersistenceFns::new::<F>(),
-                state: Mutex::new(state),
-            }),
+                state,
+            )),
             _fs: PhantomData,
         })
-    }
-
-    /// Build an **in-memory** store for `transcript_id`: it starts empty, never
-    /// reads or writes the filesystem, and every persist is a no-op.
-    ///
-    /// Used for transcripts that are pure context-management scratch and need not
-    /// survive a restart (subagents), so no `dir` is required. The write/read API
-    /// is otherwise identical to a persisting store.
-    pub fn in_memory(transcript_id: u32) -> Self {
-        Self {
-            inner: Arc::new(StoreInner {
-                transcript_id,
-                data_path: String::new(),
-                index_path: String::new(),
-                volatile: true,
-                persistence: PersistenceFns::new::<F>(),
-                state: Mutex::new(StoreState::default()),
-            }),
-            _fs: PhantomData,
-        }
     }
 
     /// Delete the persisted files for `transcript_id`.
@@ -671,9 +676,13 @@ impl<F: ClawFs + 'static> TranscriptStore<F> {
     ///
     /// Returns [`TranscriptDeleteError`] when either existing file cannot be
     /// removed.
-    pub fn delete(transcript_id: u32, dir: &str) -> Result<(), TranscriptDeleteError> {
-        delete_transcript_file::<F>(transcript_path(dir, transcript_id, INDEX_EXT))?;
-        delete_transcript_file::<F>(transcript_path(dir, transcript_id, DATA_EXT))
+    pub fn delete(
+        filesystem: &F,
+        transcript_id: u32,
+        dir: &str,
+    ) -> Result<(), TranscriptDeleteError> {
+        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, INDEX_EXT))?;
+        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, DATA_EXT))
     }
 
     /// A monotonic counter bumped once for every non-empty committed turn.
@@ -789,8 +798,8 @@ impl<F: ClawFs + 'static> Transcript for TranscriptStore<F> {
 /// ```
 /// # use claw_interface::MemFs;
 /// # use claw_memory::{AssistantFinish, TranscriptStore};
-/// # MemFs::new();
-/// # let store = TranscriptStore::<MemFs>::new(1, "/data/transcripts").unwrap();
+/// # let filesystem = std::sync::Arc::new(MemFs::new());
+/// # let store = TranscriptStore::<MemFs>::new(filesystem, 1, "/data/transcripts").unwrap();
 /// let mut turn = store.open_turn().unwrap();
 /// turn.append_user("call the weather tool").unwrap();
 /// turn.finish_user().unwrap();
@@ -1078,11 +1087,7 @@ fn commit_open_turn(inner: &StoreInner) {
         }
         let msgs = open_turn.messages;
         let id = state.id_allocator.next();
-        // An in-memory store never flushes, so skip enqueuing a pending line that
-        // would otherwise accumulate unbounded.
-        if !inner.volatile {
-            enqueue(&mut state, id, msgs.clone(), inner.transcript_id);
-        }
+        enqueue(&mut state, id, msgs.clone(), inner.transcript_id);
         state.groups.push(StoredGroup {
             id,
             msgs,
@@ -1131,10 +1136,6 @@ fn enqueue(state: &mut StoreState, id: TurnId, msgs: Vec<Value>, transcript_id: 
 
 /// Flush pending records (one `append`) and, when needed, rewrite the manifest.
 fn persist(inner: &StoreInner, force_manifest: bool) {
-    // An in-memory store keeps everything in `state`; it never writes files.
-    if inner.volatile {
-        return;
-    }
     let mut state = lock_state(inner);
     // Pending data always makes the manifest stale: after the append the data log
     // has records the index doesn't know about. Fold that into want_manifest so
@@ -1155,7 +1156,7 @@ fn persist(inner: &StoreInner, force_manifest: bool) {
             locs.push((pending.id, off, len));
             off = off.advance(len);
         }
-        if let Err(err) = (inner.persistence.append)(&inner.data_path, &data_buf) {
+        if let Err(err) = inner.persistence.append(&inner.data_path, &data_buf) {
             log::warn!(
                 "transcript {}: data append failed: {err}",
                 inner.transcript_id
@@ -1172,7 +1173,7 @@ fn persist(inner: &StoreInner, force_manifest: bool) {
     state.last_persist = Some(Instant::now());
 
     if let Some(bytes) = build_manifest_bytes(&state, inner.transcript_id) {
-        match (inner.persistence.write_atomic)(&inner.index_path, &bytes) {
+        match inner.persistence.write_atomic(&inner.index_path, &bytes) {
             Ok(()) => {
                 state.manifest_covered_len = state.data_len;
                 state.last_persist_error = None;
@@ -1191,6 +1192,7 @@ fn persist(inner: &StoreInner, force_manifest: bool) {
 /// Rewrite `.jsonl` + `.json` from the in-memory turns in id order, updating
 /// state locs to the new layout on success.
 fn write_live_set_to_files<F: ClawFs>(
+    filesystem: &F,
     data_path: &str,
     index_path: &str,
     state: &mut StoreState,
@@ -1232,12 +1234,12 @@ fn write_live_set_to_files<F: ClawFs>(
         }
     };
 
-    if let Err(err) = F::write_atomic(data_path, &data_buf) {
+    if let Err(err) = filesystem.write_atomic(data_path, &data_buf) {
         log::warn!("transcript {transcript_id}: write_live data write failed: {err}");
         state.last_persist_error = Some(err);
         return;
     }
-    if let Err(err) = F::write_atomic(index_path, &manifest_bytes) {
+    if let Err(err) = filesystem.write_atomic(index_path, &manifest_bytes) {
         log::warn!("transcript {transcript_id}: write_live index write failed: {err}");
         state.last_persist_error = Some(err);
         // Data file is the fresh truth; stale manifest is rebuilt on next load.
@@ -1333,7 +1335,11 @@ fn verify_entry(entry: &IndexEntry, record: &LogRecord) -> bool {
 /// log ([`FsError::NotFound`]) yields an empty state, and index problems are
 /// recovered from the data log rather than surfaced — so a genuine data-log I/O
 /// fault is never silently treated as an empty transcript.
-fn load_state<F: ClawFs>(data_path: &str, index_path: &str) -> Result<(StoreState, bool), FsError> {
+fn load_state<F: ClawFs>(
+    filesystem: &F,
+    data_path: &str,
+    index_path: &str,
+) -> Result<(StoreState, bool), FsError> {
     let mut state = StoreState::default();
     let mut covered_len = ByteLen::default();
     let mut manifest_next_id = TurnId::default();
@@ -1343,13 +1349,13 @@ fn load_state<F: ClawFs>(data_path: &str, index_path: &str) -> Result<(StoreStat
     // tail scan below, instead of reopening the file per access. A missing log is
     // a fresh transcript; any other open failure is a real fault, surfaced so
     // the empty state is not mistaken for "no transcript".
-    let mut data_file = match F::open(data_path) {
+    let mut data_file = match filesystem.open(data_path) {
         Ok(file) => Some(file),
         Err(FsError::NotFound) => None,
         Err(error) => return Err(error),
     };
 
-    match F::read(index_path) {
+    match filesystem.read(index_path) {
         Ok(bytes) => {
             if let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes) {
                 covered_len = manifest.covered_len;
@@ -1509,8 +1515,11 @@ fn transcript_path(dir: &str, transcript_id: u32, ext: &str) -> String {
     format!("{}/{transcript_id}{ext}", dir.trim_end_matches('/'))
 }
 
-fn delete_transcript_file<F: ClawFs>(path: String) -> Result<(), TranscriptDeleteError> {
-    match F::remove(&path) {
+fn delete_transcript_file<F: ClawFs>(
+    filesystem: &F,
+    path: String,
+) -> Result<(), TranscriptDeleteError> {
+    match filesystem.remove(&path) {
         Ok(()) | Err(FsError::NotFound) => Ok(()),
         Err(source) => Err(TranscriptDeleteError::Delete { path, source }),
     }
@@ -1530,11 +1539,11 @@ mod tests {
 
     #[test]
     fn invalid_index_is_rebuilt_from_data_log() {
-        MemFs::new();
+        let filesystem = Arc::new(MemFs::new());
         let dir = "/transcript-index-rebuild";
         let index_path = transcript_path(dir, 1, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(1, dir).unwrap();
+        let store = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 1, dir).unwrap();
         {
             let mut turn = store.open_turn().unwrap();
             turn.append_user("persisted user").unwrap();
@@ -1546,10 +1555,12 @@ mod tests {
         }
         // The first commit persists immediately (no debounce yet), so the data
         // log and manifest are already on disk here.
-        assert!(serde_json::from_slice::<Manifest>(&MemFs::read(&index_path).unwrap()).is_ok());
+        assert!(serde_json::from_slice::<Manifest>(&filesystem.read(&index_path).unwrap()).is_ok());
 
-        MemFs::write_atomic(&index_path, b"{not valid json").unwrap();
-        let rebuilt = TranscriptStore::<MemFs>::new(1, dir).unwrap();
+        filesystem
+            .write_atomic(&index_path, b"{not valid json")
+            .unwrap();
+        let rebuilt = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 1, dir).unwrap();
         let messages: String = rebuilt
             .turns()
             .iter()
@@ -1558,17 +1569,17 @@ mod tests {
             .collect();
         assert!(messages.contains("persisted user"));
         assert!(messages.contains("persisted reply"));
-        assert!(serde_json::from_slice::<Manifest>(&MemFs::read(&index_path).unwrap()).is_ok());
+        assert!(serde_json::from_slice::<Manifest>(&filesystem.read(&index_path).unwrap()).is_ok());
     }
 
     #[test]
     fn delete_removes_both_transcript_files_and_is_idempotent() {
-        MemFs::new();
+        let filesystem = Arc::new(MemFs::new());
         let dir = "/transcript-delete";
         let data_path = transcript_path(dir, 7, DATA_EXT);
         let index_path = transcript_path(dir, 7, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(7, dir).unwrap();
+        let store = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 7, dir).unwrap();
         {
             let mut turn = store.open_turn().unwrap();
             turn.append_user("delete me").unwrap();
@@ -1577,39 +1588,49 @@ mod tests {
                 .unwrap();
         }
         drop(store);
-        assert!(MemFs::exists(&data_path));
-        assert!(MemFs::exists(&index_path));
+        assert!(filesystem.exists(&data_path));
+        assert!(filesystem.exists(&index_path));
 
-        TranscriptStore::<MemFs>::delete(7, dir).unwrap();
-        assert!(!MemFs::exists(&data_path));
-        assert!(!MemFs::exists(&index_path));
+        TranscriptStore::<MemFs>::delete(filesystem.as_ref(), 7, dir).unwrap();
+        assert!(!filesystem.exists(&data_path));
+        assert!(!filesystem.exists(&index_path));
 
-        TranscriptStore::<MemFs>::delete(7, dir).unwrap();
+        TranscriptStore::<MemFs>::delete(filesystem.as_ref(), 7, dir).unwrap();
     }
 
     #[test]
     fn list_persisted_ids_unions_data_and_index_files() {
-        MemFs::new();
+        let filesystem = MemFs::new();
         let dir = "/transcript-list";
-        MemFs::write_atomic(&transcript_path(dir, 3, DATA_EXT), b"").unwrap();
-        MemFs::write_atomic(&transcript_path(dir, 3, INDEX_EXT), b"").unwrap();
-        MemFs::write_atomic(&transcript_path(dir, 7, DATA_EXT), b"").unwrap();
-        MemFs::write_atomic(&format!("{dir}/unrelated"), b"").unwrap();
+        filesystem
+            .write_atomic(&transcript_path(dir, 3, DATA_EXT), b"")
+            .unwrap();
+        filesystem
+            .write_atomic(&transcript_path(dir, 3, INDEX_EXT), b"")
+            .unwrap();
+        filesystem
+            .write_atomic(&transcript_path(dir, 7, DATA_EXT), b"")
+            .unwrap();
+        filesystem
+            .write_atomic(&format!("{dir}/unrelated"), b"")
+            .unwrap();
 
         assert_eq!(
-            TranscriptStore::<MemFs>::list_persisted_ids(dir).unwrap(),
+            TranscriptStore::<MemFs>::list_persisted_ids(&filesystem, dir).unwrap(),
             vec![3, 7]
         );
     }
 
     #[test]
     fn list_persisted_ids_rejects_invalid_transcript_filenames() {
-        MemFs::new();
+        let filesystem = MemFs::new();
         let dir = "/transcript-list-invalid";
-        MemFs::write_atomic(&format!("{dir}/not-an-id.jsonl"), b"").unwrap();
+        filesystem
+            .write_atomic(&format!("{dir}/not-an-id.jsonl"), b"")
+            .unwrap();
 
         assert_eq!(
-            TranscriptStore::<MemFs>::list_persisted_ids(dir),
+            TranscriptStore::<MemFs>::list_persisted_ids(&filesystem, dir),
             Err(TranscriptListError::InvalidFilename(
                 "not-an-id.jsonl".to_owned()
             ))

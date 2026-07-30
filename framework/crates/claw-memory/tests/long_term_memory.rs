@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use claw_interface::{ClawFs, MemFs};
 use claw_memory::{
     LongTermError, LongTermMemory, MemoryDraft, MemoryId, MemoryPatch, StoreOutcome,
@@ -7,7 +9,6 @@ use claw_memory::{
 
 #[test]
 fn store_mints_prefixed_ids_in_order() {
-    reset_fs();
     let memory = memory();
     let first = memory.store(draft("Likes tea", &["preference"]));
     let second = memory.store(draft("Lives in Berlin", &["fact"]));
@@ -17,7 +18,6 @@ fn store_mints_prefixed_ids_in_order() {
 
 #[test]
 fn store_dedups_by_normalized_content() {
-    reset_fs();
     let memory = memory();
     assert!(matches!(
         memory.store(draft("Likes  TEA", &["preference"])),
@@ -32,7 +32,6 @@ fn store_dedups_by_normalized_content() {
 
 #[test]
 fn recall_filters_by_label_and_query_newest_first() {
-    reset_fs();
     let memory = memory();
     memory.store(draft("Likes tea", &["preference"]));
     memory.store(draft("Likes coffee too", &["preference"]));
@@ -51,7 +50,6 @@ fn recall_filters_by_label_and_query_newest_first() {
 
 #[test]
 fn update_replaces_only_supplied_fields() {
-    reset_fs();
     let memory = memory();
     let id = memory.store(draft("Old", &["x"])).item().id.clone();
     let updated = memory
@@ -73,7 +71,6 @@ fn update_replaces_only_supplied_fields() {
 
 #[test]
 fn forget_removes_the_item() {
-    reset_fs();
     let memory = memory();
     let id = memory.store(draft("Ephemeral", &["x"])).item().id.clone();
     memory.forget(&id).expect("forget");
@@ -86,9 +83,10 @@ fn forget_removes_the_item() {
 
 #[test]
 fn state_survives_reload_from_journal() {
-    reset_fs();
+    let filesystem = Arc::new(MemFs::new());
     {
-        let memory = LongTermMemory::<MemFs>::new("/m", "g-").expect("load empty store");
+        let memory = LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-")
+            .expect("load empty store");
         memory.store(draft("Persistent", &["fact"]));
         let id = memory
             .store(draft("To be edited", &["fact"]))
@@ -105,7 +103,8 @@ fn state_survives_reload_from_journal() {
             )
             .expect("update");
     }
-    let reloaded = LongTermMemory::<MemFs>::new("/m", "g-").expect("replay journal");
+    let reloaded =
+        LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-").expect("replay journal");
     assert_eq!(reloaded.list().len(), 2);
     let edited = reloaded.recall(&[], Some("edited"), 10);
     assert_eq!(edited.len(), 1);
@@ -122,14 +121,18 @@ fn state_survives_reload_from_journal() {
 
 #[test]
 fn torn_trailing_journal_record_is_ignored_on_reload() {
-    reset_fs();
+    let filesystem = Arc::new(MemFs::new());
     {
-        let memory = LongTermMemory::<MemFs>::new("/m", "g-").expect("load empty store");
+        let memory = LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-")
+            .expect("load empty store");
         memory.store(draft("Committed before crash", &["fact"]));
     }
-    MemFs::append("/m/memory_records.jsonl", br#"{"torn":"record""#).unwrap();
+    filesystem
+        .append("/m/memory_records.jsonl", br#"{"torn":"record""#)
+        .unwrap();
 
-    let reloaded = LongTermMemory::<MemFs>::new("/m", "g-").expect("replay journal");
+    let reloaded =
+        LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-").expect("replay journal");
     let items = reloaded.list();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].content, "Committed before crash");
@@ -144,11 +147,7 @@ fn torn_trailing_journal_record_is_ignored_on_reload() {
 }
 
 fn memory() -> LongTermMemory<MemFs> {
-    LongTermMemory::new("/m", "g-").expect("load empty store")
-}
-
-fn reset_fs() {
-    MemFs::new();
+    LongTermMemory::new(Arc::new(MemFs::new()), "/m", "g-").expect("load empty store")
 }
 
 fn draft(content: &str, tags: &[&str]) -> MemoryDraft {

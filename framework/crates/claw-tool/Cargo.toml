@@ -26,7 +26,7 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 anyhow = "1"
-claw-interface = { path = "../claw-interface", features = ["memfs"] }
+claw-interface = { path = "../claw-interface" }
 futures-lite = "2"
 
 [lints.rust]
