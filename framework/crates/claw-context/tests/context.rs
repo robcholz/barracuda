@@ -32,13 +32,14 @@ fn blocks_render_in_wire_order_regardless_of_declaration_order() {
     let mut context = Context::new();
     context
         .with(Block::new(BlockKind::RecentContext, "RECENT"))
+        .with(Block::new(BlockKind::DeferredTools, "TOOLS"))
         .with(Block::new(BlockKind::OutputContract, "OUTPUT"))
         .with(Block::new(BlockKind::AgentInstruction, "AGENT"))
         .with(Block::new(BlockKind::ConversationSummary, "SUMMARY"));
 
     assert_eq!(
         system_of(&mut context),
-        "AGENT\n\nSUMMARY\n\nRECENT\n\nOUTPUT"
+        "AGENT\n\nSUMMARY\n\nTOOLS\n\nRECENT\n\nOUTPUT"
     );
 }
 
@@ -77,7 +78,7 @@ fn empty_content_is_absent_and_drops_the_key() {
     let mut context = Context::new();
     context
         .with(Block::new(BlockKind::AgentInstruction, "AGENT"))
-        .with(Block::new(BlockKind::ToolPolicy, ""))
+        .with(Block::new(BlockKind::StaticTools, ""))
         .with(Block::new(BlockKind::RecentContext, "   \n  "));
     assert_eq!(system_of(&mut context), "AGENT");
 }

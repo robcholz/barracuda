@@ -625,10 +625,17 @@ where
                     render_span.in_scope(|| {
                         self.agent
                             .context
-                            .with(Block::new(BlockKind::ToolPolicy, tools.tool_context()))
+                            .with(Block::new(
+                                BlockKind::StaticTools,
+                                tools.static_context(),
+                            ))
+                            .with(Block::new(
+                                BlockKind::DeferredTools,
+                                tools.deferred_context(),
+                            ))
                             .with_reminder(
                                 BlockKind::ToolReminder,
-                                Some(tools.extra_tool_context()),
+                                Some(tools.reminders()),
                             );
                     });
 

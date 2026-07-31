@@ -15,8 +15,9 @@ const NO_EXTRA_TOOL_CONTEXT: &str = "no extra tool context";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct ToolSetCache {
-    schemas_json: Option<String>,
-    tool_context: Option<String>,
+    static_schemas: Option<String>,
+    static_context: Option<String>,
+    deferred_context: Option<String>,
     extra_tool_context: Option<String>,
 }
 
@@ -546,8 +547,8 @@ impl ToolSet {
     }
 
     fn rebuild_cache(&mut self) {
-        self.render_schemas_json();
-        self.render_tool_context();
+        self.render_static_tools();
+        self.render_deferred_tools();
         self.rebuild_extra_tool_context();
         self.refresh_discovery_catalog();
         self.should_rebuild_tool = false;
@@ -588,57 +589,58 @@ impl ToolSet {
             .catalog = catalog;
     }
 
-    fn render_schemas_json(&mut self) {
-        let schemas_json = self.cache.schemas_json.get_or_insert_with(String::new);
-        schemas_json.clear();
+    fn render_static_tools(&mut self) {
+        let schemas = self.cache.static_schemas.get_or_insert_with(String::new);
+        render_schemas(
+            schemas,
+            self.state.tools.iter().filter(|(_, entry)| {
+                entry.default_visibility
+                    && matches!(
+                        entry.state,
+                        ToolState::Enabled | ToolState::TemporarilyDisabled
+                    )
+            }),
+            &self.tools,
+        );
 
-        let mut has_tool = false;
-        schemas_json.push('[');
-        for (name, entry) in &self.state.tools {
-            if !matches!(
-                entry.state,
-                ToolState::Enabled | ToolState::TemporarilyDisabled
-            ) {
-                continue;
-            }
-            let Some(tool) = self.tools.get(name) else {
-                continue;
-            };
-            if has_tool {
-                schemas_json.push(',');
-            }
-            schemas_json.push_str(tool.schema());
-            has_tool = true;
-        }
-        if has_tool {
-            schemas_json.push(']');
-        } else {
-            schemas_json.clear();
-        }
+        let context = self.cache.static_context.get_or_insert_with(String::new);
+        render_context(
+            context,
+            self.state.tools.iter().filter(|(_, entry)| {
+                entry.default_visibility
+                    && matches!(
+                        entry.state,
+                        ToolState::Enabled | ToolState::TemporarilyDisabled
+                    )
+            }),
+            &self.tools,
+        );
     }
 
-    fn render_tool_context(&mut self) {
-        let tool_context = self.cache.tool_context.get_or_insert_with(String::new);
-        tool_context.clear();
-
-        for (name, entry) in &self.state.tools {
-            if !matches!(
-                entry.state,
-                ToolState::Enabled | ToolState::TemporarilyDisabled
-            ) {
-                continue;
-            }
-            let Some(tool) = self.tools.get(name) else {
-                continue;
-            };
-            let Some(usage) = tool.usage() else {
-                continue;
-            };
-            if !tool_context.is_empty() {
-                tool_context.push_str("\n\n");
-            }
-            tool_context.push_str(usage);
-        }
+    fn render_deferred_tools(&mut self) {
+        let context = self.cache.deferred_context.get_or_insert_with(String::new);
+        render_context(
+            context,
+            self.state.tools.iter().filter(|(_, entry)| {
+                !entry.default_visibility
+                    && matches!(
+                        entry.state,
+                        ToolState::Enabled | ToolState::TemporarilyDisabled
+                    )
+            }),
+            &self.tools,
+        );
+        append_schemas(
+            context,
+            self.state.tools.iter().filter(|(_, entry)| {
+                !entry.default_visibility
+                    && matches!(
+                        entry.state,
+                        ToolState::Enabled | ToolState::TemporarilyDisabled
+                    )
+            }),
+            &self.tools,
+        );
     }
 
     fn render_extra_tool_context(&mut self) {
@@ -686,38 +688,54 @@ pub struct ToolSetHandle<'a> {
 }
 
 impl<'a> ToolSetHandle<'a> {
-    pub fn schemas_json(&self) -> &str {
+    /// Schemas for tools present in the default, immutable tool surface.
+    pub fn static_schemas(&self) -> &str {
         match self
             .cache
-            .schemas_json
+            .static_schemas
             .as_deref()
             .filter(|text| !text.is_empty())
         {
-            Some(schemas_json) => schemas_json,
+            Some(schemas) => schemas,
             None => NO_SCHEMAS,
         }
     }
 
-    pub fn tool_context(&self) -> &str {
+    /// Usage context for tools present in the default, immutable tool surface.
+    pub fn static_context(&self) -> &str {
         match self
             .cache
-            .tool_context
+            .static_context
             .as_deref()
             .filter(|text| !text.is_empty())
         {
-            Some(tool_context) => tool_context,
+            Some(context) => context,
             None => NO_TOOL_CONTEXT,
         }
     }
 
-    pub fn extra_tool_context(&self) -> &str {
+    /// Usage and schemas for hidden tools revealed through `tool_load`.
+    pub fn deferred_context(&self) -> &str {
+        match self
+            .cache
+            .deferred_context
+            .as_deref()
+            .filter(|text| !text.is_empty())
+        {
+            Some(context) => context,
+            None => "",
+        }
+    }
+
+    /// Per-iteration status for temporarily enabled or disabled tools.
+    pub fn reminders(&self) -> &str {
         match self
             .cache
             .extra_tool_context
             .as_deref()
             .filter(|text| !text.is_empty())
         {
-            Some(extra_tool_context) => extra_tool_context,
+            Some(reminders) => reminders,
             None => NO_EXTRA_TOOL_CONTEXT,
         }
     }
@@ -755,6 +773,74 @@ impl<'a> ToolSetHandle<'a> {
             }
             _ => Err(ToolError::NotFound(call.name().to_owned()).into()),
         }
+    }
+}
+
+fn render_schemas<'a>(
+    output: &mut String,
+    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
+    tools: &'a HashMap<ToolName, Tool>,
+) {
+    output.clear();
+    output.push('[');
+    let mut has_tool = false;
+    for (name, _) in entries {
+        let Some(tool) = tools.get(name) else {
+            continue;
+        };
+        if has_tool {
+            output.push(',');
+        }
+        output.push_str(tool.schema());
+        has_tool = true;
+    }
+    if has_tool {
+        output.push(']');
+    } else {
+        output.clear();
+    }
+}
+
+fn append_schemas<'a>(
+    output: &mut String,
+    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
+    tools: &'a HashMap<ToolName, Tool>,
+) {
+    let mut has_tool = false;
+    for (name, _) in entries {
+        let Some(tool) = tools.get(name) else {
+            continue;
+        };
+        if has_tool {
+            output.push(',');
+        } else {
+            if !output.is_empty() {
+                output.push_str("\n\n");
+            }
+            output.push('[');
+        }
+        output.push_str(tool.schema());
+        has_tool = true;
+    }
+    if has_tool {
+        output.push(']');
+    }
+}
+
+fn render_context<'a>(
+    output: &mut String,
+    entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
+    tools: &'a HashMap<ToolName, Tool>,
+) {
+    output.clear();
+    for (name, _) in entries {
+        let Some(usage) = tools.get(name).and_then(Tool::usage) else {
+            continue;
+        };
+        if !output.is_empty() {
+            output.push_str("\n\n");
+        }
+        output.push_str(usage);
     }
 }
 

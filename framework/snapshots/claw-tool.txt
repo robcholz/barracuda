@@ -122,9 +122,10 @@ pub fn claw_tool::ToolSet::temporarily_enable_tool(&mut self, claw_tool::ToolNam
 pub struct claw_tool::ToolSetHandle<'a>
 impl<'a> claw_tool::ToolSetHandle<'a>
 pub fn claw_tool::ToolSetHandle<'a>::classify(&self, &claw_tool::ToolInvocation) -> claw_tool::ToolResult<claw_permission::action::Action>
-pub fn claw_tool::ToolSetHandle<'a>::extra_tool_context(&self) -> &str
-pub fn claw_tool::ToolSetHandle<'a>::schemas_json(&self) -> &str
-pub fn claw_tool::ToolSetHandle<'a>::tool_context(&self) -> &str
+pub fn claw_tool::ToolSetHandle<'a>::deferred_context(&self) -> &str
+pub fn claw_tool::ToolSetHandle<'a>::reminders(&self) -> &str
+pub fn claw_tool::ToolSetHandle<'a>::static_context(&self) -> &str
+pub fn claw_tool::ToolSetHandle<'a>::static_schemas(&self) -> &str
 pub trait claw_tool::AsyncToolHandler: claw_tool::ToolSpec
 pub fn claw_tool::AsyncToolHandler::invoke<'a>(&'a self, &'a claw_tool::ToolInvocation) -> claw_tool::ToolFuture<'a>
 pub trait claw_tool::DetachedToolHandler: claw_tool::ToolSpec

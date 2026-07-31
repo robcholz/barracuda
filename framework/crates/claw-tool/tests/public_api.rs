@@ -21,10 +21,11 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
 
     let handle = tool_set.begin()?;
     assert_eq!(
-        handle.schemas_json(),
+        handle.static_schemas(),
         r#"[{"type":"function","function":{"name":"echo"}}]"#
     );
-    assert_eq!(handle.tool_context(), "Echoes the normalized arguments.");
+    assert_eq!(handle.static_context(), "Echoes the normalized arguments.");
+    assert_eq!(handle.deferred_context(), "");
 
     let call = invocation("echo", r#" { "message": "hi" } "#)?;
     let outcome = execute_tool(&handle, &call)?;
@@ -68,11 +69,11 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     {
         let handle = tool_set.begin()?;
         assert_eq!(
-            handle.schemas_json(),
+            handle.static_schemas(),
             r#"[{"type":"function","function":{"name":"echo"}}]"#
         );
         assert_eq!(
-            handle.extra_tool_context(),
+            handle.reminders(),
             "Tool `echo` is temporarily unavailable."
         );
 
@@ -90,7 +91,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     tool_set.clear_temporary_tools();
 
     let handle = tool_set.begin()?;
-    assert_eq!(handle.extra_tool_context(), "no extra tool context");
+    assert_eq!(handle.reminders(), "no extra tool context");
 
     let call = invocation("echo", "{}")?;
     let outcome = execute_tool(&handle, &call)?;
@@ -112,7 +113,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 
     {
         let handle = tool_set.begin()?;
-        assert_eq!(handle.schemas_json(), "no schemas");
+        assert_eq!(handle.static_schemas(), "no schemas");
 
         let call = invocation("echo", "{}")?;
         let outcome = execute_tool(&handle, &call)?;
@@ -129,7 +130,7 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 
     let handle = tool_set.begin()?;
     assert_eq!(
-        handle.schemas_json(),
+        handle.static_schemas(),
         r#"[{"type":"function","function":{"name":"echo"}}]"#
     );
 
@@ -249,7 +250,7 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
     tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
 
     let handle = tool_set.begin()?;
-    assert_eq!(handle.schemas_json(), "no schemas");
+    assert_eq!(handle.static_schemas(), "no schemas");
     assert_eq!(
         execute_tool(&handle, &invocation("echo", "{}")?)?,
         ToolOutput {
@@ -284,7 +285,7 @@ fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
     registry.start_all()?;
 
     let handle = tool_set.begin()?;
-    assert_eq!(handle.schemas_json(), "no schemas");
+    assert_eq!(handle.static_schemas(), "no schemas");
     Ok(())
 }
 
@@ -326,9 +327,10 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     {
         let handle = tool_set.begin()?;
         assert_eq!(
-            handle.schemas_json(),
+            handle.static_schemas(),
             r#"[{"type":"function","function":{"name":"other"}}]"#
         );
+        assert_eq!(handle.deferred_context(), "");
         let blocked = execute_tool(&handle, &invocation("echo", "{}")?)?;
         assert_eq!(
             blocked,
@@ -359,6 +361,17 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     assert!(!discovery.request_load("nope"));
 
     let handle = tool_set.begin()?;
+    assert_eq!(
+        handle.static_schemas(),
+        r#"[{"type":"function","function":{"name":"other"}}]"#
+    );
+    assert_eq!(
+        handle.deferred_context(),
+        concat!(
+            "Echoes the normalized arguments.\n\n",
+            r#"[{"type":"function","function":{"name":"echo"}}]"#
+        )
+    );
     let outcome = execute_tool(&handle, &invocation("echo", "{}")?)?;
     assert_eq!(
         outcome,
@@ -382,7 +395,7 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
     let discovery = tool_set.discovery();
     let handle = tool_set.begin()?;
 
-    assert_eq!(handle.schemas_json(), "no schemas");
+    assert_eq!(handle.static_schemas(), "no schemas");
     assert!(discovery.catalog().is_empty());
     assert!(!discovery.request_load("hidden"));
     Ok(())
@@ -418,7 +431,7 @@ fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set();
-    assert_eq!(tool_set.begin()?.schemas_json(), "no schemas");
+    assert_eq!(tool_set.begin()?.static_schemas(), "no schemas");
     Ok(())
 }
 

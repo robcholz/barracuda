@@ -13,6 +13,7 @@ pub claw_context::BlockKind::Custom::band: claw_context::Band
 pub claw_context::BlockKind::Custom::label: alloc::borrow::Cow<'static, str>
 pub claw_context::BlockKind::Custom::order: u16
 pub claw_context::BlockKind::Custom::scope: claw_context::Scope
+pub claw_context::BlockKind::DeferredTools
 pub claw_context::BlockKind::GlobalMemory
 pub claw_context::BlockKind::ModeFraming
 pub claw_context::BlockKind::OutputContract
@@ -22,7 +23,7 @@ pub claw_context::BlockKind::SessionContext
 pub claw_context::BlockKind::SessionMemory
 pub claw_context::BlockKind::SkillList
 pub claw_context::BlockKind::Soul
-pub claw_context::BlockKind::ToolPolicy
+pub claw_context::BlockKind::StaticTools
 pub claw_context::BlockKind::ToolReminder
 pub claw_context::BlockKind::UserProfile
 impl claw_context::BlockKind

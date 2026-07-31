@@ -88,7 +88,7 @@ fn observed_text(kind: &BlockKind, content: &str) -> ObservedText {
 fn observed_kind(kind: &BlockKind) -> ObservedKind {
     let (name, label) = match kind {
         BlockKind::AgentInstruction => ("agent_instruction", None),
-        BlockKind::ToolPolicy => ("tool_policy", None),
+        BlockKind::StaticTools => ("static_tools", None),
         BlockKind::Soul => ("soul", None),
         BlockKind::AssistantIdentity => ("assistant_identity", None),
         BlockKind::UserProfile => ("user_profile", None),
@@ -100,6 +100,7 @@ fn observed_kind(kind: &BlockKind) -> ObservedKind {
         BlockKind::ModeFraming => ("mode_framing", None),
         BlockKind::ReasoningEffort => ("reasoning_effort", None),
         BlockKind::ConversationSummary => ("conversation_summary", None),
+        BlockKind::DeferredTools => ("deferred_tools", None),
         BlockKind::ToolReminder => ("tool_reminder", None),
         BlockKind::RecentContext => ("recent_context", None),
         BlockKind::OutputContract => ("output_contract", None),

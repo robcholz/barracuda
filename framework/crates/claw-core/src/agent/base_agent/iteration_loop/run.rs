@@ -111,7 +111,7 @@ where
                 system_prompt: step.system_prompt,
                 messages: step.messages,
                 reminders: step.reminders,
-                tools_json: Some(step.tools.schemas_json()),
+                tools_json: Some(step.tools.static_schemas()),
                 retry: loop_.retry,
             };
             let cancel = Cancel::new(loop_.control.cancel_flag());

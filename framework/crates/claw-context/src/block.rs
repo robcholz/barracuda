@@ -65,7 +65,7 @@ impl Scope {
 pub enum BlockKind {
     // Band 1 — Static instructions.
     AgentInstruction,
-    ToolPolicy,
+    StaticTools,
     // Band 2 — Durable state.
     Soul,
     AssistantIdentity,
@@ -79,6 +79,7 @@ pub enum BlockKind {
     ReasoningEffort,
     ConversationSummary,
     // Band 3 — Volatile tail.
+    DeferredTools,
     ToolReminder,
     RecentContext,
     OutputContract,
@@ -96,7 +97,7 @@ impl BlockKind {
     /// The band this block renders in.
     pub fn band(&self) -> Band {
         match self {
-            BlockKind::AgentInstruction | BlockKind::ToolPolicy => Band::Static,
+            BlockKind::AgentInstruction | BlockKind::StaticTools => Band::Static,
             BlockKind::Soul
             | BlockKind::AssistantIdentity
             | BlockKind::UserProfile
@@ -108,9 +109,10 @@ impl BlockKind {
             | BlockKind::ModeFraming
             | BlockKind::ReasoningEffort
             | BlockKind::ConversationSummary => Band::Durable,
-            BlockKind::ToolReminder | BlockKind::RecentContext | BlockKind::OutputContract => {
-                Band::Volatile
-            }
+            BlockKind::DeferredTools
+            | BlockKind::ToolReminder
+            | BlockKind::RecentContext
+            | BlockKind::OutputContract => Band::Volatile,
             BlockKind::Custom { band, .. } => *band,
         }
     }
@@ -126,11 +128,12 @@ impl BlockKind {
             | BlockKind::UserProfile => Scope::Global,
             BlockKind::SessionContext | BlockKind::SessionMemory => Scope::Session,
             BlockKind::AgentInstruction
-            | BlockKind::ToolPolicy
+            | BlockKind::StaticTools
             | BlockKind::AgentMemory
             | BlockKind::SkillList
             | BlockKind::ModeFraming
             | BlockKind::ReasoningEffort
+            | BlockKind::DeferredTools
             | BlockKind::ToolReminder => Scope::Agent,
             BlockKind::ConversationSummary => Scope::Conversation,
             BlockKind::RecentContext | BlockKind::OutputContract => Scope::Turn,
@@ -143,7 +146,7 @@ impl BlockKind {
         match self {
             // Band 1
             BlockKind::AgentInstruction => 0,
-            BlockKind::ToolPolicy => 1,
+            BlockKind::StaticTools => 1,
             // Band 2
             BlockKind::Soul => 0,
             BlockKind::AssistantIdentity => 1,
@@ -157,6 +160,7 @@ impl BlockKind {
             BlockKind::ReasoningEffort => 3,
             BlockKind::ConversationSummary => 0,
             // Band 3
+            BlockKind::DeferredTools => 0,
             BlockKind::ToolReminder => 0,
             BlockKind::RecentContext => 0,
             BlockKind::OutputContract => 2,
