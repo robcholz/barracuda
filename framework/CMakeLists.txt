@@ -27,7 +27,7 @@ endif()
 add_custom_target(claw_rust_build
     BYPRODUCTS "${claw_rust_lib}"
     COMMAND cargo +esp build --release -p claw-cabi
-            --features ${claw_rust_logging_feature},use_legacy_skill,claw-agent/reasoning_medium
+            --features ${claw_rust_logging_feature},claw-agent/reasoning_medium
             --target ${claw_rust_target} -Z build-std=std,panic_abort
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building claw-cabi Rust staticlib (${claw_rust_target})"
