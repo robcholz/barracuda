@@ -18,3 +18,20 @@ function(claw_resolve_rust_target output_variable idf_target)
 
     set(${output_variable} "${rust_target}" PARENT_SCOPE)
 endfunction()
+
+# ESP-IDF 5.x exposes its C library component as `newlib`, while ESP-IDF 6.x
+# renamed the component to `esp_libc`. Resolve the imported CMake target at
+# configure time so the Rust static libraries can be linked by either version.
+function(claw_resolve_idf_libc_target output_variable)
+    if(TARGET idf::esp_libc)
+        set(libc_target "idf::esp_libc")
+    elseif(TARGET idf::newlib)
+        set(libc_target "idf::newlib")
+    else()
+        message(FATAL_ERROR
+            "Unable to find the ESP-IDF libc component target. "
+            "Expected either 'idf::esp_libc' or 'idf::newlib'.")
+    endif()
+
+    set(${output_variable} "${libc_target}" PARENT_SCOPE)
+endfunction()

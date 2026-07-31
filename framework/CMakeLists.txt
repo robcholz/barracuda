@@ -15,6 +15,7 @@ idf_component_register(
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClawRustTarget.cmake")
 claw_resolve_rust_target(claw_rust_target "${IDF_TARGET}")
+claw_resolve_idf_libc_target(claw_idf_libc_target)
 set(claw_rust_profile "release")
 set(claw_rust_lib "${CMAKE_CURRENT_SOURCE_DIR}/target/${claw_rust_target}/${claw_rust_profile}/libclaw_cabi.a")
 
@@ -42,7 +43,7 @@ add_custom_target(claw_rust_build
 add_library(claw_cabi_rust STATIC IMPORTED GLOBAL)
 set_target_properties(claw_cabi_rust PROPERTIES
     IMPORTED_LOCATION "${claw_rust_lib}"
-    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::esp_libc;idf::freertos;idf::pthread"
+    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;${claw_idf_libc_target};idf::freertos;idf::pthread"
 )
 add_dependencies(claw_cabi_rust claw_rust_build)
 

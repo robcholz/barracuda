@@ -31,6 +31,7 @@ idf_component_register(
 set(claw_api_rust_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 include("${claw_api_rust_dir}/cmake/ClawRustTarget.cmake")
 claw_resolve_rust_target(claw_api_rust_target "${IDF_TARGET}")
+claw_resolve_idf_libc_target(claw_api_idf_libc_target)
 set(claw_api_rust_profile "release")
 set(claw_api_rust_lib
     "${claw_api_rust_dir}/target/${claw_api_rust_target}/${claw_api_rust_profile}/libclaw_api_selftest.a")
@@ -56,7 +57,7 @@ set_target_properties(claw_api_selftest_rust PROPERTIES
     # imported libraries after the IDF component link groups, so those symbols
     # would otherwise be unresolved. INTERFACE_LINK_LIBRARIES makes CMake emit
     # the IDF libs directly after the Rust archive.
-    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::esp_libc;idf::freertos;idf::pthread"
+    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;${claw_api_idf_libc_target};idf::freertos;idf::pthread"
 )
 add_dependencies(claw_api_selftest_rust claw_api_selftest_build)
 
