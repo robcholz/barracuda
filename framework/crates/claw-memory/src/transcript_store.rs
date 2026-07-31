@@ -394,7 +394,7 @@ impl<F: ClawFs> Drop for TranscriptStore<F> {
 /// The agent's complete transcript: an append-only, verbatim record
 /// of every turn. See the module docs for the storage layout.
 ///
-/// Build one with [`new`](Self::new), append turns through the [`TurnHandle`]
+/// Build one with [`TranscriptStore::new`], append turns through the [`TurnHandle`]
 /// returned by [`open_turn`](Self::open_turn), and read the turn-structured
 /// transcript with [`turns`](Self::turns). Dropping a non-empty turn persists it
 /// immediately; dropping the store retries any pending failed write. Drive a
