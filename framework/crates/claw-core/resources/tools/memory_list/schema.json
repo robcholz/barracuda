@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "memory_list",
-    "description": "List the durable facts you currently remember, newest first. Use this to review what is in memory before editing or forgetting.",
+    "description": "List explicitly stored long-term facts, newest first. This is not a conversation transcript: do not use it to determine what was said earlier in the current session; use the conversation messages directly. An empty result means no durable facts were stored, not that no conversation occurred. Use this to review long-term memory before editing or forgetting it.",
     "parameters": {
       "type": "object",
       "properties": {

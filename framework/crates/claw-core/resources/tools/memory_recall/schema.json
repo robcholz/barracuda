@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "memory_recall",
-    "description": "Recall durable facts you remembered earlier, filtered by topic label and/or a free-text query. Use this when a task may depend on something you were told before.",
+    "description": "Search explicitly stored long-term facts by topic label and/or free text. Use this only when a task may depend on information from earlier conversations that is not already present in the current conversation messages. This is not a conversation transcript, and an empty result does not mean no conversation occurred.",
     "parameters": {
       "type": "object",
       "properties": {
