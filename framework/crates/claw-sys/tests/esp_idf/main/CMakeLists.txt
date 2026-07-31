@@ -55,7 +55,7 @@ set_target_properties(claw_sys_selftest_rust PROPERTIES
     # groups, so by default those symbols are unresolved. Setting
     # INTERFACE_LINK_LIBRARIES makes CMake emit the IDF libs directly after the
     # Rust archive, giving the linker a second chance to resolve them.
-    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::newlib;idf::freertos;idf::pthread"
+    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::esp_libc;idf::freertos;idf::pthread"
 )
 add_dependencies(claw_sys_selftest_rust claw_sys_selftest_build)
 

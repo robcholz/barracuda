@@ -8,7 +8,6 @@ idf_component_register(
         esp_http_client
         esp-tls
         mbedtls
-        newlib
         freertos
         pthread
     WHOLE_ARCHIVE
@@ -24,7 +23,7 @@ if("$ENV{CLAW_DEBUG}" STREQUAL "1")
     set(claw_rust_build_std_feature_args)
 else()
     set(claw_rust_logging_feature "prod_logging")
-    set(claw_rust_build_std_feature_args -Z build-std-features=)
+    set(claw_rust_build_std_feature_args -Z build-std-features=optimize_for_size)
 endif()
 
 add_custom_target(claw_rust_build
@@ -43,7 +42,7 @@ add_custom_target(claw_rust_build
 add_library(claw_cabi_rust STATIC IMPORTED GLOBAL)
 set_target_properties(claw_cabi_rust PROPERTIES
     IMPORTED_LOCATION "${claw_rust_lib}"
-    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::newlib;idf::freertos;idf::pthread"
+    INTERFACE_LINK_LIBRARIES "idf::esp_http_client;idf::esp-tls;idf::mbedtls;idf::esp_libc;idf::freertos;idf::pthread"
 )
 add_dependencies(claw_cabi_rust claw_rust_build)
 
