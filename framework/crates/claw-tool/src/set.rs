@@ -716,15 +716,11 @@ impl<'a> ToolSetHandle<'a> {
 
     /// Usage and schemas for hidden tools revealed through `tool_load`.
     pub fn deferred_context(&self) -> &str {
-        match self
-            .cache
+        self.cache
             .deferred_context
             .as_deref()
             .filter(|text| !text.is_empty())
-        {
-            Some(context) => context,
-            None => "",
-        }
+            .unwrap_or_default()
     }
 
     /// Per-iteration status for temporarily enabled or disabled tools.
