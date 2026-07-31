@@ -26,6 +26,9 @@ pub(crate) enum MultiagentEffect {
         message: Message,
         purpose: DispatchPurpose,
     },
+    Interrupt {
+        command: FollowupCommand,
+    },
     RemoveAgents {
         agents: Vec<AgentId>,
     },
@@ -51,6 +54,13 @@ pub(crate) enum DispatchOutcome {
     Missing,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InterruptOutcome {
+    Accepted,
+    Inactive,
+    Missing,
+}
+
 pub(crate) enum MultiagentEffectResult {
     Spawned {
         requester: AgentId,
@@ -66,6 +76,10 @@ pub(crate) enum MultiagentEffectResult {
         message: Message,
         purpose: DispatchPurpose,
         outcome: DispatchOutcome,
+    },
+    Interrupted {
+        command: FollowupCommand,
+        outcome: InterruptOutcome,
     },
 }
 
@@ -117,6 +131,7 @@ pub(crate) struct Multiagent {
     bridge: Arc<MultiagentBridge>,
     effects: VecDeque<MultiagentEffect>,
     routes: BTreeMap<AgentId, Sender<SubagentResult>>,
+    pending_interrupts: BTreeMap<AgentId, FollowupCommand>,
     removals: Vec<RemovalPlan>,
 }
 
@@ -127,6 +142,7 @@ impl Multiagent {
             bridge: Arc::new(MultiagentBridge::new()),
             effects: VecDeque::new(),
             routes: BTreeMap::new(),
+            pending_interrupts: BTreeMap::new(),
             removals: Vec::new(),
         }
     }
@@ -205,6 +221,10 @@ impl Multiagent {
                 self.reduce_dispatch(target, message, purpose, outcome);
                 None
             }
+            MultiagentEffectResult::Interrupted { command, outcome } => {
+                self.reduce_interrupt(command, outcome);
+                None
+            }
         }
     }
 
@@ -231,6 +251,16 @@ impl Multiagent {
     }
 
     pub(crate) fn on_agent_completed(&mut self, agent: AgentId, text: String, ok: bool) {
+        if let Some(command) = self.pending_interrupts.remove(&agent) {
+            self.effects.push_back(MultiagentEffect::Dispatch {
+                target: agent,
+                message: command.message,
+                purpose: DispatchPurpose::Followup {
+                    completed: command.completed,
+                },
+            });
+            return;
+        }
         if !self.state.contains(agent)
             || matches!(
                 self.state.status(agent),
@@ -384,6 +414,7 @@ impl Multiagent {
         self.state = MultiagentState::default();
         self.effects.clear();
         self.routes.clear();
+        self.pending_interrupts.clear();
         self.removals.clear();
         self.bridge.clear();
     }
@@ -497,11 +528,27 @@ impl Multiagent {
                 .try_send(Err(MultiagentCommandError::TargetNotControlled));
             return;
         }
+        if self.pending_interrupts.contains_key(&command.target) {
+            let _ = command
+                .completed
+                .try_send(Err(MultiagentCommandError::TargetBusy));
+            return;
+        }
         match self.state.status(command.target) {
-            Some(SubagentStatus::Idle) => {}
-            Some(
-                SubagentStatus::Ready | SubagentStatus::AwaitingApproval | SubagentStatus::Running,
-            ) => {
+            Some(SubagentStatus::Idle) => {
+                self.effects.push_back(MultiagentEffect::Dispatch {
+                    target: command.target,
+                    message: command.message,
+                    purpose: DispatchPurpose::Followup {
+                        completed: command.completed,
+                    },
+                });
+            }
+            Some(SubagentStatus::AwaitingApproval | SubagentStatus::Running) => {
+                self.effects
+                    .push_back(MultiagentEffect::Interrupt { command });
+            }
+            Some(SubagentStatus::Ready) => {
                 let _ = command
                     .completed
                     .try_send(Err(MultiagentCommandError::TargetBusy));
@@ -514,13 +561,6 @@ impl Multiagent {
                 return;
             }
         }
-        self.effects.push_back(MultiagentEffect::Dispatch {
-            target: command.target,
-            message: command.message,
-            purpose: DispatchPurpose::Followup {
-                completed: command.completed,
-            },
-        });
     }
 
     fn commit_spawn(
@@ -590,6 +630,26 @@ impl Multiagent {
         self.publish_snapshot();
     }
 
+    fn reduce_interrupt(&mut self, command: FollowupCommand, outcome: InterruptOutcome) {
+        match outcome {
+            InterruptOutcome::Accepted => {
+                let previous = self.pending_interrupts.insert(command.target, command);
+                debug_assert!(previous.is_none());
+            }
+            InterruptOutcome::Inactive => {
+                let _ = command
+                    .completed
+                    .try_send(Err(MultiagentCommandError::TargetBusy));
+            }
+            InterruptOutcome::Missing => {
+                let _ = command
+                    .completed
+                    .try_send(Err(MultiagentCommandError::TargetNotControlled));
+            }
+        }
+        self.publish_snapshot();
+    }
+
     fn begin_removal(&mut self, victims: Vec<AgentId>, cause: RemovalCause) {
         let victims = victims
             .into_iter()
@@ -636,9 +696,17 @@ impl Multiagent {
                         DispatchPurpose::Followup { .. } => true,
                     }
             }
+            MultiagentEffect::Interrupt { command } => !victims.contains(&command.target),
             MultiagentEffect::ArmTimeout { agent, .. } => !victims.contains(agent),
             MultiagentEffect::RemoveAgents { .. } => true,
         });
+        for victim in &victims {
+            if let Some(command) = self.pending_interrupts.remove(victim) {
+                let _ = command
+                    .completed
+                    .try_send(Err(MultiagentCommandError::TargetNotControlled));
+            }
+        }
         let agents = victims
             .difference(&already_removed)
             .copied()
@@ -790,6 +858,8 @@ impl Multiagent {
     }
 
     fn reap_cancelled_completion_receivers(&mut self) {
+        self.pending_interrupts
+            .retain(|_, command| !command.completed.is_closed());
         let cancelled = self
             .routes
             .iter()
@@ -1227,7 +1297,7 @@ mod tests {
     }
 
     #[test]
-    fn running_target_rejects_followup_before_turn_completion_is_reduced() {
+    fn running_target_accepts_interrupt_dispatch() {
         let root = AgentId(1);
         let child = AgentId(2);
         let mut multiagent = Multiagent::new();
@@ -1252,11 +1322,44 @@ mod tests {
             },
         );
 
+        assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
+        let Some(MultiagentEffect::Interrupt { command }) = multiagent.take_effect() else {
+            panic!("running target should emit an interrupt effect");
+        };
+        assert_eq!(command.target, child);
+        assert_eq!(command.message.as_str(), "too early");
+
+        multiagent.apply_result(MultiagentEffectResult::Interrupted {
+            command,
+            outcome: InterruptOutcome::Accepted,
+        });
+
+        assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
+        multiagent.on_agent_completed(child, "subagent was interrupted".to_owned(), false);
+        let Some(MultiagentEffect::Dispatch {
+            target,
+            message,
+            purpose,
+        }) = multiagent.take_effect()
+        else {
+            panic!("completed interrupt should emit the deferred dispatch");
+        };
+        assert_eq!(target, child);
+        assert_eq!(message.as_str(), "too early");
+        assert!(matches!(purpose, DispatchPurpose::Followup { .. }));
+
+        multiagent.apply_result(MultiagentEffectResult::Dispatched {
+            target,
+            message,
+            purpose,
+            outcome: DispatchOutcome::Accepted,
+        });
+
+        assert_eq!(result.try_recv(), Ok(Ok(())));
         assert_eq!(
-            result.try_recv(),
-            Ok(Err(MultiagentCommandError::TargetBusy))
+            multiagent.state.status(child),
+            Some(SubagentStatus::Running)
         );
-        assert!(multiagent.take_effect().is_none());
     }
 
     #[test]

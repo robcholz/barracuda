@@ -17,7 +17,8 @@ mod tool_port;
 mod tools;
 
 pub(crate) use self::component::{
-    DispatchOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError,
+    DispatchOutcome, InterruptOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult,
+    MultiagentPhysicalError,
 };
 pub(crate) use self::model::SubagentTimeout;
 pub(crate) use self::tool_port::SpawnCommand;

@@ -1,0 +1,21 @@
+{
+  "type": "function",
+  "function": {
+    "name": "subagent_interrupt",
+    "description": "Interrupt a subagent's active task, then send it the given message as a new task. An idle subagent receives the message immediately.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "The id of the subagent to interrupt (e.g. \"agent-7\"), as returned by subagent_spawn or subagent_list."
+        },
+        "message": {
+          "type": "string",
+          "description": "The new task input to send after the current task is interrupted."
+        }
+      },
+      "required": ["agent", "message"]
+    }
+  }
+}

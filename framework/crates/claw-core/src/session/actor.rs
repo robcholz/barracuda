@@ -40,8 +40,8 @@ use crate::agent::{
 };
 #[cfg(feature = "multiagent")]
 use crate::multiagent::{
-    DispatchOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError,
-    SubagentTimeout,
+    DispatchOutcome, InterruptOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult,
+    MultiagentPhysicalError, SubagentTimeout,
 };
 #[cfg(feature = "multiagent")]
 type TimeoutFuture = Pin<Box<dyn Future<Output = crate::agent::AgentId>>>;
@@ -857,6 +857,21 @@ where
                         purpose,
                         outcome,
                     });
+            }
+            MultiagentEffect::Interrupt { command } => {
+                let target = command.target;
+                let outcome = match self.agents.get_mut(&target) {
+                    Some(slot) => {
+                        if slot.interrupt() {
+                            InterruptOutcome::Accepted
+                        } else {
+                            InterruptOutcome::Inactive
+                        }
+                    }
+                    None => InterruptOutcome::Missing,
+                };
+                self.multiagent
+                    .apply_result(MultiagentEffectResult::Interrupted { command, outcome });
             }
             MultiagentEffect::RemoveAgents { agents } => {
                 self.begin_multiagent_removal(agents);

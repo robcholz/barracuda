@@ -150,14 +150,16 @@ where
         in_flight.span = None;
     }
 
-    pub(super) fn interrupt(&mut self) {
+    pub(super) fn interrupt(&mut self) -> bool {
         let Some(Execution::InFlight(in_flight)) = &mut self.execution else {
-            return;
+            return false;
         };
-        in_flight.control.interrupt();
-        if in_flight.lifecycle == InFlightLifecycle::Running {
-            in_flight.lifecycle = InFlightLifecycle::Interrupting;
+        if in_flight.lifecycle != InFlightLifecycle::Running {
+            return false;
         }
+        in_flight.control.interrupt();
+        in_flight.lifecycle = InFlightLifecycle::Interrupting;
+        true
     }
 
     pub(super) fn cancel(&mut self) {
