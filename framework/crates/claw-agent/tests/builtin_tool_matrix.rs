@@ -199,7 +199,7 @@ fn tool_calls_for_sequence(sequence: &str) -> Vec<ToolCallSpec> {
             call("subagent_watch", json!({ "agent": "agent-999" })),
             call("subagent_delete", json!({ "agent": "agent-999" })),
             call(
-                "subagent_followup",
+                "subagent_interrupt",
                 json!({ "agent": "agent-999", "message": "retask" }),
             ),
             call(
