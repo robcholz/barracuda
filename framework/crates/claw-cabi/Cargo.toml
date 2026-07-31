@@ -16,19 +16,18 @@ cache_profile = ["claw-agent/cache_profile"]
 rich_logging = [
     "log/release_max_level_off",
     "tracing/release_max_level_trace",
+    "cache_profile",
 ]
 # Install the lightweight logger and compile structured tracing out.
 prod_logging = [
     "log/release_max_level_info",
     "tracing/release_max_level_off",
 ]
-# Use the pre-initialized C skill registry on ESP-IDF firmware builds.
-use_legacy_skill = ["claw-agent/use_legacy_skill"]
 
 [dependencies]
 
 [target.'cfg(target_os = "espidf")'.dependencies]
-claw-agent = { path = "../claw-agent", default-features = false }
+claw-agent = { path = "../claw-agent", default-features = false, features = ["use_legacy_skill", "multiagent"] }
 claw-api = { path = "../claw-api" }
 claw-interface = { path = "../claw-interface" }
 claw-log = { path = "../claw-log", default-features = false }
