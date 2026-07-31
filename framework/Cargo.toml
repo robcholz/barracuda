@@ -15,13 +15,13 @@ default-members = [
     "crates/claw-interface",
 ]
 
-# Device images are built with the release profile (panic = abort, since the
-# xtensa-esp32s3-espidf image does not unwind). The dev/test profiles keep the
-# default unwind so the std crates can be unit-tested on the host.
+# Device images are built with the release profile because the supported
+# ESP-IDF targets do not unwind. The dev/test profiles keep the default unwind
+# so the std crates can be unit-tested on the host.
 #
 # LTO is disabled on purpose: with `lto = true` rustc emits an archive of LLVM
-# bitcode objects, which the GCC-based ESP-IDF xtensa linker cannot consume. A
-# non-LTO staticlib carries real object code that links cleanly into the image.
+# bitcode objects, which the GCC-based ESP-IDF linkers cannot consume. A non-LTO
+# staticlib carries real object code that links cleanly into the image.
 [profile.release]
 panic = "abort"
 opt-level = "s"

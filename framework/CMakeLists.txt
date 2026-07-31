@@ -14,7 +14,8 @@ idf_component_register(
     WHOLE_ARCHIVE
 )
 
-set(claw_rust_target "xtensa-esp32s3-espidf")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClawRustTarget.cmake")
+claw_resolve_rust_target(claw_rust_target "${IDF_TARGET}")
 set(claw_rust_profile "release")
 set(claw_rust_lib "${CMAKE_CURRENT_SOURCE_DIR}/target/${claw_rust_target}/${claw_rust_profile}/libclaw_cabi.a")
 

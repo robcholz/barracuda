@@ -151,7 +151,7 @@ pub unsafe extern "C" fn claw_sys_selftest_sync_http_post(
     match BlockingClawHttp::post_json(&mut http, &request, &abort) {
         Ok(response) => {
             write_cstr(&response.body, out, out_len);
-            // c_int and i32 are the same type on xtensa-esp32s3; no cast needed.
+            // C `int` is 32-bit on every supported ESP-IDF Rust target.
             response.status_code.as_i32()
         }
         Err(error) => {

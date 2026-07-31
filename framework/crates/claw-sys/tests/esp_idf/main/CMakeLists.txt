@@ -28,7 +28,8 @@ idf_component_register(
 # The Rust workspace root is five levels up:
 # main -> esp_idf -> tests -> claw-sys -> crates -> framework.
 set(claw_sys_rust_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
-set(claw_sys_rust_target "xtensa-esp32s3-espidf")
+include("${claw_sys_rust_dir}/cmake/ClawRustTarget.cmake")
+claw_resolve_rust_target(claw_sys_rust_target "${IDF_TARGET}")
 set(claw_sys_rust_profile "release")
 set(claw_sys_rust_lib
     "${claw_sys_rust_dir}/target/${claw_sys_rust_target}/${claw_sys_rust_profile}/libclaw_sys_selftest.a")

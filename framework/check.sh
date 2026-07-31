@@ -3,6 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+cmake -P cmake/tests/ClawRustTargetTest.cmake
+
 # `claw-core` defaults to reasoning_short while the public `claw-agent`
 # boundary defaults to reasoning_medium. Building both workspace packages in
 # one Cargo invocation unions those mutually exclusive features. Check the

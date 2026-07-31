@@ -1,12 +1,11 @@
-# Device builds pass `--target xtensa-esp32s3-espidf` explicitly from CMake or
-# fmt_lint_build.sh. Keep the workspace default target unset so a plain
-# `cargo check` remains a fast host check during normal Rust development.
+# Device builds pass an explicit `*-espidf` target resolved from `IDF_TARGET`
+# by CMake. Keep the workspace default target unset so a plain `cargo check`
+# remains a fast host check during normal Rust development.
 #
-# The ESP target is `xtensa-esp32s3-espidf` (not `*-none-elf`) because that is
-# the target for which `libc` and `std` use the correct newlib/ESP-IDF ABI
-# (`target_os = "espidf"`). Device builds use the Espressif Rust toolchain and
+# The targets use `target_os = "espidf"` so `libc` and `std` use the ESP-IDF
+# ABI. Device builds use the Espressif Rust toolchain and
 # `-Zbuild-std=std,panic_abort`; final linking happens in the IDF image.
 
-[target.xtensa-esp32s3-espidf]
+[target.'cfg(target_os = "espidf")']
 # ESP-IDF v5+ uses a 64-bit time_t; this makes `libc` agree.
 rustflags = ["--cfg", "espidf_time64"]
