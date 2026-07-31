@@ -58,4 +58,6 @@ target/
 output/
 simulator.log
 logger.log
+simulator_log.log
+simulator_trace.log
 trace.json

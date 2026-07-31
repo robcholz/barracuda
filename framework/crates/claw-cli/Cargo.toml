@@ -29,6 +29,7 @@ strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
 thiserror = "2"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 tempdir = "0.3"
