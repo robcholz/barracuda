@@ -1,6 +1,6 @@
 use core::future::Future;
 use core::pin::Pin;
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
 
@@ -19,7 +19,7 @@ const DETACHED_ACCEPTED: &str = concat!(
 type ToolRunFuture =
     Pin<Box<dyn Future<Output = Option<(ToolInvocation, ToolOutput)>> + Send + 'static>>;
 
-static NEXT_TOOL_TASK_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_TOOL_TASK_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Default)]
 struct ToolRuns {
