@@ -8,7 +8,7 @@ use claw_interface::http::{
     blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, StreamingHttp,
 };
 
-use super::super::chat_stream::{drain_body, ChatStream};
+use super::super::chat_stream::{drain_body, ProviderStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
 use super::super::media::prepare_asset;
 use super::super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
@@ -312,7 +312,7 @@ impl BackendImpl for OpenAiCompatible {
         http: &'h mut H,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError> {
+    ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
         let post_data = self.build_stream_body(request)?;
         let url = self.context.endpoint_url(CHAT_PATH);
         let http_request = self.context.json_request(
@@ -327,13 +327,13 @@ impl BackendImpl for OpenAiCompatible {
             .map_err(map_http_error)?;
         if !status.is_success() {
             let body = drain_body(stream).await.map_err(map_http_error)?;
-            return Err(ClawApiError::Transport(HttpError::UnexpectedStatus {
+            return Err(map_http_error(HttpError::UnexpectedStatus {
                 status,
                 message: format!("HTTP {status}: {body}"),
             })
             .into());
         }
-        Ok(ChatStream::new(
+        Ok(ProviderStream::new(
             stream,
             ProviderSse::OpenAi(OpenAiSse::new()),
         ))

@@ -1,8 +1,8 @@
 //! [`ChatStream`]: the streaming counterpart of [`crate::ClawApiAsync::chat`].
 //!
-//! Wraps a transport byte stream ([`StreamingHttp::ByteStream`](claw_interface::http::StreamingHttp::ByteStream))
-//! with a provider SSE parser and yields ordered [`ChatStreamEvent`]s as they
-//! arrive.
+//! The public stream hides connection attempts and retry backoff. Each attempt
+//! uses a private provider stream that parses one transport byte stream into
+//! ordered [`ChatStreamEvent`]s.
 
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -13,6 +13,7 @@ use futures_lite::StreamExt;
 
 use claw_interface::http::HttpError;
 
+use crate::backends::shared::map_http_error;
 use crate::backends::sse::ProviderSse;
 use crate::errors::{ChatError, ClawApiError};
 use crate::types::ChatStreamEvent;
@@ -22,22 +23,60 @@ use crate::types::ChatStreamEvent;
 /// Implements [`Stream`] over `Result<ChatStreamEvent, ChatError>`. Reasoning,
 /// output, and tool-call logical streams each carry
 /// [`StreamPart`](claw_utils::stream::StreamPart) values and an explicit `End`.
-/// Normal provider completion then yields `None`; parse, transport,
+/// Normal provider completion then yields `None`; final parse, transport,
 /// cancellation, and premature EOF failures are yielded as an `Err` item before
-/// the stream ends. The request's cancellation token remains active during body
-/// reads; dropping the stream cancels them as well.
-///
-/// `S` is the transport's byte stream and retains that transport's exclusive
-/// mutable borrow; it (and therefore `ChatStream`) is `Unpin`, so no pinning
-/// gymnastics are needed at the call site.
-pub struct ChatStream<S> {
+/// the stream ends. Transient failures before the first event are retried
+/// internally according to the request's [`RetryPolicy`](crate::RetryPolicy).
+/// Once an event has been yielded, replay is no longer safe and failures are
+/// terminal. Dropping the stream cancels the active response body.
+pub struct ChatStream<'a> {
+    driver: Driver<'a>,
+}
+
+pub(crate) type Driver<'a> = Pin<Box<dyn Stream<Item = DriverItem> + 'a>>;
+
+pub(crate) enum DriverItem {
+    Opened,
+    Event(Result<ChatStreamEvent, ChatError>),
+}
+
+impl<'a> ChatStream<'a> {
+    pub(crate) async fn open(mut driver: Driver<'a>) -> Result<Self, ChatError> {
+        match driver.next().await {
+            Some(DriverItem::Opened) => Ok(Self { driver }),
+            Some(DriverItem::Event(Err(error))) => Err(error),
+            Some(DriverItem::Event(Ok(_))) | None => Err(ChatError::Api(ClawApiError::ApiError(
+                "stream driver ended before opening",
+            ))),
+        }
+    }
+}
+
+impl Stream for ChatStream<'_> {
+    type Item = Result<ChatStreamEvent, ChatError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            match this.driver.as_mut().poll_next(cx) {
+                Poll::Ready(Some(DriverItem::Opened)) => continue,
+                Poll::Ready(Some(DriverItem::Event(item))) => return Poll::Ready(Some(item)),
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+/// One provider response attempt over one transport byte stream.
+pub(crate) struct ProviderStream<S> {
     bytes: S,
     /// `None` once the stream has completed or yielded a terminal error.
     parser: Option<ProviderSse>,
     queue: VecDeque<Result<ChatStreamEvent, ChatError>>,
 }
 
-impl<S> ChatStream<S> {
+impl<S> ProviderStream<S> {
     pub(crate) fn new(bytes: S, parser: ProviderSse) -> Self {
         Self {
             bytes,
@@ -47,14 +86,14 @@ impl<S> ChatStream<S> {
     }
 }
 
-impl<S> Stream for ChatStream<S>
+impl<S> Stream for ProviderStream<S>
 where
     S: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin,
 {
     type Item = Result<ChatStreamEvent, ChatError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        // ChatStream is Unpin (all fields are), so project by plain &mut.
+        // ProviderStream is Unpin (all fields are), so project by plain &mut.
         let this = self.get_mut();
         loop {
             if let Some(item) = this.queue.pop_front() {
@@ -93,10 +132,10 @@ where
     }
 }
 
-/// A transport read error mid-body: the stream already started, so this is a
-/// permanent (non-retryable) transport failure rather than a connect error.
+/// Preserve the transport's transient/permanent classification. The outer
+/// stream driver separately decides whether replay is still safe.
 fn read_error(error: HttpError) -> ChatError {
-    ClawApiError::Transport(error).into()
+    map_http_error(error).into()
 }
 
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body

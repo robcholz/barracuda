@@ -12,7 +12,7 @@
 
 mod anthropic;
 mod openai_compatible;
-mod shared;
+pub(crate) mod shared;
 pub(crate) mod sse;
 
 use core::{fmt, str::FromStr, sync::atomic::AtomicBool};
@@ -23,7 +23,7 @@ use claw_interface::http::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::chat_stream::ChatStream;
+use super::chat_stream::ProviderStream;
 use super::errors::{ChatError, InferMediaError, InitError};
 use super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 
@@ -101,7 +101,7 @@ trait BackendImpl: Sized {
     ) -> Result<String, InferMediaError>;
 
     /// Streaming chat completion over [`StreamingHttp`]. Builds a `stream: true`
-    /// request, and on 2xx wraps the response body stream in a [`ChatStream`]
+    /// request, and on 2xx wraps the response body stream in a provider parser
     /// backed by this backend's SSE parser; a non-2xx status reads the error body
     /// and fails.
     async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
@@ -109,7 +109,7 @@ trait BackendImpl: Sized {
         http: &'h mut H,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError>;
+    ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError>;
 }
 
 /// Constructed backend instance, dispatched by [`BackendKind`].
@@ -251,7 +251,7 @@ macro_rules! define_backends {
                 http: &'h mut H,
                 request: &'r ChatRequest<'r>,
                 cancel: Cancel<'h>,
-            ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError> {
+            ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
                 match &self.0 {
                     $( BackendInner::$variant(backend) =>
                         BackendImpl::chat_stream_async(backend, http, request, cancel)

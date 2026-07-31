@@ -6,6 +6,7 @@
 
 use core::sync::atomic::AtomicBool;
 
+use futures_lite::StreamExt as _;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::Instrument as _;
@@ -15,7 +16,7 @@ use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer, HttpError};
 
 use super::backends::Backend;
-use super::chat_stream::ChatStream;
+use super::chat_stream::{ChatStream, Driver, DriverItem};
 use super::errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
 use super::retry::{run_with_retry, sleep_abortable_async};
 use super::types::{
@@ -106,6 +107,128 @@ fn chat_error_kind(error: &ChatError) -> &'static str {
         ChatError::Api(error) => error.into(),
         other => other.into(),
     }
+}
+
+fn retrying_chat_stream<'h, 'r, H, Timer>(
+    backend: &'h Backend,
+    http: &'h mut H,
+    timer: &'h mut Timer,
+    request: &'r ChatRequest<'r>,
+    cancel: Cancel<'h>,
+) -> Driver<'h>
+where
+    H: StreamingHttp,
+    Timer: ClawTimer,
+    'r: 'h,
+{
+    let policy = request.retry;
+    let max_attempts = u64::from(policy.max_retries).saturating_add(1);
+    Box::pin(async_stream::stream! {
+        let mut retry_attempt = 0_u32;
+        let mut emitted = false;
+        let mut opened = false;
+
+        'request: loop {
+            let attempt = u64::from(retry_attempt).saturating_add(1);
+            let attempt_span = tracing::info_span!("api.attempt", attempt, max_attempts);
+
+            let (error, phase) = 'attempt: {
+                let opened_stream = backend
+                    .chat_stream_async(http, request, cancel)
+                    .instrument(attempt_span.clone())
+                    .await;
+                let mut stream = match opened_stream {
+                    Ok(stream) => {
+                        attempt_span.in_scope(|| tracing::info!(name: "opened", ""));
+                        stream
+                    }
+                    Err(error) => break 'attempt (error, "open"),
+                };
+
+                if !opened {
+                    opened = true;
+                    yield DriverItem::Opened;
+                }
+
+                loop {
+                    match stream.next().instrument(attempt_span.clone()).await {
+                        Some(Ok(event)) => {
+                            emitted = true;
+                            yield DriverItem::Event(Ok(event));
+                        }
+                        Some(Err(error)) => break 'attempt (error, "body"),
+                        None => {
+                            attempt_span.in_scope(|| tracing::info!(name: "completed", ""));
+                            return;
+                        }
+                    }
+                }
+            };
+
+            let retryable = error.is_retryable();
+            let replay_safe = !emitted;
+            let final_attempt =
+                !retryable || !replay_safe || retry_attempt >= policy.max_retries;
+            let kind = chat_error_kind(&error);
+            attempt_span.in_scope(|| {
+                if final_attempt {
+                    tracing::error!(
+                        name: "failed",
+                        kind,
+                        phase,
+                        retryable,
+                        replay_safe,
+                        final = true
+                    );
+                } else {
+                    tracing::warn!(
+                        name: "failed",
+                        kind,
+                        phase,
+                        retryable,
+                        replay_safe,
+                        final = false
+                    );
+                }
+            });
+
+            if final_attempt {
+                yield DriverItem::Event(Err(error));
+                return;
+            }
+
+            let failed_attempt = attempt;
+            retry_attempt = retry_attempt.saturating_add(1);
+            let next_attempt = u64::from(retry_attempt).saturating_add(1);
+            let backoff_ms = policy.backoff_ms(retry_attempt);
+            let completed = async {
+                let completed = sleep_abortable_async(backoff_ms, timer, cancel).await;
+                if completed {
+                    tracing::info!(name: "completed", "");
+                } else {
+                    tracing::warn!(name: "cancelled", "");
+                }
+                completed
+            }
+            .instrument(tracing::info_span!(
+                "api.retry",
+                failed_attempt,
+                next_attempt,
+                backoff_ms,
+                error_kind = kind,
+                phase
+            ))
+            .await;
+            if !completed {
+                yield DriverItem::Event(Err(ChatError::Api(ClawApiError::Transport(
+                    HttpError::Aborted,
+                ))));
+                return;
+            }
+
+            continue 'request;
+        }
+    })
 }
 
 impl<H: BlockingClawHttp> ClawApi<H> {
@@ -429,38 +552,27 @@ impl<H: ClawHttp, Timer: ClawTimer> ClawApiAsync<H, Timer> {
     /// Yields [`ChatStreamEvent`](crate::ChatStreamEvent) values as reasoning,
     /// output, and tool-call logical streams of
     /// [`StreamPart`](claw_utils::stream::StreamPart). Unlike
-    /// [`chat`](Self::chat), it never assembles an [`LlmResponse`] and does not
-    /// retry: a stream cannot be resumed mid-body, so every parse, transport, or
-    /// premature-end failure is yielded directly by the stream. `cancel`
-    /// remains active for the full body stream, not only the send/header phase.
+    /// [`chat`](Self::chat), it never assembles an [`LlmResponse`]. Transient
+    /// open or body failures are retried according to `request.retry` only until
+    /// the first semantic event is yielded. After that boundary replay could
+    /// duplicate caller-visible output, so every failure is terminal. `cancel`
+    /// remains active for opening, retry backoff, and the full body stream.
     pub async fn chat_stream<'h, 'r>(
         &'h mut self,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ChatStream<H::ByteStream<'h>>, ChatError>
+    ) -> Result<ChatStream<'h>, ChatError>
     where
         H: StreamingHttp,
+        'r: 'h,
     {
-        let backend = self.backend.as_ref().ok_or(ClawApiError::NotConfigured)?;
-        let attempt = 1_u64;
-        let max_attempts = 1_u64;
-
-        async {
-            let result = backend
-                .chat_stream_async(&mut self.http, request, cancel)
-                .await;
-            match &result {
-                Ok(_) => tracing::info!(name: "opened", ""),
-                Err(error) => {
-                    let kind = chat_error_kind(error);
-                    let retryable = error.is_retryable();
-                    tracing::error!(name: "failed", kind, retryable, final = true);
-                }
-            }
-            result
-        }
-        .instrument(tracing::info_span!("api.attempt", attempt, max_attempts))
-        .await
+        let Self {
+            backend,
+            http,
+            timer,
+        } = self;
+        let backend = backend.as_ref().ok_or(ClawApiError::NotConfigured)?;
+        ChatStream::open(retrying_chat_stream(backend, http, timer, request, cancel)).await
     }
 
     /// Async structured JSON chat over [`ClawHttp`].

@@ -21,6 +21,7 @@ base64 = "0.22"
 thiserror = "2"
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+async-stream = "0.3"
 strum = { version = "0.28", features = ["derive"] }
 # Shape-only attempt/retry spans consumed by the firmware's claw-log subscriber.
 tracing = { version = "0.1", default-features = false, features = ["std"] }

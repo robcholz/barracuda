@@ -104,10 +104,10 @@ pub fn claw_api::ChatRequest<'a>::new(&'a str, &'a serde_json::value::Value) -> 
 pub fn claw_api::ChatRequest<'a>::with_reminders(self, &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatRequest<'a>::with_retry(self, claw_api::RetryPolicy) -> Self
 pub fn claw_api::ChatRequest<'a>::with_tools(self, &'a str) -> Self
-pub struct claw_api::ChatStream<S>
-impl<S> futures_core::stream::Stream for claw_api::ChatStream<S> where S: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin
-pub type claw_api::ChatStream<S>::Item = core::result::Result<claw_api::ChatStreamEvent, claw_api::ChatError>
-pub fn claw_api::ChatStream<S>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+pub struct claw_api::ChatStream<'a>
+impl futures_core::stream::Stream for claw_api::ChatStream<'_>
+pub type claw_api::ChatStream<'_>::Item = core::result::Result<claw_api::ChatStreamEvent, claw_api::ChatError>
+pub fn claw_api::ChatStream<'_>::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
 pub struct claw_api::ClawApi<H: claw_interface::http::blocking::ClawHttp>
 impl<H: claw_interface::http::blocking::ClawHttp> claw_api::ClawApi<H>
 pub fn claw_api::ClawApi<H>::chat(&mut self, &claw_api::ChatRequest<'_>, &core::sync::atomic::AtomicBool) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
@@ -119,7 +119,7 @@ pub struct claw_api::ClawApiAsync<H: claw_interface::http::ClawHttp, Timer: claw
 impl<H: claw_interface::http::ClawHttp, Timer: claw_interface::timer::ClawTimer> claw_api::ClawApiAsync<H, Timer>
 pub async fn claw_api::ClawApiAsync<H, Timer>::chat(&mut self, &claw_api::ChatRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
 pub async fn claw_api::ClawApiAsync<H, Timer>::chat_json<T: serde_core::de::DeserializeOwned>(&mut self, &claw_api::ChatJsonRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::ChatJsonResponse<T>, claw_api::ChatJsonError>
-pub async fn claw_api::ClawApiAsync<H, Timer>::chat_stream<'h, 'r>(&'h mut self, &'r claw_api::ChatRequest<'r>, claw_interface::http::Cancel<'h>) -> core::result::Result<claw_api::ChatStream<<H as claw_interface::http::StreamingHttp>::ByteStream>, claw_api::ChatError> where H: claw_interface::http::StreamingHttp
+pub async fn claw_api::ClawApiAsync<H, Timer>::chat_stream<'h, 'r>(&'h mut self, &'r claw_api::ChatRequest<'r>, claw_interface::http::Cancel<'h>) -> core::result::Result<claw_api::ChatStream<'h>, claw_api::ChatError> where H: claw_interface::http::StreamingHttp, 'r: 'h
 pub async fn claw_api::ClawApiAsync<H, Timer>::infer_media(&mut self, &claw_api::MediaRequest<'_>, claw_interface::http::Cancel<'_>) -> core::result::Result<alloc::string::String, claw_api::InferMediaError>
 pub fn claw_api::ClawApiAsync<H, Timer>::new(H, Timer) -> Self
 pub fn claw_api::ClawApiAsync<H, Timer>::set_config(&mut self, claw_api::ClawApiConfig) -> core::result::Result<(), claw_api::InitError>

@@ -13,6 +13,8 @@ use claw_interface::http::HttpError;
 use strum::IntoStaticStr;
 use thiserror::Error;
 
+const TRUNCATED_STREAM_MESSAGE: &str = "stream ended before provider completion";
+
 /// Failures shared by chat and media calls (transport, response parsing,
 /// allocation). `ApiError` is the static-message catch-all.
 #[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, Error)]
@@ -138,15 +140,17 @@ impl ChatError {
     /// A streaming response that ended before the provider's terminal marker.
     #[must_use]
     pub fn truncated_stream() -> Self {
-        ChatError::Api(ClawApiError::MalformedResponse(
-            "stream ended before provider completion",
-        ))
+        ChatError::Api(ClawApiError::MalformedResponse(TRUNCATED_STREAM_MESSAGE))
     }
 
     /// Whether retrying the same request might succeed.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
-        matches!(self, ChatError::Api(err) if err.is_retryable())
+        matches!(
+            self,
+            ChatError::Api(ClawApiError::MalformedResponse(message))
+                if *message == TRUNCATED_STREAM_MESSAGE
+        ) || matches!(self, ChatError::Api(err) if err.is_retryable())
     }
 
     /// Whether this chat request was aborted by the caller.
