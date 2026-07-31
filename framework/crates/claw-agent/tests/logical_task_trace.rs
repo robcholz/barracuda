@@ -132,9 +132,26 @@ fn async_runtime_roots_use_logical_task_lanes_with_full_context() {
     );
     assert!(!session_actor.contains("trace.task="), "{session_actor}");
 
+    let session_span = token(session_actor, "span").expect("session actor span id");
+    let turn = lines
+        .iter()
+        .find(|line| {
+            line_type(line) == Some("enter")
+                && token(line, "span-name") == Some("turn")
+                && token(line, "parent") == Some(session_span)
+        })
+        .expect("turn span under the session actor");
+    let turn_span = token(turn, "span").expect("turn span id");
+    assert_eq!(token(turn, "turn"), Some("turn-1"), "{turn}");
+    assert_eq!(token(turn, "cause"), Some("user"), "{turn}");
+
     let agent = lines
         .iter()
-        .find(|line| line_type(line) == Some("enter") && token(line, "span-name") == Some("agent"))
+        .find(|line| {
+            line_type(line) == Some("enter")
+                && token(line, "span-name") == Some("agent")
+                && token(line, "parent") == Some(turn_span)
+        })
         .expect("agent enter line");
     let agent_id = token(agent, "agent").expect("agent context id");
 

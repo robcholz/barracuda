@@ -51,6 +51,24 @@ enum RootDispatchError {
     Invariant,
 }
 
+struct ActiveTurn {
+    id: TurnId,
+    span: tracing::Span,
+}
+
+impl ActiveTurn {
+    fn new(id: TurnId, origin: &TurnOrigin) -> Self {
+        let cause = match origin {
+            TurnOrigin::User => "user",
+            TurnOrigin::ToolCall { .. } => "detached_tool",
+        };
+        Self {
+            id,
+            span: tracing::info_span!("turn", run.turn = %id, cause),
+        }
+    }
+}
+
 #[cfg(feature = "multiagent")]
 struct TimeoutEntry {
     timeout: SubagentTimeout,
@@ -256,7 +274,7 @@ where
 
     agents: AgentSlots<Http, Timer>,
     inbox: VecDeque<Message>,
-    active_turn: Option<TurnId>,
+    active_turn: Option<ActiveTurn>,
     next_turn: u32,
     approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
     #[cfg(feature = "multiagent")]
@@ -682,14 +700,19 @@ where
         let Some(agent) = self.root_id() else {
             return Err(RootDispatchError::Invariant);
         };
-        let turn = self.active_turn.unwrap_or(TurnId(self.next_turn));
-        let span = agent_span(agent, Some(turn));
+        let turn_id = TurnId(self.next_turn);
+        let origin = TurnOrigin::User;
         let Some(root) = self.agents.get_mut(&agent) else {
             return Err(RootDispatchError::Invariant);
         };
-        let dispatch = root
-            .dispatch(message, span)
+        let (dispatch, turn) = root
+            .dispatch(message, || {
+                let turn = ActiveTurn::new(turn_id, &origin);
+                let span = agent_span(agent, Some(&turn));
+                (span, turn)
+            })
             .map_err(|(message, _)| RootDispatchError::Retry(message))?;
+        self.activate_turn(turn, origin);
         if dispatch == AgentDispatch::Started {
             self.active_agent_poll_queue.push_back(agent);
         }
@@ -812,20 +835,13 @@ where
                 purpose,
             } => {
                 let retry = message.clone();
-                let turn = if self.root_id() == Some(target) {
-                    Some(self.active_turn.unwrap_or(TurnId(self.next_turn)))
-                } else {
-                    self.active_turn
-                };
-                let dispatch = match self.agents.get_mut(&target) {
-                    Some(slot) => {
-                        let span = agent_span(target, turn);
-                        Some(slot.dispatch(message, span))
-                    }
-                    None => None,
-                };
+                let turn = self.active_turn.as_ref();
+                let dispatch = self
+                    .agents
+                    .get_mut(&target)
+                    .map(|slot| slot.dispatch(message, || (agent_span(target, turn), ())));
                 let outcome = match dispatch {
-                    Some(Ok(started)) => {
+                    Some(Ok((started, ()))) => {
                         if started == AgentDispatch::Started {
                             self.active_agent_poll_queue.push_back(target);
                         }
@@ -1019,15 +1035,34 @@ where
             AgentEvent::TurnStarted { origin } => {
                 #[cfg(feature = "multiagent")]
                 self.multiagent.on_agent_started(agent);
-                if !is_root {
-                    return;
-                }
-                let origin = match origin {
-                    AgentTurnOrigin::Message => TurnOrigin::User,
-                    AgentTurnOrigin::ToolCall { call } => TurnOrigin::ToolCall { call },
-                };
-                if self.active_turn.is_none() {
-                    self.begin_turn(origin);
+                if is_root {
+                    let origin = match origin {
+                        AgentTurnOrigin::Message => TurnOrigin::User,
+                        AgentTurnOrigin::ToolCall { call } => TurnOrigin::ToolCall { call },
+                    };
+                    if self.active_turn.is_none() {
+                        let turn = ActiveTurn::new(TurnId(self.next_turn), &origin);
+                        let span = agent_span(agent, Some(&turn));
+                        let installed = self
+                            .agents
+                            .get_mut(&agent)
+                            .is_some_and(|slot| slot.set_trace_span(span));
+                        debug_assert!(installed);
+                        self.activate_turn(turn, origin);
+                    }
+                } else {
+                    let needs_span = self
+                        .agents
+                        .get(&agent)
+                        .is_some_and(|slot| !slot.has_trace_span());
+                    if needs_span {
+                        let span = agent_span(agent, self.active_turn.as_ref());
+                        let installed = self
+                            .agents
+                            .get_mut(&agent)
+                            .is_some_and(|slot| slot.set_trace_span(span));
+                        debug_assert!(installed);
+                    }
                 }
             }
             AgentEvent::Iteration(progress) => {
@@ -1045,6 +1080,9 @@ where
                 self.request_approval(agent, tool_call_id, tool_call, reason);
             }
             AgentEvent::TurnEnded { outcome } => {
+                if let Some(slot) = self.agents.get_mut(&agent) {
+                    slot.finish_trace_turn();
+                }
                 let (_text, _completed, _cancelled) = match outcome {
                     AgentOutcome::Completed(AgentCompletion::EffectOutput(message)) => {
                         if is_root {
@@ -1147,18 +1185,24 @@ where
     }
 
     fn begin_turn(&mut self, origin: TurnOrigin) {
+        let turn = ActiveTurn::new(TurnId(self.next_turn), &origin);
+        self.activate_turn(turn, origin);
+    }
+
+    fn activate_turn(&mut self, turn: ActiveTurn, origin: TurnOrigin) {
         debug_assert!(self.active_turn.is_none());
-        let turn = TurnId(self.next_turn);
+        debug_assert_eq!(turn.id, TurnId(self.next_turn));
         self.next_turn = self.next_turn.saturating_add(1);
+        let id = turn.id;
         self.active_turn = Some(turn);
-        self.emit_turn(TurnEvent::Started { turn, origin });
+        self.emit_turn(TurnEvent::Started { turn: id, origin });
     }
 
     fn finish_turn(&mut self) {
         let Some(turn) = self.active_turn.take() else {
             return;
         };
-        self.emit_turn(TurnEvent::Ended { turn });
+        self.emit_turn(TurnEvent::Ended { turn: turn.id });
     }
 
     fn set_reasoning_effort(&mut self, effort: ReasoningEffort) {
@@ -1233,14 +1277,15 @@ where
     }
 }
 
-fn agent_span(agent: crate::agent::AgentId, turn: Option<TurnId>) -> tracing::Span {
+fn agent_span(agent: crate::agent::AgentId, turn: Option<&ActiveTurn>) -> tracing::Span {
     match turn {
-        Some(turn) => tracing::info_span!(
-            "agent",
-            trace.task = %agent,
-            run.turn = %turn,
-            run.agent = %agent,
-        ),
+        Some(turn) => turn.span.in_scope(|| {
+            tracing::info_span!(
+                "agent",
+                trace.task = %agent,
+                run.agent = %agent,
+            )
+        }),
         None => tracing::info_span!(
             "agent",
             trace.task = %agent,

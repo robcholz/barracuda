@@ -18,16 +18,46 @@ use claw_agent::{
 use claw_interface::{
     BlockingHttpAdapter, DiskFs, ImmediateTimer, SharedScriptHttp, StdThread, TokioExecutor,
 };
+use claw_log::{FlatTreeSubscriber, TraceSink};
 use futures_lite::future::block_on;
 use serde_json::json;
 use support::{assistant_text, drain_until_turn_ended, llm_config, serialize_script, Sse};
 use tempdir::TempDir;
+use tracing::Level;
 
 type TestSystem =
     claw_agent::AgentSystem<DiskFs, Sse<BlockingHttpAdapter<SharedScriptHttp>>, ImmediateTimer>;
 
+#[derive(Clone, Default)]
+struct RecordingSink(Arc<Mutex<Vec<String>>>);
+
+impl RecordingSink {
+    fn lines(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+impl TraceSink for RecordingSink {
+    fn write_line(&self, _level: Level, _tag: &str, line: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push(line.to_owned());
+    }
+}
+
 #[test]
 fn detached_completion_opens_a_tool_call_turn_after_the_root_becomes_idle() {
+    let sink = RecordingSink::default();
+    let subscriber = FlatTreeSubscriber::with_sink(sink.clone())
+        .with_allowed_target_prefix("claw")
+        .with_context_group_keys("run", ["system", "session", "turn", "agent", "iteration"]);
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("this single-test binary installs tracing exactly once");
+
     let _script = serialize_script();
     let temp = TempDir::new("detached-tool-turn").unwrap();
     let root = temp.path().to_string_lossy().into_owned();
@@ -90,6 +120,12 @@ fn detached_completion_opens_a_tool_call_turn_after_the_root_becomes_idle() {
         )
     });
     assert_eq!(outputs(&completed), vec!["background delivered"]);
+
+    drop(control);
+    drop(events);
+    drop(system);
+
+    assert_turn_trace(&sink.lines());
 }
 
 fn assistant_tool_call(name: &str) -> String {
@@ -141,6 +177,47 @@ fn outputs(events: &[SessionEvent]) -> Vec<&str> {
             _ => None,
         })
         .collect()
+}
+
+fn assert_turn_trace(lines: &[String]) {
+    let turns = lines
+        .iter()
+        .filter(|line| line_type(line) == Some("enter") && token(line, "span-name") == Some("turn"))
+        .collect::<Vec<_>>();
+    assert_eq!(turns.len(), 3, "{}", lines.join("\n"));
+
+    for (turn, (expected_id, expected_cause)) in turns.into_iter().zip([
+        ("turn-1", "user"),
+        ("turn-2", "user"),
+        ("turn-3", "detached_tool"),
+    ]) {
+        assert_eq!(token(turn, "turn"), Some(expected_id), "{turn}");
+        assert_eq!(token(turn, "cause"), Some(expected_cause), "{turn}");
+        let turn_span = token(turn, "span").expect("turn span id");
+        let agent = lines
+            .iter()
+            .find(|line| {
+                line_type(line) == Some("enter")
+                    && token(line, "span-name") == Some("agent")
+                    && token(line, "parent") == Some(turn_span)
+            })
+            .unwrap_or_else(|| panic!("missing agent child for {turn}"));
+        assert_eq!(token(agent, "turn"), Some(expected_id), "{agent}");
+        assert!(lines.iter().any(|line| {
+            line_type(line) == Some("exit") && token(line, "span") == Some(turn_span)
+        }));
+    }
+}
+
+fn token<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    line.split(' ').find_map(|raw| {
+        let token = raw.trim_matches(|ch| ch == '<' || ch == '>');
+        token.strip_prefix(key)?.strip_prefix('=')
+    })
+}
+
+fn line_type(line: &str) -> Option<&str> {
+    line.split(' ').nth(2)
 }
 
 #[derive(Default)]

@@ -169,13 +169,18 @@ span-name: `session.delete`
 
 span-name: `turn`
 
+A turn is the root-visible unit initiated by either a public user message or a
+detached tool result delivered after the previous turn ended. Ordinary joined
+tool calls, Agent iterations, and subagent work inherit the active turn; they do
+not open turns of their own.
+
 ### Incremental Context
 
 `run.turn`: Session-local turn id.
 
 ### Span Fields
 
-`cause`: Why this turn is being driven.
+`cause`: `user` or `detached_tool`.
 
 ### Events
 

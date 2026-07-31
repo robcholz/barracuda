@@ -26,7 +26,7 @@ enum InFlightLifecycle {
 struct InFlight<Http: ClawHttp, Timer: ClawTimer> {
     stream: AgentStream<Http, Timer>,
     control: AgentHandle,
-    span: tracing::Span,
+    span: Option<tracing::Span>,
     lifecycle: InFlightLifecycle,
     terminal: Option<Result<AgentEvent, AgentError>>,
 }
@@ -77,11 +77,18 @@ where
         matches!(self.execution, Some(Execution::InFlight(_)))
     }
 
-    fn start(
+    pub(super) fn has_trace_span(&self) -> bool {
+        matches!(
+            self.execution,
+            Some(Execution::InFlight(InFlight { span: Some(_), .. }))
+        )
+    }
+
+    fn start<T>(
         &mut self,
         message: Message,
-        span: tracing::Span,
-    ) -> Result<(), (Message, AgentDispatchError)> {
+        make_span: impl FnOnce() -> (tracing::Span, T),
+    ) -> Result<T, (Message, AgentDispatchError)> {
         let execution = self.execution.take();
         let agent = match execution {
             Some(Execution::Resident(agent)) => agent,
@@ -92,35 +99,55 @@ where
             None => return Err((message, AgentDispatchError::Closed)),
         };
         let (stream, control) = agent.into_stream(message);
+        let (span, value) = make_span();
         self.execution = Some(Execution::InFlight(InFlight {
             stream,
             control,
-            span,
+            span: Some(span),
             lifecycle: InFlightLifecycle::Running,
             terminal: None,
         }));
-        Ok(())
+        Ok(value)
     }
 
-    pub(super) fn dispatch(
+    pub(super) fn dispatch<T>(
         &mut self,
         message: Message,
-        span: tracing::Span,
-    ) -> Result<AgentDispatch, (Message, AgentDispatchError)> {
+        make_span: impl FnOnce() -> (tracing::Span, T),
+    ) -> Result<(AgentDispatch, T), (Message, AgentDispatchError)> {
         match self.execution.as_mut() {
             Some(Execution::InFlight(in_flight)) => {
                 let retry = message.clone();
                 in_flight
                     .control
                     .dispatch(message)
-                    .map(|()| AgentDispatch::Queued)
-                    .map_err(|error| (retry, error))
+                    .map_err(|error| (retry, error))?;
+                let (span, value) = make_span();
+                debug_assert!(in_flight.span.is_none());
+                in_flight.span = Some(span);
+                Ok((AgentDispatch::Queued, value))
             }
-            Some(Execution::Resident(_)) => {
-                self.start(message, span).map(|()| AgentDispatch::Started)
-            }
+            Some(Execution::Resident(_)) => self
+                .start(message, make_span)
+                .map(|value| (AgentDispatch::Started, value)),
             None => Err((message, AgentDispatchError::Closed)),
         }
+    }
+
+    pub(super) fn set_trace_span(&mut self, span: tracing::Span) -> bool {
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return false;
+        };
+        debug_assert!(in_flight.span.is_none());
+        in_flight.span = Some(span);
+        true
+    }
+
+    pub(super) fn finish_trace_turn(&mut self) {
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return;
+        };
+        in_flight.span = None;
     }
 
     pub(super) fn interrupt(&mut self) {
@@ -172,8 +199,10 @@ where
             let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
                 return Poll::Pending;
             };
-            let _entered = in_flight.span.enter();
-            Pin::new(&mut in_flight.stream).poll_next(context)
+            match &in_flight.span {
+                Some(span) => span.in_scope(|| Pin::new(&mut in_flight.stream).poll_next(context)),
+                None => Pin::new(&mut in_flight.stream).poll_next(context),
+            }
         };
         let item = match polled {
             Poll::Ready(Some(item)) => item,
