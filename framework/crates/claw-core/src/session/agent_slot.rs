@@ -11,7 +11,7 @@ use crate::agent::{
     AgentStream, AgentStreamItem, ApprovalDecision, ReasoningEffort, ReasoningEffortHandle,
     ToolCallId,
 };
-use crate::session::Message;
+use crate::Message;
 
 pub(super) type AgentSlots<Http, Timer> = BTreeMap<AgentId, AgentSlot<Http, Timer>>;
 

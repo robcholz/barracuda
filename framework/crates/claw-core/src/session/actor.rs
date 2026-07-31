@@ -1,19 +1,14 @@
-#[cfg(feature = "multiagent")]
-use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-#[cfg(feature = "multiagent")]
-use std::collections::BTreeMap;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
 use claw_interface::http::StreamingHttp;
-#[cfg(feature = "multiagent")]
-use claw_interface::Cancel;
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::DurableState;
+use claw_tool::ToolGroup;
 use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 
@@ -24,27 +19,23 @@ use super::approval::{
 };
 use super::control::{ControlOp, SessionCommand, SessionControlError};
 use super::manager::{OpenSessionError, SessionDeleteError, SharedAgentManager};
+use super::orchestration::{
+    AgentNotice, HostDispatchOutcome, HostInterruptOutcome, OrchestrationHost,
+    OrchestrationPhysicalError, ReapStatus, RemovalOutcome, SessionOrchestration,
+};
 use super::permission::SessionPermission;
 use super::state::{AgentIdAllocatorHandle, SessionPersistentState};
 use super::{
-    InputRequestId, IterationEvent, Message, SessionCloseReason, SessionEvent, SessionEventError,
-    SessionId, SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError,
-    TurnId, TurnOrigin,
+    InputRequestId, IterationEvent, SessionCloseReason, SessionEvent, SessionEventError, SessionId,
+    SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError, TurnId,
+    TurnOrigin,
 };
-#[cfg(feature = "multiagent")]
-use crate::agent::AgentDispatchError;
 use crate::agent::{
-    AgentCompletion, AgentCreateError, AgentError, AgentEvent, AgentId, AgentInputRequest,
-    AgentIterationEvent, AgentOutcome, AgentTurnOrigin, ApprovalDecision, PersistenceConfig,
-    ReasoningEffort, ToolCallId,
+    AgentCompletion, AgentCreateError, AgentDispatchError, AgentError, AgentEvent, AgentId,
+    AgentInputRequest, AgentIterationEvent, AgentOutcome, AgentTurnOrigin, ApprovalDecision,
+    PersistenceConfig, ReasoningEffort, ToolCallId,
 };
-#[cfg(feature = "multiagent")]
-use crate::multiagent::{
-    DispatchOutcome, InterruptOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult,
-    MultiagentPhysicalError, SubagentTimeout,
-};
-#[cfg(feature = "multiagent")]
-type TimeoutFuture = Pin<Box<dyn Future<Output = crate::agent::AgentId>>>;
+use crate::Message;
 
 enum RootDispatchError {
     Retry(Message),
@@ -66,56 +57,6 @@ impl ActiveTurn {
             id,
             span: tracing::info_span!("turn", run.turn = %id, cause),
         }
-    }
-}
-
-#[cfg(feature = "multiagent")]
-struct TimeoutEntry {
-    timeout: SubagentTimeout,
-    future: TimeoutFuture,
-}
-
-#[cfg(feature = "multiagent")]
-#[derive(Default)]
-struct AgentTimeouts {
-    entries: BTreeMap<crate::agent::AgentId, TimeoutEntry>,
-}
-
-#[cfg(feature = "multiagent")]
-impl AgentTimeouts {
-    fn arm<Timer>(&mut self, agent: crate::agent::AgentId, timeout: SubagentTimeout)
-    where
-        Timer: ClawTimer + Default + 'static,
-    {
-        let future = Box::pin(async move {
-            let mut timer = Timer::default();
-            let _ = timer.sleep(timeout.duration(), Cancel::never()).await;
-            agent
-        });
-        self.entries.insert(agent, TimeoutEntry { timeout, future });
-    }
-
-    fn remove(&mut self, agent: crate::agent::AgentId) {
-        self.entries.remove(&agent);
-    }
-
-    fn poll_expired(
-        &mut self,
-        context: &mut Context<'_>,
-    ) -> Poll<Option<(crate::agent::AgentId, SubagentTimeout)>> {
-        let expired = self.entries.iter_mut().find_map(|(&agent, entry)| {
-            entry
-                .future
-                .as_mut()
-                .poll(context)
-                .is_ready()
-                .then_some((agent, entry.timeout))
-        });
-        let Some((agent, timeout)) = expired else {
-            return Poll::Pending;
-        };
-        self.entries.remove(&agent);
-        Poll::Ready(Some((agent, timeout)))
     }
 }
 
@@ -215,10 +156,7 @@ enum PollSource {
     Command,
     Approval,
     Agent,
-    #[cfg(feature = "multiagent")]
-    Multiagent,
-    #[cfg(feature = "multiagent")]
-    Timeout,
+    Orchestration,
 }
 
 impl PollSource {
@@ -226,22 +164,13 @@ impl PollSource {
         match self {
             Self::Command => Self::Approval,
             Self::Approval => Self::Agent,
-            #[cfg(feature = "multiagent")]
-            Self::Agent => Self::Multiagent,
-            #[cfg(not(feature = "multiagent"))]
-            Self::Agent => Self::Command,
-            #[cfg(feature = "multiagent")]
-            Self::Multiagent => Self::Timeout,
-            #[cfg(feature = "multiagent")]
-            Self::Timeout => Self::Command,
+            Self::Agent => Self::Orchestration,
+            Self::Orchestration => Self::Command,
         }
     }
 }
 
-#[cfg(feature = "multiagent")]
-const POLL_SOURCE_COUNT: usize = 5;
-#[cfg(not(feature = "multiagent"))]
-const POLL_SOURCE_COUNT: usize = 3;
+const POLL_SOURCE_COUNT: usize = 4;
 
 pub(super) enum SessionActorExit {
     DeleteReady { session: SessionId },
@@ -277,12 +206,7 @@ where
     active_turn: Option<ActiveTurn>,
     next_turn: u32,
     approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
-    #[cfg(feature = "multiagent")]
-    multiagent: Multiagent,
-    #[cfg(feature = "multiagent")]
-    timeouts: AgentTimeouts,
-    #[cfg(feature = "multiagent")]
-    multiagent_reaping: BTreeSet<crate::agent::AgentId>,
+    orchestration: SessionOrchestration<Timer>,
     managed_agents: BTreeSet<crate::agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
@@ -321,12 +245,7 @@ where
                 active_turn: None,
                 next_turn: 1,
                 approval: ApprovalFlow::new(approval_resolver),
-                #[cfg(feature = "multiagent")]
-                multiagent: Multiagent::new(),
-                #[cfg(feature = "multiagent")]
-                timeouts: AgentTimeouts::default(),
-                #[cfg(feature = "multiagent")]
-                multiagent_reaping: BTreeSet::new(),
+                orchestration: SessionOrchestration::default(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
                 commands: Box::pin(commands),
@@ -369,21 +288,8 @@ where
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
-                #[cfg(feature = "multiagent")]
-                PollSource::Multiagent => {
-                    if let Poll::Ready(effect) = self.multiagent.poll_effect(context) {
-                        if let Some(effect) = effect {
-                            self.handle_multiagent_effect(effect);
-                        }
-                        return Poll::Ready(SessionActorStatus::Progress);
-                    }
-                }
-                #[cfg(feature = "multiagent")]
-                PollSource::Timeout => {
-                    if let Poll::Ready(Some((agent, _timeout))) =
-                        self.timeouts.poll_expired(context)
-                    {
-                        self.multiagent.timeout(agent);
+                PollSource::Orchestration => {
+                    if self.poll_orchestration(context).is_ready() {
                         return Poll::Ready(SessionActorStatus::Progress);
                     }
                 }
@@ -571,8 +477,7 @@ where
         if let Some(root) = self.root_mut() {
             root.cancel();
         }
-        #[cfg(feature = "multiagent")]
-        self.multiagent.cleanup_subagents();
+        self.orchestration.cleanup();
     }
 
     fn finish_lifecycle(&mut self) -> Option<SessionActorExit> {
@@ -580,8 +485,7 @@ where
         if self.agents.values().any(AgentSlot::is_in_flight) {
             return None;
         }
-        #[cfg(feature = "multiagent")]
-        if reason != StopReason::Delete && !self.multiagent.root_children().is_empty() {
+        if reason != StopReason::Delete && self.orchestration.has_live_children() {
             return None;
         }
         self.finish_turn();
@@ -724,8 +628,7 @@ where
         let mut agent_ids = self.agents.keys().copied().collect::<BTreeSet<_>>();
         agent_ids.extend(root_agent);
         agent_ids.extend(self.managed_agents.iter().copied());
-        #[cfg(feature = "multiagent")]
-        agent_ids.extend(self.multiagent.agent_ids());
+        agent_ids.extend(self.orchestration.agent_ids());
         // Drop every live component handle before deleting its canonical
         // stores. In particular, dropping a filesystem TranscriptStore after
         // deletion could otherwise recreate its index file.
@@ -751,8 +654,7 @@ where
                 }
             }
         }
-        #[cfg(feature = "multiagent")]
-        self.multiagent.clear();
+        self.orchestration.clear();
         first_error.map_or(Ok(()), Err)
     }
 
@@ -768,10 +670,7 @@ where
         let root_agent = self.state.get().root_agent;
         let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
             let kind = crate::agent::baked::root_kind().clone();
-            #[cfg(feature = "multiagent")]
-            let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
-            #[cfg(not(feature = "multiagent"))]
-            let extension_tools = Vec::new();
+            let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
                 true,
@@ -787,10 +686,7 @@ where
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
             };
             let kind = crate::agent::baked::root_kind().clone();
-            #[cfg(feature = "multiagent")]
-            let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
-            #[cfg(not(feature = "multiagent"))]
-            let extension_tools = Vec::new();
+            let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.create(
                 id,
                 &kind,
@@ -807,171 +703,51 @@ where
             .insert(id, AgentSlot::new(agent, reasoning_handle));
         debug_assert!(previous.is_none());
         self.managed_agents.insert(id);
-        #[cfg(feature = "multiagent")]
-        if !self.multiagent.register_root(id, kind) {
+        if !self.orchestration.register_root(id, kind) {
             self.agents.remove(&id);
             if fresh {
                 self.agent_manager.remove(id)?;
             }
             return Err(AgentCreateError::AgentAlreadyExists(id));
         }
-        #[cfg(not(feature = "multiagent"))]
-        let _ = kind;
         if fresh {
             self.state.get_mut().root_agent = Some(id);
         }
         Ok(())
     }
 
-    #[cfg(feature = "multiagent")]
-    fn handle_multiagent_effect(&mut self, effect: MultiagentEffect) {
-        match effect {
-            MultiagentEffect::Spawn { requester, command } => {
-                self.spawn_subagent(requester, command);
-            }
-            MultiagentEffect::Dispatch {
-                target,
-                message,
-                purpose,
-            } => {
-                let retry = message.clone();
-                let turn = self.active_turn.as_ref();
-                let dispatch = self
-                    .agents
-                    .get_mut(&target)
-                    .map(|slot| slot.dispatch(message, || (agent_span(target, turn), ())));
-                let outcome = match dispatch {
-                    Some(Ok((started, ()))) => {
-                        if started == AgentDispatch::Started {
-                            self.active_agent_poll_queue.push_back(target);
-                        }
-                        DispatchOutcome::Accepted
-                    }
-                    Some(Err((_, AgentDispatchError::Busy))) => DispatchOutcome::Busy,
-                    Some(Err((_, AgentDispatchError::Closed))) | None => DispatchOutcome::Missing,
-                };
-                self.multiagent
-                    .apply_result(MultiagentEffectResult::Dispatched {
-                        target,
-                        message: retry,
-                        purpose,
-                        outcome,
-                    });
-            }
-            MultiagentEffect::Interrupt { command } => {
-                let target = command.target;
-                let outcome = match self.agents.get_mut(&target) {
-                    Some(slot) => {
-                        if slot.interrupt() {
-                            InterruptOutcome::Accepted
-                        } else {
-                            InterruptOutcome::Inactive
-                        }
-                    }
-                    None => InterruptOutcome::Missing,
-                };
-                self.multiagent
-                    .apply_result(MultiagentEffectResult::Interrupted { command, outcome });
-            }
-            MultiagentEffect::RemoveAgents { agents } => {
-                self.begin_multiagent_removal(agents);
-            }
-            MultiagentEffect::ArmTimeout { agent, timeout } => {
-                if self.multiagent.contains(agent) {
-                    self.timeouts.arm::<Timer>(agent, timeout);
-                }
-            }
+    fn poll_orchestration(&mut self, context: &mut Context<'_>) -> Poll<()> {
+        let mut orchestration = std::mem::take(&mut self.orchestration);
+        let result = orchestration.poll(context, self);
+        self.orchestration = orchestration;
+        result
+    }
+
+    fn drain_orchestration_effects(&mut self) {
+        let mut orchestration = std::mem::take(&mut self.orchestration);
+        orchestration.drain_effects(self);
+        self.orchestration = orchestration;
+    }
+
+    fn finish_reaped_agent(&mut self, agent: AgentId) {
+        self.agents.remove(&agent);
+        self.active_agent_poll_queue
+            .retain(|queued| *queued != agent);
+        let result = self
+            .agent_manager
+            .remove(agent)
+            .map_err(|error| OrchestrationPhysicalError::new(error.to_string()));
+        if let Some(Err(error)) = self.orchestration.finish_reaped(agent, result) {
+            self.log_agent_cleanup_failure(agent, &error);
         }
     }
 
-    #[cfg(feature = "multiagent")]
-    fn spawn_subagent(
-        &mut self,
-        requester: crate::agent::AgentId,
-        command: crate::multiagent::SpawnCommand,
-    ) {
-        let id = self.agent_id_allocator.next();
-        let kind = command.spec.kind().clone();
-        let permission = Arc::new(SessionPermission::new(self.state.clone()));
-        let extension_tools = self.multiagent.tool_group(id, &kind).into_iter().collect();
-        let reasoning_effort = self.state.get().reasoning_effort;
-        match self.agent_manager.create(
-            id,
-            &kind,
-            false,
-            permission as Arc<_>,
-            reasoning_effort,
-            PersistenceConfig::InMemory,
-            extension_tools,
-        ) {
-            Ok((agent, reasoning)) => {
-                let previous = self.agents.insert(id, AgentSlot::new(agent, reasoning));
-                debug_assert!(previous.is_none());
-                self.managed_agents.insert(id);
-                let rollback = self
-                    .multiagent
-                    .apply_result(MultiagentEffectResult::Spawned {
-                        requester,
-                        command,
-                        id,
-                    });
-                if let Some(rollback) = rollback {
-                    self.rollback_spawn(rollback);
-                }
-            }
-            Err(error) => {
-                self.multiagent
-                    .apply_result(MultiagentEffectResult::SpawnFailed {
-                        command,
-                        detail: error.to_string(),
-                    });
-            }
-        }
-    }
-
-    #[cfg(feature = "multiagent")]
-    fn rollback_spawn(&mut self, id: crate::agent::AgentId) {
-        if self.agents.get(&id).is_some_and(AgentSlot::is_in_flight) {
-            if let Some(slot) = self.agents.get_mut(&id) {
-                slot.begin_reaping();
-            }
-            self.multiagent_reaping.insert(id);
-            return;
-        }
-        self.agents.remove(&id);
-        if let Err(error) = self.agent_manager.remove(id) {
-            log::error!(
-                "session {} Agent {id} spawn rollback failed: {error}",
-                self.session
-            );
-            tracing::error!(name: "spawn_rollback_failed", agent = %id, error = %error);
-        }
-    }
-
-    #[cfg(feature = "multiagent")]
-    fn begin_multiagent_removal(&mut self, agents: Vec<crate::agent::AgentId>) {
-        let victims = agents.iter().copied().collect::<BTreeSet<_>>();
-        if let Some(display) = self.approval.cancel_agents(&victims) {
-            self.emit_approval_display(display);
-        }
-        for agent in agents {
-            self.timeouts.remove(agent);
-            let in_flight = self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight);
-            if in_flight {
-                if let Some(slot) = self.agents.get_mut(&agent) {
-                    slot.begin_reaping();
-                }
-                self.multiagent_reaping.insert(agent);
-                continue;
-            }
-
-            self.agents.remove(&agent);
-            let result = self
-                .agent_manager
-                .remove(agent)
-                .map_err(|error| MultiagentPhysicalError::new(error.to_string()));
-            self.multiagent.physical_agent_removed(agent, result);
-        }
+    fn log_agent_cleanup_failure(&self, agent: AgentId, error: &OrchestrationPhysicalError) {
+        log::error!(
+            "session {} Agent {agent} cleanup failed: {error}",
+            self.session
+        );
+        tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
     }
 
     fn handle_agent_output(&mut self, agent: AgentId, update: AgentSlotUpdate) {
@@ -984,72 +760,33 @@ where
                 if is_root {
                     self.emit_turn_error(SessionTurnError::from_agent(error));
                     self.finish_turn();
-                    #[cfg(feature = "multiagent")]
-                    self.multiagent.on_agent_idle(agent);
+                    self.orchestration.observe(agent, AgentNotice::Idle);
                 } else {
-                    #[cfg(feature = "multiagent")]
-                    self.multiagent
-                        .on_agent_completed(agent, format!("[failed: {error}]"), false);
+                    self.orchestration.observe(
+                        agent,
+                        AgentNotice::Completed {
+                            text: format!("[failed: {error}]"),
+                            ok: false,
+                        },
+                    );
                 }
             }
             AgentSlotUpdate::Returned => {
-                #[cfg(feature = "multiagent")]
-                self.multiagent.on_agent_idle(agent);
+                self.orchestration.observe(agent, AgentNotice::Idle);
             }
             AgentSlotUpdate::Reaped => {
                 self.finish_reaped_agent(agent);
             }
             AgentSlotUpdate::Ignored => {}
         }
-        #[cfg(feature = "multiagent")]
-        self.drain_ready_multiagent_effects();
-    }
-
-    #[cfg(feature = "multiagent")]
-    fn drain_ready_multiagent_effects(&mut self) {
-        loop {
-            let effect = self.multiagent.take_effect();
-            let Some(effect) = effect else {
-                break;
-            };
-            self.handle_multiagent_effect(effect);
-        }
-    }
-
-    fn finish_reaped_agent(&mut self, agent: crate::agent::AgentId) {
-        self.agents.remove(&agent);
-        self.active_agent_poll_queue
-            .retain(|queued| *queued != agent);
-        let result = self.agent_manager.remove(agent);
-        #[cfg(feature = "multiagent")]
-        {
-            let result = result.map_err(|error| MultiagentPhysicalError::new(error.to_string()));
-            if self.multiagent_reaping.remove(&agent) {
-                self.multiagent.physical_agent_removed(agent, result);
-            } else if let Err(error) = result {
-                log::error!(
-                    "session {} Agent {agent} cleanup failed: {error}",
-                    self.session
-                );
-                tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
-            }
-        }
-        #[cfg(not(feature = "multiagent"))]
-        if let Err(error) = result {
-            log::error!(
-                "session {} Agent {agent} cleanup failed: {error}",
-                self.session
-            );
-            tracing::error!(name: "agent_cleanup_failed", agent = %agent, error = %error);
-        }
+        self.drain_orchestration_effects();
     }
 
     fn handle_agent_event(&mut self, agent: crate::agent::AgentId, event: AgentEvent) {
         let is_root = self.root_id() == Some(agent);
         match event {
             AgentEvent::TurnStarted { origin } => {
-                #[cfg(feature = "multiagent")]
-                self.multiagent.on_agent_started(agent);
+                self.orchestration.observe(agent, AgentNotice::Started);
                 if is_root {
                     let origin = match origin {
                         AgentTurnOrigin::Message => TurnOrigin::User,
@@ -1090,15 +827,15 @@ where
                 tool_call,
                 reason,
             }) => {
-                #[cfg(feature = "multiagent")]
-                self.multiagent.on_agent_awaiting_approval(agent);
+                self.orchestration
+                    .observe(agent, AgentNotice::AwaitingApproval);
                 self.request_approval(agent, tool_call_id, tool_call, reason);
             }
             AgentEvent::TurnEnded { outcome } => {
                 if let Some(slot) = self.agents.get_mut(&agent) {
                     slot.finish_trace_turn();
                 }
-                let (_text, _completed, _cancelled) = match outcome {
+                let (text, completed, cancelled) = match outcome {
                     AgentOutcome::Completed(AgentCompletion::EffectOutput(message)) => {
                         if is_root {
                             self.emit_effect_output(message.clone());
@@ -1113,11 +850,16 @@ where
                     }
                     AgentOutcome::Cancelled => ("subagent was cancelled".to_owned(), false, true),
                 };
-                #[cfg(feature = "multiagent")]
-                if _cancelled {
-                    self.multiagent.on_agent_cancelled(agent);
+                if cancelled {
+                    self.orchestration.observe(agent, AgentNotice::Cancelled);
                 } else {
-                    self.multiagent.on_agent_completed(agent, _text, _completed);
+                    self.orchestration.observe(
+                        agent,
+                        AgentNotice::Completed {
+                            text,
+                            ok: completed,
+                        },
+                    );
                 }
                 if let Some(display) = self.approval.cancel_agent(agent) {
                     self.emit_approval_display(display);
@@ -1184,8 +926,8 @@ where
                 slot.cancel();
             }
         } else {
-            #[cfg(feature = "multiagent")]
-            self.multiagent.on_approval_resolved(agent);
+            self.orchestration
+                .observe(agent, AgentNotice::ApprovalResolved);
         }
         if let Some(display) = self.approval.activate_next() {
             self.emit_approval_display(display);
@@ -1289,6 +1031,121 @@ where
         if let Some(client) = &self.client {
             let _ = client.events.try_send(event);
         }
+    }
+}
+
+impl<Filesystem, Http, Timer> OrchestrationHost for SessionActor<Filesystem, Http, Timer>
+where
+    Filesystem: ClawFs + 'static,
+    Http: ClawHttp + StreamingHttp + Default + 'static,
+    Timer: ClawTimer + Default + 'static,
+{
+    fn allocate_agent_id(&mut self) -> AgentId {
+        self.agent_id_allocator.next()
+    }
+
+    fn create_agent(
+        &mut self,
+        agent: AgentId,
+        kind: &crate::agent::AgentKind,
+        extension_tools: Vec<ToolGroup>,
+    ) -> Result<(), OrchestrationPhysicalError> {
+        let permission = Arc::new(SessionPermission::new(self.state.clone()));
+        let reasoning_effort = self.state.get().reasoning_effort;
+        let (created_agent, reasoning) = self
+            .agent_manager
+            .create(
+                agent,
+                kind,
+                false,
+                permission as Arc<_>,
+                reasoning_effort,
+                PersistenceConfig::InMemory,
+                extension_tools,
+            )
+            .map_err(|error| OrchestrationPhysicalError::new(error.to_string()))?;
+        let previous = self
+            .agents
+            .insert(agent, AgentSlot::new(created_agent, reasoning));
+        debug_assert!(previous.is_none());
+        self.managed_agents.insert(agent);
+        Ok(())
+    }
+
+    fn rollback_agent(&mut self, agent: AgentId) -> ReapStatus {
+        if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+            if let Some(slot) = self.agents.get_mut(&agent) {
+                slot.begin_reaping();
+            }
+            return ReapStatus::Pending;
+        }
+
+        self.agents.remove(&agent);
+        if let Err(error) = self.agent_manager.remove(agent) {
+            log::error!(
+                "session {} Agent {agent} spawn rollback failed: {error}",
+                self.session
+            );
+            tracing::error!(name: "spawn_rollback_failed", agent = %agent, error = %error);
+        }
+        ReapStatus::Complete
+    }
+
+    fn dispatch_agent(&mut self, target: AgentId, message: Message) -> HostDispatchOutcome {
+        let turn = self.active_turn.as_ref();
+        let dispatch = self
+            .agents
+            .get_mut(&target)
+            .map(|slot| slot.dispatch(message, || (agent_span(target, turn), ())));
+        match dispatch {
+            Some(Ok((started, ()))) => {
+                if started == AgentDispatch::Started {
+                    self.active_agent_poll_queue.push_back(target);
+                }
+                HostDispatchOutcome::Accepted
+            }
+            Some(Err((_, AgentDispatchError::Busy))) => HostDispatchOutcome::Busy,
+            Some(Err((_, AgentDispatchError::Closed))) | None => HostDispatchOutcome::Missing,
+        }
+    }
+
+    fn interrupt_agent(&mut self, target: AgentId) -> HostInterruptOutcome {
+        match self.agents.get_mut(&target) {
+            Some(slot) => {
+                if slot.interrupt() {
+                    HostInterruptOutcome::Accepted
+                } else {
+                    HostInterruptOutcome::Inactive
+                }
+            }
+            None => HostInterruptOutcome::Missing,
+        }
+    }
+
+    fn begin_remove_agents(&mut self, agents: Vec<AgentId>) -> Vec<RemovalOutcome> {
+        let victims = agents.iter().copied().collect::<BTreeSet<_>>();
+        if let Some(display) = self.approval.cancel_agents(&victims) {
+            self.emit_approval_display(display);
+        }
+
+        agents
+            .into_iter()
+            .map(|agent| {
+                if self.agents.get(&agent).is_some_and(AgentSlot::is_in_flight) {
+                    if let Some(slot) = self.agents.get_mut(&agent) {
+                        slot.begin_reaping();
+                    }
+                    RemovalOutcome::Pending(agent)
+                } else {
+                    self.agents.remove(&agent);
+                    let result = self
+                        .agent_manager
+                        .remove(agent)
+                        .map_err(|error| OrchestrationPhysicalError::new(error.to_string()));
+                    RemovalOutcome::Complete { agent, result }
+                }
+            })
+            .collect()
     }
 }
 

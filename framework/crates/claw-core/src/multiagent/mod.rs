@@ -1,24 +1,27 @@
 //! Optional per-Session multiagent domain component.
 //!
 //! [`Multiagent`] owns graph policy, tool commands, and the inspection read
-//! model. SessionActor remains the sole owner of Agent slots and executes the
-//! physical operations requested by this component.
+//! model. Its physical host owns Agent slots and executes the operations
+//! requested by this component.
 //!
 //! Multiagent never owns an Agent, AgentSlot, AgentManager, Session identifier,
 //! or persistence policy. Its tools submit semantic commands
-//! through a private bridge; SessionActor polls those commands without holding
-//! a bridge lock across Agent work.
+//! through a private bridge; the host polls those commands without holding a
+//! bridge lock across Agent work.
 
 mod component;
+mod effect;
+mod host;
 mod model;
+mod orchestrator;
 mod policy;
 mod state;
 mod tool_port;
 mod tools;
 
-pub(crate) use self::component::{
-    DispatchOutcome, InterruptOutcome, Multiagent, MultiagentEffect, MultiagentEffectResult,
-    MultiagentPhysicalError,
+pub(crate) use self::component::Multiagent;
+pub(crate) use self::effect::{
+    DispatchOutcome, InterruptOutcome, MultiagentEffect, MultiagentPhysicalError,
 };
+pub(crate) use self::host::MultiagentHost;
 pub(crate) use self::model::SubagentTimeout;
-pub(crate) use self::tool_port::SpawnCommand;

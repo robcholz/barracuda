@@ -37,6 +37,7 @@ macro_rules! prompt {
 
 mod agent;
 mod config;
+mod message;
 #[cfg(feature = "multiagent")]
 mod multiagent;
 mod runtime;
@@ -55,11 +56,12 @@ pub use claw_api::ToolCall;
 pub use claw_permission::PermissionLevel;
 pub use claw_tool::ToolOutput;
 pub use config::ApiPurpose;
+pub use message::Message;
 pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
 pub use session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
-    Message, OpenSessionError, SessionCloseReason, SessionControl, SessionControlError,
-    SessionCreateError, SessionDeleteError, SessionError, SessionEvent, SessionEventError,
-    SessionId, SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
+    OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
+    SessionDeleteError, SessionError, SessionEvent, SessionEventError, SessionId,
+    SessionInputError, SessionPersistence, SessionStream, SessionTurnError, TurnEvent,
     TurnEventError, TurnId, TurnOrigin,
 };

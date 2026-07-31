@@ -4,7 +4,8 @@ use strum::IntoStaticStr;
 
 use crate::agent::ReasoningEffort;
 
-use super::{InputRequestId, Message, SessionId};
+use super::{InputRequestId, SessionId};
+use crate::Message;
 
 /// Failure sending a command through a session control handle.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

@@ -15,7 +15,7 @@ use claw_utils::stream::StreamPart;
 use futures_core::Stream;
 use futures_lite::future;
 
-use crate::session::Message;
+use crate::Message;
 
 use super::iteration_loop::{IterationId, IterationLoopError, ToolCallId};
 

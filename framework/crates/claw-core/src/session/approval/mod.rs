@@ -16,7 +16,8 @@ use tracing::Instrument as _;
 
 use crate::agent::{AgentId, ApprovalDecision, ToolCallId};
 
-use super::{InputRequestId, InputRequestKind, Message};
+use super::{InputRequestId, InputRequestKind};
+use crate::Message;
 
 mod llm;
 

@@ -13,7 +13,7 @@ use super::base_agent::{
     ToolCallId,
 };
 use super::{Agent, AgentError};
-use crate::session::Message;
+use crate::Message;
 
 /// Why the long-lived Agent wrapper opened one BaseAgent task.
 #[derive(Clone, Debug, PartialEq, Eq)]

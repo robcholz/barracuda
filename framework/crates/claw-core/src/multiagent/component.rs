@@ -6,8 +6,12 @@ use async_channel::Sender;
 use claw_tool::ToolGroup;
 
 use crate::agent::{AgentId, AgentKind};
-use crate::session::Message;
+use crate::Message;
 
+use super::effect::{
+    DispatchOutcome, EffectId, InterruptOutcome, MultiagentEffect, MultiagentEffectResult,
+    MultiagentPhysicalError,
+};
 use super::model::{MultiagentSnapshot, SubagentResult, SubagentStatus, SubagentTimeout};
 use super::policy::SpawnPolicy;
 use super::state::MultiagentState;
@@ -16,29 +20,7 @@ use super::tool_port::{
     SpawnCommand,
 };
 
-pub(crate) enum MultiagentEffect {
-    Spawn {
-        requester: AgentId,
-        command: SpawnCommand,
-    },
-    Dispatch {
-        target: AgentId,
-        message: Message,
-        purpose: DispatchPurpose,
-    },
-    Interrupt {
-        command: FollowupCommand,
-    },
-    RemoveAgents {
-        agents: Vec<AgentId>,
-    },
-    ArmTimeout {
-        agent: AgentId,
-        timeout: SubagentTimeout,
-    },
-}
-
-pub(crate) enum DispatchPurpose {
+enum DispatchPurpose {
     Initial {
         child: AgentId,
     },
@@ -47,52 +29,19 @@ pub(crate) enum DispatchPurpose {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DispatchOutcome {
-    Accepted,
-    Busy,
-    Missing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum InterruptOutcome {
-    Accepted,
-    Inactive,
-    Missing,
-}
-
-pub(crate) enum MultiagentEffectResult {
-    Spawned {
+enum PendingEffect {
+    Spawn {
         requester: AgentId,
-        command: SpawnCommand,
-        id: AgentId,
+        accepted: Sender<Result<AgentId, MultiagentCommandError>>,
+        completion: Sender<SubagentResult>,
     },
-    SpawnFailed {
-        command: SpawnCommand,
-        detail: String,
-    },
-    Dispatched {
+    Dispatch {
         target: AgentId,
-        message: Message,
         purpose: DispatchPurpose,
-        outcome: DispatchOutcome,
     },
-    Interrupted {
+    Interrupt {
         command: FollowupCommand,
-        outcome: InterruptOutcome,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("{detail}")]
-pub(crate) struct MultiagentPhysicalError {
-    detail: String,
-}
-
-impl MultiagentPhysicalError {
-    pub(crate) fn new(detail: String) -> Self {
-        Self { detail }
-    }
 }
 
 enum RemovalCause {
@@ -130,6 +79,8 @@ pub(crate) struct Multiagent {
     state: MultiagentState,
     bridge: Arc<MultiagentBridge>,
     effects: VecDeque<MultiagentEffect>,
+    pending_effects: BTreeMap<EffectId, PendingEffect>,
+    next_effect_id: u64,
     routes: BTreeMap<AgentId, Sender<SubagentResult>>,
     pending_interrupts: BTreeMap<AgentId, FollowupCommand>,
     removals: Vec<RemovalPlan>,
@@ -141,6 +92,8 @@ impl Multiagent {
             state: MultiagentState::default(),
             bridge: Arc::new(MultiagentBridge::new()),
             effects: VecDeque::new(),
+            pending_effects: BTreeMap::new(),
+            next_effect_id: 1,
             routes: BTreeMap::new(),
             pending_interrupts: BTreeMap::new(),
             removals: Vec::new(),
@@ -201,28 +154,15 @@ impl Multiagent {
 
     pub(crate) fn apply_result(&mut self, result: MultiagentEffectResult) -> Option<AgentId> {
         match result {
-            MultiagentEffectResult::Spawned {
-                requester,
-                command,
-                id,
-            } => self.commit_spawn(requester, command, id),
-            MultiagentEffectResult::SpawnFailed { command, detail } => {
-                let _ = command
-                    .accepted
-                    .try_send(Err(MultiagentCommandError::CreateFailed(detail)));
+            MultiagentEffectResult::Spawned { id, spec, outcome } => {
+                self.reduce_spawn(id, spec, outcome)
+            }
+            MultiagentEffectResult::Dispatched { id, outcome } => {
+                self.reduce_dispatch(id, outcome);
                 None
             }
-            MultiagentEffectResult::Dispatched {
-                target,
-                message,
-                purpose,
-                outcome,
-            } => {
-                self.reduce_dispatch(target, message, purpose, outcome);
-                None
-            }
-            MultiagentEffectResult::Interrupted { command, outcome } => {
-                self.reduce_interrupt(command, outcome);
+            MultiagentEffectResult::Interrupted { id, outcome } => {
+                self.reduce_interrupt(id, outcome);
                 None
             }
         }
@@ -252,13 +192,13 @@ impl Multiagent {
 
     pub(crate) fn on_agent_completed(&mut self, agent: AgentId, text: String, ok: bool) {
         if let Some(command) = self.pending_interrupts.remove(&agent) {
-            self.effects.push_back(MultiagentEffect::Dispatch {
-                target: agent,
-                message: command.message,
-                purpose: DispatchPurpose::Followup {
+            self.queue_dispatch(
+                agent,
+                command.message,
+                DispatchPurpose::Followup {
                     completed: command.completed,
                 },
-            });
+            );
             return;
         }
         if !self.state.contains(agent)
@@ -413,6 +353,7 @@ impl Multiagent {
     pub(crate) fn clear(&mut self) {
         self.state = MultiagentState::default();
         self.effects.clear();
+        self.pending_effects.clear();
         self.routes.clear();
         self.pending_interrupts.clear();
         self.removals.clear();
@@ -450,8 +391,17 @@ impl Multiagent {
             let _ = command.accepted.try_send(Err(error));
             return;
         }
-        self.effects
-            .push_back(MultiagentEffect::Spawn { requester, command });
+        let SpawnCommand {
+            spec,
+            accepted,
+            completion,
+        } = command;
+        let id = self.reserve_effect(PendingEffect::Spawn {
+            requester,
+            accepted,
+            completion,
+        });
+        self.effects.push_back(MultiagentEffect::Spawn { id, spec });
     }
 
     fn prepare_delete(&mut self, requester: AgentId, command: DeleteCommand) {
@@ -489,8 +439,7 @@ impl Multiagent {
                 .difference(&removal.removed)
                 .copied()
                 .collect();
-            self.effects
-                .push_back(MultiagentEffect::RemoveAgents { agents });
+            self.queue_remove(agents);
             self.publish_snapshot();
             return;
         }
@@ -536,29 +485,29 @@ impl Multiagent {
         }
         match self.state.status(command.target) {
             Some(SubagentStatus::Idle) => {
-                self.effects.push_back(MultiagentEffect::Dispatch {
-                    target: command.target,
-                    message: command.message,
-                    purpose: DispatchPurpose::Followup {
+                self.queue_dispatch(
+                    command.target,
+                    command.message,
+                    DispatchPurpose::Followup {
                         completed: command.completed,
                     },
-                });
+                );
             }
             Some(SubagentStatus::AwaitingApproval | SubagentStatus::Running) => {
+                let target = command.target;
+                let id = self.reserve_effect(PendingEffect::Interrupt { command });
                 self.effects
-                    .push_back(MultiagentEffect::Interrupt { command });
+                    .push_back(MultiagentEffect::Interrupt { id, target });
             }
             Some(SubagentStatus::Ready) => {
                 let _ = command
                     .completed
                     .try_send(Err(MultiagentCommandError::TargetBusy));
-                return;
             }
             Some(SubagentStatus::Reaping | SubagentStatus::CompletedPendingDelivery) | None => {
                 let _ = command
                     .completed
                     .try_send(Err(MultiagentCommandError::TargetNotControlled));
-                return;
             }
         }
     }
@@ -566,45 +515,61 @@ impl Multiagent {
     fn commit_spawn(
         &mut self,
         requester: AgentId,
-        command: SpawnCommand,
+        accepted: Sender<Result<AgentId, MultiagentCommandError>>,
+        completion: Sender<SubagentResult>,
+        spec: super::model::SubagentSpec,
         id: AgentId,
     ) -> Option<AgentId> {
         if self.state.status(requester) != Some(SubagentStatus::Running) {
-            let _ = command
-                .accepted
-                .try_send(Err(MultiagentCommandError::RequesterMissing));
+            let _ = accepted.try_send(Err(MultiagentCommandError::RequesterMissing));
             return Some(id);
         }
-        let (kind, name, goal, timeout) = command.spec.into_parts();
+        let (kind, name, goal, timeout) = spec.into_parts();
         if !self.state.insert_child(requester, id, kind, name, timeout) {
-            let _ = command
-                .accepted
-                .try_send(Err(MultiagentCommandError::RequesterMissing));
+            let _ = accepted.try_send(Err(MultiagentCommandError::RequesterMissing));
             return Some(id);
         }
-        self.routes.insert(id, command.completion);
-        if command.accepted.try_send(Ok(id)).is_err() {
+        self.routes.insert(id, completion);
+        if accepted.try_send(Ok(id)).is_err() {
             self.begin_removal(self.state.subtree_ids(id), RemovalCause::Cleanup);
             return None;
         }
-        self.effects
-            .push_back(MultiagentEffect::ArmTimeout { agent: id, timeout });
-        self.effects.push_back(MultiagentEffect::Dispatch {
-            target: id,
-            message: goal,
-            purpose: DispatchPurpose::Initial { child: id },
-        });
+        self.queue_timeout(id, timeout);
+        self.queue_dispatch(id, goal, DispatchPurpose::Initial { child: id });
         self.publish_snapshot();
         None
     }
 
-    fn reduce_dispatch(
+    fn reduce_spawn(
         &mut self,
-        target: AgentId,
-        message: Message,
-        purpose: DispatchPurpose,
-        outcome: DispatchOutcome,
-    ) {
+        effect: EffectId,
+        spec: super::model::SubagentSpec,
+        outcome: Result<AgentId, MultiagentPhysicalError>,
+    ) -> Option<AgentId> {
+        let Some(PendingEffect::Spawn {
+            requester,
+            accepted,
+            completion,
+        }) = self.pending_effects.remove(&effect)
+        else {
+            return outcome.ok();
+        };
+        match outcome {
+            Ok(agent) => self.commit_spawn(requester, accepted, completion, spec, agent),
+            Err(error) => {
+                let _ =
+                    accepted.try_send(Err(MultiagentCommandError::CreateFailed(error.to_string())));
+                None
+            }
+        }
+    }
+
+    fn reduce_dispatch(&mut self, effect: EffectId, outcome: DispatchOutcome) {
+        let Some(PendingEffect::Dispatch { target, purpose }) =
+            self.pending_effects.remove(&effect)
+        else {
+            return;
+        };
         match purpose {
             DispatchPurpose::Initial { child } => match outcome {
                 DispatchOutcome::Accepted => {
@@ -626,11 +591,14 @@ impl Multiagent {
                 let _ = completed.try_send(result);
             }
         }
-        drop(message);
         self.publish_snapshot();
     }
 
-    fn reduce_interrupt(&mut self, command: FollowupCommand, outcome: InterruptOutcome) {
+    fn reduce_interrupt(&mut self, effect: EffectId, outcome: InterruptOutcome) {
+        let Some(PendingEffect::Interrupt { command }) = self.pending_effects.remove(&effect)
+        else {
+            return;
+        };
         match outcome {
             InterruptOutcome::Accepted => {
                 let previous = self.pending_interrupts.insert(command.target, command);
@@ -648,6 +616,40 @@ impl Multiagent {
             }
         }
         self.publish_snapshot();
+    }
+
+    fn next_effect(&mut self) -> EffectId {
+        let id = EffectId(self.next_effect_id);
+        self.next_effect_id = self.next_effect_id.wrapping_add(1);
+        id
+    }
+
+    fn reserve_effect(&mut self, pending: PendingEffect) -> EffectId {
+        let id = self.next_effect();
+        let previous = self.pending_effects.insert(id, pending);
+        debug_assert!(previous.is_none());
+        id
+    }
+
+    fn queue_dispatch(&mut self, target: AgentId, message: Message, purpose: DispatchPurpose) {
+        let id = self.reserve_effect(PendingEffect::Dispatch { target, purpose });
+        self.effects.push_back(MultiagentEffect::Dispatch {
+            id,
+            target,
+            message,
+        });
+    }
+
+    fn queue_remove(&mut self, agents: Vec<AgentId>) {
+        let id = self.next_effect();
+        self.effects
+            .push_back(MultiagentEffect::RemoveAgents { id, agents });
+    }
+
+    fn queue_timeout(&mut self, agent: AgentId, timeout: SubagentTimeout) {
+        let id = self.next_effect();
+        self.effects
+            .push_back(MultiagentEffect::ArmTimeout { id, agent, timeout });
     }
 
     fn begin_removal(&mut self, victims: Vec<AgentId>, cause: RemovalCause) {
@@ -685,21 +687,40 @@ impl Multiagent {
         for victim in &victims {
             self.state.set_status(*victim, SubagentStatus::Reaping);
         }
-        self.effects.retain(|effect| match effect {
-            MultiagentEffect::Spawn { requester, .. } => !victims.contains(requester),
-            MultiagentEffect::Dispatch {
-                target, purpose, ..
-            } => {
-                !victims.contains(target)
-                    && match purpose {
-                        DispatchPurpose::Initial { child } => !victims.contains(child),
-                        DispatchPurpose::Followup { .. } => true,
+        let cancelled_effects = self
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                MultiagentEffect::Spawn { id, .. } => match self.pending_effects.get(id) {
+                    Some(PendingEffect::Spawn { requester, .. }) if victims.contains(requester) => {
+                        Some(*id)
                     }
-            }
-            MultiagentEffect::Interrupt { command } => !victims.contains(&command.target),
-            MultiagentEffect::ArmTimeout { agent, .. } => !victims.contains(agent),
-            MultiagentEffect::RemoveAgents { .. } => true,
+                    _ => None,
+                },
+                MultiagentEffect::Dispatch { id, target, .. }
+                | MultiagentEffect::Interrupt { id, target }
+                | MultiagentEffect::ArmTimeout {
+                    id, agent: target, ..
+                } if victims.contains(target) => Some(*id),
+                MultiagentEffect::RemoveAgents { .. }
+                | MultiagentEffect::Dispatch { .. }
+                | MultiagentEffect::Interrupt { .. }
+                | MultiagentEffect::ArmTimeout { .. } => None,
+            })
+            .collect::<BTreeSet<_>>();
+        self.effects.retain(|effect| {
+            let id = match effect {
+                MultiagentEffect::Spawn { id, .. }
+                | MultiagentEffect::Dispatch { id, .. }
+                | MultiagentEffect::Interrupt { id, .. }
+                | MultiagentEffect::RemoveAgents { id, .. }
+                | MultiagentEffect::ArmTimeout { id, .. } => id,
+            };
+            !cancelled_effects.contains(id)
         });
+        for effect in cancelled_effects {
+            self.pending_effects.remove(&effect);
+        }
         for victim in &victims {
             if let Some(command) = self.pending_interrupts.remove(victim) {
                 let _ = command
@@ -712,8 +733,7 @@ impl Multiagent {
             .copied()
             .collect::<Vec<_>>();
         if !agents.is_empty() {
-            self.effects
-                .push_back(MultiagentEffect::RemoveAgents { agents });
+            self.queue_remove(agents);
         }
         self.removals.push(RemovalPlan {
             victims,
@@ -771,16 +791,20 @@ impl Multiagent {
     }
 
     fn retry_failed_removals(&mut self) {
+        let mut effects = Vec::new();
         for removal in &mut self.removals {
             if removal.failure.take().is_some() {
-                self.effects.push_back(MultiagentEffect::RemoveAgents {
-                    agents: removal
+                effects.push(
+                    removal
                         .victims
                         .difference(&removal.removed)
                         .copied()
                         .collect(),
-                });
+                );
             }
+        }
+        for agents in effects {
+            self.queue_remove(agents);
         }
     }
 
@@ -893,12 +917,35 @@ impl Default for Multiagent {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::panic)]
 mod tests {
+    use super::super::model::SubagentSpec;
     use super::*;
-    use crate::session::Message;
+    use crate::Message;
     use futures_lite::future;
 
     fn timeout() -> SubagentTimeout {
         SubagentTimeout::from_millis(60_000).expect("test timeout is non-zero")
+    }
+
+    fn take_spawn_effect(multiagent: &mut Multiagent) -> (EffectId, SubagentSpec) {
+        let effect = future::block_on(future::poll_fn(|cx| multiagent.poll_effect(cx)))
+            .expect("spawn effect");
+        let MultiagentEffect::Spawn { id, spec } = effect else {
+            panic!("expected spawn effect");
+        };
+        (id, spec)
+    }
+
+    fn apply_spawned(
+        multiagent: &mut Multiagent,
+        effect: EffectId,
+        spec: SubagentSpec,
+        child: AgentId,
+    ) -> Option<AgentId> {
+        multiagent.apply_result(MultiagentEffectResult::Spawned {
+            id: effect,
+            spec,
+            outcome: Ok(child),
+        })
     }
 
     #[test]
@@ -946,14 +993,11 @@ mod tests {
                 timeout(),
             ),
         );
-        let effect = future::block_on(future::poll_fn(|cx| multiagent.poll_effect(cx)))
-            .expect("spawn effect");
-        let MultiagentEffect::Spawn { command, .. } = effect else {
-            panic!("expected spawn effect");
-        };
-        multiagent.apply_result(MultiagentEffectResult::SpawnFailed {
-            command,
-            detail: "injected".to_owned(),
+        let (effect, spec) = take_spawn_effect(&mut multiagent);
+        multiagent.apply_result(MultiagentEffectResult::Spawned {
+            id: effect,
+            spec,
+            outcome: Err(MultiagentPhysicalError::new("injected".to_owned())),
         });
 
         assert_eq!(multiagent.agent_ids(), vec![root]);
@@ -980,35 +1024,24 @@ mod tests {
                 timeout(),
             ),
         );
-        let effect = future::block_on(future::poll_fn(|cx| multiagent.poll_effect(cx)))
-            .expect("spawn effect");
-        let MultiagentEffect::Spawn { command, .. } = effect else {
-            panic!("expected spawn effect");
-        };
-        assert_eq!(
-            multiagent.apply_result(MultiagentEffectResult::Spawned {
-                requester: root,
-                command,
-                id: child,
-            }),
-            None
-        );
+        let (effect, spec) = take_spawn_effect(&mut multiagent);
+        assert_eq!(apply_spawned(&mut multiagent, effect, spec, child), None);
         assert_eq!(accepted.try_recv(), Ok(Ok(child)));
 
         let _ = multiagent.take_effect().expect("timeout effect");
         let initial = multiagent.take_effect().expect("initial dispatch");
         let MultiagentEffect::Dispatch {
+            id,
             target,
             message,
-            purpose,
         } = initial
         else {
             panic!("expected initial dispatch");
         };
+        assert_eq!(target, child);
+        assert_eq!(message.as_str(), "goal");
         multiagent.apply_result(MultiagentEffectResult::Dispatched {
-            target,
-            message,
-            purpose,
+            id,
             outcome: DispatchOutcome::Accepted,
         });
         multiagent.on_agent_completed(child, "done".to_owned(), true);
@@ -1067,7 +1100,7 @@ mod tests {
         );
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents })
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![child, grandchild]
         ));
 
@@ -1105,7 +1138,7 @@ mod tests {
         );
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         multiagent.physical_agent_removed(
             child,
@@ -1135,7 +1168,7 @@ mod tests {
         );
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         multiagent.physical_agent_removed(child, Ok(()));
 
@@ -1162,11 +1195,9 @@ mod tests {
             accepted: accepted_sender,
             completion: completion_sender,
         };
-        multiagent.apply_result(MultiagentEffectResult::Spawned {
-            requester: root,
-            command,
-            id: child,
-        });
+        multiagent.prepare_spawn(root, command);
+        let (effect, spec) = take_spawn_effect(&mut multiagent);
+        apply_spawned(&mut multiagent, effect, spec, child);
         assert_eq!(accepted.try_recv(), Ok(Ok(child)));
         let _ = multiagent.take_effect();
         let _ = multiagent.take_effect();
@@ -1176,7 +1207,7 @@ mod tests {
             .expect("cancelled receiver removal");
         assert!(matches!(
             removal,
-            MultiagentEffect::RemoveAgents { agents } if agents == vec![child]
+            MultiagentEffect::RemoveAgents { agents, .. } if agents == vec![child]
         ));
         assert_eq!(
             multiagent.state.status(child),
@@ -1250,7 +1281,7 @@ mod tests {
         );
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents })
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![cancelled_foreground]
         ));
         assert!(nested_receiver.try_recv().is_err());
@@ -1272,19 +1303,11 @@ mod tests {
                 timeout(),
             ),
         );
-        let effect = future::block_on(future::poll_fn(|cx| multiagent.poll_effect(cx)))
-            .expect("spawn effect");
-        let MultiagentEffect::Spawn { command, .. } = effect else {
-            panic!("expected spawn effect");
-        };
+        let (effect, spec) = take_spawn_effect(&mut multiagent);
 
         multiagent.state.set_status(root, SubagentStatus::Reaping);
         assert_eq!(
-            multiagent.apply_result(MultiagentEffectResult::Spawned {
-                requester: root,
-                command,
-                id: child,
-            }),
+            apply_spawned(&mut multiagent, effect, spec, child),
             Some(child)
         );
 
@@ -1323,35 +1346,31 @@ mod tests {
         );
 
         assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
-        let Some(MultiagentEffect::Interrupt { command }) = multiagent.take_effect() else {
+        let Some(MultiagentEffect::Interrupt { id, target }) = multiagent.take_effect() else {
             panic!("running target should emit an interrupt effect");
         };
-        assert_eq!(command.target, child);
-        assert_eq!(command.message.as_str(), "too early");
+        assert_eq!(target, child);
 
         multiagent.apply_result(MultiagentEffectResult::Interrupted {
-            command,
+            id,
             outcome: InterruptOutcome::Accepted,
         });
 
         assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
         multiagent.on_agent_completed(child, "subagent was interrupted".to_owned(), false);
         let Some(MultiagentEffect::Dispatch {
+            id,
             target,
             message,
-            purpose,
         }) = multiagent.take_effect()
         else {
             panic!("completed interrupt should emit the deferred dispatch");
         };
         assert_eq!(target, child);
         assert_eq!(message.as_str(), "too early");
-        assert!(matches!(purpose, DispatchPurpose::Followup { .. }));
 
         multiagent.apply_result(MultiagentEffectResult::Dispatched {
-            target,
-            message,
-            purpose,
+            id,
             outcome: DispatchOutcome::Accepted,
         });
 
@@ -1423,7 +1442,7 @@ mod tests {
         multiagent.timeout(child);
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         multiagent.physical_agent_removed(
             child,
@@ -1467,13 +1486,13 @@ mod tests {
         multiagent.on_agent_completed(child, "child done".to_owned(), true);
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
 
         multiagent.timeout(parent);
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents })
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![parent, child]
         ));
         assert_eq!(
@@ -1518,7 +1537,7 @@ mod tests {
         );
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         multiagent.physical_agent_removed(
             child,
@@ -1534,7 +1553,7 @@ mod tests {
         multiagent.cleanup_subagents();
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         multiagent.physical_agent_removed(
             child,
@@ -1575,7 +1594,7 @@ mod tests {
         multiagent.timeout(parent);
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents })
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![parent, child]
         ));
         multiagent.physical_agent_removed(
@@ -1611,23 +1630,15 @@ mod tests {
                 timeout(),
             ),
         );
-        let effect = future::block_on(future::poll_fn(|cx| multiagent.poll_effect(cx)))
-            .expect("spawn effect");
-        let MultiagentEffect::Spawn { command, .. } = effect else {
-            panic!("expected spawn effect");
-        };
-        multiagent.apply_result(MultiagentEffectResult::Spawned {
-            requester: root,
-            command,
-            id: child,
-        });
+        let (effect, spec) = take_spawn_effect(&mut multiagent);
+        apply_spawned(&mut multiagent, effect, spec, child);
         assert_eq!(accepted.try_recv(), Ok(Ok(child)));
 
         multiagent.cleanup_subagents();
 
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents }) if agents == vec![child]
+            Some(MultiagentEffect::RemoveAgents { agents, .. }) if agents == vec![child]
         ));
         assert!(multiagent.take_effect().is_none());
         assert_eq!(
@@ -1664,7 +1675,7 @@ mod tests {
         multiagent.timeout(parent);
         assert!(matches!(
             multiagent.take_effect(),
-            Some(MultiagentEffect::RemoveAgents { agents })
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![parent, child]
         ));
         multiagent.physical_agent_removed(

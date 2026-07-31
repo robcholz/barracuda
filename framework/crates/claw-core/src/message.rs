@@ -1,9 +1,8 @@
-//! Messages delivered to sessions and agents.
+//! Messages delivered to agents.
 
 use serde::{Deserialize, Serialize};
 
-/// One message delivered to a session or agent.
-///
+/// One message delivered to an agent.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Message {

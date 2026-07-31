@@ -5,7 +5,7 @@ mod agent_slot;
 mod approval;
 mod control;
 mod manager;
-mod message;
+mod orchestration;
 mod permission;
 mod persistence;
 mod state;
@@ -17,7 +17,6 @@ pub use manager::{
     OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionPersistence,
 };
 pub(crate) use manager::{SessionManager, SessionManagerInitError};
-pub use message::Message;
 pub use stream::{
     ContextProviderError, InputRequestId, InputRequestKind, IterationEvent, SessionCloseReason,
     SessionError, SessionEvent, SessionEventError, SessionInputError, SessionStream,

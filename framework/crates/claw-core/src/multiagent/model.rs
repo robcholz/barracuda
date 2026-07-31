@@ -7,7 +7,7 @@ use serde::Serialize;
 use strum::IntoStaticStr;
 
 use crate::agent::{AgentId, AgentKind};
-use crate::session::Message;
+use crate::Message;
 
 /// Everything the Multiagent component needs to materialize one child Agent.
 #[derive(Clone)]

@@ -14,7 +14,7 @@ use getset::Getters;
 use tracing::Instrument as _;
 
 use crate::config::{ApiPurpose, SharedApiManager};
-use crate::session::Message;
+use crate::Message;
 
 use super::context_provider::ContextProvider;
 use super::effect::{AgentEffect, AgentEffectInbox};

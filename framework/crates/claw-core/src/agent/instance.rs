@@ -22,7 +22,7 @@ use super::stream::{
     AgentTurnOrigin,
 };
 use super::{AgentError, AgentIterationEvent, BaseAgentState};
-use crate::session::Message;
+use crate::Message;
 
 #[derive(Clone)]
 struct DetachedCompletion {

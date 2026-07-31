@@ -5,7 +5,7 @@ use std::task::{Context, Poll, Waker};
 use async_channel::{Receiver, Sender};
 
 use crate::agent::{AgentId, AgentKind};
-use crate::session::Message;
+use crate::Message;
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,

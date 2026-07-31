@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 
 use crate::agent::ApprovalDecision;
 use crate::config::{ApiPurpose, SharedApiManager};
-use crate::session::Message;
+use crate::Message;
 
 use super::{ApprovalFuture, ApprovalResolver, ApprovalResolverError};
 
@@ -152,7 +152,7 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
                 return Err(ToolError::InvalidArguments(format!(
                     "decision must be yes|no|other, got '{other}'"
                 ))
-                .into())
+                .into());
             }
         };
 
