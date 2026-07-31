@@ -524,6 +524,9 @@ dependencies = [
 name = "claw-utils"
 version = "0.1.0"
 dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-util",
  "serde",
  "thiserror",
 ]

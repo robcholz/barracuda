@@ -10,6 +10,19 @@ pub claw_utils::IdParseError::Empty
 pub claw_utils::IdParseError::Invalid
 pub claw_utils::IdParseError::Invalid::kind: &'static str
 pub claw_utils::IdParseError::Invalid::value: alloc::string::String
+pub struct claw_utils::JobCancelled
+pub struct claw_utils::JobHandle<T>
+impl<T> claw_utils::JobHandle<T>
+pub fn claw_utils::JobHandle<T>::try_take(&mut self) -> core::result::Result<core::option::Option<T>, claw_utils::JobCancelled>
+impl<T> core::future::future::Future for claw_utils::JobHandle<T>
+pub type claw_utils::JobHandle<T>::Output = core::result::Result<T, claw_utils::JobCancelled>
+pub fn claw_utils::JobHandle<T>::poll(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+pub struct claw_utils::TaskPool
+impl claw_utils::TaskPool
+pub fn claw_utils::TaskPool::drive(&self, &mut core::task::wake::Context<'_>) -> usize
+pub fn claw_utils::TaskPool::submit<F>(&self, F) -> claw_utils::JobHandle<<F as core::future::future::Future>::Output> where F: core::future::future::Future + 'static, <F as core::future::future::Future>::Output: 'static
+impl core::default::Default for claw_utils::TaskPool
+pub fn claw_utils::TaskPool::default() -> Self
 pub struct claw_utils::TruncatedText<T>
 impl<T: core::convert::AsRef<str>> claw_utils::TruncatedText<T>
 pub fn claw_utils::TruncatedText<T>::new(T) -> Self

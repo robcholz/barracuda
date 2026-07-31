@@ -3,12 +3,15 @@ name = "claw-utils"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Shared utilities: stream parts, log-safe text truncation, and prefixed ids"
+description = "Shared utilities: cooperative tasks, stream parts, log-safe text, and prefixed ids"
 
 [lib]
 name = "claw_utils"
 crate-type = ["rlib"]
 
 [dependencies]
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-core = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
