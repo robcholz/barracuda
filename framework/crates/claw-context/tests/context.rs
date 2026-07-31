@@ -1,4 +1,4 @@
-use claw_context::{Block, BlockKind, Context, ContextItem};
+use claw_context::{Band, Block, BlockKind, Context, ContextItem, Scope};
 use serde_json::Value;
 
 #[test]
@@ -59,18 +59,26 @@ fn profile_blocks_render_before_global_memory() {
 }
 
 #[test]
-fn reasoning_effort_follows_mode_and_precedes_conversation_summary() {
+fn mode_policy_is_static_and_precedes_durable_agent_context() {
     let mut context = Context::new();
     context
         .with(Block::new(BlockKind::ConversationSummary, "SUMMARY"))
         .with(Block::new(BlockKind::ReasoningEffort, "EFFORT"))
         .with(Block::new(BlockKind::SkillList, "SKILLS"))
-        .with(Block::new(BlockKind::ModeFraming, "MODE"));
+        .with(Block::new(BlockKind::ModePolicy, "POLICY"));
 
     assert_eq!(
         system_of(&mut context),
-        "SKILLS\n\nMODE\n\nEFFORT\n\nSUMMARY"
+        "POLICY\n\nSKILLS\n\nEFFORT\n\nSUMMARY"
     );
+}
+
+#[test]
+fn mode_kinds_have_cache_safe_placement() {
+    assert_eq!(BlockKind::ModePolicy.band(), Band::Static);
+    assert_eq!(BlockKind::ModePolicy.scope(), Scope::Agent);
+    assert_eq!(BlockKind::ActiveMode.band(), Band::Volatile);
+    assert_eq!(BlockKind::ActiveMode.scope(), Scope::Agent);
 }
 
 #[test]
@@ -153,21 +161,30 @@ fn reminders_render_in_wire_order_and_clear_by_kind() {
     let mut context = Context::new();
     context
         .with_reminder(BlockKind::OutputContract, Some("output"))
-        .with_reminder(BlockKind::ToolReminder, Some("tools"));
+        .with_reminder(BlockKind::ToolReminder, Some("tools"))
+        .with_reminder(BlockKind::ActiveMode, Some("plan"));
 
     let history = Value::Array(vec![]);
     let request = context.request(&history);
-    assert_eq!(request.reminders().len(), 2);
+    assert_eq!(request.reminders().len(), 3);
     assert_eq!(
         reminder_content(request.reminders().first()),
         Some("<system-reminder>\ntools\n</system-reminder>")
     );
+    assert_eq!(
+        reminder_content(request.reminders().get(1)),
+        Some("<system-reminder>\nplan\n</system-reminder>")
+    );
 
     context.with_reminder(BlockKind::ToolReminder, None);
     let request = context.request(&history);
-    assert_eq!(request.reminders().len(), 1);
+    assert_eq!(request.reminders().len(), 2);
     assert_eq!(
         reminder_content(request.reminders().first()),
+        Some("<system-reminder>\nplan\n</system-reminder>")
+    );
+    assert_eq!(
+        reminder_content(request.reminders().get(1)),
         Some("<system-reminder>\noutput\n</system-reminder>")
     );
 }

@@ -62,7 +62,7 @@ nesting.
 ```
 Context
 ├── Core        Soul · AgentInstruction · ToolPolicy · ToolReminder · SkillList
-├── Mode        ConversationModeContext | WorkingModeContext
+├── Mode        ModePolicy · ActiveMode
 ├── Knowledge   GlobalMemory/SessionMemory/AgentMemory (push)
 │               retrieved knowledge is tool-call output in History (pull)
 ├── History     ConversationSummary · RecentMessages/Events/ToolResults/Errors/Approvals
@@ -72,15 +72,17 @@ Context
 ## Mode Model (the primary extension axis)
 
 `ModeContext` lets one model serve different agent behaviors without
-restructuring. Modes are **never mixed** — an agent pays only for its mode.
+restructuring. Its system-level policy is immutable, while the active mode is a
+small per-request signal.
 
-- **ConversationMode** — dialogue: answer, clarify, route. No task scaffolding.
-- **WorkingMode** — task execution: `RunContext` / `TaskSpec` / `WorkspaceContext`
-  (stable framing) plus `WorkingState` / `ApprovalState` / `Blockers` (live state).
+- **ModePolicy** — the static rules for every supported mode. It remains byte
+  identical when the agent switches modes.
+- **ActiveMode** — a volatile reminder whose content is only `normal` or `plan`.
+  It selects which branch of `ModePolicy` applies to the current request.
 
-On the wire, mode splits by mutability (framing → Band 2, live state → Band 3),
-but it is one architectural concept. *Future modes* slot in with no band change:
-`Planning`, `Review`, `Approval`, `MemoryUpdate`, `Device`, `ToolExecution`.
+On the wire, mode splits by mutability (policy → Band 1, active mode → Band 3),
+but it is one architectural concept. Future modes extend the static policy and
+the `AgentMode` state without moving variable content into the cached prefix.
 
 ## Bake-Time Instructions
 
@@ -184,7 +186,10 @@ Group, scope, source, and extension points. (Mutability / band in Part B.)
   does not move the cached system prefix.
 - **SkillList** — *Core, Agent.* Available skill catalog rendered as prompt
   guidance. Full skill documents are returned by skill activation tools.
-- **ModeFraming** — *Mode, Agent.* Stable half of `ModeContext` (see Mode Model).
+- **ModePolicy** — *Mode, Agent.* Immutable rules for interpreting every
+  supported active mode.
+- **ActiveMode** — *Mode, Agent.* Volatile reminder containing only the current
+  `normal` or `plan` mode.
 - **ReasoningEffort** — *Mode, Agent.* Per-session orchestration guidance for
   how directly or deliberately the root agent should approach the current turn.
 - **GlobalMemory / SessionMemory / AgentMemory** — *Knowledge.* `MEMORY.md` per
@@ -218,14 +223,15 @@ Group, scope, source, and extension points. (Mutability / band in Part B.)
 
 ```
 BAND 1 — STATIC INSTRUCTIONS   (immutable; the long shared prefix, never busted at runtime)
-  AgentInstruction · ToolPolicy
+  AgentInstruction · ToolPolicy · ModePolicy
 
 BAND 2 — DURABLE STATE         (slowly mutable; broad→narrow scope; an edit busts only Bands 2–3)
   Soul · AssistantIdentity · UserProfile · GlobalMemory · SessionContext · SessionMemory · AgentMemory
-  SkillList · ModeFraming · ReasoningEffort · ConversationSummary
+  SkillList · ReasoningEffort · ConversationSummary
 
 BAND 3 — VOLATILE TAIL         (rebuilt each iteration; append-only between compactions)
   ToolReminder                 (dynamic tool phase note, reminder tail)
+  ActiveMode                   (`normal` or `plan`, reminder tail)
   RecentContext + LiveState (RecentMessages/Events/ToolResults/Errors/Approvals;
       WorkingState/ApprovalState/Blockers; tool-retrieved knowledge is a ToolResult)
   OutputContract               (static, but last by exception — see below)
@@ -239,7 +245,7 @@ lands next to the user turn because it is a tool result in recent history.
 
 - **`OutputContract`** — static but emitted last: it won't cache (volatile tail
   precedes it), but recency improves instruction following, and it's tiny.
-- **`ModeContext`** — split by mutability: framing → Band 2, live state → Band 3.
+- **`ModeContext`** — split by mutability: policy → Band 1, active mode → Band 3.
 - **Time / run metadata** — volatile; Band 3 only.
 
 ## Cache Breakpoints
@@ -254,13 +260,14 @@ Regions below the provider minimum (~1024 tokens on OpenAI) won't cache alone.
 |---|---|---|---|
 | AgentInstruction | Agent | Immutable | 1 |
 | ToolPolicy | Agent | Immutable | 1 |
+| ModePolicy | Agent | Immutable | 1 |
+| ActiveMode | Agent | Volatile reminder | 3 |
 | ToolReminder | Agent | Volatile reminder | 3 |
 | Soul / AssistantIdentity / UserProfile | Global | Durable-mutable | 2 |
 | GlobalMemory | Global | Durable-mutable | 2 |
 | SessionContext / SessionMemory | Session | Durable-mutable | 2 |
 | AgentMemory | Agent | Durable-mutable | 2 |
 | SkillList | Agent | Durable-mutable | 2 |
-| ModeFraming | Agent | Durable-mutable | 2 |
 | ReasoningEffort | Agent | Durable-mutable | 2 |
 | ConversationSummary | Conversation | Durable-mutable | 2 |
 | RecentContext / LiveState / ToolResults | Turn | Volatile | 3 |
@@ -283,9 +290,7 @@ Product calls; each lists the default the layout assumes.
 2. **`RetrievedDocs` injection** — default *pull* through a tool call, so it is a
    tool result in history. For system-initiated prefetch without a tool call, use
    a `Custom` volatile block or reminder. Do not add a `PulledKnowledge` kind.
-3. **SkillList vs ModeFraming order** in Band 2 — default `SkillList` first;
-   swap if framing proves more stable.
-4. **`SessionContext`** — confirm what session-wide framing exists beyond
+3. **`SessionContext`** — confirm what session-wide framing exists beyond
    `SessionMemory`, or drop it.
 
 ## Legacy C Mapping and Rust Integration Backlog
@@ -301,7 +306,7 @@ blocks:
 | Soul / AssistantIdentity / UserProfile | `claw_memory_profile_provider` pushed editable profile files (`user.md`, `soul.md`, `identity.md`) into the system prompt. | Implemented as first-class global blocks backed by `ProfileStore` and `ProfileContextProvider`. |
 | SessionContext | No clear legacy equivalent beyond request metadata such as source channel/chat. | Product decision. Implement only if sessions gain stable shared framing; otherwise drop the block kind. |
 | SessionMemory | No durable session-scope `MEMORY.md` equivalent. Legacy Session History was transcript storage, not session memory. | Missing by design. Implement only if we need session-wide durable notes distinct from conversation transcript/summary. |
-| ModeFraming | Root/subagent role and subagent type prompts were folded into the agent system prompt by the agent manager. | Mostly absorbed by `AgentInstruction` today. Extract to `ModeFraming` only when conversation/working/review/etc. modes need to swap framing independently of agent identity. |
+| ModePolicy / ActiveMode | Root/subagent role and mode prompts were folded into the agent system prompt by the agent manager. | Implemented as an immutable `ModePolicy` system block plus a volatile `ActiveMode` reminder, so switching modes does not invalidate the cached prefix. |
 | OutputContract | No standalone legacy provider. Output expectations were implicit in prompts/tools. | Missing. Prefer a small reminder/tail injection when recency matters; use a block only for stable per-agent or per-mode contracts. |
 
 ## Relationship to the LLM Request

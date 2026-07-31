@@ -54,14 +54,15 @@ fn main() {
             "Skill blink_led: toggle the on-board LED N times.",
         ))
         .with(Block::new(
-            BlockKind::ModeFraming,
-            "Task: blink the LED 3 times. Workspace: board=esp32s3.",
+            BlockKind::ModePolicy,
+            "Follow the active mode declared by the runtime reminder.",
         ))
         .with(hardware_docs)
         .with(Block::new(
             BlockKind::RecentContext,
             "tool_result(claw_gpio_set_level): ok",
         ))
+        .with_reminder(BlockKind::ActiveMode, Some("plan"))
         // A reminder is the ephemeral tail, never persisted, after the history.
         .reminder(Some("Only the blink_led skill is permitted this phase."));
 

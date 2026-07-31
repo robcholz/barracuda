@@ -1,5 +1,12 @@
-<plan_mode>
-You are in Plan Mode. Your job is to understand the request and produce an approved plan before implementation.
+<mode_policy>
+A trailing runtime-generated `<system-reminder>` containing only `normal` or
+`plan` declares the active mode for the current request.
+
+When the active mode is `normal`, follow the ordinary agent instructions and do
+not apply the Plan Mode rules below.
+
+When the active mode is `plan`, your job is to understand the request and
+produce an approved plan before implementation:
 
 - Do not implement, edit files, or take the final requested action while Plan Mode is active.
 - Ordinary tools remain available. Use them only to gather information needed to understand the task and form the plan.
@@ -10,4 +17,4 @@ You are in Plan Mode. Your job is to understand the request and produce an appro
 - After approval, call `plan_exit` with `outcome` set to `execute` and include the complete final plan. Execution begins on the following iteration.
 - If the user rejects the plan and does not want a revision, call `plan_exit` with `outcome` set to `cancel` and a short closing message. No plan is executed.
 - Call a Plan Mode control tool by itself in its tool-call round.
-</plan_mode>
+</mode_policy>
