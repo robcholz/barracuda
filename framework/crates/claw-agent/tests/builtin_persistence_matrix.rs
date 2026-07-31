@@ -75,12 +75,12 @@ fn builtin_profile_and_memory_csv_matrix_survives_disk_rebuild() {
         assert_disk_file_contains(&root, "profile/user.md", "Persistent user profile");
         assert_disk_file_contains(
             &root,
-            "long_term/global/memory_records.jsonl",
+            "long_term/g/memory_records.jsonl",
             "Persistent global fact",
         );
         assert_disk_file_contains(
             &root,
-            "long_term/agents/conversation/memory_records.jsonl",
+            "long_term/a/conversation/memory_records.jsonl",
             "Persistent task note",
         );
 
@@ -144,13 +144,13 @@ fn builtin_memory_journal_torn_tail_keeps_committed_records_after_rebuild() {
     assert_followup_tool_fragments(&setup.requests, "Stored memory g-0.", case);
     assert_disk_file_contains(
         &root,
-        "long_term/global/memory_records.jsonl",
+        "long_term/g/memory_records.jsonl",
         "Torn-tail durable fact",
     );
 
     DiskFs::absolute()
         .append(
-            &format!("{root}/long_term/global/memory_records.jsonl"),
+            &format!("{root}/long_term/g/memory_records.jsonl"),
             br#"{"torn":"record""#,
         )
         .unwrap();
@@ -220,7 +220,7 @@ fn builtin_profile_clear_and_memory_update_forget_survive_disk_rebuilds() {
     assert_disk_file_contains(&root, "profile/user.md", "Mutable profile content");
     assert_disk_file_contains(
         &root,
-        "long_term/global/memory_records.jsonl",
+        "long_term/g/memory_records.jsonl",
         "Mutable global fact",
     );
 
@@ -265,7 +265,7 @@ fn builtin_profile_clear_and_memory_update_forget_survive_disk_rebuilds() {
     assert_disk_file_equals(&root, "profile/user.md", "");
     assert_disk_file_contains(
         &root,
-        "long_term/global/memory_records.jsonl",
+        "long_term/g/memory_records.jsonl",
         "Updated durable global fact",
     );
 

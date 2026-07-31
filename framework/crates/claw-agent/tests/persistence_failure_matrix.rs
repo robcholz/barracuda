@@ -97,7 +97,7 @@ fn setup_disk_state(root: &str, setup: &str) {
     match setup {
         "global_memory_journal_dir" => {
             DiskFs::absolute()
-                .create_dir_all(&format!("{root}/long_term/global/memory_records.jsonl"))
+                .create_dir_all(&format!("{root}/long_term/g/memory_records.jsonl"))
                 .unwrap();
         }
         // Installed after runtime startup in `assert_submit_error`: startup

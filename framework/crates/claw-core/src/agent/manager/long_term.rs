@@ -9,8 +9,8 @@ use crate::config::SharedApiManager;
 
 use super::layout::join_storage_path;
 
-const GLOBAL_LONG_TERM_DIR: &str = "global";
-const AGENT_LONG_TERM_DIR: &str = "agents";
+const GLOBAL_LONG_TERM_DIR: &str = "g";
+const AGENT_LONG_TERM_DIR: &str = "a";
 
 type BuildProvider<F> =
     dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextProvider<F>;
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn same_kind_reuses_one_live_store_owner() {
         let stores =
-            AgentMemoryStores::<MemFs>::new(Arc::new(MemFs::new()), "/memory/agents".to_owned());
+            AgentMemoryStores::<MemFs>::new(Arc::new(MemFs::new()), "/memory/a".to_owned());
         let first = stores.get("conversation").expect("first store opens");
         let second = stores.get("conversation").expect("second store opens");
 
