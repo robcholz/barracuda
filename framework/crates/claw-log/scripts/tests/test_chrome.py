@@ -346,8 +346,15 @@ def test_explicit_counter_fields_become_counter() -> None:
         ]
     )
     events = chrome_trace_events(build_forest(log))
+    instants = _by_phase(events, 'I')
     counters = _by_phase(events, 'C')
+    assert len(instants) == 1
     assert len(counters) == 1
+    instant = instants[0].to_dict()
+    assert instant['name'] == 'ram'
+    assert instant['args']['sample'] == '1'
+    assert instant['args']['iteration'] == 'i-0'
+    assert instant['args']['span'] == 1
     body = counters[0].to_dict()
     assert body['name'] == 'ram'
     assert body['args'] == {'free_heap': 120000.0, 'min_free': 90000.0}

@@ -21,6 +21,10 @@ required-features = ["multiagent"]
 name = "subagent_lifecycle_matrix"
 required-features = ["multiagent"]
 
+[[test]]
+name = "cache_counter_trace"
+required-features = ["cache_profile"]
+
 [features]
 # Concepts:
 # - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a

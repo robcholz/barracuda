@@ -447,6 +447,9 @@ span-name: `iteration_loop`
 ### Events
 
 `completed`: LLM produced final text without tool calls.
+`context_cache_hit_rate`: Provider usage reported both input and cache-read
+tokens for a non-empty prompt. The event is also projected as a Chrome counter
+sample so cache effectiveness can be graphed over time.
 `preempted`: Iteration stopped at an interrupt checkpoint.
 `cancelled`: Iteration stopped after cancellation was requested.
 `chat_failed`: LLM chat failed for a non-interrupt reason.
@@ -456,6 +459,8 @@ span-name: `iteration_loop`
 ### Event Fields
 
 `completed`: `output_bytes`.
+`context_cache_hit_rate`: `input_tokens`, `cache_read_tokens`, and
+`counter.value` (`cache_read_tokens / input_tokens * 100`, in percent).
 `preempted`: `checkpoint`.
 `cancelled`: `checkpoint`.
 `chat_failed`: `kind`.

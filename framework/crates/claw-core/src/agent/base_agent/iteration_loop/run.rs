@@ -1,5 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
+#[cfg(feature = "cache_profile")]
+use claw_api::ProviderUsage;
 use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use claw_interface::http::StreamingHttp;
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
@@ -58,6 +60,27 @@ struct ToolPhase<'a> {
     ready_results: VecDeque<(ToolCall, ToolOutput)>,
     remaining_results: usize,
     results_ended: bool,
+}
+
+#[cfg(feature = "cache_profile")]
+fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
+    let (Some(input_tokens), Some(cache_read_tokens)) =
+        (usage.input_tokens, usage.cache_read_tokens)
+    else {
+        return;
+    };
+    if input_tokens == 0 {
+        return;
+    }
+
+    #[allow(clippy::arithmetic_side_effects)]
+    let hit_rate_pct = cache_read_tokens as f64 / input_tokens as f64 * 100.0;
+    tracing::info!(
+        name: "context_cache_hit_rate",
+        input_tokens,
+        cache_read_tokens,
+        counter.value = hit_rate_pct,
+    );
 }
 
 impl<'a, H, Timer, P> IterationLoop<'a, H, Timer, P>
@@ -141,6 +164,7 @@ where
                     Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::End))) => {}
                     #[cfg(feature = "cache_profile")]
                     Some(Ok(ChatStreamEvent::Usage(usage))) => {
+                        trace_context_cache_hit_rate(&usage);
                         yield IterationLoopEvent::Iteration(IterationEvent::Usage(usage));
                     }
                     Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
