@@ -25,6 +25,7 @@ default-members = [
 [profile.release]
 panic = "abort"
 opt-level = "s"
+codegen-units = 1
 lto = false
 
 # Host profiling keeps the same size-oriented optimization as firmware while

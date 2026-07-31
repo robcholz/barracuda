@@ -21,15 +21,19 @@ set(claw_rust_lib "${CMAKE_CURRENT_SOURCE_DIR}/target/${claw_rust_target}/${claw
 
 if("$ENV{CLAW_DEBUG}" STREQUAL "1")
     set(claw_rust_logging_feature "rich_logging")
+    set(claw_rust_build_std_feature_args)
 else()
     set(claw_rust_logging_feature "prod_logging")
+    set(claw_rust_build_std_feature_args -Z build-std-features=)
 endif()
 
 add_custom_target(claw_rust_build
     BYPRODUCTS "${claw_rust_lib}"
     COMMAND cargo +esp build --release -p claw-cabi
             --features ${claw_rust_logging_feature},claw-agent/reasoning_medium
-            --target ${claw_rust_target} -Z build-std=std,panic_abort
+            --target ${claw_rust_target}
+            -Z build-std=std,panic_abort
+            ${claw_rust_build_std_feature_args}
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Building claw-cabi Rust staticlib (${claw_rust_target})"
     VERBATIM
