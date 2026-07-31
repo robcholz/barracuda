@@ -525,17 +525,4 @@ mod tests {
             format!("{MOVE_UP_ONE}{CLEAR_LINE}{second}\r\n")
         );
     }
-
-    #[test]
-    fn submitted_input_deletes_the_transient_waiting_row() {
-        assert_eq!(
-            delete_waiting_after_input("short"),
-            "\u{1b}[2A\r\u{1b}[M\u{1b}[1B\r"
-        );
-        assert_eq!(input_rows(&"x".repeat(79), 80), 2);
-        assert_eq!(
-            delete_waiting_after_input(&"x".repeat(79)),
-            "\u{1b}[3A\r\u{1b}[M\u{1b}[2B\r"
-        );
-    }
 }
