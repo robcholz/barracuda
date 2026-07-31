@@ -1,6 +1,6 @@
 # Host profiling
 
-Run commands from the `framework/` directory.
+Run commands from the `agent-framework/` directory.
 
 ## Agent heap profile
 

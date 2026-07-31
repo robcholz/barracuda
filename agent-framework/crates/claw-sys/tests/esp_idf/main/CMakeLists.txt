@@ -1,6 +1,6 @@
 # Register the Unity test component and link the Rust `claw-sys-selftest`
 # staticlib, mirroring the cargo->staticlib->imported-library wiring in
-# framework/CMakeLists.txt.
+# agent-framework/CMakeLists.txt.
 #
 # The tiny `claw_rs_log.c` shim (the per-level ESP_LOGx bridge the Rust log sink
 # calls) is compiled here. WHOLE_ARCHIVE keeps the Unity `TEST_CASE`s and the
@@ -26,7 +26,7 @@ idf_component_register(
 )
 
 # The Rust workspace root is five levels up:
-# main -> esp_idf -> tests -> claw-sys -> crates -> framework.
+# main -> esp_idf -> tests -> claw-sys -> crates -> agent-framework.
 set(claw_sys_rust_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 include("${claw_sys_rust_dir}/cmake/ClawRustTarget.cmake")
 claw_resolve_rust_target(claw_sys_rust_target "${IDF_TARGET}")

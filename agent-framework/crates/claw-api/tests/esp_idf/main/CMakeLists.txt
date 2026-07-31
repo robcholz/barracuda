@@ -1,6 +1,6 @@
 # Register the Unity test component and link the Rust `claw-api-selftest`
 # staticlib (cargo -> staticlib -> imported library), mirroring
-# framework/CMakeLists.txt and the sibling claw-sys app.
+# agent-framework/CMakeLists.txt and the sibling claw-sys app.
 #
 # `claw_rs_log.c` (the per-level ESP_LOGx bridge claw-sys's log sink calls) is
 # compiled here so the linker can always resolve the `claw_rs_log_*` shims that
@@ -27,7 +27,7 @@ idf_component_register(
 )
 
 # The Rust workspace root is five levels up:
-# main -> esp_idf -> tests -> claw-api -> crates -> framework.
+# main -> esp_idf -> tests -> claw-api -> crates -> agent-framework.
 set(claw_api_rust_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../../..")
 include("${claw_api_rust_dir}/cmake/ClawRustTarget.cmake")
 claw_resolve_rust_target(claw_api_rust_target "${IDF_TARGET}")

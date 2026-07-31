@@ -129,7 +129,7 @@ The firmware uses two logical filesystem roots, configured at boot through `claw
 
 ## Rust Core
 
-- use framework/check.sh + harness.sh + update-public-api-snapshots.sh to test the Rust workspace
+- use agent-framework/check.sh + harness.sh + update-public-api-snapshots.sh to test the Rust workspace
 
 ## C & Integration
 
