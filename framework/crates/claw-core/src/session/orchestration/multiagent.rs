@@ -12,9 +12,8 @@ use claw_tool::ToolGroup;
 use crate::agent::{AgentId, AgentKind};
 use crate::multiagent::{
     DispatchOutcome as DomainDispatchOutcome, InterruptOutcome as DomainInterruptOutcome,
-    Multiagent, MultiagentEffect, MultiagentHost, MultiagentPhysicalError, SubagentTimeout,
+    Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError, SubagentTimeout,
 };
-use crate::Message;
 
 use super::{
     AgentNotice, HostDispatchOutcome, HostInterruptOutcome, OrchestrationHost,
@@ -142,13 +141,79 @@ where
     }
 
     fn execute(&mut self, effect: MultiagentEffect, host: &mut impl OrchestrationHost) {
-        let mut host = DomainHostAdapter::<Timer, _> {
-            host,
-            timeouts: &mut self.timeouts,
-            reaping: &mut self.reaping,
-            marker: PhantomData,
-        };
-        self.domain.execute_effect(effect, &mut host);
+        match effect {
+            MultiagentEffect::Spawn { id, spec } => {
+                let agent = host.allocate_agent_id();
+                let extension_tools = self
+                    .domain
+                    .tool_group(agent, spec.kind())
+                    .into_iter()
+                    .collect();
+                let outcome = host
+                    .create_agent(agent, spec.kind(), extension_tools)
+                    .map(|()| agent)
+                    .map_err(|error| MultiagentPhysicalError::new(error.to_string()));
+                let rollback =
+                    self.domain
+                        .apply_result(MultiagentEffectResult::Spawned { id, spec, outcome });
+                if let Some(agent) = rollback {
+                    if host.rollback_agent(agent) == ReapStatus::Pending {
+                        self.reaping.insert(agent);
+                    }
+                }
+            }
+            MultiagentEffect::Dispatch {
+                id,
+                target,
+                message,
+            } => {
+                let outcome = match host.dispatch_agent(target, message) {
+                    HostDispatchOutcome::Accepted => DomainDispatchOutcome::Accepted,
+                    HostDispatchOutcome::Busy => DomainDispatchOutcome::Busy,
+                    HostDispatchOutcome::Missing => DomainDispatchOutcome::Missing,
+                };
+                self.domain
+                    .apply_result(MultiagentEffectResult::Dispatched { id, outcome });
+            }
+            MultiagentEffect::Interrupt { id, target } => {
+                let outcome = match host.interrupt_agent(target) {
+                    HostInterruptOutcome::Accepted => DomainInterruptOutcome::Accepted,
+                    HostInterruptOutcome::Inactive => DomainInterruptOutcome::Inactive,
+                    HostInterruptOutcome::Missing => DomainInterruptOutcome::Missing,
+                };
+                self.domain
+                    .apply_result(MultiagentEffectResult::Interrupted { id, outcome });
+            }
+            MultiagentEffect::RemoveAgents { id: _, agents } => {
+                for agent in &agents {
+                    self.timeouts.remove(*agent);
+                }
+                for outcome in host.begin_remove_agents(agents) {
+                    match outcome {
+                        RemovalOutcome::Pending(agent) => {
+                            self.reaping.insert(agent);
+                        }
+                        RemovalOutcome::Complete { agent, result } => {
+                            self.domain.physical_agent_removed(
+                                agent,
+                                result.map_err(|error| {
+                                    MultiagentPhysicalError::new(error.to_string())
+                                }),
+                            );
+                        }
+                    }
+                }
+            }
+            MultiagentEffect::ArmTimeout {
+                id: _,
+                agent,
+                timeout,
+            } => {
+                if self.domain.contains(agent) {
+                    self.timeouts.arm::<Timer>(agent, timeout);
+                }
+            }
+        }
     }
 }
 
@@ -213,82 +278,5 @@ impl OrchestrationPollSource {
             Self::Effect => Self::Timeout,
             Self::Timeout => Self::Effect,
         }
-    }
-}
-
-struct DomainHostAdapter<'a, Timer, Host> {
-    host: &'a mut Host,
-    timeouts: &'a mut AgentTimeouts,
-    reaping: &'a mut BTreeSet<AgentId>,
-    marker: PhantomData<fn() -> Timer>,
-}
-
-impl<Timer, Host> MultiagentHost for DomainHostAdapter<'_, Timer, Host>
-where
-    Timer: ClawTimer + Default + 'static,
-    Host: OrchestrationHost,
-{
-    fn allocate_agent_id(&mut self) -> AgentId {
-        self.host.allocate_agent_id()
-    }
-
-    fn create_agent(
-        &mut self,
-        agent: AgentId,
-        kind: &AgentKind,
-        extension_tools: Vec<ToolGroup>,
-    ) -> Result<(), MultiagentPhysicalError> {
-        self.host
-            .create_agent(agent, kind, extension_tools)
-            .map_err(|error| MultiagentPhysicalError::new(error.to_string()))
-    }
-
-    fn rollback_agent(&mut self, agent: AgentId) {
-        if self.host.rollback_agent(agent) == ReapStatus::Pending {
-            self.reaping.insert(agent);
-        }
-    }
-
-    fn dispatch_agent(&mut self, target: AgentId, message: Message) -> DomainDispatchOutcome {
-        match self.host.dispatch_agent(target, message) {
-            HostDispatchOutcome::Accepted => DomainDispatchOutcome::Accepted,
-            HostDispatchOutcome::Busy => DomainDispatchOutcome::Busy,
-            HostDispatchOutcome::Missing => DomainDispatchOutcome::Missing,
-        }
-    }
-
-    fn interrupt_agent(&mut self, target: AgentId) -> DomainInterruptOutcome {
-        match self.host.interrupt_agent(target) {
-            HostInterruptOutcome::Accepted => DomainInterruptOutcome::Accepted,
-            HostInterruptOutcome::Inactive => DomainInterruptOutcome::Inactive,
-            HostInterruptOutcome::Missing => DomainInterruptOutcome::Missing,
-        }
-    }
-
-    fn begin_remove_agents(
-        &mut self,
-        agents: Vec<AgentId>,
-    ) -> Vec<(AgentId, Result<(), MultiagentPhysicalError>)> {
-        for agent in &agents {
-            self.timeouts.remove(*agent);
-        }
-        self.host
-            .begin_remove_agents(agents)
-            .into_iter()
-            .filter_map(|outcome| match outcome {
-                RemovalOutcome::Pending(agent) => {
-                    self.reaping.insert(agent);
-                    None
-                }
-                RemovalOutcome::Complete { agent, result } => Some((
-                    agent,
-                    result.map_err(|error| MultiagentPhysicalError::new(error.to_string())),
-                )),
-            })
-            .collect()
-    }
-
-    fn arm_timeout(&mut self, agent: AgentId, timeout: SubagentTimeout) {
-        self.timeouts.arm::<Timer>(agent, timeout);
     }
 }
