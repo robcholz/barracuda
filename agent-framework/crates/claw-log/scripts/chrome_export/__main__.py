@@ -1,7 +1,8 @@
 """CLI for the standalone Chrome Trace exporter: ``claw-trace-chrome``.
 
-uv run claw-trace-chrome device.log -o trace.json
-cat device.log | uv run claw-trace-chrome --strip-ansi -o trace.json
+uv run --package claw-trace claw-trace-chrome device.log -o trace.json
+cat device.log | uv run --package claw-trace \
+    claw-trace-chrome --strip-ansi -o trace.json
 """
 
 from __future__ import annotations

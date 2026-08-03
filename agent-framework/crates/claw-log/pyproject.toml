@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-serial-log = { path = "scripts/serial_log", editable = true }
+serial-log = { workspace = true }
 
 [project.scripts]
 # Capture a live TRACE log from a monitor command and export Chrome trace JSON

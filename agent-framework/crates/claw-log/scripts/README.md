@@ -10,8 +10,9 @@ Run a monitor as a child process, parse its `TRACE` lines live, and write
 `trace.json` when it exits (or on Ctrl-C).
 
 ```bash
-# from claw-log/
-uv run claw-trace-capture --cmd "cargo espflash monitor" -o trace.json --tee
+# from agent-framework/
+uv run --package claw-trace \
+  claw-trace-capture --cmd "cargo espflash monitor" -o trace.json --tee
 ```
 
 | Option | Default | Meaning |
@@ -67,9 +68,10 @@ JSON you can open in `chrome://tracing` / Perfetto. Use this when you already
 have a `.log` and don't need a live monitor.
 
 ```bash
-# from claw-log/
-uv run claw-trace-chrome device.log -o trace.json
-cat device.log | uv run claw-trace-chrome --strip-ansi -o trace.json
+# from agent-framework/
+uv run --package claw-trace claw-trace-chrome device.log -o trace.json
+cat device.log | uv run --package claw-trace \
+  claw-trace-chrome --strip-ansi -o trace.json
 ```
 
 | Option | Default | Meaning |
@@ -122,7 +124,8 @@ complete slice at the observable trace/ancestor boundary and marks it with
 ## Develop / test
 
 ```bash
-# from claw-log/
-uv run pytest
-uv run ruff format
+# from agent-framework/
+uv run --package claw-trace \
+  pytest -c crates/claw-log/pyproject.toml crates/claw-log/scripts/tests
+uv run --package claw-trace ruff format crates/claw-log
 ```

@@ -12,13 +12,28 @@ benchmark:
 cargo run --profile profiling -p claw-agent-profile -- agent-init
 ```
 
+## Python tooling
+
+Python tools are members of the root uv workspace and share one `uv.lock` and
+one `.venv`. Set up every tool and its development dependencies from this
+directory:
+
+```bash
+uv sync --all-packages --all-groups
+```
+
+Select packaged tools explicitly with `--package`, so member selection never
+depends on the current directory. The examples below run from this workspace
+root so their input/output paths are also unambiguous. Standalone PEP 723
+scripts continue to use `uv run --script`.
+
 ## Debugging
 
 ### Export Trace
 
 ```bash
-cd crates/claw-log
-uv run claw-trace-chrome <path-to-log> -o <where-you-want-to-emit-chrome-trace>
+uv run --package claw-trace \
+  claw-trace-chrome <path-to-log> -o <where-you-want-to-emit-chrome-trace>
 ```
 
 Visualization

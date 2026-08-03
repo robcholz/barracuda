@@ -15,10 +15,11 @@ The current scope is intentionally narrow:
 
 ## Install
 
-From this directory:
+From the `agent-framework` root, install every Python tool and development
+dependency into the shared workspace environment:
 
 ```bash
-uv sync
+uv sync --all-packages --all-groups
 ```
 
 ## Record
@@ -26,10 +27,10 @@ uv sync
 Start the recorder with the real provider as its upstream:
 
 ```bash
-uv run llm-tape record \
+uv run --package llm-tape llm-tape record \
   --listen 0.0.0.0:8787 \
   --upstream https://api.anthropic.com \
-  --output run.jsonl
+  --output bench/tapes/run.jsonl
 ```
 
 Point the agent at the recorder. An agent running on another machine or device
@@ -52,9 +53,9 @@ stores the request body or authentication header values.
 ## Replay
 
 ```bash
-uv run llm-tape replay \
+uv run --package llm-tape llm-tape replay \
   --listen 0.0.0.0:8787 \
-  run.jsonl
+  bench/tapes/run.jsonl
 ```
 
 Point the agent at the replay server using the same base URL. Incoming requests
@@ -77,10 +78,10 @@ Use `DEBUG` to additionally report the sequence, byte count, and original
 timestamp of every recorded or replayed byte chunk:
 
 ```bash
-uv run llm-tape replay \
+uv run --package llm-tape llm-tape replay \
   --log-level DEBUG \
   --listen 0.0.0.0:8787 \
-  run.jsonl
+  bench/tapes/run.jsonl
 ```
 
 ## Tape format
@@ -108,7 +109,8 @@ does not consume a replay interaction.
 ## Verification
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+uv run --package llm-tape ruff check bench/llm-tape
+uv run --package llm-tape ruff format --check bench/llm-tape
+uv run --package llm-tape \
+  pytest -c bench/llm-tape/pyproject.toml bench/llm-tape/tests
 ```

@@ -1,7 +1,9 @@
 """CLI: capture a live TRACE log from a monitor command and export Chrome trace.
 
-uv run claw-trace-capture --cmd "cargo espflash monitor" -o trace.json
-uv run claw-trace-capture --cmd "idf.py monitor" --tee -o trace.json
+uv run --package claw-trace claw-trace-capture \
+    --cmd "cargo espflash monitor" -o trace.json
+uv run --package claw-trace claw-trace-capture \
+    --cmd "idf.py monitor" --tee -o trace.json
 
 The monitor runs as a child process so Ctrl-C is handled cleanly: the child is
 terminated and the collected records are still exported (unlike a raw pipe,
