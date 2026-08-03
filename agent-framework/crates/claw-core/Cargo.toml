@@ -52,6 +52,9 @@ async-stream = "0.3"
 # `no_std`-friendly for the device.
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+# `SelectAll` fairly merges the per-batch detached-tool completion streams the
+# Agent wrapper tracks, replacing a hand-written round-robin poll queue.
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 getset = "0.1.7"
 # NOTE: the `block_on` backend for the runtime worker is injected as a
 # `ClawExecutor` (edge-executor on device via `claw-sys`, tokio on host via

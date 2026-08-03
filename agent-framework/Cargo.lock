@@ -382,6 +382,7 @@ dependencies = [
  "claw-utils",
  "futures-core",
  "futures-lite 2.6.1",
+ "futures-util",
  "getset",
  "log",
  "proc-macro2",

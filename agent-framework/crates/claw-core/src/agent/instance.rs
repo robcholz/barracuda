@@ -13,6 +13,7 @@ use claw_persistence::DurableState;
 use claw_tool::{ToolDetachHandle, ToolInvocation, ToolOutput};
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
+use futures_util::stream::SelectAll;
 
 use super::base_agent::{
     AgentInputRequest, AgentOutcome, AgentSubmitError, BaseAgent, BaseAgentEvent,
@@ -45,38 +46,31 @@ impl DetachedCompletion {
 
 /// Runtime-only state that disappears when this Agent is dropped or restarted.
 struct AgentEphemeralState {
-    inflight_detached_toolcalls: VecDeque<ToolDetachHandle>,
+    inflight_detached_toolcalls: SelectAll<ToolDetachHandle>,
     ready_detached_toolcalls: VecDeque<DetachedCompletion>,
 }
 
 impl AgentEphemeralState {
     fn new() -> Self {
         Self {
-            inflight_detached_toolcalls: VecDeque::new(),
+            inflight_detached_toolcalls: SelectAll::new(),
             ready_detached_toolcalls: VecDeque::new(),
         }
     }
 
     fn push(&mut self, handle: ToolDetachHandle) {
-        self.inflight_detached_toolcalls.push_back(handle);
+        self.inflight_detached_toolcalls.push(handle);
     }
 
     fn poll_completion(&mut self, context: &mut Context<'_>) -> Poll<DetachedCompletion> {
-        let count = self.inflight_detached_toolcalls.len();
-        for _ in 0..count {
-            let Some(mut handle) = self.inflight_detached_toolcalls.pop_front() else {
-                break;
-            };
-            match Pin::new(&mut handle).poll_next(context) {
-                Poll::Ready(Some(completion)) => {
-                    self.inflight_detached_toolcalls.push_back(handle);
-                    return Poll::Ready(DetachedCompletion::from_tool(completion));
-                }
-                Poll::Ready(None) => {}
-                Poll::Pending => self.inflight_detached_toolcalls.push_back(handle),
+        match Pin::new(&mut self.inflight_detached_toolcalls).poll_next(context) {
+            Poll::Ready(Some(completion)) => {
+                Poll::Ready(DetachedCompletion::from_tool(completion))
             }
+            // An exhausted set yields `None`; no completion can arrive until
+            // another detached handle is pushed, so keep the wait pending.
+            Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
-        Poll::Pending
     }
 
     fn has_inflight_detached_toolcalls(&self) -> bool {
