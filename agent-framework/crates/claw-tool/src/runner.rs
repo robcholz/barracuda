@@ -3,7 +3,7 @@ use core::pin::Pin;
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
+use futures_channel::oneshot;
 use futures_core::Stream;
 use futures_util::stream::FuturesUnordered;
 use tracing::Instrument as _;
@@ -115,7 +115,7 @@ impl<'a> ToolRunner<'a> {
                 }
             };
             if tool.is_dynamically_detached() {
-                let (completion, receiver) = async_channel::bounded(1);
+                let (completion, receiver) = oneshot::channel();
                 joined.push(start_detached(
                     tool,
                     invocation.clone(),
@@ -171,7 +171,7 @@ fn run(tool: Tool, invocation: ToolInvocation, span: tracing::Span) -> ToolRunFu
 fn start_detached(
     tool: Tool,
     invocation: ToolInvocation,
-    completion: Sender<ToolCompletionFuture>,
+    completion: oneshot::Sender<ToolCompletionFuture>,
     span: tracing::Span,
 ) -> ToolRunFuture {
     Box::pin(
@@ -179,7 +179,7 @@ fn start_detached(
             let output = match tool.invoke_detached(&invocation).await {
                 Ok(detached) => {
                     let (accepted, future) = detached.into_parts();
-                    let _ = completion.try_send(future);
+                    let _ = completion.send(future);
                     accepted
                 }
                 Err(error) => {
@@ -196,12 +196,12 @@ fn start_detached(
 
 fn await_completion(
     invocation: ToolInvocation,
-    completion: Receiver<ToolCompletionFuture>,
+    completion: oneshot::Receiver<ToolCompletionFuture>,
     span: tracing::Span,
 ) -> ToolRunFuture {
     Box::pin(
         async move {
-            let future = completion.recv().await.ok()?;
+            let future = completion.await.ok()?;
             let output = settle(future.await);
             trace_result(&output, false);
             Some((invocation, output))

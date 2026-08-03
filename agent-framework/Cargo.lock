@@ -509,10 +509,10 @@ name = "claw-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-channel",
  "claw-interface",
  "claw-permission",
  "claw-persistence",
+ "futures-channel",
  "futures-core",
  "futures-lite 2.6.1",
  "futures-util",

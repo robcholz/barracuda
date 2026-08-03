@@ -273,16 +273,10 @@ impl Tool {
     }
 
     pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
-        let mut remaining = self.spec().retry_count().extra_attempts();
-        loop {
-            match self.invoke_once(call).await {
-                Ok(output) => return Ok(output),
-                Err(_) if remaining > 0 => {
-                    remaining = remaining.saturating_sub(1);
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        retry_no_backoff(self.spec().retry_count().extra_attempts(), move || {
+            self.invoke_once(call)
+        })
+        .await
     }
 
     pub(crate) fn is_dynamically_detached(&self) -> bool {
@@ -293,25 +287,10 @@ impl Tool {
         &'a self,
         call: &'a ToolInvocation,
     ) -> ToolResult<DetachedTool> {
-        let mut remaining = self.spec().retry_count().extra_attempts();
-        loop {
-            let result = match self.inner.as_ref() {
-                ToolInner::Detached(handler) => handler.invoke(call).await,
-                ToolInner::Sync(_) | ToolInner::Async(_) => {
-                    return Err(ToolError::InvokeRejected(
-                        "tool does not support dynamic detached execution".to_owned(),
-                    )
-                    .into());
-                }
-            };
-            match result {
-                Ok(output) => return Ok(output),
-                Err(_) if remaining > 0 => {
-                    remaining = remaining.saturating_sub(1);
-                }
-                Err(error) => return Err(error),
-            }
-        }
+        retry_no_backoff(self.spec().retry_count().extra_attempts(), move || {
+            self.invoke_detached_once(call)
+        })
+        .await
     }
 
     async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
@@ -320,6 +299,19 @@ impl Tool {
             ToolInner::Async(handler) => handler.invoke(call).await,
             ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
                 "dynamically detached tool requires detached execution".to_owned(),
+            )
+            .into()),
+        }
+    }
+
+    async fn invoke_detached_once<'a>(
+        &'a self,
+        call: &'a ToolInvocation,
+    ) -> ToolResult<DetachedTool> {
+        match self.inner.as_ref() {
+            ToolInner::Detached(handler) => handler.invoke(call).await,
+            ToolInner::Sync(_) | ToolInner::Async(_) => Err(ToolError::InvokeRejected(
+                "tool does not support dynamic detached execution".to_owned(),
             )
             .into()),
         }
@@ -337,5 +329,25 @@ impl Tool {
 impl fmt::Debug for Tool {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_tuple("Tool").field(&self.name()).finish()
+    }
+}
+
+/// Retry an attempt with no backoff until it succeeds or the extra attempts run
+/// out. Shared by the joined and detached invocation paths so retry handling
+/// lives in one place.
+async fn retry_no_backoff<T, Fut>(
+    extra_attempts: u32,
+    mut attempt: impl FnMut() -> Fut,
+) -> ToolResult<T>
+where
+    Fut: Future<Output = ToolResult<T>>,
+{
+    let mut remaining = extra_attempts;
+    loop {
+        match attempt().await {
+            Ok(output) => return Ok(output),
+            Err(_) if remaining > 0 => remaining = remaining.saturating_sub(1),
+            Err(error) => return Err(error),
+        }
     }
 }
