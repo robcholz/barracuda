@@ -514,6 +514,7 @@ dependencies = [
  "claw-persistence",
  "futures-core",
  "futures-lite 2.6.1",
+ "futures-util",
  "serde",
  "serde_json",
  "thiserror",

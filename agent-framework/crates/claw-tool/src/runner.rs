@@ -2,10 +2,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicU32, Ordering};
 use core::task::{Context, Poll};
-use std::collections::VecDeque;
 
 use async_channel::{Receiver, Sender};
 use futures_core::Stream;
+use futures_util::stream::FuturesUnordered;
 use tracing::Instrument as _;
 
 use super::{Tool, ToolCompletionFuture, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle};
@@ -23,16 +23,16 @@ static NEXT_TOOL_TASK_ID: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Default)]
 struct ToolRuns {
-    runs: VecDeque<ToolRunFuture>,
+    runs: FuturesUnordered<ToolRunFuture>,
 }
 
 impl ToolRuns {
     fn push(&mut self, future: ToolRunFuture) {
-        self.runs.push_back(future);
+        self.runs.push(future);
     }
 
-    fn append(&mut self, other: &mut Self) {
-        self.runs.append(&mut other.runs);
+    fn merge(&mut self, other: Self) {
+        self.runs.extend(other.runs);
     }
 
     fn is_empty(&self) -> bool {
@@ -43,22 +43,15 @@ impl ToolRuns {
         &mut self,
         context: &mut Context<'_>,
     ) -> Poll<Option<(ToolInvocation, ToolOutput)>> {
-        let count = self.runs.len();
-        for _ in 0..count {
-            let Some(mut future) = self.runs.pop_front() else {
-                return Poll::Ready(None);
-            };
-            match future.as_mut().poll(context) {
-                Poll::Ready(Some(result)) => return Poll::Ready(Some(result)),
-                Poll::Ready(None) => {}
-                Poll::Pending => self.runs.push_back(future),
+        // A settled run yields `Some(result)`; a run that finished without a
+        // model-facing result yields `None` and is simply drained.
+        loop {
+            match Pin::new(&mut self.runs).poll_next(context) {
+                Poll::Ready(Some(Some(result))) => return Poll::Ready(Some(result)),
+                Poll::Ready(Some(None)) => continue,
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
             }
-        }
-
-        if self.runs.is_empty() {
-            Poll::Ready(None)
-        } else {
-            Poll::Pending
         }
     }
 }
@@ -72,8 +65,8 @@ pub struct ToolJoinHandle {
 }
 
 impl ToolJoinHandle {
-    pub fn merge(&mut self, mut other: Self) {
-        self.runs.append(&mut other.runs);
+    pub fn merge(&mut self, other: Self) {
+        self.runs.merge(other.runs);
     }
 }
 

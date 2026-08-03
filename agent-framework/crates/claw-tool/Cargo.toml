@@ -19,6 +19,7 @@ claw-permission = { path = "../claw-permission" }
 claw-interface = { path = "../claw-interface" }
 claw-persistence = { path = "../claw-persistence" }
 futures-core = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
