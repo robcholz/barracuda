@@ -4,14 +4,16 @@ use core::sync::atomic::AtomicBool;
 
 use claw_interface::http::{
     blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, HttpHeader,
-    HttpJsonRequest, HttpResponse, HttpStatusCode,
+    HttpJsonRequest, HttpResponse, HttpStatusCode, StreamingHttp,
 };
 use serde_json::{Map, Value};
 
+use super::super::chat_stream::{drain_body, ProviderStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError};
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
 use super::super::types::{ClawApiConfig, LlmResponse, MediaAsset, ToolCall};
+use super::sse::ProviderSse;
 
 /// HTTP statuses that indicate a transient, retryable server condition.
 const STATUS_REQUEST_TIMEOUT: u16 = 408;
@@ -61,17 +63,69 @@ impl BackendContext {
         join_url(&self.base_url, chat_path)
     }
 
-    pub(super) fn json_request<'a>(
-        &'a self,
-        url: &'a str,
-        body: &'a str,
-        auth: HttpAuth<'a>,
-        headers: &'a [HttpHeader<'a>],
-    ) -> HttpJsonRequest<'a> {
-        HttpJsonRequest {
-            url,
+    /// Assemble the owned inputs for a single JSON POST to `path`.
+    ///
+    /// This is the transport-agnostic half of a request: the backend builds the
+    /// serialized `body` and chooses `auth`/`headers`, and the blocking and async
+    /// send paths then borrow the same [`PreparedRequest`] instead of each
+    /// re-deriving the URL, auth, and headers.
+    pub(super) fn prepare(
+        &self,
+        path: &str,
+        body: String,
+        auth: PreparedAuth,
+        headers: Vec<(&'static str, String)>,
+    ) -> PreparedRequest {
+        PreparedRequest {
+            url: self.endpoint_url(path),
             body,
+            timeout_ms: self.timeout_ms,
             auth,
+            headers,
+        }
+    }
+}
+
+/// Owned authentication for a [`PreparedRequest`], mapped to a borrowing
+/// [`HttpAuth`] only at send time.
+pub(super) enum PreparedAuth {
+    None,
+    Bearer(String),
+}
+
+/// A fully assembled but not-yet-sent JSON POST.
+///
+/// Owning the URL, body, auth, and headers lets the blocking and async send
+/// helpers share one assembly path; the only remaining difference between them
+/// is the actual `post_json` call.
+pub(super) struct PreparedRequest {
+    url: String,
+    body: String,
+    timeout_ms: u32,
+    auth: PreparedAuth,
+    headers: Vec<(&'static str, String)>,
+}
+
+impl PreparedRequest {
+    fn header_refs(&self) -> Vec<HttpHeader<'_>> {
+        self.headers
+            .iter()
+            .map(|(name, value)| HttpHeader { name, value })
+            .collect()
+    }
+
+    fn auth(&self) -> HttpAuth<'_> {
+        match &self.auth {
+            PreparedAuth::None => HttpAuth::None,
+            PreparedAuth::Bearer(key) => HttpAuth::Bearer(key),
+        }
+    }
+
+    fn request<'a>(&'a self, headers: &'a [HttpHeader<'a>]) -> HttpJsonRequest<'a> {
+        HttpJsonRequest {
+            url: &self.url,
+            body: &self.body,
+            auth: self.auth(),
             timeout_ms: self.timeout_ms,
             headers,
         }
@@ -120,6 +174,61 @@ pub(super) async fn post_json_async<'a, H: ClawHttp>(
     http.post_json(request, cancel)
         .await
         .map_err(map_http_error)
+}
+
+/// Send a [`PreparedRequest`] over the blocking transport.
+pub(super) fn post_prepared<H: BlockingClawHttp>(
+    http: &mut H,
+    prepared: &PreparedRequest,
+    abort: &AtomicBool,
+) -> Result<HttpResponse, ClawApiError> {
+    let headers = prepared.header_refs();
+    let request = prepared.request(&headers);
+    post_json(http, &request, abort)
+}
+
+/// Send a [`PreparedRequest`] over the async transport.
+pub(super) async fn post_prepared_async<H: ClawHttp>(
+    http: &mut H,
+    prepared: &PreparedRequest,
+    cancel: Cancel<'_>,
+) -> Result<HttpResponse, ClawApiError> {
+    let headers = prepared.header_refs();
+    let request = prepared.request(&headers);
+    post_json_async(http, &request, cancel).await
+}
+
+/// Open a streaming chat completion from a [`PreparedRequest`], wrapping a 2xx
+/// body stream in `sse` and surfacing a non-2xx status as a drained error body.
+pub(super) async fn post_prepared_stream<'h, H: StreamingHttp>(
+    http: &'h mut H,
+    prepared: &PreparedRequest,
+    cancel: Cancel<'h>,
+    sse: ProviderSse,
+) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
+    let headers = prepared.header_refs();
+    let request = prepared.request(&headers);
+    let (status, stream) = http
+        .post_json_streaming(&request, cancel)
+        .await
+        .map_err(map_http_error)?;
+    if !status.is_success() {
+        let body = drain_body(stream).await.map_err(map_http_error)?;
+        return Err(map_http_error(HttpError::UnexpectedStatus {
+            status,
+            message: format!("HTTP {status}: {body}"),
+        })
+        .into());
+    }
+    Ok(ProviderStream::new(stream, sse))
+}
+
+/// Extract the required non-empty assistant text from a media inference reply.
+pub(super) fn media_text(parsed: LlmResponse) -> Result<String, InferMediaError> {
+    match parsed.text {
+        Some(text) if !text.is_empty() => Ok(text),
+        _ => Err(ClawApiError::EmptyResponse.into()),
+    }
 }
 
 /// `join_url` from the backends: join `base_url` and `path` with exactly one

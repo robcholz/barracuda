@@ -14,10 +14,10 @@ build-support = ["dep:anyhow"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
-async-channel = "2"
 claw-permission = { path = "../claw-permission" }
 claw-interface = { path = "../claw-interface" }
 claw-persistence = { path = "../claw-persistence" }
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
