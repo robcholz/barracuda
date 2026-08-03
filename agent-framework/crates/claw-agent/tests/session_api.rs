@@ -6,6 +6,7 @@ use support::Sse;
 use core::future::{poll_fn, Future};
 use core::pin::Pin;
 use core::task::{Context, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,7 +27,10 @@ use support::{
 };
 
 type SlowAgentSystem = AgentSystem<MemFs, Sse<SlowScriptHttp>, ImmediateTimer>;
+type CancelFirstAgentSystem = AgentSystem<MemFs, Sse<CancelFirstScriptHttp>, ImmediateTimer>;
 type CancelOnlyAgentSystem = AgentSystem<MemFs, Sse<CancelOnlyHttp>, ImmediateTimer>;
+
+static CANCEL_FIRST_REQUEST_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Default)]
 struct SlowScriptHttp;
@@ -69,6 +73,41 @@ impl Future for YieldTimes {
             context.waker().wake_by_ref();
             Poll::Pending
         }
+    }
+}
+
+#[derive(Default)]
+struct CancelFirstScriptHttp {
+    calls: u32,
+}
+
+impl ClawHttp for CancelFirstScriptHttp {
+    fn post_json<'a>(
+        &'a mut self,
+        request: &'a HttpJsonRequest<'a>,
+        cancel: Cancel<'a>,
+    ) -> HttpResponseFuture<'a> {
+        let wait_for_cancel = self.calls == 0;
+        self.calls = self.calls.saturating_add(1);
+        Box::pin(async move {
+            if wait_for_cancel {
+                CANCEL_FIRST_REQUEST_STARTED.store(true, Ordering::Release);
+                poll_fn(|context| {
+                    if cancel.is_cancelled() {
+                        Poll::Ready(())
+                    } else {
+                        context.waker().wake_by_ref();
+                        thread::yield_now();
+                        Poll::Pending
+                    }
+                })
+                .await;
+                return Err(HttpError::Aborted);
+            }
+
+            let mut inner = BlockingHttpAdapter::new(SharedScriptHttp::default());
+            inner.post_json(request, cancel).await
+        })
     }
 }
 
@@ -258,13 +297,7 @@ fn session_control_methods_are_idempotent() {
 fn cancel_preserves_messages_already_queued_for_later_turns() {
     let _script = serialize_script();
     let root = mem_root("agent-cancel-preserves-inbox");
-    let system = build_slow_system(
-        &root,
-        vec![
-            assistant_text("queued message ran"),
-            assistant_text("queued message ran"),
-        ],
-    );
+    let system = build_cancel_first_system(&root, vec![assistant_text("queued message ran")]);
     let session = system
         .new_session(claw_agent::SessionPersistence::Persistent)
         .unwrap();
@@ -275,6 +308,23 @@ fn cancel_preserves_messages_already_queued_for_later_turns() {
             .append(Message::text("cancel this turn"))
             .await
             .unwrap();
+        assert!(matches!(
+            events.next().await,
+            Some(Ok(SessionEvent::Turn(TurnEvent::Started {
+                turn: TurnId(1),
+                origin: TurnOrigin::User,
+            })))
+        ));
+        poll_fn(|context| {
+            if CANCEL_FIRST_REQUEST_STARTED.load(Ordering::Acquire) {
+                Poll::Ready(())
+            } else {
+                context.waker().wake_by_ref();
+                thread::yield_now();
+                Poll::Pending
+            }
+        })
+        .await;
         control
             .append(Message::text("keep this queued turn"))
             .await
@@ -369,6 +419,18 @@ fn build_slow_system(root: &str, bodies: Vec<String>) -> SlowAgentSystem {
     install_script(bodies);
     let system =
         SlowAgentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(root)).unwrap();
+    system
+        .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
+        .unwrap();
+    system
+}
+
+fn build_cancel_first_system(root: &str, bodies: Vec<String>) -> CancelFirstAgentSystem {
+    CANCEL_FIRST_REQUEST_STARTED.store(false, Ordering::Release);
+    install_script(bodies);
+    let system =
+        CancelFirstAgentSystem::new::<StdThread, TokioExecutor>(MemFs::new(), persistence(root))
+            .unwrap();
     system
         .link_api(llm_config(), claw_agent::ApiPurpose::RootAgent, true)
         .unwrap();
