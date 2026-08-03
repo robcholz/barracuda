@@ -10,6 +10,10 @@ members = [
     "crates/claw-sys/tests/esp_idf/claw-sys-selftest",
     "crates/claw-api/tests/esp_idf/claw-api-selftest",
 ]
+exclude = [
+    "bench/llm-tape",
+    "bench/tapes",
+]
 default-members = [
     "crates/claw-agent",
     "crates/claw-interface",

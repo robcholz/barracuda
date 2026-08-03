@@ -26,6 +26,13 @@ cargo run --profile profiling -p claw-agent-profile -- \
 
 `claw-profile` is the shared profiling library; it has no standalone command.
 
+## LLM API byte recording and replay
+
+[`llm-tape`](llm-tape/README.md) is an independent Python reverse proxy for
+recording uninterpreted LLM HTTP response chunks and replaying them with their
+original timing. It is intended for deterministic agent trajectory benchmarks;
+it does not parse SSE or model output.
+
 ## Binary size
 
 Build the host profiling executable and print its load-image breakdown:
