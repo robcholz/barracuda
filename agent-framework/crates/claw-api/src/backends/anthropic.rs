@@ -10,12 +10,9 @@ use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Map, Value};
 
-use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, HttpHeader,
-    StreamingHttp,
-};
+use claw_interface::http::{blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, StreamingHttp};
 
-use super::super::chat_stream::{drain_body, ProviderStream};
+use super::super::chat_stream::ProviderStream;
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
 use super::super::media::prepare_asset;
 use super::super::types::{
@@ -24,7 +21,8 @@ use super::super::types::{
 #[cfg(feature = "cache_profile")]
 use super::shared::parse_anthropic_usage;
 use super::shared::{
-    map_http_error, post_json, post_json_async, single_media_asset, BackendContext,
+    media_text, post_prepared, post_prepared_async, post_prepared_stream, single_media_asset,
+    BackendContext, PreparedAuth, PreparedRequest,
 };
 use super::sse::{AnthropicSse, ProviderSse};
 use super::BackendImpl;
@@ -400,17 +398,81 @@ impl Anthropic {
         Ok(())
     }
 
-    fn headers(&self) -> [HttpHeader<'_>; 2] {
-        [
-            HttpHeader {
-                name: "x-api-key",
-                value: self.context.api_key(),
-            },
-            HttpHeader {
-                name: "anthropic-version",
-                value: ANTHROPIC_VERSION,
-            },
+    /// Anthropic's required auth/version headers, owned for a [`PreparedRequest`].
+    fn headers(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("x-api-key", self.context.api_key().to_string()),
+            ("anthropic-version", ANTHROPIC_VERSION.to_string()),
         ]
+    }
+
+    fn prepare_chat(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
+        let body = self.build_chat_body(request)?;
+        Ok(self
+            .context
+            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
+    }
+
+    fn prepare_chat_json(
+        &self,
+        request: &ChatJsonRequest<'_>,
+        schema: &Value,
+    ) -> Result<PreparedRequest, ChatError> {
+        let body = self.build_chat_json_body(request, schema)?;
+        Ok(self
+            .context
+            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
+    }
+
+    fn prepare_stream(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
+        let body = self.build_stream_body(request)?;
+        Ok(self
+            .context
+            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
+    }
+
+    /// Serialize the media inference request body (no transport).
+    fn build_media_body(&self, request: &MediaRequest<'_>) -> Result<String, InferMediaError> {
+        let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
+            return Err(InferMediaError::IncompleteRequest);
+        };
+        let asset = single_media_asset(request.media)?;
+
+        let prepared = prepare_asset(asset, IMAGE_REMOTE_URL_ONLY, self.context.image_max_bytes())?;
+        if !prepared.is_data_url() {
+            return Err(InferMediaError::RequiresLocalImage);
+        }
+        let (mime, base64_data) =
+            parse_data_url(prepared.payload()).ok_or(InferMediaError::PayloadPrepFailed)?;
+
+        let mut body = Map::new();
+        body.insert("model".to_string(), json!(self.context.model()));
+        body.insert(
+            MAX_TOKENS_FIELD.to_string(),
+            json!(self.context.max_tokens()),
+        );
+        if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
+            body.insert("system".to_string(), json!(system));
+        }
+        body.insert(
+            "messages".to_string(),
+            json!([{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_prompt},
+                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64_data}}
+                ]
+            }]),
+        );
+        serde_json::to_string(&Value::Object(body))
+            .map_err(|_| ClawApiError::ApiError("out of memory serializing media request").into())
+    }
+
+    fn prepare_media(&self, request: &MediaRequest<'_>) -> Result<PreparedRequest, InferMediaError> {
+        let body = self.build_media_body(request)?;
+        Ok(self
+            .context
+            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
     }
 }
 
@@ -429,14 +491,8 @@ impl BackendImpl for Anthropic {
         request: &ChatRequest,
         abort: &AtomicBool,
     ) -> Result<LlmResponse, ChatError> {
-        let post_data = self.build_chat_body(request)?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json(http, &http_request, abort)?;
+        let prepared = self.prepare_chat(request)?;
+        let response = post_prepared(http, &prepared, abort)?;
         Ok(parse_chat_response(&response.body)?)
     }
 
@@ -448,14 +504,8 @@ impl BackendImpl for Anthropic {
         schema: &Value,
         abort: &AtomicBool,
     ) -> Result<LlmResponse, ChatError> {
-        let post_data = self.build_chat_json_body(request, schema)?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json(http, &http_request, abort)?;
+        let prepared = self.prepare_chat_json(request, schema)?;
+        let response = post_prepared(http, &prepared, abort)?;
         Ok(parse_chat_response(&response.body)?)
     }
 
@@ -466,53 +516,9 @@ impl BackendImpl for Anthropic {
         request: &MediaRequest,
         abort: &AtomicBool,
     ) -> Result<String, InferMediaError> {
-        let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
-            return Err(InferMediaError::IncompleteRequest);
-        };
-        let asset = single_media_asset(request.media)?;
-
-        let prepared = prepare_asset(asset, IMAGE_REMOTE_URL_ONLY, self.context.image_max_bytes())?;
-        if !prepared.is_data_url() {
-            return Err(InferMediaError::RequiresLocalImage);
-        }
-        let (mime, base64_data) =
-            parse_data_url(prepared.payload()).ok_or(InferMediaError::PayloadPrepFailed)?;
-
-        let mut body = Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
-            body.insert("system".to_string(), json!(system));
-        }
-        body.insert(
-            "messages".to_string(),
-            json!([{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64_data}}
-                ]
-            }]),
-        );
-        let body = Value::Object(body);
-        let post_data = serde_json::to_string(&body)
-            .map_err(|_| ClawApiError::ApiError("out of memory serializing media request"))?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json(http, &http_request, abort)?;
-
-        let parsed = parse_chat_response(&response.body)?;
-        match parsed.text {
-            Some(t) if !t.is_empty() => Ok(t),
-            _ => Err(ClawApiError::EmptyResponse.into()),
-        }
+        let prepared = self.prepare_media(request)?;
+        let response = post_prepared(http, &prepared, abort)?;
+        media_text(parse_chat_response(&response.body)?)
     }
 
     async fn chat_async<H: ClawHttp>(
@@ -521,14 +527,8 @@ impl BackendImpl for Anthropic {
         request: &ChatRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let post_data = self.build_chat_body(request)?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json_async(http, &http_request, cancel).await?;
+        let prepared = self.prepare_chat(request)?;
+        let response = post_prepared_async(http, &prepared, cancel).await?;
         Ok(parse_chat_response(&response.body)?)
     }
 
@@ -540,14 +540,8 @@ impl BackendImpl for Anthropic {
         schema: &Value,
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let post_data = self.build_chat_json_body(request, schema)?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json_async(http, &http_request, cancel).await?;
+        let prepared = self.prepare_chat_json(request, schema)?;
+        let response = post_prepared_async(http, &prepared, cancel).await?;
         Ok(parse_chat_response(&response.body)?)
     }
 
@@ -557,53 +551,9 @@ impl BackendImpl for Anthropic {
         request: &MediaRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError> {
-        let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
-            return Err(InferMediaError::IncompleteRequest);
-        };
-        let asset = single_media_asset(request.media)?;
-
-        let prepared = prepare_asset(asset, IMAGE_REMOTE_URL_ONLY, self.context.image_max_bytes())?;
-        if !prepared.is_data_url() {
-            return Err(InferMediaError::RequiresLocalImage);
-        }
-        let (mime, base64_data) =
-            parse_data_url(prepared.payload()).ok_or(InferMediaError::PayloadPrepFailed)?;
-
-        let mut body = Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
-            body.insert("system".to_string(), json!(system));
-        }
-        body.insert(
-            "messages".to_string(),
-            json!([{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_prompt},
-                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64_data}}
-                ]
-            }]),
-        );
-        let body = Value::Object(body);
-        let post_data = serde_json::to_string(&body)
-            .map_err(|_| ClawApiError::ApiError("out of memory serializing media request"))?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let response = post_json_async(http, &http_request, cancel).await?;
-
-        let parsed = parse_chat_response(&response.body)?;
-        match parsed.text {
-            Some(t) if !t.is_empty() => Ok(t),
-            _ => Err(ClawApiError::EmptyResponse.into()),
-        }
+        let prepared = self.prepare_media(request)?;
+        let response = post_prepared_async(http, &prepared, cancel).await?;
+        media_text(parse_chat_response(&response.body)?)
     }
 
     async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
@@ -612,28 +562,14 @@ impl BackendImpl for Anthropic {
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
     ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
-        let post_data = self.build_stream_body(request)?;
-        let url = self.context.endpoint_url(CHAT_PATH);
-        let headers = self.headers();
-        let http_request = self
-            .context
-            .json_request(&url, &post_data, HttpAuth::None, &headers);
-        let (status, stream) = http
-            .post_json_streaming(&http_request, cancel)
-            .await
-            .map_err(map_http_error)?;
-        if !status.is_success() {
-            let body = drain_body(stream).await.map_err(map_http_error)?;
-            return Err(map_http_error(HttpError::UnexpectedStatus {
-                status,
-                message: format!("HTTP {status}: {body}"),
-            })
-            .into());
-        }
-        Ok(ProviderStream::new(
-            stream,
+        let prepared = self.prepare_stream(request)?;
+        post_prepared_stream(
+            http,
+            &prepared,
+            cancel,
             ProviderSse::Anthropic(AnthropicSse::new()),
-        ))
+        )
+        .await
     }
 }
 
