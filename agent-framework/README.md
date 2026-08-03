@@ -51,6 +51,45 @@ process/thread mapping (including `run.system`, session grouping, and the
 uv run --script crates/claw-context/scripts/context_viewer.py
 ```
 
+## Prebuilt ESP-IDF static library
+
+Build the complete Rust runtime as a target-specific static archive:
+
+```bash
+./build-idf-staticlib.sh
+```
+
+Each run builds archives for `esp32s3`, `esp32c5`, `esp32p4`, and `esp32s31`.
+The archives are written to
+`crates/claw-cabi/prebuilt/<idf-target>/libclaw_cabi.a`. These archives are
+committed with the repository, and ESP-IDF links the archive matching
+`IDF_TARGET` by default. No Rust toolchain is needed unless the Rust sources
+change.
+
+CI verifies that all committed archives match the Rust sources without
+overwriting them:
+
+```bash
+./build-idf-staticlib.sh --check
+```
+
+Build the firmware normally:
+
+```bash
+idf.py -C ../application/edge_agent build
+```
+
+Set `CLAW_DEBUG=1` while running the archive build script to enable rich
+logging. To bypass the committed archives during Rust development, configure
+with an empty prebuilt directory:
+
+```bash
+idf.py \
+  -C ../application/edge_agent \
+  -DCLAW_RUST_PREBUILT_DIR= \
+  build
+```
+
 ## Flashing
 
 Enable rich logging by:
