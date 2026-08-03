@@ -69,7 +69,7 @@ async def test_replay_returns_raw_bytes_with_original_timing(tmp_path):
         await runner.cleanup()
 
 
-async def test_mismatch_does_not_consume_interaction(tmp_path):
+async def test_mismatch_does_not_consume_interaction(tmp_path, log_messages):
     path = tmp_path / 'run.llmtape'
     await _make_tape(path, response_at_us=0, chunk_at_us=0)
     runner, base_url = await _serve(create_replay_app(path))
@@ -90,6 +90,10 @@ async def test_mismatch_does_not_consume_interaction(tmp_path):
                 assert payload['message'] == 'tape exhausted'
     finally:
         await runner.cleanup()
+
+    log_text = ''.join(log_messages)
+    assert 'reason=request mismatch:' in log_text
+    assert 'reason=tape exhausted' in log_text
 
 
 async def test_health_does_not_consume_interaction(tmp_path):

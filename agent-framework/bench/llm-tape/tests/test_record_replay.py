@@ -20,7 +20,7 @@ async def _serve(app: web.Application) -> tuple[web.AppRunner, str]:
     return runner, f'http://127.0.0.1:{port}'
 
 
-async def test_record_then_replay_is_content_agnostic(tmp_path):
+async def test_record_then_replay_is_content_agnostic(tmp_path, log_messages):
     source_chunks = [
         b'event: content_block_delta\ndata: {"text":"\xe4',
         b'\xb8\xad',
@@ -95,3 +95,12 @@ async def test_record_then_replay_is_content_agnostic(tmp_path):
         await replay_runner.cleanup()
 
     assert replayed_body == recorded_body
+    log_text = ''.join(log_messages)
+    assert 'record request_started interaction=call-000000' in log_text
+    assert 'record chunk interaction=call-000000 seq=0' in log_text
+    assert 'record request_completed interaction=call-000000' in log_text
+    assert 'replay request_matched interaction=call-000000' in log_text
+    assert 'replay chunk interaction=call-000000 seq=0' in log_text
+    assert 'replay request_completed interaction=call-000000' in log_text
+    assert 'Bearer secret' not in log_text
+    assert 'content_block_delta' not in log_text

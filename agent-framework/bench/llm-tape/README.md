@@ -64,6 +64,25 @@ consume recorded interactions in order. A method or path mismatch returns HTTP
 Replay has no speed option: response headers and chunks are always scheduled at
 their original monotonic offsets from the start of the matching request.
 
+## Logs
+
+`llm-tape` uses [Loguru](https://loguru.readthedocs.io/). Logs are colored when
+stderr is an interactive terminal and automatically become plain text when
+redirected. `INFO` is the default and reports server startup, request matching,
+response status, chunk/byte totals, elapsed time, stream outcome, and failures.
+It never logs request bodies, response contents, or authentication header
+values.
+
+Use `DEBUG` to additionally report the sequence, byte count, and original
+timestamp of every recorded or replayed byte chunk:
+
+```bash
+uv run llm-tape replay \
+  --log-level DEBUG \
+  --listen 0.0.0.0:8787 \
+  run.jsonl
+```
+
 ## Tape format
 
 The tape is append-only JSONL. Response data is base64 encoded so arbitrary

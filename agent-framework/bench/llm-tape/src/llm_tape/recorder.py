@@ -10,6 +10,7 @@ from pathlib import Path
 
 import aiohttp
 from aiohttp import web
+from loguru import logger
 
 from .headers import (
     forwarded_request_headers,
@@ -54,7 +55,9 @@ async def _client_session_context(app: web.Application) -> AsyncIterator[None]:
 
 
 async def _close_writer(app: web.Application) -> None:
-    await app[WRITER_KEY].close()
+    writer = app[WRITER_KEY]
+    await writer.close()
+    logger.info('record tape_closed output={}', writer.path)
 
 
 async def _health(request: web.Request) -> web.Response:
@@ -64,16 +67,30 @@ async def _health(request: web.Request) -> web.Response:
 
 async def _record_request(request: web.Request) -> web.StreamResponse:
     started_ns = time.monotonic_ns()
+    logger.info(
+        'record request_received method={} path={}',
+        request.method,
+        request.path,
+    )
     body = await request.read()
     body_hash = hashlib.sha256(body).hexdigest()
     writer = request.app[WRITER_KEY]
-    interaction_id, _ = await writer.request(
+    interaction_id, call_index = await writer.request(
         method=request.method,
         path=request.path,
         path_qs=request.raw_path,
         headers=stored_request_headers(request.raw_headers),
         body_sha256=body_hash,
         body_size=len(body),
+    )
+    logger.info(
+        'record request_started interaction={} call_index={} method={} path={} '
+        'request_bytes={}',
+        interaction_id,
+        call_index,
+        request.method,
+        request.path,
+        len(body),
     )
 
     content_encoding = request.headers.get('Content-Encoding', '').lower()
@@ -92,6 +109,12 @@ async def _record_request(request: web.Request) -> web.StreamResponse:
             allow_redirects=False,
         )
     except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        logger.error(
+            'record upstream_failed interaction={} error_type={} error={}',
+            interaction_id,
+            type(exc).__name__,
+            exc,
+        )
         return await _record_proxy_error(
             writer=writer,
             interaction_id=interaction_id,
@@ -100,12 +123,19 @@ async def _record_request(request: web.Request) -> web.StreamResponse:
         )
 
     headers = response_headers(upstream_response.raw_headers)
+    response_started_us = _elapsed_us(started_ns)
     await writer.response_start(
         interaction_id,
-        at_us=_elapsed_us(started_ns),
+        at_us=response_started_us,
         status=upstream_response.status,
         reason=upstream_response.reason,
         headers=headers,
+    )
+    logger.info(
+        'record response_started interaction={} status={} at_us={}',
+        interaction_id,
+        upstream_response.status,
+        response_started_us,
     )
     downstream = web.StreamResponse(
         status=upstream_response.status,
@@ -116,33 +146,66 @@ async def _record_request(request: web.Request) -> web.StreamResponse:
 
     outcome = 'eof'
     sequence = 0
+    response_bytes = 0
     try:
         async for chunk in upstream_response.content.iter_any():
             if not chunk:
                 continue
+            chunk_at_us = _elapsed_us(started_ns)
             await writer.chunk(
                 interaction_id,
                 seq=sequence,
-                at_us=_elapsed_us(started_ns),
+                at_us=chunk_at_us,
                 data=bytes(chunk),
+            )
+            response_bytes += len(chunk)
+            logger.debug(
+                'record chunk interaction={} seq={} bytes={} at_us={}',
+                interaction_id,
+                sequence,
+                len(chunk),
+                chunk_at_us,
             )
             sequence += 1
             try:
                 await downstream.write(chunk)
             except ConnectionError:
                 outcome = 'client_disconnect'
+                logger.warning(
+                    'record client_disconnected interaction={} after_chunks={}',
+                    interaction_id,
+                    sequence,
+                )
                 break
-    except (aiohttp.ClientError, asyncio.TimeoutError):
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
         outcome = 'upstream_error'
+        logger.error(
+            'record upstream_stream_failed interaction={} error_type={} error={}',
+            interaction_id,
+            type(exc).__name__,
+            exc,
+        )
     except asyncio.CancelledError:
         outcome = 'client_disconnect'
+        logger.warning('record request_cancelled interaction={}', interaction_id)
         raise
     finally:
         upstream_response.release()
+        elapsed_us = _elapsed_us(started_ns)
         await writer.response_end(
             interaction_id,
-            at_us=_elapsed_us(started_ns),
+            at_us=elapsed_us,
             outcome=outcome,
+        )
+        logger.info(
+            'record request_completed interaction={} status={} chunks={} '
+            'response_bytes={} elapsed_us={} outcome={}',
+            interaction_id,
+            upstream_response.status,
+            sequence,
+            response_bytes,
+            elapsed_us,
+            outcome,
         )
 
     try:
@@ -164,23 +227,33 @@ async def _record_proxy_error(
         ('Content-Type', 'text/plain; charset=utf-8'),
         ('Content-Length', str(len(body))),
     ]
+    response_started_us = _elapsed_us(started_ns)
     await writer.response_start(
         interaction_id,
-        at_us=_elapsed_us(started_ns),
+        at_us=response_started_us,
         status=502,
         reason='Bad Gateway',
         headers=headers,
     )
+    chunk_at_us = _elapsed_us(started_ns)
     await writer.chunk(
         interaction_id,
         seq=0,
-        at_us=_elapsed_us(started_ns),
+        at_us=chunk_at_us,
         data=body,
     )
+    response_ended_us = _elapsed_us(started_ns)
     await writer.response_end(
         interaction_id,
-        at_us=_elapsed_us(started_ns),
+        at_us=response_ended_us,
         outcome='eof',
+    )
+    logger.info(
+        'record request_completed interaction={} status=502 chunks=1 '
+        'response_bytes={} elapsed_us={} outcome=proxy_error',
+        interaction_id,
+        len(body),
+        response_ended_us,
     )
     return web.Response(status=502, reason='Bad Gateway', headers=headers, body=body)
 
