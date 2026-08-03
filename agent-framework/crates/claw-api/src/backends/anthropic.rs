@@ -10,7 +10,9 @@ use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Map, Value};
 
-use claw_interface::http::{blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, StreamingHttp};
+use claw_interface::http::{
+    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, StreamingHttp,
+};
 
 use super::super::chat_stream::ProviderStream;
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
@@ -468,7 +470,10 @@ impl Anthropic {
             .map_err(|_| ClawApiError::ApiError("out of memory serializing media request").into())
     }
 
-    fn prepare_media(&self, request: &MediaRequest<'_>) -> Result<PreparedRequest, InferMediaError> {
+    fn prepare_media(
+        &self,
+        request: &MediaRequest<'_>,
+    ) -> Result<PreparedRequest, InferMediaError> {
         let body = self.build_media_body(request)?;
         Ok(self
             .context

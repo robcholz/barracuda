@@ -183,7 +183,10 @@ impl OpenAiCompatible {
             .map_err(|_| ClawApiError::ApiError("out of memory serializing media request").into())
     }
 
-    fn prepare_media(&self, request: &MediaRequest<'_>) -> Result<PreparedRequest, InferMediaError> {
+    fn prepare_media(
+        &self,
+        request: &MediaRequest<'_>,
+    ) -> Result<PreparedRequest, InferMediaError> {
         let body = self.build_media_body(request)?;
         Ok(self
             .context
@@ -278,7 +281,13 @@ impl BackendImpl for OpenAiCompatible {
         cancel: Cancel<'h>,
     ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
         let prepared = self.prepare_stream(request)?;
-        post_prepared_stream(http, &prepared, cancel, ProviderSse::OpenAi(OpenAiSse::new())).await
+        post_prepared_stream(
+            http,
+            &prepared,
+            cancel,
+            ProviderSse::OpenAi(OpenAiSse::new()),
+        )
+        .await
     }
 }
 
