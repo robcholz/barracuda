@@ -1,8 +1,9 @@
-use std::collections::VecDeque;
+use core::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::task::{Context, Poll, Waker};
+use std::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
+use futures_core::Stream;
 
 use crate::agent::{AgentId, AgentKind};
 use crate::Message;
@@ -69,16 +70,18 @@ pub(crate) struct FollowupCommand {
     pub(crate) completed: Sender<Result<(), MultiagentCommandError>>,
 }
 
-#[derive(Default)]
-struct MultiagentBridgeState {
-    commands: VecDeque<MultiagentCommand>,
-    waiter: Option<Waker>,
-    snapshot: MultiagentSnapshot,
-}
-
 /// Short-lock bridge shared by model-facing tools and one Session actor.
+///
+/// Commands ride an unbounded async-channel (multi-producer tools, single
+/// consumer actor), so channel wakeups replace the former hand-written waker.
+/// The read-mostly snapshot sits on its own lock so snapshot reads never
+/// contend with command delivery.
 pub(crate) struct MultiagentBridge {
-    state: Mutex<MultiagentBridgeState>,
+    command_tx: Sender<MultiagentCommand>,
+    // `Receiver` is `!Unpin`, so it is pinned on the heap to be polled as a
+    // `Stream` through the shared bridge.
+    command_rx: Mutex<Pin<Box<Receiver<MultiagentCommand>>>>,
+    snapshot: Mutex<MultiagentSnapshot>,
 }
 
 /// Caller-bound capability handed to model-facing subagent tools.
@@ -150,26 +153,24 @@ impl SubagentControl {
 
 impl MultiagentBridge {
     pub(crate) fn new() -> Self {
+        let (command_tx, command_rx) = async_channel::unbounded();
         Self {
-            state: Mutex::new(MultiagentBridgeState::default()),
+            command_tx,
+            command_rx: Mutex::new(Box::pin(command_rx)),
+            snapshot: Mutex::new(MultiagentSnapshot::default()),
         }
     }
 
-    fn state(&self) -> MutexGuard<'_, MultiagentBridgeState> {
-        self.state
+    fn snapshot(&self) -> MutexGuard<'_, MultiagentSnapshot> {
+        self.snapshot
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
     }
 
     fn push(&self, command: MultiagentCommand) {
-        let waiter = {
-            let mut state = self.state();
-            state.commands.push_back(command);
-            state.waiter.take()
-        };
-        if let Some(waiter) = waiter {
-            waiter.wake();
-        }
+        // The bridge holds a sender for its whole life, so the unbounded channel
+        // is never closed here and the send cannot fail.
+        let _ = self.command_tx.try_send(command);
     }
 
     pub(crate) fn spawn(
@@ -194,29 +195,32 @@ impl MultiagentBridge {
     }
 
     pub(crate) fn poll_command(&self, context: &mut Context<'_>) -> Poll<MultiagentCommand> {
-        let mut state = self.state();
-        if let Some(command) = state.commands.pop_front() {
-            return Poll::Ready(command);
+        let mut receiver = self
+            .command_rx
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        match receiver.as_mut().poll_next(context) {
+            Poll::Ready(Some(command)) => Poll::Ready(command),
+            // The bridge keeps a live sender, so the stream never ends; treat a
+            // spurious close the same as "no command pending".
+            Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
-        if state
-            .waiter
-            .as_ref()
-            .is_none_or(|waiter| !waiter.will_wake(context.waker()))
-        {
-            state.waiter = Some(context.waker().clone());
-        }
-        Poll::Pending
     }
 
     pub(crate) fn clear(&self) {
-        let mut state = self.state();
-        state.commands.clear();
-        state.waiter = None;
-        state.snapshot = MultiagentSnapshot::default();
+        // Drain queued commands without closing the channel so later spawns keep
+        // delivering.
+        let receiver = self
+            .command_rx
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        while receiver.try_recv().is_ok() {}
+        drop(receiver);
+        *self.snapshot() = MultiagentSnapshot::default();
     }
 
     pub(crate) fn publish_snapshot(&self, snapshot: MultiagentSnapshot) {
-        self.state().snapshot = snapshot;
+        *self.snapshot() = snapshot;
     }
 
     fn delete(
@@ -251,10 +255,10 @@ impl MultiagentBridge {
     }
 
     fn list(&self, requester: AgentId) -> Vec<SubagentSnapshot> {
-        self.state().snapshot.descendants_of(requester)
+        self.snapshot().descendants_of(requester)
     }
 
     fn get(&self, requester: AgentId, target: AgentId) -> Option<SubagentSnapshot> {
-        self.state().snapshot.descendant(requester, target)
+        self.snapshot().descendant(requester, target)
     }
 }
