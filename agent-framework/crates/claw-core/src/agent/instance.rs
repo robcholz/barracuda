@@ -64,9 +64,7 @@ impl AgentEphemeralState {
 
     fn poll_completion(&mut self, context: &mut Context<'_>) -> Poll<DetachedCompletion> {
         match Pin::new(&mut self.inflight_detached_toolcalls).poll_next(context) {
-            Poll::Ready(Some(completion)) => {
-                Poll::Ready(DetachedCompletion::from_tool(completion))
-            }
+            Poll::Ready(Some(completion)) => Poll::Ready(DetachedCompletion::from_tool(completion)),
             // An exhausted set yields `None`; no completion can arrive until
             // another detached handle is pushed, so keep the wait pending.
             Poll::Ready(None) | Poll::Pending => Poll::Pending,
