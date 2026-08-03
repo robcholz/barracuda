@@ -80,7 +80,10 @@ stream.stop()
 ## Develop
 
 ```bash
-uv sync
-uv run pytest
-uv run ruff format
+# from agent-framework/
+uv sync --all-packages --all-groups
+uv run --package serial-log pytest \
+  -c crates/claw-log/scripts/serial_log/pyproject.toml \
+  crates/claw-log/scripts/serial_log/tests
+uv run --package serial-log ruff format crates/claw-log/scripts/serial_log
 ```

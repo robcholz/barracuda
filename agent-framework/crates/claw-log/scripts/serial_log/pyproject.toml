@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# src-layout: make `import serial_log` work under `uv run pytest` without an
+# src-layout: make `import serial_log` work under workspace pytest without an
 # install step.
 pythonpath = ["src"]
 testpaths = ["tests"]

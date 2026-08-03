@@ -1,7 +1,7 @@
 """CLI: reconstruct and pretty-print a ``TRACE`` log.
 
-uv run claw-trace device.log
-cat device.log | uv run claw-trace
+uv run --package claw-trace python -m claw_trace device.log
+cat device.log | uv run --package claw-trace python -m claw_trace
 """
 
 from __future__ import annotations

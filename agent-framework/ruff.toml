@@ -1,8 +1,7 @@
-# Shared Ruff config for all Python living under the Rust crates' uv projects
-# (e.g. claw-log/scripts/). This is the single source of truth: each crate's uv
-# project inherits it because Ruff walks up the filesystem for config, and the
-# per-crate pyproject.toml intentionally has NO [tool.ruff] section. Keep it that
-# way so formatting stays identical across every crate.
+# Shared Ruff config for all Python in the root uv workspace. This is the single
+# source of truth: workspace members inherit it because Ruff walks up the
+# filesystem for config, and member pyproject.toml files intentionally have no
+# [tool.ruff] section. Keep it that way so formatting stays identical.
 
 target-version = "py311"
 line-length = 88
