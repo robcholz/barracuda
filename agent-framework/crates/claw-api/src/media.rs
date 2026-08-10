@@ -1,8 +1,11 @@
 //! Media preparation, port of `claw_media_pipeline.c`.
 //!
-//! Local image files are read with `std::fs` and base64-encoded with the
-//! `base64` crate (replacing `fopen`/`mbedtls_base64_encode`).
+//! Inline image bytes are base64-encoded with the `base64` crate. Filesystem
+//! access belongs to the platform/application layer, which can read through
+//! [`claw_interface::ClawFs`] and construct [`MediaAsset::inline_bytes`].
 
+use alloc::format;
+use alloc::string::String;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
@@ -32,58 +35,6 @@ impl Prepared {
     pub(crate) fn payload(&self) -> &str {
         &self.payload
     }
-}
-
-/// Mirror of `image_mime_from_path`: extension-based MIME, case-insensitive.
-fn image_mime_from_path(path: &str) -> Option<&'static str> {
-    let dot = path.rfind('.')?;
-    let ext = path[dot..].to_ascii_lowercase();
-    match ext.as_str() {
-        ".jpg" | ".jpeg" => Some("image/jpeg"),
-        ".png" => Some("image/png"),
-        ".gif" => Some("image/gif"),
-        ".webp" => Some("image/webp"),
-        _ => None,
-    }
-}
-
-fn prepare_local_path_asset(
-    path: &str,
-    mime_override: Option<&str>,
-    image_max_bytes: usize,
-) -> Result<Prepared, InferMediaError> {
-    if path.is_empty() {
-        return Err(InferMediaError::MediaPathEmpty);
-    }
-    if !path.starts_with('/') {
-        return Err(InferMediaError::MediaPathNotAbsolute);
-    }
-
-    let mime = mime_override
-        .or_else(|| image_mime_from_path(path))
-        .ok_or(InferMediaError::UnsupportedMediaType)?;
-
-    let meta = std::fs::metadata(path).map_err(|_| InferMediaError::MediaNotFound)?;
-    let size = meta.len() as usize;
-    if size == 0 {
-        return Err(InferMediaError::MediaFileEmpty);
-    }
-    if size > image_max_bytes {
-        return Err(InferMediaError::MediaTooLarge);
-    }
-
-    let raw = std::fs::read(path).map_err(|_| InferMediaError::MediaReadFailed)?;
-    if raw.len() != size {
-        return Err(InferMediaError::MediaReadFailed);
-    }
-
-    let encoded = STANDARD.encode(&raw);
-    let payload = format!("data:{mime};base64,{encoded}");
-
-    Ok(Prepared {
-        kind: PreparedKind::DataUrl,
-        payload,
-    })
 }
 
 fn prepare_inline_bytes_asset(
@@ -128,12 +79,6 @@ pub(crate) fn prepare_asset(
                 return Err(InferMediaError::RemoteOnlyProfile);
             }
             prepare_inline_bytes_asset(bytes, mime_type, image_max_bytes)
-        }
-        MediaAsset::LocalPath { path, mime_type } => {
-            if image_remote_url_only {
-                return Err(InferMediaError::RemoteOnlyProfile);
-            }
-            prepare_local_path_asset(path, mime_type.as_deref(), image_max_bytes)
         }
     }
 }

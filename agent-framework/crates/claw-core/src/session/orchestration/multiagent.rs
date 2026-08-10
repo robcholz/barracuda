@@ -1,10 +1,15 @@
 //! Multiagent Session orchestration adapter.
 
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::ToString,
+    vec::Vec,
+};
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet};
 
 use claw_interface::{Cancel, ClawTimer};
 use claw_tool::ToolGroup;

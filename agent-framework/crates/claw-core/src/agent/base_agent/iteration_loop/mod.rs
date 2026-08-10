@@ -91,3 +91,4 @@ pub(crate) struct IterationLoop<'a, H: ClawHttp, Timer: ClawTimer, P> {
     /// Retry policy applied to this iteration's LLM call (see [`RetryPolicy`]).
     pub retry: RetryPolicy,
 }
+use alloc::{boxed::Box, string::String};

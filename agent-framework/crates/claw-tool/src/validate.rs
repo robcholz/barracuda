@@ -1,3 +1,5 @@
+use alloc::string::ToString;
+
 use serde_json::Value;
 
 use super::tool::{ToolError, ToolInvokeError, ToolResult};

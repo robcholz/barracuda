@@ -25,8 +25,7 @@ use claw_agent::{
 use claw_interface::http::SliceChunks;
 use claw_interface::{
     BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
-    HttpStatusCode, ImmediateTimer, MemFs, SharedScriptHttp, StdThread, StreamingHttp,
-    TokioExecutor,
+    HttpStatusCode, ImmediateTimer, MemFs, SharedScriptHttp, StreamingHttp,
 };
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use futures_lite::StreamExt;
@@ -113,8 +112,12 @@ fn scripted_llm() -> ClawApiConfig {
     )
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
+    tokio::task::LocalSet::new().run_until(run()).await
+}
+
+async fn run() -> anyhow::Result<()> {
     claw_log::init_logger(LevelFilter::Info, LogOutput::Stderr)?;
     claw_log::init_tracing(
         TracingConfig::default()
@@ -127,11 +130,11 @@ async fn main() -> anyhow::Result<()> {
         "Hello from the agent — the local time is 2026-06-29T17:00:00Z.",
     )]);
 
-    let system = AgentSystem::<
+    let (system, service) = AgentSystem::<
         MemFs,
         Sse<BlockingHttpAdapter<SharedScriptHttp>>,
         ImmediateTimer,
-    >::with_tool_groups::<StdThread, TokioExecutor>(
+    >::with_tool_groups(
         MemFs::new(),
         claw_agent::AgentPersistenceConfig {
             persistence_root: "/mem".to_string(),
@@ -143,13 +146,14 @@ async fn main() -> anyhow::Result<()> {
             [Tool::from_sync(TimeNowTool)],
         )],
     )?;
+    let service_task = tokio::task::spawn_local(service);
     system.link_api(scripted_llm(), ApiPurpose::RootAgent, true)?;
     println!("registered tool `time_now`");
     system.start_all()?;
-    let session = system.new_session(SessionPersistence::Persistent)?;
+    let session = system.new_session(SessionPersistence::Persistent).await?;
 
     // 2. Drive the loop: explicit session id selects the agent session.
-    let (control, mut events) = system.open_session(session)?;
+    let (control, mut events) = system.open_session(session).await?;
     control
         .append(Message::text("Hi, what time is it?"))
         .await?;
@@ -192,5 +196,7 @@ async fn main() -> anyhow::Result<()> {
     }
     assert_eq!(outputs.len(), 1, "expected exactly one output");
 
+    system.shutdown().await;
+    let _ = service_task.await;
     Ok(())
 }

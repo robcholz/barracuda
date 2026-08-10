@@ -1,3 +1,7 @@
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::future::Future as _;
 use core::pin::Pin;
 use core::task::Poll;
@@ -11,6 +15,8 @@ use super::{
 };
 
 pub(super) mod blocking {
+    use alloc::format;
+    use alloc::string::{String, ToString};
     use core::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
@@ -107,8 +113,8 @@ pub(super) mod blocking {
 /// (`Runtime::block_on` or a tokio test runtime) — *not* by the cooperative
 /// `embedded-executor` used for the device-model `YieldingHttpAdapter`
 /// futures (those have no reactor). This keeps it strictly a host backend
-/// (CLIs, integration tests); on-device async HTTP uses the `esp_http_client`
-/// driver in `claw_sys` instead.
+/// (CLIs, integration tests); an Embassy application injects its own async HTTP
+/// adapter instead.
 ///
 /// The `reqwest::Client` pools connections, so construct one and reuse it.
 #[derive(Debug, Clone, Default)]

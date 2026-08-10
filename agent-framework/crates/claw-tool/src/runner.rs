@@ -1,3 +1,8 @@
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::ToString;
+use alloc::vec::Vec;
 use core::future::Future;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -16,8 +21,7 @@ const DETACHED_ACCEPTED: &str = concat!(
     "Its result will be delivered automatically."
 );
 
-type ToolRunFuture =
-    Pin<Box<dyn Future<Output = Option<(ToolInvocation, ToolOutput)>> + Send + 'static>>;
+type ToolRunFuture = Pin<Box<dyn Future<Output = Option<(ToolInvocation, ToolOutput)>> + 'static>>;
 
 static NEXT_TOOL_TASK_ID: AtomicU32 = AtomicU32::new(0);
 
@@ -254,6 +258,7 @@ fn settle(output: ToolResult<ToolOutput>) -> ToolOutput {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
     use futures_lite::future::block_on;
     use futures_lite::StreamExt as _;
 

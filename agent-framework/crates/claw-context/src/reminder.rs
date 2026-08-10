@@ -25,7 +25,10 @@
 //! [`Context::with_reminder`](crate::Context::with_reminder), and the tail it
 //! contributes to [`Context::request`](crate::Context::request).
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use serde_json::{json, Value};
 
@@ -34,7 +37,6 @@ use crate::block::BlockKind;
 /// The agent's ephemeral reminder channel. Holds the source texts plus a reused
 /// render buffer; call [`refresh`](Self::refresh) once per tick before reading
 /// [`as_slice`](Self::as_slice).
-#[cfg_attr(feature = "intrusive-observability", derive(Clone))]
 pub(crate) struct Reminders {
     /// Source reminder texts, keyed by context kind. The single source of truth.
     texts: BTreeMap<BlockKind, String>,

@@ -1,10 +1,11 @@
+use alloc::{boxed::Box, collections::VecDeque, rc::Rc, string::String};
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
-use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
-use std::error::Error;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use core::{
+    cell::{Cell, RefCell},
+    error::Error,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 #[cfg(feature = "cache_profile")]
 use claw_api::ProviderUsage;
@@ -160,7 +161,7 @@ impl RunControl {
     }
 
     pub(super) fn take_continuations(&self) -> VecDeque<Message> {
-        std::mem::take(&mut *self.inner.continuations.borrow_mut())
+        core::mem::take(&mut *self.inner.continuations.borrow_mut())
     }
 
     pub(super) fn begin_approval(&self, tool_call_id: ToolCallId) {
@@ -247,7 +248,7 @@ impl RunControl {
 
     fn take_approval_decision(&self) -> Option<ApprovalDecision> {
         let mut approval = self.inner.approval.borrow_mut();
-        match std::mem::replace(&mut *approval, ApprovalState::Idle) {
+        match core::mem::replace(&mut *approval, ApprovalState::Idle) {
             ApprovalState::Resolved(decision) => Some(decision),
             state => {
                 *approval = state;

@@ -1,7 +1,10 @@
 //! Skill identity, catalog metadata, and `SKILL.md` front-matter parsing.
 
-use std::borrow::Cow;
-use std::fmt;
+use alloc::borrow::{Cow, ToOwned};
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::fmt;
 
 use claw_interface::FsError;
 use serde::Deserialize;

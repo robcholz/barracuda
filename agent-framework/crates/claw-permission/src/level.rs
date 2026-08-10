@@ -1,3 +1,5 @@
+use alloc::format;
+
 use serde::{Deserialize, Serialize};
 
 use crate::action::RiskClass;

@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::String,
+    vec::Vec,
+};
 
 use crate::agent::{AgentId, AgentKind};
 

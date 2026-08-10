@@ -1,12 +1,20 @@
 //! LLM-backed implementation of the Session approval resolver.
 
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    format,
+    rc::Rc,
+    string::{String, ToString},
+    sync::Arc,
+    vec,
+};
+use core::cell::RefCell;
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use claw_api::{ChatRequest, ClawApiAsync, RetryPolicy, ToolCall};
 use claw_interface::http::StreamingHttp;
@@ -90,11 +98,11 @@ impl Drop for CancellableApprovalFuture {
 }
 
 struct ResolvePermissionReplyTool {
-    resolution: Arc<Mutex<Option<ApprovalDecision>>>,
+    resolution: Arc<RefCell<Option<ApprovalDecision>>>,
 }
 
 impl ResolvePermissionReplyTool {
-    fn new(resolution: Arc<Mutex<Option<ApprovalDecision>>>) -> Self {
+    fn new(resolution: Arc<RefCell<Option<ApprovalDecision>>>) -> Self {
         Self { resolution }
     }
 }
@@ -156,10 +164,7 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
             }
         };
 
-        *self
-            .resolution
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner()) = Some(resolution);
+        *self.resolution.borrow_mut() = Some(resolution);
         Ok(ToolOutput {
             content: "approval reply resolved".to_string(),
             ok: true,
@@ -179,14 +184,10 @@ where
     Timer: ClawTimer + Default + 'static,
 {
     let mut llm = ClawApiAsync::<Http, Timer>::new(Http::default(), Timer::default());
-    if let Some(config) = api_manager
-        .read()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .get_api(ApiPurpose::RootAgent)
-    {
+    if let Some(config) = api_manager.borrow().get_api(ApiPurpose::RootAgent) {
         llm.set_config(config)?;
     }
-    let resolution = Arc::new(Mutex::new(None));
+    let resolution = Arc::new(RefCell::new(None));
     let mut tools = ToolSet::empty();
     tools.add_group(ToolGroup::new(
         "permission",
@@ -231,9 +232,6 @@ where
     if let Some(mut detached) = detached {
         while detached.next().await.is_some() {}
     }
-    let resolved = resolution
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .clone();
+    let resolved = resolution.borrow().clone();
     resolved.ok_or(ApprovalResolverError::MalformedToolCall)
 }

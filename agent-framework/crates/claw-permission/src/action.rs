@@ -2,7 +2,9 @@
 //! optional target resource, and a risk class. A tool produces an [`Action`] for
 //! each call (its `classify`), and the permission layer evaluates it.
 
-use std::fmt;
+use alloc::format;
+use alloc::string::String;
+use core::fmt;
 
 /// How dangerous an [`Action`] is, ordered low → high. Policies threshold on it
 /// (e.g. "ask at or above [`Moderate`](Self::Moderate)").

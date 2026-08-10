@@ -4,9 +4,12 @@
 //! uses a private provider stream that parses one transport byte stream into
 //! ordered [`ChatStreamEvent`]s.
 
+use alloc::boxed::Box;
+use alloc::collections::VecDeque;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::VecDeque;
 
 use futures_core::Stream;
 use futures_lite::StreamExt;

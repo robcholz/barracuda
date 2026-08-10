@@ -1,7 +1,10 @@
-use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use alloc::borrow::{Cow, ToOwned};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::cell::{Ref, RefCell, RefMut};
+use core::fmt;
 
 use claw_interface::ClawFs;
 use claw_persistence::{
@@ -19,12 +22,12 @@ pub type ToolGroupId = String;
 const TOOL_REGISTRY_STATE_NAME: &str = "tool_registry";
 
 pub struct ToolRegistry {
-    inner: RwLock<ToolRegistryInner>,
+    inner: RefCell<ToolRegistryInner>,
 }
 
 struct ToolRegistryInner {
-    tools: HashMap<ToolName, Tool>,
-    groups: HashMap<ToolGroupId, ToolGroupEntry>,
+    tools: BTreeMap<ToolName, Tool>,
+    groups: BTreeMap<ToolGroupId, ToolGroupEntry>,
     state: DurableState<ToolRegistryState>,
     started: bool,
     runtime_version: ToolRegistryVersion,
@@ -116,7 +119,7 @@ impl ToolRegistryInner {
         }
         // Reverse index each tool to its owning group once, rather than
         // rescanning every group per tool.
-        let mut group_of: HashMap<&ToolName, (&ToolGroupId, bool)> = HashMap::new();
+        let mut group_of: BTreeMap<&ToolName, (&ToolGroupId, bool)> = BTreeMap::new();
         for (group_id, group) in &self.groups {
             for tool_name in &group.tools {
                 group_of.insert(tool_name, (group_id, group.default_visibility));
@@ -223,9 +226,9 @@ impl ToolRegistry {
 
     fn from_state(state: DurableState<ToolRegistryState>) -> Self {
         Self {
-            inner: RwLock::new(ToolRegistryInner {
-                tools: HashMap::new(),
-                groups: HashMap::new(),
+            inner: RefCell::new(ToolRegistryInner {
+                tools: BTreeMap::new(),
+                groups: BTreeMap::new(),
                 state,
                 started: false,
                 runtime_version: 0,
@@ -244,7 +247,7 @@ impl ToolRegistry {
         if inner.tools.contains_key(&group.id) {
             return Err(ToolRegistryError::AmbiguousName(group.id));
         }
-        let mut names = HashSet::with_capacity(group.tools.len());
+        let mut names = BTreeSet::new();
         for tool in &group.tools {
             let name = tool.name();
             if name.is_empty() {
@@ -323,12 +326,12 @@ impl ToolRegistry {
         self.read_state().tool_projection()
     }
 
-    fn read_state(&self) -> RwLockReadGuard<'_, ToolRegistryInner> {
-        self.inner.read().unwrap_or_else(PoisonError::into_inner)
+    fn read_state(&self) -> Ref<'_, ToolRegistryInner> {
+        self.inner.borrow()
     }
 
-    fn write_state(&self) -> RwLockWriteGuard<'_, ToolRegistryInner> {
-        self.inner.write().unwrap_or_else(PoisonError::into_inner)
+    fn write_state(&self) -> RefMut<'_, ToolRegistryInner> {
+        self.inner.borrow_mut()
     }
 }
 

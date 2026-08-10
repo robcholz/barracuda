@@ -14,7 +14,7 @@ use claw_interface::http::{
     Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
     StreamingHttp,
 };
-use claw_interface::{ImmediateTimer, MemFs, StdThread, TokioExecutor};
+use claw_interface::{ImmediateTimer, MemFs};
 use claw_profile::dhat::{AllocationStats, HeapProfile};
 
 claw_profile::install_dhat_allocator!();
@@ -111,7 +111,7 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 
 fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, claw_agent::AgentError> {
     let profile = HeapProfile::start(output_file);
-    let system = ProfileAgentSystem::new::<StdThread, TokioExecutor>(
+    let (system, service) = ProfileAgentSystem::new(
         MemFs::new(),
         AgentPersistenceConfig {
             persistence_root: "/profile/agent-init".to_owned(),
@@ -123,6 +123,7 @@ fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, claw_agent:
     // retained by a fully initialized AgentSystem.
     let stats = profile.finish();
     drop(system);
+    drop(service);
     Ok(stats)
 }
 

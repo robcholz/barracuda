@@ -61,3 +61,4 @@ pub enum AgentCreateError {
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),
 }
+use alloc::string::String;

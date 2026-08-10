@@ -7,9 +7,10 @@
 //!
 //! See `.agents/design/sse.md` for the full model (ordering, SSE forward-compat).
 
+use alloc::{boxed::Box, string::String};
+use core::error::Error;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::error::Error;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;

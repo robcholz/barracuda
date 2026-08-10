@@ -4,14 +4,21 @@
 //! routing, channel inbound/outbound conversion, and reply destinations live in
 //! adapter crates above this layer.
 
-use std::marker::PhantomData;
-use std::sync::Arc;
+#![no_std]
+// Public subsystem handles share ownership inside one AgentService task.
+#![allow(clippy::arc_with_non_send_sync)]
+
+extern crate alloc;
+
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::marker::PhantomData;
 
 use claw_api::InitError;
 #[cfg(feature = "cache_profile")]
 pub use claw_api::ProviderUsage;
 pub use claw_api::{BackendKind, ClawApiConfig};
 pub use claw_core::stream;
+pub use claw_core::AgentService;
 pub use claw_core::{
     AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, ApprovalResolverError,
     BaseAgentError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
@@ -23,7 +30,7 @@ pub use claw_core::{
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
 use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawThread, ClawTimer, FsError};
+use claw_interface::{ClawFs, ClawHttp, ClawTimer, FsError};
 use claw_persistence::{Persistence, PersistenceError, SharedPersistence};
 use claw_tool::{ToolRegistry, ToolRegistryError};
 
@@ -105,31 +112,19 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    /// Build an agent system with an empty tool registry, spawning the core
-    /// runtime worker via the [`ClawThread`] policy `Thread` (`StdThread` on
-    /// host, `EspIdfThread` on device) and driving its `!Send` engine with the
-    /// injected [`ClawExecutor`] `Executor` (`TokioExecutor` on host,
-    /// `EspIdfExecutor` on device).
-    /// `Thread` and `Executor` are policies selected purely by type parameter.
-    /// `filesystem` is a concrete instance moved into the runtime and shared by
-    /// the storage components it constructs.
+    /// Build an agent system with an empty tool registry.
+    ///
+    /// The returned service future must be spawned by the application. The
+    /// framework does not create a thread or choose an executor.
     ///
     /// # Errors
     ///
     /// Returns [`AgentError`] when storage cleanup or runtime construction fails.
-    pub fn new<Thread, Executor>(
+    pub fn new(
         filesystem: Filesystem,
         persistence: AgentPersistenceConfig,
-    ) -> AgentResult<Self>
-    where
-        Thread: ClawThread,
-        Executor: ClawExecutor + 'static,
-    {
-        Self::with_tool_groups::<Thread, Executor>(
-            filesystem,
-            persistence,
-            std::iter::empty::<ToolGroup>(),
-        )
+    ) -> AgentResult<(Self, AgentService<Filesystem, Http, Timer>)> {
+        Self::with_tool_groups(filesystem, persistence, core::iter::empty::<ToolGroup>())
     }
 
     /// Build a fully injectable agent system with its initial tool groups.
@@ -142,15 +137,11 @@ where
     ///
     /// Returns [`AgentError`] when persistence, tool registration, or runtime
     /// construction fails.
-    pub fn with_tool_groups<Thread, Executor>(
+    pub fn with_tool_groups(
         filesystem: Filesystem,
         persistence: AgentPersistenceConfig,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> AgentResult<Self>
-    where
-        Thread: ClawThread,
-        Executor: ClawExecutor + 'static,
-    {
+    ) -> AgentResult<(Self, AgentService<Filesystem, Http, Timer>)> {
         let filesystem = Arc::new(filesystem);
         let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
             Arc::clone(&filesystem),
@@ -160,7 +151,7 @@ where
         for group in tool_groups {
             tools.register_group(group)?;
         }
-        let runtime = AgentRuntime::new::<Filesystem, Http, Timer, Thread, Executor>(
+        let (runtime, service) = AgentRuntime::new::<Filesystem, Http, Timer>(
             filesystem,
             Arc::clone(&tools),
             shared_persistence,
@@ -168,11 +159,14 @@ where
             persistence.skill_roots,
         )?;
 
-        Ok(Self {
-            tools,
-            runtime,
-            _marker: PhantomData,
-        })
+        Ok((
+            Self {
+                tools,
+                runtime,
+                _marker: PhantomData,
+            },
+            service,
+        ))
     }
 
     /// Enable a registered tool.
@@ -221,8 +215,11 @@ where
     ///
     /// Returns [`OpenSessionError`] when the session is missing, already open, or
     /// the runtime is stopped.
-    pub fn open_session(&self, session: SessionId) -> AgentResult<(SessionControl, SessionStream)> {
-        Ok(self.runtime.open_session(session)?)
+    pub async fn open_session(
+        &self,
+        session: SessionId,
+    ) -> AgentResult<(SessionControl, SessionStream)> {
+        Ok(self.runtime.open_session(session).await?)
     }
 
     /// Register an LLM API config for a purpose (root/subagent/memory/compaction).
@@ -253,15 +250,16 @@ where
     ///
     /// Returns [`AgentError::SessionCreate`] if persistent session state cannot
     /// be initialized or the runtime has stopped.
-    pub fn new_session(&self, persistence: SessionPersistence) -> AgentResult<SessionId> {
+    pub async fn new_session(&self, persistence: SessionPersistence) -> AgentResult<SessionId> {
         self.runtime
             .create_session(persistence)
+            .await
             .map_err(AgentError::from)
     }
 
     /// Return the live conversation sessions.
-    pub fn list_sessions(&self) -> Vec<SessionId> {
-        self.runtime.list_sessions()
+    pub async fn list_sessions(&self) -> Vec<SessionId> {
+        self.runtime.list_sessions().await
     }
 
     /// Delete a live conversation session.
@@ -272,7 +270,12 @@ where
     /// # Errors
     ///
     /// Returns [`SessionDeleteError`] if any part of permanent deletion fails.
-    pub fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
-        self.runtime.delete_session(session)
+    pub async fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
+        self.runtime.delete_session(session).await
+    }
+
+    /// Ask the matching service future to shut down.
+    pub async fn shutdown(&self) {
+        self.runtime.shutdown().await;
     }
 }

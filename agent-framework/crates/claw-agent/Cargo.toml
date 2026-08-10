@@ -4,32 +4,19 @@ authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
 description = "Assembled agent-system API over claw-core runtime and Sessions"
+autotests = false
 
 [lib]
 name = "claw_agent"
 path = "src/lib.rs"
 
 [[test]]
-name = "builtin_tool_matrix"
-required-features = ["multiagent"]
-
-[[test]]
-name = "nested_subagent_join"
-required-features = ["multiagent"]
-
-[[test]]
-name = "subagent_lifecycle_matrix"
-required-features = ["multiagent"]
-
-[[test]]
-name = "cache_counter_trace"
-required-features = ["cache_profile"]
+name = "embassy_runtime"
 
 [features]
 # Concepts:
-# - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
-#   feature. The firmware path reaches ESP-IDF implementations through
-#   `claw-cabi` + `claw-sys`.
+# - target selection and concrete HAL adapters belong to the application, not
+#   to this executor-neutral framework crate.
 # - `cache_profile` forwards provider usage support.
 #
 # `claw-agent` is the public feature-selection boundary. It disables
@@ -37,9 +24,6 @@ required-features = ["cache_profile"]
 # so consumers never need to configure an implementation crate directly.
 default = ["reasoning_medium"]
 multiagent = ["claw-core/multiagent"]
-intrusive-observability = ["claw-core/intrusive-observability"]
-# Select the device-only C skill registry through claw-core.
-use_legacy_skill = ["claw-core/use_legacy_skill"]
 # Provider token/cache usage diagnostics.
 cache_profile = [
     "claw-api/cache_profile",
@@ -60,7 +44,7 @@ claw-tool = { path = "../claw-tool" }
 # `claw-agent` consumes only the DI trait surface (`ClawFs` / `ClawHttp`).
 # Applications select concrete host or device backends at their own boundary.
 claw-interface = { path = "../claw-interface" }
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
@@ -68,13 +52,10 @@ anyhow = "1"
 claw-log = { path = "../claw-log" }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted HTTP doubles so the end-to-end tests run hermetically
-# (no network, no API key) entirely through the public API; `stdthread` is the
-# host-target executor backend used by agent tests.
+# (no network, no API key) entirely through the public API.
 claw-interface = { path = "../claw-interface", features = [
     "test-doubles",
     "diskfs",
-    "stdthread",
-    "tokioexecutor",
 ] }
 serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }

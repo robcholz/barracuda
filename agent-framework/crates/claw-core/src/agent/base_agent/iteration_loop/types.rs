@@ -72,3 +72,4 @@ pub(crate) enum IterationLoopEvent {
     Interrupted,
     Cancelled,
 }
+use alloc::{string::String, vec::Vec};

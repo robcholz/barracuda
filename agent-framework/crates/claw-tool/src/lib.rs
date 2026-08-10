@@ -1,3 +1,11 @@
+#![no_std]
+// Tool handles are ref-counted but intentionally executor-local and non-Send.
+#![allow(clippy::arc_with_non_send_sync)]
+
+extern crate alloc;
+#[cfg(feature = "build-support")]
+extern crate std;
+
 #[cfg(feature = "build-support")]
 pub mod bake;
 mod registry;

@@ -16,7 +16,5 @@ claw-agent = { path = "../../crates/claw-agent" }
 claw-interface = { path = "../../crates/claw-interface", features = [
     "httpmock",
     "timermock",
-    "stdthread",
-    "tokioexecutor",
 ] }
 claw-profile = { path = "../claw-profile", features = ["dhat-heap"] }

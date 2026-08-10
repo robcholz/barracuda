@@ -346,3 +346,4 @@ mod tests {
         assert_eq!(rendered_text.matches("open-four").count(), 1);
     }
 }
+use alloc::{boxed::Box, string::ToString, vec::Vec};

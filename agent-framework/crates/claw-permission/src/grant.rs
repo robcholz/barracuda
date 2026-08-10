@@ -1,7 +1,8 @@
 //! Records human decisions on `Ask` actions so a retried call resolves without
 //! asking again — and so it cannot loop forever between "ask" and "retry".
 
-use std::collections::BTreeMap;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
 
 use serde::{Deserialize, Serialize};
 

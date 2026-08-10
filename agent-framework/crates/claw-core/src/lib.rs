@@ -1,9 +1,15 @@
+#![cfg_attr(not(test), no_std)]
 #![deny(unreachable_pub)]
+// Runtime state is executor-local; Arc remains the ownership ABI between crates.
+#![allow(clippy::arc_with_non_send_sync)]
 
 //! `claw_core` — execution runtime and agent Session primitives.
 //!
 //! [`AgentRuntime`] owns process execution; the Session subsystem owns Session
 //! lifecycle and actors.
+
+#[macro_use]
+extern crate alloc;
 
 // The reasoning cap is a crate-wide compile-time tier. Reject missing or
 // ambiguous feature selections before any runtime modules are built.
@@ -43,8 +49,6 @@ mod multiagent;
 mod runtime;
 mod session;
 
-pub(crate) const SYSTEM_TRACE_SCOPE: &str = "agent-system";
-
 pub use claw_utils::stream;
 pub(crate) use claw_utils::{define_id_allocator, define_prefixed_id};
 
@@ -57,7 +61,7 @@ pub use claw_permission::PermissionLevel;
 pub use claw_tool::ToolOutput;
 pub use config::ApiPurpose;
 pub use message::Message;
-pub use runtime::{AgentRuntime, AgentRuntimeBuildError};
+pub use runtime::{AgentRuntime, AgentRuntimeBuildError, AgentService};
 pub use session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,

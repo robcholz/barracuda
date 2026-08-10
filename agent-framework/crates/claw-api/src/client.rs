@@ -4,6 +4,8 @@
 //! client with [`ClawApi::new`], then install a complete config with
 //! [`ClawApi::set_config`] before issuing requests.
 
+use alloc::format;
+use alloc::string::{String, ToString};
 use core::sync::atomic::AtomicBool;
 
 use futures_lite::StreamExt as _;
@@ -22,6 +24,7 @@ use super::retry::{run_with_retry, sleep_abortable_async};
 use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest,
 };
+use claw_utils::yield_stream::yield_stream;
 
 /// The LLM client: a resolved backend + model profile behind an injected
 /// [`ClawHttp`] transport.
@@ -123,7 +126,7 @@ where
 {
     let policy = request.retry;
     let max_attempts = u64::from(policy.max_retries).saturating_add(1);
-    Box::pin(async_stream::stream! {
+    yield_stream(|yielder| async move {
         let mut retry_attempt = 0_u32;
         let mut emitted = false;
         let mut opened = false;
@@ -147,14 +150,14 @@ where
 
                 if !opened {
                     opened = true;
-                    yield DriverItem::Opened;
+                    yielder.yield_one(DriverItem::Opened).await;
                 }
 
                 loop {
                     match stream.next().instrument(attempt_span.clone()).await {
                         Some(Ok(event)) => {
                             emitted = true;
-                            yield DriverItem::Event(Ok(event));
+                            yielder.yield_one(DriverItem::Event(Ok(event))).await;
                         }
                         Some(Err(error)) => break 'attempt (error, "body"),
                         None => {
@@ -167,8 +170,7 @@ where
 
             let retryable = error.is_retryable();
             let replay_safe = !emitted;
-            let final_attempt =
-                !retryable || !replay_safe || retry_attempt >= policy.max_retries;
+            let final_attempt = !retryable || !replay_safe || retry_attempt >= policy.max_retries;
             let kind = chat_error_kind(&error);
             attempt_span.in_scope(|| {
                 if final_attempt {
@@ -193,7 +195,7 @@ where
             });
 
             if final_attempt {
-                yield DriverItem::Event(Err(error));
+                yielder.yield_one(DriverItem::Event(Err(error))).await;
                 return;
             }
 
@@ -220,9 +222,11 @@ where
             ))
             .await;
             if !completed {
-                yield DriverItem::Event(Err(ChatError::Api(ClawApiError::Transport(
-                    HttpError::Aborted,
-                ))));
+                yielder
+                    .yield_one(DriverItem::Event(Err(ChatError::Api(
+                        ClawApiError::Transport(HttpError::Aborted),
+                    ))))
+                    .await;
                 return;
             }
 
@@ -414,7 +418,7 @@ impl<H: BlockingClawHttp> ClawApi<H> {
     /// # use claw_interface::http::{HttpError, HttpJsonRequest, HttpResponse};
     /// # struct H; impl ClawHttp for H { fn post_json(&mut self, _r: &HttpJsonRequest, _a: &AtomicBool) -> Result<HttpResponse, HttpError> { unimplemented!() } }
     /// # let mut api: ClawApi<H> = unimplemented!();
-    /// let assets = [MediaAsset::local_path("/sdcard/photo.jpg")];
+    /// let assets = [MediaAsset::inline_bytes(vec![1, 2, 3], "image/png")];
     /// let abort = AtomicBool::new(false);
     /// let description = api.infer_media(
     ///     &MediaRequest::new(&assets).with_user_prompt("Describe this image."),

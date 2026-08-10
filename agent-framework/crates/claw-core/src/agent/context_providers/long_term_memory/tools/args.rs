@@ -86,3 +86,7 @@ pub(super) fn optional_limit(args: &Value) -> Result<usize, ToolInvokeError> {
         ))
     })
 }
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};

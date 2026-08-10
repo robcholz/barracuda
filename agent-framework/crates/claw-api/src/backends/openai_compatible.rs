@@ -1,5 +1,7 @@
 //! OpenAI-compatible backend, port of `claw_llm_backend_openai_compatible.c`.
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Value};

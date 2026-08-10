@@ -77,3 +77,4 @@ impl MultiagentPhysicalError {
         Self { detail }
     }
 }
+use alloc::{string::String, vec::Vec};

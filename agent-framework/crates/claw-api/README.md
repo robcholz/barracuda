@@ -27,10 +27,10 @@ tool-result roles, structured-output config) into each provider's wire format.
 
 ## Networking is injected
 
-`claw-api` never opens sockets itself. On device the espidf layer implements
-`ClawHttp` and `StreamingHttp` over one persistent `esp_http_client` handle;
-tests and host tools provide their own implementation. This keeps the crate a
-pure-Rust, host-testable core.
+`claw-api` never opens sockets itself. Device applications implement `ClawHttp`
+and `StreamingHttp` over their selected network stack; tests and host tools
+provide their own implementation. This keeps the crate a pure-Rust,
+host-testable core.
 
 ## Cancellation
 

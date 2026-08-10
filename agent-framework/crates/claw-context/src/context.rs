@@ -18,17 +18,16 @@
 //! the volatile ones every tick — never betting that it "remembers" to push a
 //! change, and never re-rendering when nothing changed.
 
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use alloc::borrow::Cow;
+use alloc::collections::BTreeMap;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 use serde_json::Value;
 
 use crate::block::{Block, BlockKind, Scope};
 use crate::reminder::Reminders;
-
-#[cfg(feature = "intrusive-observability")]
-mod observability;
 
 /// Separator inserted between rendered blocks: a blank line keeps sections
 /// visually distinct without editorializing block content.
@@ -62,7 +61,6 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 ///     "You are a helpful agent.\n\nAnswer in one concise paragraph."
 /// );
 /// ```
-#[cfg_attr(feature = "intrusive-observability", derive(Clone))]
 pub struct Context {
     /// One owned content string per declared kind. Only ever holds non-absent
     /// content — empty content drops the key (see [`with`](Self::with)).
@@ -89,9 +87,6 @@ impl Default for Context {
 impl Context {
     /// An empty context: no blocks, no reminder.
     pub fn new() -> Self {
-        #[cfg(feature = "intrusive-observability")]
-        observability::ensure_server();
-
         Self {
             blocks: BTreeMap::new(),
             rendered: String::new(),
@@ -195,10 +190,6 @@ impl Context {
             self.rendered_version = self.content_version;
         }
         self.reminders.refresh();
-        #[cfg(feature = "intrusive-observability")]
-        if observability::is_active() {
-            observability::publish(self.clone(), history.clone());
-        }
         RequestContext::new(&self.rendered, history, self.reminders.as_slice())
     }
 
@@ -210,7 +201,7 @@ impl Context {
         // custom blocks sharing a key, keeping the render deterministic.
         entries.sort_by(|left, right| block_order(left.0, right.0));
 
-        let mut buffer = std::mem::take(&mut self.rendered);
+        let mut buffer = core::mem::take(&mut self.rendered);
         buffer.clear();
         for (_, content) in entries {
             if !buffer.is_empty() {

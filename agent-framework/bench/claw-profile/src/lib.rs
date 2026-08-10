@@ -13,7 +13,7 @@ mod heap;
 
 pub use heap::HeapSnapshot;
 
-#[cfg(all(feature = "dhat-heap", not(target_os = "espidf")))]
+#[cfg(feature = "dhat-heap")]
 pub mod dhat;
 
 /// Install DHAT as the executable's global allocator.
@@ -21,7 +21,7 @@ pub mod dhat;
 /// Invoke this once at crate scope in a profiling executable. The allocator is
 /// intentionally not installed by the `claw-profile` library itself: global
 /// allocator selection belongs to the final linked executable.
-#[cfg(all(feature = "dhat-heap", not(target_os = "espidf")))]
+#[cfg(feature = "dhat-heap")]
 #[macro_export]
 macro_rules! install_dhat_allocator {
     () => {

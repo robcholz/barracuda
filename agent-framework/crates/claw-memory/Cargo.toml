@@ -15,22 +15,21 @@ compactor-stub = []
 [dependencies]
 # Core crate: depends only on the inbound trait crate. The concrete `ClawFs` and
 # `Compactor` (e.g. `claw_core::LlmCompactor`) are passed in by the caller, so
-# this crate pulls in neither the platform boundary (`claw-sys`) nor the LLM
+# this crate pulls in neither a concrete platform boundary nor the LLM
 # client (`claw-api`).
 claw-interface = { path = "../claw-interface" }
 # Shared id/allocator macros (`define_id_allocator!` for the `TurnId` counter).
 claw-utils = { path = "../claw-utils" }
-log = "0.4"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-strum = { version = "0.28", features = ["derive"] }
-thiserror = "2"
+log = { version = "0.4", default-features = false }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 # Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
-# disk-backed inspection backend, and `stdthread`
-# drives background work on the host target. None of these reach device builds.
-claw-interface = { path = "../claw-interface", features = ["diskfs-pretty", "stdthread"] }
+# disk-backed inspection backend. None of these reach device builds.
+claw-interface = { path = "../claw-interface", features = ["diskfs-pretty"] }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

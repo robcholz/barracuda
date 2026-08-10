@@ -1,3 +1,5 @@
+#![no_std]
+
 //! `claw_interface` — the OS / platform abstraction layer for the claw Rust
 //! crates.
 //!
@@ -10,15 +12,19 @@
 //! depend only on these traits, never on a platform directly, so the device
 //! build and host tests can plug in different implementations of the same seam.
 
-pub mod executor;
+extern crate alloc;
+#[cfg(any(
+    feature = "diskfs",
+    feature = "httpmock",
+    feature = "realhttp",
+    feature = "tokiotimer"
+))]
+extern crate std;
+
 pub mod fs;
 pub mod http;
-pub mod thread;
 pub mod timer;
 
-pub use executor::ClawExecutor;
-#[cfg(feature = "tokioexecutor")]
-pub use executor::TokioExecutor;
 pub use fs::{ClawFile, ClawFs, FsError, FsIoError};
 #[cfg(feature = "diskfs")]
 pub use fs::{DiskFile, DiskFs};
@@ -34,9 +40,6 @@ pub use http::{
     Cancel, ClawHttp, HttpAuth, HttpError, HttpGetRequest, HttpHeader, HttpJsonRequest,
     HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, StreamingHttp,
 };
-#[cfg(feature = "stdthread")]
-pub use thread::StdThread;
-pub use thread::{ClawThread, CoreAffinity, Priority, WorkerHandle};
 #[cfg(feature = "timermock")]
 pub use timer::mock::{ImmediateTimer, YieldingTimer};
 #[cfg(feature = "tokiotimer")]

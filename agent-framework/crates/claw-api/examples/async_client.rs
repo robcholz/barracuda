@@ -10,8 +10,8 @@
 //!
 //! To stay dependency-free the example ships its own pieces: a stub async
 //! transport that resolves in one poll, an immediate [`ClawTimer`], and a
-//! minimal spinning `block_on`. On device these are `esp_http_client` (async)
-//! and a real runtime timer.
+//! minimal spinning `block_on`. A device application replaces them with its
+//! async network adapter and runtime timer.
 
 use std::future::Future;
 use std::pin::Pin;

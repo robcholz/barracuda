@@ -67,12 +67,15 @@ fn openai_remote_url_is_sent_as_image_url() {
 }
 
 #[test]
-fn openai_local_path_is_sent_as_data_url() {
+fn host_can_read_a_file_then_send_inline_bytes() {
     let dir = TempDir::new("claw-api-media").unwrap();
     let path = dir.path().join("image.png");
     std::fs::write(&path, b"\x89PNG\r\n\x1a\nABCDE").unwrap();
     let (mut api, http) = openai_api(openai_reply("local ok"), None);
-    let assets = [MediaAsset::local_path(path.to_string_lossy().into_owned())];
+    let assets = [MediaAsset::inline_bytes(
+        std::fs::read(path).unwrap(),
+        "image/png",
+    )];
     let abort = AtomicBool::new(false);
 
     let text = api
@@ -87,13 +90,10 @@ fn openai_local_path_is_sent_as_data_url() {
 }
 
 #[test]
-fn local_path_mime_override_bypasses_extension() {
-    let dir = TempDir::new("claw-api-media").unwrap();
-    let path = dir.path().join("image.bmp");
-    std::fs::write(&path, b"bmpdata").unwrap();
+fn inline_mime_type_can_be_replaced() {
     let (mut api, http) = openai_api(openai_reply("override ok"), None);
     let assets =
-        [MediaAsset::local_path(path.to_string_lossy().into_owned()).with_mime_type("image/png")];
+        [MediaAsset::inline_bytes(b"bmpdata".to_vec(), "image/bmp").with_mime_type("image/png")];
     let abort = AtomicBool::new(false);
 
     api.infer_media(
@@ -142,60 +142,9 @@ fn media_rejects_empty_remote_url() {
 }
 
 #[test]
-fn media_rejects_empty_path() {
+fn media_rejects_empty_inline_bytes() {
     let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::local_path("")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaPathEmpty));
-}
-
-#[test]
-fn media_rejects_relative_path() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::local_path("rel/a.png")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaPathNotAbsolute));
-}
-
-#[test]
-fn media_rejects_unknown_extension() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::local_path("/tmp/a.bmp")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::UnsupportedMediaType));
-}
-
-#[test]
-fn media_rejects_empty_local_file() {
-    let dir = TempDir::new("claw-api-media").unwrap();
-    let path = dir.path().join("empty.png");
-    std::fs::write(&path, b"").unwrap();
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::local_path(path.to_string_lossy().into_owned())];
+    let assets = [MediaAsset::inline_bytes(Vec::new(), "image/png")];
     let abort = AtomicBool::new(false);
 
     let error = api
@@ -222,22 +171,6 @@ fn media_rejects_inline_bytes_over_size_limit() {
         .unwrap_err();
 
     assert!(matches!(error, InferMediaError::MediaTooLarge));
-}
-
-#[test]
-fn media_rejects_empty_inline_bytes() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::inline_bytes(Vec::new(), "image/png")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaFileEmpty));
 }
 
 #[test]

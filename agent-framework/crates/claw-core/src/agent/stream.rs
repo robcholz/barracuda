@@ -1,7 +1,7 @@
+use alloc::{boxed::Box, rc::Rc};
+use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;

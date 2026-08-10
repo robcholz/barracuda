@@ -1,6 +1,7 @@
 //! Skill tools owned by the skill context provider.
 
-use std::sync::{Arc, Mutex};
+use alloc::{borrow::ToOwned, format, string::ToString, sync::Arc};
+use core::cell::RefCell;
 
 use claw_skill::{SkillError, SkillId, SkillSet};
 use claw_tool::{
@@ -11,7 +12,7 @@ use serde_json::Value;
 
 use super::lock_skill_set;
 
-pub(super) fn skill_tools(skills: Arc<Mutex<SkillSet>>) -> ToolGroup {
+pub(super) fn skill_tools(skills: Arc<RefCell<SkillSet>>) -> ToolGroup {
     ToolGroup::new(
         "skill",
         true,
@@ -29,7 +30,7 @@ pub(super) fn skill_tools(skills: Arc<Mutex<SkillSet>>) -> ToolGroup {
 
 /// Serves the available-skills JSON catalog resolved from the agent's SkillSet.
 struct ListSkillTool {
-    skills: Arc<Mutex<SkillSet>>,
+    skills: Arc<RefCell<SkillSet>>,
 }
 
 impl ToolSpec for ListSkillTool {
@@ -57,7 +58,7 @@ impl SyncToolHandler for ListSkillTool {
 
 /// Activates one skill and returns its processed document as the tool result.
 struct ActivateSkillTool {
-    skills: Arc<Mutex<SkillSet>>,
+    skills: Arc<RefCell<SkillSet>>,
 }
 
 impl ToolSpec for ActivateSkillTool {
@@ -108,7 +109,7 @@ impl SyncToolHandler for ActivateSkillTool {
 
 /// Re-scans the skill registry's roots and swaps in a fresh catalog.
 struct ReloadSkillsTool {
-    skills: Arc<Mutex<SkillSet>>,
+    skills: Arc<RefCell<SkillSet>>,
 }
 
 impl ToolSpec for ReloadSkillsTool {

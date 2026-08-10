@@ -62,8 +62,8 @@ the modules rely on, and a `ScriptedHttp` serving canned LLM replies through the
 
 ## Where it fits
 
-Everything downstream — `claw-api`, `claw_core`, `claw-capability`, `claw-memory`,
+Everything downstream — `claw-api`, `claw_core`, `claw-tool`, `claw-memory`,
 `claw-sandbox`, … — depends on this crate's traits and types and stays
-platform-agnostic. The on-device implementations live in `claw-sys` (e.g.
-`EspIdfHttp`) and the firmware wiring; the host implementations are the
+platform-agnostic. An Embassy application implements these traits with its
+selected HAL/network/storage stack; the host implementations are the
 feature-gated doubles above.

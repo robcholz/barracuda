@@ -1,6 +1,11 @@
+use alloc::{
+    borrow::ToOwned,
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use std::sync::Arc;
 
 use async_channel::Sender;
 use claw_tool::ToolGroup;
@@ -747,7 +752,7 @@ impl Multiagent {
 
     fn finish_removals(&mut self) {
         let mut pending = Vec::with_capacity(self.removals.len());
-        for mut removal in std::mem::take(&mut self.removals) {
+        for mut removal in core::mem::take(&mut self.removals) {
             if removal.reaped != removal.victims {
                 pending.push(removal);
                 continue;

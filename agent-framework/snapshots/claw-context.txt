@@ -40,10 +40,10 @@ pub claw_context::ContextItem::Reminder
 pub claw_context::ContextItem::Reminder::kind: claw_context::BlockKind
 pub claw_context::ContextItem::Reminder::text: core::option::Option<alloc::borrow::Cow<'a, str>>
 impl<'a> claw_context::ContextItem<'a>
-pub fn claw_context::ContextItem<'a>::block(claw_context::BlockKind, impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
-pub fn claw_context::ContextItem<'a>::clear_reminder(claw_context::BlockKind) -> Self
-pub fn claw_context::ContextItem<'a>::message(claw_context::BlockKind, &'a serde_json::value::Value) -> Self
-pub fn claw_context::ContextItem<'a>::reminder(claw_context::BlockKind, impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub fn claw_context::ContextItem<'a>::block(kind: claw_context::BlockKind, content: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub fn claw_context::ContextItem<'a>::clear_reminder(kind: claw_context::BlockKind) -> Self
+pub fn claw_context::ContextItem<'a>::message(kind: claw_context::BlockKind, value: &'a serde_json::value::Value) -> Self
+pub fn claw_context::ContextItem<'a>::reminder(kind: claw_context::BlockKind, text: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
 pub enum claw_context::Scope
 pub claw_context::Scope::Agent
 pub claw_context::Scope::Conversation
@@ -54,27 +54,27 @@ pub struct claw_context::Block<'a>
 pub claw_context::Block::content: alloc::borrow::Cow<'a, str>
 pub claw_context::Block::kind: claw_context::BlockKind
 impl<'a> claw_context::Block<'a>
-pub fn claw_context::Block<'a>::new(claw_context::BlockKind, impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub fn claw_context::Block<'a>::new(kind: claw_context::BlockKind, content: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
 pub struct claw_context::Context
 impl claw_context::Context
 pub fn claw_context::Context::fork_blocks(&self) -> alloc::vec::Vec<claw_context::Block<'static>>
 pub fn claw_context::Context::new() -> Self
-pub fn claw_context::Context::reminder(&mut self, core::option::Option<&str>) -> &mut Self
-pub fn claw_context::Context::request<'a>(&'a mut self, &'a serde_json::value::Value) -> claw_context::RequestContext<'a>
+pub fn claw_context::Context::reminder(&mut self, text: core::option::Option<&str>) -> &mut Self
+pub fn claw_context::Context::request<'a>(&'a mut self, history: &'a serde_json::value::Value) -> claw_context::RequestContext<'a>
 pub fn claw_context::Context::sink(&mut self) -> claw_context::ContextSink<'_>
 pub fn claw_context::Context::version(&self) -> u64
-pub fn claw_context::Context::with(&mut self, claw_context::Block<'_>) -> &mut Self
-pub fn claw_context::Context::with_item(&mut self, claw_context::ContextItem<'_>) -> &mut Self
-pub fn claw_context::Context::with_reminder(&mut self, claw_context::BlockKind, core::option::Option<&str>) -> &mut Self
+pub fn claw_context::Context::with(&mut self, block: claw_context::Block<'_>) -> &mut Self
+pub fn claw_context::Context::with_item(&mut self, item: claw_context::ContextItem<'_>) -> &mut Self
+pub fn claw_context::Context::with_reminder(&mut self, kind: claw_context::BlockKind, text: core::option::Option<&str>) -> &mut Self
 impl core::default::Default for claw_context::Context
 pub fn claw_context::Context::default() -> Self
 pub struct claw_context::ContextSink<'a>
 impl<'a> claw_context::ContextSink<'a>
-pub fn claw_context::ContextSink<'a>::block(&mut self, claw_context::Block<'_>) -> &mut Self
+pub fn claw_context::ContextSink<'a>::block(&mut self, block: claw_context::Block<'_>) -> &mut Self
 pub fn claw_context::ContextSink<'a>::into_history(self) -> serde_json::value::Value
-pub fn claw_context::ContextSink<'a>::item(&mut self, claw_context::ContextItem<'_>) -> &mut Self
-pub fn claw_context::ContextSink<'a>::message(&mut self, claw_context::BlockKind, &serde_json::value::Value) -> &mut Self
-pub fn claw_context::ContextSink<'a>::reminder(&mut self, claw_context::BlockKind, core::option::Option<&str>) -> &mut Self
+pub fn claw_context::ContextSink<'a>::item(&mut self, item: claw_context::ContextItem<'_>) -> &mut Self
+pub fn claw_context::ContextSink<'a>::message(&mut self, kind: claw_context::BlockKind, value: &serde_json::value::Value) -> &mut Self
+pub fn claw_context::ContextSink<'a>::reminder(&mut self, kind: claw_context::BlockKind, text: core::option::Option<&str>) -> &mut Self
 pub struct claw_context::RequestContext<'a>
 impl<'a> claw_context::RequestContext<'a>
 pub fn claw_context::RequestContext<'a>::history(&self) -> &'a serde_json::value::Value

@@ -1,7 +1,14 @@
+use alloc::{
+    borrow::ToOwned,
+    boxed::Box,
+    collections::{BTreeSet, VecDeque},
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::{BTreeSet, VecDeque};
-use std::sync::Arc;
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
@@ -490,7 +497,7 @@ where
         }
         self.finish_turn();
 
-        let lifecycle = std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
+        let lifecycle = core::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
         let ActorLifecycle::Stopping(stopping) = lifecycle else {
             self.lifecycle = lifecycle;
             return None;
@@ -523,7 +530,7 @@ where
     }
 
     pub(super) fn complete_delete(&mut self, result: Result<(), SessionDeleteError>) -> bool {
-        let lifecycle = std::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
+        let lifecycle = core::mem::replace(&mut self.lifecycle, ActorLifecycle::Running);
         let ActorLifecycle::DeleteReady(mut stopping) = lifecycle else {
             self.lifecycle = lifecycle;
             return false;
@@ -717,14 +724,14 @@ where
     }
 
     fn poll_orchestration(&mut self, context: &mut Context<'_>) -> Poll<()> {
-        let mut orchestration = std::mem::take(&mut self.orchestration);
+        let mut orchestration = core::mem::take(&mut self.orchestration);
         let result = orchestration.poll(context, self);
         self.orchestration = orchestration;
         result
     }
 
     fn drain_orchestration_effects(&mut self) {
-        let mut orchestration = std::mem::take(&mut self.orchestration);
+        let mut orchestration = core::mem::take(&mut self.orchestration);
         orchestration.drain_effects(self);
         self.orchestration = orchestration;
     }

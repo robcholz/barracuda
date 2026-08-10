@@ -1,26 +1,29 @@
 //! Single-thread process runtime loop.
 
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::sync::{mpsc, Arc};
 
 use async_channel::{Receiver, Sender};
 use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawExecutor, ClawFs, ClawHttp, ClawTimer};
+use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;
 use futures_core::Stream;
-use tracing::Instrument as _;
 
 use crate::config::SharedApiManager;
 use crate::session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
 };
-use crate::SYSTEM_TRACE_SCOPE;
 
-use super::agent_runtime::{AgentRuntimeBuildError, RUNTIME_TRACE_TASK};
+use super::agent_runtime::AgentRuntimeBuildError;
 
 pub(super) enum RuntimeCommand {
     CreateSession {
@@ -41,7 +44,7 @@ pub(super) enum RuntimeCommand {
     Stop,
 }
 
-struct RuntimeWorker<Filesystem, Http, Timer>
+pub(super) struct RuntimeWorker<Filesystem, Http, Timer>
 where
     Filesystem: ClawFs + 'static,
     Http: ClawHttp + StreamingHttp + Default + 'static,
@@ -60,7 +63,7 @@ where
     Http: ClawHttp + StreamingHttp + Default + 'static,
     Timer: ClawTimer + Default + 'static,
 {
-    fn new(
+    pub(super) fn new(
         filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
@@ -218,46 +221,4 @@ fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntim
             AgentRuntimeBuildError::MissingPersistedSessionState(session)
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn run_runtime_worker<Filesystem, Http, Timer, Executor>(
-    filesystem: Arc<Filesystem>,
-    tool_registry: Arc<ToolRegistry>,
-    persistence: SharedPersistence<Filesystem>,
-    persistence_dir: String,
-    skill_roots: Vec<String>,
-    commands: Receiver<RuntimeCommand>,
-    init_result: mpsc::Sender<Result<(), AgentRuntimeBuildError>>,
-    api_manager: SharedApiManager,
-) where
-    Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
-    Executor: ClawExecutor,
-{
-    let span = tracing::info_span!(
-        "agent.runtime",
-        trace.task = RUNTIME_TRACE_TASK,
-        run.system = SYSTEM_TRACE_SCOPE,
-    );
-    let worker = match span.in_scope(|| {
-        RuntimeWorker::<Filesystem, Http, Timer>::new(
-            filesystem,
-            tool_registry,
-            persistence,
-            persistence_dir,
-            skill_roots,
-            api_manager,
-            commands,
-        )
-    }) {
-        Ok(worker) => worker,
-        Err(error) => {
-            let _ = init_result.send(Err(error));
-            return;
-        }
-    };
-    let _ = init_result.send(Ok(()));
-    Executor::block_on(worker.instrument(span));
 }

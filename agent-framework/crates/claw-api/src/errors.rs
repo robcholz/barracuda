@@ -9,6 +9,7 @@
 //! Transport variants retain the typed [`HttpError`] source; other dynamic
 //! messages are limited to the variants whose domain data is itself text.
 
+use alloc::string::String;
 use claw_interface::http::HttpError;
 use strum::IntoStaticStr;
 use thiserror::Error;

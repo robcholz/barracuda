@@ -1,4 +1,10 @@
-use std::collections::{HashSet, VecDeque};
+use alloc::{
+    borrow::ToOwned,
+    collections::{BTreeSet, VecDeque},
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 #[cfg(feature = "cache_profile")]
 use claw_api::ProviderUsage;
@@ -9,6 +15,7 @@ use claw_tool::{
     ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
 };
 use claw_utils::stream::StreamPart;
+use claw_utils::yield_stream::try_yield_stream;
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
@@ -98,13 +105,13 @@ where
         self,
         step: LlmStep<'a>,
     ) -> impl futures_core::Stream<Item = Result<IterationLoopEvent, IterationLoopError>> + 'a {
-        async_stream::try_stream! {
+        try_yield_stream(|yielder| async move {
             let loop_ = self;
             if loop_.control.is_cancelled() {
                 log::warn!("Agent iteration cancelled before LLM HTTP request");
                 tracing::warn!(name: "cancelled", checkpoint = "before_llm_http");
-                yield IterationLoopEvent::Cancelled;
-                return;
+                yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                return Ok(());
             }
 
             let chat_request = ChatRequest {
@@ -132,8 +139,8 @@ where
                 Err(error) if loop_.control.is_cancelled() || error.is_aborted() => {
                     log::warn!("Agent iteration cancelled during LLM HTTP request");
                     tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
-                    yield IterationLoopEvent::Cancelled;
-                    return;
+                    yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                    return Ok(());
                 }
                 Err(error) => {
                     log::error!("Agent LLM chat failed");
@@ -150,13 +157,19 @@ where
                     .await;
                 match next {
                     Some(Ok(ChatStreamEvent::Reasoning(part))) => {
-                        yield IterationLoopEvent::Iteration(IterationEvent::Reasoning(part));
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Reasoning(
+                                part,
+                            )))
+                            .await;
                     }
                     Some(Ok(ChatStreamEvent::Output(part))) => {
                         if let StreamPart::Delta(output) = &part {
                             output_bytes = output_bytes.saturating_add(output.len() as u64);
                         }
-                        yield IterationLoopEvent::Iteration(IterationEvent::Output(part));
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Output(part)))
+                            .await;
                     }
                     Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))) => {
                         tool_calls.push(call);
@@ -165,13 +178,15 @@ where
                     #[cfg(feature = "cache_profile")]
                     Some(Ok(ChatStreamEvent::Usage(usage))) => {
                         trace_context_cache_hit_rate(&usage);
-                        yield IterationLoopEvent::Iteration(IterationEvent::Usage(usage));
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Usage(usage)))
+                            .await;
                     }
                     Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
                         log::warn!("Agent iteration cancelled during LLM HTTP request");
                         tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
-                        yield IterationLoopEvent::Cancelled;
-                        return;
+                        yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                        return Ok(());
                     }
                     Some(Err(error)) => {
                         log::error!("Agent LLM chat failed");
@@ -185,19 +200,25 @@ where
             if loop_.control.is_cancelled() {
                 log::warn!("Agent iteration cancelled after LLM response");
                 tracing::warn!(name: "cancelled", checkpoint = "after_llm");
-                yield IterationLoopEvent::Cancelled;
-                return;
+                yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                return Ok(());
             }
             if tool_calls.is_empty() {
                 tracing::info!(name: "completed", output_bytes);
-                yield IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::End));
-                return;
+                yielder
+                    .yield_one(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+                        StreamPart::End,
+                    )))
+                    .await;
+                return Ok(());
             }
 
             tracing::info!(name: "tool_calls", count = tool_calls.len() as u64);
-            yield IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(
-                tool_calls.clone(),
-            ));
+            yielder
+                .yield_one(IterationLoopEvent::Iteration(
+                    IterationEvent::BeforeToolCalls(tool_calls.clone()),
+                ))
+                .await;
 
             let mut tools = ToolPhase::new(tool_calls, step.tools, loop_.permission)?;
             while let Some(event) = tools.next(loop_.control).await? {
@@ -205,12 +226,13 @@ where
                     event,
                     IterationLoopEvent::Interrupted | IterationLoopEvent::Cancelled
                 );
-                yield event;
+                yielder.yield_one(event).await;
                 if terminal {
-                    return;
+                    return Ok(());
                 }
             }
-        }
+            Ok(())
+        })
     }
 }
 
@@ -223,7 +245,7 @@ impl<'a> ToolPhase<'a> {
     where
         P: ToolPermissionPolicy,
     {
-        let mut provider_ids = HashSet::with_capacity(tool_calls.len());
+        let mut provider_ids = BTreeSet::new();
         for tool_call in &tool_calls {
             if tool_call.id.is_empty() {
                 return Err(IterationLoopError::MissingProviderToolCallId);
@@ -739,7 +761,7 @@ mod tests {
     fn chat_phase_errors_preserve_nested_http_debug_context() {
         let chat_error =
             ChatError::Api(ClawApiError::TransientTransport(HttpError::RequestFailed(
-                HttpRequestFailure::driver("esp_http_client_perform", "async transport errno=104"),
+                HttpRequestFailure::driver("network_poll", "async transport errno=104"),
             )));
 
         let init = format!("{:?}", IterationLoopError::ChatInit(chat_error.clone()));
@@ -753,7 +775,7 @@ mod tests {
             "TransientTransport(",
             "RequestFailed(",
             "Driver {",
-            "operation: \"esp_http_client_perform\"",
+            "operation: \"network_poll\"",
             "message: \"async transport errno=104\"",
         ] {
             assert!(init.contains(expected), "missing `{expected}` in {init}");

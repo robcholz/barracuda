@@ -1,6 +1,5 @@
-//! Blocking [`ClawApi::infer_media`] surface: build image inputs three ways
-//! ([`MediaAsset::local_path`], [`MediaAsset::remote_url`],
-//! [`MediaAsset::inline_bytes`]), inspect each enum variant's payload, and send
+//! Blocking [`ClawApi::infer_media`] surface: build remote and inline image
+//! inputs, inspect each enum variant's payload, and send
 //! them with every [`MediaRequest`] builder.
 //!
 //! Run with:
@@ -10,8 +9,8 @@
 //! ```
 //!
 //! The transport is a stub returning a canned vision reply, so no network or
-//! real model is involved. The local-file path is exercised against a tiny
-//! temporary `.png` written to the OS temp dir.
+//! real model is involved. Host code reads a tiny temporary `.png` before
+//! passing its bytes to the platform-neutral API.
 
 use std::sync::atomic::AtomicBool;
 
@@ -42,9 +41,6 @@ impl ClawHttp for StubHttp {
 /// Print the variant + payload of a [`MediaAsset`].
 fn describe(asset: &MediaAsset) {
     let detail = match asset {
-        MediaAsset::LocalPath { path, mime_type } => {
-            format!("LocalPath   path={path} mime={mime_type:?}")
-        }
         MediaAsset::RemoteUrl { url } => format!("RemoteUrl   url={url}"),
         MediaAsset::InlineBytes { bytes, mime_type } => {
             format!("InlineBytes bytes={}B mime={mime_type}", bytes.len())
@@ -58,10 +54,10 @@ fn main() -> anyhow::Result<()> {
     let mut png_path = std::env::temp_dir();
     png_path.push("claw_api_example.png");
     std::fs::write(&png_path, b"\x89PNG\r\n\x1a\nfake-image-bytes")?;
-    let png_path = png_path.to_string_lossy().into_owned();
+    let png_bytes = std::fs::read(&png_path)?;
 
-    // Three ways to supply an image; `with_mime_type` overrides the inferred type.
-    let local = MediaAsset::local_path(&png_path);
+    // The host reads through its filesystem boundary, then supplies bytes.
+    let local = MediaAsset::inline_bytes(png_bytes, "image/png");
     let remote = MediaAsset::remote_url("https://example.com/cat.png");
     let inline = MediaAsset::inline_bytes(b"\x89PNG\r\n\x1a\ninline".to_vec(), "image/png")
         .with_mime_type("image/png");
@@ -105,6 +101,6 @@ fn main() -> anyhow::Result<()> {
         api.infer_media(&remote_request, &abort)?
     );
 
-    let _ = std::fs::remove_file(&png_path);
+    let _ = std::fs::remove_file(png_path);
     Ok(())
 }

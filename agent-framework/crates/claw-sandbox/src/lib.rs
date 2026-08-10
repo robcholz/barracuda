@@ -1,3 +1,5 @@
+#![no_std]
+
 //! `claw-sandbox` — the sandbox filesystem.
 //!
 //! This crate is the sandbox the agent runs in: it confines file access to a
@@ -8,6 +10,8 @@
 //! applies on-device and in host tests.
 //!
 //! [`ClawFs`]: claw_interface::ClawFs
+
+extern crate alloc;
 
 pub mod fs;
 pub mod sandbox;

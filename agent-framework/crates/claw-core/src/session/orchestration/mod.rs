@@ -85,3 +85,4 @@ impl OrchestrationPhysicalError {
         Self { detail }
     }
 }
+use alloc::{string::String, vec::Vec};

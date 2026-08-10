@@ -10,6 +10,8 @@
 //! trait (as associated consts), so a backend owns its own metadata instead of
 //! duplicating it in a table here.
 
+use alloc::string::String;
+
 mod anthropic;
 mod openai_compatible;
 pub(crate) mod shared;
@@ -37,7 +39,7 @@ impl fmt::Display for ParseBackendKindError {
     }
 }
 
-impl std::error::Error for ParseBackendKindError {}
+impl core::error::Error for ParseBackendKindError {}
 
 /// Behavior each built-in backend implements.
 ///

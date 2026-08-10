@@ -28,3 +28,4 @@ pub(crate) fn non_blank_argument(args: &Value, key: &str) -> Result<String, Tool
     }
     Ok(trimmed.to_string())
 }
+use alloc::string::{String, ToString};

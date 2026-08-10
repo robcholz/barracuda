@@ -1,5 +1,7 @@
 //! Request, response, and configuration types for [`crate::ClawApi`].
 
+use alloc::string::String;
+use alloc::vec::Vec;
 use claw_utils::stream::StreamPart;
 use serde::{Deserialize, Serialize};
 
@@ -466,26 +468,19 @@ impl<'a> ChatRequest<'a> {
 /// An image input for [`crate::ClawApi::infer_media`].
 ///
 /// Each variant carries exactly the data its input mode needs, so mutually
-/// exclusive states (a file path *and* inline bytes at once, inline bytes with
-/// no MIME) are unrepresentable. Construct with [`MediaAsset::local_path`],
-/// [`MediaAsset::remote_url`], or [`MediaAsset::inline_bytes`]. Supported local
-/// types: jpg/jpeg/png/gif/webp.
+/// exclusive states are unrepresentable. Construct with
+/// [`MediaAsset::remote_url`] or [`MediaAsset::inline_bytes`]. The application
+/// reads local files through its injected filesystem before constructing inline
+/// bytes, so this transport-facing type never performs platform I/O.
 ///
 /// ```
 /// use claw_api::MediaAsset;
-/// let a = MediaAsset::local_path("/sdcard/photo.jpg");
+/// let a = MediaAsset::inline_bytes(vec![1, 2, 3], "image/png");
 /// let b = MediaAsset::remote_url("https://example.com/cat.png");
 /// # let _ = (a, b);
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MediaAsset {
-    /// An absolute local file path, read and base64-encoded into a data URL.
-    LocalPath {
-        /// Absolute file path.
-        path: String,
-        /// MIME override; otherwise inferred from the file extension.
-        mime_type: Option<String>,
-    },
     /// A remote image URL, passed through to the provider unchanged.
     RemoteUrl {
         /// Image URL.
@@ -501,15 +496,6 @@ pub enum MediaAsset {
 }
 
 impl MediaAsset {
-    /// An asset backed by an absolute local file path.
-    #[must_use]
-    pub fn local_path(path: impl Into<String>) -> Self {
-        Self::LocalPath {
-            path: path.into(),
-            mime_type: None,
-        }
-    }
-
     /// An asset referenced by a remote URL.
     #[must_use]
     pub fn remote_url(url: impl Into<String>) -> Self {
@@ -525,15 +511,11 @@ impl MediaAsset {
         }
     }
 
-    /// Override the MIME type: sets the override for [`MediaAsset::LocalPath`]
-    /// and replaces it for [`MediaAsset::InlineBytes`]. A remote URL carries no
-    /// MIME (the provider fetches and sniffs it), so this is a no-op there.
+    /// Replace the MIME type for [`MediaAsset::InlineBytes`]. A remote URL
+    /// carries no MIME (the provider fetches and sniffs it), so this is a no-op.
     #[must_use]
     pub fn with_mime_type(mut self, mime_type: impl Into<String>) -> Self {
         match &mut self {
-            Self::LocalPath {
-                mime_type: slot, ..
-            } => *slot = Some(mime_type.into()),
             Self::InlineBytes {
                 mime_type: slot, ..
             } => *slot = mime_type.into(),
@@ -547,7 +529,7 @@ impl MediaAsset {
 ///
 /// ```
 /// use claw_api::{MediaAsset, MediaRequest};
-/// let assets = [MediaAsset::local_path("/sdcard/photo.jpg")];
+/// let assets = [MediaAsset::inline_bytes(vec![1, 2, 3], "image/png")];
 /// let req = MediaRequest::new(&assets).with_user_prompt("Describe this image.");
 /// # let _ = req;
 /// ```

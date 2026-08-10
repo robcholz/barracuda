@@ -68,8 +68,9 @@ impl<F: ClawFs + 'static> ProfileContextProvider<F> {
 impl<F: ClawFs + 'static> ContextProvider for ProfileContextProvider<F> {
     fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
         for document in ProfileDocument::all() {
-            self.contribute_document(document, output)
-                .map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { Box::new(error) })?;
+            self.contribute_document(document, output).map_err(
+                |error| -> Box<dyn core::error::Error + Send + Sync> { Box::new(error) },
+            )?;
         }
         Ok(())
     }
@@ -78,3 +79,4 @@ impl<F: ClawFs + 'static> ContextProvider for ProfileContextProvider<F> {
         Some(profile_tools(self.store.clone()))
     }
 }
+use alloc::boxed::Box;

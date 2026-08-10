@@ -107,3 +107,4 @@ pub(super) trait Extractor {
     /// Propose memory changes from `input` (transcript + current memory).
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a>;
 }
+use alloc::{boxed::Box, string::String, vec::Vec};

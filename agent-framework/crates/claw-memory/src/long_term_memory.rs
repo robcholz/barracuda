@@ -26,14 +26,24 @@
 //! the journal is rewritten atomically from the live set, dropping the dead
 //! lines.
 //!
-//! # Concurrency
+//! # Ownership
 //!
-//! All state sits behind one `Mutex` inside an `Arc`, so the agent context path
+//! All state sits behind one `RefCell` inside an `Arc`, so the agent context path
 //! and memory tools can write the *same* store through cheap [`Clone`]s of the
-//! handle. The store itself is thread-safe; higher layers decide whether a
-//! particular extraction or tool path is local or worker-driven.
+//! handle. A store is driven by one executor task; higher layers must not access
+//! it re-entrantly while a mutation is in progress.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::{
+    cell::{RefCell, RefMut},
+    cmp::Reverse,
+    fmt,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,8 +71,8 @@ impl MemoryId {
     }
 }
 
-impl std::fmt::Display for MemoryId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for MemoryId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
@@ -231,7 +241,7 @@ struct Inner<F: ClawFs + 'static> {
     filesystem: Arc<F>,
     path: String,
     id_prefix: String,
-    state: Mutex<State>,
+    state: RefCell<State>,
 }
 
 /// A durable, label-indexed store of distilled facts. See the module docs for
@@ -303,7 +313,7 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
                 filesystem,
                 path,
                 id_prefix: id_prefix.to_string(),
-                state: Mutex::new(state),
+                state: RefCell::new(state),
             }),
         })
     }
@@ -371,7 +381,7 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
             })
             .cloned()
             .collect();
-        hits.sort_by_key(|item| std::cmp::Reverse(item.seq));
+        hits.sort_by_key(|item| Reverse(item.seq));
         hits.truncate(limit);
         hits
     }
@@ -380,7 +390,7 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
     pub fn list(&self) -> Vec<MemoryItem> {
         let state = self.lock();
         let mut items = state.items.clone();
-        items.sort_by_key(|item| std::cmp::Reverse(item.seq));
+        items.sort_by_key(|item| Reverse(item.seq));
         items
     }
 
@@ -457,11 +467,8 @@ impl<F: ClawFs + 'static> LongTermMemory<F> {
         self.lock().version
     }
 
-    fn lock(&self) -> MutexGuard<'_, State> {
-        self.inner
-            .state
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn lock(&self) -> RefMut<'_, State> {
+        self.inner.state.borrow_mut()
     }
 
     /// Append one serialized record to the journal.

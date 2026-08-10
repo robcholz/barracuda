@@ -1,9 +1,9 @@
 //! Eyeball the unified host log format: one line per source (`log` facade and
-//! `tracing`), all rendered as ESP-IDF's `<L> (<ms>) <tag>: <msg>`.
+//! `tracing`), all rendered as `<L> (<ms>) <tag>: <msg>`.
 //!
 //! Run: `cargo run --example fmt_demo -p claw-log`
 //! - piped (non-TTY) → plain text, ANSI auto-stripped by anstream;
-//! - on a TTY → ESP-IDF per-level colors (E red, W yellow, I green).
+//! - on a TTY → per-level colors (E red, W yellow, I green).
 
 use claw_log::LevelFilter;
 

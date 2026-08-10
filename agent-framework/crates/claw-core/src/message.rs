@@ -44,3 +44,4 @@ mod tests {
         .is_err());
     }
 }
+use alloc::string::String;

@@ -13,5 +13,5 @@ crate-type = ["rlib"]
 default = []
 dhat-heap = ["dep:dhat"]
 
-[target.'cfg(not(target_os = "espidf"))'.dependencies]
+[dependencies]
 dhat = { version = "0.3.3", optional = true }

@@ -1,3 +1,4 @@
+#![no_std]
 //! `claw-permission` — the tool-permission policy layer.
 //!
 //! A pure, `claw-core`-independent crate that answers one question: *may this tool
@@ -33,6 +34,8 @@
 //! grants.grant(action.signature());
 //! assert!(grants.lookup(&action.signature()).is_some());
 //! ```
+
+extern crate alloc;
 
 mod action;
 mod grant;

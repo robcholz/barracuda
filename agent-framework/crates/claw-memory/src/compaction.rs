@@ -12,10 +12,9 @@
 //! is defined here only so it stays free of any LLM dependency, exactly like the
 //! crate depends on the `ClawFs` trait and never on its implementation.
 
+use alloc::{boxed::Box, vec::Vec};
+use core::{error::Error, future::Future, pin::Pin};
 use serde_json::Value;
-use std::error::Error;
-use std::future::Future;
-use std::pin::Pin;
 use strum::IntoStaticStr;
 
 /// Future returned by [`Compactor::compact`].
@@ -113,13 +112,13 @@ impl Compactor for NoopCompactor {
 
 #[cfg(test)]
 mod tests {
-    use std::error::Error as _;
+    use core::error::Error as _;
 
     use super::CompactError;
 
     #[test]
     fn compact_error_preserves_source_and_converts_variants_to_stable_trace_kinds() {
-        let summary_generation = CompactError::summary_generation(std::fmt::Error);
+        let summary_generation = CompactError::summary_generation(core::fmt::Error);
         let empty_summary = CompactError::EmptySummary;
 
         let summary_generation_kind: &'static str = (&summary_generation).into();
@@ -129,6 +128,6 @@ mod tests {
         assert_eq!(empty_summary_kind, "empty_summary");
         assert!(summary_generation
             .source()
-            .is_some_and(|source| source.is::<std::fmt::Error>()));
+            .is_some_and(|source| source.is::<core::fmt::Error>()));
     }
 }

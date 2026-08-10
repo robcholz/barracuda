@@ -1,3 +1,6 @@
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 

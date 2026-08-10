@@ -7,8 +7,8 @@ mod layout;
 mod long_term;
 mod persistence;
 
-use std::marker::PhantomData;
-use std::sync::Arc;
+use alloc::{string::String, sync::Arc};
+use core::marker::PhantomData;
 
 use crate::config::SharedApiManager;
 use claw_interface::http::StreamingHttp;

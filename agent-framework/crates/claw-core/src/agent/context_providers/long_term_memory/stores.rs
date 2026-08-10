@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use claw_interface::ClawFs;
 use claw_memory::{

@@ -1,7 +1,7 @@
 //! Typed effects emitted by model-callable tools and reduced by BaseAgent.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
+use core::cell::RefCell;
 
 /// A tool-level request that changes the current task boundary.
 ///
@@ -15,7 +15,7 @@ pub(crate) enum AgentEffect {
 }
 
 struct EffectQueue {
-    effects: Mutex<VecDeque<AgentEffect>>,
+    effects: RefCell<VecDeque<AgentEffect>>,
 }
 
 /// Cloneable sending endpoint injected into tools that may affect the agent.
@@ -36,7 +36,7 @@ pub(in crate::agent) struct AgentEffectInbox {
 /// Create the split tool-to-agent effect channel.
 pub(in crate::agent) fn agent_effect_channel() -> (AgentEffectEmitter, AgentEffectInbox) {
     let inner = Arc::new(EffectQueue {
-        effects: Mutex::new(VecDeque::new()),
+        effects: RefCell::new(VecDeque::new()),
     });
     (
         AgentEffectEmitter {
@@ -48,30 +48,18 @@ pub(in crate::agent) fn agent_effect_channel() -> (AgentEffectEmitter, AgentEffe
 
 impl AgentEffectEmitter {
     pub(in crate::agent) fn emit(&self, effect: AgentEffect) {
-        self.inner
-            .effects
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .push_back(effect);
+        self.inner.effects.borrow_mut().push_back(effect);
     }
 }
 
 impl AgentEffectInbox {
     pub(in crate::agent) fn drain(&mut self) -> Vec<AgentEffect> {
-        let mut effects = self
-            .inner
-            .effects
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut effects = self.inner.effects.borrow_mut();
         effects.drain(..).collect()
     }
 
     pub(in crate::agent) fn clear(&mut self) {
-        self.inner
-            .effects
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
+        self.inner.effects.borrow_mut().clear();
     }
 }
 

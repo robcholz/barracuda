@@ -9,7 +9,11 @@
 //! directory whose `skills/` and `tmp/` subdirectories are materialized when the
 //! sandbox is constructed.
 
-use std::sync::Arc;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use claw_interface::ClawFs;
 

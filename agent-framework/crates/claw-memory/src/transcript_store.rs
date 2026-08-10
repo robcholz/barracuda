@@ -62,8 +62,10 @@
 //!
 //! [`MemFs`]: claw_interface::MemFs
 
-use std::collections::BTreeSet;
-use std::sync::{Arc, Mutex, MutexGuard};
+use alloc::{
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, format, string::String, sync::Arc, vec::Vec,
+};
+use core::cell::{RefCell, RefMut};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -374,7 +376,7 @@ pub struct TranscriptStore<F: ClawFs> {
     index_path: String,
     /// Shared only with the one live [`TurnHandle`]. Filesystem ownership stays
     /// on the store, so all I/O remains statically dispatched through `F`.
-    state: Arc<Mutex<StoreState>>,
+    state: Arc<RefCell<StoreState>>,
 }
 
 impl<F: ClawFs> Drop for TranscriptStore<F> {
@@ -599,7 +601,7 @@ impl<F: ClawFs> TranscriptStore<F> {
             transcript_id,
             data_path,
             index_path,
-            state: Arc::new(Mutex::new(state)),
+            state: Arc::new(RefCell::new(state)),
         })
     }
 
@@ -701,7 +703,7 @@ impl<F: ClawFs> TranscriptStore<F> {
         snapshot
     }
 
-    fn lock_state(&self) -> MutexGuard<'_, StoreState> {
+    fn lock_state(&self) -> RefMut<'_, StoreState> {
         lock_state(&self.state)
     }
 }
@@ -756,8 +758,8 @@ impl<F: ClawFs> Transcript for TranscriptStore<F> {
 /// ```
 #[must_use = "the turn is committed and persisted when this handle is dropped"]
 pub struct TurnHandle {
-    state: Arc<Mutex<StoreState>>,
-    on_drop: Option<Box<dyn FnOnce() + Send>>,
+    state: Arc<RefCell<StoreState>>,
+    on_drop: Option<Box<dyn FnOnce()>>,
 }
 
 impl TurnHandle {
@@ -835,7 +837,7 @@ impl Drop for TurnHandle {
 /// seals the accumulated content into the parent turn.
 #[must_use = "the user message is finished when this handle is dropped"]
 pub struct UserHandle<'a> {
-    state: &'a Mutex<StoreState>,
+    state: &'a RefCell<StoreState>,
 }
 
 impl UserHandle<'_> {
@@ -866,7 +868,7 @@ impl Drop for UserHandle<'_> {
 /// message into the parent turn.
 #[must_use = "the assistant message is finished when this handle is dropped"]
 pub struct AssistantHandle<'a> {
-    state: &'a Mutex<StoreState>,
+    state: &'a RefCell<StoreState>,
 }
 
 impl AssistantHandle<'_> {
@@ -905,7 +907,7 @@ impl Drop for AssistantHandle<'_> {
 /// seals the result into the parent turn.
 #[must_use = "the tool result is finished when this handle is dropped"]
 pub struct ToolHandle<'a> {
-    state: &'a Mutex<StoreState>,
+    state: &'a RefCell<StoreState>,
 }
 
 impl ToolHandle<'_> {
@@ -931,7 +933,7 @@ impl Drop for ToolHandle<'_> {
     }
 }
 
-fn start_message(state: &Mutex<StoreState>, draft: MessageDraft) -> Result<(), TurnError> {
+fn start_message(state: &RefCell<StoreState>, draft: MessageDraft) -> Result<(), TurnError> {
     let mut state = lock_state(state);
     let Some(turn) = state.open_turn.as_mut() else {
         return Err(TurnError::Inactive);
@@ -944,7 +946,7 @@ fn start_message(state: &Mutex<StoreState>, draft: MessageDraft) -> Result<(), T
     Ok(())
 }
 
-fn finish_message(state: &Mutex<StoreState>) {
+fn finish_message(state: &RefCell<StoreState>) {
     let mut state = lock_state(state);
     let Some(turn) = state.open_turn.as_mut() else {
         debug_assert!(false, "message handle outlived its turn");
@@ -977,7 +979,7 @@ fn persist<F: ClawFs>(
     transcript_id: u32,
     data_path: &str,
     index_path: &str,
-    state: &Mutex<StoreState>,
+    state: &RefCell<StoreState>,
     force_manifest: bool,
 ) {
     let mut state = lock_state(state);
@@ -1336,14 +1338,14 @@ fn delete_transcript_file<F: ClawFs>(
     }
 }
 
-fn lock_state(state: &Mutex<StoreState>) -> MutexGuard<'_, StoreState> {
-    state
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn lock_state(state: &RefCell<StoreState>) -> RefMut<'_, StoreState> {
+    state.borrow_mut()
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::{string::ToString, vec};
+
     use super::*;
     use claw_interface::MemFs;
 

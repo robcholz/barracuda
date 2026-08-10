@@ -1,7 +1,11 @@
 //! Filesystem-backed skill registry.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use alloc::format;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use claw_interface::{ClawFs, FsError};
 
@@ -56,7 +60,7 @@ impl CatalogSnapshot {
 ///
 /// Implementations own discovery and document loading. [`SkillSet`] adds the
 /// per-agent render buffers over this shared registry.
-pub trait SkillRegistry: Send + Sync + 'static {
+pub trait SkillRegistry: 'static {
     /// Create a per-agent [`SkillSet`] projection backed by this registry.
     fn skill_set(self: Arc<Self>) -> SkillSet {
         let registry: Arc<dyn SkillRegistry> = Arc::new(ErasedSkillRegistry(self));
@@ -119,7 +123,7 @@ impl SkillRegistry for EmptySkillRegistry {
 pub struct FsSkillRegistry<F: ClawFs> {
     filesystem: Arc<F>,
     roots: Vec<String>,
-    snapshot: RwLock<Arc<CatalogSnapshot>>,
+    snapshot: RefCell<Arc<CatalogSnapshot>>,
     next_version: AtomicU32,
 }
 
@@ -129,7 +133,7 @@ impl<F: ClawFs> FsSkillRegistry<F> {
         Self {
             filesystem,
             roots: Vec::new(),
-            snapshot: RwLock::new(Arc::new(CatalogSnapshot::empty())),
+            snapshot: RefCell::new(Arc::new(CatalogSnapshot::empty())),
             next_version: AtomicU32::new(1),
         }
     }
@@ -140,7 +144,7 @@ impl<F: ClawFs> FsSkillRegistry<F> {
     pub fn set_root(mut self, root: impl Into<String>) -> Result<Self, SkillError> {
         self.roots.push(root.into());
         let snapshot = self.scan_catalog_next_version()?;
-        *self.write_snapshot() = Arc::new(snapshot);
+        *self.snapshot.borrow_mut() = Arc::new(snapshot);
         Ok(self)
     }
 
@@ -154,12 +158,12 @@ impl<F: ClawFs> FsSkillRegistry<F> {
     }
 
     pub(crate) fn catalog(&self) -> Arc<CatalogSnapshot> {
-        Arc::clone(&self.read_snapshot())
+        Arc::clone(&self.snapshot.borrow())
     }
 
     pub(crate) fn reload(&self) -> Result<(), SkillError> {
         let snapshot = self.scan_catalog_next_version()?;
-        *self.write_snapshot() = Arc::new(snapshot);
+        *self.snapshot.borrow_mut() = Arc::new(snapshot);
         Ok(())
     }
 
@@ -190,16 +194,6 @@ impl<F: ClawFs> FsSkillRegistry<F> {
 
     fn read_skill_document(&self, path: &str) -> Result<Vec<u8>, FsError> {
         self.filesystem.read(path)
-    }
-
-    fn read_snapshot(&self) -> RwLockReadGuard<'_, Arc<CatalogSnapshot>> {
-        self.snapshot.read().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn write_snapshot(&self) -> RwLockWriteGuard<'_, Arc<CatalogSnapshot>> {
-        self.snapshot
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 

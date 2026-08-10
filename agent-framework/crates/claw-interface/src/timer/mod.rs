@@ -5,6 +5,7 @@
 //! trait is the injected boundary: each runtime supplies a small wrapper that
 //! waits using that runtime's timer primitive.
 
+use alloc::boxed::Box;
 use core::future::Future;
 use core::pin::Pin;
 use core::time::Duration;

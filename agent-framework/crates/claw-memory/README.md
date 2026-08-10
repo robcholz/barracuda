@@ -17,8 +17,8 @@ provider that drives it both live in `claw_core` (the layer that owns the LLM
 client). The store is never asked to compact.
 
 As a core crate it depends only on the `claw-interface` `ClawFs` persistence
-seam, never on the platform boundary (`claw-sys`). The concrete filesystem is
-selected by the store type parameter (device firmware uses its real FS type;
+seam, never on a concrete platform. The concrete filesystem is selected by the
+store type parameter (device firmware uses its real FS type;
 host CLIs and tests use `claw_interface::MemFs` / `DiskFs`), so the crate is
 fully host-testable.
 

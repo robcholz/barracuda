@@ -384,3 +384,4 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
+use alloc::{string::String, vec::Vec};

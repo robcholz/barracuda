@@ -1,6 +1,11 @@
 //! The policy seam: turn a [`PermissionRequest`] into a [`PermissionDecision`],
 //! plus the small built-in policies and the [`PolicyChain`] that composes them.
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use crate::action::{Action, RiskClass};
 
 /// The verdict a policy returns for one action.
@@ -76,7 +81,7 @@ impl<'a> PermissionRequest<'a> {
 /// let request = PermissionRequest::new(&action);
 /// assert!(matches!(DenyVerb("rm").evaluate(&request), PermissionDecision::Deny { .. }));
 /// ```
-pub trait PermissionPolicy: Send + Sync {
+pub trait PermissionPolicy {
     /// Classify `request` into a decision.
     fn evaluate(&self, request: &PermissionRequest<'_>) -> PermissionDecision;
 }

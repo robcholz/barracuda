@@ -1,8 +1,12 @@
 //! Blocking, async, and streaming HTTP dependency-injection traits.
 //!
-//! Replaces `claw_llm_http_transport.c`. The espidf wiring implements this over
-//! `esp_http_client`; host tests provide canned responses.
+//! Device applications implement these traits over their selected network
+//! stack; host tests provide canned responses.
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
@@ -163,7 +167,6 @@ impl HttpRequestFailure {
 
 /// Rust-native HTTP transport failure.
 ///
-/// `esp_err_t` mapping for the C ABI lives in `claw_capi::errmap::http_esp_err`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HttpError {
     #[error("HTTP request aborted by caller")]
@@ -247,10 +250,8 @@ impl Cancel<'static> {
 /// HTTP transport driven by a cooperative executor instead of blocking the
 /// calling task for the whole request.
 ///
-/// On ESP-IDF this maps onto `esp_http_client`'s non-blocking mode
-/// (`config.is_async = true`): each poll runs one `esp_http_client_perform`
-/// step and yields (`Poll::Pending`) while the call reports
-/// `ESP_ERR_HTTP_EAGAIN`, letting other tasks run between steps.
+/// An embedded implementation advances its network driver incrementally and
+/// yields [`Poll::Pending`] between steps, letting other tasks make progress.
 ///
 /// Thread-safety is intentionally not a property of this base trait. Host
 /// transports such as `reqwest::Client` may be `Send + Sync`, while embedded
@@ -297,8 +298,8 @@ pub trait ClawHttp {
 /// lets it carry a lifetime-indexed GAT: **each transport names a body-stream
 /// type that keeps the transport mutably borrowed until that stream reaches EOF
 /// or is dropped**. This statically enforces one in-flight operation per
-/// transport. The device driver uses a concrete `poll_next` over its existing
-/// `esp_http_client`; only host transports whose stream type is unnameable
+/// transport. A device driver can expose a concrete `poll_next`; only host
+/// transports whose stream type is unnameable
 /// (e.g. `reqwest::Response::bytes_stream`) pay for boxing.
 ///
 /// The stream keeps the mutable transport borrow alive, so a second request

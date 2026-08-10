@@ -1,5 +1,8 @@
 //! Helpers shared by the LLM backends.
 
+use alloc::format;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 
 use claw_interface::http::{

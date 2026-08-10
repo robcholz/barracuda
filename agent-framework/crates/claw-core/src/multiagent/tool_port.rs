@@ -1,6 +1,9 @@
-use core::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::task::{Context, Poll};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use core::{
+    cell::{RefCell, RefMut},
+    pin::Pin,
+    task::{Context, Poll},
+};
 
 use async_channel::{Receiver, Sender};
 use futures_core::Stream;
@@ -80,8 +83,8 @@ pub(crate) struct MultiagentBridge {
     command_tx: Sender<MultiagentCommand>,
     // `Receiver` is `!Unpin`, so it is pinned on the heap to be polled as a
     // `Stream` through the shared bridge.
-    command_rx: Mutex<Pin<Box<Receiver<MultiagentCommand>>>>,
-    snapshot: Mutex<MultiagentSnapshot>,
+    command_rx: RefCell<Pin<Box<Receiver<MultiagentCommand>>>>,
+    snapshot: RefCell<MultiagentSnapshot>,
 }
 
 /// Caller-bound capability handed to model-facing subagent tools.
@@ -156,15 +159,13 @@ impl MultiagentBridge {
         let (command_tx, command_rx) = async_channel::unbounded();
         Self {
             command_tx,
-            command_rx: Mutex::new(Box::pin(command_rx)),
-            snapshot: Mutex::new(MultiagentSnapshot::default()),
+            command_rx: RefCell::new(Box::pin(command_rx)),
+            snapshot: RefCell::new(MultiagentSnapshot::default()),
         }
     }
 
-    fn snapshot(&self) -> MutexGuard<'_, MultiagentSnapshot> {
-        self.snapshot
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
+    fn snapshot(&self) -> RefMut<'_, MultiagentSnapshot> {
+        self.snapshot.borrow_mut()
     }
 
     fn push(&self, command: MultiagentCommand) {
@@ -195,10 +196,7 @@ impl MultiagentBridge {
     }
 
     pub(crate) fn poll_command(&self, context: &mut Context<'_>) -> Poll<MultiagentCommand> {
-        let mut receiver = self
-            .command_rx
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut receiver = self.command_rx.borrow_mut();
         match receiver.as_mut().poll_next(context) {
             Poll::Ready(Some(command)) => Poll::Ready(command),
             // The bridge keeps a live sender, so the stream never ends; treat a
@@ -210,10 +208,7 @@ impl MultiagentBridge {
     pub(crate) fn clear(&self) {
         // Drain queued commands without closing the channel so later spawns keep
         // delivering.
-        let receiver = self
-            .command_rx
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let receiver = self.command_rx.borrow_mut();
         while receiver.try_recv().is_ok() {}
         drop(receiver);
         *self.snapshot() = MultiagentSnapshot::default();

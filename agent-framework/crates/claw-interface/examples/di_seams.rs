@@ -8,10 +8,9 @@
 //!     --features httpmock --target x86_64-unknown-linux-gnu
 //! ```
 //!
-//! Core crates depend only on the `ClawFs` / `ClawHttp` *traits*; on device the
-//! espidf layer implements them over FATFS and `esp_http_client`, while tests
-//! and host tools substitute doubles like the `MemFs` and `ScriptedHttp` used
-//! here.
+//! Core crates depend only on the `ClawFs` / `ClawHttp` *traits*. Device
+//! applications provide concrete adapters, while tests and host tools
+//! substitute doubles like the `MemFs` and `ScriptedHttp` used here.
 
 use core::sync::atomic::AtomicBool;
 
@@ -25,7 +24,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// `ClawFs`: byte-oriented persistence. The in-memory `MemFs` behaves like the
-/// on-device FATFS backend for the operations the modules rely on.
+/// embedded backend for the operations the modules rely on.
 fn filesystem_seam() -> anyhow::Result<()> {
     let filesystem = MemFs::new();
 
@@ -56,7 +55,7 @@ fn filesystem_seam() -> anyhow::Result<()> {
 }
 
 /// `ClawHttp`: a blocking JSON POST. `ScriptedHttp` hands back canned bodies in
-/// order, standing in for the `esp_http_client` driver.
+/// order, standing in for a device network driver.
 fn http_seam() -> anyhow::Result<()> {
     let mut http = ScriptedHttp::new([
         r#"{"choices":[{"message":{"content":"first"}}]}"#,

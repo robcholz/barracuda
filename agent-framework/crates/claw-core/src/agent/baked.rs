@@ -3,7 +3,8 @@
 //! [`AgentRuntimeManifest`] is consumed while assembling one Agent;
 //! [`MultiagentManifest`] is consumed only by the Multiagent extension.
 
-use std::borrow::Cow;
+use alloc::{borrow::Cow, string::String};
+use core::fmt;
 
 /// Which baked agent template to instantiate from `resources/agents/<kind>/`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -23,8 +24,8 @@ impl AgentKind {
     }
 }
 
-impl std::fmt::Display for AgentKind {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for AgentKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }

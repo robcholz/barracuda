@@ -5,7 +5,7 @@ description = "Stream complete log lines from a subprocess (e.g. `idf.py monitor
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-keywords = ["serial", "log", "subprocess", "esp-idf", "streaming", "monitor"]
+keywords = ["serial", "log", "subprocess", "streaming", "monitor"]
 dependencies = []
 
 [project.optional-dependencies]

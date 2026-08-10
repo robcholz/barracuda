@@ -1,6 +1,6 @@
 //! Persistence mapping for Session-owned state.
 
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 use claw_persistence::{
     DurablePartError, DurableStateCodec, InstanceId, InvalidInstanceId, SchemaVersion, StateBlob,

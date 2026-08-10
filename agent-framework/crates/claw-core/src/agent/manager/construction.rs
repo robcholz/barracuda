@@ -1,5 +1,5 @@
-use std::marker::PhantomData;
-use std::sync::Arc;
+use alloc::{string::String, sync::Arc, vec::Vec};
+use core::marker::PhantomData;
 
 use crate::config::SharedApiManager;
 use claw_interface::http::StreamingHttp;
@@ -9,9 +9,6 @@ use claw_persistence::SharedPersistence;
 use claw_skill::SkillRegistry;
 use claw_tool::ToolRegistry;
 
-#[cfg(all(feature = "use_legacy_skill", target_os = "espidf"))]
-use claw_c_legacy_skill::LegacySkillRegistry;
-#[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
 use claw_skill::{FsSkillRegistry, SkillError};
 
 use super::error::AgentManagerError;
@@ -64,12 +61,6 @@ impl<
         };
 
         let profile_store = ProfileStore::new(Arc::clone(&filesystem), &layout.profile_dir);
-        #[cfg(all(feature = "use_legacy_skill", target_os = "espidf"))]
-        let skill_registry: Arc<dyn SkillRegistry> = {
-            drop(skill_roots);
-            Arc::new(LegacySkillRegistry::attach()?)
-        };
-        #[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
         let skill_registry: Arc<dyn SkillRegistry> =
             build_fs_skill_registry(Arc::clone(&filesystem), skill_roots)?;
 
@@ -94,7 +85,6 @@ impl<
 ///
 /// A missing root is skipped so the agent still starts; a real scan failure
 /// (e.g. a malformed `SKILL.md`) aborts construction.
-#[cfg(not(all(feature = "use_legacy_skill", target_os = "espidf")))]
 fn build_fs_skill_registry<F: ClawFs + 'static>(
     filesystem: Arc<F>,
     skill_roots: Vec<String>,

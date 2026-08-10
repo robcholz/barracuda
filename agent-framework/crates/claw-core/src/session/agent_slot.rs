@@ -1,6 +1,6 @@
+use alloc::collections::BTreeMap;
 use core::pin::Pin;
-use std::collections::BTreeMap;
-use std::task::{Context, Poll};
+use core::task::{Context, Poll};
 
 use claw_interface::http::StreamingHttp;
 use claw_interface::{ClawHttp, ClawTimer};

@@ -13,7 +13,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 claw-interface = { path = "../claw-interface" }
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 # Hermetic in-memory ClawFs double for host-target sandbox tests.

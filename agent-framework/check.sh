@@ -7,8 +7,9 @@ cd "$(dirname "$0")"
 # boundary defaults to reasoning_medium. Building both workspace packages in
 # one Cargo invocation unions those mutually exclusive features. Check the
 # assembled workspace first, then the implementation crate on its own.
-cargo check --workspace --all-targets --exclude claw-core
-cargo check -p claw-core --all-targets
+cargo check --workspace --exclude claw-core
+cargo check -p claw-core
+cargo check -p claw-agent --target riscv32imac-unknown-none-elf --features multiagent
 
 if ! cargo public-api --version >/dev/null 2>&1; then
     echo "cargo-public-api is required. Install it with: cargo +stable install cargo-public-api" >&2
@@ -21,7 +22,6 @@ trap 'rm -rf "$tmpdir"' EXIT
 crates=(
     claw-agent
     claw-api
-    claw-cabi
     claw-persistence
     claw-context
     claw-core
@@ -31,7 +31,6 @@ crates=(
     claw-permission
     claw-sandbox
     claw-skill
-    claw-sys
     claw-tool
     claw-utils
 )

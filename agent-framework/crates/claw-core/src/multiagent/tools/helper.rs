@@ -51,3 +51,4 @@ fn agent_resource(args: &Value) -> Option<Resource> {
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| Resource::Agent(trimmed.to_string()))
 }
+use alloc::string::ToString;

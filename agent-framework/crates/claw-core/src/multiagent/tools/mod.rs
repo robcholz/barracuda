@@ -7,7 +7,7 @@ mod run;
 mod spawn;
 mod watch;
 
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 use claw_tool::ToolGroup;
 

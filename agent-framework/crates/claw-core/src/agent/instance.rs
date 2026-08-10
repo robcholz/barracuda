@@ -1,9 +1,10 @@
+use alloc::{borrow::ToOwned, collections::VecDeque, rc::Rc, string::String, vec::Vec};
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::cell::Cell;
-use std::collections::VecDeque;
-use std::fmt::Write as _;
-use std::rc::Rc;
+use core::{
+    cell::{Cell, RefCell},
+    fmt::Write as _,
+};
 
 use async_channel::{Receiver, TryRecvError};
 use claw_api::ToolCall;
@@ -24,6 +25,7 @@ use super::stream::{
 };
 use super::{AgentError, AgentIterationEvent, BaseAgentState};
 use crate::Message;
+use claw_utils::yield_stream::yield_stream;
 
 #[derive(Clone)]
 struct DetachedCompletion {
@@ -203,33 +205,43 @@ where
         mut self,
         first_message: Message,
         commands: Receiver<AgentCommand>,
-        awaiting_approval: Rc<std::cell::RefCell<Option<super::ToolCallId>>>,
+        awaiting_approval: Rc<RefCell<Option<super::ToolCallId>>>,
     ) -> impl futures_core::Stream<Item = AgentStreamItem<H, Timer>> + 'static {
-        async_stream::stream! {
+        yield_stream(|yielder| async move {
             let activity = Rc::clone(&self.activity);
             {
                 let Some(Agent { base, ephemeral }) = self.agent.as_mut() else {
                     activity.set(AgentActivity::Closed);
-                    yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                    yielder
+                        .yield_one(AgentStreamItem::Event(Err(AgentError::StateInvariant)))
+                        .await;
                     return;
                 };
                 let mut turn = PendingTurn::message(first_message);
                 let mut cancel_requested = false;
 
                 loop {
-                    yield AgentStreamItem::Event(Ok(AgentEvent::TurnStarted {
-                        origin: turn.origin.clone(),
-                    }));
+                    yielder
+                        .yield_one(AgentStreamItem::Event(Ok(AgentEvent::TurnStarted {
+                            origin: turn.origin.clone(),
+                        })))
+                        .await;
 
                     let mut run = match base.submit(turn.message) {
                         Ok(run) => run,
                         Err(AgentSubmitError::Transcript(error)) => {
-                            yield AgentStreamItem::Event(Err(AgentError::Transcript(error)));
+                            yielder
+                                .yield_one(AgentStreamItem::Event(Err(AgentError::Transcript(
+                                    error,
+                                ))))
+                                .await;
                             ephemeral.clear();
                             break;
                         }
                         Err(AgentSubmitError::Running) => {
-                            yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                            yielder
+                                .yield_one(AgentStreamItem::Event(Err(AgentError::StateInvariant)))
+                                .await;
                             ephemeral.clear();
                             break;
                         }
@@ -279,7 +291,7 @@ where
                             }
                             ActiveWake::Detached(completion) => {
                                 run.continue_with(Message::text(render_completions(
-                                    std::slice::from_ref(&completion),
+                                    core::slice::from_ref(&completion),
                                 )));
                                 pending_completions.push(completion);
                             }
@@ -292,7 +304,11 @@ where
                                 ) {
                                     applied_completions.append(&mut pending_completions);
                                 }
-                                yield AgentStreamItem::Event(Ok(AgentEvent::Iteration(progress)));
+                                yielder
+                                    .yield_one(AgentStreamItem::Event(Ok(AgentEvent::Iteration(
+                                        progress,
+                                    ))))
+                                    .await;
                             }
                             ActiveWake::Base(Some(Ok(BaseAgentEvent::Detached(handle)))) => {
                                 ephemeral.push(handle);
@@ -300,7 +316,11 @@ where
                             ActiveWake::Base(Some(Ok(BaseAgentEvent::InputRequired(request)))) => {
                                 let AgentInputRequest::Approval { tool_call_id, .. } = &request;
                                 *awaiting_approval.borrow_mut() = Some(*tool_call_id);
-                                yield AgentStreamItem::Event(Ok(AgentEvent::InputRequired(request)));
+                                yielder
+                                    .yield_one(AgentStreamItem::Event(Ok(
+                                        AgentEvent::InputRequired(request),
+                                    )))
+                                    .await;
                             }
                             ActiveWake::Base(Some(Ok(BaseAgentEvent::Finished(finished)))) => {
                                 outcome = Some(finished);
@@ -315,13 +335,15 @@ where
 
                     if let Some(error) = failure {
                         ephemeral.clear();
-                        yield AgentStreamItem::Event(Err(error));
+                        yielder.yield_one(AgentStreamItem::Event(Err(error))).await;
                         break;
                     }
 
                     let Some(outcome) = outcome else {
                         ephemeral.clear();
-                        yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                        yielder
+                            .yield_one(AgentStreamItem::Event(Err(AgentError::StateInvariant)))
+                            .await;
                         break;
                     };
                     match &outcome {
@@ -346,14 +368,19 @@ where
                     } else {
                         activity.set(AgentActivity::Idle);
                     }
-                    yield AgentStreamItem::Event(Ok(AgentEvent::TurnEnded { outcome }));
+                    yielder
+                        .yield_one(AgentStreamItem::Event(Ok(AgentEvent::TurnEnded {
+                            outcome,
+                        })))
+                        .await;
 
                     if cancel_requested {
                         ephemeral.clear();
                         break;
                     }
 
-                    let Some(next_turn) = ephemeral.next_turn(&commands, activity.as_ref()).await else {
+                    let Some(next_turn) = ephemeral.next_turn(&commands, activity.as_ref()).await
+                    else {
                         break;
                     };
                     turn = next_turn;
@@ -362,11 +389,13 @@ where
 
             activity.set(AgentActivity::Closed);
             if let Some(agent) = self.agent.take() {
-                yield AgentStreamItem::Returned(agent);
+                yielder.yield_one(AgentStreamItem::Returned(agent)).await;
             } else {
-                yield AgentStreamItem::Event(Err(AgentError::StateInvariant));
+                yielder
+                    .yield_one(AgentStreamItem::Event(Err(AgentError::StateInvariant)))
+                    .await;
             }
-        }
+        })
     }
 }
 

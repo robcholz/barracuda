@@ -1,6 +1,12 @@
 //! LLM-backed transformation for one aged conversation-history window.
 
-use std::sync::atomic::AtomicBool;
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec,
+};
+use core::sync::atomic::AtomicBool;
 
 use claw_api::{ChatRequest, ClawApiAsync};
 use claw_interface::{Cancel, ClawHttp, ClawTimer};
@@ -49,12 +55,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Compactor for LlmCompactor<H, Timer> {
             let response = async {
                 let mut lease = self.api.lease().await?;
                 let api = lease.api_mut()?;
-                if let Some(config) = self
-                    .api_manager
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .get_api(ApiPurpose::Compaction)
-                {
+                if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Compaction) {
                     let _ = api.set_config(config);
                 }
                 api.chat(&request, Cancel::new(&abort)).await

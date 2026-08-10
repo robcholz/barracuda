@@ -1,6 +1,10 @@
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    vec::Vec,
+};
 use core::num::NonZeroU32;
 use core::time::Duration;
-use std::collections::{BTreeMap, BTreeSet};
 
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;

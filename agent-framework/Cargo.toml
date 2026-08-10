@@ -2,13 +2,7 @@
 resolver = "2"
 members = [
     "crates/*",
-    "c-legacy/*",
     "bench/*",
-    # Device-only (`#![cfg(target_os = "espidf")]`) staticlib crates that back
-    # the on-device ESP-IDF integration test apps. They build to empty archives
-    # on the host, so they are harmless members of `cargo build --workspace`.
-    "crates/claw-sys/tests/esp_idf/claw-sys-selftest",
-    "crates/claw-api/tests/esp_idf/claw-api-selftest",
 ]
 exclude = [
     "bench/llm-tape",
@@ -19,13 +13,9 @@ default-members = [
     "crates/claw-interface",
 ]
 
-# Device images are built with the release profile because the supported
-# ESP-IDF targets do not unwind. The dev/test profiles keep the default unwind
-# so the std crates can be unit-tested on the host.
-#
-# LTO is disabled on purpose: with `lto = true` rustc emits an archive of LLVM
-# bitcode objects, which the GCC-based ESP-IDF linkers cannot consume. A non-LTO
-# staticlib carries real object code that links cleanly into the image.
+# Device images abort on panic. Dev/test profiles keep the default unwind so
+# the std crates can be unit-tested on the host. LTO remains disabled so final
+# applications can select the link strategy appropriate to their target.
 [profile.release]
 panic = "abort"
 opt-level = "s"

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use alloc::{string::ToString, sync::Arc};
 
 use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,

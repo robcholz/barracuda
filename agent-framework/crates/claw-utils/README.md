@@ -1,12 +1,13 @@
 # claw-utils
 
-Small, dependency-light helpers shared across the claw Rust crates. Three things
+Small, dependency-light helpers shared across the claw Rust crates. Four things
 live here, all used widely enough to deserve a single home rather than being
 copied per crate:
 
 1. **`stream::StreamPart`** — shared `Delta`/`End` vocabulary for logical streams.
-2. **`TruncatedText`** — log-safe text truncation.
-3. **`define_prefixed_id!`** — the strongly typed, wire-prefixed id newtype macro.
+2. **`yield_stream`** — safe single-task async generator adapters.
+3. **`TruncatedText`** — log-safe text truncation.
+4. **`define_prefixed_id!`** — the strongly typed, wire-prefixed id newtype macro.
 
 The crate name is `claw-utils`; the library is imported as `claw_utils`.
 
@@ -25,6 +26,13 @@ let end: StreamPart<&str> = StreamPart::End;
 A plain Rust `Stream` whose `None` is the only relevant boundary does not need
 this wrapper.
 
+## `yield_stream` — single-task async generators
+
+`yield_stream` and `try_yield_stream` turn an async producer into a boxed
+`Stream`. The producer receives a `Yielder` and suspends after every item until
+the consumer takes it. The implementation uses `Rc<RefCell>` and is therefore
+intentionally local (`!Send`) and suitable for one cooperative executor task.
+
 ## `TruncatedText<T>` — log-safe truncation
 
 A `Display` wrapper that renders at most `limit` bytes of text, always backing
@@ -34,17 +42,16 @@ allocates and never panics on multi-byte input.
 ```rust
 use claw_utils::TruncatedText;
 
-// Platform default ceiling: compact on device, unbounded on host.
+// Default ceiling: 96 bytes on every target.
 log::debug!("payload = {}", TruncatedText::new(&body));
 
 // Explicit, testable ceiling.
 let s = TruncatedText::with_limit(&body, 96).to_string();
 ```
 
-The default limit is platform-aware: on the `espidf` target it caps lines at 96
-bytes to save flash and UART bandwidth; on the host it is `usize::MAX` (a no-op)
-so the CLI and offline tooling see the full text. Use `with_limit` to override
-at a call site.
+The default limit is 96 bytes on every target. This keeps firmware, host tests,
+and CLI behavior consistent and prevents unexpectedly large log records. Use
+`with_limit` to override it at a call site.
 
 ## `define_prefixed_id!` — wire-prefixed id newtypes
 

@@ -13,7 +13,6 @@ mkdir -p snapshots
 crates=(
     claw-agent
     claw-api
-    claw-cabi
     claw-persistence
     claw-context
     claw-core
@@ -23,7 +22,6 @@ crates=(
     claw-permission
     claw-sandbox
     claw-skill
-    claw-sys
     claw-tool
     claw-utils
 )

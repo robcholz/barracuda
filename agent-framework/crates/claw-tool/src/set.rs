@@ -1,5 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use alloc::borrow::ToOwned;
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use claw_permission::Action;
 use serde::Serialize;
@@ -54,12 +59,12 @@ pub enum ToolSetError {
 pub struct ToolSet {
     registry: Option<Arc<ToolRegistry>>,
     blacklist: &'static [&'static str],
-    local_group_ids: HashSet<String>,
-    local_tool_names: HashSet<ToolName>,
-    tools: HashMap<ToolName, Tool>,
+    local_group_ids: BTreeSet<String>,
+    local_tool_names: BTreeSet<ToolName>,
+    tools: BTreeMap<ToolName, Tool>,
     state: ToolSetState,
     cache: ToolSetCache,
-    discovery: Arc<Mutex<ToolDiscovery>>,
+    discovery: Arc<RefCell<ToolDiscovery>>,
     registry_projection_ready: bool,
     should_rebuild_temporary_tool: bool,
     should_rebuild_tool: bool,
@@ -105,18 +110,14 @@ struct ToolDiscovery {
 /// Cloneable handle the discovery tools hold to reach their owning [`ToolSet`].
 #[derive(Clone)]
 pub struct ToolDiscoveryHandle {
-    inner: Arc<Mutex<ToolDiscovery>>,
+    inner: Arc<RefCell<ToolDiscovery>>,
 }
 
 impl ToolDiscoveryHandle {
     /// Snapshot of the loadable (registered-but-hidden) tool groups, for
     /// `tool_search` to surface. Never includes tool schemas.
     pub fn catalog(&self) -> Vec<ToolGroupCatalog> {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .catalog
-            .clone()
+        self.inner.borrow().catalog.clone()
     }
 
     /// Request that `group_id`'s tools be enabled on the next tick. Returns
@@ -124,7 +125,7 @@ impl ToolDiscoveryHandle {
     /// already-queued group.
     pub fn request_load(&self, group_id: impl Into<String>) -> bool {
         let group_id = group_id.into();
-        let mut discovery = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut discovery = self.inner.borrow_mut();
         let loadable = discovery.catalog.iter().any(|group| group.id == group_id);
         if loadable && !discovery.pending_loads.contains(&group_id) {
             discovery.pending_loads.push(group_id);
@@ -166,12 +167,12 @@ impl ToolSet {
         Self {
             registry,
             blacklist,
-            local_group_ids: HashSet::new(),
-            local_tool_names: HashSet::new(),
-            tools: HashMap::new(),
+            local_group_ids: BTreeSet::new(),
+            local_tool_names: BTreeSet::new(),
+            tools: BTreeMap::new(),
             state: ToolSetState::default(),
             cache: ToolSetCache::default(),
-            discovery: Arc::new(Mutex::new(ToolDiscovery::default())),
+            discovery: Arc::new(RefCell::new(ToolDiscovery::default())),
             registry_projection_ready,
             should_rebuild_temporary_tool: false,
             should_rebuild_tool: false,
@@ -197,7 +198,7 @@ impl ToolSet {
         if self.local_tool_names.contains(&group_id) || self.registry_contains_tool(&group_id) {
             return Err(ToolSetError::AmbiguousName(group_id));
         }
-        let mut names = HashSet::with_capacity(tools.len());
+        let mut names = BTreeSet::new();
         for tool in &tools {
             let name = tool.name();
             if name.is_empty() {
@@ -342,11 +343,8 @@ impl ToolSet {
     /// so a group stays loaded for the lifetime of this `ToolSet`. ToolSet
     /// runtime state is not restored after a process restart.
     fn apply_pending_tool_loads(&mut self) {
-        let pending: HashSet<ToolName> = {
-            let mut discovery = self
-                .discovery
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
+        let pending: BTreeSet<ToolName> = {
+            let mut discovery = self.discovery.borrow_mut();
             core::mem::take(&mut discovery.pending_loads)
                 .into_iter()
                 .collect()
@@ -450,7 +448,7 @@ impl ToolSet {
             .iter()
             .filter(|entry| !self.is_blacklisted(&entry.group_id, &entry.name))
             .map(|entry| entry.name.clone())
-            .collect::<HashSet<_>>();
+            .collect::<BTreeSet<_>>();
 
         self.tools.retain(|name, _| {
             self.state
@@ -583,10 +581,7 @@ impl ToolSet {
             .into_iter()
             .map(|(id, tools)| ToolGroupCatalog { id, tools })
             .collect();
-        self.discovery
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .catalog = catalog;
+        self.discovery.borrow_mut().catalog = catalog;
     }
 
     fn render_static_tools(&mut self) {
@@ -682,7 +677,7 @@ impl ToolSet {
 }
 
 pub struct ToolSetHandle<'a> {
-    tools: &'a HashMap<ToolName, Tool>,
+    tools: &'a BTreeMap<ToolName, Tool>,
     states: &'a BTreeMap<ToolName, ToolSetEntryState>,
     cache: &'a ToolSetCache,
 }
@@ -775,7 +770,7 @@ impl<'a> ToolSetHandle<'a> {
 fn render_schemas<'a>(
     output: &mut String,
     entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a HashMap<ToolName, Tool>,
+    tools: &'a BTreeMap<ToolName, Tool>,
 ) {
     output.clear();
     output.push('[');
@@ -800,7 +795,7 @@ fn render_schemas<'a>(
 fn append_schemas<'a>(
     output: &mut String,
     entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a HashMap<ToolName, Tool>,
+    tools: &'a BTreeMap<ToolName, Tool>,
 ) {
     let mut has_tool = false;
     for (name, _) in entries {
@@ -826,7 +821,7 @@ fn append_schemas<'a>(
 fn render_context<'a>(
     output: &mut String,
     entries: impl Iterator<Item = (&'a ToolName, &'a ToolSetEntryState)>,
-    tools: &'a HashMap<ToolName, Tool>,
+    tools: &'a BTreeMap<ToolName, Tool>,
 ) {
     output.clear();
     for (name, _) in entries {

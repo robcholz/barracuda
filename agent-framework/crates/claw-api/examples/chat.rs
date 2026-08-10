@@ -9,8 +9,8 @@
 //! ```
 //!
 //! Networking is injected: `claw-api` never opens sockets. Here the transport
-//! returns canned OpenAI-shaped replies so the example is self-contained; on
-//! device the espidf layer implements [`ClawHttp`] over `esp_http_client`.
+//! returns canned OpenAI-shaped replies so the example is self-contained;
+//! device applications inject their selected network stack.
 
 use std::sync::atomic::AtomicBool;
 

@@ -36,3 +36,4 @@ impl SyncToolHandler for ListSpawnableAgentsTool {
         })
     }
 }
+use alloc::{string::ToString, vec::Vec};

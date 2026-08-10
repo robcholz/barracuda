@@ -1,9 +1,14 @@
-use std::{
-    any::{type_name, TypeId},
-    collections::{hash_map::Entry as MapEntry, HashMap},
-    marker::PhantomData,
-    sync::{Arc, Mutex, MutexGuard, PoisonError},
-};
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap};
+use alloc::format;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::any::{type_name, TypeId};
+use core::cell::RefCell;
+use core::error::Error;
+use core::marker::PhantomData;
 
 use claw_interface::{ClawFs, FsError};
 
@@ -12,10 +17,10 @@ use crate::{
     SchemaVersion, StateBlob, StateSlice, WeakDurableState,
 };
 
-const SCHEMA_VERSION_SIZE: usize = std::mem::size_of::<SchemaVersion>();
+const SCHEMA_VERSION_SIZE: usize = core::mem::size_of::<SchemaVersion>();
 const FILE_EXTENSION: &str = ".bin";
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum EntryKey {
     Singleton(String),
     Collection(String),
@@ -36,7 +41,7 @@ impl EntryKey {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 enum StateAddress {
     Singleton {
         name: String,
@@ -50,9 +55,8 @@ enum StateAddress {
 /// Filesystem-backed registry for typed durable state.
 pub struct Persistence<Filesystem: ClawFs> {
     persistence_directory: String,
-    entry_types: Mutex<HashMap<EntryKey, RegisteredEntryType>>,
-    parts: Mutex<HashMap<StateAddress, Arc<dyn RegisteredPart>>>,
-    operation_lock: Mutex<()>,
+    entry_types: RefCell<BTreeMap<EntryKey, RegisteredEntryType>>,
+    parts: RefCell<BTreeMap<StateAddress, Arc<dyn RegisteredPart>>>,
     filesystem: Arc<Filesystem>,
 }
 
@@ -93,9 +97,8 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
 
         Ok(Self {
             persistence_directory,
-            entry_types: Mutex::new(HashMap::new()),
-            parts: Mutex::new(HashMap::new()),
-            operation_lock: Mutex::new(()),
+            entry_types: RefCell::new(BTreeMap::new()),
+            parts: RefCell::new(BTreeMap::new()),
             filesystem,
         })
     }
@@ -106,7 +109,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         name: impl Into<String>,
     ) -> Result<Singleton<'_, Filesystem, T>, PersistenceError>
     where
-        T: DurableStateCodec + Send + 'static,
+        T: DurableStateCodec + 'static,
     {
         let name = name.into();
         self.ensure_entry_type::<T>(&EntryKey::Singleton(name.clone()))?;
@@ -123,7 +126,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         name: impl Into<String>,
     ) -> Result<Collection<'_, Filesystem, T>, PersistenceError>
     where
-        T: DurableStateCodec + Send + 'static,
+        T: DurableStateCodec + 'static,
     {
         let name = name.into();
         self.ensure_entry_type::<T>(&EntryKey::Collection(name.clone()))?;
@@ -136,9 +139,8 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
 
     /// Persist every registered state whose generation changed.
     pub fn maybe_persist(&self) -> Result<(), PersistenceError> {
-        let _operation = lock(&self.operation_lock);
         let parts = {
-            let parts = lock(&self.parts);
+            let parts = self.parts.borrow();
             parts
                 .iter()
                 .map(|(address, part)| (address.clone(), Arc::clone(part)))
@@ -165,7 +167,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         }
 
         if !dropped.is_empty() {
-            let mut parts = lock(&self.parts);
+            let mut parts = self.parts.borrow_mut();
             for address in dropped {
                 let should_remove = parts.get(&address).is_some_and(|part| !part.is_alive());
                 if should_remove {
@@ -186,7 +188,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
             state_type_id: TypeId::of::<T>(),
             state_type_name: type_name::<T>(),
         };
-        let mut entry_types = lock(&self.entry_types);
+        let mut entry_types = self.entry_types.borrow_mut();
         match entry_types.entry(entry.clone()) {
             MapEntry::Vacant(slot) => {
                 slot.insert(entry_type);
@@ -208,7 +210,6 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     where
         T: DurableStateCodec,
     {
-        let _operation = lock(&self.operation_lock);
         let path = self.state_path(address);
         let file = match self.filesystem.read(&path) {
             Ok(file) => file,
@@ -229,7 +230,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         state: &DurableState<T>,
     ) -> Result<(), PersistenceError>
     where
-        T: DurableStateCodec + Send + 'static,
+        T: DurableStateCodec + 'static,
     {
         self.register_part(
             address,
@@ -237,7 +238,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
             instance_id,
             Arc::new(StateRegisteredPart {
                 state: state.downgrade(),
-                persisted_generation: Mutex::new(None),
+                persisted_generation: RefCell::new(None),
             }),
         )
     }
@@ -249,8 +250,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
         instance_id: Option<InstanceId>,
         part: Arc<dyn RegisteredPart>,
     ) -> Result<(), PersistenceError> {
-        let _operation = lock(&self.operation_lock);
-        let mut parts = lock(&self.parts);
+        let mut parts = self.parts.borrow_mut();
         match parts.entry(address) {
             MapEntry::Vacant(slot) => {
                 slot.insert(part);
@@ -267,7 +267,6 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
     }
 
     fn remove_at(&self, address: &StateAddress) -> Result<(), PersistenceError> {
-        let _operation = lock(&self.operation_lock);
         let path = self.state_path(address);
         match self.filesystem.remove(&path) {
             Ok(()) | Err(FsError::NotFound) => {}
@@ -275,12 +274,11 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
                 return Err(PersistenceError::storage("remove state", path, source));
             }
         }
-        lock(&self.parts).remove(address);
+        self.parts.borrow_mut().remove(address);
         Ok(())
     }
 
     fn list_collection(&self, name: &str) -> Result<Vec<InstanceId>, PersistenceError> {
-        let _operation = lock(&self.operation_lock);
         let path = self.join_path(name);
         let entries = match self.filesystem.list_dir(&path) {
             Ok(entries) => entries,
@@ -340,7 +338,7 @@ impl<Filesystem: ClawFs> Persistence<Filesystem> {
 impl<Filesystem, T> Singleton<'_, Filesystem, T>
 where
     Filesystem: ClawFs,
-    T: DurableStateCodec + Send + 'static,
+    T: DurableStateCodec + 'static,
 {
     /// Decode the persisted DTO, returning `None` when no state exists.
     pub fn load(&self) -> Result<Option<T>, PersistenceError> {
@@ -372,7 +370,7 @@ where
 impl<Filesystem, T> Collection<'_, Filesystem, T>
 where
     Filesystem: ClawFs,
-    T: DurableStateCodec + Send + 'static,
+    T: DurableStateCodec + 'static,
 {
     /// List the persisted instance identifiers.
     pub fn list(&self) -> Result<Vec<InstanceId>, PersistenceError> {
@@ -419,7 +417,7 @@ struct RegisteredEntryType {
     state_type_name: &'static str,
 }
 
-trait RegisteredPart: Send + Sync {
+trait RegisteredPart {
     fn is_alive(&self) -> bool;
 
     fn snapshot_if_dirty(&self) -> Result<PartStatus, DurablePartError>;
@@ -429,19 +427,19 @@ trait RegisteredPart: Send + Sync {
 
 struct StateRegisteredPart<T> {
     state: WeakDurableState<T>,
-    persisted_generation: Mutex<Option<PartGeneration>>,
+    persisted_generation: RefCell<Option<PartGeneration>>,
 }
 
 impl<T> RegisteredPart for StateRegisteredPart<T>
 where
-    T: DurableStateCodec + Send + 'static,
+    T: DurableStateCodec + 'static,
 {
     fn is_alive(&self) -> bool {
         self.state.generation().is_some()
     }
 
     fn snapshot_if_dirty(&self) -> Result<PartStatus, DurablePartError> {
-        let persisted_generation = *lock(&self.persisted_generation);
+        let persisted_generation = *self.persisted_generation.borrow();
         let Some(generation) = self.state.generation() else {
             return Ok(PartStatus::Dropped);
         };
@@ -464,7 +462,7 @@ where
     }
 
     fn mark_persisted(&self, generation: PartGeneration) {
-        *lock(&self.persisted_generation) = Some(generation);
+        *self.persisted_generation.borrow_mut() = Some(generation);
     }
 }
 
@@ -508,10 +506,6 @@ fn decode_file<'a>(
     ))
 }
 
-fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
 /// Errors produced by the persistence registry.
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
@@ -536,11 +530,11 @@ pub enum PersistenceError {
         instance_id: Option<InstanceId>,
     },
     #[error("{0}")]
-    Storage(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    Storage(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error("{0}")]
-    CorruptState(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    CorruptState(#[source] Box<dyn Error + Send + Sync + 'static>),
     #[error("{0}")]
-    Codec(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    Codec(#[source] Box<dyn Error + Send + Sync + 'static>),
 }
 
 impl PersistenceError {
@@ -594,7 +588,9 @@ struct CodecFailure {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use alloc::borrow::Cow;
+    use alloc::string::ToString;
+    use alloc::vec;
 
     use claw_interface::{ClawFs, MemFs};
 
@@ -623,7 +619,7 @@ mod tests {
                     "unsupported test state schema",
                 ));
             }
-            if state.bytes.len() != std::mem::size_of::<u32>() {
+            if state.bytes.len() != core::mem::size_of::<u32>() {
                 return Err(DurablePartError::InvalidState(
                     "invalid test state payload size",
                 ));

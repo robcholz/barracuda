@@ -51,55 +51,24 @@ process/thread mapping (including `run.system`, session grouping, and the
 uv run --script crates/claw-context/scripts/context_viewer.py
 ```
 
-## Prebuilt ESP-IDF static library
+## Embassy integration
 
-Build the complete Rust runtime as a target-specific static archive:
+Production crates use `no_std + alloc` and do not depend on a chip PAC or a
+concrete executor. Constructing an `AgentSystem` also returns an
+`AgentService` future. Spawn that future from the application and implement the
+three platform traits (`ClawFs`, `ClawHttp`, and `ClawTimer`) with the selected
+HAL.
 
-```bash
-./build-idf-staticlib.sh
+```rust,ignore
+let (agent, service) = AgentSystem::new(filesystem, persistence)?;
+spawner.spawn(run_agent_service(service))?;
+let session = agent.new_session(SessionPersistence::Persistent).await?;
 ```
 
-Each run builds archives for `esp32s3`, `esp32c5`, `esp32p4`, and `esp32s31`.
-The archives are written to
-`crates/claw-cabi/prebuilt/<idf-target>/libclaw_cabi.a`. These archives are
-committed with the repository, and ESP-IDF links the archive matching
-`IDF_TARGET` by default. No Rust toolchain is needed unless the Rust sources
-change.
+The service is a local (`!Send`) future. Use Embassy's current-executor
+`Spawner`, which supports non-`Send` tasks; do not use `SendSpawner` for this
+task. This is the tradeoff of the allocation-only yield-stream implementation:
+no extra generator crate or synchronization, but no cross-executor migration.
 
-CI verifies that all committed archives match the Rust sources without
-overwriting them:
-
-```bash
-./build-idf-staticlib.sh --check
-```
-
-Build the firmware normally:
-
-```bash
-idf.py -C ../application/edge_agent build
-```
-
-Set `CLAW_DEBUG=1` while running the archive build script to enable rich
-logging. To bypass the committed archives during Rust development, configure
-with an empty prebuilt directory:
-
-```bash
-idf.py \
-  -C ../application/edge_agent \
-  -DCLAW_RUST_PREBUILT_DIR= \
-  build
-```
-
-## Flashing
-
-Enable rich logging by:
-
-```bash
-export CLAW_DEBUG=1
-```
-
-Clear it with:
-
-```bash
-unset CLAW_DEBUG
-```
+Host tests and `claw-cli` remain normal `std` consumers. The former C ABI and
+prebuilt static archives are no longer part of this workspace.

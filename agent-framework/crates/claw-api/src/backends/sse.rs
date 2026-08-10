@@ -13,6 +13,8 @@
 //! ToolCalls(End)`. With cache profiling enabled, one final `Usage` event may
 //! follow those boundaries.
 
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 use claw_utils::stream::StreamPart;
 use serde_json::Value;
 
@@ -522,7 +524,7 @@ impl AnthropicSse {
         let Some(block) = self.blocks.get_mut(index) else {
             return Ok(());
         };
-        let AnthBlock::ToolUse { id, name, args } = std::mem::replace(block, AnthBlock::Other)
+        let AnthBlock::ToolUse { id, name, args } = core::mem::replace(block, AnthBlock::Other)
         else {
             return Ok(());
         };
@@ -577,6 +579,8 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
 
     fn drive<P: SseParse>(parser: &mut P, body: &str) -> Vec<ChatStreamEvent> {

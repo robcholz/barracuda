@@ -1,7 +1,8 @@
 //! Per-agent skill projection and reusable render buffers.
 
-use std::fmt::Write as _;
-use std::sync::Arc;
+use alloc::string::String;
+use alloc::sync::Arc;
+use core::fmt::Write as _;
 
 use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
 use super::skill::{SkillDocument, SkillError, SkillId};

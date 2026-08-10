@@ -10,7 +10,7 @@
 //!
 //! As a core crate it depends only on the [`claw_interface`] inbound traits — the
 //! [`ClawFs`](claw_interface::ClawFs) persistence seam — never on the platform
-//! boundary (`claw-sys`) or on the LLM client (`claw-api`).
+//! boundary or on the LLM client (`claw-api`).
 //!
 //! # Compaction is *not* here
 //!
@@ -30,8 +30,8 @@
 //! use claw_memory::{AssistantFragment, TranscriptStore};
 //! use std::sync::Arc;
 //!
-//! // A filesystem for persistence. On device this is the espidf `ClawFs` over
-//! // the DATA root; here it is the in-memory host double.
+//! // A filesystem for persistence. Device applications provide their `ClawFs`;
+//! // here it is the in-memory host double.
 //! let filesystem = Arc::new(MemFs::new());
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
@@ -59,6 +59,12 @@
 //!
 //! // Persistence is automatic at the turn boundary.
 //! ```
+
+#![no_std]
+// Shared ownership stays API-compatible while mutation remains single-task.
+#![allow(clippy::arc_with_non_send_sync)]
+
+extern crate alloc;
 
 pub mod compaction;
 pub mod long_term_memory;

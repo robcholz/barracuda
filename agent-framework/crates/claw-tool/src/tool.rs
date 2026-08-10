@@ -1,17 +1,18 @@
+use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::sync::Arc;
+use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
-use std::fmt;
-use std::sync::Arc;
 
 use claw_permission::{Action, RiskClass};
 
 use super::validate;
 
-pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'a>>;
-pub type ToolCompletionFuture =
-    Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + Send + 'static>>;
-pub type DetachedToolFuture<'a> =
-    Pin<Box<dyn Future<Output = ToolResult<DetachedTool>> + Send + 'a>>;
+pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'a>>;
+pub type ToolCompletionFuture = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'static>>;
+pub type DetachedToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<DetachedTool>> + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
 
 /// The two settlements produced by a dynamically detached tool.
@@ -114,8 +115,8 @@ impl fmt::Display for ToolInvokeError {
     }
 }
 
-impl std::error::Error for ToolInvokeError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl core::error::Error for ToolInvokeError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
         Some(&self.error)
     }
 }
@@ -145,7 +146,7 @@ impl RetryCount {
     }
 }
 
-pub trait ToolSpec: Send + Sync {
+pub trait ToolSpec {
     fn name(&self) -> &str;
 
     fn schema(&self) -> &str;
@@ -197,7 +198,7 @@ macro_rules! tool_metadata {
             ))
         }
 
-        fn usage(&self) -> ::std::option::Option<&str> {
+        fn usage(&self) -> ::core::option::Option<&str> {
             const USAGE: &str = include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/resources/tools/",
@@ -205,9 +206,9 @@ macro_rules! tool_metadata {
                 "/usage.md"
             ));
             if USAGE.trim().is_empty() {
-                ::std::option::Option::None
+                ::core::option::Option::None
             } else {
-                ::std::option::Option::Some(USAGE)
+                ::core::option::Option::Some(USAGE)
             }
         }
     };

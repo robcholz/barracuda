@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use core::cell::RefCell;
 
 use async_channel::{Receiver, Sender, TrySendError};
 

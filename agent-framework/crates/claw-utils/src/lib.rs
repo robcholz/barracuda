@@ -1,3 +1,5 @@
+#![no_std]
+
 //! Shared helpers for the claw Rust crates: the externally-driven [`TaskPool`],
 //! logical [`stream`] parts, log-safe text truncation, the prefixed-id newtype
 //! macro ([`define_prefixed_id`]), and the id-allocator macro.
@@ -6,27 +8,32 @@
 //! only when its owner calls [`TaskPool::drive`]. Use vetted runtime-specific
 //! crates for channels and top-level `block_on` behavior.
 
+extern crate alloc;
+
 pub mod stream;
 mod task_pool;
+pub mod yield_stream;
 
 pub use task_pool::{JobCancelled, JobHandle, TaskPool};
 
 use core::fmt;
 
+use alloc::string::{String, ToString};
+
 use thiserror::Error;
 
 #[doc(hidden)]
 pub mod __private {
+    pub use alloc::{format, string::String};
+    pub use core::{default::Default, fmt, str::FromStr};
     pub use serde;
 }
 
-/// Default byte ceiling for [`TruncatedText::new`]. On device, keep trace/log
-/// lines compact (flash + UART bandwidth); on host, print the full text so the
-/// CLI / offline tooling sees everything. `usize::MAX` makes truncation a no-op.
-#[cfg(target_os = "espidf")]
+/// Default byte ceiling for [`TruncatedText::new`]. Keep trace/log lines compact
+/// on every target; callers that need a different ceiling use [`with_limit`].
+///
+/// [`with_limit`]: TruncatedText::with_limit
 const LOG_SNIPPET_LEN: usize = 96;
-#[cfg(not(target_os = "espidf"))]
-const LOG_SNIPPET_LEN: usize = usize::MAX;
 
 /// Log-safe view of text: at most `limit` bytes on a char boundary, plus `"..."`
 /// when truncated. [`new`](Self::new) uses the platform default
@@ -37,7 +44,7 @@ pub struct TruncatedText<T> {
 }
 
 impl<T: AsRef<str>> TruncatedText<T> {
-    /// Truncate to the platform default ceiling: compact on device, unbounded on host.
+    /// Truncate to the default 96-byte ceiling.
     pub fn new(text: T) -> Self {
         Self {
             text,
@@ -119,8 +126,8 @@ macro_rules! define_prefixed_id {
             }
 
             /// Render to the prefixed wire string (e.g. the prefix followed by the number).
-            pub fn to_wire(&self) -> String {
-                format!(concat!($prefix, "{}"), self.0)
+            pub fn to_wire(&self) -> $crate::__private::String {
+                $crate::__private::format!(concat!($prefix, "{}"), self.0)
             }
 
             /// Parse from a prefixed wire string, validating the prefix.
@@ -134,13 +141,16 @@ macro_rules! define_prefixed_id {
             }
         }
 
-        impl ::std::fmt::Display for $name {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+        impl $crate::__private::fmt::Display for $name {
+            fn fmt(
+                &self,
+                f: &mut $crate::__private::fmt::Formatter<'_>,
+            ) -> $crate::__private::fmt::Result {
                 write!(f, concat!($prefix, "{}"), self.0)
             }
         }
 
-        impl ::std::str::FromStr for $name {
+        impl $crate::__private::FromStr for $name {
             type Err = $crate::IdParseError;
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -168,7 +178,7 @@ macro_rules! define_prefixed_id {
                 deserializer: D,
             ) -> Result<Self, D::Error> {
                 let value =
-                    <::std::string::String as $crate::__private::serde::Deserialize>::deserialize(
+                    <$crate::__private::String as $crate::__private::serde::Deserialize>::deserialize(
                         deserializer,
                     )?;
                 Self::from_wire(&value).map_err($crate::__private::serde::de::Error::custom)
@@ -252,7 +262,7 @@ macro_rules! define_id_allocator {
             }
         }
 
-        impl ::std::default::Default for $name {
+        impl $crate::__private::Default for $name {
             fn default() -> Self {
                 Self::new()
             }

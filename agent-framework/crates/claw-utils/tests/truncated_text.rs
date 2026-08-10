@@ -27,8 +27,10 @@ fn with_limit_respects_char_boundary() {
 }
 
 #[test]
-#[cfg(not(target_os = "espidf"))]
-fn new_is_unbounded_on_host() {
-    let long = "x".repeat(10_000);
-    assert_eq!(TruncatedText::new(&long).to_string(), long);
+fn new_uses_the_default_limit() {
+    let long = "x".repeat(TEST_LIMIT + 10);
+    assert_eq!(
+        TruncatedText::new(&long).to_string(),
+        format!("{}...", "x".repeat(TEST_LIMIT))
+    );
 }

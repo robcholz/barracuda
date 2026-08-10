@@ -2,9 +2,9 @@
 //!
 //! This is the persistence seam for everything that has to survive a reboot
 //! (conversation tapes, profile/long-term memory, …). Like [`ClawHttp`], it is a
-//! dependency-injection point: the espidf wiring implements it over the DATA
-//! root (FATFS / SD card), while host tests provide `std::fs` or an in-memory
-//! map. Modules never touch `std::fs` directly so they stay portable.
+//! dependency-injection point: device applications implement it over their
+//! storage stack, while host tests provide `std::fs` or an in-memory map.
+//! Modules never touch `std::fs` directly so they stay portable.
 //!
 //! # Two layers: a filesystem backend that produces file handles
 //!
@@ -31,9 +31,12 @@
 //!
 //! [`ClawHttp`]: crate::http::ClawHttp
 
-use std::error::Error;
-use std::fmt;
-use std::sync::Arc;
+use alloc::format;
+use alloc::string::String;
+use alloc::sync::Arc;
+use alloc::vec::Vec;
+use core::error::Error;
+use core::fmt;
 
 #[cfg(feature = "diskfs")]
 mod disk;
@@ -47,8 +50,7 @@ pub use mem::{MemFile, MemFs};
 ///
 /// Deliberately coarse: callers either retry, log, or fall back to an empty
 /// state, so the only distinction that matters is "the file isn't there" versus
-/// "the underlying I/O failed". The `esp_err_t` mapping for the C ABI lives in
-/// `claw_capi`.
+/// "the underlying I/O failed".
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FsError {
     #[error("path not found")]
@@ -70,6 +72,7 @@ impl FsError {
     }
 }
 
+#[cfg(feature = "diskfs")]
 impl From<std::io::Error> for FsError {
     fn from(error: std::io::Error) -> Self {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -181,7 +184,7 @@ pub trait ClawFile {
 ///   on compaction/collapse, and the `.jsonl` itself when a collapse rewrites it
 ///   to drop dead records. The default implementation writes a temporary sibling
 ///   then [`rename`](ClawFs::rename)s it over the target.
-pub trait ClawFs: Send + Sync + 'static {
+pub trait ClawFs: 'static {
     /// The open-file handle this filesystem produces.
     type File: ClawFile;
 

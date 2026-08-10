@@ -1,3 +1,5 @@
+#![no_std]
+
 //! `claw-api` — LLM client: OpenAI-/Anthropic-compatible chat, structured JSON
 //! output, and image inference over an injected HTTP transport.
 //!
@@ -18,10 +20,10 @@
 //! | [`ClawApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
 //! | [`ClawApiAsync::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
-//! Networking is **injected**: `claw-api` never opens sockets itself. On device
-//! the espidf layer implements [`ClawHttp`](claw_interface::http::ClawHttp) and
-//! [`StreamingHttp`](claw_interface::http::StreamingHttp) over one persistent
-//! `esp_http_client`; tests and host tools provide their own implementation.
+//! Networking is **injected**: `claw-api` never opens sockets itself. Device
+//! applications implement [`ClawHttp`](claw_interface::http::ClawHttp) and
+//! [`StreamingHttp`](claw_interface::http::StreamingHttp) over their selected
+//! network stack; tests and host tools provide their own implementation.
 //!
 //! # Cancellation
 //!
@@ -49,8 +51,7 @@
 //! use claw_api::{BackendKind, ChatRequest, ClawApi, ClawApiConfig, RetryPolicy};
 //! use claw_interface::http::{blocking::ClawHttp, HttpError, HttpJsonRequest, HttpResponse, HttpStatusCode};
 //!
-//! // 1. Provide an HTTP transport. On device this wraps `esp_http_client`;
-//! //    here we stub a fixed OpenAI-shaped reply.
+//! // 1. Provide an HTTP transport; here we stub a fixed OpenAI-shaped reply.
 //! struct MyHttp;
 //! impl ClawHttp for MyHttp {
 //!     fn post_json(&mut self, _req: &HttpJsonRequest, _abort: &AtomicBool)
@@ -98,6 +99,8 @@
     not(test),
     warn(clippy::todo, clippy::unimplemented, clippy::unreachable)
 )]
+
+extern crate alloc;
 
 // Implementation modules are private: the public surface is the curated
 // re-exports below. The backend registry, media-prep pipeline, prompt helpers,

@@ -1,6 +1,6 @@
 //! One-shot resume context plus the tool-discovery surface.
 
-use std::borrow::Cow;
+use alloc::{borrow::Cow, string::String, vec::Vec};
 
 use claw_context::{Band, BlockKind, ContextSink, Scope};
 use claw_persistence::DurableState;

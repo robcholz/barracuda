@@ -4,11 +4,15 @@
 //! text, and the SessionActor runs one short LLM/tool round to classify that text
 //! into the internal [`ApprovalDecision`] it feeds back to the parked agent.
 
+use alloc::{
+    boxed::Box,
+    collections::{BTreeSet, VecDeque},
+    rc::Rc,
+    string::String,
+};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::{BTreeSet, VecDeque};
-use std::rc::Rc;
 
 use claw_api::{ChatError, InitError, ToolCall};
 use claw_tool::ToolSetError;

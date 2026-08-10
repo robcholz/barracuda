@@ -1,15 +1,19 @@
-use std::collections::{BTreeSet, HashMap};
-use std::sync::{Arc, Mutex, MutexGuard};
+use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use core::cell::{Ref, RefCell, RefMut};
 
 use super::{ClawFile, ClawFs, FsError};
 
-type Files = Arc<Mutex<HashMap<String, Vec<u8>>>>;
+type Files = Rc<RefCell<BTreeMap<String, Vec<u8>>>>;
 
 /// In-memory [`ClawFs`] backed by a shared path → bytes map.
 ///
 /// Each [`MemFs::new`] creates an independent namespace. The filesystem itself
 /// is deliberately not [`Clone`]; owners that intentionally share one instance
-/// do so explicitly through an [`Arc`]. Dropping the last filesystem or open
+/// do so explicitly through an [`Rc`]. Dropping the last filesystem or open
 /// file handle releases every file.
 /// `list_dir` derives entries from the key prefixes, mirroring a real
 /// directory tree.
@@ -28,19 +32,21 @@ impl MemFs {
     /// An empty filesystem.
     pub fn new() -> Self {
         Self {
-            files: Arc::new(Mutex::new(HashMap::new())),
+            files: Rc::new(RefCell::new(BTreeMap::new())),
         }
     }
 
     /// Remove every file from this namespace.
     pub fn clear(&self) {
-        Self::lock(&self.files).clear();
+        Self::borrow_mut(&self.files).clear();
     }
 
-    fn lock(files: &Files) -> MutexGuard<'_, HashMap<String, Vec<u8>>> {
-        files
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    fn borrow(files: &Files) -> Ref<'_, BTreeMap<String, Vec<u8>>> {
+        files.borrow()
+    }
+
+    fn borrow_mut(files: &Files) -> RefMut<'_, BTreeMap<String, Vec<u8>>> {
+        files.borrow_mut()
     }
 }
 
@@ -51,26 +57,30 @@ impl MemFs {
 /// immediately (there is no separate "flush"), matching the on-disk backend
 /// closely enough for tests.
 pub struct MemFile {
-    files: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    files: Files,
     path: String,
 }
 
 impl MemFile {
-    fn lock(&self) -> MutexGuard<'_, HashMap<String, Vec<u8>>> {
-        MemFs::lock(&self.files)
+    fn borrow(&self) -> Ref<'_, BTreeMap<String, Vec<u8>>> {
+        MemFs::borrow(&self.files)
+    }
+
+    fn borrow_mut(&self) -> RefMut<'_, BTreeMap<String, Vec<u8>>> {
+        MemFs::borrow_mut(&self.files)
     }
 }
 
 impl ClawFile for MemFile {
     fn read_to_end(&mut self) -> Result<Vec<u8>, FsError> {
-        self.lock()
+        self.borrow()
             .get(&self.path)
             .cloned()
             .ok_or(FsError::NotFound)
     }
 
     fn read_exact_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>, FsError> {
-        let files = self.lock();
+        let files = self.borrow();
         let bytes = files.get(&self.path).ok_or(FsError::NotFound)?;
         let start = usize::try_from(offset).map_err(|_| FsError::io_message("offset overflow"))?;
         let end = start
@@ -84,14 +94,14 @@ impl ClawFile for MemFile {
     }
 
     fn size(&self) -> Result<u64, FsError> {
-        self.lock()
+        self.borrow()
             .get(&self.path)
             .map(|bytes| u64::try_from(bytes.len()).unwrap_or(u64::MAX))
             .ok_or(FsError::NotFound)
     }
 
     fn write_all(&mut self, data: &[u8]) -> Result<(), FsError> {
-        self.lock()
+        self.borrow_mut()
             .entry(self.path.clone())
             .or_default()
             .extend_from_slice(data);
@@ -103,8 +113,9 @@ impl ClawFs for MemFs {
     type File = MemFile;
 
     fn open(&self, path: &str) -> Result<Self::File, FsError> {
-        let files = Arc::clone(&self.files);
-        if Self::lock(&files).contains_key(path) {
+        let files = Rc::clone(&self.files);
+        let exists = Self::borrow(&files).contains_key(path);
+        if exists {
             Ok(MemFile {
                 files,
                 path: path.to_string(),
@@ -115,9 +126,9 @@ impl ClawFs for MemFs {
     }
 
     fn create(&self, path: &str) -> Result<Self::File, FsError> {
-        let files = Arc::clone(&self.files);
+        let files = Rc::clone(&self.files);
         // Truncate: an empty entry that subsequent `write_all`s extend.
-        Self::lock(&files).insert(path.to_string(), Vec::new());
+        Self::borrow_mut(&files).insert(path.to_string(), Vec::new());
         Ok(MemFile {
             files,
             path: path.to_string(),
@@ -125,8 +136,10 @@ impl ClawFs for MemFs {
     }
 
     fn open_append(&self, path: &str) -> Result<Self::File, FsError> {
-        let files = Arc::clone(&self.files);
-        Self::lock(&files).entry(path.to_string()).or_default();
+        let files = Rc::clone(&self.files);
+        Self::borrow_mut(&files)
+            .entry(path.to_string())
+            .or_default();
         Ok(MemFile {
             files,
             path: path.to_string(),
@@ -134,8 +147,8 @@ impl ClawFs for MemFs {
     }
 
     fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
-        let files = Arc::clone(&self.files);
-        let mut files = Self::lock(&files);
+        let files = Rc::clone(&self.files);
+        let mut files = Self::borrow_mut(&files);
         let bytes = files.remove(from).ok_or(FsError::NotFound)?;
         files.insert(to.to_string(), bytes);
         Ok(())
@@ -149,22 +162,22 @@ impl ClawFs for MemFs {
     }
 
     fn exists(&self, path: &str) -> bool {
-        let files = Arc::clone(&self.files);
-        let exists = Self::lock(&files).contains_key(path);
+        let files = Rc::clone(&self.files);
+        let exists = Self::borrow(&files).contains_key(path);
         exists
     }
 
     fn remove(&self, path: &str) -> Result<(), FsError> {
-        let files = Arc::clone(&self.files);
-        Self::lock(&files).remove(path);
+        let files = Rc::clone(&self.files);
+        Self::borrow_mut(&files).remove(path);
         Ok(())
     }
 
     fn list_dir(&self, path: &str) -> Result<Vec<String>, FsError> {
         let prefix = format!("{}/", path.trim_end_matches('/'));
         let mut names = BTreeSet::new();
-        let files = Arc::clone(&self.files);
-        for key in Self::lock(&files).keys() {
+        let files = Rc::clone(&self.files);
+        for key in Self::borrow(&files).keys() {
             if let Some(rest) = key.strip_prefix(&prefix) {
                 if let Some(name) = rest.split('/').next().filter(|name| !name.is_empty()) {
                     names.insert(name.to_string());
@@ -180,10 +193,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn filesystem_is_send_and_sync() {
-        fn assert_send_sync<T: Send + Sync>() {}
+    fn filesystem_is_single_thread_shareable() {
+        fn assert_clone<T: Clone>() {}
 
-        assert_send_sync::<MemFs>();
+        assert_clone::<Rc<MemFs>>();
     }
 
     #[test]

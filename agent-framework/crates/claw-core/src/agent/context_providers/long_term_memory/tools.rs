@@ -185,3 +185,4 @@ fn render_items(header: &str, items: &[MemoryItem]) -> String {
     }
     out
 }
+use alloc::string::{String, ToString};

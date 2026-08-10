@@ -1,98 +1,83 @@
 pub mod claw_interface
-pub mod claw_interface::executor
-pub trait claw_interface::executor::ClawExecutor
-pub fn claw_interface::executor::ClawExecutor::block_on<Fut: core::future::future::Future>(Fut) -> <Fut as core::future::future::Future>::Output
 pub mod claw_interface::fs
 pub enum claw_interface::fs::FsError
 pub claw_interface::fs::FsError::Io(claw_interface::fs::FsIoError)
 pub claw_interface::fs::FsError::NotFound
 impl claw_interface::fs::FsError
-pub fn claw_interface::fs::FsError::io(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-pub fn claw_interface::fs::FsError::io_message(impl core::convert::Into<alloc::string::String>) -> Self
-impl core::convert::From<core::io::error::Error> for claw_interface::fs::FsError
-pub fn claw_interface::fs::FsError::from(core::io::error::Error) -> Self
+pub fn claw_interface::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_interface::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
 pub struct claw_interface::fs::FsIoError
 impl claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::message(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn claw_interface::fs::FsIoError::new(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_interface::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_interface::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
 impl core::cmp::Eq for claw_interface::fs::FsIoError
 impl core::cmp::PartialEq for claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::eq(&self, &Self) -> bool
+pub fn claw_interface::fs::FsIoError::eq(&self, other: &Self) -> bool
 impl core::error::Error for claw_interface::fs::FsIoError
 pub fn claw_interface::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_interface::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_interface::fs::MemFile
 impl claw_interface::fs::ClawFile for claw_interface::MemFile
-pub fn claw_interface::MemFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 pub struct claw_interface::fs::MemFs
 impl claw_interface::MemFs
 pub fn claw_interface::MemFs::clear(&self)
 pub fn claw_interface::MemFs::new() -> Self
 impl claw_interface::fs::ClawFs for claw_interface::MemFs
 pub type claw_interface::MemFs::File = claw_interface::MemFile
-pub fn claw_interface::MemFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::exists(&self, &str) -> bool
-pub fn claw_interface::MemFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
 impl core::default::Default for claw_interface::MemFs
 pub fn claw_interface::MemFs::default() -> Self
 pub trait claw_interface::fs::ClawFile
-pub fn claw_interface::fs::ClawFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::fs::ClawFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::fs::ClawFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 impl claw_interface::fs::ClawFile for claw_interface::MemFile
-pub fn claw_interface::MemFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub trait claw_interface::fs::ClawFs: core::marker::Send + core::marker::Sync + 'static
+pub fn claw_interface::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub trait claw_interface::fs::ClawFs: 'static
 pub type claw_interface::fs::ClawFs::File: claw_interface::fs::ClawFile
-pub fn claw_interface::fs::ClawFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::exists(&self, &str) -> bool
-pub fn claw_interface::fs::ClawFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::fs::ClawFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::create_dir_all(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::fs::ClawFs::len(&self, path: &str) -> core::result::Result<u64, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::fs::ClawFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 impl claw_interface::fs::ClawFs for claw_interface::MemFs
 pub type claw_interface::MemFs::File = claw_interface::MemFile
-pub fn claw_interface::MemFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::exists(&self, &str) -> bool
-pub fn claw_interface::MemFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
 pub mod claw_interface::http
 pub mod claw_interface::http::blocking
 pub trait claw_interface::http::blocking::ClawHttp
-pub fn claw_interface::http::blocking::ClawHttp::post_json(&mut self, &claw_interface::http::HttpJsonRequest<'_>, &core::sync::atomic::AtomicBool) -> core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>
+pub fn claw_interface::http::blocking::ClawHttp::post_json(&mut self, request: &claw_interface::http::HttpJsonRequest<'_>, abort: &core::sync::atomic::AtomicBool) -> core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>
 pub enum claw_interface::http::HttpAuth<'a>
 pub claw_interface::http::HttpAuth::ApiKey(&'a str)
 pub claw_interface::http::HttpAuth::Bearer(&'a str)
@@ -122,14 +107,14 @@ pub claw_interface::http::HttpRequestFailure::TimeoutTooLarge
 pub claw_interface::http::HttpRequestFailure::TimeoutTooLarge::timeout_ms: u32
 pub claw_interface::http::HttpRequestFailure::Transport(alloc::string::String)
 impl claw_interface::http::HttpRequestFailure
-pub fn claw_interface::http::HttpRequestFailure::driver(&'static str, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn claw_interface::http::HttpRequestFailure::transport(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_interface::http::HttpRequestFailure::driver(operation: &'static str, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_interface::http::HttpRequestFailure::transport(message: impl core::convert::Into<alloc::string::String>) -> Self
 pub struct claw_interface::http::Cancel<'a>(_)
 impl claw_interface::http::Cancel<'static>
 pub fn claw_interface::http::Cancel<'static>::never() -> Self
 impl<'a> claw_interface::http::Cancel<'a>
 pub fn claw_interface::http::Cancel<'a>::is_cancelled(&self) -> bool
-pub fn claw_interface::http::Cancel<'a>::new(&'a core::sync::atomic::AtomicBool) -> Self
+pub fn claw_interface::http::Cancel<'a>::new(flag: &'a core::sync::atomic::AtomicBool) -> Self
 pub struct claw_interface::http::HttpGetRequest<'a>
 pub claw_interface::http::HttpGetRequest::auth: claw_interface::http::HttpAuth<'a>
 pub claw_interface::http::HttpGetRequest::headers: &'a [claw_interface::http::HttpHeader<'a>]
@@ -154,34 +139,20 @@ pub const claw_interface::http::HttpStatusCode::OK: Self
 pub fn claw_interface::http::HttpStatusCode::as_i32(self) -> i32
 pub const fn claw_interface::http::HttpStatusCode::as_u16(self) -> u16
 pub const fn claw_interface::http::HttpStatusCode::is_success(self) -> bool
-pub const fn claw_interface::http::HttpStatusCode::new(u16) -> Self
+pub const fn claw_interface::http::HttpStatusCode::new(code: u16) -> Self
 impl core::convert::From<claw_interface::http::HttpStatusCode> for i32
-pub fn i32::from(claw_interface::http::HttpStatusCode) -> Self
+pub fn i32::from(status: claw_interface::http::HttpStatusCode) -> Self
 impl core::convert::From<claw_interface::http::HttpStatusCode> for u16
-pub fn u16::from(claw_interface::http::HttpStatusCode) -> Self
+pub fn u16::from(status: claw_interface::http::HttpStatusCode) -> Self
 impl core::fmt::Display for claw_interface::http::HttpStatusCode
-pub fn claw_interface::http::HttpStatusCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_interface::http::HttpStatusCode::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub trait claw_interface::http::ClawHttp
-pub fn claw_interface::http::ClawHttp::get_json<'a>(&'a mut self, &'a claw_interface::http::HttpGetRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
-pub fn claw_interface::http::ClawHttp::post_json<'a>(&'a mut self, &'a claw_interface::http::HttpJsonRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
+pub fn claw_interface::http::ClawHttp::get_json<'a>(&'a mut self, _request: &'a claw_interface::http::HttpGetRequest<'a>, _cancel: claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
+pub fn claw_interface::http::ClawHttp::post_json<'a>(&'a mut self, request: &'a claw_interface::http::HttpJsonRequest<'a>, cancel: claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
 pub trait claw_interface::http::StreamingHttp
 pub type claw_interface::http::StreamingHttp::ByteStream<'a> where Self: 'a: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin + 'a
-pub fn claw_interface::http::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, &'r claw_interface::http::HttpJsonRequest<'r>, claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
+pub fn claw_interface::http::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, request: &'r claw_interface::http::HttpJsonRequest<'r>, cancel: claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
 pub type claw_interface::http::HttpResponseFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>> + 'a)>>
-pub mod claw_interface::thread
-pub enum claw_interface::thread::CoreAffinity
-pub claw_interface::thread::CoreAffinity::Any
-pub claw_interface::thread::CoreAffinity::Core(u8)
-pub enum claw_interface::thread::Priority
-pub claw_interface::thread::Priority::High
-pub claw_interface::thread::Priority::Low
-pub claw_interface::thread::Priority::Normal
-pub struct claw_interface::thread::WorkerHandle
-impl claw_interface::thread::WorkerHandle
-pub fn claw_interface::thread::WorkerHandle::join(self)
-pub fn claw_interface::thread::WorkerHandle::new(std::thread::join_handle::JoinHandle<()>) -> Self
-pub trait claw_interface::thread::ClawThread: core::marker::Send + core::marker::Sync
-pub fn claw_interface::thread::ClawThread::spawn_worker<F>(&str, usize, claw_interface::thread::Priority, claw_interface::thread::CoreAffinity, F) -> core::io::error::Result<claw_interface::thread::WorkerHandle> where F: core::ops::function::FnOnce() + core::marker::Send + 'static
 pub mod claw_interface::timer
 pub enum claw_interface::timer::SleepOutcome
 pub claw_interface::timer::SleepOutcome::Cancelled
@@ -190,19 +161,14 @@ impl claw_interface::timer::SleepOutcome
 pub const fn claw_interface::timer::SleepOutcome::is_cancelled(self) -> bool
 pub const fn claw_interface::timer::SleepOutcome::is_completed(self) -> bool
 pub trait claw_interface::timer::ClawTimer
-pub fn claw_interface::timer::ClawTimer::sleep<'a>(&'a mut self, core::time::Duration, claw_interface::http::Cancel<'a>) -> claw_interface::timer::TimerFuture<'a>
+pub fn claw_interface::timer::ClawTimer::sleep<'a>(&'a mut self, duration: core::time::Duration, cancel: claw_interface::http::Cancel<'a>) -> claw_interface::timer::TimerFuture<'a>
 pub type claw_interface::timer::TimerFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = claw_interface::timer::SleepOutcome> + 'a)>>
-pub enum claw_interface::CoreAffinity
-pub claw_interface::CoreAffinity::Any
-pub claw_interface::CoreAffinity::Core(u8)
 pub enum claw_interface::FsError
 pub claw_interface::FsError::Io(claw_interface::fs::FsIoError)
 pub claw_interface::FsError::NotFound
 impl claw_interface::fs::FsError
-pub fn claw_interface::fs::FsError::io(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-pub fn claw_interface::fs::FsError::io_message(impl core::convert::Into<alloc::string::String>) -> Self
-impl core::convert::From<core::io::error::Error> for claw_interface::fs::FsError
-pub fn claw_interface::fs::FsError::from(core::io::error::Error) -> Self
+pub fn claw_interface::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_interface::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
 pub enum claw_interface::HttpAuth<'a>
 pub claw_interface::HttpAuth::ApiKey(&'a str)
 pub claw_interface::HttpAuth::Bearer(&'a str)
@@ -232,12 +198,8 @@ pub claw_interface::HttpRequestFailure::TimeoutTooLarge
 pub claw_interface::HttpRequestFailure::TimeoutTooLarge::timeout_ms: u32
 pub claw_interface::HttpRequestFailure::Transport(alloc::string::String)
 impl claw_interface::http::HttpRequestFailure
-pub fn claw_interface::http::HttpRequestFailure::driver(&'static str, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn claw_interface::http::HttpRequestFailure::transport(impl core::convert::Into<alloc::string::String>) -> Self
-pub enum claw_interface::Priority
-pub claw_interface::Priority::High
-pub claw_interface::Priority::Low
-pub claw_interface::Priority::Normal
+pub fn claw_interface::http::HttpRequestFailure::driver(operation: &'static str, message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_interface::http::HttpRequestFailure::transport(message: impl core::convert::Into<alloc::string::String>) -> Self
 pub enum claw_interface::SleepOutcome
 pub claw_interface::SleepOutcome::Cancelled
 pub claw_interface::SleepOutcome::Completed
@@ -249,18 +211,18 @@ impl claw_interface::http::Cancel<'static>
 pub fn claw_interface::http::Cancel<'static>::never() -> Self
 impl<'a> claw_interface::http::Cancel<'a>
 pub fn claw_interface::http::Cancel<'a>::is_cancelled(&self) -> bool
-pub fn claw_interface::http::Cancel<'a>::new(&'a core::sync::atomic::AtomicBool) -> Self
+pub fn claw_interface::http::Cancel<'a>::new(flag: &'a core::sync::atomic::AtomicBool) -> Self
 pub struct claw_interface::FsIoError
 impl claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::message(impl core::convert::Into<alloc::string::String>) -> Self
-pub fn claw_interface::fs::FsIoError::new(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_interface::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_interface::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
 impl core::cmp::Eq for claw_interface::fs::FsIoError
 impl core::cmp::PartialEq for claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::eq(&self, &Self) -> bool
+pub fn claw_interface::fs::FsIoError::eq(&self, other: &Self) -> bool
 impl core::error::Error for claw_interface::fs::FsIoError
 pub fn claw_interface::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Display for claw_interface::fs::FsIoError
-pub fn claw_interface::fs::FsIoError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_interface::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_interface::HttpGetRequest<'a>
 pub claw_interface::HttpGetRequest::auth: claw_interface::http::HttpAuth<'a>
 pub claw_interface::HttpGetRequest::headers: &'a [claw_interface::http::HttpHeader<'a>]
@@ -285,95 +247,77 @@ pub const claw_interface::http::HttpStatusCode::OK: Self
 pub fn claw_interface::http::HttpStatusCode::as_i32(self) -> i32
 pub const fn claw_interface::http::HttpStatusCode::as_u16(self) -> u16
 pub const fn claw_interface::http::HttpStatusCode::is_success(self) -> bool
-pub const fn claw_interface::http::HttpStatusCode::new(u16) -> Self
+pub const fn claw_interface::http::HttpStatusCode::new(code: u16) -> Self
 impl core::convert::From<claw_interface::http::HttpStatusCode> for i32
-pub fn i32::from(claw_interface::http::HttpStatusCode) -> Self
+pub fn i32::from(status: claw_interface::http::HttpStatusCode) -> Self
 impl core::convert::From<claw_interface::http::HttpStatusCode> for u16
-pub fn u16::from(claw_interface::http::HttpStatusCode) -> Self
+pub fn u16::from(status: claw_interface::http::HttpStatusCode) -> Self
 impl core::fmt::Display for claw_interface::http::HttpStatusCode
-pub fn claw_interface::http::HttpStatusCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_interface::http::HttpStatusCode::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_interface::MemFile
 impl claw_interface::fs::ClawFile for claw_interface::MemFile
-pub fn claw_interface::MemFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 pub struct claw_interface::MemFs
 impl claw_interface::MemFs
 pub fn claw_interface::MemFs::clear(&self)
 pub fn claw_interface::MemFs::new() -> Self
 impl claw_interface::fs::ClawFs for claw_interface::MemFs
 pub type claw_interface::MemFs::File = claw_interface::MemFile
-pub fn claw_interface::MemFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::exists(&self, &str) -> bool
-pub fn claw_interface::MemFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
 impl core::default::Default for claw_interface::MemFs
 pub fn claw_interface::MemFs::default() -> Self
-pub struct claw_interface::WorkerHandle
-impl claw_interface::thread::WorkerHandle
-pub fn claw_interface::thread::WorkerHandle::join(self)
-pub fn claw_interface::thread::WorkerHandle::new(std::thread::join_handle::JoinHandle<()>) -> Self
-pub trait claw_interface::ClawExecutor
-pub fn claw_interface::ClawExecutor::block_on<Fut: core::future::future::Future>(Fut) -> <Fut as core::future::future::Future>::Output
 pub trait claw_interface::ClawFile
-pub fn claw_interface::ClawFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::ClawFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::ClawFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 impl claw_interface::fs::ClawFile for claw_interface::MemFile
-pub fn claw_interface::MemFile::read_exact_at(&mut self, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
 pub fn claw_interface::MemFile::size(&self) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFile::write_all(&mut self, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub trait claw_interface::ClawFs: core::marker::Send + core::marker::Sync + 'static
+pub fn claw_interface::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub trait claw_interface::ClawFs: 'static
 pub type claw_interface::ClawFs::File: claw_interface::fs::ClawFile
-pub fn claw_interface::ClawFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::exists(&self, &str) -> bool
-pub fn claw_interface::ClawFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::ClawFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::create_dir_all(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::ClawFs::len(&self, path: &str) -> core::result::Result<u64, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::ClawFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
 impl claw_interface::fs::ClawFs for claw_interface::MemFs
 pub type claw_interface::MemFs::File = claw_interface::MemFile
-pub fn claw_interface::MemFs::append(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::create_dir_all(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::exists(&self, &str) -> bool
-pub fn claw_interface::MemFs::len(&self, &str) -> core::result::Result<u64, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::list_dir(&self, &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::open_append(&self, &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read(&self, &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::read_at(&self, &str, u64, usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::remove(&self, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::rename(&self, &str, &str) -> core::result::Result<(), claw_interface::fs::FsError>
-pub fn claw_interface::MemFs::write_atomic(&self, &str, &[u8]) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_interface::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_interface::fs::FsError>
+pub fn claw_interface::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_interface::fs::FsError>
 pub trait claw_interface::ClawHttp
-pub fn claw_interface::ClawHttp::get_json<'a>(&'a mut self, &'a claw_interface::http::HttpGetRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
-pub fn claw_interface::ClawHttp::post_json<'a>(&'a mut self, &'a claw_interface::http::HttpJsonRequest<'a>, claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
-pub trait claw_interface::ClawThread: core::marker::Send + core::marker::Sync
-pub fn claw_interface::ClawThread::spawn_worker<F>(&str, usize, claw_interface::thread::Priority, claw_interface::thread::CoreAffinity, F) -> core::io::error::Result<claw_interface::thread::WorkerHandle> where F: core::ops::function::FnOnce() + core::marker::Send + 'static
+pub fn claw_interface::ClawHttp::get_json<'a>(&'a mut self, _request: &'a claw_interface::http::HttpGetRequest<'a>, _cancel: claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
+pub fn claw_interface::ClawHttp::post_json<'a>(&'a mut self, request: &'a claw_interface::http::HttpJsonRequest<'a>, cancel: claw_interface::http::Cancel<'a>) -> claw_interface::http::HttpResponseFuture<'a>
 pub trait claw_interface::ClawTimer
-pub fn claw_interface::ClawTimer::sleep<'a>(&'a mut self, core::time::Duration, claw_interface::http::Cancel<'a>) -> claw_interface::timer::TimerFuture<'a>
+pub fn claw_interface::ClawTimer::sleep<'a>(&'a mut self, duration: core::time::Duration, cancel: claw_interface::http::Cancel<'a>) -> claw_interface::timer::TimerFuture<'a>
 pub trait claw_interface::StreamingHttp
 pub type claw_interface::StreamingHttp::ByteStream<'a> where Self: 'a: futures_core::stream::Stream<Item = core::result::Result<alloc::vec::Vec<u8>, claw_interface::http::HttpError>> + core::marker::Unpin + 'a
-pub fn claw_interface::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, &'r claw_interface::http::HttpJsonRequest<'r>, claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
+pub fn claw_interface::StreamingHttp::post_json_streaming<'a, 'r>(&'a mut self, request: &'r claw_interface::http::HttpJsonRequest<'r>, cancel: claw_interface::http::Cancel<'a>) -> impl core::future::future::Future<Output = core::result::Result<(claw_interface::http::HttpStatusCode, Self::ByteStream), claw_interface::http::HttpError>>
 pub type claw_interface::HttpResponseFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<claw_interface::http::HttpResponse, claw_interface::http::HttpError>> + 'a)>>
 pub type claw_interface::TimerFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = claw_interface::timer::SleepOutcome> + 'a)>>

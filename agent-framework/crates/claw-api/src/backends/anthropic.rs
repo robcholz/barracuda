@@ -6,6 +6,9 @@
 //! Structured JSON ([`crate::ClawApi::chat_json`]) uses Anthropic
 //! `output_config.format` (this backend supports provider-native JSON schema).
 
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Map, Value};

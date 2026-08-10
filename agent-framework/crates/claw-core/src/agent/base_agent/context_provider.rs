@@ -62,3 +62,4 @@ pub(in crate::agent) trait ContextProvider {
     /// Observe a turn-lifecycle transition.
     fn on_turn_lifecycle(&mut self, _lifecycle: TurnLifecycle) {}
 }
+use alloc::boxed::Box;

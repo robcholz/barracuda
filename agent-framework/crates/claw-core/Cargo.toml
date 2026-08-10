@@ -18,13 +18,9 @@ crate-type = ["rlib"]
 # Host-side API/cache profiling. Kept out of defaults so firmware does not pay
 # for diagnostic-only response fields and session events.
 cache_profile = ["claw-api/cache_profile"]
-# Raw Context snapshots and their intrusive WebSocket observer.
-intrusive-observability = ["claw-context/intrusive-observability"]
 # Compile the Session-scoped subagent graph, tools, and lifecycle driver.
 # Disabled builds contain only the root-Agent Session path.
 multiagent = []
-# Device-only adapter over the already initialized C skill singleton.
-use_legacy_skill = ["dep:claw-c-legacy-skill"]
 
 # Compile-time byte cap on accumulated `SessionEvent::Reasoning` deltas in one
 # iteration. EXACTLY ONE may be enabled (event.rs emits a compile_error! for zero
@@ -42,11 +38,7 @@ claw-api = { path = "../claw-api" }
 claw-persistence = { path = "../claw-persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
-async-channel = "2"
-# Direct generators for BaseAgent's owner-facing progress stream. This replaces
-# the former Future + bounded-channel bridge and makes each `yield` the natural
-# consumer poll boundary.
-async-stream = "0.3"
+async-channel = { version = "2", default-features = false }
 # The `Stream` trait `async_channel::Receiver` implements, so
 # `SessionEventStream` can poll it. `default-features = false` keeps this
 # `no_std`-friendly for the device.
@@ -56,9 +48,8 @@ futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 # Agent wrapper tracks, replacing a hand-written round-robin poll queue.
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 getset = "0.1.7"
-# NOTE: the `block_on` backend for the runtime worker is injected as a
-# `ClawExecutor` (edge-executor on device via `claw-sys`, tokio on host via
-# `claw-interface`), so `claw-core` no longer depends on a concrete executor.
+# The runtime is exposed as an ordinary Future. The application chooses Embassy,
+# Tokio, or another executor and spawns that future at its own boundary.
 claw-memory = { path = "../claw-memory" }
 claw-skill = { path = "../claw-skill" }
 claw-context = { path = "../claw-context" }
@@ -67,20 +58,17 @@ claw-permission = { path = "../claw-permission" }
 claw-tool = { path = "../claw-tool" }
 # Flat production diagnostics. Compile-time level ceilings are selected by the
 # final application through `log`'s max-level features.
-log = "0.4"
+log = { version = "0.4", default-features = false }
 # Observability facade reserved for the trace instrumentation pass. `log-always`
 # is intentionally NOT enabled: with a real subscriber it would double-emit every
 # event (once via the log bridge, once via the subscriber). `std` kept;
 # `attributes` dropped to avoid the `syn` build cost until `#[instrument]` is
 # actually used.
-tracing = { version = "0.1", default-features = false, features = ["std"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-strum = { version = "0.28", features = ["derive"] }
-thiserror = "2"
-
-[target.'cfg(target_os = "espidf")'.dependencies]
-claw-c-legacy-skill = { path = "../../c-legacy/skill", optional = true }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
 
 [build-dependencies]
 # The build script parses the agent manifest JSON at compile time and generates
@@ -96,13 +84,14 @@ proc-macro2 = "1"
 claw-tool = { path = "../claw-tool", features = ["build-support"] }
 
 [dev-dependencies]
-# Host-target live backends (`diskfs`/`realhttp`/`stdthread`) plus hermetic
+# Host-only test generators; production streams use the internal no_std adapter.
+async-stream = "0.3"
+# Host-target live backends (`diskfs`/`realhttp`) plus hermetic
 # doubles (`test-doubles`) shared from claw-interface (tests only).
 claw-interface = { path = "../claw-interface", features = [
     "test-doubles",
     "diskfs",
     "realhttp",
-    "stdthread",
 ] }
 # Never-compacts `NoopCompactor` shared from claw-memory (tests only).
 claw-memory = { path = "../claw-memory", features = ["compactor-stub"] }

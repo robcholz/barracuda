@@ -1,11 +1,12 @@
 //! Single-thread cooperative tasks driven by an owning event loop.
 
+use alloc::boxed::Box;
+use alloc::collections::VecDeque;
+use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
-use std::collections::VecDeque;
-use std::rc::Rc;
 
 use futures_channel::oneshot;
 use futures_core::Stream;
@@ -175,12 +176,11 @@ impl Drop for DriveGuard<'_> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::{rc::Rc, sync::Arc};
     use core::cell::Cell;
     use core::future::{pending, poll_fn};
+    use core::sync::atomic::{AtomicUsize, Ordering};
     use core::task::{Context, Poll};
-    use std::rc::Rc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
 
     use futures_util::task::{noop_waker, waker_ref, ArcWake};
 

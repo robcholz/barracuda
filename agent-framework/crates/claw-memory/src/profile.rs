@@ -4,7 +4,13 @@
 //! documents edited by users or by profile-specific tools and later projected into
 //! context by `claw-core`.
 
-use std::sync::Arc;
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::fmt;
 
 use claw_interface::{ClawFs, FsError};
 use strum::{EnumString, IntoStaticStr};
@@ -63,8 +69,8 @@ impl ProfileDocument {
     }
 }
 
-impl std::fmt::Display for ProfileDocument {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for ProfileDocument {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str((*self).into())
     }
 }

@@ -3,7 +3,7 @@
 //! Global and per-agent stores appear as one catalog; id prefixes route writes
 //! back to the owning store.
 
-use std::sync::Arc;
+use alloc::{boxed::Box, string::String, sync::Arc};
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};

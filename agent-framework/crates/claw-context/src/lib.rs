@@ -1,3 +1,5 @@
+#![no_std]
+
 //! `claw-context` — the agent's context assembler.
 //!
 //! This crate owns **placement, change detection, and rendering**, never
@@ -35,6 +37,8 @@
 //!     "You are a helpful agent.\n\nAnswer in one concise paragraph."
 //! );
 //! ```
+
+extern crate alloc;
 
 mod block;
 mod context;

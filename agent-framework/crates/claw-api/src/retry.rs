@@ -6,14 +6,11 @@
 //! are retried; the backoff sleep polls the abort flag cooperatively.
 
 use core::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use core::time::Duration;
 
 use claw_interface::{Cancel, ClawTimer, SleepOutcome};
 
 use crate::types::RetryPolicy;
-
-/// Abort poll granularity while sleeping for backoff.
-const BACKOFF_POLL_SLICE_MS: u64 = 25;
 
 /// Run `op`, retrying transient failures per `policy`.
 ///
@@ -35,26 +32,15 @@ pub(crate) fn run_with_retry<T, E>(
                     return Err(err);
                 }
                 attempt = attempt.saturating_add(1);
-                if !sleep_abortable(policy.backoff_ms(attempt), abort) {
+                // The blocking compatibility client has no runtime-independent
+                // clock. Production retry backoff is provided by the async
+                // client through `ClawTimer`; here retries remain immediate.
+                if abort.load(Ordering::Acquire) {
                     return Err(on_abort());
                 }
             }
         }
     }
-}
-
-/// Sleep `total_ms`, polling `abort`. Returns `false` if aborted.
-fn sleep_abortable(total_ms: u32, abort: &AtomicBool) -> bool {
-    let mut remaining = total_ms as u64;
-    while remaining > 0 {
-        if abort.load(Ordering::Acquire) {
-            return false;
-        }
-        let slice = remaining.min(BACKOFF_POLL_SLICE_MS);
-        std::thread::sleep(Duration::from_millis(slice));
-        remaining = remaining.saturating_sub(slice);
-    }
-    !abort.load(Ordering::Acquire)
 }
 
 /// Async backoff sleep using the caller-injected timer seam.

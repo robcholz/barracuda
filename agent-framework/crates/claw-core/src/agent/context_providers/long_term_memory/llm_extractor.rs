@@ -6,8 +6,14 @@
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory provider.
 
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
+use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Value};
 
@@ -84,12 +90,7 @@ impl<H: ClawHttp, Timer: ClawTimer> Extractor for LlmExtractor<H, Timer> {
                 let api = lease.api_mut()?;
                 // Apply this operation's config from the manager (its explicit
                 // binding, else the default). None / invalid keeps the current one.
-                if let Some(config) = self
-                    .api_manager
-                    .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .get_api(ApiPurpose::Memory)
-                {
+                if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Memory) {
                     let _ = api.set_config(config);
                 }
                 api.chat(&request, Cancel::new(&abort)).await

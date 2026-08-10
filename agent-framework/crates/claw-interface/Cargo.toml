@@ -10,8 +10,7 @@ crate-type = ["rlib"]
 
 [features]
 # Concepts:
-# - target selection is Cargo/rustc cfg (`target_os = "espidf"` vs host), not a
-#   feature. ESP-IDF implementations live in `claw-sys` behind target cfg.
+# - target selection and concrete HAL adapters live at the application boundary.
 # - `host-backends` is the opt-in bundle of concrete host-target
 #   implementations used by host CLIs and live host tests.
 # - `test-doubles` is the opt-in bundle of hermetic doubles used by tests and
@@ -21,7 +20,7 @@ crate-type = ["rlib"]
 #
 # Nothing is enabled by default so pure core/device crates only see the traits.
 default = []
-host-backends = ["diskfs", "realhttp", "stdthread", "tokiotimer", "tokioexecutor"]
+host-backends = ["diskfs", "realhttp", "tokiotimer"]
 test-doubles = ["httpmock", "timermock"]
 
 # - `diskfs`:       `std::fs` backend for host CLIs and disk-backed tests.
@@ -36,19 +35,11 @@ httpmock = ["dep:serde_json"]
 timermock = []
 realhttp = ["dep:reqwest", "dep:futures-lite"]
 tokiotimer = ["dep:tokio"]
-# `TokioExecutor`: a current-thread tokio runtime `ClawExecutor` for the host
-# orchestrator worker (async `reqwest` + `TokioTimer` need tokio's reactor). Adds
-# the `rt` + `net` drivers on top of `time`.
-tokioexecutor = ["dep:tokio", "tokio/rt", "tokio/net"]
-# `StdThread`: a plain `std::thread` host implementation of `ClawThread` (host
-# only; the device build uses `claw-sys`'s `EspIdfThread`).
-stdthread = []
-
 [dependencies]
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", optional = true }
-serde_json = { version = "1", optional = true }
+serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"], optional = true }
 tokio = { version = "1.52.3", default-features = false, features = ["time"], optional = true }
 

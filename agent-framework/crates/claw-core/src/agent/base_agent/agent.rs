@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind, Context};
@@ -9,6 +9,7 @@ use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_persistence::DurableState;
 use claw_tool::ToolSet;
 use claw_utils::stream::StreamPart;
+use claw_utils::yield_stream::yield_stream;
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
@@ -290,11 +291,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
     }
 
     fn refresh_llm_config(&mut self) {
-        let config = self
-            .api_manager
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_api(self.api_purpose);
+        let config = self.api_manager.borrow().get_api(self.api_purpose);
         if let Some(config) = config {
             if self.llm.set_config(config).is_err() {
                 log::error!("invalid LLM configuration for {:?}", self.api_purpose);
@@ -561,28 +558,34 @@ where
         self,
         control: RunControl,
     ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a {
-        async_stream::stream! {
+        yield_stream(|yielder| async move {
             'agent_run: loop {
                 if !matches!(self.agent.run_state, RunState::Running) {
-                    yield Err(self.agent.fail(AgentError::StateInvariant));
+                    yielder
+                        .yield_one(Err(self.agent.fail(AgentError::StateInvariant)))
+                        .await;
                     break;
                 }
                 if control.take_interrupt() {
                     self.agent.abandon_open_task();
                     self.agent.stop(StopReason::Interrupted);
-                    yield Ok(BaseAgentEvent::Finished(AgentOutcome::Interrupted));
+                    yielder
+                        .yield_one(Ok(BaseAgentEvent::Finished(AgentOutcome::Interrupted)))
+                        .await;
                     break;
                 }
 
                 if let Err(error) = self.agent.apply_continuations(&control) {
-                    yield Err(self.agent.fail(error));
+                    yielder.yield_one(Err(self.agent.fail(error))).await;
                     break;
                 }
 
                 let iteration_id = self.agent.iteration_id_allocator.next();
                 self.agent.refresh_llm_config();
                 if self.agent.active_turn.is_none() {
-                    yield Err(self.agent.fail(AgentError::StateInvariant));
+                    yielder
+                        .yield_one(Err(self.agent.fail(AgentError::StateInvariant)))
+                        .await;
                     break;
                 }
 
@@ -592,51 +595,46 @@ where
                     run.iteration = %iteration_id,
                     provider_count,
                 );
-                if let Err(error) = self.agent
+                if let Err(error) = self
+                    .agent
                     .prepare_provider_context()
                     .instrument(prepare_span.clone())
                     .await
                 {
-                    yield Err(self.agent.fail(error));
+                    yielder.yield_one(Err(self.agent.fail(error))).await;
                     break;
                 }
 
-                let render_span = prepare_span
-                    .in_scope(|| tracing::info_span!("context.render", provider_count));
-                let history = match render_span
-                    .in_scope(|| self.agent.render_provider_context())
-                {
+                let render_span =
+                    prepare_span.in_scope(|| tracing::info_span!("context.render", provider_count));
+                let history = match render_span.in_scope(|| self.agent.render_provider_context()) {
                     Ok(history) => history,
                     Err(error) => {
-                        yield Err(self.agent.fail(error));
+                        yielder.yield_one(Err(self.agent.fail(error))).await;
                         break 'agent_run;
                     }
                 };
                 let result = 'run_iteration: {
                     let tools = match render_span.in_scope(|| self.agent.tools.begin()) {
-                    Ok(tools) => tools,
-                    Err(error) => {
-                        yield Err(self.agent.fail(AgentError::from(
-                            IterationLoopError::from(error),
-                        )));
-                        break 'agent_run;
-                    }
+                        Ok(tools) => tools,
+                        Err(error) => {
+                            yielder
+                                .yield_one(Err(self
+                                    .agent
+                                    .fail(AgentError::from(IterationLoopError::from(error)))))
+                                .await;
+                            break 'agent_run;
+                        }
                     };
                     render_span.in_scope(|| {
                         self.agent
                             .context
-                            .with(Block::new(
-                                BlockKind::StaticTools,
-                                tools.static_context(),
-                            ))
+                            .with(Block::new(BlockKind::StaticTools, tools.static_context()))
                             .with(Block::new(
                                 BlockKind::DeferredTools,
                                 tools.deferred_context(),
                             ))
-                            .with_reminder(
-                                BlockKind::ToolReminder,
-                                Some(tools.reminders()),
-                            );
+                            .with_reminder(BlockKind::ToolReminder, Some(tools.reminders()));
                     });
 
                     let context = render_span.in_scope(|| self.agent.context.request(&history));
@@ -651,7 +649,9 @@ where
                     drop(prepare_span);
 
                     let Some(turn) = self.agent.active_turn.as_mut() else {
-                        yield Err(self.agent.fail(AgentError::StateInvariant));
+                        yielder
+                            .yield_one(Err(self.agent.fail(AgentError::StateInvariant)))
+                            .await;
                         break 'agent_run;
                     };
                     let mut consumer = match IterationConsumer::new(turn) {
@@ -662,171 +662,206 @@ where
                         policy: self.agent.permission_policy.as_ref(),
                         control: &control,
                     };
-                    let mut iteration = Box::pin(IterationLoop {
-                        llm: &mut self.agent.llm,
-                        control: &control,
-                        permission: &permission,
-                        retry: self.agent.retry_policy,
-                    }
-                    .run(step));
+                    let mut iteration = Box::pin(
+                        IterationLoop {
+                            llm: &mut self.agent.llm,
+                            control: &control,
+                            permission: &permission,
+                            retry: self.agent.retry_policy,
+                        }
+                        .run(step),
+                    );
                     let iteration_span = tracing::info_span!(
                         "iteration_loop",
                         run.iteration = %iteration_id,
                     );
 
-                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                        AgentIterationEvent::Started(iteration_id),
-                    )));
+                    yielder
+                        .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                            AgentIterationEvent::Started(iteration_id),
+                        ))))
+                        .await;
 
                     let mut result = None;
                     let mut tool_results_ended = false;
-                    while let Some(item) = iteration
-                        .next()
-                        .instrument(iteration_span.clone())
-                        .await
+                    while let Some(item) = iteration.next().instrument(iteration_span.clone()).await
                     {
-                    let event = match item {
-                        Ok(event) => event,
-                        Err(error) => {
-                            result = Some(Err(AgentError::from(error)));
-                            break;
-                        }
-                    };
-                    match event {
-                        IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
-                            if let Some(part) = consumer.consume_reasoning(part) {
-                                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                                    AgentIterationEvent::Reasoning(part),
-                                )));
-                            }
-                        }
-                        IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
-                            match consumer.consume_output(part) {
-                                Ok(part) => yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                                    AgentIterationEvent::Output(part),
-                                ))),
-                                Err(error) => {
-                                    result = Some(Err(error));
-                                    break;
-                                }
-                            }
-                        }
-                        #[cfg(feature = "cache_profile")]
-                        IterationLoopEvent::Iteration(IterationEvent::Usage(usage)) => {
-                            yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                                AgentIterationEvent::Usage(usage),
-                            )));
-                        }
-                        IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(calls)) => {
-                            for event in consumer.finish_content() {
-                                yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
-                            }
-                            if let Err(error) = consumer.finish_assistant(&calls) {
-                                result = Some(Err(error));
+                        let event = match item {
+                            Ok(event) => event,
+                            Err(error) => {
+                                result = Some(Err(AgentError::from(error)));
                                 break;
                             }
-                            self.agent
-                                .state
-                                .get_mut()
-                                .record_inflight_toolcalls(calls);
-                            futures_lite::future::yield_now().await;
-                        }
-                        IterationLoopEvent::Iteration(IterationEvent::ToolResult(part)) => {
-                            match part {
-                                StreamPart::Delta((call, output)) => {
-                                    if tool_results_ended {
-                                        result = Some(Err(AgentError::StateInvariant));
-                                        break;
-                                    }
-                                    match consumer.turn.tool(&call.id, !output.ok) {
-                                        Ok(mut tool) => tool.append(&output.content),
-                                        Err(error) => {
-                                            result = Some(Err(AgentError::from(error)));
-                                            break;
-                                        }
-                                    }
-                                    self.agent
-                                        .state
-                                        .get_mut()
-                                        .remove_inflight_toolcall(&call.id);
-                                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                                        AgentIterationEvent::ToolResult(StreamPart::Delta((
-                                            call,
-                                            output,
-                                        ))),
-                                    )));
+                        };
+                        match event {
+                            IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
+                                if let Some(part) = consumer.consume_reasoning(part) {
+                                    yielder
+                                        .yield_one(Ok(BaseAgentEvent::Iteration(
+                                            StreamPart::Delta(AgentIterationEvent::Reasoning(part)),
+                                        )))
+                                        .await;
                                 }
-                                StreamPart::End => {
-                                    if tool_results_ended {
-                                        result = Some(Err(AgentError::StateInvariant));
-                                        break;
+                            }
+                            IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
+                                match consumer.consume_output(part) {
+                                    Ok(part) => {
+                                        yielder
+                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                                StreamPart::Delta(AgentIterationEvent::Output(
+                                                    part,
+                                                )),
+                                            )))
+                                            .await
                                     }
-                                    for event in consumer.finish_content() {
-                                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
-                                    }
-                                    if let Err(error) = consumer.finish_assistant(&[]) {
+                                    Err(error) => {
                                         result = Some(Err(error));
                                         break;
                                     }
-                                    tool_results_ended = true;
-                                    yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                                        AgentIterationEvent::ToolResult(StreamPart::End),
-                                    )));
                                 }
                             }
-                        }
-                        IterationLoopEvent::Detached(handle) => {
-                            yield Ok(BaseAgentEvent::Detached(handle));
-                        }
-                        IterationLoopEvent::ApprovalRequired {
-                            tool_call_id,
-                            tool_call,
-                            reason,
-                        } => {
-                            yield Ok(BaseAgentEvent::InputRequired(AgentInputRequest::Approval {
+                            #[cfg(feature = "cache_profile")]
+                            IterationLoopEvent::Iteration(IterationEvent::Usage(usage)) => {
+                                yielder
+                                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                        AgentIterationEvent::Usage(usage),
+                                    ))))
+                                    .await;
+                            }
+                            IterationLoopEvent::Iteration(IterationEvent::BeforeToolCalls(
+                                calls,
+                            )) => {
+                                for event in consumer.finish_content() {
+                                    yielder
+                                        .yield_one(Ok(BaseAgentEvent::Iteration(
+                                            StreamPart::Delta(event),
+                                        )))
+                                        .await;
+                                }
+                                if let Err(error) = consumer.finish_assistant(&calls) {
+                                    result = Some(Err(error));
+                                    break;
+                                }
+                                self.agent.state.get_mut().record_inflight_toolcalls(calls);
+                                futures_lite::future::yield_now().await;
+                            }
+                            IterationLoopEvent::Iteration(IterationEvent::ToolResult(part)) => {
+                                match part {
+                                    StreamPart::Delta((call, output)) => {
+                                        if tool_results_ended {
+                                            result = Some(Err(AgentError::StateInvariant));
+                                            break;
+                                        }
+                                        match consumer.turn.tool(&call.id, !output.ok) {
+                                            Ok(mut tool) => tool.append(&output.content),
+                                            Err(error) => {
+                                                result = Some(Err(AgentError::from(error)));
+                                                break;
+                                            }
+                                        }
+                                        self.agent
+                                            .state
+                                            .get_mut()
+                                            .remove_inflight_toolcall(&call.id);
+                                        yielder
+                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                                StreamPart::Delta(AgentIterationEvent::ToolResult(
+                                                    StreamPart::Delta((call, output)),
+                                                )),
+                                            )))
+                                            .await;
+                                    }
+                                    StreamPart::End => {
+                                        if tool_results_ended {
+                                            result = Some(Err(AgentError::StateInvariant));
+                                            break;
+                                        }
+                                        for event in consumer.finish_content() {
+                                            yielder
+                                                .yield_one(Ok(BaseAgentEvent::Iteration(
+                                                    StreamPart::Delta(event),
+                                                )))
+                                                .await;
+                                        }
+                                        if let Err(error) = consumer.finish_assistant(&[]) {
+                                            result = Some(Err(error));
+                                            break;
+                                        }
+                                        tool_results_ended = true;
+                                        yielder
+                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                                StreamPart::Delta(AgentIterationEvent::ToolResult(
+                                                    StreamPart::End,
+                                                )),
+                                            )))
+                                            .await;
+                                    }
+                                }
+                            }
+                            IterationLoopEvent::Detached(handle) => {
+                                yielder
+                                    .yield_one(Ok(BaseAgentEvent::Detached(handle)))
+                                    .await;
+                            }
+                            IterationLoopEvent::ApprovalRequired {
                                 tool_call_id,
                                 tool_call,
                                 reason,
-                            }));
+                            } => {
+                                yielder
+                                    .yield_one(Ok(BaseAgentEvent::InputRequired(
+                                        AgentInputRequest::Approval {
+                                            tool_call_id,
+                                            tool_call,
+                                            reason,
+                                        },
+                                    )))
+                                    .await;
+                            }
+                            IterationLoopEvent::Interrupted => {
+                                result = Some(Ok(IterationCompletion::Interrupted));
+                                break;
+                            }
+                            IterationLoopEvent::Cancelled => {
+                                result = Some(Ok(IterationCompletion::Cancelled));
+                                break;
+                            }
                         }
-                        IterationLoopEvent::Interrupted => {
-                            result = Some(Ok(IterationCompletion::Interrupted));
-                            break;
-                        }
-                        IterationLoopEvent::Cancelled => {
-                            result = Some(Ok(IterationCompletion::Cancelled));
-                            break;
-                        }
-                    }
                     }
 
                     for event in consumer.finish_content() {
-                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event)));
+                        yielder
+                            .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event))))
+                            .await;
                     }
                     if !tool_results_ended {
-                        yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
-                            AgentIterationEvent::ToolResult(StreamPart::End),
-                        )));
+                        yielder
+                            .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                AgentIterationEvent::ToolResult(StreamPart::End),
+                            ))))
+                            .await;
                     }
                     result.unwrap_or_else(|| consumer.finish_iteration())
                 };
 
-                yield Ok(BaseAgentEvent::Iteration(StreamPart::End));
+                yielder
+                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::End)))
+                    .await;
 
                 match self.agent.reduce_iteration(result, &control) {
                     Ok(Some(event @ BaseAgentEvent::Finished(_))) => {
-                        yield Ok(event);
+                        yielder.yield_one(Ok(event)).await;
                         break;
                     }
-                    Ok(Some(event)) => yield Ok(event),
+                    Ok(Some(event)) => yielder.yield_one(Ok(event)).await,
                     Ok(None) => {}
                     Err(error) => {
-                        yield Err(self.agent.fail(error));
+                        yielder.yield_one(Err(self.agent.fail(error))).await;
                         break;
                     }
                 }
             }
-        }
+        })
     }
 }
 

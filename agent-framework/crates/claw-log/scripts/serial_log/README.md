@@ -68,7 +68,7 @@ stream.stop()
 ## Semantics
 
 - **Complete lines only.** Splits on `\n`; a trailing `\r` is dropped, so
-  `\r\n` (ESP-IDF) and `\n` (host) both work, even across read boundaries. A
+  `\r\n` and `\n` both work, even across read boundaries. A
   final line without a newline is emitted at EOF.
 - **Backpressure, not loss.** Callbacks run synchronously on the reader thread;
   a slow callback lets the OS pipe fill and the child block — no lines dropped.

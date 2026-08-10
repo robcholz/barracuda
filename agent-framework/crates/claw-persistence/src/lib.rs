@@ -1,21 +1,28 @@
+#![no_std]
+// Durable handles retain shared ownership but are driven by one service task.
+#![allow(clippy::arc_with_non_send_sync)]
+
 //! Persistence primitives for runtime-owned durable state.
 //!
 //! Callers open typed singleton or collection entries, decode persisted DTOs,
 //! construct their own [`DurableState`], and register it for observation by
 //! [`Persistence::maybe_persist`]. Normal registrations are non-owning.
 
+extern crate alloc;
+
 mod persistence;
 
 pub use persistence::{Collection, Persistence, PersistenceError, Singleton};
 
-use std::{
-    borrow::Cow,
-    error::Error,
-    ops::{Deref, DerefMut},
-    sync::{Arc, Mutex, MutexGuard, PoisonError, Weak},
-};
+use alloc::borrow::Cow;
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::sync::{Arc, Weak};
+use core::cell::{Ref, RefCell, RefMut};
+use core::error::Error;
+use core::ops::{Deref, DerefMut};
 
-type Shared<T> = Arc<Mutex<T>>;
+type Shared<T> = Arc<RefCell<T>>;
 
 pub type SharedPersistence<Filesystem> = Arc<Persistence<Filesystem>>;
 
@@ -123,7 +130,7 @@ pub struct DurableState<T> {
 
 #[derive(Debug)]
 pub(crate) struct WeakDurableState<T> {
-    inner: Weak<Mutex<DurableStateInner<T>>>,
+    inner: Weak<RefCell<DurableStateInner<T>>>,
 }
 
 #[derive(Debug)]
@@ -132,7 +139,7 @@ struct DurableStateInner<T> {
     generation: PartGeneration,
 }
 
-struct StateGuard<'a, T>(MutexGuard<'a, DurableStateInner<T>>);
+struct StateGuard<'a, T>(Ref<'a, DurableStateInner<T>>);
 
 impl<T> Deref for StateGuard<'_, T> {
     type Target = T;
@@ -142,7 +149,7 @@ impl<T> Deref for StateGuard<'_, T> {
     }
 }
 
-struct StateGuardMut<'a, T>(MutexGuard<'a, DurableStateInner<T>>);
+struct StateGuardMut<'a, T>(RefMut<'a, DurableStateInner<T>>);
 
 impl<T> Deref for StateGuardMut<'_, T> {
     type Target = T;
@@ -177,7 +184,7 @@ impl<T> Clone for WeakDurableState<T> {
 impl<T> DurableState<T> {
     pub fn new(value: T) -> Self {
         Self {
-            inner: Arc::new(Mutex::new(DurableStateInner {
+            inner: Arc::new(RefCell::new(DurableStateInner {
                 value,
                 generation: 0,
             })),
@@ -186,21 +193,21 @@ impl<T> DurableState<T> {
 
     #[cfg(test)]
     pub(crate) fn generation(&self) -> PartGeneration {
-        self.lock().generation
+        self.borrow().generation
     }
 
     pub fn get(&self) -> impl Deref<Target = T> + '_ {
-        StateGuard(self.lock())
+        StateGuard(self.borrow())
     }
 
     pub fn get_mut(&self) -> impl DerefMut<Target = T> + '_ {
-        let mut state = self.lock();
+        let mut state = self.borrow_mut();
         state.generation = state.generation.saturating_add(1);
         StateGuardMut(state)
     }
 
     pub fn replace(&self, value: T) {
-        let mut state = self.lock();
+        let mut state = self.borrow_mut();
         state.value = value;
         state.generation = state.generation.saturating_add(1);
     }
@@ -211,31 +218,32 @@ impl<T> DurableState<T> {
         }
     }
 
-    fn lock(&self) -> MutexGuard<'_, DurableStateInner<T>> {
-        self.inner.lock().unwrap_or_else(PoisonError::into_inner)
+    fn borrow(&self) -> Ref<'_, DurableStateInner<T>> {
+        self.inner.borrow()
+    }
+
+    fn borrow_mut(&self) -> RefMut<'_, DurableStateInner<T>> {
+        self.inner.borrow_mut()
     }
 }
 
 impl<T> WeakDurableState<T> {
     pub(crate) fn generation(&self) -> Option<PartGeneration> {
         let inner = self.inner.upgrade()?;
-        let generation = inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .generation;
+        let generation = inner.borrow().generation;
         Some(generation)
     }
 }
 
 impl<T> WeakDurableState<T>
 where
-    T: DurableStateCodec + Send + 'static,
+    T: DurableStateCodec + 'static,
 {
     pub(crate) fn snapshot(&self) -> Result<Option<DurableStateSnapshot>, DurablePartError> {
         let Some(inner) = self.inner.upgrade() else {
             return Ok(None);
         };
-        let state = inner.lock().unwrap_or_else(PoisonError::into_inner);
+        let state = inner.borrow();
         let blob = state.value.encode_state()?.into_owned();
         Ok(Some(DurableStateSnapshot::new(
             state.generation,
@@ -267,7 +275,7 @@ impl DurablePartError {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
+    use alloc::borrow::Cow;
 
     use super::*;
 
@@ -321,16 +329,11 @@ mod tests {
     }
 
     #[test]
-    fn clones_share_state_across_threads() {
+    fn clones_share_state_within_one_task() {
         let state = DurableState::new(TestState { value: 1 });
         let cloned = state.clone();
 
-        std::thread::spawn(move || {
-            let mut state = cloned.get_mut();
-            state.value = 2;
-        })
-        .join()
-        .expect("state mutation thread completes");
+        cloned.get_mut().value = 2;
 
         let value = state.get().value;
         assert_eq!(value, 2);

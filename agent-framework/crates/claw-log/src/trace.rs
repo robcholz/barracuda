@@ -7,8 +7,8 @@
 //! This is pure Rust (only `tracing`'s re-exported core traits): no
 //! `tracing-subscriber` (so no `sharded-slab`/`regex`), and no platform/FFI. The
 //! actual output target is a [`TraceSink`] supplied by the caller — this crate's
-//! [`init_tracing`](crate::init_tracing) wires it to `claw_sys`'s `ESP_LOGx`
-//! sink; tests inject a capturing one.
+//! [`init_tracing`](crate::init_tracing) wires it to the host logger; tests
+//! inject a capturing one.
 //!
 //! ## What it solves
 //!
@@ -70,9 +70,8 @@ use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Level, Metadata, Subscriber};
 
 /// Where a [`FlatTreeSubscriber`] writes its formatted lines. Implemented by the
-/// platform sink wiring (this crate's `ClawTraceSink`, which writes through
-/// `claw_sys`'s `ESP_LOGx` sink) and by tests (a capturing sink), keeping this
-/// module free of any output/FFI concern.
+/// platform sink wiring (this crate's `ClawTraceSink`) and by tests (a capturing
+/// sink), keeping this module free of any output/FFI concern.
 pub trait TraceSink: Send + Sync {
     /// Write one already-formatted, single-line record at `level`, tagged `tag`
     /// (the record's `target`/module path). The line never contains a newline.

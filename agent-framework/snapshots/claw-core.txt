@@ -28,8 +28,6 @@ pub claw_core::AgentRuntimeBuildError::MissingPersistedSessionState(claw_core::S
 pub claw_core::AgentRuntimeBuildError::MissingPersistenceDir
 pub claw_core::AgentRuntimeBuildError::Persistence(claw_persistence::persistence::PersistenceError)
 pub claw_core::AgentRuntimeBuildError::SkillRegistry(claw_skill::skill::SkillError)
-pub claw_core::AgentRuntimeBuildError::WorkerExitedBeforeReady
-pub claw_core::AgentRuntimeBuildError::WorkerSpawn(core::io::error::Error)
 pub enum claw_core::ApiPurpose
 pub claw_core::ApiPurpose::Compaction
 pub claw_core::ApiPurpose::Memory
@@ -139,126 +137,130 @@ pub claw_core::TurnOrigin::ToolCall::call: claw_api::types::ToolCall
 pub claw_core::TurnOrigin::User
 pub struct claw_core::AgentId(pub u32)
 impl claw_core::AgentId
-pub fn claw_core::AgentId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::AgentId::new(u32) -> Self
+pub fn claw_core::AgentId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::AgentId::new(id: u32) -> Self
 pub fn claw_core::AgentId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::AgentId
-pub fn claw_core::AgentId::from(u32) -> Self
+pub fn claw_core::AgentId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::AgentId
-pub fn claw_core::AgentId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::AgentId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::AgentId
 pub type claw_core::AgentId::Err = claw_utils::IdParseError
-pub fn claw_core::AgentId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::AgentId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::AgentId
-pub fn claw_core::AgentId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::AgentId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::AgentId
-pub fn claw_core::AgentId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::AgentId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::AgentRuntime
 impl claw_core::AgentRuntime
-pub fn claw_core::AgentRuntime::create_session(&self, claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>
-pub fn claw_core::AgentRuntime::delete_session(&self, claw_core::SessionId) -> core::result::Result<(), claw_core::SessionDeleteError>
-pub fn claw_core::AgentRuntime::link_api(&self, claw_api::types::ClawApiConfig, claw_core::ApiPurpose, bool) -> core::result::Result<(), claw_api::errors::InitError>
-pub fn claw_core::AgentRuntime::list_sessions(&self) -> alloc::vec::Vec<claw_core::SessionId>
-pub fn claw_core::AgentRuntime::new<Filesystem, Http, Timer, Thread, Executor>(alloc::sync::Arc<Filesystem>, alloc::sync::Arc<claw_tool::registry::ToolRegistry>, claw_persistence::SharedPersistence<Filesystem>, alloc::string::String, alloc::vec::Vec<alloc::string::String>) -> core::result::Result<Self, claw_core::AgentRuntimeBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static, Thread: claw_interface::thread::ClawThread, Executor: claw_interface::executor::ClawExecutor + 'static
-pub fn claw_core::AgentRuntime::open_session(&self, claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionStream), claw_core::OpenSessionError>
-impl core::ops::drop::Drop for claw_core::AgentRuntime
-pub fn claw_core::AgentRuntime::drop(&mut self)
+pub async fn claw_core::AgentRuntime::create_session(&self, persistence: claw_core::SessionPersistence) -> core::result::Result<claw_core::SessionId, claw_core::SessionCreateError>
+pub async fn claw_core::AgentRuntime::delete_session(&self, session: claw_core::SessionId) -> core::result::Result<(), claw_core::SessionDeleteError>
+pub fn claw_core::AgentRuntime::link_api(&self, api: claw_api::types::ClawApiConfig, purpose: claw_core::ApiPurpose, default: bool) -> core::result::Result<(), claw_api::errors::InitError>
+pub async fn claw_core::AgentRuntime::list_sessions(&self) -> alloc::vec::Vec<claw_core::SessionId>
+pub fn claw_core::AgentRuntime::new<Filesystem, Http, Timer>(filesystem: alloc::sync::Arc<Filesystem>, tool_registry: alloc::sync::Arc<claw_tool::registry::ToolRegistry>, persistence: claw_persistence::SharedPersistence<Filesystem>, persistence_dir: alloc::string::String, skill_roots: alloc::vec::Vec<alloc::string::String>) -> core::result::Result<(Self, claw_core::AgentService<Filesystem, Http, Timer>), claw_core::AgentRuntimeBuildError> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
+pub async fn claw_core::AgentRuntime::open_session(&self, session: claw_core::SessionId) -> core::result::Result<(claw_core::SessionControl, claw_core::SessionStream), claw_core::OpenSessionError>
+pub async fn claw_core::AgentRuntime::shutdown(&self)
+pub struct claw_core::AgentService<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
+impl<Filesystem, Http, Timer> core::future::future::Future for claw_core::AgentService<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
+pub type claw_core::AgentService<Filesystem, Http, Timer>::Output = ()
+pub fn claw_core::AgentService<Filesystem, Http, Timer>::poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+impl<Filesystem, Http, Timer> core::marker::Unpin for claw_core::AgentService<Filesystem, Http, Timer> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: claw_interface::http::ClawHttp + claw_interface::http::StreamingHttp + core::default::Default + 'static, Timer: claw_interface::timer::ClawTimer + core::default::Default + 'static
 pub struct claw_core::ContextProviderError(_)
 pub struct claw_core::InputRequestId(pub u32)
 impl claw_core::InputRequestId
-pub fn claw_core::InputRequestId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::InputRequestId::new(u32) -> Self
+pub fn claw_core::InputRequestId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::InputRequestId::new(id: u32) -> Self
 pub fn claw_core::InputRequestId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::InputRequestId
-pub fn claw_core::InputRequestId::from(u32) -> Self
+pub fn claw_core::InputRequestId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::InputRequestId
-pub fn claw_core::InputRequestId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::InputRequestId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::InputRequestId
 pub type claw_core::InputRequestId::Err = claw_utils::IdParseError
-pub fn claw_core::InputRequestId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::InputRequestId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::InputRequestId
-pub fn claw_core::InputRequestId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::InputRequestId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::InputRequestId
-pub fn claw_core::InputRequestId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::InputRequestId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::IterationId(pub u32)
 impl claw_core::IterationId
-pub fn claw_core::IterationId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::IterationId::new(u32) -> Self
+pub fn claw_core::IterationId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::IterationId::new(id: u32) -> Self
 pub fn claw_core::IterationId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::IterationId
-pub fn claw_core::IterationId::from(u32) -> Self
+pub fn claw_core::IterationId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::IterationId
-pub fn claw_core::IterationId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::IterationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::IterationId
 pub type claw_core::IterationId::Err = claw_utils::IdParseError
-pub fn claw_core::IterationId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::IterationId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::IterationId
-pub fn claw_core::IterationId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::IterationId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::IterationId
-pub fn claw_core::IterationId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::IterationId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::Message
 impl claw_core::Message
-pub fn claw_core::Message::text(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_core::Message::text(text: impl core::convert::Into<alloc::string::String>) -> Self
 pub struct claw_core::SessionControl
 impl claw_core::SessionControl
-pub async fn claw_core::SessionControl::append(&self, claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
+pub async fn claw_core::SessionControl::append(&self, message: claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::cancel(&self) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::close(&self) -> core::result::Result<(), claw_core::SessionControlError>
 pub async fn claw_core::SessionControl::interrupt(&self) -> core::result::Result<(), claw_core::SessionControlError>
-pub async fn claw_core::SessionControl::respond(&self, claw_core::InputRequestId, claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
-pub async fn claw_core::SessionControl::set_permission_level(&self, claw_permission::level::PermissionLevel) -> core::result::Result<(), claw_core::SessionControlError>
-pub async fn claw_core::SessionControl::set_reasoning_effort(&self, claw_core::ReasoningEffort) -> core::result::Result<(), claw_core::SessionControlError>
+pub async fn claw_core::SessionControl::respond(&self, request: claw_core::InputRequestId, message: claw_core::Message) -> core::result::Result<(), claw_core::SessionControlError>
+pub async fn claw_core::SessionControl::set_permission_level(&self, level: claw_permission::level::PermissionLevel) -> core::result::Result<(), claw_core::SessionControlError>
+pub async fn claw_core::SessionControl::set_reasoning_effort(&self, effort: claw_core::ReasoningEffort) -> core::result::Result<(), claw_core::SessionControlError>
 pub struct claw_core::SessionId(pub u32)
 impl claw_core::SessionId
-pub fn claw_core::SessionId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::SessionId::new(u32) -> Self
+pub fn claw_core::SessionId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::SessionId::new(id: u32) -> Self
 pub fn claw_core::SessionId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::SessionId
-pub fn claw_core::SessionId::from(u32) -> Self
+pub fn claw_core::SessionId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::SessionId
-pub fn claw_core::SessionId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::SessionId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::SessionId
 pub type claw_core::SessionId::Err = claw_utils::IdParseError
-pub fn claw_core::SessionId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::SessionId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::SessionId
-pub fn claw_core::SessionId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::SessionId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::SessionId
-pub fn claw_core::SessionId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::SessionId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::SessionStream
 impl core::ops::drop::Drop for claw_core::SessionStream
 pub fn claw_core::SessionStream::drop(&mut self)
 impl futures_core::stream::Stream for claw_core::SessionStream
 pub type claw_core::SessionStream::Item = core::result::Result<claw_core::SessionEvent, claw_core::SessionError>
-pub fn claw_core::SessionStream::poll_next(core::pin::Pin<&mut Self>, &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+pub fn claw_core::SessionStream::poll_next(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
 pub struct claw_core::ToolCallId(pub u32)
 impl claw_core::ToolCallId
-pub fn claw_core::ToolCallId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::ToolCallId::new(u32) -> Self
+pub fn claw_core::ToolCallId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::ToolCallId::new(id: u32) -> Self
 pub fn claw_core::ToolCallId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::ToolCallId
-pub fn claw_core::ToolCallId::from(u32) -> Self
+pub fn claw_core::ToolCallId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::ToolCallId
-pub fn claw_core::ToolCallId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::ToolCallId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::ToolCallId
 pub type claw_core::ToolCallId::Err = claw_utils::IdParseError
-pub fn claw_core::ToolCallId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::ToolCallId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::ToolCallId
-pub fn claw_core::ToolCallId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::ToolCallId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::ToolCallId
-pub fn claw_core::ToolCallId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::ToolCallId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub struct claw_core::TurnId(pub u32)
 impl claw_core::TurnId
-pub fn claw_core::TurnId::from_wire(&str) -> core::result::Result<Self, claw_utils::IdParseError>
-pub const fn claw_core::TurnId::new(u32) -> Self
+pub fn claw_core::TurnId::from_wire(value: &str) -> core::result::Result<Self, claw_utils::IdParseError>
+pub const fn claw_core::TurnId::new(id: u32) -> Self
 pub fn claw_core::TurnId::to_wire(&self) -> alloc::string::String
 impl core::convert::From<u32> for claw_core::TurnId
-pub fn claw_core::TurnId::from(u32) -> Self
+pub fn claw_core::TurnId::from(value: u32) -> Self
 impl core::fmt::Display for claw_core::TurnId
-pub fn claw_core::TurnId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn claw_core::TurnId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::str::traits::FromStr for claw_core::TurnId
 pub type claw_core::TurnId::Err = claw_utils::IdParseError
-pub fn claw_core::TurnId::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub fn claw_core::TurnId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
 impl serde_core::ser::Serialize for claw_core::TurnId
-pub fn claw_core::TurnId::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub fn claw_core::TurnId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for claw_core::TurnId
-pub fn claw_core::TurnId::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn claw_core::TurnId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>

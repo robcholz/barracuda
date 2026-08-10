@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
+use core::cell::RefCell;
 
 use claw_interface::{ClawFs, ClawHttp, ClawTimer};
 use claw_memory::{LongTermInitError, LongTermMemory};
@@ -24,7 +24,7 @@ pub(super) struct LongTermDeps<F: ClawFs + 'static> {
 struct AgentMemoryStores<F: ClawFs + 'static> {
     filesystem: Arc<F>,
     root_dir: String,
-    by_kind: Mutex<BTreeMap<String, LongTermMemory<F>>>,
+    by_kind: RefCell<BTreeMap<String, LongTermMemory<F>>>,
 }
 
 impl<F: ClawFs + 'static> AgentMemoryStores<F> {
@@ -32,15 +32,12 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
         Self {
             filesystem,
             root_dir,
-            by_kind: Mutex::new(BTreeMap::new()),
+            by_kind: RefCell::new(BTreeMap::new()),
         }
     }
 
     fn get(&self, kind: &str) -> Result<LongTermMemory<F>, LongTermInitError> {
-        let mut stores = self
-            .by_kind
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut stores = self.by_kind.borrow_mut();
         if let Some(store) = stores.get(kind) {
             return Ok(store.clone());
         }

@@ -1,7 +1,11 @@
 //! Durable state owned by one BaseAgent and its stateful components.
 
-use std::borrow::Cow;
-use std::collections::BTreeSet;
+use alloc::{
+    borrow::{Cow, ToOwned},
+    collections::BTreeSet,
+    string::String,
+    vec::Vec,
+};
 
 use claw_api::ToolCall;
 use claw_persistence::{DurablePartError, DurableStateCodec, SchemaVersion, StateBlob, StateSlice};

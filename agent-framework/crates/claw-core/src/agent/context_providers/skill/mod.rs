@@ -4,7 +4,8 @@
 //! the skill catalog into `BlockKind::SkillList` and exposes skill tools that
 //! read from the same buffered source.
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use alloc::sync::Arc;
+use core::cell::{RefCell, RefMut};
 
 use claw_context::{Block, BlockKind, ContextSink};
 use claw_skill::SkillSet;
@@ -16,13 +17,13 @@ use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 mod tools;
 
 pub(crate) struct SkillContextProvider {
-    skills: Arc<Mutex<SkillSet>>,
+    skills: Arc<RefCell<SkillSet>>,
 }
 
 impl SkillContextProvider {
     pub(crate) fn new(skills: SkillSet) -> Self {
         Self {
-            skills: Arc::new(Mutex::new(skills)),
+            skills: Arc::new(RefCell::new(skills)),
         }
     }
 }
@@ -40,6 +41,6 @@ impl ContextProvider for SkillContextProvider {
     }
 }
 
-pub(super) fn lock_skill_set(skills: &Mutex<SkillSet>) -> MutexGuard<'_, SkillSet> {
-    skills.lock().unwrap_or_else(|poison| poison.into_inner())
+pub(super) fn lock_skill_set(skills: &RefCell<SkillSet>) -> RefMut<'_, SkillSet> {
+    skills.borrow_mut()
 }

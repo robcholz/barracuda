@@ -5,13 +5,13 @@
 //! against an [`ApiPurpose`] and resolves the right one per purpose, falling
 //! back to a registered default.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use core::cell::RefCell;
 
 use claw_api::{ClawApiConfig, InitError};
 
 /// What an LLM API config is used for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ApiPurpose {
     /// The root (externally-visible) agent's turns.
     RootAgent,
@@ -23,7 +23,7 @@ pub enum ApiPurpose {
     Compaction,
 }
 
-pub(crate) type SharedApiManager = Arc<RwLock<ClawApiManager>>;
+pub(crate) type SharedApiManager = Arc<RefCell<ClawApiManager>>;
 
 /// Registers LLM API configs per [`ApiPurpose`], de-duplicated by model, with a
 /// default fallback.
@@ -34,9 +34,9 @@ pub(crate) type SharedApiManager = Arc<RwLock<ClawApiManager>>;
 #[derive(Debug, Default)]
 pub(crate) struct ClawApiManager {
     /// Configs by model name (one per model).
-    by_model: HashMap<String, ClawApiConfig>,
+    by_model: BTreeMap<String, ClawApiConfig>,
     /// Purpose → the model name it resolves to.
-    by_purpose: HashMap<ApiPurpose, String>,
+    by_purpose: BTreeMap<ApiPurpose, String>,
     /// Model resolved for a purpose that has no explicit binding.
     default_model: Option<String>,
 }

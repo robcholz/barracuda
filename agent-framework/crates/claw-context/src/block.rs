@@ -5,7 +5,7 @@
 //! only *placement* (band + scope + in-band order); block *content* is injected
 //! by callers and never authored here.
 
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 /// Mutability band — the primary wire-order key. Lower bands render first and
 /// form the cacheable prefix.

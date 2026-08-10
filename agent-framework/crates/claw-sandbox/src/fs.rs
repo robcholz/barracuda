@@ -9,6 +9,9 @@
 //!
 //! [`ClawFs`]: claw_interface::ClawFs
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 use claw_interface::FsError;
 
 /// The virtual path prefixes that are visible inside the sandbox.
@@ -73,11 +76,8 @@ pub enum SandboxError {
 /// - mutating methods can fail with [`SandboxError::ReadOnly`] on a read-only
 ///   root.
 ///
-/// Implementations must be safe to share across threads (handed out via `Arc`),
-/// matching the threading contract of the underlying [`ClawFs`].
-///
 /// [`ClawFs`]: claw_interface::ClawFs
-pub trait SandboxFs: Send + Sync {
+pub trait SandboxFs {
     /// Read the whole file at `path`.
     fn read(&self, path: &str) -> Result<Vec<u8>, SandboxError>;
 

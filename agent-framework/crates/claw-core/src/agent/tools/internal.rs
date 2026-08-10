@@ -84,3 +84,4 @@ mod tests {
         );
     }
 }
+use alloc::string::ToString;
