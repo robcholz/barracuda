@@ -334,13 +334,13 @@ mod tests {
         assert_eq!(provider.covered_through, Some(expected_covered_through));
         assert_eq!(
             rendered,
-            json!([
-                {"role": "system", "content": "summary:turn-one|turn-two"},
-                {"role": "user", "content": "turn-three"},
-                {"role": "user", "content": "open-four"},
-            ])
+            vec![
+                json!({"role": "system", "content": "summary:turn-one|turn-two"}),
+                json!({"role": "user", "content": "turn-three"}),
+                json!({"role": "user", "content": "open-four"}),
+            ]
         );
-        let rendered_text = rendered.to_string();
+        let rendered_text = serde_json::to_string(&rendered).expect("history serializes");
         assert_eq!(rendered_text.matches("turn-one").count(), 1);
         assert_eq!(rendered_text.matches("turn-two").count(), 1);
         assert_eq!(rendered_text.matches("turn-three").count(), 1);

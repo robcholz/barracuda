@@ -1,10 +1,6 @@
 //! Executor-neutral process runtime ownership and configuration entry point.
 
-use alloc::{
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{
     future::Future,
     pin::Pin,
@@ -19,6 +15,7 @@ use claw_net::{Dns, TcpConnect};
 use claw_persistence::{PersistenceError, SharedPersistence};
 use claw_skill::SkillError;
 use claw_tool::ToolRegistry;
+use futures_channel::oneshot;
 
 use crate::agent::{AgentCreateError, AgentManagerError};
 use crate::config::{ApiPurpose, SharedApiManager};
@@ -176,15 +173,12 @@ impl AgentRuntime {
         &self,
         session: SessionId,
     ) -> Result<(SessionControl, SessionStream), OpenSessionError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::OpenSession { session, ack })
             .await
             .map_err(|_| OpenSessionError::WorkerStopped)?;
-        result
-            .recv()
-            .await
-            .unwrap_or(Err(OpenSessionError::WorkerStopped))
+        result.await.unwrap_or(Err(OpenSessionError::WorkerStopped))
     }
 
     /// Create a fresh isolated Session.
@@ -192,20 +186,19 @@ impl AgentRuntime {
         &self,
         persistence: SessionPersistence,
     ) -> Result<SessionId, SessionCreateError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::CreateSession { persistence, ack })
             .await
             .map_err(|_| SessionCreateError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionCreateError::WorkerStopped))
     }
 
     /// Return live Sessions, sorted by id.
     pub async fn list_sessions(&self) -> Vec<SessionId> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         if self
             .commands
             .send(RuntimeCommand::ListSessions { ack })
@@ -214,18 +207,17 @@ impl AgentRuntime {
         {
             return Vec::new();
         }
-        result.recv().await.unwrap_or_default()
+        result.await.unwrap_or_default()
     }
 
     /// Delete a live Session and its associated runtime state.
     pub async fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::DeleteSession { session, ack })
             .await
             .map_err(|_| SessionDeleteError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionDeleteError::WorkerStopped))
     }

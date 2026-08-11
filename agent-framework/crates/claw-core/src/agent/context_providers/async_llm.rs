@@ -1,74 +1,24 @@
-use core::cell::RefCell;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::mutex::{Mutex, MutexGuard};
 
-use async_channel::{Receiver, Sender, TrySendError};
-
-use claw_api::{ChatError, ClawApi, ClawApiError};
+use claw_api::ClawApi;
 use claw_net::{Dns, TcpConnect};
 
 /// Private shared lease helper used by the concrete memory-side LLM providers.
 pub(super) struct SharedAsyncLlm<H: TcpConnect + Dns + 'static> {
-    api_tx: Sender<ClawApi<'static, H>>,
-    api_rx: Receiver<ClawApi<'static, H>>,
-    initial_api: RefCell<Option<ClawApi<'static, H>>>,
+    api: Mutex<NoopRawMutex, ClawApi<'static, H>>,
 }
 
 impl<H: TcpConnect + Dns + 'static> SharedAsyncLlm<H> {
     pub(super) fn new(api: ClawApi<'static, H>) -> Self {
-        let (api_tx, api_rx) = async_channel::bounded(1);
         Self {
-            api_tx,
-            api_rx,
-            initial_api: RefCell::new(Some(api)),
+            api: Mutex::new(api),
         }
     }
 
-    pub(super) async fn lease(&self) -> Result<AsyncLlmLease<'_, H>, ChatError> {
-        let initial_api = self.initial_api.borrow_mut().take();
-        let api = match initial_api {
-            Some(api) => api,
-            None => self.api_rx.recv().await.map_err(|_| channel_error())?,
-        };
-        Ok(AsyncLlmLease {
-            owner: self,
-            api: Some(api),
-        })
+    pub(super) async fn lease(&self) -> MutexGuard<'_, NoopRawMutex, ClawApi<'static, H>> {
+        self.api.lock().await
     }
-}
-
-pub(super) struct AsyncLlmLease<'owner, H: TcpConnect + Dns + 'static> {
-    owner: &'owner SharedAsyncLlm<H>,
-    api: Option<ClawApi<'static, H>>,
-}
-
-impl<H: TcpConnect + Dns + 'static> AsyncLlmLease<'_, H> {
-    pub(super) fn api_mut(&mut self) -> Result<&mut ClawApi<'static, H>, ChatError> {
-        self.api.as_mut().ok_or_else(channel_error)
-    }
-}
-
-impl<H: TcpConnect + Dns + 'static> Drop for AsyncLlmLease<'_, H> {
-    fn drop(&mut self) {
-        if let Some(api) = self.api.take() {
-            match self.owner.api_tx.try_send(api) {
-                Ok(()) => {}
-                Err(TrySendError::Closed(api)) => {
-                    *self.owner.initial_api.borrow_mut() = Some(api);
-                    log::error!("shared LLM channel closed while returning its client");
-                    tracing::error!("shared LLM channel closed while returning its client");
-                }
-                Err(TrySendError::Full(_)) => {
-                    log::error!("shared LLM channel already held a client");
-                    tracing::error!("shared LLM channel already held a client");
-                }
-            }
-        }
-    }
-}
-
-fn channel_error() -> ChatError {
-    ChatError::Api(ClawApiError::ApiError(
-        "shared LLM client channel is unavailable",
-    ))
 }
 
 #[cfg(test)]

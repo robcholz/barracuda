@@ -17,6 +17,7 @@ use claw_net::{Dns, TcpConnect};
 use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
 use claw_utils::stream::StreamPart;
+use futures_channel::oneshot;
 use futures_core::Stream;
 
 use super::agent_slot::{AgentDispatch, AgentSlot, AgentSlotUpdate, AgentSlots};
@@ -91,8 +92,8 @@ impl StopReason {
 
 struct Stopping {
     reason: StopReason,
-    close_acks: Vec<Sender<Result<(), SessionControlError>>>,
-    delete_ack: Option<Sender<Result<(), SessionDeleteError>>>,
+    close_acks: Vec<oneshot::Sender<Result<(), SessionControlError>>>,
+    delete_ack: Option<oneshot::Sender<Result<(), SessionDeleteError>>>,
 }
 
 enum ActorLifecycle {
@@ -119,8 +120,8 @@ impl ActorLifecycle {
     fn stop(
         &mut self,
         reason: StopReason,
-        close_ack: Option<Sender<Result<(), SessionControlError>>>,
-        delete_ack: Option<Sender<Result<(), SessionDeleteError>>>,
+        close_ack: Option<oneshot::Sender<Result<(), SessionControlError>>>,
+        delete_ack: Option<oneshot::Sender<Result<(), SessionDeleteError>>>,
     ) {
         match self {
             Self::Running => {
@@ -350,7 +351,7 @@ where
             SessionCommand::SetReasoningEffort { lease, effort, ack } => {
                 if self.accepts(lease) {
                     self.set_reasoning_effort(effort);
-                    let _ = ack.try_send(Ok(()));
+                    let _ = ack.send(Ok(()));
                 } else {
                     self.reject_closed(ack);
                 }
@@ -360,7 +361,7 @@ where
                     if self.state.get().permission_level != level {
                         self.state.get_mut().permission_level = level;
                     }
-                    let _ = ack.try_send(Ok(()));
+                    let _ = ack.send(Ok(()));
                 } else {
                     self.reject_closed(ack);
                 }
@@ -383,14 +384,14 @@ where
         &mut self,
         lease: u64,
         message: Message,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     ) {
         if !self.accepts(lease) {
             self.reject_closed(ack);
             return;
         }
         self.inbox.push_back(message);
-        let _ = ack.try_send(Ok(()));
+        let _ = ack.send(Ok(()));
     }
 
     fn respond(
@@ -398,7 +399,7 @@ where
         lease: u64,
         request: InputRequestId,
         message: Message,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     ) {
         if !self.accepts(lease) {
             self.reject_closed(ack);
@@ -419,10 +420,15 @@ where
                     }
                 }
             });
-        let _ = ack.try_send(result);
+        let _ = ack.send(result);
     }
 
-    fn control(&mut self, lease: u64, op: ControlOp, ack: Sender<Result<(), SessionControlError>>) {
+    fn control(
+        &mut self,
+        lease: u64,
+        op: ControlOp,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
+    ) {
         if !self.accepts(lease) {
             self.reject_closed(ack);
             return;
@@ -444,10 +450,10 @@ where
                 self.emit_approval_display(display);
             }
         }
-        let _ = ack.try_send(Ok(()));
+        let _ = ack.send(Ok(()));
     }
 
-    fn close(&mut self, lease: u64, ack: Sender<Result<(), SessionControlError>>) {
+    fn close(&mut self, lease: u64, ack: oneshot::Sender<Result<(), SessionControlError>>) {
         if !self.accepts(lease) {
             self.reject_closed(ack);
             return;
@@ -456,9 +462,9 @@ where
         self.stop_current_run(false);
     }
 
-    pub(super) fn request_delete(&mut self, ack: Sender<Result<(), SessionDeleteError>>) {
+    pub(super) fn request_delete(&mut self, ack: oneshot::Sender<Result<(), SessionDeleteError>>) {
         if self.lifecycle.is_deleting() {
-            let _ = ack.try_send(Err(SessionDeleteError::AlreadyDeleting(self.session)));
+            let _ = ack.send(Err(SessionDeleteError::AlreadyDeleting(self.session)));
             return;
         }
         self.lifecycle.stop(StopReason::Delete, None, Some(ack));
@@ -538,7 +544,7 @@ where
                 self.emit_closed(SessionCloseReason::Deleted);
                 Self::complete_close_requests(stopping.close_acks);
                 if let Some(ack) = stopping.delete_ack.take() {
-                    let _ = ack.try_send(Ok(()));
+                    let _ = ack.send(Ok(()));
                 }
                 true
             }
@@ -552,7 +558,7 @@ where
     fn fail_delete(&mut self, mut stopping: Stopping, error: SessionDeleteError) {
         self.emit_event_error(SessionEventError::DeleteFailed);
         if let Some(ack) = stopping.delete_ack.take() {
-            let _ = ack.try_send(Err(error));
+            let _ = ack.send(Err(error));
         }
         if !stopping.close_acks.is_empty() {
             self.lifecycle = ActorLifecycle::Stopping(Stopping {
@@ -563,9 +569,9 @@ where
         }
     }
 
-    fn complete_close_requests(acks: Vec<Sender<Result<(), SessionControlError>>>) {
+    fn complete_close_requests(acks: Vec<oneshot::Sender<Result<(), SessionControlError>>>) {
         for ack in acks {
-            let _ = ack.try_send(Ok(()));
+            let _ = ack.send(Ok(()));
         }
     }
 
@@ -993,8 +999,8 @@ where
                 .is_some_and(|client| client.lease == lease)
     }
 
-    fn reject_closed(&self, ack: Sender<Result<(), SessionControlError>>) {
-        let _ = ack.try_send(Err(SessionControlError::SessionClosed(self.session)));
+    fn reject_closed(&self, ack: oneshot::Sender<Result<(), SessionControlError>>) {
+        let _ = ack.send(Err(SessionControlError::SessionClosed(self.session)));
     }
 
     fn emit_effect_output(&self, message: String) {

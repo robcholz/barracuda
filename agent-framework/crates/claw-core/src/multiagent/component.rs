@@ -7,8 +7,8 @@ use alloc::{
 };
 use core::task::{Context, Poll};
 
-use async_channel::Sender;
 use claw_tool::ToolGroup;
+use futures_channel::oneshot;
 
 use crate::agent::{AgentId, AgentKind};
 use crate::Message;
@@ -30,15 +30,15 @@ enum DispatchPurpose {
         child: AgentId,
     },
     Followup {
-        completed: Sender<Result<(), MultiagentCommandError>>,
+        completed: oneshot::Sender<Result<(), MultiagentCommandError>>,
     },
 }
 
 enum PendingEffect {
     Spawn {
         requester: AgentId,
-        accepted: Sender<Result<AgentId, MultiagentCommandError>>,
-        completion: Sender<SubagentResult>,
+        accepted: oneshot::Sender<Result<AgentId, MultiagentCommandError>>,
+        completion: oneshot::Sender<SubagentResult>,
     },
     Dispatch {
         target: AgentId,
@@ -62,7 +62,7 @@ enum RemovalCause {
     },
     Delete {
         target: AgentId,
-        completed: Option<Sender<Result<(), MultiagentCommandError>>>,
+        completed: Option<oneshot::Sender<Result<(), MultiagentCommandError>>>,
     },
     Cleanup,
 }
@@ -86,7 +86,7 @@ pub(crate) struct Multiagent {
     effects: VecDeque<MultiagentEffect>,
     pending_effects: BTreeMap<EffectId, PendingEffect>,
     next_effect_id: u64,
-    routes: BTreeMap<AgentId, Sender<SubagentResult>>,
+    routes: BTreeMap<AgentId, oneshot::Sender<SubagentResult>>,
     pending_interrupts: BTreeMap<AgentId, FollowupCommand>,
     removals: Vec<RemovalPlan>,
 }
@@ -366,13 +366,13 @@ impl Multiagent {
     }
 
     fn prepare_spawn(&mut self, requester: AgentId, command: SpawnCommand) {
-        if command.accepted.is_closed() {
+        if command.accepted.is_canceled() {
             return;
         }
         if self.state.status(requester) != Some(SubagentStatus::Running) {
             let _ = command
                 .accepted
-                .try_send(Err(MultiagentCommandError::RequesterMissing));
+                .send(Err(MultiagentCommandError::RequesterMissing));
             return;
         }
         let validation = self
@@ -393,7 +393,7 @@ impl Multiagent {
                 }
             });
         if let Err(error) = validation {
-            let _ = command.accepted.try_send(Err(error));
+            let _ = command.accepted.send(Err(error));
             return;
         }
         let SpawnCommand {
@@ -410,19 +410,19 @@ impl Multiagent {
     }
 
     fn prepare_delete(&mut self, requester: AgentId, command: DeleteCommand) {
-        if command.completed.is_closed() {
+        if command.completed.is_canceled() {
             return;
         }
         if self.state.status(requester) != Some(SubagentStatus::Running) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::RequesterMissing));
+                .send(Err(MultiagentCommandError::RequesterMissing));
             return;
         }
         if !self.state.is_strict_descendant(requester, command.target) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                .send(Err(MultiagentCommandError::TargetNotControlled));
             return;
         }
         if let Some(removal) = self.removals.iter_mut().find(|removal| {
@@ -454,7 +454,7 @@ impl Multiagent {
         ) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                .send(Err(MultiagentCommandError::TargetNotControlled));
             return;
         }
         self.begin_removal(
@@ -467,25 +467,25 @@ impl Multiagent {
     }
 
     fn prepare_followup(&mut self, requester: AgentId, command: FollowupCommand) {
-        if command.completed.is_closed() {
+        if command.completed.is_canceled() {
             return;
         }
         if self.state.status(requester) != Some(SubagentStatus::Running) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::RequesterMissing));
+                .send(Err(MultiagentCommandError::RequesterMissing));
             return;
         }
         if !self.state.is_strict_descendant(requester, command.target) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                .send(Err(MultiagentCommandError::TargetNotControlled));
             return;
         }
         if self.pending_interrupts.contains_key(&command.target) {
             let _ = command
                 .completed
-                .try_send(Err(MultiagentCommandError::TargetBusy));
+                .send(Err(MultiagentCommandError::TargetBusy));
             return;
         }
         match self.state.status(command.target) {
@@ -507,12 +507,12 @@ impl Multiagent {
             Some(SubagentStatus::Ready) => {
                 let _ = command
                     .completed
-                    .try_send(Err(MultiagentCommandError::TargetBusy));
+                    .send(Err(MultiagentCommandError::TargetBusy));
             }
             Some(SubagentStatus::Reaping | SubagentStatus::CompletedPendingDelivery) | None => {
                 let _ = command
                     .completed
-                    .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                    .send(Err(MultiagentCommandError::TargetNotControlled));
             }
         }
     }
@@ -520,22 +520,22 @@ impl Multiagent {
     fn commit_spawn(
         &mut self,
         requester: AgentId,
-        accepted: Sender<Result<AgentId, MultiagentCommandError>>,
-        completion: Sender<SubagentResult>,
+        accepted: oneshot::Sender<Result<AgentId, MultiagentCommandError>>,
+        completion: oneshot::Sender<SubagentResult>,
         spec: super::model::SubagentSpec,
         id: AgentId,
     ) -> Option<AgentId> {
         if self.state.status(requester) != Some(SubagentStatus::Running) {
-            let _ = accepted.try_send(Err(MultiagentCommandError::RequesterMissing));
+            let _ = accepted.send(Err(MultiagentCommandError::RequesterMissing));
             return Some(id);
         }
         let (kind, name, goal, timeout) = spec.into_parts();
         if !self.state.insert_child(requester, id, kind, name, timeout) {
-            let _ = accepted.try_send(Err(MultiagentCommandError::RequesterMissing));
+            let _ = accepted.send(Err(MultiagentCommandError::RequesterMissing));
             return Some(id);
         }
         self.routes.insert(id, completion);
-        if accepted.try_send(Ok(id)).is_err() {
+        if accepted.send(Ok(id)).is_err() {
             self.begin_removal(self.state.subtree_ids(id), RemovalCause::Cleanup);
             return None;
         }
@@ -562,8 +562,7 @@ impl Multiagent {
         match outcome {
             Ok(agent) => self.commit_spawn(requester, accepted, completion, spec, agent),
             Err(error) => {
-                let _ =
-                    accepted.try_send(Err(MultiagentCommandError::CreateFailed(error.to_string())));
+                let _ = accepted.send(Err(MultiagentCommandError::CreateFailed(error.to_string())));
                 None
             }
         }
@@ -593,7 +592,7 @@ impl Multiagent {
                     DispatchOutcome::Busy => Err(MultiagentCommandError::TargetBusy),
                     DispatchOutcome::Missing => Err(MultiagentCommandError::TargetNotControlled),
                 };
-                let _ = completed.try_send(result);
+                let _ = completed.send(result);
             }
         }
         self.publish_snapshot();
@@ -612,12 +611,12 @@ impl Multiagent {
             InterruptOutcome::Inactive => {
                 let _ = command
                     .completed
-                    .try_send(Err(MultiagentCommandError::TargetBusy));
+                    .send(Err(MultiagentCommandError::TargetBusy));
             }
             InterruptOutcome::Missing => {
                 let _ = command
                     .completed
-                    .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                    .send(Err(MultiagentCommandError::TargetNotControlled));
             }
         }
         self.publish_snapshot();
@@ -668,7 +667,7 @@ impl Multiagent {
                 ..
             } = cause
             {
-                let _ = completed.try_send(Err(MultiagentCommandError::TargetNotControlled));
+                let _ = completed.send(Err(MultiagentCommandError::TargetNotControlled));
             }
             return;
         }
@@ -730,7 +729,7 @@ impl Multiagent {
             if let Some(command) = self.pending_interrupts.remove(victim) {
                 let _ = command
                     .completed
-                    .try_send(Err(MultiagentCommandError::TargetNotControlled));
+                    .send(Err(MultiagentCommandError::TargetNotControlled));
             }
         }
         let agents = victims
@@ -762,9 +761,8 @@ impl Multiagent {
                     RemovalCause::Delete { completed, .. } => {
                         let completed = completed.take();
                         if let Some(completed) = completed {
-                            let _ = completed.try_send(Err(MultiagentCommandError::RemoveFailed(
-                                error.to_string(),
-                            )));
+                            let _ = completed
+                                .send(Err(MultiagentCommandError::RemoveFailed(error.to_string())));
                         }
                         pending.push(removal);
                     }
@@ -835,7 +833,7 @@ impl Multiagent {
                     .remove_agents(&removal.victims.iter().copied().collect::<Vec<_>>());
                 self.drop_routes_for_removed(&removal.victims, None);
                 if let Some(completed) = completed {
-                    let _ = completed.try_send(Ok(()));
+                    let _ = completed.send(Ok(()));
                 }
             }
             RemovalCause::Cleanup => {
@@ -851,10 +849,9 @@ impl Multiagent {
             .set_status(agent, SubagentStatus::CompletedPendingDelivery);
         let delivered = self
             .routes
-            .get(&agent)
-            .is_some_and(|completion| completion.try_send(result).is_ok());
+            .remove(&agent)
+            .is_some_and(|completion| completion.send(result).is_ok());
         if !delivered {
-            self.routes.remove(&agent);
             self.state.remove_agents(&[agent]);
         }
     }
@@ -877,7 +874,7 @@ impl Multiagent {
             .collect::<Vec<_>>();
         for victim in removed {
             if let Some(completion) = self.routes.remove(&victim) {
-                let _ = completion.try_send(SubagentResult::new(
+                let _ = completion.send(SubagentResult::new(
                     victim,
                     "subagent was deleted before returning a result".to_owned(),
                     false,
@@ -888,11 +885,11 @@ impl Multiagent {
 
     fn reap_cancelled_completion_receivers(&mut self) {
         self.pending_interrupts
-            .retain(|_, command| !command.completed.is_closed());
+            .retain(|_, command| !command.completed.is_canceled());
         let cancelled = self
             .routes
             .iter()
-            .filter_map(|(&agent, sender)| sender.is_closed().then_some(agent))
+            .filter_map(|(&agent, sender)| sender.is_canceled().then_some(agent))
             .collect::<Vec<_>>();
         for agent in cancelled {
             if self.state.status(agent) == Some(SubagentStatus::CompletedPendingDelivery) {
@@ -989,7 +986,7 @@ mod tests {
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
         let bridge = Arc::clone(&multiagent.bridge);
-        let (accepted, _completion) = bridge.spawn(
+        let (mut accepted, _completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1008,7 +1005,7 @@ mod tests {
         assert_eq!(multiagent.agent_ids(), vec![root]);
         assert!(matches!(
             accepted.try_recv(),
-            Ok(Err(MultiagentCommandError::CreateFailed(message))) if message == "injected"
+            Ok(Some(Err(MultiagentCommandError::CreateFailed(message)))) if message == "injected"
         ));
     }
 
@@ -1020,7 +1017,7 @@ mod tests {
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
         let bridge = Arc::clone(&multiagent.bridge);
-        let (accepted, completion) = bridge.spawn(
+        let (mut accepted, mut completion) = bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1031,7 +1028,7 @@ mod tests {
         );
         let (effect, spec) = take_spawn_effect(&mut multiagent);
         assert_eq!(apply_spawned(&mut multiagent, effect, spec, child), None);
-        assert_eq!(accepted.try_recv(), Ok(Ok(child)));
+        assert_eq!(accepted.try_recv(), Ok(Some(Ok(child))));
 
         let _ = multiagent.take_effect().expect("timeout effect");
         let initial = multiagent.take_effect().expect("initial dispatch");
@@ -1058,7 +1055,7 @@ mod tests {
             multiagent.take_effect(),
             Some(MultiagentEffect::RemoveAgents { .. })
         ));
-        assert!(completion.try_recv().is_err());
+        assert_eq!(completion.try_recv(), Ok(None));
 
         multiagent.physical_agent_removed(child, Ok(()));
         assert_eq!(
@@ -1068,6 +1065,7 @@ mod tests {
         assert!(completion
             .try_recv()
             .expect("completion is published after removal")
+            .expect("completion value")
             .ok());
         multiagent.acknowledge_delivery(root, child);
         assert!(!multiagent.contains(child));
@@ -1095,7 +1093,7 @@ mod tests {
             None,
             timeout()
         ));
-        let (completed, result) = async_channel::bounded(1);
+        let (completed, mut result) = oneshot::channel();
         multiagent.prepare_delete(
             root,
             DeleteCommand {
@@ -1111,11 +1109,11 @@ mod tests {
 
         multiagent.physical_agent_removed(child, Ok(()));
         assert!(multiagent.contains(child));
-        assert!(result.try_recv().is_err());
+        assert_eq!(result.try_recv(), Ok(None));
         multiagent.physical_agent_removed(grandchild, Ok(()));
         assert!(!multiagent.contains(child));
         assert!(!multiagent.contains(grandchild));
-        assert_eq!(result.try_recv(), Ok(Ok(())));
+        assert_eq!(result.try_recv(), Ok(Some(Ok(()))));
     }
 
     #[test]
@@ -1133,7 +1131,7 @@ mod tests {
             timeout()
         ));
 
-        let (first_completed, first_result) = async_channel::bounded(1);
+        let (first_completed, mut first_result) = oneshot::channel();
         multiagent.prepare_delete(
             root,
             DeleteCommand {
@@ -1159,11 +1157,11 @@ mod tests {
         );
         assert!(matches!(
             first_result.try_recv(),
-            Ok(Err(MultiagentCommandError::RemoveFailed(detail)))
+            Ok(Some(Err(MultiagentCommandError::RemoveFailed(detail))))
                 if detail == "injected remove failure"
         ));
 
-        let (retry_completed, retry_result) = async_channel::bounded(1);
+        let (retry_completed, mut retry_result) = oneshot::channel();
         multiagent.prepare_delete(
             root,
             DeleteCommand {
@@ -1178,7 +1176,7 @@ mod tests {
         multiagent.physical_agent_removed(child, Ok(()));
 
         assert!(!multiagent.contains(child));
-        assert_eq!(retry_result.try_recv(), Ok(Ok(())));
+        assert_eq!(retry_result.try_recv(), Ok(Some(Ok(()))));
     }
 
     #[test]
@@ -1188,8 +1186,8 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (accepted_sender, accepted) = async_channel::bounded(1);
-        let (completion_sender, completion) = async_channel::bounded(1);
+        let (accepted_sender, mut accepted) = oneshot::channel();
+        let (completion_sender, completion) = oneshot::channel();
         let command = SpawnCommand {
             spec: super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1203,7 +1201,7 @@ mod tests {
         multiagent.prepare_spawn(root, command);
         let (effect, spec) = take_spawn_effect(&mut multiagent);
         apply_spawned(&mut multiagent, effect, spec, child);
-        assert_eq!(accepted.try_recv(), Ok(Ok(child)));
+        assert_eq!(accepted.try_recv(), Ok(Some(Ok(child))));
         let _ = multiagent.take_effect();
         let _ = multiagent.take_effect();
 
@@ -1259,11 +1257,11 @@ mod tests {
         multiagent
             .state
             .set_status(cancelled_foreground, SubagentStatus::Running);
-        let (background_sender, _background_receiver) = async_channel::bounded(1);
+        let (background_sender, _background_receiver) = oneshot::channel();
         multiagent.routes.insert(background, background_sender);
-        let (nested_sender, nested_receiver) = async_channel::bounded(1);
+        let (nested_sender, mut nested_receiver) = oneshot::channel();
         multiagent.routes.insert(nested_foreground, nested_sender);
-        let (cancelled_sender, cancelled_receiver) = async_channel::bounded(1);
+        let (cancelled_sender, cancelled_receiver) = oneshot::channel();
         multiagent
             .routes
             .insert(cancelled_foreground, cancelled_sender);
@@ -1289,7 +1287,7 @@ mod tests {
             Some(MultiagentEffect::RemoveAgents { agents, .. })
                 if agents == vec![cancelled_foreground]
         ));
-        assert!(nested_receiver.try_recv().is_err());
+        assert_eq!(nested_receiver.try_recv(), Ok(None));
     }
 
     #[test]
@@ -1299,7 +1297,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1319,7 +1317,7 @@ mod tests {
         assert_eq!(multiagent.agent_ids(), vec![root]);
         assert_eq!(
             accepted.try_recv(),
-            Ok(Err(MultiagentCommandError::RequesterMissing))
+            Ok(Some(Err(MultiagentCommandError::RequesterMissing)))
         );
         assert!(multiagent.take_effect().is_none());
     }
@@ -1339,7 +1337,7 @@ mod tests {
             timeout()
         ));
         multiagent.state.set_status(child, SubagentStatus::Running);
-        let (completed, result) = async_channel::bounded(1);
+        let (completed, mut result) = oneshot::channel();
 
         multiagent.prepare_followup(
             root,
@@ -1350,7 +1348,7 @@ mod tests {
             },
         );
 
-        assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
+        assert_eq!(result.try_recv(), Ok(None));
         let Some(MultiagentEffect::Interrupt { id, target }) = multiagent.take_effect() else {
             panic!("running target should emit an interrupt effect");
         };
@@ -1361,7 +1359,7 @@ mod tests {
             outcome: InterruptOutcome::Accepted,
         });
 
-        assert_eq!(result.try_recv(), Err(async_channel::TryRecvError::Empty));
+        assert_eq!(result.try_recv(), Ok(None));
         multiagent.on_agent_completed(child, "subagent was interrupted".to_owned(), false);
         let Some(MultiagentEffect::Dispatch {
             id,
@@ -1379,7 +1377,7 @@ mod tests {
             outcome: DispatchOutcome::Accepted,
         });
 
-        assert_eq!(result.try_recv(), Ok(Ok(())));
+        assert_eq!(result.try_recv(), Ok(Some(Ok(()))));
         assert_eq!(
             multiagent.state.status(child),
             Some(SubagentStatus::Running)
@@ -1402,7 +1400,7 @@ mod tests {
         ));
         multiagent.state.set_status(child, SubagentStatus::Idle);
 
-        let (delete_completed, delete_result) = async_channel::bounded(1);
+        let (delete_completed, delete_result) = oneshot::channel();
         drop(delete_result);
         multiagent.prepare_delete(
             root,
@@ -1412,7 +1410,7 @@ mod tests {
             },
         );
 
-        let (followup_completed, followup_result) = async_channel::bounded(1);
+        let (followup_completed, followup_result) = oneshot::channel();
         drop(followup_result);
         multiagent.prepare_followup(
             root,
@@ -1441,7 +1439,7 @@ mod tests {
             None,
             timeout()
         ));
-        let (completion, result) = async_channel::bounded(1);
+        let (completion, mut result) = oneshot::channel();
         multiagent.routes.insert(child, completion);
 
         multiagent.timeout(child);
@@ -1457,7 +1455,11 @@ mod tests {
         );
 
         assert!(!multiagent.contains(child));
-        assert!(!result.try_recv().expect("foreground timeout result").ok());
+        assert!(!result
+            .try_recv()
+            .expect("foreground timeout result")
+            .expect("foreground timeout value")
+            .ok());
         assert!(multiagent.removals.is_empty());
     }
 
@@ -1483,8 +1485,8 @@ mod tests {
             None,
             timeout()
         ));
-        let (parent_completion, parent_result) = async_channel::bounded(1);
-        let (child_completion, _child_result) = async_channel::bounded(1);
+        let (parent_completion, mut parent_result) = oneshot::channel();
+        let (child_completion, _child_result) = oneshot::channel();
         multiagent.routes.insert(parent, parent_completion);
         multiagent.routes.insert(child, child_completion);
 
@@ -1514,6 +1516,7 @@ mod tests {
         assert!(!parent_result
             .try_recv()
             .expect("parent timeout result")
+            .expect("parent timeout value")
             .ok());
         assert!(multiagent.removals.is_empty());
     }
@@ -1532,7 +1535,7 @@ mod tests {
             None,
             timeout()
         ));
-        let (completed, result) = async_channel::bounded(1);
+        let (completed, mut result) = oneshot::channel();
         multiagent.prepare_delete(
             root,
             DeleteCommand {
@@ -1552,7 +1555,7 @@ mod tests {
         );
         assert!(matches!(
             result.try_recv(),
-            Ok(Err(MultiagentCommandError::RemoveFailed(_)))
+            Ok(Some(Err(MultiagentCommandError::RemoveFailed(_))))
         ));
 
         multiagent.cleanup_subagents();
@@ -1593,7 +1596,7 @@ mod tests {
             None,
             timeout()
         ));
-        let (completion, result) = async_channel::bounded(1);
+        let (completion, mut result) = oneshot::channel();
         multiagent.routes.insert(parent, completion);
 
         multiagent.timeout(parent);
@@ -1611,12 +1614,16 @@ mod tests {
 
         assert!(multiagent.contains(parent));
         assert!(multiagent.contains(child));
-        assert!(result.try_recv().is_err());
+        assert_eq!(result.try_recv(), Ok(None));
 
         multiagent.physical_agent_removed(child, Ok(()));
         assert!(!multiagent.contains(parent));
         assert!(!multiagent.contains(child));
-        assert!(!result.try_recv().expect("timeout result").ok());
+        assert!(!result
+            .try_recv()
+            .expect("timeout result")
+            .expect("timeout value")
+            .ok());
     }
 
     #[test]
@@ -1626,7 +1633,7 @@ mod tests {
         let mut multiagent = Multiagent::new();
         assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
         multiagent.on_agent_started(root);
-        let (accepted, _completion) = multiagent.bridge.spawn(
+        let (mut accepted, _completion) = multiagent.bridge.spawn(
             root,
             super::super::model::SubagentSpec::new(
                 AgentKind::from_static("worker"),
@@ -1637,7 +1644,7 @@ mod tests {
         );
         let (effect, spec) = take_spawn_effect(&mut multiagent);
         apply_spawned(&mut multiagent, effect, spec, child);
-        assert_eq!(accepted.try_recv(), Ok(Ok(child)));
+        assert_eq!(accepted.try_recv(), Ok(Some(Ok(child))));
 
         multiagent.cleanup_subagents();
 
@@ -1674,7 +1681,7 @@ mod tests {
             None,
             timeout()
         ));
-        let (completion, completion_result) = async_channel::bounded(1);
+        let (completion, mut completion_result) = oneshot::channel();
         multiagent.routes.insert(parent, completion);
 
         multiagent.timeout(parent);
@@ -1690,7 +1697,7 @@ mod tests {
             )),
         );
 
-        let (completed, result) = async_channel::bounded(1);
+        let (completed, mut result) = oneshot::channel();
         multiagent.prepare_delete(
             root,
             DeleteCommand {
@@ -1700,13 +1707,17 @@ mod tests {
         );
         assert_eq!(
             result.try_recv(),
-            Ok(Err(MultiagentCommandError::TargetNotControlled))
+            Ok(Some(Err(MultiagentCommandError::TargetNotControlled)))
         );
         assert!(multiagent.take_effect().is_none());
 
         multiagent.physical_agent_removed(child, Ok(()));
         assert!(!multiagent.contains(parent));
         assert!(!multiagent.contains(child));
-        assert!(!completion_result.try_recv().expect("timeout result").ok());
+        assert!(!completion_result
+            .try_recv()
+            .expect("timeout result")
+            .expect("timeout value")
+            .ok());
     }
 }

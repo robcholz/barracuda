@@ -1,7 +1,10 @@
 //! Per-agent reasoning-effort context.
 
-use async_channel::{Receiver, Sender};
+use alloc::sync::Arc;
+
 use claw_context::{Block, BlockKind, ContextSink};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::signal::Signal;
 use serde::{Deserialize, Serialize};
 
 use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
@@ -43,29 +46,28 @@ impl ReasoningEffort {
 
 /// Sending endpoint retained by the Agent's logical owner.
 pub(crate) struct ReasoningEffortHandle {
-    updates: Sender<ReasoningEffort>,
+    updates: Arc<Signal<NoopRawMutex, ReasoningEffort>>,
 }
 
 impl ReasoningEffortHandle {
     pub(crate) fn set(&self, effort: ReasoningEffort) {
-        let result = self.updates.try_send(effort);
-        debug_assert!(result.is_ok(), "live Agent reasoning inbox must be open");
+        self.updates.signal(effort);
     }
 }
 
 pub(crate) struct ReasoningEffortContextProvider {
     effort: ReasoningEffort,
-    updates: Receiver<ReasoningEffort>,
+    updates: Arc<Signal<NoopRawMutex, ReasoningEffort>>,
 }
 
 impl ReasoningEffortContextProvider {
     /// Create the provider and its owner-facing sending handle together.
     pub(crate) fn new(effort: ReasoningEffort) -> (Self, ReasoningEffortHandle) {
-        let (updates, receiver) = async_channel::unbounded();
+        let updates = Arc::new(Signal::new());
         (
             Self {
                 effort,
-                updates: receiver,
+                updates: Arc::clone(&updates),
             },
             ReasoningEffortHandle { updates },
         )
@@ -74,7 +76,7 @@ impl ReasoningEffortContextProvider {
 
 impl ContextProvider for ReasoningEffortContextProvider {
     fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
-        while let Ok(effort) = self.updates.try_recv() {
+        if let Some(effort) = self.updates.try_take() {
             self.effort = effort;
         }
         output.block(self.effort.context_block());
@@ -114,6 +116,18 @@ mod tests {
 
         let mut other_context = Context::new();
         assert!(render(&mut other, &mut other_context).contains("Reasoning effort: low"));
+    }
+
+    #[test]
+    fn pending_updates_keep_only_the_latest_effort() {
+        let (mut provider, handle) = ReasoningEffortContextProvider::new(ReasoningEffort::Low);
+        handle.set(ReasoningEffort::High);
+        handle.set(ReasoningEffort::Ultra);
+
+        let mut context = Context::new();
+        let rendered = render(&mut provider, &mut context);
+        assert!(rendered.contains("Reasoning effort: ultra"));
+        assert!(!rendered.contains("Reasoning effort: high"));
     }
 
     #[test]

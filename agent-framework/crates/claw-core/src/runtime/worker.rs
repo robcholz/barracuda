@@ -1,21 +1,17 @@
 //! Single-thread process runtime loop.
 
-use alloc::{
-    boxed::Box,
-    string::String,
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use async_channel::{Receiver, Sender};
+use async_channel::Receiver;
 use claw_api::ClawApiFactory;
 use claw_interface::ClawFs;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;
+use futures_channel::oneshot;
 use futures_core::Stream;
 
 use crate::config::SharedApiManager;
@@ -29,18 +25,18 @@ use super::agent_runtime::AgentRuntimeBuildError;
 pub(super) enum RuntimeCommand {
     CreateSession {
         persistence: SessionPersistence,
-        ack: Sender<Result<SessionId, SessionCreateError>>,
+        ack: oneshot::Sender<Result<SessionId, SessionCreateError>>,
     },
     ListSessions {
-        ack: Sender<Vec<SessionId>>,
+        ack: oneshot::Sender<Vec<SessionId>>,
     },
     OpenSession {
         session: SessionId,
-        ack: Sender<Result<(SessionControl, SessionStream), OpenSessionError>>,
+        ack: oneshot::Sender<Result<(SessionControl, SessionStream), OpenSessionError>>,
     },
     DeleteSession {
         session: SessionId,
-        ack: Sender<Result<(), SessionDeleteError>>,
+        ack: oneshot::Sender<Result<(), SessionDeleteError>>,
     },
     Stop,
 }
@@ -112,13 +108,13 @@ where
     fn handle_command(&mut self, command: Option<RuntimeCommand>) {
         match command {
             Some(RuntimeCommand::CreateSession { persistence, ack }) => {
-                let _ = ack.try_send(self.session_manager.create(persistence));
+                let _ = ack.send(self.session_manager.create(persistence));
             }
             Some(RuntimeCommand::ListSessions { ack }) => {
-                let _ = ack.try_send(self.session_manager.list());
+                let _ = ack.send(self.session_manager.list());
             }
             Some(RuntimeCommand::OpenSession { session, ack }) => {
-                let _ = ack.try_send(self.session_manager.open(session));
+                let _ = ack.send(self.session_manager.open(session));
             }
             Some(RuntimeCommand::DeleteSession { session, ack }) => {
                 self.session_manager.delete(session, ack);
@@ -134,16 +130,16 @@ where
         while let Ok(command) = self.commands.try_recv() {
             match command {
                 RuntimeCommand::CreateSession { ack, .. } => {
-                    let _ = ack.try_send(Err(SessionCreateError::WorkerStopped));
+                    let _ = ack.send(Err(SessionCreateError::WorkerStopped));
                 }
                 RuntimeCommand::ListSessions { ack } => {
-                    let _ = ack.try_send(Vec::new());
+                    let _ = ack.send(Vec::new());
                 }
                 RuntimeCommand::OpenSession { ack, .. } => {
-                    let _ = ack.try_send(Err(OpenSessionError::WorkerStopped));
+                    let _ = ack.send(Err(OpenSessionError::WorkerStopped));
                 }
                 RuntimeCommand::DeleteSession { ack, .. } => {
-                    let _ = ack.try_send(Err(SessionDeleteError::WorkerStopped));
+                    let _ = ack.send(Err(SessionDeleteError::WorkerStopped));
                 }
                 RuntimeCommand::Stop => {}
             }

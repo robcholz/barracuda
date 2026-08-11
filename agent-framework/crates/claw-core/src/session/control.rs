@@ -1,5 +1,6 @@
 use async_channel::Sender;
 use claw_permission::PermissionLevel;
+use futures_channel::oneshot;
 use strum::IntoStaticStr;
 
 use crate::agent::ReasoningEffort;
@@ -36,32 +37,32 @@ pub(super) enum SessionCommand {
     Append {
         lease: u64,
         message: Message,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
     Respond {
         lease: u64,
         request: InputRequestId,
         message: Message,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
     Control {
         lease: u64,
         op: ControlOp,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
     SetReasoningEffort {
         lease: u64,
         effort: ReasoningEffort,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
     SetPermissionLevel {
         lease: u64,
         level: PermissionLevel,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
     Close {
         lease: u64,
-        ack: Sender<Result<(), SessionControlError>>,
+        ack: oneshot::Sender<Result<(), SessionControlError>>,
     },
 }
 
@@ -81,7 +82,7 @@ impl SessionControl {
     ///
     /// This resolves when the actor queues the message, not when its turn ends.
     pub async fn append(&self, message: Message) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::Append {
                 lease: self.lease,
@@ -91,7 +92,6 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
@@ -106,7 +106,7 @@ impl SessionControl {
         request: InputRequestId,
         message: Message,
     ) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::Respond {
                 lease: self.lease,
@@ -117,7 +117,6 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
@@ -127,7 +126,7 @@ impl SessionControl {
         &self,
         effort: ReasoningEffort,
     ) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::SetReasoningEffort {
                 lease: self.lease,
@@ -137,7 +136,6 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
@@ -147,7 +145,7 @@ impl SessionControl {
         &self,
         level: PermissionLevel,
     ) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::SetPermissionLevel {
                 lease: self.lease,
@@ -157,7 +155,6 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
@@ -175,7 +172,7 @@ impl SessionControl {
     /// Close this event stream. The session id stays live; dirty state is
     /// persisted by the runtime's global persistence boundary.
     pub async fn close(&self) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::Close {
                 lease: self.lease,
@@ -184,13 +181,12 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }
 
     async fn send_control(&self, op: ControlOp) -> Result<(), SessionControlError> {
-        let (ack, result) = async_channel::bounded(1);
+        let (ack, result) = oneshot::channel();
         self.commands
             .send(SessionCommand::Control {
                 lease: self.lease,
@@ -200,7 +196,6 @@ impl SessionControl {
             .await
             .map_err(|_| SessionControlError::WorkerStopped)?;
         result
-            .recv()
             .await
             .unwrap_or(Err(SessionControlError::WorkerStopped))
     }

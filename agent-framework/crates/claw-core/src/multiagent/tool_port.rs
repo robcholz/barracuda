@@ -6,6 +6,7 @@ use core::{
 };
 
 use async_channel::{Receiver, Sender};
+use futures_channel::oneshot;
 use futures_core::Stream;
 
 use crate::agent::{AgentId, AgentKind};
@@ -58,19 +59,19 @@ pub(crate) enum MultiagentAction {
 
 pub(crate) struct SpawnCommand {
     pub(crate) spec: SubagentSpec,
-    pub(crate) accepted: Sender<Result<AgentId, MultiagentCommandError>>,
-    pub(crate) completion: Sender<SubagentResult>,
+    pub(crate) accepted: oneshot::Sender<Result<AgentId, MultiagentCommandError>>,
+    pub(crate) completion: oneshot::Sender<SubagentResult>,
 }
 
 pub(crate) struct DeleteCommand {
     pub(crate) target: AgentId,
-    pub(crate) completed: Sender<Result<(), MultiagentCommandError>>,
+    pub(crate) completed: oneshot::Sender<Result<(), MultiagentCommandError>>,
 }
 
 pub(crate) struct FollowupCommand {
     pub(crate) target: AgentId,
     pub(crate) message: Message,
-    pub(crate) completed: Sender<Result<(), MultiagentCommandError>>,
+    pub(crate) completed: oneshot::Sender<Result<(), MultiagentCommandError>>,
 }
 
 /// Short-lock bridge shared by model-facing tools and one Session actor.
@@ -107,12 +108,11 @@ impl SubagentControl {
         name: Option<String>,
         goal: Message,
         timeout: SubagentTimeout,
-    ) -> Result<(AgentId, Receiver<SubagentResult>), MultiagentCommandError> {
+    ) -> Result<(AgentId, oneshot::Receiver<SubagentResult>), MultiagentCommandError> {
         let (accepted, result) = self
             .bridge
             .spawn(self.caller, SubagentSpec::new(kind, name, goal, timeout));
         let id = accepted
-            .recv()
             .await
             .map_err(|_| MultiagentCommandError::BridgeClosed)??;
         Ok((id, result))
@@ -121,7 +121,6 @@ impl SubagentControl {
     pub(crate) async fn delete(&self, target: AgentId) -> Result<(), MultiagentCommandError> {
         self.bridge
             .delete(self.caller, target)
-            .recv()
             .await
             .map_err(|_| MultiagentCommandError::BridgeClosed)?
     }
@@ -133,7 +132,6 @@ impl SubagentControl {
     ) -> Result<(), MultiagentCommandError> {
         self.bridge
             .followup(self.caller, target, message)
-            .recv()
             .await
             .map_err(|_| MultiagentCommandError::BridgeClosed)?
     }
@@ -179,11 +177,11 @@ impl MultiagentBridge {
         parent: AgentId,
         spec: SubagentSpec,
     ) -> (
-        Receiver<Result<AgentId, MultiagentCommandError>>,
-        Receiver<SubagentResult>,
+        oneshot::Receiver<Result<AgentId, MultiagentCommandError>>,
+        oneshot::Receiver<SubagentResult>,
     ) {
-        let (accepted, result) = async_channel::bounded(1);
-        let (completion, completed) = async_channel::bounded(1);
+        let (accepted, result) = oneshot::channel();
+        let (completion, completed) = oneshot::channel();
         self.push(MultiagentCommand::new(
             parent,
             MultiagentAction::Spawn(SpawnCommand {
@@ -222,8 +220,8 @@ impl MultiagentBridge {
         &self,
         requester: AgentId,
         target: AgentId,
-    ) -> Receiver<Result<(), MultiagentCommandError>> {
-        let (completed, result) = async_channel::bounded(1);
+    ) -> oneshot::Receiver<Result<(), MultiagentCommandError>> {
+        let (completed, result) = oneshot::channel();
         self.push(MultiagentCommand::new(
             requester,
             MultiagentAction::Delete(DeleteCommand { target, completed }),
@@ -236,8 +234,8 @@ impl MultiagentBridge {
         requester: AgentId,
         target: AgentId,
         message: Message,
-    ) -> Receiver<Result<(), MultiagentCommandError>> {
-        let (completed, result) = async_channel::bounded(1);
+    ) -> oneshot::Receiver<Result<(), MultiagentCommandError>> {
+        let (completed, result) = oneshot::channel();
         self.push(MultiagentCommand::new(
             requester,
             MultiagentAction::Followup(FollowupCommand {

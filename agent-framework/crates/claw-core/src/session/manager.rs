@@ -15,6 +15,7 @@ use claw_interface::ClawFs;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::{DurableState, InvalidInstanceId, PersistenceError, SharedPersistence};
 use claw_tool::ToolRegistry;
+use futures_channel::oneshot;
 
 use crate::agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
 use crate::config::SharedApiManager;
@@ -255,14 +256,14 @@ where
     pub(crate) fn delete(
         &mut self,
         session: SessionId,
-        ack: Sender<Result<(), SessionDeleteError>>,
+        ack: oneshot::Sender<Result<(), SessionDeleteError>>,
     ) {
         if !self.sessions.contains_key(&session) {
-            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            let _ = ack.send(Err(SessionDeleteError::SessionNotFound(session)));
             return;
         }
         if !self.ensure_actor(session) {
-            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            let _ = ack.send(Err(SessionDeleteError::SessionNotFound(session)));
             return;
         }
         let Some(task) = self
@@ -270,7 +271,7 @@ where
             .get_mut(&session)
             .and_then(|entry| entry.actor.as_mut())
         else {
-            let _ = ack.try_send(Err(SessionDeleteError::SessionNotFound(session)));
+            let _ = ack.send(Err(SessionDeleteError::SessionNotFound(session)));
             return;
         };
         task.actor.request_delete(ack);

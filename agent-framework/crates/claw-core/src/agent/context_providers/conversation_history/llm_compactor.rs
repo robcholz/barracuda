@@ -52,8 +52,7 @@ impl<H: TcpConnect + Dns + 'static> Compactor for LlmCompactor<H> {
                 max_attempts,
             );
             let response = async {
-                let mut lease = self.api.lease().await?;
-                let api = lease.api_mut()?;
+                let mut api = self.api.lease().await;
                 if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Compaction) {
                     let _ = api.set_config(config);
                 }

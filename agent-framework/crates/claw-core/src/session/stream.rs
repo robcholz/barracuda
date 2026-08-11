@@ -273,7 +273,7 @@ impl Drop for SessionStream {
         if self.terminated {
             return;
         }
-        let (ack, _result) = async_channel::bounded(1);
+        let (ack, _result) = futures_channel::oneshot::channel();
         let _ = self.commands.try_send(SessionCommand::Close {
             lease: self.lease,
             ack,
