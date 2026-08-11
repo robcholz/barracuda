@@ -8,20 +8,22 @@
       "properties": {
         "id": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The id of the memory to revise (as shown in brackets by memory_recall/memory_list)."
         },
         "content": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Replacement content, if changing it."
         },
         "tags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "string", "trimmedNonEmpty": true },
           "description": "Replacement topic labels, if changing them."
         },
         "keywords": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "string", "trimmedNonEmpty": true },
           "description": "Replacement keywords, if changing them."
         }
       },

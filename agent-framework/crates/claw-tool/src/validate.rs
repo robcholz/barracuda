@@ -4,10 +4,10 @@ use serde_json::Value;
 
 use super::tool::{ToolError, ToolInvokeError, ToolResult};
 
-pub(super) fn normalize_arguments_json(arguments_json: &str) -> ToolResult<&str> {
+pub(super) fn normalize_arguments_json(arguments_json: &str) -> ToolResult<(&str, Value)> {
     let text = normalized_arguments_json(arguments_json);
-    parse_arguments_json(text)?;
-    Ok(text)
+    let value = parse_arguments_json(text)?;
+    Ok((text, value))
 }
 
 pub(super) fn parse_arguments_json(arguments_json: &str) -> ToolResult<Value> {

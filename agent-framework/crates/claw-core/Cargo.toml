@@ -23,11 +23,13 @@ cache_profile = ["claw-api/cache_profile"]
 multiagent = []
 
 [dependencies]
+json-validator = { path = "../json-validator" }
 claw-interface = { path = "../claw-interface" }
 claw-utils = { path = "../claw-utils" }
 claw-api = { path = "../claw-api" }
 claw-net = { path = "../claw-net" }
 embassy-time.workspace = true
+embassy-sync.workspace = true
 claw-persistence = { path = "../claw-persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
@@ -36,6 +38,7 @@ async-channel = { version = "2", default-features = false }
 # `SessionEventStream` can poll it. `default-features = false` keeps this
 # `no_std`-friendly for the device.
 futures-core = { version = "0.3", default-features = false }
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 # `SelectAll` fairly merges the per-batch detached-tool completion streams the
 # Agent wrapper tracks, replacing a hand-written round-robin poll queue.

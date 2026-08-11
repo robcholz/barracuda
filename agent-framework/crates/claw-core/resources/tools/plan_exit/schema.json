@@ -13,10 +13,12 @@
         },
         "plan": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The complete approved plan. Required for execute and omitted for cancel."
         },
         "message": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Optional user-facing closing message for cancel."
         }
       },

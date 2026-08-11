@@ -7,8 +7,8 @@ use anyhow::{anyhow, Result};
 use claw_interface::MemFs;
 use claw_persistence::{Persistence, SharedPersistence};
 use claw_tool::{
-    Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry,
-    ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
+    EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
+    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
 };
 use futures_lite::StreamExt as _;
 
@@ -29,12 +29,10 @@ fn local_tool_runs_through_public_tool_surface() -> Result<()> {
     let call = invocation("echo", r#" { "message": "hi" } "#)?;
     let outcome = execute_tool(&handle, &call)?;
 
+    assert!(outcome.ok);
     assert_eq!(
-        outcome,
-        ToolOutput {
-            content: r#"{ "message": "hi" }"#.into(),
-            ok: true,
-        }
+        serde_json::from_str::<serde_json::Value>(&outcome.content)?,
+        serde_json::json!({"message": "hi"})
     );
     Ok(())
 }
@@ -448,19 +446,25 @@ impl ToolSpec for EchoTool {
         r#"{"type":"function","function":{"name":"echo"}}"#
     }
 
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("tests/fixtures/object.json");
+        &VALIDATOR
+    }
+
     fn usage(&self) -> Option<&str> {
         Some("Echoes the normalized arguments.")
     }
 }
 
 impl ToolHandler for EchoTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = serde_json::Value;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            if call.name() != self.name() {
-                return Err(ToolError::NotFound(call.name().to_owned()).into());
-            }
             Ok(ToolOutput {
-                content: call.arguments_json().to_owned(),
+                content: serde_json::to_string(&args)
+                    .map_err(|_| ToolError::InvokeRejected("failed to serialize args".into()))?,
                 ok: true,
             })
         })
@@ -477,14 +481,19 @@ impl ToolSpec for OtherTool {
     fn schema(&self) -> &str {
         r#"{"type":"function","function":{"name":"other"}}"#
     }
+
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("tests/fixtures/object.json");
+        &VALIDATOR
+    }
 }
 
 impl ToolHandler for OtherTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            if call.name() != self.name() {
-                return Err(ToolError::NotFound(call.name().to_owned()).into());
-            }
             Ok(ToolOutput {
                 content: "other".into(),
                 ok: true,

@@ -20,6 +20,7 @@ claw-persistence = { path = "../claw-persistence" }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+json-validator = { path = "../json-validator" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }

@@ -8,16 +8,17 @@
       "properties": {
         "content": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The fact to remember, written concisely in the third person."
         },
         "tags": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "string", "trimmedNonEmpty": true },
           "description": "Short topic labels to file this memory under (e.g. \"preference\", \"device\", \"fact\"). You recall by these labels later."
         },
         "keywords": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "string", "trimmedNonEmpty": true },
           "description": "Optional extra search terms that need not appear in the content."
         }
       },

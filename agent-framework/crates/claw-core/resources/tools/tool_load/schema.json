@@ -8,6 +8,7 @@
       "properties": {
         "group_id": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Tool group id returned by tool_search."
         }
       },

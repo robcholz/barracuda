@@ -1,0 +1,18 @@
+[package]
+name = "json-validator-macros"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Compile-time macros for json-validator"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+serde_json = "1"
+syn = { version = "2", features = ["parsing"] }
+
+[lints.rust]
+unsafe_code = "forbid"

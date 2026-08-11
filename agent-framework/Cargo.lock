@@ -317,8 +317,8 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a4372fa7a38648577b85b4a0c2a559be9fbc131ca27f6f2f2cf250a4bd45a03"
 dependencies = [
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
 ]
 
 [[package]]
@@ -461,6 +461,7 @@ dependencies = [
  "claw-tool",
  "embassy-time",
  "futures-lite",
+ "json-validator",
  "serde_json",
  "static_cell",
  "tempdir",
@@ -493,8 +494,8 @@ dependencies = [
  "critical-section",
  "embassy-futures",
  "embassy-time",
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "eventsource-stream",
  "futures-core",
@@ -560,11 +561,14 @@ dependencies = [
  "claw-skill",
  "claw-tool",
  "claw-utils",
+ "embassy-sync",
  "embassy-time",
+ "futures-channel",
  "futures-core",
  "futures-lite",
  "futures-util",
  "getset",
+ "json-validator",
  "log",
  "proc-macro2",
  "quote",
@@ -616,8 +620,8 @@ dependencies = [
 name = "claw-net"
 version = "0.1.0"
 dependencies = [
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "tokio",
 ]
@@ -680,6 +684,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "futures-util",
+ "json-validator",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -933,7 +938,7 @@ checksum = "a69dedd701da44b0536442edf09c81a64b0ab97a7a4a5e3d1971f00027cbc63d"
 dependencies = [
  "const-oid 0.10.2",
  "der_derive",
- "heapless",
+ "heapless 0.9.3",
  "time",
 ]
 
@@ -1048,6 +1053,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc2d050bdc5c21e0862a89256ed8029ae6c290a93aecefc73084b3002cdebb01"
 
 [[package]]
+name = "embassy-sync"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73974a3edbd0bd286759b3d483540f0ebef705919a5f56f4fc7709066f71689b"
+dependencies = [
+ "cfg-if",
+ "critical-section",
+ "embedded-io-async 0.6.1",
+ "futures-core",
+ "futures-sink",
+ "heapless 0.8.0",
+]
+
+[[package]]
 name = "embassy-time"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1080,7 +1099,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "168297bf80aaf114b3c9ad589bf38b01b3009b9af7f97cd18086c5bbf96f5693"
 dependencies = [
  "embassy-executor-timer-queue",
- "heapless",
+ "heapless 0.9.3",
 ]
 
 [[package]]
@@ -1122,9 +1141,24 @@ dependencies = [
 
 [[package]]
 name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "embedded-io"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
+
+[[package]]
+name = "embedded-io-async"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ff09972d4073aa8c299395be75161d582e7629cd663171d62af73c8d50dba3f"
+dependencies = [
+ "embedded-io 0.6.1",
+]
 
 [[package]]
 name = "embedded-io-async"
@@ -1132,7 +1166,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2564b9f813c544241430e147d8bc454815ef9ac998878d30cc3055449f7fd4c0"
 dependencies = [
- "embedded-io",
+ "embedded-io 0.7.1",
 ]
 
 [[package]]
@@ -1150,7 +1184,7 @@ version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb5a1bd585135d302f8f6d7de329310938093da6271b37a6c94b8798795c0c6d"
 dependencies = [
- "embedded-io-async",
+ "embedded-io-async 0.7.0",
  "embedded-nal",
 ]
 
@@ -1165,10 +1199,10 @@ dependencies = [
  "der 0.8.1",
  "digest",
  "ecdsa",
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "generic-array",
- "heapless",
+ "heapless 0.9.3",
  "hkdf",
  "hmac",
  "p256",
@@ -1603,6 +1637,16 @@ dependencies = [
 
 [[package]]
 name = "heapless"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+dependencies = [
+ "hash32",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "heapless"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25ba4bd83f9415b58b4ed8dc5714c76e626a105be4646c02630ad730ad3b5aa4"
@@ -1786,6 +1830,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "json-validator"
+version = "0.1.0"
+dependencies = [
+ "json-validator-macros",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "json-validator-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "konst"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1862,8 +1925,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f164d9b6133a4a07ffdd96416c0898d728009df55a86456378f21b78d36c98c"
 dependencies = [
  "critical-section",
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "enumset",
  "mbedtls-rs-sys",
  "rand_core 0.10.1",
@@ -2342,11 +2405,11 @@ source = "git+https://github.com/drogue-iot/reqwless.git?rev=b761705cc654e6f31bc
 dependencies = [
  "base64 0.21.7",
  "buffered-io",
- "embedded-io",
- "embedded-io-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "embedded-tls",
- "heapless",
+ "heapless 0.9.3",
  "hex",
  "httparse",
  "mbedtls-rs",

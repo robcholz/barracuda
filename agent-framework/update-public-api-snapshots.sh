@@ -25,6 +25,8 @@ crates=(
     claw-skill
     claw-tool
     claw-utils
+    json-validator
+    json-validator-macros
 )
 
 for crate in "${crates[@]}"; do

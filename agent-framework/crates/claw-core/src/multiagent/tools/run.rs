@@ -9,7 +9,7 @@ use super::super::model::TranscriptText;
 use super::super::policy::SpawnPolicy;
 use super::super::tool_port::SubagentControl;
 use super::helper::trace_subagent_bound;
-use super::spawn::SpawnRequest;
+use super::spawn::{SpawnArgs, SpawnRequest};
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
     Tool::new(RunSubagentTool { control, policy })
@@ -29,9 +29,11 @@ impl ToolSpec for RunSubagentTool {
 }
 
 impl ToolHandler for RunSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = SpawnArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let request = SpawnRequest::parse(call, &self.policy, "subagent_run")?;
+            let request = SpawnRequest::from_args(args, &self.policy, "subagent_run")?;
             let (child, result) = self
                 .control
                 .spawn(

@@ -740,7 +740,7 @@ impl<'a> ToolSetHandle<'a> {
                     ToolState::Enabled | ToolState::TemporarilyEnabled
                 ) =>
             {
-                Ok(tool.classify(call))
+                tool.classify(call)
             }
             (_, Some(entry)) if entry.state == ToolState::TemporarilyDisabled => {
                 Err(ToolError::InvokeRejected(unavailable_message(call.name())).into())

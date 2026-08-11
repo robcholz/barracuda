@@ -13,6 +13,7 @@
         },
         "reason": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Required when decision is other. Concisely explains why the reply does not grant permission."
         }
       },

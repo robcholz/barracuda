@@ -27,6 +27,7 @@ cache_profile = [
 ]
 
 [dependencies]
+json-validator = { path = "../json-validator" }
 claw-core = { path = "../claw-core", default-features = false }
 claw-api = { path = "../claw-api" }
 claw-net = { path = "../claw-net" }

@@ -2,16 +2,85 @@
 
 mod args;
 
+use alloc::vec::Vec;
+use claw_api::ToolCall;
 use claw_interface::ClawFs;
 use claw_memory::{MemoryDraft, MemoryId, MemoryItem, MemoryPatch, StoreOutcome};
 use claw_tool::{
-    tool_metadata, Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, tool_schemas, tool_validator, Tool, ToolError, ToolFuture, ToolGroup,
+    ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
 
 use self::args::{
-    optional_limit, optional_string, optional_string_array, required_string, string_array,
+    limit_or_default, optional_trimmed, optional_trimmed_strings, trimmed, trimmed_strings, IdArgs,
+    ListArgs, RecallArgs, StoreArgs, UpdateArgs,
 };
+use super::extraction::{ExtractedItem, MemoryOp};
 use super::MemoryStores;
+
+const STORE_VALIDATOR: json_validator::Validator = tool_validator!("memory_store");
+const UPDATE_VALIDATOR: json_validator::Validator = tool_validator!("memory_update");
+const FORGET_VALIDATOR: json_validator::Validator = tool_validator!("memory_forget");
+
+pub(super) const EXTRACTION_TOOLS_JSON: &str =
+    tool_schemas!("memory_store", "memory_update", "memory_forget");
+
+pub(super) fn decode_extraction_operations(
+    calls: Vec<ToolCall>,
+) -> Result<Vec<MemoryOp>, ToolInvokeError> {
+    calls.into_iter().map(decode_extraction_operation).collect()
+}
+
+fn decode_extraction_operation(call: ToolCall) -> Result<MemoryOp, ToolInvokeError> {
+    let invocation = ToolInvocation::try_new(Some(&call.id), &call.name, &call.arguments_json)?;
+    match call.name.as_str() {
+        "memory_store" => {
+            validate_extraction_arguments(&invocation, &STORE_VALIDATOR)?;
+            let args = invocation.arguments::<StoreArgs>()?;
+            Ok(MemoryOp::Add(ExtractedItem {
+                content: trimmed(args.content),
+                tags: trimmed_strings(args.tags),
+                keywords: trimmed_strings(args.keywords),
+            }))
+        }
+        "memory_update" => {
+            validate_extraction_arguments(&invocation, &UPDATE_VALIDATOR)?;
+            let args = invocation.arguments::<UpdateArgs>()?;
+            let content = args.content.ok_or_else(|| {
+                ToolError::InvalidArguments("'content' is required for extracted updates".into())
+            })?;
+            Ok(MemoryOp::Replace {
+                id: MemoryId::from(trimmed(args.id).as_str()),
+                item: ExtractedItem {
+                    content: trimmed(content),
+                    tags: optional_trimmed_strings(args.tags).unwrap_or_default(),
+                    keywords: optional_trimmed_strings(args.keywords).unwrap_or_default(),
+                },
+            })
+        }
+        "memory_forget" => {
+            validate_extraction_arguments(&invocation, &FORGET_VALIDATOR)?;
+            let args = invocation.arguments::<IdArgs>()?;
+            Ok(MemoryOp::Forget {
+                id: MemoryId::from(trimmed(args.id).as_str()),
+            })
+        }
+        name => Err(ToolError::InvalidArguments(format!(
+            "unexpected memory extraction tool '{name}'"
+        ))
+        .into()),
+    }
+}
+
+fn validate_extraction_arguments(
+    invocation: &ToolInvocation,
+    validator: &json_validator::Validator,
+) -> Result<(), ToolInvokeError> {
+    validator
+        .validate(invocation.arguments_value())
+        .map_err(ToolError::from)?;
+    Ok(())
+}
 
 pub(crate) fn memory_tools<F: ClawFs + 'static>(stores: MemoryStores<F>) -> ToolGroup {
     ToolGroup::new(
@@ -44,13 +113,14 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryStoreTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for MemoryStoreTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = StoreArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let content = required_string(&args, "content")?;
+            let content = trimmed(args.content);
             let draft = MemoryDraft::new(content)
-                .with_tags(string_array(&args, "tags")?)
-                .with_keywords(string_array(&args, "keywords")?)
+                .with_tags(trimmed_strings(args.tags))
+                .with_keywords(trimmed_strings(args.keywords))
                 .with_source("manual");
 
             let output = match self.stores.store(draft) {
@@ -76,12 +146,13 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryRecallTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for MemoryRecallTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = RecallArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let labels = string_array(&args, "labels")?;
-            let query = optional_string(&args, "query")?;
-            let limit = optional_limit(&args)?;
+            let labels = trimmed_strings(args.labels);
+            let query = optional_trimmed(args.query);
+            let limit = limit_or_default(args.limit);
 
             let items = self.stores.recall(&labels, query.as_deref(), limit);
             Ok(ToolOutput {
@@ -101,10 +172,11 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryListTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for MemoryListTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = ListArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let limit = optional_limit(&args)?;
+            let limit = limit_or_default(args.limit);
             let mut items = self.stores.list();
             items.truncate(limit);
             Ok(ToolOutput {
@@ -124,14 +196,15 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryUpdateTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for MemoryUpdateTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = UpdateArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let id = MemoryId::from(required_string(&args, "id")?.as_str());
+            let id = MemoryId::from(trimmed(args.id).as_str());
             let patch = MemoryPatch {
-                content: optional_string(&args, "content")?,
-                tags: optional_string_array(&args, "tags")?,
-                keywords: optional_string_array(&args, "keywords")?,
+                content: optional_trimmed(args.content),
+                tags: optional_trimmed_strings(args.tags),
+                keywords: optional_trimmed_strings(args.keywords),
             };
             match self.stores.update(&id, patch) {
                 Ok(item) => Ok(ToolOutput {
@@ -156,10 +229,11 @@ impl<F: ClawFs + 'static> ToolSpec for MemoryForgetTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for MemoryForgetTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = IdArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let id = MemoryId::from(required_string(&args, "id")?.as_str());
+            let id = MemoryId::from(trimmed(args.id).as_str());
             match self.stores.forget(&id) {
                 Ok(()) => Ok(ToolOutput {
                     content: format!("Forgot memory {id}."),

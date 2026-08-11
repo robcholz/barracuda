@@ -3,16 +3,34 @@
 use claw_permission::{Action, RiskClass};
 use claw_persistence::DurableState;
 use claw_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
+    ToolSpec,
 };
+use serde::Deserialize;
 
 use super::AgentMode;
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::tools::helper::{non_blank_argument, optional_string_argument};
 use crate::agent::BaseAgentState;
 
 const DEFAULT_CANCEL_MESSAGE: &str = "Planning cancelled.";
+
+#[derive(Deserialize)]
+struct ClarifyArgs {
+    question: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "outcome", rename_all = "lowercase")]
+enum ExitArgs {
+    Execute {
+        plan: String,
+        #[serde(rename = "message")]
+        _message: Option<String>,
+    },
+    Cancel {
+        message: Option<String>,
+    },
+}
 
 pub(super) fn plan_tools(
     state: DurableState<BaseAgentState>,
@@ -33,7 +51,7 @@ pub(super) fn plan_tools(
     )
 }
 
-pub(super) struct EnterPlanModeTool {
+struct EnterPlanModeTool {
     state: DurableState<BaseAgentState>,
 }
 
@@ -46,7 +64,9 @@ impl ToolSpec for EnterPlanModeTool {
 }
 
 impl ToolHandler for EnterPlanModeTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             self.state.get_mut().set_mode(AgentMode::Plan);
             Ok(success("Plan Mode entered."))
@@ -54,7 +74,7 @@ impl ToolHandler for EnterPlanModeTool {
     }
 }
 
-pub(super) struct RequestClarificationTool {
+struct RequestClarificationTool {
     effects: AgentEffectEmitter,
 }
 
@@ -67,17 +87,18 @@ impl ToolSpec for RequestClarificationTool {
 }
 
 impl ToolHandler for RequestClarificationTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = ClarifyArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let question = non_blank_argument(&args, "question")?;
+            let question = args.question.trim().to_owned();
             self.effects.emit(AgentEffect::Yield { message: question });
             Ok(success("Clarification presented to the user."))
         })
     }
 }
 
-pub(super) struct ExitPlanModeTool {
+struct ExitPlanModeTool {
     state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 }
@@ -91,56 +112,31 @@ impl ToolSpec for ExitPlanModeTool {
 }
 
 impl ToolHandler for ExitPlanModeTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = ExitArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let outcome = non_blank_argument(&args, "outcome")?;
-            let output = match outcome.as_str() {
-                "execute" => {
+            let output = match args {
+                ExitArgs::Execute {
+                    plan: _plan,
+                    _message: _,
+                } => {
                     // The approved plan remains in this tool call's transcript
                     // arguments; the provider only changes the next context frame.
-                    let _plan = non_blank_argument(&args, "plan")?;
                     "Plan Mode exited. Begin executing the approved plan."
                 }
-                "cancel" => {
-                    if optional_string_argument(&args, "plan")?.is_some() {
-                        return Err(ToolError::InvalidArguments(
-                            "'plan' must be omitted when 'outcome' is 'cancel'".into(),
-                        )
-                        .into());
-                    }
-                    let message = optional_non_empty_string_argument(&args, "message")?
+                ExitArgs::Cancel { message } => {
+                    let message = message
+                        .map(|message| message.trim().to_owned())
                         .unwrap_or_else(|| DEFAULT_CANCEL_MESSAGE.to_owned());
                     self.effects.emit(AgentEffect::Yield { message });
                     "Plan Mode cancelled."
-                }
-                _ => {
-                    return Err(ToolError::InvalidArguments(
-                        "'outcome' must be either 'execute' or 'cancel'".into(),
-                    )
-                    .into());
                 }
             };
             self.state.get_mut().set_mode(AgentMode::Normal);
             Ok(success(output))
         })
     }
-}
-
-fn optional_non_empty_string_argument(
-    args: &serde_json::Value,
-    key: &str,
-) -> Result<Option<String>, ToolInvokeError> {
-    optional_string_argument(args, key)?
-        .map(|value| {
-            let value = value.trim();
-            if value.is_empty() {
-                Err(ToolError::InvalidArguments(format!("'{key}' must not be empty")).into())
-            } else {
-                Ok(value.to_owned())
-            }
-        })
-        .transpose()
 }
 
 fn success(output: &str) -> ToolOutput {
@@ -180,7 +176,7 @@ mod tests {
             EnterPlanModeTool {
                 state: state.clone(),
             }
-            .invoke(&invocation("plan_enter", "{}")),
+            .invoke(claw_tool::EmptyArgs {}),
         )
         .expect("enter succeeds");
         assert_eq!(state.get().mode(), AgentMode::Plan);
@@ -191,10 +187,11 @@ mod tests {
                 state: state.clone(),
                 effects,
             }
-            .invoke(&invocation(
-                "plan_exit",
-                r#"{"outcome":"execute","plan":"ship it"}"#,
-            )),
+            .invoke(
+                invocation("plan_exit", r#"{"outcome":"execute","plan":"ship it"}"#)
+                    .arguments()
+                    .expect("valid exit args"),
+            ),
         )
         .expect("exit succeeds");
         assert_eq!(state.get().mode(), AgentMode::Normal);
@@ -203,10 +200,13 @@ mod tests {
     #[test]
     fn clarification_emits_generic_yield() {
         let (effects, mut inbox) = agent_effect_channel();
-        block_on(RequestClarificationTool { effects }.invoke(&invocation(
-            "plan_clarify",
-            r#"{"question":"Which board?"}"#,
-        )))
+        block_on(
+            RequestClarificationTool { effects }.invoke(
+                invocation("plan_clarify", r#"{"question":"Which board?"}"#)
+                    .arguments()
+                    .expect("valid clarification args"),
+            ),
+        )
         .expect("clarification succeeds");
 
         let drained = inbox.drain();
@@ -227,10 +227,14 @@ mod tests {
                 state: state.clone(),
                 effects,
             }
-            .invoke(&invocation(
-                "plan_exit",
-                r#"{"outcome":"cancel","message":"No changes made."}"#,
-            )),
+            .invoke(
+                invocation(
+                    "plan_exit",
+                    r#"{"outcome":"cancel","message":"No changes made."}"#,
+                )
+                .arguments()
+                .expect("valid exit args"),
+            ),
         )
         .expect("cancel succeeds");
 

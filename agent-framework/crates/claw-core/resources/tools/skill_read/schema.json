@@ -8,6 +8,7 @@
       "properties": {
         "name": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The standard skill name shown by skill_list."
         }
       },

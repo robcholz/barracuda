@@ -1,12 +1,14 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
 
 use claw_permission::{Action, RiskClass};
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 
 use super::validate;
 
@@ -46,20 +48,26 @@ pub struct ToolConfig {
     pub detached: bool,
 }
 
+/// Serde projection for a schema that accepts an empty argument object.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+pub struct EmptyArgs {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolInvocation {
     id: Option<String>,
     name: String,
     arguments_json: String,
+    arguments: serde_json::Value,
 }
 
 impl ToolInvocation {
     pub fn try_new(id: Option<&str>, name: &str, arguments_json: &str) -> ToolResult<Self> {
-        let arguments_json = validate::normalize_arguments_json(arguments_json)?;
+        let (arguments_json, arguments) = validate::normalize_arguments_json(arguments_json)?;
         Ok(Self {
             id: id.map(str::to_owned),
             name: name.to_owned(),
             arguments_json: arguments_json.to_owned(),
+            arguments,
         })
     }
 
@@ -75,8 +83,133 @@ impl ToolInvocation {
         &self.arguments_json
     }
 
-    pub fn arguments_value(&self) -> ToolResult<serde_json::Value> {
-        validate::parse_arguments_json(&self.arguments_json)
+    pub fn arguments_value(&self) -> &serde_json::Value {
+        &self.arguments
+    }
+
+    /// Deserialize the already-parsed argument object into a tool-specific DTO.
+    ///
+    /// This keeps JSON shape validation at the boundary without reparsing the
+    /// original argument string in each handler.
+    pub fn arguments<'de, T>(&'de self) -> ToolResult<T>
+    where
+        T: Deserialize<'de>,
+    {
+        T::deserialize(&self.arguments)
+            .map_err(|error| ToolInvokeError::new(ToolError::InvalidArguments(error.to_string())))
+    }
+}
+
+#[cfg(test)]
+mod invocation_tests {
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use alloc::string::String;
+    use core::cell::Cell;
+
+    use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
+    use futures_lite::future::block_on;
+    use serde::Deserialize;
+
+    struct BusinessHandler {
+        invoked: Rc<Cell<bool>>,
+    }
+
+    impl ToolSpec for BusinessHandler {
+        fn name(&self) -> &str {
+            "example"
+        }
+
+        fn schema(&self) -> &str {
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/example.json"
+            ))
+        }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("tests/fixtures/example.json");
+            &VALIDATOR
+        }
+    }
+
+    impl ToolHandler for BusinessHandler {
+        type Args = BusinessArgs;
+
+        fn invoke<'a>(&'a self, arguments: Self::Args) -> ToolFuture<'a> {
+            self.invoked.set(true);
+            Box::pin(async move {
+                Ok(ToolOutput {
+                    content: arguments.name,
+                    ok: arguments.enabled,
+                })
+            })
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct BusinessArgs {
+        name: String,
+        enabled: bool,
+    }
+
+    #[test]
+    fn invocation_keeps_one_parsed_arguments_value() -> Result<(), Box<dyn core::error::Error>> {
+        let invocation =
+            ToolInvocation::try_new(None, "example", r#"{"name":"lamp","enabled":true}"#)?;
+        let first = invocation.arguments_value();
+        let second = invocation.arguments_value();
+        assert!(core::ptr::eq(first, second));
+        Ok(())
+    }
+
+    #[test]
+    fn framework_validates_schema_before_entering_business_handler(
+    ) -> Result<(), Box<dyn core::error::Error>> {
+        let invoked = Rc::new(Cell::new(false));
+        let tool = Tool::new(BusinessHandler {
+            invoked: Rc::clone(&invoked),
+        });
+        let invalid = ToolInvocation::try_new(None, "example", r#"{"name":"lamp"}"#)?;
+
+        let classification_error = tool.classify(&invalid).err().ok_or("expected error")?;
+        assert!(matches!(
+            classification_error.error,
+            ToolError::ArgumentsSchema(_)
+        ));
+
+        let error = block_on(tool.invoke(&invalid))
+            .err()
+            .ok_or("expected error")?;
+
+        assert!(matches!(error.error, ToolError::ArgumentsSchema(_)));
+        assert!(!invoked.get());
+
+        let blank =
+            ToolInvocation::try_new(None, "example", r#"{"name":"  \t\n","enabled":true}"#)?;
+        let error = block_on(tool.invoke(&blank))
+            .err()
+            .ok_or("expected error")?;
+        assert!(matches!(error.error, ToolError::ArgumentsSchema(_)));
+        assert!(!invoked.get());
+        Ok(())
+    }
+
+    #[test]
+    fn business_handler_receives_validated_arguments() -> Result<(), Box<dyn core::error::Error>> {
+        let invoked = Rc::new(Cell::new(false));
+        let tool = Tool::new(BusinessHandler {
+            invoked: Rc::clone(&invoked),
+        });
+        let valid = ToolInvocation::try_new(None, "example", r#"{"name":"lamp","enabled":true}"#)?;
+
+        let output = block_on(tool.invoke(&valid))?;
+
+        assert!(invoked.get());
+        assert_eq!(output.content, "lamp");
+        assert!(output.ok);
+        Ok(())
     }
 }
 
@@ -94,6 +227,8 @@ pub enum ToolError {
     InvalidArgumentsJson(String),
     #[error("invalid arguments: {0}")]
     InvalidArguments(String),
+    #[error("invalid arguments: {0}")]
+    ArgumentsSchema(#[from] json_validator::ValidationError),
     #[error("tool invocation rejected: {0}")]
     InvokeRejected(String),
 }
@@ -132,6 +267,8 @@ pub trait ToolSpec {
 
     fn schema(&self) -> &str;
 
+    fn arguments_validator(&self) -> &'static json_validator::Validator;
+
     fn usage(&self) -> Option<&str> {
         None
     }
@@ -146,13 +283,49 @@ pub trait ToolSpec {
 }
 
 pub trait ToolHandler: ToolSpec {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
+    type Args: DeserializeOwned;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a>;
 }
 
 /// A tool whose accepted and completed settlements become available at
 /// different times.
 pub trait DetachedToolHandler: ToolSpec {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a>;
+    type Args: DeserializeOwned;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a>;
+}
+
+trait ErasedToolHandler: ToolSpec {
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
+}
+
+impl<Handler> ErasedToolHandler for Handler
+where
+    Handler: ToolHandler,
+{
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let args = call.arguments::<Handler::Args>()?;
+            self.invoke(args).await
+        })
+    }
+}
+
+trait ErasedDetachedToolHandler: ToolSpec {
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a>;
+}
+
+impl<Handler> ErasedDetachedToolHandler for Handler
+where
+    Handler: DetachedToolHandler,
+{
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
+        Box::pin(async move {
+            let args = call.arguments::<Handler::Args>()?;
+            self.invoke(args).await
+        })
+    }
 }
 
 #[macro_export]
@@ -171,6 +344,12 @@ macro_rules! tool_metadata {
             ))
         }
 
+        fn arguments_validator(&self) -> &'static ::json_validator::Validator {
+            const VALIDATOR: ::json_validator::Validator =
+                ::json_validator::validator!("resources/tools/", $name, "/schema.json");
+            &VALIDATOR
+        }
+
         fn usage(&self) -> ::core::option::Option<&str> {
             const USAGE: &str = include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -187,6 +366,41 @@ macro_rules! tool_metadata {
     };
 }
 
+/// Embed several canonical `resources/tools/<name>/schema.json` documents as
+/// one provider-ready JSON array.
+#[macro_export]
+macro_rules! tool_schemas {
+    ($first:literal $(, $rest:literal)* $(,)?) => {
+        concat!(
+            "[",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/resources/tools/",
+                $first,
+                "/schema.json"
+            )),
+            $(
+                ",",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/resources/tools/",
+                    $rest,
+                    "/schema.json"
+                )),
+            )*
+            "]"
+        )
+    };
+}
+
+/// Compile the canonical validator for one `resources/tools/<name>/schema.json`.
+#[macro_export]
+macro_rules! tool_validator {
+    ($name:literal) => {
+        ::json_validator::validator!("resources/tools/", $name, "/schema.json")
+    };
+}
+
 #[derive(Clone)]
 pub struct Tool {
     inner: Arc<ToolInner>,
@@ -194,8 +408,8 @@ pub struct Tool {
 }
 
 enum ToolInner {
-    Handler(Box<dyn ToolHandler>),
-    Detached(Box<dyn DetachedToolHandler>),
+    Handler(Box<dyn ErasedToolHandler>),
+    Detached(Box<dyn ErasedDetachedToolHandler>),
 }
 
 impl Tool {
@@ -223,24 +437,38 @@ impl Tool {
     }
 
     pub fn name(&self) -> &str {
-        self.spec().name()
+        match self.inner.as_ref() {
+            ToolInner::Handler(handler) => handler.name(),
+            ToolInner::Detached(handler) => handler.name(),
+        }
     }
 
     pub fn schema(&self) -> &str {
-        self.spec().schema()
+        match self.inner.as_ref() {
+            ToolInner::Handler(handler) => handler.schema(),
+            ToolInner::Detached(handler) => handler.schema(),
+        }
     }
 
     pub fn usage(&self) -> Option<&str> {
-        self.spec().usage()
+        match self.inner.as_ref() {
+            ToolInner::Handler(handler) => handler.usage(),
+            ToolInner::Detached(handler) => handler.usage(),
+        }
     }
 
-    pub(crate) fn classify(&self, call: &ToolInvocation) -> Action {
-        self.spec().classify(call)
+    pub(crate) fn classify(&self, call: &ToolInvocation) -> ToolResult<Action> {
+        self.validate_arguments(call)?;
+        match self.inner.as_ref() {
+            ToolInner::Handler(handler) => Ok(handler.classify(call)),
+            ToolInner::Detached(handler) => Ok(handler.classify(call)),
+        }
     }
 
     pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
+        self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.invoke(call).await,
+            ToolInner::Handler(handler) => handler.invoke_erased(call).await,
             ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
                 "dynamically detached tool requires detached execution".to_owned(),
             )
@@ -256,8 +484,9 @@ impl Tool {
         &'a self,
         call: &'a ToolInvocation,
     ) -> ToolResult<DetachedTool> {
+        self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Detached(handler) => handler.invoke(call).await,
+            ToolInner::Detached(handler) => handler.invoke_erased(call).await,
             ToolInner::Handler(_) => Err(ToolError::InvokeRejected(
                 "tool does not support dynamic detached execution".to_owned(),
             )
@@ -265,11 +494,15 @@ impl Tool {
         }
     }
 
-    fn spec(&self) -> &dyn ToolSpec {
-        match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.as_ref(),
-            ToolInner::Detached(handler) => handler.as_ref(),
-        }
+    fn validate_arguments(&self, call: &ToolInvocation) -> ToolResult<()> {
+        let validator = match self.inner.as_ref() {
+            ToolInner::Handler(handler) => handler.arguments_validator(),
+            ToolInner::Detached(handler) => handler.arguments_validator(),
+        };
+        validator
+            .validate(call.arguments_value())
+            .map_err(ToolError::from)?;
+        Ok(())
     }
 }
 

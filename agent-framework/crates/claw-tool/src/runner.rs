@@ -264,8 +264,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, ToolConfig, ToolFuture, ToolGroup,
-        ToolHandler, ToolSet, ToolSpec,
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, ToolConfig, ToolFuture,
+        ToolGroup, ToolHandler, ToolSet, ToolSpec,
     };
 
     struct EchoTool {
@@ -280,10 +280,18 @@ mod tests {
         fn schema(&self) -> &str {
             r#"{"type":"function","function":{"name":"echo","parameters":{"type":"object"}}}"#
         }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("tests/fixtures/object.json");
+            &VALIDATOR
+        }
     }
 
     impl ToolHandler for EchoTool {
-        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        type Args = EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             Box::pin(async move {
                 Ok(ToolOutput {
                     content: self.name.to_owned(),
@@ -303,10 +311,18 @@ mod tests {
         fn schema(&self) -> &str {
             r#"{"type":"function","function":{"name":"dynamic","parameters":{"type":"object"}}}"#
         }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("tests/fixtures/object.json");
+            &VALIDATOR
+        }
     }
 
     impl DetachedToolHandler for DynamicDetachedTool {
-        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
+        type Args = EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> DetachedToolFuture<'a> {
             Box::pin(async {
                 Ok(DetachedTool::new(
                     ToolOutput {

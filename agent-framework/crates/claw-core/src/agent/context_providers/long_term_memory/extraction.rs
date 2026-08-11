@@ -16,6 +16,7 @@
 
 use claw_api::ChatError;
 use claw_memory::MemoryId;
+use claw_tool::ToolInvokeError;
 use core::future::Future;
 use core::pin::Pin;
 use strum::IntoStaticStr;
@@ -90,10 +91,10 @@ pub(crate) enum ExtractError {
     #[strum(serialize = "backend")]
     #[error("extraction backend failed: {0}")]
     Backend(#[from] ChatError),
-    /// The extraction backend produced no usable text.
-    #[strum(serialize = "empty_output")]
-    #[error("extraction backend returned empty output")]
-    EmptyOutput,
+    /// The model returned malformed or unsupported memory tool calls.
+    #[strum(serialize = "invalid_output")]
+    #[error("invalid memory extraction output: {0}")]
+    InvalidOutput(#[from] ToolInvokeError),
 }
 
 pub(super) type ExtractFuture<'a> =

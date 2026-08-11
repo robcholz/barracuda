@@ -18,7 +18,7 @@
 
 use claw_agent::{
     stream::StreamPart,
-    tools::{Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSpec},
+    tools::{EmptyArgs, Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec},
     AgentSystem, ApiPurpose, BackendKind, ClawApiConfig, ClawApiFactory, IterationEvent, Message,
     SessionEvent, SessionPersistence, TurnEvent,
 };
@@ -41,12 +41,20 @@ impl ToolSpec for TimeNowTool {
     }
 
     fn schema(&self) -> &str {
-        r#"{"type":"function","function":{"name":"time_now","description":"Current time","parameters":{"type":"object","properties":{}}}}"#
+        include_str!("time_now.schema.json")
+    }
+
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("examples/time_now.schema.json");
+        &VALIDATOR
     }
 }
 
 impl ToolHandler for TimeNowTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async {
             Ok(ToolOutput {
                 content: "2026-06-29T17:00:00Z".into(),

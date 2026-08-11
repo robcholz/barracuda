@@ -1,92 +1,80 @@
-use claw_tool::{ToolError, ToolInvokeError};
-use serde_json::Value;
+use alloc::{borrow::ToOwned, string::String, vec::Vec};
+
+use serde::Deserialize;
 
 const DEFAULT_RECALL_LIMIT: usize = 20;
 
-pub(super) fn required_string(args: &Value, key: &str) -> Result<String, ToolInvokeError> {
-    let value = args
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| {
-            ToolInvokeError::new(ToolError::InvokeRejected(format!(
-                "missing required string field '{key}'"
-            )))
-        })?;
-    Ok(value.to_string())
+#[derive(Deserialize)]
+pub(super) struct StoreArgs {
+    pub(super) content: String,
+    #[serde(default)]
+    pub(super) tags: Vec<String>,
+    #[serde(default)]
+    pub(super) keywords: Vec<String>,
 }
 
-pub(super) fn optional_string(args: &Value, key: &str) -> Result<Option<String>, ToolInvokeError> {
-    match args.get(key) {
-        Some(Value::String(value)) => {
-            let value = value.trim();
-            if value.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(value.to_string()))
-            }
-        }
-        Some(_) => Err(ToolInvokeError::new(ToolError::InvalidArguments(format!(
-            "'{key}' must be a string"
-        )))),
-        None => Ok(None),
-    }
+#[derive(Deserialize)]
+pub(super) struct RecallArgs {
+    #[serde(default)]
+    pub(super) labels: Vec<String>,
+    pub(super) query: Option<String>,
+    pub(super) limit: Option<usize>,
 }
 
-pub(super) fn string_array(args: &Value, key: &str) -> Result<Vec<String>, ToolInvokeError> {
-    match optional_string_array(args, key)? {
-        Some(values) => Ok(values),
-        None => Ok(Vec::new()),
-    }
+#[derive(Deserialize)]
+pub(super) struct ListArgs {
+    pub(super) limit: Option<usize>,
 }
 
-pub(super) fn optional_string_array(
-    args: &Value,
-    key: &str,
-) -> Result<Option<Vec<String>>, ToolInvokeError> {
-    let Some(value) = args.get(key) else {
-        return Ok(None);
-    };
-    let Some(items) = value.as_array() else {
-        return Err(ToolInvokeError::new(ToolError::InvalidArguments(format!(
-            "'{key}' must be an array of strings"
-        ))));
-    };
-    let mut strings = Vec::with_capacity(items.len());
-    for item in items {
-        let Some(text) = item.as_str() else {
-            return Err(ToolInvokeError::new(ToolError::InvalidArguments(format!(
-                "'{key}' must be an array of strings"
-            ))));
-        };
-        let text = text.trim();
-        if !text.is_empty() {
-            strings.push(text.to_string());
-        }
-    }
-    Ok(Some(strings))
+#[derive(Deserialize)]
+pub(super) struct UpdateArgs {
+    pub(super) id: String,
+    pub(super) content: Option<String>,
+    pub(super) tags: Option<Vec<String>>,
+    pub(super) keywords: Option<Vec<String>>,
 }
 
-pub(super) fn optional_limit(args: &Value) -> Result<usize, ToolInvokeError> {
-    let Some(value) = args.get("limit") else {
-        return Ok(DEFAULT_RECALL_LIMIT);
-    };
-    let Some(limit) = value.as_u64() else {
-        return Err(ToolInvokeError::new(ToolError::InvalidArguments(
-            "'limit' must be an unsigned integer".into(),
-        )));
-    };
-    if limit == 0 {
-        return Ok(DEFAULT_RECALL_LIMIT);
-    }
-    usize::try_from(limit).map_err(|_| {
-        ToolInvokeError::new(ToolError::InvalidArguments(
-            "'limit' is too large for this platform".into(),
-        ))
-    })
+#[derive(Deserialize)]
+pub(super) struct IdArgs {
+    pub(super) id: String,
 }
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+
+pub(super) fn trimmed(value: String) -> String {
+    value.trim().to_owned()
+}
+
+pub(super) fn optional_trimmed(value: Option<String>) -> Option<String> {
+    value.map(trimmed)
+}
+
+pub(super) fn trimmed_strings(values: Vec<String>) -> Vec<String> {
+    values.into_iter().map(trimmed).collect()
+}
+
+pub(super) fn optional_trimmed_strings(values: Option<Vec<String>>) -> Option<Vec<String>> {
+    values.map(trimmed_strings)
+}
+
+pub(super) fn limit_or_default(limit: Option<usize>) -> usize {
+    limit.unwrap_or(DEFAULT_RECALL_LIMIT)
+}
+
+#[cfg(test)]
+mod tests {
+    use claw_tool::ToolInvocation;
+
+    use super::StoreArgs;
+
+    #[test]
+    fn serde_projection_does_not_add_unknown_field_rules() -> Result<(), Box<dyn core::error::Error>>
+    {
+        let call = ToolInvocation::try_new(
+            None,
+            "memory_store",
+            r#"{"content":"fact","unexpected":true}"#,
+        )?;
+        let args = call.arguments::<StoreArgs>()?;
+        assert_eq!(args.content, "fact");
+        Ok(())
+    }
+}

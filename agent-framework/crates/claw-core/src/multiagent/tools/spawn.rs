@@ -12,11 +12,10 @@ use claw_tool::{
     tool_metadata, DetachedTool, DetachedToolFuture, DetachedToolHandler, Tool, ToolError,
     ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
 };
+use serde::Deserialize;
 
-use crate::agent::tools::helper::non_blank_argument;
 use crate::agent::AgentKind;
 use crate::Message;
-use serde_json::Value;
 
 use super::super::model::{SubagentTimeout, TranscriptText};
 use super::super::policy::SpawnPolicy;
@@ -41,14 +40,16 @@ impl ToolSpec for SpawnSubagentTool {
 }
 
 impl DetachedToolHandler for SpawnSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
-        Box::pin(async move { self.invoke_inner(call).await })
+    type Args = SpawnArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a> {
+        Box::pin(async move { self.invoke_inner(args).await })
     }
 }
 
 impl SpawnSubagentTool {
-    async fn invoke_inner(&self, call: &ToolInvocation) -> Result<DetachedTool, ToolInvokeError> {
-        let request = SpawnRequest::parse(call, &self.policy, "subagent_spawn")?;
+    async fn invoke_inner(&self, args: SpawnArgs) -> Result<DetachedTool, ToolInvokeError> {
+        let request = SpawnRequest::from_args(args, &self.policy, "subagent_spawn")?;
         let SpawnRequest {
             kind,
             name,
@@ -70,7 +71,7 @@ impl SpawnSubagentTool {
         };
         let control = Arc::clone(&self.control);
         let completion = Box::pin(async move {
-            let result = result.recv().await.map_err(|_| {
+            let result = result.await.map_err(|_| {
                 ToolError::InvokeRejected("subagent result channel closed".to_owned())
             })?;
             control.acknowledge_delivery(child);
@@ -90,20 +91,30 @@ pub(super) struct SpawnRequest {
     pub(super) timeout: SubagentTimeout,
 }
 
+#[derive(Deserialize)]
+pub(super) struct SpawnArgs {
+    kind: String,
+    name: String,
+    goal: String,
+    timeout_ms: u32,
+}
+
 impl SpawnRequest {
-    pub(super) fn parse(
-        call: &ToolInvocation,
+    pub(super) fn from_args(
+        args: SpawnArgs,
         policy: &SpawnPolicy,
         tool_name: &str,
     ) -> Result<Self, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let kind = AgentKind::new(non_blank_argument(&args, "kind")?);
+        let kind = AgentKind::new(trimmed(args.kind));
         validate_kind(policy, &kind, tool_name)?;
+        let timeout_ms = NonZeroU32::new(args.timeout_ms).ok_or_else(|| {
+            ToolError::InvalidArguments("'timeout_ms' must be greater than zero".to_owned())
+        })?;
         Ok(Self {
             kind,
-            name: non_blank_argument(&args, "name")?,
-            goal: Message::text(non_blank_argument(&args, "goal")?),
-            timeout: SubagentTimeout::new(required_nonzero_u32_argument(&args, "timeout_ms")?),
+            name: trimmed(args.name),
+            goal: Message::text(trimmed(args.goal)),
+            timeout: SubagentTimeout::new(timeout_ms),
         })
     }
 }
@@ -145,51 +156,29 @@ fn validate_kind(
     .into())
 }
 
-fn required_nonzero_u32_argument(args: &Value, key: &str) -> Result<NonZeroU32, ToolError> {
-    let Some(raw) = args.get(key) else {
-        return Err(ToolError::InvalidArguments(format!("'{key}' is required")));
-    };
-    let Some(raw) = raw.as_u64() else {
-        return Err(ToolError::InvalidArguments(format!(
-            "'{key}' must be a positive integer"
-        )));
-    };
-    u32::try_from(raw)
-        .ok()
-        .and_then(NonZeroU32::new)
-        .ok_or_else(|| {
-            ToolError::InvalidArguments(format!("'{key}' must be between 1 and {}", u32::MAX))
-        })
+fn trimmed(value: String) -> String {
+    value.trim().to_owned()
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use serde_json::json;
+    use claw_tool::ToolError;
 
-    use super::required_nonzero_u32_argument;
+    use super::{SpawnArgs, SpawnRequest};
+    use crate::multiagent::policy::SpawnPolicy;
 
     #[test]
-    fn required_nonzero_u32_rejects_missing_zero_negative_fractional_and_oversized_values() {
-        assert_eq!(
-            required_nonzero_u32_argument(&json!({"timeout_ms": 2500}), "timeout_ms")
-                .expect("valid timeout")
-                .get(),
-            2_500
-        );
-
-        for arguments in [
-            json!({}),
-            json!({"timeout_ms": 0}),
-            json!({"timeout_ms": -1}),
-            json!({"timeout_ms": 1.5}),
-            json!({"timeout_ms": 4_294_967_296_u64}),
-            json!({"timeout_ms": "1000"}),
-        ] {
-            assert!(
-                required_nonzero_u32_argument(&arguments, "timeout_ms").is_err(),
-                "unexpectedly accepted {arguments}"
-            );
-        }
+    fn zero_timeout_is_a_spawn_domain_error() {
+        let args = SpawnArgs {
+            kind: "worker".into(),
+            name: "x".into(),
+            goal: "y".into(),
+            timeout_ms: 0,
+        };
+        assert!(matches!(
+            SpawnRequest::from_args(args, &SpawnPolicy::Any, "subagent_spawn"),
+            Err(error) if matches!(error.error, ToolError::InvalidArguments(_))
+        ));
     }
 }

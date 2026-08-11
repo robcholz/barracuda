@@ -214,6 +214,7 @@ mod tests {
 
     use claw_interface::MemFs;
     use claw_memory::{LongTermMemory, TranscriptStore};
+    use claw_tool::ToolError;
     use futures_lite::future::block_on;
 
     use crate::agent::base_agent::ContextProvider;
@@ -325,7 +326,9 @@ mod tests {
     #[test]
     fn failed_extraction_is_logged_and_not_retried_on_every_iteration() {
         let recorder = Arc::new(RecordingExtractor::new([
-            Err(ExtractError::EmptyOutput),
+            Err(ExtractError::InvalidOutput(
+                ToolError::InvalidArguments("malformed extraction".into()).into(),
+            )),
             Ok(Vec::new()),
         ]));
         let mut provider = provider(recorder.clone());

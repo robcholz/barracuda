@@ -10,7 +10,7 @@ use core::cell::RefCell;
 
 use claw_skill::{SkillError, SkillName, SkillSet};
 use claw_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
+    tool_metadata, EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolOutput,
     ToolSpec,
 };
 use serde::Deserialize;
@@ -18,7 +18,6 @@ use serde::Deserialize;
 use super::lock_skill_set;
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct ReadArgs {
     name: String,
 }
@@ -49,7 +48,9 @@ impl ToolSpec for ListSkillTool {
 }
 
 impl ToolHandler for ListSkillTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let mut skills = lock_skill_set(&self.skills);
             let output = skills.list_skills().to_owned();
@@ -71,17 +72,11 @@ impl ToolSpec for ReadSkillTool {
 }
 
 impl ToolHandler for ReadSkillTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
-        alloc::boxed::Box::pin(async move {
-            let args: ReadArgs = call.arguments()?;
-            let skill_name = args.name.trim();
-            if skill_name.is_empty() {
-                return Err(ToolError::InvokeRejected(
-                    "`name` is required: pass a skill name from skill_list.".to_string(),
-                )
-                .into());
-            }
+    type Args = ReadArgs;
 
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let skill_name = args.name.trim();
             let mut skills = lock_skill_set(&self.skills);
             match skills.read_skill(&SkillName::new(skill_name)) {
                 Ok(document) => {
@@ -118,7 +113,9 @@ impl ToolSpec for ReloadSkillsTool {
 }
 
 impl ToolHandler for ReloadSkillsTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let skills = lock_skill_set(&self.skills);
             if let Err(error) = skills.reload() {

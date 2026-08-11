@@ -8,14 +8,17 @@
       "properties": {
         "kind": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Agent kind from subagent_list_spawnable."
         },
         "name": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Short label for the subagent."
         },
         "goal": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Standalone task for the subagent."
         },
         "timeout_ms": {

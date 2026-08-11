@@ -1,6 +1,4 @@
-use claw_tool::{
-    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
-};
+use claw_tool::{tool_metadata, EmptyArgs, Tool, ToolFuture, ToolHandler, ToolOutput, ToolSpec};
 
 use super::super::policy::SpawnPolicy;
 
@@ -21,7 +19,9 @@ impl ToolSpec for ListSpawnableAgentsTool {
 }
 
 impl ToolHandler for ListSpawnableAgentsTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let kinds: Vec<serde_json::Value> = self
                 .policy

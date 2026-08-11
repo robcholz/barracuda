@@ -6,7 +6,7 @@ use claw_tool::{
 };
 
 use super::super::tool_port::SubagentControl;
-use super::helper::{action_with_agent_resource, required_agent_id};
+use super::helper::{action_with_agent_resource, required_agent_id, AgentArgs};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::new(WatchSubagentTool { control })
@@ -29,10 +29,11 @@ impl ToolSpec for WatchSubagentTool {
 }
 
 impl ToolHandler for WatchSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = AgentArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let target = required_agent_id(&args, "subagent_watch")?;
+            let target = required_agent_id(args.agent)?;
             match self.control.get(target) {
                 Some(snapshot) => Ok(ToolOutput {
                     content: serde_json::to_string(&snapshot).map_err(|error| {

@@ -43,6 +43,7 @@ pub use claw_agent::TurnOrigin
 pub use claw_agent::stream
 pub mod claw_agent::tools
 pub use claw_agent::tools::Action
+pub use claw_agent::tools::EmptyArgs
 pub use claw_agent::tools::Resource
 pub use claw_agent::tools::RiskClass
 pub use claw_agent::tools::Tool

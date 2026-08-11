@@ -581,13 +581,21 @@ mod tests {
             r#"{"type":"function","function":{"name":"test","parameters":{"type":"object"}}}"#
         }
 
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("resources/tools/plan_enter/schema.json");
+            &VALIDATOR
+        }
+
         fn classify(&self, _call: &ToolInvocation) -> claw_permission::Action {
             claw_permission::Action::new(self.name, RiskClass::High)
         }
     }
 
     impl ToolHandler for CountingTool {
-        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        type Args = claw_tool::EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             Box::pin(async move {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 Ok(ToolOutput {

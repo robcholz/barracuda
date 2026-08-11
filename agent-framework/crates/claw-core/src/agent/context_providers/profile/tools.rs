@@ -1,5 +1,6 @@
 //! Model-callable tools for editable profile documents.
 
+use alloc::string::String;
 use core::str::FromStr;
 
 use claw_interface::ClawFs;
@@ -9,7 +10,23 @@ use claw_tool::{
     tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
     ToolInvokeError, ToolOutput, ToolSpec,
 };
-use serde_json::Value;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct DocumentArgs {
+    document: String,
+}
+
+#[derive(Deserialize)]
+struct DocumentField {
+    document: String,
+}
+
+#[derive(Deserialize)]
+struct ReplaceArgs {
+    document: String,
+    content: String,
+}
 
 /// Build the profile tools. Agent manifests may blacklist individual mutation
 /// tools while retaining `profile_read`.
@@ -46,10 +63,11 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReadTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for ProfileReadTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = DocumentArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let document = document_from_args(&args)?;
+            let document = parse_document(args.document)?;
             match self.store.read(document) {
                 Ok(Some(content)) => Ok(ToolOutput {
                     content: if content.trim().is_empty() {
@@ -85,16 +103,12 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReplaceTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for ProfileReplaceTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = ReplaceArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let document = document_from_args(&args)?;
-            let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
-                ToolInvokeError::new(ToolError::InvokeRejected(
-                    "missing required string field 'content'".into(),
-                ))
-            })?;
-            match self.store.replace(document, content) {
+            let document = parse_document(args.document)?;
+            match self.store.replace(document, &args.content) {
                 Ok(()) => Ok(ToolOutput {
                     content: format!("Replaced profile document {document}."),
                     ok: true,
@@ -121,10 +135,11 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileClearTool<F> {
 }
 
 impl<F: ClawFs + 'static> ToolHandler for ProfileClearTool<F> {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = DocumentArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let document = document_from_args(&args)?;
+            let document = parse_document(args.document)?;
             match self.store.clear(document) {
                 Ok(()) => Ok(ToolOutput {
                     content: format!("Cleared profile document {document}."),
@@ -146,29 +161,39 @@ fn profile_action<F: ClawFs + 'static>(
     store: &ProfileStore<F>,
 ) -> Action {
     let action = Action::new(verb, risk);
-    let Ok(args) = call.arguments_value() else {
+    let Ok(args) = call.arguments::<DocumentField>() else {
         return action;
     };
-    let Ok(document) = document_from_args(&args) else {
+    let Ok(document) = parse_document(args.document) else {
         return action;
     };
     action.with_resource(Resource::Path(store.path(document)))
 }
 
-fn document_from_args(args: &Value) -> Result<ProfileDocument, ToolInvokeError> {
-    let document = args
-        .get("document")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .ok_or_else(|| {
-            ToolInvokeError::new(ToolError::InvokeRejected(
-                "missing required string field 'document'".into(),
-            ))
-        })?;
-    ProfileDocument::from_str(document).map_err(|error| {
+fn parse_document(document: String) -> Result<ProfileDocument, ToolInvokeError> {
+    ProfileDocument::from_str(document.trim()).map_err(|error| {
         ToolInvokeError::new(ToolError::InvokeRejected(format!(
             "{error}; expected one of: soul, assistant_identity, user_profile"
         )))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use claw_tool::ToolInvocation;
+
+    use super::DocumentField;
+
+    #[test]
+    fn classification_can_project_document_from_replace_arguments(
+    ) -> Result<(), Box<dyn core::error::Error>> {
+        let call = ToolInvocation::try_new(
+            None,
+            "profile_replace",
+            r#"{"document":"user_profile","content":"updated"}"#,
+        )?;
+        let args: DocumentField = call.arguments()?;
+        assert_eq!(args.document, "user_profile");
+        Ok(())
+    }
 }

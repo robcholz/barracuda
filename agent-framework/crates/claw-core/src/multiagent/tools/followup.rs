@@ -1,15 +1,21 @@
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{borrow::ToOwned, boxed::Box, string::String, sync::Arc};
 
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
     tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
+use serde::Deserialize;
 
-use crate::agent::tools::helper::non_blank_argument;
 use crate::Message;
 
 use super::super::tool_port::SubagentControl;
 use super::helper::{action_with_agent_resource, required_agent_id};
+
+#[derive(Deserialize)]
+struct FollowupArgs {
+    agent: String,
+    message: String,
+}
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::new(FollowupSubagentTool { control })
@@ -28,11 +34,12 @@ impl ToolSpec for FollowupSubagentTool {
 }
 
 impl ToolHandler for FollowupSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = FollowupArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let args = call.arguments_value()?;
-            let target = required_agent_id(&args, "subagent_interrupt")?;
-            let message = Message::text(non_blank_argument(&args, "message")?);
+            let target = required_agent_id(args.agent)?;
+            let message = Message::text(args.message.trim().to_owned());
             if self.control.get(target).is_none() {
                 return Ok(ToolOutput {
                     content: format!(

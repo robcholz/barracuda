@@ -1,12 +1,16 @@
 //! The pure `internal` Agent control tool group.
 
-use claw_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolSpec,
-};
+use alloc::string::{String, ToString};
+
+use claw_tool::{tool_metadata, Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec};
+use serde::Deserialize;
 
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::tools::helper::optional_string_argument;
+
+#[derive(Deserialize)]
+struct EndConversationArgs {
+    final_message: String,
+}
 
 /// Build the always-visible core Agent control group.
 pub(in crate::agent) fn internal_tools(effects: AgentEffectEmitter) -> ToolGroup {
@@ -28,22 +32,11 @@ impl ToolSpec for EndConversationTool {
 }
 
 impl ToolHandler for EndConversationTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EndConversationArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let Some(final_message) = optional_string_argument(&args, "final_message")? else {
-                return Err(ToolError::InvalidArguments(
-                    "conversation_end 'final_message' is required".into(),
-                )
-                .into());
-            };
-            let final_message = final_message.trim();
-            if final_message.is_empty() {
-                return Err(ToolError::InvalidArguments(
-                    "conversation_end 'final_message' is required".into(),
-                )
-                .into());
-            }
+            let final_message = args.final_message.trim();
             self.effects.emit(AgentEffect::Finish {
                 final_message: final_message.to_string(),
             });
@@ -74,7 +67,8 @@ mod tests {
         )
         .expect("valid invocation");
 
-        block_on(EndConversationTool { effects }.invoke(&call)).expect("conversation_end succeeds");
+        let args = call.arguments().expect("valid conversation args");
+        block_on(EndConversationTool { effects }.invoke(args)).expect("conversation_end succeeds");
 
         let emitted = inbox.drain();
         assert_eq!(
@@ -85,4 +79,3 @@ mod tests {
         );
     }
 }
-use alloc::string::ToString;

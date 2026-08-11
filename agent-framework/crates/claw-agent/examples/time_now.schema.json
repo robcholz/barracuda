@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "time_now",
+    "description": "Current time",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

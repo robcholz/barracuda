@@ -1,0 +1,20 @@
+{
+  "type": "function",
+  "function": {
+    "name": "fixture",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "trimmedNonEmpty": true },
+        "labels": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "limit": { "type": "integer", "minimum": 1 },
+        "mode": { "type": "string", "enum": ["fast", "safe"] }
+      },
+      "required": ["name", "labels", "limit", "mode"],
+      "additionalProperties": false
+    }
+  }
+}

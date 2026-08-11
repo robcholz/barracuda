@@ -8,11 +8,12 @@
       "properties": {
         "labels": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": { "type": "string", "trimmedNonEmpty": true },
           "description": "Topic labels to recall (as shown in your memory topics). Omit to search across all topics."
         },
         "query": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "Optional free-text filter; only memories whose content or keywords contain it are returned."
         },
         "limit": {

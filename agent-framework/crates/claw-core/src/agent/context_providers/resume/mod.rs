@@ -105,9 +105,7 @@ mod tests {
     use claw_api::ToolCall;
     use claw_context::Context;
     use claw_persistence::DurableState;
-    use claw_tool::{
-        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
-    };
+    use claw_tool::{Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSet, ToolSpec};
 
     #[test]
     fn resume_context_is_contributed_once_while_discovery_tools_remain_available() {
@@ -186,10 +184,18 @@ mod tests {
         fn schema(&self) -> &str {
             r#"{"type":"function","function":{"name":"hidden_test"}}"#
         }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("resources/tools/plan_enter/schema.json");
+            &VALIDATOR
+        }
     }
 
     impl ToolHandler for HiddenTool {
-        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        type Args = claw_tool::EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             alloc::boxed::Box::pin(async {
                 Ok(ToolOutput {
                     content: "ok".to_owned(),

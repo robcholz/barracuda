@@ -7,7 +7,6 @@
 //! Human approval is **not** a tool: it is raised by the permission layer (an
 //! `Ask` decision in `base_agent`), not requested or resolved by the model.
 //!
-pub(crate) mod helper;
 mod internal;
 
 pub(in crate::agent) use internal::internal_tools;

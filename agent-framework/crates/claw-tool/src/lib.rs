@@ -23,7 +23,7 @@ pub use set::{
     ToolSetHandle,
 };
 pub use tool::{
-    DetachedTool, DetachedToolFuture, DetachedToolHandler, Tool, ToolCompletionFuture,
+    DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolCompletionFuture,
     ToolConfig, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
     ToolResult, ToolSpec,
 };

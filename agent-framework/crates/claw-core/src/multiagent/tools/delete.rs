@@ -6,7 +6,7 @@ use claw_tool::{
 };
 
 use super::super::tool_port::SubagentControl;
-use super::helper::{action_with_agent_resource, required_agent_id};
+use super::helper::{action_with_agent_resource, required_agent_id, AgentArgs};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
     Tool::new(DeleteSubagentTool { control })
@@ -25,10 +25,11 @@ impl ToolSpec for DeleteSubagentTool {
 }
 
 impl ToolHandler for DeleteSubagentTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = AgentArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let args = call.arguments_value()?;
-            let target = required_agent_id(&args, "subagent_delete")?;
+            let target = required_agent_id(args.agent)?;
             if self.control.get(target).is_none() {
                 return Ok(ToolOutput {
                     content: format!(

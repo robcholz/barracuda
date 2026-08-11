@@ -8,6 +8,7 @@
       "properties": {
         "question": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The focused question or proposed plan to present for user approval."
         }
       },

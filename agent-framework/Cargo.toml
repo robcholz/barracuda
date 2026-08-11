@@ -16,6 +16,7 @@ default-members = [
 [workspace.dependencies]
 embassy-time = { version = "0.5.1", default-features = false }
 embassy-futures = { version = "0.1.2", default-features = false }
+embassy-sync = { version = "0.7.2", default-features = false }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
 # the std crates can be unit-tested on the host. LTO remains disabled so final

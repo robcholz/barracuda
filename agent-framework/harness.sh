@@ -23,6 +23,7 @@ no_std_crates=(
     claw-skill
     claw-tool
     claw-utils
+    json-validator
 )
 host_test_crates=(
     claw-api
@@ -37,6 +38,8 @@ host_test_crates=(
     claw-skill
     claw-tool
     claw-utils
+    json-validator
+    json-validator-macros
 )
 
 run cargo fmt --all --check

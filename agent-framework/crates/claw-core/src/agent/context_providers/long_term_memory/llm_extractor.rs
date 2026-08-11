@@ -1,23 +1,16 @@
 //! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApi`].
 //!
-//! It asks the model to read a conversation transcript and return a JSON array of
-//! durable facts. Like the conversation provider's LLM compactor, it lives in
+//! It asks the model to read a conversation transcript and call the canonical
+//! long-term-memory tools. Like the conversation provider's LLM compactor, it lives in
 //! `claw_core` (the agent wiring layer) rather than `claw-memory`, because the
 //! [`Extractor`] seam stays free of any LLM dependency; the concrete extractor is
 //! injected into the long-term memory provider.
 
-use alloc::{
-    boxed::Box,
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
 
-use serde_json::{json, Value};
+use serde_json::json;
 
 use claw_api::{ChatRequest, ClawApiFactory};
-use claw_memory::MemoryId;
 use claw_net::{Dns, TcpConnect};
 use claw_utils::Cancel;
 use tracing::Instrument as _;
@@ -25,13 +18,10 @@ use tracing::Instrument as _;
 use super::super::async_llm::SharedAsyncLlm;
 use crate::config::{ApiPurpose, SharedApiManager};
 
-use super::extraction::{
-    ExtractError, ExtractFuture, ExtractedItem, ExtractionInput, Extractor, MemoryOp,
-    MemorySnapshot,
-};
+use super::extraction::{ExtractError, ExtractFuture, ExtractionInput, Extractor, MemorySnapshot};
+use super::tools::{decode_extraction_operations as decode_operations, EXTRACTION_TOOLS_JSON};
 
-/// System prompt steering the extraction. Asks the model to reconcile memory
-/// against the conversation and reply with ONLY a JSON array of ops.
+/// System prompt steering the extraction through canonical memory tool calls.
 const EXTRACT_SYSTEM_PROMPT: &str = prompt!("memory/long_term_extraction_system.md");
 
 /// Header prefacing the current-memory listing handed to the model.
@@ -81,13 +71,13 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
             );
             let messages = [json!({ "role": "user", "content": prompt })];
 
-            let request = ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages);
+            let request = ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages)
+                .with_tools(EXTRACTION_TOOLS_JSON);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
             let chat_span =
                 tracing::info_span!("api.chat", purpose = "memory_extraction", max_attempts,);
             let response = async {
-                let mut lease = self.api.lease().await?;
-                let api = lease.api_mut()?;
+                let mut api = self.api.lease().await;
                 // Apply this operation's config from the manager (its explicit
                 // binding, else the default). None / invalid keeps the current one.
                 if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Memory) {
@@ -99,13 +89,7 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
             .await
             .map_err(ExtractError::from)?;
 
-            let Some(text) = response.text else {
-                return Err(ExtractError::EmptyOutput);
-            };
-            if text.trim().is_empty() {
-                return Err(ExtractError::EmptyOutput);
-            }
-            Ok(parse_ops(&text))
+            decode_operations(response.tool_calls).map_err(ExtractError::from)
         })
     }
 }
@@ -114,7 +98,7 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
 /// or `(none)` when empty.
 fn render_existing(existing: &[MemorySnapshot]) -> String {
     if existing.is_empty() {
-        return "(none)".to_string();
+        return "(none)".into();
     }
     existing
         .iter()
@@ -129,82 +113,76 @@ fn render_existing(existing: &[MemorySnapshot]) -> String {
         .join("\n")
 }
 
-/// Parse the model's reply into ops, tolerating prose around the JSON array.
-///
-/// Best-effort: a reply with no parseable array yields no ops, and malformed
-/// individual entries are skipped rather than failing the whole batch.
-fn parse_ops(text: &str) -> Vec<MemoryOp> {
-    let Some(array) = extract_json_array(text) else {
-        return Vec::new();
-    };
-    array.iter().filter_map(parse_op).collect()
-}
+#[cfg(test)]
+mod tests {
+    use claw_api::ToolCall;
 
-/// Parse one op object, or `None` if it is malformed for its kind.
-fn parse_op(entry: &Value) -> Option<MemoryOp> {
-    let op = entry
-        .get("op")
-        .and_then(Value::as_str)?
-        .to_ascii_lowercase();
-    match op.as_str() {
-        "forget" => Some(MemoryOp::Forget {
-            id: parse_id(entry)?,
-        }),
-        "replace" => Some(MemoryOp::Replace {
-            id: parse_id(entry)?,
-            item: parse_item(entry)?,
-        }),
-        "add" => Some(MemoryOp::Add(parse_item(entry)?)),
-        _ => None,
+    use super::super::extraction::MemoryOp;
+
+    #[test]
+    fn extraction_tools_come_from_the_canonical_tool_resources() {
+        let schemas: serde_json::Value = serde_json::from_str(super::EXTRACTION_TOOLS_JSON)
+            .expect("extraction tools are valid JSON");
+        let names = schemas
+            .as_array()
+            .expect("tool schemas form an array")
+            .iter()
+            .filter_map(|schema| schema.pointer("/function/name")?.as_str())
+            .collect::<alloc::vec::Vec<_>>();
+
+        assert_eq!(names, ["memory_store", "memory_update", "memory_forget"]);
     }
-}
 
-/// Read the non-empty `id` field as a [`MemoryId`], or `None`.
-fn parse_id(entry: &Value) -> Option<MemoryId> {
-    let id = entry.get("id").and_then(Value::as_str)?.trim();
-    (!id.is_empty()).then(|| MemoryId::from(id))
-}
+    #[test]
+    fn tool_calls_decode_into_memory_operations() {
+        let calls = vec![
+            ToolCall {
+                id: "1".into(),
+                name: "memory_store".into(),
+                arguments_json:
+                    r#"{"content":"  likes tea  ","tags":["preference"],"keywords":["drink"]}"#
+                        .into(),
+            },
+            ToolCall {
+                id: "2".into(),
+                name: "memory_update".into(),
+                arguments_json:
+                    r#"{"id":" memory-1 ","content":"likes coffee","tags":[],"keywords":["drink"]}"#
+                        .into(),
+            },
+            ToolCall {
+                id: "3".into(),
+                name: "memory_forget".into(),
+                arguments_json: r#"{"id":"memory-2"}"#.into(),
+            },
+        ];
 
-/// Read the `content`/`tags`/`keywords` fields into an [`ExtractedItem`], or
-/// `None` when `content` is missing/blank.
-fn parse_item(entry: &Value) -> Option<ExtractedItem> {
-    let content = entry.get("content").and_then(Value::as_str)?.trim();
-    if content.is_empty() {
-        return None;
+        let operations = super::decode_operations(calls).expect("valid tool calls decode");
+        assert_eq!(operations.len(), 3);
+        assert!(matches!(
+            &operations[0],
+            MemoryOp::Add(item)
+                if item.content == "likes tea" && item.tags == ["preference"]
+        ));
+        assert!(matches!(
+            &operations[1],
+            MemoryOp::Replace { id, item }
+                if id.as_str() == "memory-1" && item.content == "likes coffee"
+        ));
+        assert!(matches!(
+            &operations[2],
+            MemoryOp::Forget { id } if id.as_str() == "memory-2"
+        ));
     }
-    Some(ExtractedItem {
-        content: content.to_string(),
-        tags: string_array(entry.get("tags"))?,
-        keywords: string_array(entry.get("keywords"))?,
-    })
-}
 
-/// Pull the first top-level JSON array out of `text` (the model may wrap it in
-/// prose or a code fence). Returns its elements, or `None` if none parses.
-fn extract_json_array(text: &str) -> Option<Vec<Value>> {
-    let start = text.find('[')?;
-    let end = text.rfind(']')?;
-    let slice = text.get(start..=end)?;
-    serde_json::from_str::<Value>(slice)
-        .ok()
-        .and_then(|value| match value {
-            Value::Array(items) => Some(items),
-            _ => None,
-        })
-}
+    #[test]
+    fn canonical_validator_rejects_blank_memory_fields() {
+        let calls = vec![ToolCall {
+            id: "1".into(),
+            name: "memory_store".into(),
+            arguments_json: r#"{"content":"fact","tags":["   "]}"#.into(),
+        }];
 
-/// Read an optional JSON string array. Missing is empty; malformed is rejected.
-fn string_array(value: Option<&Value>) -> Option<Vec<String>> {
-    let Some(value) = value else {
-        return Some(Vec::new());
-    };
-    let items = value.as_array()?;
-    let mut strings = Vec::with_capacity(items.len());
-    for item in items {
-        let text = item.as_str()?.trim();
-        if !text.is_empty() {
-            strings.push(text.to_string());
-        }
+        assert!(super::decode_operations(calls).is_err());
     }
-    Some(strings)
 }

@@ -1,15 +1,22 @@
 //! The `tool_discovery` group: search hidden groups and load one for the next turn.
 
+use alloc::string::String;
+
 use claw_permission::{Action, RiskClass};
 use claw_persistence::DurableState;
 use claw_tool::{
-    tool_metadata, Tool, ToolDiscoveryHandle, ToolError, ToolFuture, ToolGroup, ToolHandler,
+    tool_metadata, EmptyArgs, Tool, ToolDiscoveryHandle, ToolFuture, ToolGroup, ToolHandler,
     ToolInvocation, ToolOutput, ToolSpec,
 };
+use serde::Deserialize;
 use serde_json::json;
 
-use crate::agent::tools::helper::optional_string_argument;
 use crate::agent::BaseAgentState;
+
+#[derive(Deserialize)]
+struct LoadArgs {
+    group_id: String,
+}
 
 /// Build the always-visible discovery group over a [`ToolSet`](claw_tool::ToolSet)
 /// bridge. All other registered groups remain hidden until `tool_load` reveals
@@ -51,16 +58,11 @@ impl ToolSpec for ToolLoadTool {
 }
 
 impl ToolHandler for ToolLoadTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
-        alloc::boxed::Box::pin(async move {
-            let args = call.arguments_value()?;
-            let group_id = optional_string_argument(&args, "group_id")?
-                .map(|group_id| group_id.trim().to_owned())
-                .filter(|group_id| !group_id.is_empty())
-                .ok_or_else(|| {
-                    ToolError::InvalidArguments("tool_load 'group_id' is required".into())
-                })?;
+    type Args = LoadArgs;
 
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let group_id = args.group_id.trim().to_owned();
             let loaded = self.discovery.request_load(group_id.clone());
             if loaded {
                 self.state
@@ -89,7 +91,9 @@ impl ToolSpec for ToolSearchTool {
 }
 
 impl ToolHandler for ToolSearchTool {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             Ok(ToolOutput {
                 content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
@@ -130,7 +134,8 @@ mod tests {
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
                 .expect("valid invocation");
 
-        let output = block_on(tool.invoke(&call)).expect("load succeeds");
+        let args = call.arguments().expect("valid load args");
+        let output = block_on(tool.invoke(args)).expect("load succeeds");
 
         assert!(output.ok);
         assert!(state.get().loaded_tool_groups().contains("hidden"));
@@ -146,10 +151,18 @@ mod tests {
         fn schema(&self) -> &str {
             r#"{"type":"function","function":{"name":"hidden_test"}}"#
         }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("resources/tools/plan_enter/schema.json");
+            &VALIDATOR
+        }
     }
 
     impl ToolHandler for HiddenTool {
-        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        type Args = claw_tool::EmptyArgs;
+
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             alloc::boxed::Box::pin(async {
                 Ok(ToolOutput {
                     content: "ok".to_owned(),

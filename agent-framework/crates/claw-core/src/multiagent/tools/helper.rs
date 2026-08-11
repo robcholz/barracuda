@@ -1,9 +1,18 @@
 use claw_permission::{Action, Resource, RiskClass};
 use claw_tool::{ToolError, ToolInvocation, ToolInvokeError};
-use serde_json::Value;
+use serde::Deserialize;
 
-use crate::agent::tools::helper::optional_string_argument;
 use crate::agent::AgentId;
+
+#[derive(Deserialize)]
+pub(super) struct AgentArgs {
+    pub(super) agent: String,
+}
+
+#[derive(Deserialize)]
+struct AgentField {
+    agent: String,
+}
 
 pub(super) fn trace_subagent_bound(child: AgentId) {
     tracing::event!(
@@ -18,13 +27,8 @@ pub(super) fn trace_subagent_bound(child: AgentId) {
     );
 }
 
-pub(super) fn required_agent_id(args: &Value, tool: &str) -> Result<AgentId, ToolInvokeError> {
-    let raw = optional_string_argument(args, "agent")?
-        .ok_or_else(|| ToolError::InvalidArguments(format!("{tool} 'agent' is required")))?;
+pub(super) fn required_agent_id(raw: String) -> Result<AgentId, ToolInvokeError> {
     let agent = raw.trim();
-    if agent.is_empty() {
-        return Err(ToolError::InvalidArguments(format!("{tool} 'agent' is required")).into());
-    }
     AgentId::from_wire(agent)
         .map_err(|error| ToolError::InvokeRejected(format!("invalid agent id '{agent}': {error}")))
         .map_err(Into::into)
@@ -36,19 +40,10 @@ pub(super) fn action_with_agent_resource(
     call: &ToolInvocation,
 ) -> Action {
     let action = Action::new(name, risk);
-    let Some(resource) = call
-        .arguments_value()
-        .ok()
-        .and_then(|args| agent_resource(&args))
-    else {
+    let Ok(args) = call.arguments::<AgentField>() else {
         return action;
     };
-    action.with_resource(resource)
+    let agent = args.agent.trim();
+    action.with_resource(Resource::Agent(agent.to_string()))
 }
-
-fn agent_resource(args: &Value) -> Option<Resource> {
-    let raw = optional_string_argument(args, "agent").ok().flatten()?;
-    let trimmed = raw.trim();
-    (!trimmed.is_empty()).then(|| Resource::Agent(trimmed.to_string()))
-}
-use alloc::string::ToString;
+use alloc::string::{String, ToString};

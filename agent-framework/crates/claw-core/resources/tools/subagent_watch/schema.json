@@ -8,6 +8,7 @@
       "properties": {
         "agent": {
           "type": "string",
+          "trimmedNonEmpty": true,
           "description": "The id of the subagent to inspect (e.g. \"agent-7\"), as returned by subagent_spawn or subagent_list."
         }
       },

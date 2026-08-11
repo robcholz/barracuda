@@ -23,7 +23,8 @@ use claw_tool::{
 };
 use claw_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
-use serde_json::{json, Value};
+use serde::Deserialize;
+use serde_json::json;
 
 use crate::agent::ApprovalDecision;
 use crate::config::{ApiPurpose, SharedApiManager};
@@ -33,6 +34,20 @@ use super::{ApprovalFuture, ApprovalResolver, ApprovalResolverError};
 
 const APPROVAL_RESOLVER_PROMPT: &str = prompt!("approval/resolver_system.md");
 const USER_REJECTED: &str = "user rejected";
+
+#[derive(Deserialize)]
+struct ResolutionArgs {
+    decision: ResolutionDecision,
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ResolutionDecision {
+    Yes,
+    No,
+    Other,
+}
 
 pub(crate) struct LlmApprovalResolver<Http: TcpConnect + Dns + 'static> {
     api_manager: SharedApiManager,
@@ -118,52 +133,21 @@ impl ToolSpec for ResolvePermissionReplyTool {
 }
 
 impl ToolHandler for ResolvePermissionReplyTool {
-    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+    type Args = ResolutionArgs;
+
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
-            let args: Value = serde_json::from_str(call.arguments_json()).map_err(|error| {
-                ToolError::InvalidArgumentsJson(format!("invalid tool arguments JSON: {error}"))
-            })?;
-            if !args.is_object() {
-                return Err(ToolError::InvalidArgumentsJson(
-                    "tool arguments must be a JSON object".into(),
-                )
-                .into());
-            }
-
-            let Some(decision) = args
-                .get("decision")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-            else {
-                return Err(ToolError::InvalidArguments(
-                    "decision is required and must be a non-empty string".into(),
-                )
-                .into());
-            };
-
-            let resolution = match decision {
-                "yes" => ApprovalDecision::Approved,
-                "no" => ApprovalDecision::Rejected(USER_REJECTED.to_owned()),
-                "other" => {
-                    let Some(reason) = args
-                        .get("reason")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                    else {
+            let resolution = match args.decision {
+                ResolutionDecision::Yes => ApprovalDecision::Approved,
+                ResolutionDecision::No => ApprovalDecision::Rejected(USER_REJECTED.to_owned()),
+                ResolutionDecision::Other => {
+                    let Some(reason) = args.reason.map(|reason| reason.trim().to_owned()) else {
                         return Err(ToolError::InvalidArguments(
                             "reason is required when decision is other".into(),
                         )
                         .into());
                     };
-                    ApprovalDecision::Rejected(reason.to_owned())
-                }
-                other => {
-                    return Err(ToolError::InvalidArguments(format!(
-                        "decision must be yes|no|other, got '{other}'"
-                    ))
-                    .into());
+                    ApprovalDecision::Rejected(reason)
                 }
             };
 
