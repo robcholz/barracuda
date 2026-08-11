@@ -25,8 +25,18 @@ pub struct claw_utils::Cancel<'a>(_)
 impl claw_utils::Cancel<'static>
 pub fn claw_utils::Cancel<'static>::never() -> Self
 impl<'a> claw_utils::Cancel<'a>
+pub fn claw_utils::Cancel<'a>::cancelled(self) -> impl core::future::future::Future<Output = ()> + 'a
 pub fn claw_utils::Cancel<'a>::is_cancelled(self) -> bool
-pub const fn claw_utils::Cancel<'a>::new(flag: &'a core::sync::atomic::AtomicBool) -> Self
+pub const fn claw_utils::Cancel<'a>::new(flag: &'a claw_utils::CancellationFlag) -> Self
+pub struct claw_utils::CancellationFlag
+impl claw_utils::CancellationFlag
+pub fn claw_utils::CancellationFlag::cancel(&self)
+pub fn claw_utils::CancellationFlag::is_cancelled(&self) -> bool
+pub const fn claw_utils::CancellationFlag::new() -> Self
+impl core::default::Default for claw_utils::CancellationFlag
+pub fn claw_utils::CancellationFlag::default() -> Self
+impl core::fmt::Debug for claw_utils::CancellationFlag
+pub fn claw_utils::CancellationFlag::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_utils::JobCancelled
 pub struct claw_utils::JobHandle<T>
 impl<T> claw_utils::JobHandle<T>

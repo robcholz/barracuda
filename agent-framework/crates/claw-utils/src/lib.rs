@@ -15,7 +15,7 @@ pub mod stream;
 mod task_pool;
 pub mod yield_stream;
 
-pub use cancel::Cancel;
+pub use cancel::{Cancel, CancellationFlag};
 pub use task_pool::{JobCancelled, JobHandle, TaskPool};
 
 use core::fmt;

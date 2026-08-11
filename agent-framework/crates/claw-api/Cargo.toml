@@ -24,6 +24,7 @@ mbedtls-host = [
 [dependencies]
 claw-utils = { path = "../claw-utils" }
 embassy-time.workspace = true
+embassy-futures.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
@@ -35,6 +36,7 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+sseer = { version = "0.3", default-features = false }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 # Shape-only attempt/retry spans consumed by the firmware's claw-log subscriber.
 tracing = { version = "0.1", default-features = false }

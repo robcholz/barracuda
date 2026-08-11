@@ -4,7 +4,6 @@ use core::task::{Context, Poll, Waker};
 use core::{
     cell::{Cell, RefCell},
     error::Error,
-    sync::atomic::{AtomicBool, Ordering},
 };
 
 #[cfg(feature = "cache_profile")]
@@ -12,7 +11,7 @@ use claw_api::ProviderUsage;
 use claw_api::ToolCall;
 use claw_memory::TurnError;
 use claw_tool::{ToolDetachHandle, ToolOutput};
-use claw_utils::stream::StreamPart;
+use claw_utils::{stream::StreamPart, CancellationFlag};
 use futures_core::Stream;
 use futures_lite::future;
 
@@ -112,7 +111,7 @@ pub(super) struct RunControl {
 
 struct RunSignals {
     interrupt: Cell<bool>,
-    cancel: AtomicBool,
+    cancel: CancellationFlag,
     approval: RefCell<ApprovalState>,
     continuations: RefCell<VecDeque<Message>>,
     waker: RefCell<Option<Waker>>,
@@ -140,7 +139,7 @@ impl RunControl {
         Self {
             inner: Rc::new(RunSignals {
                 interrupt: Cell::new(false),
-                cancel: AtomicBool::new(false),
+                cancel: CancellationFlag::new(),
                 approval: RefCell::new(ApprovalState::Idle),
                 continuations: RefCell::new(VecDeque::new()),
                 waker: RefCell::new(None),
@@ -148,12 +147,12 @@ impl RunControl {
         }
     }
 
-    pub(super) fn cancel_flag(&self) -> &AtomicBool {
+    pub(super) fn cancel_flag(&self) -> &CancellationFlag {
         &self.inner.cancel
     }
 
     pub(super) fn is_cancelled(&self) -> bool {
-        self.inner.cancel.load(Ordering::Acquire)
+        self.inner.cancel.is_cancelled()
     }
 
     pub(super) fn take_interrupt(&self) -> bool {
@@ -209,7 +208,7 @@ impl RunControl {
     }
 
     fn cancel(&self) {
-        self.inner.cancel.store(true, Ordering::Release);
+        self.inner.cancel.cancel();
         self.wake();
     }
 

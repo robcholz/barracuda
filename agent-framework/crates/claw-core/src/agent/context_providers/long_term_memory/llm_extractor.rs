@@ -13,7 +13,6 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Value};
 
@@ -82,9 +81,6 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
             );
             let messages = json!([{ "role": "user", "content": prompt }]);
 
-            // Extraction is not tied to the active iteration's interrupt flag,
-            // so it uses its own (never-set) abort flag.
-            let abort = AtomicBool::new(false);
             let request = ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
             let chat_span =
@@ -97,7 +93,7 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
                 if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Memory) {
                     let _ = api.set_config(config);
                 }
-                api.chat(&request, Cancel::new(&abort)).await
+                api.chat(&request, Cancel::never()).await
             }
             .instrument(chat_span)
             .await

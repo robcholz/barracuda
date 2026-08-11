@@ -13,6 +13,8 @@ use core::task::{Context, Poll};
 
 use futures_core::Stream;
 use futures_lite::StreamExt;
+use sseer::errors::EventStreamError;
+use sseer::EventStream;
 
 use crate::backends::shared::map_net_error;
 use crate::backends::sse::ProviderSse;
@@ -72,7 +74,7 @@ impl Stream for ChatStream<'_> {
 
 /// One provider response attempt over one transport byte stream.
 pub(crate) struct ProviderStream<S> {
-    bytes: S,
+    events: EventStream<ResponseDataStream<S>>,
     /// `None` after provider completion or a terminal parser error.
     parser: Option<ProviderSse>,
     /// Provider completion was observed; drain the remaining HTTP framing so
@@ -84,7 +86,7 @@ pub(crate) struct ProviderStream<S> {
 impl<S> ProviderStream<S> {
     pub(crate) fn new(bytes: S, parser: ProviderSse) -> Self {
         Self {
-            bytes,
+            events: EventStream::new(ResponseDataStream { inner: bytes }),
             parser: Some(parser),
             drain_after_done: false,
             queue: VecDeque::new(),
@@ -108,8 +110,8 @@ where
             if this.parser.is_none() && !this.drain_after_done {
                 return Poll::Ready(None);
             }
-            match Pin::new(&mut this.bytes).poll_next(cx) {
-                Poll::Ready(Some(Ok(ResponsePart::Data(chunk)))) => {
+            match Pin::new(&mut this.events).poll_next(cx) {
+                Poll::Ready(Some(Ok(event))) => {
                     if this.drain_after_done {
                         continue;
                     }
@@ -117,7 +119,7 @@ where
                     let Some(parser) = this.parser.as_mut() else {
                         return Poll::Ready(None);
                     };
-                    let result = parser.push(&chunk, &mut deltas);
+                    let result = parser.process_data(&event.data, &mut deltas);
                     let done = parser.is_done();
                     this.queue.extend(deltas.into_iter().map(Ok));
                     if let Err(error) = result {
@@ -128,15 +130,13 @@ where
                         this.drain_after_done = true;
                     }
                 }
-                Poll::Ready(Some(Ok(ResponsePart::Head(_)))) => {
+                Poll::Ready(Some(Err(EventStreamError::Transport(error)))) => {
                     this.parser = None;
-                    return Poll::Ready(Some(Err(ChatError::Api(ClawApiError::ApiError(
-                        "HTTP response head was emitted twice",
-                    )))));
+                    return Poll::Ready(Some(Err(error)));
                 }
-                Poll::Ready(Some(Err(error))) => {
+                Poll::Ready(Some(Err(EventStreamError::Utf8Error(_)))) => {
                     this.parser = None;
-                    return Poll::Ready(Some(Err(read_error(error))));
+                    return Poll::Ready(Some(Err(ClawApiError::Parse.into())));
                 }
                 Poll::Ready(None) => {
                     if this.drain_after_done {
@@ -148,6 +148,29 @@ where
                 }
                 Poll::Pending => return Poll::Pending,
             }
+        }
+    }
+}
+
+struct ResponseDataStream<S> {
+    inner: S,
+}
+
+impl<S> Stream for ResponseDataStream<S>
+where
+    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
+{
+    type Item = Result<Vec<u8>, ChatError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.inner).poll_next(context) {
+            Poll::Ready(Some(Ok(ResponsePart::Data(chunk)))) => Poll::Ready(Some(Ok(chunk))),
+            Poll::Ready(Some(Ok(ResponsePart::Head(_)))) => Poll::Ready(Some(Err(ChatError::Api(
+                ClawApiError::ApiError("HTTP response head was emitted twice"),
+            )))),
+            Poll::Ready(Some(Err(error))) => Poll::Ready(Some(Err(read_error(error)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
         }
     }
 }

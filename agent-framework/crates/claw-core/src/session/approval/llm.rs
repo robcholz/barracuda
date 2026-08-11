@@ -12,7 +12,6 @@ use alloc::{
 use core::cell::RefCell;
 use core::future::Future;
 use core::pin::Pin;
-use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 
 use claw_api::{ChatRequest, ClawApiFactory, RetryPolicy, ToolCall};
@@ -22,7 +21,7 @@ use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
     ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
-use claw_utils::Cancel;
+use claw_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
 use serde_json::{json, Value};
 
@@ -64,7 +63,7 @@ where
     ) -> Result<ApprovalDecision, ApprovalResolverError> {
         let api_manager = Arc::clone(&self.api_manager);
         let llm_factory = self.llm_factory.clone();
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled = Arc::new(CancellationFlag::new());
         let task_cancelled = Arc::clone(&cancelled);
         let future: ApprovalFuture = Box::pin(async move {
             resolve_permission_reply::<Http>(
@@ -82,7 +81,7 @@ where
 }
 
 struct CancellableApprovalFuture {
-    cancelled: Arc<AtomicBool>,
+    cancelled: Arc<CancellationFlag>,
     future: ApprovalFuture,
 }
 
@@ -96,7 +95,7 @@ impl Future for CancellableApprovalFuture {
 
 impl Drop for CancellableApprovalFuture {
     fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.cancelled.cancel();
     }
 }
 
@@ -181,7 +180,7 @@ async fn resolve_permission_reply<Http>(
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
-    cancelled: &AtomicBool,
+    cancelled: &CancellationFlag,
 ) -> Result<ApprovalDecision, ApprovalResolverError>
 where
     Http: TcpConnect + Dns + 'static,

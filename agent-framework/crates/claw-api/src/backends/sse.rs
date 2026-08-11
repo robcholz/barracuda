@@ -1,11 +1,9 @@
 //! Streaming SSE parsing: turn a provider's `text/event-stream` body into
 //! ordered [`ChatStreamEvent`]s.
 //!
-//! Each parser is a **sync** state machine driven by raw byte chunks, kept free
-//! of any async/transport concern so it can be unit-tested with byte slices
-//! (including frames split mid-chunk and multibyte UTF-8 split across chunk
-//! boundaries). The async [`crate::ChatStream`] wrapper only pumps bytes into
-//! [`SseParse::push`] and reads semantic events back out.
+//! `sseer` owns standards-compliant SSE framing, including fragmented UTF-8 and
+//! multiline `data:` fields. Each provider parser remains a synchronous state
+//! machine driven by one complete SSE data payload at a time.
 //!
 //! Ordering contract (both providers): within one response the three logical
 //! streams are explicitly closed in order: `Reasoning(Delta)* ->
@@ -24,10 +22,6 @@ use super::super::types::ProviderUsage;
 use super::super::types::{ChatStreamEvent, ToolCall};
 #[cfg(feature = "cache_profile")]
 use super::shared::{parse_anthropic_usage, parse_openai_usage};
-
-/// SSE event separators. Providers may use LF or HTTP-style CRLF lines.
-const LF_FRAME_BOUNDARY: &[u8] = b"\n\n";
-const CRLF_FRAME_BOUNDARY: &[u8] = b"\r\n\r\n";
 
 #[cfg(feature = "cache_profile")]
 fn merge_usage(current: &mut Option<ProviderUsage>, incoming: ProviderUsage) {
@@ -54,14 +48,14 @@ pub(crate) enum ProviderSse {
 }
 
 impl ProviderSse {
-    pub(crate) fn push(
+    pub(crate) fn process_data(
         &mut self,
-        bytes: &[u8],
+        payload: &str,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
         match self {
-            Self::OpenAi(parser) => parser.push(bytes, out),
-            Self::Anthropic(parser) => parser.push(bytes, out),
+            Self::OpenAi(parser) => SseParse::process_data(parser, payload, out),
+            Self::Anthropic(parser) => SseParse::process_data(parser, payload, out),
         }
     }
 
@@ -75,9 +69,12 @@ impl ProviderSse {
 
 /// A provider-specific streaming parser.
 pub(crate) trait SseParse {
-    /// Feed the next raw body chunk, appending newly-produced events to `out`.
-    /// Partial frames are buffered until a later call completes them.
-    fn push(&mut self, bytes: &[u8], out: &mut Vec<ChatStreamEvent>) -> Result<(), ChatError>;
+    /// Process one complete SSE `data` payload.
+    fn process_data(
+        &mut self,
+        payload: &str,
+        out: &mut Vec<ChatStreamEvent>,
+    ) -> Result<(), ChatError>;
 
     /// Whether the provider's native terminal event has been parsed.
     fn is_done(&self) -> bool;
@@ -179,52 +176,6 @@ impl ContentEvents {
     }
 }
 
-/// Buffers raw bytes and yields complete SSE frames (the text between blank
-/// lines). Cutting only on ASCII line endings never splits a multibyte code
-/// point, so a returned frame is always valid UTF-8.
-#[derive(Default)]
-struct FrameBuffer {
-    buf: Vec<u8>,
-}
-
-impl FrameBuffer {
-    fn push_bytes(&mut self, bytes: &[u8]) {
-        self.buf.extend_from_slice(bytes);
-    }
-
-    fn next_frame(&mut self) -> Result<Option<String>, ChatError> {
-        let lf = find_subsequence(&self.buf, LF_FRAME_BOUNDARY)
-            .map(|index| (index, LF_FRAME_BOUNDARY.len()));
-        let crlf = find_subsequence(&self.buf, CRLF_FRAME_BOUNDARY)
-            .map(|index| (index, CRLF_FRAME_BOUNDARY.len()));
-        let boundary = match (lf, crlf) {
-            (Some(lf), Some(crlf)) if lf.0 <= crlf.0 => Some(lf),
-            (Some(_), Some(crlf)) => Some(crlf),
-            (Some(lf), None) => Some(lf),
-            (None, Some(crlf)) => Some(crlf),
-            (None, None) => None,
-        };
-        let Some((idx, boundary_len)) = boundary else {
-            return Ok(None);
-        };
-        let frame_end = idx.checked_add(boundary_len).ok_or(ClawApiError::Parse)?;
-        let frame: Vec<u8> = self.buf.drain(..frame_end).collect();
-        let payload = frame.get(..idx).ok_or(ClawApiError::Parse)?;
-        let text = core::str::from_utf8(payload).map_err(|_| ClawApiError::Parse)?;
-        Ok(Some(text.to_string()))
-    }
-}
-
-/// Yield each `data:` payload in an SSE frame (skipping `event:`, comments, and
-/// blank continuation lines).
-fn data_payloads(frame: &str) -> impl Iterator<Item = &str> {
-    frame.split('\n').filter_map(|line| {
-        let payload = line.trim_end_matches('\r').strip_prefix("data:")?;
-        let payload = payload.trim_start();
-        (!payload.is_empty()).then_some(payload)
-    })
-}
-
 // ---------------------------------------------------------------------------
 // OpenAI-compatible
 // ---------------------------------------------------------------------------
@@ -243,7 +194,6 @@ struct OpenAiToolCall {
 /// Incremental parser for an OpenAI-compatible `chat/completions` SSE stream.
 #[derive(Default)]
 pub(crate) struct OpenAiSse {
-    frames: FrameBuffer,
     done: bool,
     events: ContentEvents,
     tool_calls: Vec<OpenAiToolCall>,
@@ -345,28 +295,24 @@ impl OpenAiSse {
 }
 
 impl SseParse for OpenAiSse {
-    fn push(&mut self, bytes: &[u8], out: &mut Vec<ChatStreamEvent>) -> Result<(), ChatError> {
-        self.frames.push_bytes(bytes);
-        while let Some(frame) = self.frames.next_frame()? {
-            for payload in data_payloads(&frame) {
-                if payload == OPENAI_DONE {
-                    self.flush_tool_calls(out)?;
-                    if !self.events.has_delta() {
-                        return Err(ClawApiError::EmptyResponse.into());
-                    }
-                    self.events.finish(out)?;
-                    #[cfg(feature = "cache_profile")]
-                    if let Some(usage) = self.usage.take() {
-                        out.push(ChatStreamEvent::Usage(usage));
-                    }
-                    self.done = true;
-                } else {
-                    self.process_data(payload, out)?;
-                }
-                if self.done {
-                    return Ok(());
-                }
+    fn process_data(
+        &mut self,
+        payload: &str,
+        out: &mut Vec<ChatStreamEvent>,
+    ) -> Result<(), ChatError> {
+        if payload == OPENAI_DONE {
+            self.flush_tool_calls(out)?;
+            if !self.events.has_delta() {
+                return Err(ClawApiError::EmptyResponse.into());
             }
+            self.events.finish(out)?;
+            #[cfg(feature = "cache_profile")]
+            if let Some(usage) = self.usage.take() {
+                out.push(ChatStreamEvent::Usage(usage));
+            }
+            self.done = true;
+        } else {
+            OpenAiSse::process_data(self, payload, out)?;
         }
         Ok(())
     }
@@ -393,7 +339,6 @@ enum AnthBlock {
 /// Incremental parser for an Anthropic Messages API SSE stream.
 #[derive(Default)]
 pub(crate) struct AnthropicSse {
-    frames: FrameBuffer,
     done: bool,
     events: ContentEvents,
     /// Content blocks by their Anthropic content-block index (contiguous).
@@ -543,17 +488,12 @@ impl AnthropicSse {
 }
 
 impl SseParse for AnthropicSse {
-    fn push(&mut self, bytes: &[u8], out: &mut Vec<ChatStreamEvent>) -> Result<(), ChatError> {
-        self.frames.push_bytes(bytes);
-        while let Some(frame) = self.frames.next_frame()? {
-            for payload in data_payloads(&frame) {
-                self.process_data(payload, out)?;
-                if self.done {
-                    return Ok(());
-                }
-            }
-        }
-        Ok(())
+    fn process_data(
+        &mut self,
+        payload: &str,
+        out: &mut Vec<ChatStreamEvent>,
+    ) -> Result<(), ChatError> {
+        AnthropicSse::process_data(self, payload, out)
     }
 
     fn is_done(&self) -> bool {
@@ -567,25 +507,32 @@ fn block_index(value: &Value) -> Result<usize, ChatError> {
         .map_err(|_| ClawApiError::Parse.into())
 }
 
-/// Index of the first occurrence of `needle` in `haystack`, if any.
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || haystack.len() < needle.len() {
-        return None;
-    }
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::vec;
+    use futures_lite::{future::block_on, StreamExt as _};
+    use sseer::EventStream;
 
     use super::*;
 
     fn drive<P: SseParse>(parser: &mut P, body: &str) -> Vec<ChatStreamEvent> {
+        drive_chunks(parser, &[body.as_bytes()])
+    }
+
+    fn drive_chunks<P: SseParse>(parser: &mut P, chunks: &[&[u8]]) -> Vec<ChatStreamEvent> {
         let mut out = Vec::new();
-        parser.push(body.as_bytes(), &mut out).unwrap();
+        let source = futures_lite::stream::iter(
+            chunks.iter().map(|chunk| Ok::<Vec<u8>, ()>(chunk.to_vec())),
+        );
+        let mut events = EventStream::new(source);
+        block_on(async {
+            while let Some(event) = events.next().await {
+                let event = event.expect("valid SSE event");
+                parser
+                    .process_data(&event.data, &mut out)
+                    .expect("valid provider payload");
+            }
+        });
         out
     }
 
@@ -625,15 +572,10 @@ mod tests {
     #[test]
     fn openai_reassembles_frames_split_across_chunks() {
         let mut parser = OpenAiSse::new();
-        let mut out = Vec::new();
         let full = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n";
         let (a, b) = full.split_at(10);
         let (b, c) = b.split_at(15);
-        parser.push(a.as_bytes(), &mut out).unwrap();
-        assert!(out.is_empty());
-        parser.push(b.as_bytes(), &mut out).unwrap();
-        assert!(out.is_empty());
-        parser.push(c.as_bytes(), &mut out).unwrap();
+        let out = drive_chunks(&mut parser, &[a.as_bytes(), b.as_bytes(), c.as_bytes()]);
         assert_eq!(
             out,
             vec![
@@ -664,14 +606,33 @@ mod tests {
     }
 
     #[test]
+    fn openai_joins_multiline_sse_data_before_parsing_json() {
+        let mut parser = OpenAiSse::new();
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":\n",
+            "data: {\"content\":\"hi\"}}]}\n\n",
+            "data: [DONE]\n\n",
+        );
+        let deltas = drive(&mut parser, body);
+        assert_eq!(
+            deltas,
+            vec![
+                ChatStreamEvent::Reasoning(StreamPart::End),
+                ChatStreamEvent::Output(StreamPart::Delta("hi".to_string())),
+                ChatStreamEvent::Output(StreamPart::End),
+                ChatStreamEvent::ToolCalls(StreamPart::End),
+            ]
+        );
+        assert!(parser.is_done());
+    }
+
+    #[test]
     fn openai_reassembles_multibyte_utf8_split_across_chunks() {
         let mut parser = OpenAiSse::new();
-        let mut out = Vec::new();
         let full = "data: {\"choices\":[{\"delta\":{\"content\":\"上\"}}]}\n\n";
         let bytes = full.as_bytes();
         let cut = full.find('上').unwrap() + 1;
-        parser.push(&bytes[..cut], &mut out).unwrap();
-        parser.push(&bytes[cut..], &mut out).unwrap();
+        let out = drive_chunks(&mut parser, &[&bytes[..cut], &bytes[cut..]]);
         assert_eq!(
             out,
             vec![
@@ -685,7 +646,7 @@ mod tests {
     fn openai_empty_stream_is_an_error() {
         let mut parser = OpenAiSse::new();
         let mut out = Vec::new();
-        assert!(parser.push(b"data: [DONE]\n\n", &mut out).is_err());
+        assert!(parser.process_data(OPENAI_DONE, &mut out).is_err());
         assert!(out.is_empty());
         assert!(!parser.is_done());
     }
@@ -767,12 +728,9 @@ mod tests {
     #[test]
     fn anthropic_reassembles_frames_split_across_chunks() {
         let mut parser = AnthropicSse::new();
-        let mut out = Vec::new();
         let full = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n";
         let (a, b) = full.split_at(40);
-        parser.push(a.as_bytes(), &mut out).unwrap();
-        assert!(out.is_empty());
-        parser.push(b.as_bytes(), &mut out).unwrap();
+        let out = drive_chunks(&mut parser, &[a.as_bytes(), b.as_bytes()]);
         assert_eq!(
             out,
             vec![

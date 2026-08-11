@@ -6,7 +6,6 @@ use alloc::{
     string::{String, ToString},
     vec,
 };
-use core::sync::atomic::AtomicBool;
 
 use claw_api::{ChatRequest, ClawApiFactory};
 use claw_memory::{CompactError, CompactFuture, Compactor};
@@ -44,8 +43,6 @@ impl<H: TcpConnect + Dns + 'static> Compactor for LlmCompactor<H> {
                 { "role": "user", "content": format!("{SUMMARY_USER_PREFIX}\n\n{transcript}") }
             ]);
 
-            // todo: thread a real abort flag once `Compactor` carries one.
-            let abort = AtomicBool::new(false);
             let request = ChatRequest::new(SUMMARY_SYSTEM_PROMPT, &messages);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
             let chat_span = tracing::info_span!(
@@ -59,7 +56,7 @@ impl<H: TcpConnect + Dns + 'static> Compactor for LlmCompactor<H> {
                 if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Compaction) {
                     let _ = api.set_config(config);
                 }
-                api.chat(&request, Cancel::new(&abort)).await
+                api.chat(&request, Cancel::never()).await
             }
             .instrument(chat_span)
             .await

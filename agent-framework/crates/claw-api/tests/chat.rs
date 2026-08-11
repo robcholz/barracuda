@@ -1,13 +1,11 @@
 #![allow(clippy::unwrap_used)]
 
-use core::sync::atomic::AtomicBool;
-
 use claw_api::{
     BackendKind, ChatError, ChatJsonRequest, ChatRequest, ClawApi, ClawApiConfig, ClawApiError,
     RetryPolicy,
 };
 use claw_net::testing::{ScriptStep, ScriptedStack};
-use claw_utils::Cancel;
+use claw_utils::{Cancel, CancellationFlag};
 use embedded_io::ErrorKind;
 use futures_lite::future::block_on;
 use serde_json::{json, Value};
@@ -177,7 +175,8 @@ fn cancelled_request_does_not_touch_network() {
     let stack = ScriptedStack::new([ScriptStep::json(200, "{}")]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
     let messages = json!([{"role":"user","content":"hello"}]);
-    let cancelled = AtomicBool::new(true);
+    let cancelled = CancellationFlag::new();
+    cancelled.cancel();
     let error = block_on(api.chat(
         &ChatRequest::new("system", &messages).with_retry(RetryPolicy::none()),
         Cancel::new(&cancelled),
