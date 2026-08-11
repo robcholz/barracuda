@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 /// `agent.json` — the kind's metadata header.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AgentJson {
     /// The kind/role this directory defines (validated against the dir name).
     pub(crate) kind: String,
@@ -19,6 +20,7 @@ pub(crate) struct AgentJson {
 
 /// The `spawn` block of `agent.json`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SpawnJson {
     /// Whether this kind is the one session root baked into the firmware.
     pub(crate) root: bool,
@@ -31,6 +33,7 @@ pub(crate) struct SpawnJson {
 
 /// The `runtime` block of `agent.json`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RuntimeJson {
     /// LLM retry count per iteration.
     pub(crate) retries: u32,
