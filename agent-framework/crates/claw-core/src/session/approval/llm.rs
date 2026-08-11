@@ -201,17 +201,15 @@ where
         )))],
     ))?;
     let tools = tools.begin()?;
-    let messages = json!([
-        {
-            "role": "user",
-            "content": format!(
-                "Pending tool call:\nID: {}\nName: {}\nArguments JSON: {}\n\nPermission reason:\n{reason}\n\nUser reply:\n{user_reply}",
-                tool_call.id,
-                tool_call.name,
-                tool_call.arguments_json,
-            )
-        }
-    ]);
+    let messages = [json!({
+        "role": "user",
+        "content": format!(
+            "Pending tool call:\nID: {}\nName: {}\nArguments JSON: {}\n\nPermission reason:\n{reason}\n\nUser reply:\n{user_reply}",
+            tool_call.id,
+            tool_call.name,
+            tool_call.arguments_json,
+        )
+    })];
     let request = ChatRequest {
         system_prompt: APPROVAL_RESOLVER_PROMPT,
         messages: &messages,

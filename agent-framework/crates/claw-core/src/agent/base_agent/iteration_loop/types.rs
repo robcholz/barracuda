@@ -9,7 +9,7 @@ use strum::IntoStaticStr;
 use super::{IterationId, ToolCallId};
 
 /// Errors from one `IterationLoop::run` step.
-#[derive(Clone, Debug, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, IntoStaticStr, thiserror::Error)]
 pub enum IterationLoopError {
     #[strum(serialize = "missing_provider_tool_call_id")]
     #[error("LLM tool call is missing its provider id")]
@@ -35,7 +35,7 @@ pub enum IterationLoopError {
 pub(crate) struct LlmStep<'a> {
     pub(crate) iteration_id: IterationId,
     pub(crate) system_prompt: &'a str,
-    pub(crate) messages: &'a Value,
+    pub(crate) messages: &'a [Value],
     /// Ephemeral trailing messages for this request only (never persisted),
     /// appended after `messages`. Empty when there is nothing to nudge.
     pub(crate) reminders: &'a [Value],

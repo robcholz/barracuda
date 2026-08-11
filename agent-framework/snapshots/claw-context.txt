@@ -60,7 +60,7 @@ impl claw_context::Context
 pub fn claw_context::Context::fork_blocks(&self) -> alloc::vec::Vec<claw_context::Block<'static>>
 pub fn claw_context::Context::new() -> Self
 pub fn claw_context::Context::reminder(&mut self, text: core::option::Option<&str>) -> &mut Self
-pub fn claw_context::Context::request<'a>(&'a mut self, history: &'a serde_json::value::Value) -> claw_context::RequestContext<'a>
+pub fn claw_context::Context::request<'a>(&'a mut self, history: &'a [serde_json::value::Value]) -> claw_context::RequestContext<'a>
 pub fn claw_context::Context::sink(&mut self) -> claw_context::ContextSink<'_>
 pub fn claw_context::Context::version(&self) -> u64
 pub fn claw_context::Context::with(&mut self, block: claw_context::Block<'_>) -> &mut Self
@@ -71,12 +71,12 @@ pub fn claw_context::Context::default() -> Self
 pub struct claw_context::ContextSink<'a>
 impl<'a> claw_context::ContextSink<'a>
 pub fn claw_context::ContextSink<'a>::block(&mut self, block: claw_context::Block<'_>) -> &mut Self
-pub fn claw_context::ContextSink<'a>::into_history(self) -> serde_json::value::Value
+pub fn claw_context::ContextSink<'a>::into_history(self) -> alloc::vec::Vec<serde_json::value::Value>
 pub fn claw_context::ContextSink<'a>::item(&mut self, item: claw_context::ContextItem<'_>) -> &mut Self
 pub fn claw_context::ContextSink<'a>::message(&mut self, kind: claw_context::BlockKind, value: &serde_json::value::Value) -> &mut Self
 pub fn claw_context::ContextSink<'a>::reminder(&mut self, kind: claw_context::BlockKind, text: core::option::Option<&str>) -> &mut Self
 pub struct claw_context::RequestContext<'a>
 impl<'a> claw_context::RequestContext<'a>
-pub fn claw_context::RequestContext<'a>::history(&self) -> &'a serde_json::value::Value
+pub fn claw_context::RequestContext<'a>::history(&self) -> &'a [serde_json::value::Value]
 pub fn claw_context::RequestContext<'a>::reminders(&self) -> &'a [serde_json::value::Value]
 pub fn claw_context::RequestContext<'a>::system(&self) -> &'a str

@@ -1,4 +1,4 @@
-//! Anthropic-compatible backend, port of `claw_llm_backend_anthropic.c`.
+//! Anthropic-compatible backend.
 //!
 //! Converts OpenAI-style messages/tools to the Anthropic Messages API shape and
 //! parses the Anthropic content-block response back into a [`LlmResponse`].
@@ -10,48 +10,34 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use claw_utils::Cancel;
 use embedded_nal_async::{Dns, TcpConnect};
 
 use super::super::chat_stream::ProviderStream;
-use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
-use super::super::media::prepare_asset;
+use super::super::errors::{ChatError, ClawApiError, InferMediaError};
+use super::super::media::{prepare_asset, Prepared};
 use super::super::transport::{HttpTransport as NetClient, ResponseStream};
 use super::super::types::{
     ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest, ToolCall,
 };
 #[cfg(feature = "cache_profile")]
-use super::shared::parse_anthropic_usage;
-use super::shared::{
-    media_text, post_prepared_async, post_prepared_stream, single_media_asset, BackendContext,
-    PreparedAuth, PreparedRequest,
-};
+use super::shared::AnthropicUsage;
+use super::shared::{media_text, post_json, post_stream, serialize_chat_body, BackendContext};
 use super::sse::{AnthropicSse, ProviderSse};
-use super::BackendImpl;
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-/// Chat endpoint path appended to the base URL.
 const CHAT_PATH: &str = "/messages";
-/// Provider field name that carries the max-tokens value.
-const MAX_TOKENS_FIELD: &str = "max_tokens";
-/// Whether media prep must reject local/inline images (remote URLs only).
-const IMAGE_REMOTE_URL_ONLY: bool = false;
 
-pub(super) struct Anthropic {
+pub(crate) struct Anthropic {
     context: BackendContext,
 }
 
-/// `anthropic_init`
-///
-/// Credential/config validation is centralized in [`crate::ClawApi::set_config`];
-/// `api_key`, `model`, and `base_url` are guaranteed non-empty here.
 fn str_field<'a>(obj: &'a Value, key: &str) -> Option<&'a str> {
     obj.get(key).and_then(|v| v.as_str())
 }
 
-/// `anthropic_make_tool_use_block`
 fn make_tool_use_block(tool_call: &Value) -> Result<Value, ClawApiError> {
     if !tool_call.is_object() {
         return Err(ClawApiError::ApiError(
@@ -82,22 +68,16 @@ fn make_tool_use_block(tool_call: &Value) -> Result<Value, ClawApiError> {
     Ok(json!({"type": "tool_use", "id": id, "name": name, "input": input}))
 }
 
-/// `convert_messages_to_anthropic`
-///
 /// Converts the persisted `messages` history followed by the ephemeral
 /// `reminders` (a two-segment tail) into the Anthropic message shape. The two
 /// segments are viewed as one sequence of references (no `Value` is cloned to
 /// fuse them) so consecutive-tool-message merging still works across the seam.
 fn convert_messages_to_anthropic(
-    messages: &Value,
+    messages: &[Value],
     reminders: &[Value],
 ) -> Result<Value, ClawApiError> {
     let mut out: Vec<Value> = Vec::new();
-    let history = match messages.as_array() {
-        Some(a) => a.as_slice(),
-        None => &[],
-    };
-    let mut iter = history.iter().chain(reminders.iter()).peekable();
+    let mut iter = messages.iter().chain(reminders.iter()).peekable();
 
     while let Some(msg) = iter.next() {
         let role = match str_field(msg, "role") {
@@ -185,15 +165,20 @@ fn make_tool_result_block(message: &Value) -> Option<Value> {
     }))
 }
 
-/// `convert_tools_to_anthropic`. Returns `None` when there are no tools or the
-/// JSON is invalid (the caller distinguishes the two).
+/// Returns `None` when there are no tools and rejects malformed tool JSON.
 ///
 /// When `strict` is true, each tool gets `"strict": true` for Anthropic structured
 /// outputs combined with strict tool use.
-fn convert_tools_to_anthropic(tools_json: Option<&str>, strict: bool) -> Option<Value> {
-    let tools_json = tools_json.filter(|s| !s.is_empty())?;
-    let parsed: Value = serde_json::from_str(tools_json).ok()?;
-    let arr = parsed.as_array()?;
+fn convert_tools_to_anthropic(
+    tools_json: Option<&str>,
+    strict: bool,
+) -> Result<Option<Value>, ChatError> {
+    let Some(tools_json) = tools_json.filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let parsed: Value =
+        serde_json::from_str(tools_json).map_err(|_| ChatError::InvalidToolsJson)?;
+    let arr = parsed.as_array().ok_or(ChatError::InvalidToolsJson)?;
 
     let mut out: Vec<Value> = Vec::new();
     for item in arr {
@@ -236,32 +221,44 @@ fn convert_tools_to_anthropic(tools_json: Option<&str>, strict: bool) -> Option<
         out.push(Value::Object(tool));
     }
 
-    Some(Value::Array(out))
+    Ok(Some(Value::Array(out)))
 }
 
-/// `parse_data_url`: split `data:<mime>;base64,<data>`.
-fn parse_data_url(data_url: &str) -> Option<(String, String)> {
-    const PREFIX: &str = "data:";
-    const MARKER: &str = ";base64,";
-    let rest = data_url.strip_prefix(PREFIX)?;
-    let (mime, data) = rest.split_once(MARKER)?;
-    if data.is_empty() {
-        return None;
-    }
-    Some((mime.to_string(), data.to_string()))
+#[derive(Deserialize, Serialize)]
+struct AnthropicResponse {
+    content: Option<Vec<AnthropicContentBlock>>,
+    #[cfg(feature = "cache_profile")]
+    usage: Option<AnthropicUsage>,
 }
 
-/// `parse_chat_response` (Anthropic content-block form).
+#[derive(Deserialize, Serialize)]
+struct AnthropicContentBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input: Option<Value>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
 fn parse_chat_response(body: &str) -> Result<LlmResponse, ClawApiError> {
-    let root: Value = serde_json::from_str(body).map_err(|_| ClawApiError::Parse)?;
-    let content = match root.get("content") {
-        Some(Value::Array(a)) => a,
-        _ => return Err(ClawApiError::MalformedResponse("response missing content")),
-    };
+    let response: AnthropicResponse =
+        serde_json::from_str(body).map_err(|_| ClawApiError::Parse)?;
+    let content = response
+        .content
+        .ok_or(ClawApiError::MalformedResponse("response missing content"))?;
 
     let raw_message_json = serde_json::to_string(&json!({
         "role": "assistant",
-        "content": Value::Array(content.clone()),
+        "content": &content,
     }))
     .map_err(|_| ClawApiError::ApiError("out of memory copying raw message"))?;
 
@@ -270,30 +267,32 @@ fn parse_chat_response(body: &str) -> Result<LlmResponse, ClawApiError> {
     let mut tool_calls: Vec<ToolCall> = Vec::new();
 
     for block in content {
-        match str_field(block, "type") {
-            Some("text") => {
-                if let Some(t) = str_field(block, "text") {
-                    text.push_str(t);
+        match block.kind.as_str() {
+            "text" => {
+                if let Some(value) = block.text {
+                    text.push_str(&value);
                 }
             }
-            Some("thinking") => {
-                if let Some(t) = str_field(block, "thinking") {
-                    reasoning.push_str(t);
+            "thinking" => {
+                if let Some(value) = block.thinking {
+                    reasoning.push_str(&value);
                 }
             }
-            Some("tool_use") => {
-                let id = str_field(block, "id")
+            "tool_use" => {
+                let id = block
+                    .id
                     .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?;
-                let name = str_field(block, "name")
+                let name = block
+                    .name
                     .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?;
-                let arguments_json = match block.get("input") {
-                    Some(input) => serde_json::to_string(input)
+                let arguments_json = match block.input {
+                    Some(input) => serde_json::to_string(&input)
                         .map_err(|_| ClawApiError::ApiError("out of memory copying tool call"))?,
                     None => "{}".to_string(),
                 };
                 tool_calls.push(ToolCall {
-                    id: id.to_string(),
-                    name: name.to_string(),
+                    id,
+                    name,
                     arguments_json,
                 });
             }
@@ -314,40 +313,53 @@ fn parse_chat_response(body: &str) -> Result<LlmResponse, ClawApiError> {
         raw_message_json: Some(raw_message_json),
         tool_calls,
         #[cfg(feature = "cache_profile")]
-        usage: parse_anthropic_usage(&root),
+        usage: response.usage.and_then(AnthropicUsage::profile),
     })
 }
 
 impl Anthropic {
     /// The shared request body object, without the transport-only `stream` flag.
-    fn chat_body_object(&self, request: &ChatRequest) -> Result<Map<String, Value>, ChatError> {
-        let messages = convert_messages_to_anthropic(request.messages, request.reminders)?;
+    fn chat_body_object(
+        &self,
+        system_prompt: &str,
+        messages: &[Value],
+        reminders: &[Value],
+        tools_json: Option<&str>,
+        strict_tools: bool,
+    ) -> Result<Map<String, Value>, ChatError> {
+        let messages = convert_messages_to_anthropic(messages, reminders)?;
 
-        let mut body = Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        if !request.system_prompt.is_empty() {
-            body.insert("system".to_string(), json!(request.system_prompt));
+        let mut body = self.context.request_body();
+        if !system_prompt.is_empty() {
+            body.insert("system".to_string(), json!(system_prompt));
         }
         body.insert("messages".to_string(), messages);
 
-        Self::insert_tools_into_body(&mut body, request.tools_json, false)?;
+        Self::insert_tools_into_body(&mut body, tools_json, strict_tools)?;
         Ok(body)
     }
 
-    /// `build_chat_body`
     fn build_chat_body(&self, request: &ChatRequest) -> Result<String, ChatError> {
-        serialize_body(self.chat_body_object(request)?)
+        serialize_chat_body(self.chat_body_object(
+            request.system_prompt,
+            request.messages,
+            request.reminders,
+            request.tools_json,
+            false,
+        )?)
     }
 
     /// Like [`build_chat_body`](Self::build_chat_body) but sets `stream: true`.
     fn build_stream_body(&self, request: &ChatRequest) -> Result<String, ChatError> {
-        let mut body = self.chat_body_object(request)?;
+        let mut body = self.chat_body_object(
+            request.system_prompt,
+            request.messages,
+            request.reminders,
+            request.tools_json,
+            false,
+        )?;
         body.insert("stream".to_string(), json!(true));
-        serialize_body(body)
+        serialize_chat_body(body)
     }
 
     fn build_chat_json_body(
@@ -355,18 +367,13 @@ impl Anthropic {
         request: &ChatJsonRequest<'_>,
         schema: &Value,
     ) -> Result<String, ChatError> {
-        let messages = convert_messages_to_anthropic(request.messages, request.reminders)?;
-
-        let mut body = Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        if !request.system_prompt.is_empty() {
-            body.insert("system".to_string(), json!(request.system_prompt));
-        }
-        body.insert("messages".to_string(), messages);
+        let mut body = self.chat_body_object(
+            request.chat.system_prompt,
+            request.chat.messages,
+            request.chat.reminders,
+            request.chat.tools_json,
+            true,
+        )?;
         body.insert(
             "output_config".to_string(),
             json!({
@@ -377,11 +384,7 @@ impl Anthropic {
             }),
         );
 
-        Self::insert_tools_into_body(&mut body, request.tools_json, true)?;
-
-        serde_json::to_string(&Value::Object(body)).map_err(|_| {
-            ChatError::Api(ClawApiError::ApiError("out of memory serializing request"))
-        })
+        serialize_chat_body(body)
     }
 
     fn insert_tools_into_body(
@@ -389,11 +392,7 @@ impl Anthropic {
         tools_json: Option<&str>,
         strict: bool,
     ) -> Result<(), ChatError> {
-        let tools = convert_tools_to_anthropic(tools_json, strict);
-        if tools_json.is_some_and(|s| !s.is_empty()) && tools.is_none() {
-            return Err(ChatError::InvalidToolsJson);
-        }
-        if let Some(tools) = tools {
+        if let Some(tools) = convert_tools_to_anthropic(tools_json, strict)? {
             if tools.as_array().is_some_and(|a| !a.is_empty()) {
                 body.insert("tools".to_string(), tools);
                 body.insert("tool_choice".to_string(), json!({"type": "auto"}));
@@ -402,59 +401,18 @@ impl Anthropic {
         Ok(())
     }
 
-    /// Anthropic's required auth/version headers, owned for a [`PreparedRequest`].
-    fn headers(&self) -> Vec<(&'static str, String)> {
-        vec![
-            ("x-api-key", self.context.api_key().to_string()),
-            ("anthropic-version", ANTHROPIC_VERSION.to_string()),
-        ]
-    }
-
-    fn prepare_chat(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_chat_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
-    }
-
-    fn prepare_chat_json(
-        &self,
-        request: &ChatJsonRequest<'_>,
-        schema: &Value,
-    ) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_chat_json_body(request, schema)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
-    }
-
-    fn prepare_stream(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_stream_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
-    }
-
     /// Serialize the media inference request body (no transport).
     fn build_media_body(&self, request: &MediaRequest<'_>) -> Result<String, InferMediaError> {
         let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
             return Err(InferMediaError::IncompleteRequest);
         };
-        let asset = single_media_asset(request.media)?;
-
-        let prepared = prepare_asset(asset, IMAGE_REMOTE_URL_ONLY, self.context.image_max_bytes())?;
-        if !prepared.is_data_url() {
+        let Prepared::Inline { mime_type, base64 } =
+            prepare_asset(request.media, self.context.image_max_bytes)?
+        else {
             return Err(InferMediaError::RequiresLocalImage);
-        }
-        let (mime, base64_data) =
-            parse_data_url(prepared.payload()).ok_or(InferMediaError::PayloadPrepFailed)?;
+        };
 
-        let mut body = Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
+        let mut body = self.context.request_body();
         if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
             body.insert("system".to_string(), json!(system));
         }
@@ -464,7 +422,7 @@ impl Anthropic {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": user_prompt},
-                    {"type": "image", "source": {"type": "base64", "media_type": mime, "data": base64_data}}
+                    {"type": "image", "source": {"type": "base64", "media_type": mime_type, "data": base64}}
                 ]
             }]),
         );
@@ -472,82 +430,68 @@ impl Anthropic {
             .map_err(|_| ClawApiError::ApiError("out of memory serializing media request").into())
     }
 
-    fn prepare_media(
-        &self,
-        request: &MediaRequest<'_>,
-    ) -> Result<PreparedRequest, InferMediaError> {
-        let body = self.build_media_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, PreparedAuth::None, self.headers()))
-    }
-}
-
-impl BackendImpl for Anthropic {
-    /// `anthropic_init`
-    fn make(config: &ClawApiConfig) -> Result<Self, InitError> {
-        Ok(Anthropic {
-            context: BackendContext::from_config(config),
-        })
+    pub(super) fn new(config: ClawApiConfig) -> Self {
+        Self {
+            context: BackendContext::new(config, CHAT_PATH, |api_key| {
+                vec![
+                    ("x-api-key".to_string(), api_key),
+                    (
+                        "anthropic-version".to_string(),
+                        ANTHROPIC_VERSION.to_string(),
+                    ),
+                ]
+            }),
+        }
     }
 
-    fn timeout_ms(&self) -> u32 {
-        self.context.timeout_ms()
+    pub(super) fn timeout_ms(&self) -> u32 {
+        self.context.timeout_ms
     }
 
-    async fn chat_async<S: TcpConnect + Dns>(
+    pub(super) async fn chat<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatRequest<'_>,
-        cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat(request)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
-        Ok(parse_chat_response(&response.body)?)
+        let body = self.build_chat_body(request)?;
+        let response = post_json(http, &self.context, &body).await?;
+        parse_chat_response(&response.body).map_err(Into::into)
     }
 
-    async fn chat_json_async<S: TcpConnect + Dns>(
+    pub(super) async fn chat_json<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatJsonRequest<'_>,
         _schema_name: &str,
         schema: &Value,
-        cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat_json(request, schema)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
-        Ok(parse_chat_response(&response.body)?)
+        let body = self.build_chat_json_body(request, schema)?;
+        let response = post_json(http, &self.context, &body).await?;
+        parse_chat_response(&response.body).map_err(Into::into)
     }
 
-    async fn infer_media_async<S: TcpConnect + Dns>(
+    pub(super) async fn infer_media<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &MediaRequest<'_>,
-        cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError> {
-        let prepared = self.prepare_media(request)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
+        let body = self.build_media_body(request)?;
+        let response = post_json(http, &self.context, &body).await?;
         media_text(parse_chat_response(&response.body)?)
     }
 
-    async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
+    pub(super) async fn chat_stream<'h, 'r, S: TcpConnect + Dns>(
         &self,
         http: &'h mut NetClient<'_, S>,
         request: &'r ChatRequest<'r>,
-        cancel: Cancel<'h>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
-        let prepared = self.prepare_stream(request)?;
-        post_prepared_stream(
+        let body = self.build_stream_body(request)?;
+        post_stream(
             http,
-            &prepared,
-            cancel,
+            &self.context,
+            body,
             ProviderSse::Anthropic(AnthropicSse::new()),
         )
         .await
     }
-}
-
-fn serialize_body(body: Map<String, Value>) -> Result<String, ChatError> {
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| ChatError::Api(ClawApiError::ApiError("out of memory serializing request")))
 }

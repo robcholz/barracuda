@@ -12,33 +12,25 @@
 //! ToolCalls(End)`. With cache profiling enabled, one final `Usage` event may
 //! follow those boundaries.
 
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use claw_utils::stream::StreamPart;
-use serde_json::Value;
+use serde::Deserialize;
 
 use super::super::errors::{ChatError, ClawApiError};
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
 use super::super::types::{ChatStreamEvent, ToolCall};
 #[cfg(feature = "cache_profile")]
-use super::shared::{parse_anthropic_usage, parse_openai_usage};
+use super::shared::{AnthropicUsage, OpenAiUsage};
 
 #[cfg(feature = "cache_profile")]
 fn merge_usage(current: &mut Option<ProviderUsage>, incoming: ProviderUsage) {
     let aggregate = current.get_or_insert_default();
-    if incoming.input_tokens.is_some() {
-        aggregate.input_tokens = incoming.input_tokens;
-    }
-    if incoming.output_tokens.is_some() {
-        aggregate.output_tokens = incoming.output_tokens;
-    }
-    if incoming.cache_read_tokens.is_some() {
-        aggregate.cache_read_tokens = incoming.cache_read_tokens;
-    }
-    if incoming.cache_write_tokens.is_some() {
-        aggregate.cache_write_tokens = incoming.cache_write_tokens;
-    }
+    aggregate.input_tokens = incoming.input_tokens.or(aggregate.input_tokens);
+    aggregate.output_tokens = incoming.output_tokens.or(aggregate.output_tokens);
+    aggregate.cache_read_tokens = incoming.cache_read_tokens.or(aggregate.cache_read_tokens);
+    aggregate.cache_write_tokens = incoming.cache_write_tokens.or(aggregate.cache_write_tokens);
 }
 
 /// The concrete SSE parser for the selected backend. Lets [`crate::ChatStream`]
@@ -89,7 +81,7 @@ struct ContentEvents {
     emitted: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 enum ContentPhase {
     #[default]
     Reasoning,
@@ -117,10 +109,7 @@ impl ContentEvents {
         fragment: String,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        self.finish_reasoning(out);
-        if self.phase != ContentPhase::Output {
-            return Err(ClawApiError::Parse.into());
-        }
+        self.advance_to(ContentPhase::Output, out)?;
         self.emitted = true;
         out.push(ChatStreamEvent::Output(StreamPart::Delta(fragment)));
         Ok(())
@@ -131,11 +120,7 @@ impl ContentEvents {
         call: ToolCall,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        self.finish_reasoning(out);
-        self.finish_output(out);
-        if self.phase != ContentPhase::ToolCalls {
-            return Err(ClawApiError::Parse.into());
-        }
+        self.advance_to(ContentPhase::ToolCalls, out)?;
         self.emitted = true;
         out.push(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)));
         Ok(())
@@ -145,31 +130,37 @@ impl ContentEvents {
         if self.phase == ContentPhase::Ended {
             return Err(ClawApiError::Parse.into());
         }
-        self.finish_reasoning(out);
-        self.finish_output(out);
-        self.finish_tool_calls(out);
+        self.advance_to(ContentPhase::Ended, out)
+    }
+
+    fn advance_to(
+        &mut self,
+        target: ContentPhase,
+        out: &mut Vec<ChatStreamEvent>,
+    ) -> Result<(), ChatError> {
+        if self.phase > target {
+            return Err(ClawApiError::Parse.into());
+        }
+        while self.phase < target {
+            let (event, next) = match self.phase {
+                ContentPhase::Reasoning => (
+                    ChatStreamEvent::Reasoning(StreamPart::End),
+                    ContentPhase::Output,
+                ),
+                ContentPhase::Output => (
+                    ChatStreamEvent::Output(StreamPart::End),
+                    ContentPhase::ToolCalls,
+                ),
+                ContentPhase::ToolCalls => (
+                    ChatStreamEvent::ToolCalls(StreamPart::End),
+                    ContentPhase::Ended,
+                ),
+                ContentPhase::Ended => return Err(ClawApiError::Parse.into()),
+            };
+            out.push(event);
+            self.phase = next;
+        }
         Ok(())
-    }
-
-    fn finish_reasoning(&mut self, out: &mut Vec<ChatStreamEvent>) {
-        if self.phase == ContentPhase::Reasoning {
-            out.push(ChatStreamEvent::Reasoning(StreamPart::End));
-            self.phase = ContentPhase::Output;
-        }
-    }
-
-    fn finish_output(&mut self, out: &mut Vec<ChatStreamEvent>) {
-        if self.phase == ContentPhase::Output {
-            out.push(ChatStreamEvent::Output(StreamPart::End));
-            self.phase = ContentPhase::ToolCalls;
-        }
-    }
-
-    fn finish_tool_calls(&mut self, out: &mut Vec<ChatStreamEvent>) {
-        if self.phase == ContentPhase::ToolCalls {
-            out.push(ChatStreamEvent::ToolCalls(StreamPart::End));
-            self.phase = ContentPhase::Ended;
-        }
     }
 
     fn has_delta(&self) -> bool {
@@ -192,6 +183,41 @@ struct OpenAiToolCall {
     args: String,
 }
 
+#[derive(Deserialize)]
+struct OpenAiChunk {
+    #[serde(default)]
+    choices: Vec<OpenAiChunkChoice>,
+    #[cfg(feature = "cache_profile")]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChunkChoice {
+    delta: Option<OpenAiDelta>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiDelta {
+    reasoning_content: Option<String>,
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<OpenAiToolCallDelta>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiToolCallDelta {
+    #[serde(default)]
+    index: u64,
+    id: Option<String>,
+    function: Option<OpenAiFunctionDelta>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiFunctionDelta {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
 /// Incremental parser for an OpenAI-compatible `chat/completions` SSE stream.
 #[derive(Default)]
 pub(crate) struct OpenAiSse {
@@ -212,40 +238,38 @@ impl OpenAiSse {
         payload: &str,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        let value: Value = serde_json::from_str(payload).map_err(|_| ClawApiError::Parse)?;
+        let chunk: OpenAiChunk = serde_json::from_str(payload).map_err(|_| ClawApiError::Parse)?;
         #[cfg(feature = "cache_profile")]
-        if let Some(usage) = parse_openai_usage(&value) {
+        if let Some(usage) = chunk.usage.and_then(OpenAiUsage::profile) {
             merge_usage(&mut self.usage, usage);
         }
-        let Some(delta) = value
-            .get("choices")
-            .and_then(|choices| choices.get(0))
-            .and_then(|choice| choice.get("delta"))
+        let Some(delta) = chunk
+            .choices
+            .into_iter()
+            .next()
+            .and_then(|choice| choice.delta)
         else {
             return Ok(()); // e.g. a usage-only final chunk carries no delta
         };
 
-        if let Some(reasoning) = delta.get("reasoning_content").and_then(Value::as_str) {
+        if let Some(reasoning) = delta.reasoning_content {
             if !reasoning.is_empty() {
-                self.events.reasoning(reasoning.to_string(), out)?;
+                self.events.reasoning(reasoning, out)?;
             }
         }
-        if let Some(content) = delta.get("content").and_then(Value::as_str) {
+        if let Some(content) = delta.content {
             if !content.is_empty() {
-                self.events.output(content.to_string(), out)?;
+                self.events.output(content, out)?;
             }
         }
-        if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
-            for call in calls {
-                self.merge_tool_call(call)?;
-            }
+        for call in delta.tool_calls {
+            self.merge_tool_call(call)?;
         }
         Ok(())
     }
 
-    fn merge_tool_call(&mut self, call: &Value) -> Result<(), ChatError> {
-        let raw_index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
-        let index = usize::try_from(u32::try_from(raw_index).map_err(|_| ClawApiError::Parse)?)
+    fn merge_tool_call(&mut self, call: OpenAiToolCallDelta) -> Result<(), ChatError> {
+        let index = usize::try_from(u32::try_from(call.index).map_err(|_| ClawApiError::Parse)?)
             .map_err(|_| ClawApiError::Parse)?;
         if index > self.tool_calls.len() {
             return Err(ClawApiError::Parse.into());
@@ -254,23 +278,15 @@ impl OpenAiSse {
             self.tool_calls.push(OpenAiToolCall::default());
         }
         let slot = self.tool_calls.get_mut(index).ok_or(ClawApiError::Parse)?;
-        if let Some(id) = call
-            .get("id")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
-            slot.id = id.to_string();
+        if let Some(id) = call.id.filter(|id| !id.is_empty()) {
+            slot.id = id;
         }
-        if let Some(function) = call.get("function") {
-            if let Some(name) = function
-                .get("name")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-            {
-                slot.name = name.to_string();
+        if let Some(function) = call.function {
+            if let Some(name) = function.name.filter(|name| !name.is_empty()) {
+                slot.name = name;
             }
-            if let Some(args) = function.get("arguments").and_then(Value::as_str) {
-                slot.args.push_str(args);
+            if let Some(arguments) = function.arguments {
+                slot.args.push_str(&arguments);
             }
         }
         Ok(())
@@ -337,6 +353,66 @@ enum AnthBlock {
     Other,
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicEvent {
+    MessageStart {
+        message: Option<AnthropicMessageStart>,
+    },
+    MessageDelta {
+        #[cfg(feature = "cache_profile")]
+        usage: Option<AnthropicUsage>,
+    },
+    ContentBlockStart {
+        #[serde(default)]
+        index: u64,
+        content_block: Option<AnthropicBlockStart>,
+    },
+    ContentBlockDelta {
+        #[serde(default)]
+        index: u64,
+        delta: Option<AnthropicDelta>,
+    },
+    ContentBlockStop {
+        #[serde(default)]
+        index: u64,
+    },
+    MessageStop,
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+struct AnthropicMessageStart {
+    #[cfg(feature = "cache_profile")]
+    usage: Option<AnthropicUsage>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicBlockStart {
+    #[serde(rename = "type")]
+    kind: String,
+    id: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum AnthropicDelta {
+    ThinkingDelta {
+        thinking: Option<String>,
+    },
+    SignatureDelta,
+    TextDelta {
+        text: Option<String>,
+    },
+    InputJsonDelta {
+        partial_json: Option<String>,
+    },
+    #[serde(other)]
+    Other,
+}
+
 /// Incremental parser for an Anthropic Messages API SSE stream.
 #[derive(Default)]
 pub(crate) struct AnthropicSse {
@@ -358,16 +434,39 @@ impl AnthropicSse {
         payload: &str,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        let value: Value = serde_json::from_str(payload).map_err(|_| ClawApiError::Parse)?;
-        #[cfg(feature = "cache_profile")]
-        if let Some(usage) = parse_anthropic_usage(&value) {
-            merge_usage(&mut self.usage, usage);
-        }
-        match value.get("type").and_then(Value::as_str) {
-            Some("content_block_start") => self.on_block_start(&value)?,
-            Some("content_block_delta") => self.on_block_delta(&value, out)?,
-            Some("content_block_stop") => self.on_block_stop(&value, out)?,
-            Some("message_stop") => {
+        let event: AnthropicEvent =
+            serde_json::from_str(payload).map_err(|_| ClawApiError::Parse)?;
+        match event {
+            AnthropicEvent::MessageStart { message } => {
+                #[cfg(not(feature = "cache_profile"))]
+                let _ = message;
+                #[cfg(feature = "cache_profile")]
+                if let Some(usage) = message
+                    .and_then(|message| message.usage)
+                    .and_then(AnthropicUsage::profile)
+                {
+                    merge_usage(&mut self.usage, usage);
+                }
+            }
+            AnthropicEvent::MessageDelta {
+                #[cfg(feature = "cache_profile")]
+                usage,
+            } =>
+            {
+                #[cfg(feature = "cache_profile")]
+                if let Some(usage) = usage.and_then(AnthropicUsage::profile) {
+                    merge_usage(&mut self.usage, usage);
+                }
+            }
+            AnthropicEvent::ContentBlockStart {
+                index,
+                content_block,
+            } => self.on_block_start(index, content_block)?,
+            AnthropicEvent::ContentBlockDelta { index, delta } => {
+                self.on_block_delta(index, delta, out)?
+            }
+            AnthropicEvent::ContentBlockStop { index } => self.on_block_stop(index, out)?,
+            AnthropicEvent::MessageStop => {
                 if !self.events.has_delta() {
                     return Err(ClawApiError::EmptyResponse.into());
                 }
@@ -378,7 +477,7 @@ impl AnthropicSse {
                 }
                 self.done = true;
             }
-            _ => {} // message_start / message_delta / ping: ignored
+            AnthropicEvent::Other => {}
         }
         Ok(())
     }
@@ -395,29 +494,18 @@ impl AnthropicSse {
             .ok_or_else(|| ClawApiError::Parse.into())
     }
 
-    fn on_block_start(&mut self, value: &Value) -> Result<(), ChatError> {
-        let index = block_index(value)?;
-        let kind = value
-            .get("content_block")
-            .and_then(|b| b.get("type"))
-            .and_then(Value::as_str);
-        let block = match kind {
-            Some("tool_use") => {
-                let content_block = value.get("content_block");
-                AnthBlock::ToolUse {
-                    id: content_block
-                        .and_then(|b| b.get("id"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    name: content_block
-                        .and_then(|b| b.get("name"))
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    args: String::new(),
-                }
-            }
+    fn on_block_start(
+        &mut self,
+        raw_index: u64,
+        content_block: Option<AnthropicBlockStart>,
+    ) -> Result<(), ChatError> {
+        let index = block_index(raw_index)?;
+        let block = match content_block {
+            Some(content_block) if content_block.kind == "tool_use" => AnthBlock::ToolUse {
+                id: content_block.id.unwrap_or_default(),
+                name: content_block.name.unwrap_or_default(),
+                args: String::new(),
+            },
             _ => AnthBlock::Other,
         };
         *self.slot(index)? = block;
@@ -426,47 +514,48 @@ impl AnthropicSse {
 
     fn on_block_delta(
         &mut self,
-        value: &Value,
+        raw_index: u64,
+        delta: Option<AnthropicDelta>,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        let index = block_index(value)?;
-        let Some(delta) = value.get("delta") else {
+        let index = block_index(raw_index)?;
+        let Some(delta) = delta else {
             return Ok(());
         };
-        match delta.get("type").and_then(Value::as_str) {
-            Some("thinking_delta") => {
-                if let Some(fragment) = delta.get("thinking").and_then(Value::as_str) {
+        match delta {
+            AnthropicDelta::ThinkingDelta { thinking } => {
+                if let Some(fragment) = thinking {
                     if !fragment.is_empty() {
-                        self.events.reasoning(fragment.to_string(), out)?;
+                        self.events.reasoning(fragment, out)?;
                     }
                 }
             }
-            Some("signature_delta") => {}
-            Some("text_delta") => {
-                if let Some(fragment) = delta.get("text").and_then(Value::as_str) {
+            AnthropicDelta::SignatureDelta => {}
+            AnthropicDelta::TextDelta { text } => {
+                if let Some(fragment) = text {
                     if !fragment.is_empty() {
-                        self.events.output(fragment.to_string(), out)?;
+                        self.events.output(fragment, out)?;
                     }
                 }
             }
-            Some("input_json_delta") => {
-                if let Some(fragment) = delta.get("partial_json").and_then(Value::as_str) {
+            AnthropicDelta::InputJsonDelta { partial_json } => {
+                if let Some(fragment) = partial_json {
                     if let AnthBlock::ToolUse { args, .. } = self.slot(index)? {
-                        args.push_str(fragment);
+                        args.push_str(&fragment);
                     }
                 }
             }
-            _ => {}
+            AnthropicDelta::Other => {}
         }
         Ok(())
     }
 
     fn on_block_stop(
         &mut self,
-        value: &Value,
+        raw_index: u64,
         out: &mut Vec<ChatStreamEvent>,
     ) -> Result<(), ChatError> {
-        let index = block_index(value)?;
+        let index = block_index(raw_index)?;
         let Some(block) = self.blocks.get_mut(index) else {
             return Ok(());
         };
@@ -502,14 +591,14 @@ impl SseParse for AnthropicSse {
     }
 }
 
-fn block_index(value: &Value) -> Result<usize, ChatError> {
-    let raw_index = value.get("index").and_then(Value::as_u64).unwrap_or(0);
+fn block_index(raw_index: u64) -> Result<usize, ChatError> {
     usize::try_from(u32::try_from(raw_index).map_err(|_| ClawApiError::Parse)?)
         .map_err(|_| ClawApiError::Parse.into())
 }
 
 #[cfg(test)]
 mod tests {
+    use alloc::string::ToString;
     use alloc::vec;
     use eventsource_stream::EventStream;
     use futures_lite::{future::block_on, StreamExt as _};

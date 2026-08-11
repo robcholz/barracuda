@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use claw_api::{BackendKind, ChatRequest, ChatStreamEvent, ClawApi, ClawApiConfig, RetryPolicy};
+use claw_api::{
+    BackendKind, ChatError, ChatRequest, ChatStreamEvent, ClawApi, ClawApiConfig, ClawApiError,
+    RetryPolicy, StatusCode,
+};
 use claw_net::testing::{ScriptStep, ScriptedStack};
 use claw_utils::stream::StreamPart;
 use claw_utils::Cancel;
@@ -30,7 +33,7 @@ fn stream_parses_sse_across_arbitrary_network_chunks() {
     let body = sse("hello");
     let stack = ScriptedStack::new([ScriptStep::sse(200, &[&body[..11], &body[11..]])]);
     let mut api = configured(&stack);
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let events = block_on(async {
         api.chat_stream(&ChatRequest::new("system", &messages), Cancel::never())
             .await
@@ -56,7 +59,7 @@ fn sequential_streams_reuse_one_connection() {
         ScriptStep::sse(200, &[&second_body]),
     ]);
     let mut api = configured(&stack);
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
 
     block_on(async {
         api.chat_stream(&ChatRequest::new("system", &messages), Cancel::never())
@@ -83,7 +86,7 @@ fn stream_retries_connect_failure_before_emitting() {
         ScriptStep::sse(200, &[&body]),
     ]);
     let mut api = configured(&stack);
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::fixed(1, 0));
     let events = block_on(async {
         api.chat_stream(&request, Cancel::never())
@@ -103,13 +106,20 @@ fn stream_retries_connect_failure_before_emitting() {
 fn non_success_stream_surfaces_status_and_body() {
     let stack = ScriptedStack::new([ScriptStep::sse(429, &["rate limited"])]);
     let mut api = configured(&stack);
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::none());
     let result = block_on(api.chat_stream(&request, Cancel::never()));
     let error = match result {
         Ok(_) => panic!("non-success response unexpectedly opened a stream"),
         Err(error) => error,
     };
+    assert!(matches!(
+        &error,
+        ChatError::Api(ClawApiError::TransientHttpStatus {
+            status: StatusCode(429),
+            ..
+        })
+    ));
     assert!(error.to_string().contains("429"));
     assert!(error.to_string().contains("rate limited"));
 }
@@ -126,15 +136,15 @@ fn stalled_stream_body_times_out_after_the_response_head() {
     );
     config.timeout_ms = 1;
     api.set_config(config).unwrap();
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::none());
     let mut stream = block_on(api.chat_stream(&request, Cancel::never())).unwrap();
 
     let error = block_on(stream.next()).unwrap().unwrap_err();
-    assert_eq!(
+    assert!(matches!(
         error,
         claw_api::ChatError::Api(claw_api::ClawApiError::Timeout)
-    );
+    ));
 }
 
 #[test]
@@ -142,7 +152,7 @@ fn non_success_stream_truncates_the_error_body() {
     let body = format!("{}tail-marker", "x".repeat(1100));
     let stack = ScriptedStack::new([ScriptStep::sse(400, &[&body])]);
     let mut api = configured(&stack);
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let request = ChatRequest::new("system", &messages).with_retry(RetryPolicy::none());
     let error = match block_on(api.chat_stream(&request, Cancel::never())) {
         Ok(_) => panic!("non-success response unexpectedly opened a stream"),

@@ -5,13 +5,10 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::Cell;
-use core::fmt;
-use core::future::{poll_fn, Future};
+use core::future::Future;
 use core::pin::Pin;
-use core::task::Poll;
 
 use claw_utils::yield_stream::try_yield_stream;
-use claw_utils::Cancel;
 use embedded_io_async::Read as _;
 use embedded_nal_async::{Dns, TcpConnect};
 use futures_core::Stream;
@@ -19,38 +16,10 @@ use ouroboros::self_referencing;
 use reqwless::client::{HttpClient, HttpResource};
 use reqwless::headers::ContentType;
 use reqwless::request::RequestBuilder as _;
+use reqwless::response::StatusCode;
 
 #[cfg(all(feature = "embedded-tls", feature = "mbedtls"))]
 compile_error!("select exactly one claw-api TLS backend");
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StatusCode(u16);
-
-impl StatusCode {
-    pub const OK: Self = Self(200);
-    pub const NO_CONTENT: Self = Self(204);
-
-    #[must_use]
-    pub const fn new(code: u16) -> Self {
-        Self(code)
-    }
-
-    #[must_use]
-    pub const fn as_u16(self) -> u16 {
-        self.0
-    }
-
-    #[must_use]
-    pub const fn is_success(self) -> bool {
-        self.0 >= 200 && self.0 < 300
-    }
-}
-
-impl fmt::Display for StatusCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Response {
@@ -66,28 +35,38 @@ pub(crate) enum ResponsePart {
 
 pub(crate) type ResponseStream<'a> = Pin<Box<dyn Stream<Item = Result<ResponsePart, Error>> + 'a>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("request was cancelled")]
     Cancelled,
     #[error("HTTPS requested without a TLS configuration")]
     TlsNotConfigured,
-    #[error("DNS lookup failed")]
-    Dns,
-    #[error("network error: {0:?}")]
-    Network(embedded_io::ErrorKind),
     #[error("invalid URL")]
     InvalidUrl,
-    #[error("TLS handshake or verification failed")]
-    Tls,
     #[error("HTTP codec error")]
     Codec,
-    #[error("HTTP buffer is too small")]
-    BufferTooSmall,
     #[error("connection was aborted")]
     ConnectionAborted,
     #[error("response body is not UTF-8")]
     InvalidUtf8,
+    #[error(transparent)]
+    Reqwless(#[from] reqwless::Error),
+}
+
+impl Error {
+    /// Whether retrying the request may recover from this transport failure.
+    #[must_use]
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::ConnectionAborted
+                | Self::Reqwless(
+                    reqwless::Error::Dns
+                        | reqwless::Error::Network(_)
+                        | reqwless::Error::ConnectionAborted
+                )
+        )
+    }
 }
 
 struct ConnectionOwner<'net, S>
@@ -133,14 +112,28 @@ where
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
+        Self::from_client(
+            HttpClient::new(network, network),
+            header_buffer_size,
+            read_buffer_size,
+            false,
+        )
+    }
+
+    fn from_client(
+        client: HttpClient<'net, S, S>,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+        tls_configured: bool,
+    ) -> Self {
         Self {
-            disconnected: Some(HttpClient::new(network, network)),
+            disconnected: Some(client),
             connected: None,
             connected_origin: None,
             connection_healthy: Cell::new(true),
             header_buffer: vec![0; header_buffer_size],
             read_buffer: vec![0; read_buffer_size],
-            tls_configured: false,
+            tls_configured,
         }
     }
 
@@ -182,7 +175,7 @@ where
             }
             Err((error, heads)) => {
                 self.disconnected = Some(heads.owner.client);
-                Err(map_reqwless_error(error))
+                Err(error.into())
             }
         }
     }
@@ -216,16 +209,12 @@ where
                         .content_type(ContentType::ApplicationJson)
                         .body(body.as_bytes())
                         .send(header_buffer.as_mut_slice())
-                        .await
-                        .map_err(map_reqwless_error)?;
-                    let status = StatusCode::new(response.status.0);
+                        .await?;
+                    let status = response.status;
                     let mut reader = response.body().reader();
                     let mut response_body = Vec::new();
                     loop {
-                        let read = reader
-                            .read(read_buffer.as_mut_slice())
-                            .await
-                            .map_err(map_reqwless_error)?;
+                        let read = reader.read(read_buffer.as_mut_slice()).await?;
                         if read == 0 {
                             break;
                         }
@@ -248,19 +237,8 @@ where
         url: &str,
         body: &str,
         headers: &[(&str, &str)],
-        cancel: Cancel<'_>,
     ) -> Result<Response, Error> {
-        let result = {
-            let mut transfer = core::pin::pin!(self.post_json_inner(url, body, headers));
-            poll_fn(move |context| {
-                if cancel.is_cancelled() {
-                    Poll::Ready(Err(Error::Cancelled))
-                } else {
-                    transfer.as_mut().poll(context)
-                }
-            })
-            .await
-        };
+        let result = self.post_json_inner(url, body, headers).await;
         if result.is_err() {
             self.disconnect();
         }
@@ -272,12 +250,8 @@ where
         url: String,
         body: String,
         headers: Vec<(String, String)>,
-        cancel: Cancel<'a>,
     ) -> ResponseStream<'a> {
         try_yield_stream(|yielder| async move {
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
             if url.starts_with("https://") && !self.tls_configured {
                 return Err(Error::TlsNotConfigured);
             }
@@ -306,20 +280,11 @@ where
                                 .content_type(ContentType::ApplicationJson)
                                 .body(body.as_bytes())
                                 .send(header_buffer.as_mut_slice())
-                                .await
-                                .map_err(map_reqwless_error)?;
-                            yielder
-                                .yield_one(ResponsePart::Head(StatusCode::new(response.status.0)))
-                                .await;
+                                .await?;
+                            yielder.yield_one(ResponsePart::Head(response.status)).await;
                             let mut reader = response.body().reader();
                             loop {
-                                if cancel.is_cancelled() {
-                                    return Err(Error::Cancelled);
-                                }
-                                let read = reader
-                                    .read(read_buffer.as_mut_slice())
-                                    .await
-                                    .map_err(map_reqwless_error)?;
+                                let read = reader.read(read_buffer.as_mut_slice()).await?;
                                 if read == 0 {
                                     return Ok(());
                                 }
@@ -343,7 +308,7 @@ where
     }
 }
 
-#[cfg(feature = "embedded-tls")]
+#[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
 impl<'net, S> HttpTransport<'net, S>
 where
     S: TcpConnect + Dns + 'net,
@@ -355,39 +320,12 @@ where
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
-        Self {
-            disconnected: Some(HttpClient::new_with_tls(network, network, tls)),
-            connected: None,
-            connected_origin: None,
-            connection_healthy: Cell::new(true),
-            header_buffer: vec![0; header_buffer_size],
-            read_buffer: vec![0; read_buffer_size],
-            tls_configured: true,
-        }
-    }
-}
-
-#[cfg(feature = "mbedtls")]
-impl<'net, S> HttpTransport<'net, S>
-where
-    S: TcpConnect + Dns + 'net,
-{
-    #[must_use]
-    pub(crate) fn new_with_tls(
-        network: &'net S,
-        tls: reqwless::client::TlsConfig<'net>,
-        header_buffer_size: usize,
-        read_buffer_size: usize,
-    ) -> Self {
-        Self {
-            disconnected: Some(HttpClient::new_with_tls(network, network, tls)),
-            connected: None,
-            connected_origin: None,
-            connection_healthy: Cell::new(true),
-            header_buffer: vec![0; header_buffer_size],
-            read_buffer: vec![0; read_buffer_size],
-            tls_configured: true,
-        }
+        Self::from_client(
+            HttpClient::new_with_tls(network, network, tls),
+            header_buffer_size,
+            read_buffer_size,
+            true,
+        )
     }
 }
 
@@ -405,20 +343,5 @@ fn split_url(url: &str) -> Result<(&str, &str), Error> {
         )),
         None if authority_start < url.len() => Ok((url, "/")),
         None => Err(Error::InvalidUrl),
-    }
-}
-
-fn map_reqwless_error(error: reqwless::Error) -> Error {
-    match error {
-        reqwless::Error::Dns => Error::Dns,
-        reqwless::Error::Network(kind) => Error::Network(kind),
-        reqwless::Error::Codec
-        | reqwless::Error::AlreadySent
-        | reqwless::Error::IncorrectBodyWritten => Error::Codec,
-        reqwless::Error::InvalidUrl(_) => Error::InvalidUrl,
-        #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
-        reqwless::Error::Tls(_) => Error::Tls,
-        reqwless::Error::BufferTooSmall => Error::BufferTooSmall,
-        reqwless::Error::ConnectionAborted => Error::ConnectionAborted,
     }
 }

@@ -24,9 +24,9 @@ fn remote_image_uses_image_url_wire_shape() {
         r#"{"choices":[{"message":{"role":"assistant","content":"a dog"}}]}"#,
     )]);
     let mut api = configured(&stack);
-    let assets = [MediaAsset::remote_url("https://example.test/dog.png")];
+    let asset = MediaAsset::remote_url("https://example.test/dog.png");
     let response = block_on(api.infer_media(
-        &MediaRequest::new(&assets).with_user_prompt("describe"),
+        &MediaRequest::new(&asset).with_user_prompt("describe"),
         Cancel::never(),
     ))
     .unwrap();
@@ -41,9 +41,9 @@ fn inline_image_is_encoded_as_data_url() {
         r#"{"choices":[{"message":{"role":"assistant","content":"inline"}}]}"#,
     )]);
     let mut api = configured(&stack);
-    let assets = [MediaAsset::inline_bytes(vec![1, 2, 3], "image/png")];
+    let asset = MediaAsset::inline_bytes(vec![1, 2, 3], "image/png");
     block_on(api.infer_media(
-        &MediaRequest::new(&assets).with_user_prompt("describe"),
+        &MediaRequest::new(&asset).with_user_prompt("describe"),
         Cancel::never(),
     ))
     .unwrap();
@@ -54,7 +54,7 @@ fn inline_image_is_encoded_as_data_url() {
 fn empty_inline_image_is_rejected_without_network() {
     let stack = ScriptedStack::new([]);
     let mut api = configured(&stack);
-    let assets = [MediaAsset::inline_bytes(Vec::new(), "image/png")];
-    assert!(block_on(api.infer_media(&MediaRequest::new(&assets), Cancel::never())).is_err());
+    let asset = MediaAsset::inline_bytes(Vec::new(), "image/png");
+    assert!(block_on(api.infer_media(&MediaRequest::new(&asset), Cancel::never())).is_err());
     assert!(stack.requests().is_empty());
 }

@@ -39,9 +39,10 @@ impl<H: TcpConnect + Dns + 'static> Compactor for LlmCompactor<H> {
     fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
         Box::pin(async move {
             let transcript = render_transcript(window);
-            let messages = json!([
-                { "role": "user", "content": format!("{SUMMARY_USER_PREFIX}\n\n{transcript}") }
-            ]);
+            let messages = [json!({
+                "role": "user",
+                "content": format!("{SUMMARY_USER_PREFIX}\n\n{transcript}")
+            })];
 
             let request = ChatRequest::new(SUMMARY_SYSTEM_PROMPT, &messages);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);

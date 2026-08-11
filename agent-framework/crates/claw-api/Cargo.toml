@@ -25,7 +25,6 @@ mbedtls-host = [
 claw-utils = { path = "../claw-utils" }
 embassy-time.workspace = true
 embassy-futures.workspace = true
-embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
 ouroboros = { version = "0.18.5", default-features = false }

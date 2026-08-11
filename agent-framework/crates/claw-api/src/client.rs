@@ -1,4 +1,4 @@
-//! `ClawApi` — the LLM client, port of `claw_llm_runtime.c`.
+//! `ClawApi` — the LLM client.
 //!
 //! Owns one concrete reqwless client and an optional resolved backend. Construct
 //! it with [`ClawApi::new`], then install a complete config with
@@ -20,7 +20,7 @@ use embedded_nal_async::{Dns, TcpConnect};
 use super::backends::Backend;
 use super::chat_stream::{ChatStream, Driver, DriverItem};
 use super::errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
-use super::retry::{sleep_abortable_async, with_timeout, DeadlineError};
+use super::retry::{deadline_error, retry_call, sleep_or_cancel, timed, with_timeout, RetryState};
 use super::transport::{Error as HttpError, HttpTransport};
 use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest,
@@ -40,6 +40,8 @@ pub struct ClawApiFactory<S: TcpConnect + Dns + 'static> {
 }
 
 impl<S: TcpConnect + Dns + 'static> Clone for ClawApiFactory<S> {
+    // A derived impl would unnecessarily require `S: Clone`; cloning the
+    // factory only increments the `Rc` count.
     fn clone(&self) -> Self {
         Self {
             make: Rc::clone(&self.make),
@@ -59,12 +61,6 @@ impl<S: TcpConnect + Dns + 'static> ClawApiFactory<S> {
     pub fn create(&self) -> ClawApi<'static, S> {
         (self.make)()
     }
-}
-
-fn resolve_config(config: ClawApiConfig) -> Result<Backend, InitError> {
-    // Backends trust that required fields are present once `set_config` returns.
-    config.validate()?;
-    config.backend.make(&config)
 }
 
 fn parse_chat_json_response<T: DeserializeOwned>(
@@ -90,21 +86,6 @@ fn parse_chat_json_response<T: DeserializeOwned>(
     })
 }
 
-/// Stable, shape-only trace classification; never expose an error's payload.
-fn chat_error_kind(error: &ChatError) -> &'static str {
-    match error {
-        ChatError::Api(error) => error.into(),
-        other => other.into(),
-    }
-}
-
-fn deadline_error(error: DeadlineError) -> ClawApiError {
-    match error {
-        DeadlineError::Cancelled => ClawApiError::Transport(HttpError::Cancelled),
-        DeadlineError::Elapsed => ClawApiError::Timeout,
-    }
-}
-
 fn retrying_chat_stream<'h, 'r, S>(
     backend: &'h Backend,
     http: &'h mut HttpTransport<'_, S>,
@@ -115,28 +96,24 @@ where
     S: TcpConnect + Dns,
     'r: 'h,
 {
-    let policy = request.retry;
-    let max_attempts = u64::from(policy.max_retries).saturating_add(1);
     yield_stream(|yielder| async move {
-        let mut retry_attempt = 0_u32;
+        let mut retry = RetryState::new(request.retry);
         let mut emitted = false;
         let mut opened = false;
 
         'request: loop {
-            let attempt = u64::from(retry_attempt).saturating_add(1);
-            let attempt_span = tracing::info_span!("api.attempt", attempt, max_attempts);
+            let attempt = retry.attempt();
+            let attempt_span =
+                tracing::info_span!("api.attempt", attempt, max_attempts = retry.max_attempts());
 
             let (error, phase) = 'attempt: {
-                let opened_stream = with_timeout(
-                    backend.chat_stream_async(http, request, cancel),
+                let opened_stream = timed(
+                    backend.chat_stream(http, request),
                     backend.timeout_ms(),
                     cancel,
                 )
                 .instrument(attempt_span.clone())
-                .await
-                .map_err(deadline_error)
-                .map_err(ChatError::from)
-                .and_then(core::convert::identity);
+                .await;
                 let mut stream = match opened_stream {
                     Ok(stream) => {
                         attempt_span.in_scope(|| tracing::info!(name: "opened", ""));
@@ -173,8 +150,8 @@ where
 
             let retryable = error.is_retryable();
             let replay_safe = !emitted;
-            let final_attempt = !retryable || !replay_safe || retry_attempt >= policy.max_retries;
-            let kind = chat_error_kind(&error);
+            let final_attempt = !replay_safe || !retry.can_retry(retryable);
+            let kind = error.kind();
             attempt_span.in_scope(|| {
                 if final_attempt {
                     tracing::error!(
@@ -202,12 +179,9 @@ where
                 return;
             }
 
-            let failed_attempt = attempt;
-            retry_attempt = retry_attempt.saturating_add(1);
-            let next_attempt = u64::from(retry_attempt).saturating_add(1);
-            let backoff_ms = policy.backoff_ms(retry_attempt);
+            let delay = retry.advance();
             let completed = async {
-                let completed = sleep_abortable_async(backoff_ms, cancel).await;
+                let completed = sleep_or_cancel(delay.backoff_ms, cancel).await;
                 if completed {
                     tracing::info!(name: "completed", "");
                 } else {
@@ -217,9 +191,9 @@ where
             }
             .instrument(tracing::info_span!(
                 "api.retry",
-                failed_attempt,
-                next_attempt,
-                backoff_ms,
+                failed_attempt = delay.failed_attempt,
+                next_attempt = delay.next_attempt,
+                backoff_ms = delay.backoff_ms,
                 error_kind = kind,
                 phase
             ))
@@ -239,13 +213,21 @@ where
 }
 
 impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
+    fn with_transport(http: HttpTransport<'net, S>) -> Self {
+        Self {
+            backend: None,
+            http,
+        }
+    }
+
     /// Construct an unconfigured client over the supplied reqwless transport.
     #[must_use]
     pub fn new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self {
-        Self {
-            backend: None,
-            http: HttpTransport::new(network, header_buffer_size, read_buffer_size),
-        }
+        Self::with_transport(HttpTransport::new(
+            network,
+            header_buffer_size,
+            read_buffer_size,
+        ))
     }
 
     /// Construct an unconfigured HTTPS client over the supplied network stack.
@@ -257,10 +239,12 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
-        Self {
-            backend: None,
-            http: HttpTransport::new_with_tls(network, tls, header_buffer_size, read_buffer_size),
-        }
+        Self::with_transport(HttpTransport::new_with_tls(
+            network,
+            tls,
+            header_buffer_size,
+            read_buffer_size,
+        ))
     }
 
     /// Rebind this client to a new [`ClawApiConfig`] at runtime, keeping the
@@ -271,7 +255,8 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
     /// reconstructing the whole client. Returns [`InitError`] if the new config
     /// is incomplete or invalid.
     pub fn set_config(&mut self, config: ClawApiConfig) -> Result<(), InitError> {
-        self.backend = Some(resolve_config(config)?);
+        config.validate()?;
+        self.backend = Some(config.backend.make(config));
         Ok(())
     }
 
@@ -286,27 +271,22 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
             .as_ref()
             .ok_or(ClawApiError::NotConfigured)
             .map_err(ChatError::from)?;
-        let policy = request.retry;
-        let max_attempts = u64::from(policy.max_retries).saturating_add(1);
-        let mut retry_attempt = 0u32;
+        let mut retry = RetryState::new(request.retry);
         loop {
-            let attempt = u64::from(retry_attempt).saturating_add(1);
+            let attempt = retry.attempt();
             let result = async {
-                let result = with_timeout(
-                    backend.chat_async(&mut self.http, request, cancel),
+                let result = timed(
+                    backend.chat(&mut self.http, request),
                     backend.timeout_ms(),
                     cancel,
                 )
-                .await
-                .map_err(deadline_error)
-                .map_err(ChatError::from)
-                .and_then(core::convert::identity);
+                .await;
                 match &result {
                     Ok(_) => tracing::info!(name: "completed", ""),
                     Err(error) => {
-                        let kind = chat_error_kind(error);
+                        let kind = error.kind();
                         let retryable = error.is_retryable();
-                        let final_attempt = !retryable || retry_attempt >= policy.max_retries;
+                        let final_attempt = !retry.can_retry(retryable);
                         if final_attempt {
                             tracing::error!(
                                 name: "failed",
@@ -326,22 +306,23 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
                 }
                 result
             }
-            .instrument(tracing::info_span!("api.attempt", attempt, max_attempts))
+            .instrument(tracing::info_span!(
+                "api.attempt",
+                attempt,
+                max_attempts = retry.max_attempts()
+            ))
             .await;
 
             match result {
                 Ok(response) => return Ok(response),
                 Err(error) => {
-                    if !error.is_retryable() || retry_attempt >= policy.max_retries {
+                    if !retry.can_retry(error.is_retryable()) {
                         return Err(error);
                     }
-                    let error_kind = chat_error_kind(&error);
-                    let failed_attempt = attempt;
-                    retry_attempt = retry_attempt.saturating_add(1);
-                    let next_attempt = u64::from(retry_attempt).saturating_add(1);
-                    let backoff_ms = policy.backoff_ms(retry_attempt);
+                    let error_kind = error.kind();
+                    let delay = retry.advance();
                     let completed = async {
-                        let completed = sleep_abortable_async(backoff_ms, cancel).await;
+                        let completed = sleep_or_cancel(delay.backoff_ms, cancel).await;
                         if completed {
                             tracing::info!(name: "completed", "");
                         } else {
@@ -351,9 +332,9 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
                     }
                     .instrument(tracing::info_span!(
                         "api.retry",
-                        failed_attempt,
-                        next_attempt,
-                        backoff_ms,
+                        failed_attempt = delay.failed_attempt,
+                        next_attempt = delay.next_attempt,
+                        backoff_ms = delay.backoff_ms,
                         error_kind
                     ))
                     .await;
@@ -408,38 +389,16 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
         let schema: Value = serde_json::from_str(spec.json)
             .map_err(|err| ChatJsonError::InvalidOutput(format!("invalid schema json: {err}")))?;
 
-        let policy = request.retry;
-        let mut attempt = 0u32;
-        loop {
-            let timed = with_timeout(
-                backend.chat_json_async(&mut self.http, request, spec.name, &schema, cancel),
+        retry_call(request.chat.retry, cancel, async || {
+            let response = timed(
+                backend.chat_json(&mut self.http, request, spec.name, &schema),
                 backend.timeout_ms(),
                 cancel,
             )
-            .await
-            .map_err(deadline_error)
-            .map_err(ChatError::from)
-            .and_then(core::convert::identity);
-            let result = match timed {
-                Ok(response) => parse_chat_json_response(response),
-                Err(error) => Err(ChatJsonError::from(error)),
-            };
-
-            match result {
-                Ok(response) => return Ok(response),
-                Err(error) => {
-                    if !error.is_retryable() || attempt >= policy.max_retries {
-                        return Err(error);
-                    }
-                    attempt = attempt.saturating_add(1);
-                    if !sleep_abortable_async(policy.backoff_ms(attempt), cancel).await {
-                        return Err(ChatJsonError::Chat(ChatError::Api(
-                            ClawApiError::Transport(HttpError::Cancelled),
-                        )));
-                    }
-                }
-            }
-        }
+            .await?;
+            parse_chat_json_response(response)
+        })
+        .await
     }
 
     /// Async one-shot image inference over the owned reqwless client.
@@ -449,32 +408,14 @@ impl<'net, S: TcpConnect + Dns + 'net> ClawApi<'net, S> {
         cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError> {
         let backend = self.backend.as_ref().ok_or(ClawApiError::NotConfigured)?;
-        let policy = request.retry;
-        let mut attempt = 0u32;
-        loop {
-            let result = with_timeout(
-                backend.infer_media_async(&mut self.http, request, cancel),
+        retry_call(request.retry, cancel, async || {
+            timed(
+                backend.infer_media(&mut self.http, request),
                 backend.timeout_ms(),
                 cancel,
             )
             .await
-            .map_err(deadline_error)
-            .map_err(InferMediaError::from)
-            .and_then(core::convert::identity);
-            match result {
-                Ok(response) => return Ok(response),
-                Err(error) => {
-                    if !error.is_retryable() || attempt >= policy.max_retries {
-                        return Err(error);
-                    }
-                    attempt = attempt.saturating_add(1);
-                    if !sleep_abortable_async(policy.backoff_ms(attempt), cancel).await {
-                        return Err(InferMediaError::Api(ClawApiError::Transport(
-                            HttpError::Cancelled,
-                        )));
-                    }
-                }
-            }
-        }
+        })
+        .await
     }
 }

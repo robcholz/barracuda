@@ -66,7 +66,7 @@ fn main() {
         // A reminder is the ephemeral tail, never persisted, after the history.
         .reminder(Some("Only the blink_led skill is permitted this phase."));
 
-    let history = json!([{ "role": "user", "content": "Make the LED blink." }]);
+    let history = [json!({ "role": "user", "content": "Make the LED blink." })];
 
     let version_before = context.version();
     let request = context.request(&history);

@@ -1,33 +1,28 @@
-//! OpenAI-compatible backend, port of `claw_llm_backend_openai_compatible.c`.
+//! OpenAI-compatible backend.
 
+use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 
 use serde_json::{json, Value};
 
-use claw_utils::Cancel;
 use embedded_nal_async::{Dns, TcpConnect};
 
 use super::super::chat_stream::ProviderStream;
-use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
+use super::super::errors::{ChatError, ClawApiError, InferMediaError};
 use super::super::media::prepare_asset;
 use super::super::transport::{HttpTransport as NetClient, ResponseStream};
 use super::super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 use super::shared::{
-    insert_tools_into_body, media_text, parse_openai_chat_response, post_prepared_async,
-    post_prepared_stream, single_media_asset, BackendContext, PreparedAuth, PreparedRequest,
+    insert_tools_into_body, media_text, parse_openai_chat_response, post_json, post_stream,
+    serialize_chat_body, BackendContext,
 };
 use super::sse::{OpenAiSse, ProviderSse};
-use super::BackendImpl;
 
-/// Chat endpoint path appended to the base URL.
 const CHAT_PATH: &str = "/chat/completions";
-/// Provider field name that carries the max-tokens value.
-const MAX_TOKENS_FIELD: &str = "max_tokens";
-/// Whether media prep must reject local/inline images (remote URLs only).
-const IMAGE_REMOTE_URL_ONLY: bool = false;
 
-pub(super) struct OpenAiCompatible {
+pub(crate) struct OpenAiCompatible {
     context: BackendContext,
 }
 
@@ -36,48 +31,52 @@ impl OpenAiCompatible {
     /// transport-only `stream` flag.
     fn chat_body_object(
         &self,
-        request: &ChatRequest,
+        system_prompt: &str,
+        messages: &[Value],
+        reminders: &[Value],
+        tools_json: Option<&str>,
     ) -> Result<serde_json::Map<String, Value>, ChatError> {
-        let mut messages: Vec<Value> = Vec::new();
-        if !request.system_prompt.is_empty() {
-            messages.push(json!({"role": "system", "content": request.system_prompt}));
+        let mut output_messages = Vec::new();
+        if !system_prompt.is_empty() {
+            output_messages.push(json!({"role": "system", "content": system_prompt}));
         }
-        if let Some(arr) = request.messages.as_array() {
-            messages.extend(arr.iter().cloned());
-        }
-        // Ephemeral trailing reminders, appended after the persisted history.
-        messages.extend(request.reminders.iter().cloned());
+        output_messages.extend(messages.iter().cloned());
+        output_messages.extend(reminders.iter().cloned());
 
-        let mut body = serde_json::Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        body.insert("messages".to_string(), Value::Array(messages));
+        let mut body = self.context.request_body();
+        body.insert("messages".to_string(), Value::Array(output_messages));
 
-        if let Some(tools_json) = request.tools_json.filter(|s| !s.is_empty()) {
+        if let Some(tools_json) = tools_json.filter(|s| !s.is_empty()) {
             insert_tools_into_body(&mut body, tools_json)?;
         }
         Ok(body)
     }
 
-    /// `build_chat_body`
     fn build_chat_body(&self, request: &ChatRequest) -> Result<String, ChatError> {
-        serialize_body(self.chat_body_object(request)?)
+        serialize_chat_body(self.chat_body_object(
+            request.system_prompt,
+            request.messages,
+            request.reminders,
+            request.tools_json,
+        )?)
     }
 
     /// Like [`build_chat_body`](Self::build_chat_body) but sets `stream: true` so
     /// the provider replies with a `text/event-stream` body.
     fn build_stream_body(&self, request: &ChatRequest) -> Result<String, ChatError> {
-        let mut body = self.chat_body_object(request)?;
+        let mut body = self.chat_body_object(
+            request.system_prompt,
+            request.messages,
+            request.reminders,
+            request.tools_json,
+        )?;
         body.insert("stream".to_string(), json!(true));
         #[cfg(feature = "cache_profile")]
         body.insert(
             "stream_options".to_string(),
             json!({ "include_usage": true }),
         );
-        serialize_body(body)
+        serialize_chat_body(body)
     }
 
     fn build_chat_json_body(
@@ -86,23 +85,12 @@ impl OpenAiCompatible {
         schema_name: &str,
         schema: &Value,
     ) -> Result<String, ChatError> {
-        let mut messages: Vec<Value> = Vec::new();
-        if !request.system_prompt.is_empty() {
-            messages.push(json!({"role": "system", "content": request.system_prompt}));
-        }
-        if let Some(arr) = request.messages.as_array() {
-            messages.extend(arr.iter().cloned());
-        }
-        // Ephemeral trailing reminders, appended after the persisted history.
-        messages.extend(request.reminders.iter().cloned());
-
-        let mut body = serde_json::Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
-        body.insert("messages".to_string(), Value::Array(messages));
+        let mut body = self.chat_body_object(
+            request.chat.system_prompt,
+            request.chat.messages,
+            request.chat.reminders,
+            request.chat.tools_json,
+        )?;
         body.insert(
             "response_format".to_string(),
             json!({
@@ -114,44 +102,7 @@ impl OpenAiCompatible {
                 }
             }),
         );
-        if let Some(tools_json) = request.tools_json.filter(|s| !s.is_empty()) {
-            insert_tools_into_body(&mut body, tools_json)?;
-        }
-
-        serde_json::to_string(&Value::Object(body)).map_err(|_| {
-            ChatError::Api(ClawApiError::ApiError("out of memory serializing request"))
-        })
-    }
-
-    /// Bearer auth carrying this backend's configured API key.
-    fn auth(&self) -> PreparedAuth {
-        PreparedAuth::Bearer(self.context.api_key().to_string())
-    }
-
-    fn prepare_chat(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_chat_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, self.auth(), Vec::new()))
-    }
-
-    fn prepare_chat_json(
-        &self,
-        request: &ChatJsonRequest<'_>,
-        schema_name: &str,
-        schema: &Value,
-    ) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_chat_json_body(request, schema_name, schema)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, self.auth(), Vec::new()))
-    }
-
-    fn prepare_stream(&self, request: &ChatRequest<'_>) -> Result<PreparedRequest, ChatError> {
-        let body = self.build_stream_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, self.auth(), Vec::new()))
+        serialize_chat_body(body)
     }
 
     /// Serialize the media inference request body (no transport).
@@ -159,23 +110,17 @@ impl OpenAiCompatible {
         let Some(user_prompt) = request.user_prompt.filter(|prompt| !prompt.is_empty()) else {
             return Err(InferMediaError::IncompleteRequest);
         };
-        let asset = single_media_asset(request.media)?;
+        let prepared = prepare_asset(request.media, self.context.image_max_bytes)?;
+        let image_url = prepared.openai_url();
 
-        let prepared = prepare_asset(asset, IMAGE_REMOTE_URL_ONLY, self.context.image_max_bytes())?;
-
-        let mut body = serde_json::Map::new();
-        body.insert("model".to_string(), json!(self.context.model()));
-        body.insert(
-            MAX_TOKENS_FIELD.to_string(),
-            json!(self.context.max_tokens()),
-        );
+        let mut body = self.context.request_body();
         let mut messages: Vec<Value> = Vec::new();
         if let Some(system) = request.system_prompt.filter(|prompt| !prompt.is_empty()) {
             messages.push(json!({"role": "system", "content": system}));
         }
         messages.push(json!({"role": "user", "content": [
             {"type": "text", "text": user_prompt},
-                {"type": "image_url", "image_url": {"url": prepared.payload()}}
+                {"type": "image_url", "image_url": {"url": image_url.as_ref()}}
         ]}));
         body.insert("messages".to_string(), Value::Array(messages));
 
@@ -183,84 +128,64 @@ impl OpenAiCompatible {
             .map_err(|_| ClawApiError::ApiError("out of memory serializing media request").into())
     }
 
-    fn prepare_media(
-        &self,
-        request: &MediaRequest<'_>,
-    ) -> Result<PreparedRequest, InferMediaError> {
-        let body = self.build_media_body(request)?;
-        Ok(self
-            .context
-            .prepare(CHAT_PATH, body, self.auth(), Vec::new()))
-    }
-}
-
-impl BackendImpl for OpenAiCompatible {
-    /// `openai_compatible_init`
-    fn make(config: &ClawApiConfig) -> Result<Self, InitError> {
-        Ok(OpenAiCompatible {
-            context: BackendContext::from_config(config),
-        })
+    pub(super) fn new(config: ClawApiConfig) -> Self {
+        Self {
+            context: BackendContext::new(config, CHAT_PATH, |api_key| {
+                vec![("Authorization".to_string(), format!("Bearer {api_key}"))]
+            }),
+        }
     }
 
-    fn timeout_ms(&self) -> u32 {
-        self.context.timeout_ms()
+    pub(super) fn timeout_ms(&self) -> u32 {
+        self.context.timeout_ms
     }
 
-    async fn chat_async<S: TcpConnect + Dns>(
+    pub(super) async fn chat<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatRequest<'_>,
-        cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat(request)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
-        Ok(parse_openai_chat_response(&response.body)?)
+        let body = self.build_chat_body(request)?;
+        let response = post_json(http, &self.context, &body).await?;
+        parse_openai_chat_response(&response.body).map_err(Into::into)
     }
 
-    async fn chat_json_async<S: TcpConnect + Dns>(
+    pub(super) async fn chat_json<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
-        cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat_json(request, schema_name, schema)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
-        Ok(parse_openai_chat_response(&response.body)?)
+        let body = self.build_chat_json_body(request, schema_name, schema)?;
+        let response = post_json(http, &self.context, &body).await?;
+        parse_openai_chat_response(&response.body).map_err(Into::into)
     }
 
-    async fn infer_media_async<S: TcpConnect + Dns>(
+    pub(super) async fn infer_media<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &MediaRequest<'_>,
-        cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError> {
-        let prepared = self.prepare_media(request)?;
-        let response = post_prepared_async(http, &prepared, cancel).await?;
+        let body = self.build_media_body(request)?;
+        let response = post_json(http, &self.context, &body).await?;
         media_text(parse_openai_chat_response(&response.body)?)
     }
 
-    async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
+    pub(super) async fn chat_stream<'h, 'r, S: TcpConnect + Dns>(
         &self,
         http: &'h mut NetClient<'_, S>,
         request: &'r ChatRequest<'r>,
-        cancel: Cancel<'h>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
-        let prepared = self.prepare_stream(request)?;
-        post_prepared_stream(
+        let body = self.build_stream_body(request)?;
+        post_stream(
             http,
-            &prepared,
-            cancel,
+            &self.context,
+            body,
             ProviderSse::OpenAi(OpenAiSse::new()),
         )
         .await
     }
-}
-
-fn serialize_body(body: serde_json::Map<String, Value>) -> Result<String, ChatError> {
-    serde_json::to_string(&Value::Object(body))
-        .map_err(|_| ChatError::Api(ClawApiError::ApiError("out of memory serializing request")))
 }
 
 #[cfg(all(test, feature = "cache_profile"))]
@@ -270,14 +195,13 @@ mod tests {
 
     #[test]
     fn streaming_requests_ask_provider_to_include_usage() {
-        let backend = OpenAiCompatible::make(&ClawApiConfig::new(
+        let backend = OpenAiCompatible::new(ClawApiConfig::new(
             BackendKind::OpenAiCompatible,
             "key",
             "model",
             "https://example.invalid/v1",
-        ))
-        .unwrap();
-        let messages = serde_json::json!([]);
+        ));
+        let messages = [];
         let body = backend
             .build_stream_body(&ChatRequest::new("system", &messages))
             .unwrap();

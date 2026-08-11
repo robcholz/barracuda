@@ -54,7 +54,7 @@ const BLOCK_SEPARATOR: &str = "\n\n";
 ///     .with(Block::new(BlockKind::AgentInstruction, "You are a helpful agent."))
 ///     .with(Block::new(BlockKind::OutputContract, "Answer in one concise paragraph."));
 ///
-/// let history = json!([{ "role": "user", "content": "What's the weather?" }]);
+/// let history = [json!({ "role": "user", "content": "What's the weather?" })];
 /// let request = context.request(&history);
 /// assert_eq!(
 ///     request.system(),
@@ -184,7 +184,7 @@ impl Context {
     /// Assemble this request: pair the system prefix with the message tail
     /// (`history` plus the ephemeral reminders). Re-renders the prefix only when a
     /// block changed since the last call; otherwise reuses the cached string.
-    pub fn request<'a>(&'a mut self, history: &'a Value) -> RequestContext<'a> {
+    pub fn request<'a>(&'a mut self, history: &'a [Value]) -> RequestContext<'a> {
         if self.rendered_version != self.content_version {
             self.rebuild();
             self.rendered_version = self.content_version;
@@ -318,19 +318,17 @@ impl<'a> ContextSink<'a> {
         self
     }
 
-    /// Finish this sink and return the ordered history array for the request.
-    pub fn into_history(mut self) -> Value {
+    /// Finish this sink and return the ordered history messages for the request.
+    pub fn into_history(mut self) -> Vec<Value> {
         self.messages.sort_by(|a, b| {
             a.0.sort_key()
                 .cmp(&b.0.sort_key())
                 .then_with(|| a.0.cmp(&b.0))
         });
-        Value::Array(
-            self.messages
-                .into_iter()
-                .map(|(_, message)| message)
-                .collect(),
-        )
+        self.messages
+            .into_iter()
+            .map(|(_, message)| message)
+            .collect()
     }
 }
 
@@ -347,13 +345,13 @@ impl<'a> ContextSink<'a> {
 #[derive(Clone, Copy, Debug)]
 pub struct RequestContext<'a> {
     system: &'a str,
-    history: &'a Value,
+    history: &'a [Value],
     reminders: &'a [Value],
 }
 
 impl<'a> RequestContext<'a> {
     /// Pair an assembled `system` prefix with the message tail's two segments.
-    pub(crate) fn new(system: &'a str, history: &'a Value, reminders: &'a [Value]) -> Self {
+    pub(crate) fn new(system: &'a str, history: &'a [Value], reminders: &'a [Value]) -> Self {
         Self {
             system,
             history,
@@ -367,7 +365,7 @@ impl<'a> RequestContext<'a> {
     }
 
     /// The persisted conversation history (a JSON array of messages).
-    pub fn history(&self) -> &'a Value {
+    pub fn history(&self) -> &'a [Value] {
         self.history
     }
 

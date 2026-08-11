@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
         "model",
         "http://llm.test/v1",
     ))?;
-    let messages = json!([{"role":"user","content":"hi"}]);
+    let messages = [json!({"role":"user","content":"hi"})];
     let response = block_on(api.chat(&ChatRequest::new("be concise", &messages), Cancel::never()))?;
     println!("{:?}", response.text);
     Ok(())

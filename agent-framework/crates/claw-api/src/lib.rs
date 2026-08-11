@@ -77,7 +77,6 @@ pub use backends::{BackendKind, ParseBackendKindError};
 pub use chat_stream::ChatStream;
 pub use claw_utils::stream;
 pub use client::{ClawApi, ClawApiFactory};
-pub use embedded_io::ErrorKind as NetworkErrorKind;
 pub use errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
 #[cfg(feature = "mbedtls-host")]
 pub use mbedtls_rs::Tls;
@@ -85,9 +84,10 @@ pub use mbedtls_rs::Tls;
 pub use reqwless::client::TlsConfig;
 #[cfg(feature = "embedded-tls")]
 pub use reqwless::client::{TlsConfig, TlsVerify};
+pub use reqwless::response::StatusCode;
 #[cfg(feature = "mbedtls")]
 pub use reqwless::{Certificate, Credentials, TlsReference, TlsVersion, X509};
-pub use transport::{Error as HttpError, StatusCode};
+pub use transport::Error as HttpError;
 #[cfg(feature = "cache_profile")]
 pub use types::ProviderUsage;
 pub use types::{

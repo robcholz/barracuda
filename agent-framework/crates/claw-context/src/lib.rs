@@ -30,7 +30,7 @@
 //!     .with(Block::new(BlockKind::AgentInstruction, "You are a helpful agent."))
 //!     .with(Block::new(BlockKind::OutputContract, "Answer in one concise paragraph."));
 //!
-//! let history = json!([{ "role": "user", "content": "What's the weather?" }]);
+//! let history = [json!({ "role": "user", "content": "What's the weather?" })];
 //! let request = context.request(&history);
 //! assert_eq!(
 //!     request.system(),

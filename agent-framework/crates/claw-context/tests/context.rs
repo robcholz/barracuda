@@ -147,7 +147,7 @@ fn reminder_feeds_the_tail_without_touching_version() {
     context.reminder(Some("only these tools"));
     assert_eq!(context.version(), version);
 
-    let history = Value::Array(vec![]);
+    let history: [Value; 0] = [];
     let request = context.request(&history);
     assert_eq!(request.reminders().len(), 1);
     assert_eq!(
@@ -164,7 +164,7 @@ fn reminders_render_in_wire_order_and_clear_by_kind() {
         .with_reminder(BlockKind::ToolReminder, Some("tools"))
         .with_reminder(BlockKind::ActiveMode, Some("plan"));
 
-    let history = Value::Array(vec![]);
+    let history: [Value; 0] = [];
     let request = context.request(&history);
     assert_eq!(request.reminders().len(), 3);
     assert_eq!(
@@ -212,12 +212,12 @@ fn sink_routes_items_to_their_request_channels() {
 
     let request = context.request(&history);
     assert_eq!(request.system(), "PERSONA");
-    assert_eq!(request.history(), &serde_json::json!([summary, recent]));
+    assert_eq!(request.history(), &[summary, recent]);
     assert_eq!(request.reminders().len(), 1);
 }
 
 fn system_of(context: &mut Context) -> String {
-    let history = Value::Array(vec![]);
+    let history: [Value; 0] = [];
     context.request(&history).system().to_string()
 }
 

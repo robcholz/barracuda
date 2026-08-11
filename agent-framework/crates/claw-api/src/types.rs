@@ -22,17 +22,6 @@ pub struct ToolCall {
     pub arguments_json: String,
 }
 
-impl ToolCall {
-    /// Tool name for logs and run records.
-    pub fn display_name(&self) -> &str {
-        if self.name.is_empty() {
-            "(null)"
-        } else {
-            &self.name
-        }
-    }
-}
-
 /// One semantic event yielded by a streaming chat completion
 /// ([`crate::ChatStream`]).
 ///
@@ -142,8 +131,7 @@ impl ClawApiConfig {
 
     /// Validate the fields required by every backend.
     ///
-    /// This is the same validation performed by [`crate::ClawApi::set_config`]
-    /// and [`crate::ClawApi::set_config`].
+    /// This is the validation performed by [`crate::ClawApi::set_config`].
     pub fn validate(&self) -> Result<(), crate::InitError> {
         if self.api_key.is_empty() {
             return Err(crate::InitError::MissingApiKey);
@@ -278,15 +266,13 @@ impl RetryPolicy {
         if attempt == 0 {
             return 0;
         }
-        let multiplier = self.backoff_multiplier.max(1);
-        let mut backoff = self.initial_backoff_ms;
-        for _ in 1..attempt {
-            backoff = backoff.saturating_mul(multiplier);
-            if backoff >= self.max_backoff_ms {
-                return self.max_backoff_ms;
-            }
-        }
-        backoff.min(self.max_backoff_ms)
+        self.initial_backoff_ms
+            .saturating_mul(
+                self.backoff_multiplier
+                    .max(1)
+                    .saturating_pow(attempt.saturating_sub(1)),
+            )
+            .min(self.max_backoff_ms)
     }
 }
 
@@ -310,7 +296,7 @@ pub struct StaticOutputSchema<'a> {
 ///
 /// ```
 /// use claw_api::ChatJsonRequest;
-/// let messages = serde_json::json!([{ "role": "user", "content": "hi" }]);
+/// let messages = [serde_json::json!({ "role": "user", "content": "hi" })];
 /// let schema = r#"{"type":"object","properties":{"ok":{"type":"boolean"}}}"#;
 /// let req = ChatJsonRequest::new("be terse", &messages)
 ///     .with_output_schema("answer", schema);
@@ -318,49 +304,33 @@ pub struct StaticOutputSchema<'a> {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChatJsonRequest<'a> {
-    /// System prompt / instructions.
-    pub system_prompt: &'a str,
-    /// JSON array of chat messages (the persisted history segment).
-    pub messages: &'a serde_json::Value,
-    /// Ephemeral trailing messages appended after `messages` for this request
-    /// only (never persisted). Kept as a separate segment so the history is not
-    /// cloned to append them; the backend iterates `messages` then `reminders`.
-    /// Defaults to empty; set with [`with_reminders`](Self::with_reminders).
-    pub reminders: &'a [serde_json::Value],
-    /// Optional OpenAI-style tools JSON array.
-    pub tools_json: Option<&'a str>,
+    /// Common chat input and retry policy.
+    pub chat: ChatRequest<'a>,
     /// The required output schema (set via [`Self::with_output_schema`]).
     pub output_schema: Option<StaticOutputSchema<'a>>,
-    /// Per-call retry policy. Defaults to [`RetryPolicy::default`]; use
-    /// [`RetryPolicy::none`] to disable retry.
-    pub retry: RetryPolicy,
 }
 
 impl<'a> ChatJsonRequest<'a> {
     /// A structured-output request (no schema/tools yet).
     #[must_use]
-    pub fn new(system_prompt: &'a str, messages: &'a serde_json::Value) -> Self {
+    pub fn new(system_prompt: &'a str, messages: &'a [serde_json::Value]) -> Self {
         Self {
-            system_prompt,
-            messages,
-            reminders: &[],
-            tools_json: None,
+            chat: ChatRequest::new(system_prompt, messages),
             output_schema: None,
-            retry: RetryPolicy::default(),
         }
     }
 
     /// Attach an OpenAI-style tools JSON array (may be sent with `response_format`).
     #[must_use]
     pub fn with_tools(mut self, tools_json: &'a str) -> Self {
-        self.tools_json = Some(tools_json);
+        self.chat = self.chat.with_tools(tools_json);
         self
     }
 
     /// Attach ephemeral trailing reminder messages for this request only.
     #[must_use]
     pub fn with_reminders(mut self, reminders: &'a [serde_json::Value]) -> Self {
-        self.reminders = reminders;
+        self.chat = self.chat.with_reminders(reminders);
         self
     }
 
@@ -377,7 +347,7 @@ impl<'a> ChatJsonRequest<'a> {
     /// Override the retry policy for this call.
     #[must_use]
     pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.retry = retry;
+        self.chat = self.chat.with_retry(retry);
         self
     }
 }
@@ -408,7 +378,7 @@ pub struct ChatJsonResponse<T> {
 ///
 /// ```
 /// use claw_api::{ChatRequest, RetryPolicy};
-/// let messages = serde_json::json!([{ "role": "user", "content": "hi" }]);
+/// let messages = [serde_json::json!({ "role": "user", "content": "hi" })];
 /// let req = ChatRequest::new("be terse", &messages)
 ///     .with_retry(RetryPolicy::fixed(3, 250));
 /// # let _ = req;
@@ -418,7 +388,7 @@ pub struct ChatRequest<'a> {
     /// System prompt / instructions.
     pub system_prompt: &'a str,
     /// JSON array of chat messages (the persisted history segment).
-    pub messages: &'a serde_json::Value,
+    pub messages: &'a [serde_json::Value],
     /// Ephemeral trailing messages appended after `messages` for this request
     /// only (never persisted). Kept as a separate segment so the history is not
     /// cloned to append them; the backend iterates `messages` then `reminders`.
@@ -434,7 +404,7 @@ pub struct ChatRequest<'a> {
 impl<'a> ChatRequest<'a> {
     /// A tool-less chat request.
     #[must_use]
-    pub fn new(system_prompt: &'a str, messages: &'a serde_json::Value) -> Self {
+    pub fn new(system_prompt: &'a str, messages: &'a [serde_json::Value]) -> Self {
         ChatRequest {
             system_prompt,
             messages,
@@ -511,46 +481,33 @@ impl MediaAsset {
             mime_type: mime_type.into(),
         }
     }
-
-    /// Replace the MIME type for [`MediaAsset::InlineBytes`]. A remote URL
-    /// carries no MIME (the provider fetches and sniffs it), so this is a no-op.
-    #[must_use]
-    pub fn with_mime_type(mut self, mime_type: impl Into<String>) -> Self {
-        match &mut self {
-            Self::InlineBytes {
-                mime_type: slot, ..
-            } => *slot = mime_type.into(),
-            Self::RemoteUrl { .. } => {}
-        }
-        self
-    }
 }
 
-/// A request for [`crate::ClawApi::infer_media`]: image(s) plus optional prompts.
+/// A request for [`crate::ClawApi::infer_media`]: one image plus optional prompts.
 ///
 /// ```
 /// use claw_api::{MediaAsset, MediaRequest};
-/// let assets = [MediaAsset::inline_bytes(vec![1, 2, 3], "image/png")];
-/// let req = MediaRequest::new(&assets).with_user_prompt("Describe this image.");
+/// let asset = MediaAsset::inline_bytes(vec![1, 2, 3], "image/png");
+/// let req = MediaRequest::new(&asset).with_user_prompt("Describe this image.");
 /// # let _ = req;
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MediaRequest<'a> {
     /// Optional system prompt / instructions.
     pub system_prompt: Option<&'a str>,
-    /// Optional user prompt accompanying the image(s).
+    /// Optional user prompt accompanying the image.
     pub user_prompt: Option<&'a str>,
-    /// The image asset(s) to send.
-    pub media: &'a [MediaAsset],
+    /// The image asset to send.
+    pub media: &'a MediaAsset,
     /// Per-call retry policy. Defaults to [`RetryPolicy::default`]; use
     /// [`RetryPolicy::none`] to disable retry.
     pub retry: RetryPolicy,
 }
 
 impl<'a> MediaRequest<'a> {
-    /// A media request over the given assets, with no prompts set yet.
+    /// A media request over the given asset, with no prompts set yet.
     #[must_use]
-    pub fn new(media: &'a [MediaAsset]) -> Self {
+    pub fn new(media: &'a MediaAsset) -> Self {
         MediaRequest {
             system_prompt: None,
             user_prompt: None,
@@ -566,7 +523,7 @@ impl<'a> MediaRequest<'a> {
         self
     }
 
-    /// Set the user prompt accompanying the image(s).
+    /// Set the user prompt accompanying the image.
     #[must_use]
     pub fn with_user_prompt(mut self, user_prompt: &'a str) -> Self {
         self.user_prompt = Some(user_prompt);

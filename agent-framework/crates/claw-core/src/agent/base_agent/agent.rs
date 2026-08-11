@@ -278,7 +278,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
         Ok(())
     }
 
-    fn render_provider_context(&mut self) -> Result<serde_json::Value, AgentError> {
+    fn render_provider_context(&mut self) -> Result<Vec<serde_json::Value>, AgentError> {
         let mut sink = self.context.sink();
         for provider in &mut self.context_providers {
             provider

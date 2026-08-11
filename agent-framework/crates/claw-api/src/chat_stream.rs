@@ -15,7 +15,6 @@ use eventsource_stream::{EventStream, EventStreamError};
 use futures_core::Stream;
 use futures_lite::StreamExt;
 
-use crate::backends::shared::map_net_error;
 use crate::backends::sse::ProviderSse;
 use crate::errors::{ChatError, ClawApiError};
 use crate::transport::{Error as NetError, ResponsePart};
@@ -177,7 +176,7 @@ where
 /// Preserve the transport's transient/permanent classification. The outer
 /// stream driver separately decides whether replay is still safe.
 fn read_error(error: NetError) -> ChatError {
-    map_net_error(error).into()
+    ClawApiError::from(error).into()
 }
 
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body

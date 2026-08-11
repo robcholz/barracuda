@@ -84,7 +84,7 @@ pub(crate) enum MemoryOp {
 /// Failure from an [`Extractor`].
 ///
 /// The concrete source is preserved for propagation through the provider port.
-#[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, IntoStaticStr, thiserror::Error)]
 pub(crate) enum ExtractError {
     /// The extraction backend (e.g. the LLM client) failed.
     #[strum(serialize = "backend")]

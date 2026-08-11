@@ -79,7 +79,7 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
                 render_existing(input.existing),
                 input.transcript
             );
-            let messages = json!([{ "role": "user", "content": prompt }]);
+            let messages = [json!({ "role": "user", "content": prompt })];
 
             let request = ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);

@@ -1,14 +1,4 @@
-//! Backend selection and dispatch.
-//!
-//! The original C runtime used a vtable because backend implementations were
-//! selected by string at runtime. In Rust the same runtime choice is a closed,
-//! built-in enum, while HTTP transport dispatch stays generic/static at the call
-//! site.
-//!
-//! Registering a backend is a single line in the [`define_backends!`] table plus
-//! a [`BackendImpl`] in its module. Wire details and capability flags live on the
-//! trait (as associated consts), so a backend owns its own metadata instead of
-//! duplicating it in a table here.
+//! Built-in backend selection and dispatch.
 
 use alloc::string::String;
 
@@ -17,206 +7,117 @@ mod openai_compatible;
 pub(crate) mod shared;
 pub(crate) mod sse;
 
-use core::{fmt, str::FromStr};
-
-use claw_utils::Cancel;
 use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use strum::{Display, EnumString, IntoStaticStr};
 
 use super::chat_stream::ProviderStream;
-use super::errors::{ChatError, InferMediaError, InitError};
+use super::errors::{ChatError, InferMediaError};
 use super::transport::{HttpTransport as NetClient, ResponseStream};
 use super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 
 /// Failed to parse a string backend id into [`BackendKind`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// This wrapper is intentional: `strum::ParseError` does not implement
+/// `core::error::Error` in our `no_std` feature set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("unknown LLM backend type")]
 pub struct ParseBackendKindError;
 
-impl fmt::Display for ParseBackendKindError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("unknown LLM backend type")
+fn parse_backend_kind_error(_: &str) -> ParseBackendKindError {
+    ParseBackendKindError
+}
+
+/// Built-in backend kind selected by [`ClawApiConfig`](crate::ClawApiConfig).
+#[derive(
+    Clone, Copy, Debug, Display, EnumString, IntoStaticStr, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[strum(
+    parse_err_ty = ParseBackendKindError,
+    parse_err_fn = parse_backend_kind_error
+)]
+pub enum BackendKind {
+    #[serde(rename = "openai_compatible")]
+    #[strum(serialize = "openai_compatible")]
+    OpenAiCompatible,
+    #[serde(rename = "anthropic_compatible")]
+    #[strum(serialize = "anthropic_compatible")]
+    AnthropicCompatible,
+}
+
+impl BackendKind {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
+
+    pub(crate) fn make(self, config: ClawApiConfig) -> Backend {
+        match self {
+            Self::OpenAiCompatible => {
+                Backend::OpenAi(openai_compatible::OpenAiCompatible::new(config))
+            }
+            Self::AnthropicCompatible => Backend::Anthropic(anthropic::Anthropic::new(config)),
+        }
     }
 }
 
-impl core::error::Error for ParseBackendKindError {}
+pub(crate) enum Backend {
+    OpenAi(openai_compatible::OpenAiCompatible),
+    Anthropic(anthropic::Anthropic),
+}
 
-/// Behavior each built-in backend implements.
-///
-/// This is a pure behavioral contract: `make` plus the request methods. Wire
-/// details (endpoint path, provider field names, media-input rules) are
-/// backend-internal and live as private constants in each backend module, not
-/// here. The trait is crate-internal and never used as `dyn` (its request
-/// methods are generic over the HTTP transport), so [`Backend`] erases the
-/// concrete backend behind a small enum instead.
-trait BackendImpl: Sized {
-    /// Build the backend from validated config.
-    ///
-    /// Credential/config validation is centralized in [`crate::ClawApi::set_config`];
-    /// `api_key`, `model`, and `base_url` are guaranteed non-empty here.
-    fn make(config: &ClawApiConfig) -> Result<Self, InitError>;
+impl Backend {
+    pub(crate) fn timeout_ms(&self) -> u32 {
+        match self {
+            Self::OpenAi(backend) => backend.timeout_ms(),
+            Self::Anthropic(backend) => backend.timeout_ms(),
+        }
+    }
 
-    fn timeout_ms(&self) -> u32;
-
-    async fn chat_async<S: TcpConnect + Dns>(
+    pub(crate) async fn chat<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatRequest<'_>,
-        cancel: Cancel<'_>,
-    ) -> Result<LlmResponse, ChatError>;
+    ) -> Result<LlmResponse, ChatError> {
+        match self {
+            Self::OpenAi(backend) => backend.chat(http, request).await,
+            Self::Anthropic(backend) => backend.chat(http, request).await,
+        }
+    }
 
-    async fn chat_json_async<S: TcpConnect + Dns>(
+    pub(crate) async fn chat_json<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
-        cancel: Cancel<'_>,
-    ) -> Result<LlmResponse, ChatError>;
+    ) -> Result<LlmResponse, ChatError> {
+        match self {
+            Self::OpenAi(backend) => backend.chat_json(http, request, schema_name, schema).await,
+            Self::Anthropic(backend) => backend.chat_json(http, request, schema_name, schema).await,
+        }
+    }
 
-    async fn infer_media_async<S: TcpConnect + Dns>(
+    pub(crate) async fn infer_media<S: TcpConnect + Dns>(
         &self,
         http: &mut NetClient<'_, S>,
         request: &MediaRequest<'_>,
-        cancel: Cancel<'_>,
-    ) -> Result<String, InferMediaError>;
+    ) -> Result<String, InferMediaError> {
+        match self {
+            Self::OpenAi(backend) => backend.infer_media(http, request).await,
+            Self::Anthropic(backend) => backend.infer_media(http, request).await,
+        }
+    }
 
-    /// Streaming chat completion. Builds a `stream: true`
-    /// request, and on 2xx wraps the response body stream in a provider parser
-    /// backed by this backend's SSE parser; a non-2xx status reads the error body
-    /// and fails.
-    async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
+    pub(crate) async fn chat_stream<'h, S: TcpConnect + Dns>(
         &self,
         http: &'h mut NetClient<'_, S>,
-        request: &'r ChatRequest<'r>,
-        cancel: Cancel<'h>,
-    ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError>;
-}
-
-/// Constructed backend instance, dispatched by [`BackendKind`].
-pub(crate) struct Backend(BackendInner);
-
-/// Declare the closed set of built-in backends in one place.
-///
-/// Each entry is `Variant => Type, "id"`. The macro generates [`BackendKind`],
-/// the private `BackendInner` storage enum, the [`Backend`] transport dispatch,
-/// and the id `as_str`/`FromStr`/serde mapping.
-macro_rules! define_backends {
-    ( $( $variant:ident => $backend:ty, $id:literal );+ $(;)? ) => {
-        /// Built-in backend kind selected by [`ClawApiConfig`](crate::ClawApiConfig).
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-        pub enum BackendKind {
-            $(
-                #[serde(rename = $id)]
-                $variant,
-            )+
+        request: &ChatRequest<'_>,
+    ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
+        match self {
+            Self::OpenAi(backend) => backend.chat_stream(http, request).await,
+            Self::Anthropic(backend) => backend.chat_stream(http, request).await,
         }
-
-        enum BackendInner {
-            $( $variant($backend), )+
-        }
-
-        impl BackendKind {
-            /// The stable string id of this backend (config + logs).
-            #[must_use]
-            pub fn as_str(self) -> &'static str {
-                match self {
-                    $( Self::$variant => $id, )+
-                }
-            }
-
-            pub(crate) fn make(self, config: &ClawApiConfig) -> Result<Backend, InitError> {
-                Ok(Backend(match self {
-                    $( Self::$variant =>
-                        BackendInner::$variant(<$backend as BackendImpl>::make(config)?), )+
-                }))
-            }
-        }
-
-        impl FromStr for BackendKind {
-            type Err = ParseBackendKindError;
-
-            fn from_str(id: &str) -> Result<Self, Self::Err> {
-                match id {
-                    $( $id => Ok(Self::$variant), )+
-                    _ => Err(ParseBackendKindError),
-                }
-            }
-        }
-
-        impl Backend {
-
-            pub(crate) fn timeout_ms(&self) -> u32 {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) => BackendImpl::timeout_ms(backend), )+
-                }
-            }
-
-            pub(crate) async fn chat_async<S: TcpConnect + Dns>(
-                &self,
-                http: &mut NetClient<'_, S>,
-                request: &ChatRequest<'_>,
-                cancel: Cancel<'_>,
-            ) -> Result<LlmResponse, ChatError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::chat_async(backend, http, request, cancel).await, )+
-                }
-            }
-
-            pub(crate) async fn chat_json_async<S: TcpConnect + Dns>(
-                &self,
-                http: &mut NetClient<'_, S>,
-                request: &ChatJsonRequest<'_>,
-                schema_name: &str,
-                schema: &Value,
-                cancel: Cancel<'_>,
-            ) -> Result<LlmResponse, ChatError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::chat_json_async(
-                            backend, http, request, schema_name, schema, cancel,
-                        )
-                        .await, )+
-                }
-            }
-
-            pub(crate) async fn infer_media_async<S: TcpConnect + Dns>(
-                &self,
-                http: &mut NetClient<'_, S>,
-                request: &MediaRequest<'_>,
-                cancel: Cancel<'_>,
-            ) -> Result<String, InferMediaError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::infer_media_async(backend, http, request, cancel)
-                            .await, )+
-                }
-            }
-
-            pub(crate) async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
-                &self,
-                http: &'h mut NetClient<'_, S>,
-                request: &'r ChatRequest<'r>,
-                cancel: Cancel<'h>,
-            ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::chat_stream_async(backend, http, request, cancel)
-                            .await, )+
-                }
-            }
-        }
-    };
-}
-
-define_backends! {
-    OpenAiCompatible => openai_compatible::OpenAiCompatible, "openai_compatible";
-    AnthropicCompatible => anthropic::Anthropic, "anthropic_compatible";
-}
-
-impl fmt::Display for BackendKind {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
     }
 }

@@ -13,57 +13,51 @@ use alloc::string::String;
 use strum::IntoStaticStr;
 use thiserror::Error;
 
-use crate::transport::{Error as NetError, StatusCode};
+use crate::{transport::Error as NetError, StatusCode};
 
 const TRUNCATED_STREAM_MESSAGE: &str = "stream ended before provider completion";
 
 /// Failures shared by chat and media calls (transport, response parsing,
 /// allocation). `ApiError` is the static-message catch-all.
-#[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, Error)]
+#[derive(Debug, IntoStaticStr, Error)]
 pub enum ClawApiError {
     /// The client was constructed but no valid config has been installed yet.
-    #[strum(serialize = "not_configured")]
     #[error("LLM API is not configured")]
+    #[strum(serialize = "not_configured")]
     NotConfigured,
-    /// Permanent transport failure (aborts, bad URL/body, 4xx, ...). Never
-    /// retried. The typed HTTP failure is retained for matching and nested debug
-    /// output.
-    #[strum(serialize = "transport")]
+    /// Transport failure. The typed HTTP failure is retained as the error
+    /// source and decides its own retryability.
     #[error("HTTP transport error: {0}")]
-    Transport(#[source] NetError),
-    /// Transient transport failure (network error, HTTP 408/429/5xx) eligible
-    /// for retry by the [`crate::ClawApi`] retry loop.
-    #[strum(serialize = "transient_transport")]
-    #[error("transient HTTP transport error: {0}")]
-    TransientTransport(#[source] NetError),
+    #[strum(serialize = "transport")]
+    Transport(#[from] NetError),
     /// The configured request deadline elapsed.
-    #[strum(serialize = "timeout")]
     #[error("LLM HTTP request timed out")]
+    #[strum(serialize = "timeout")]
     Timeout,
     /// Permanent non-success HTTP response.
+    #[error("HTTP {}: {body}", status.0)]
     #[strum(serialize = "http_status")]
-    #[error("HTTP {status}: {body}")]
     HttpStatus { status: StatusCode, body: String },
     /// Retryable non-success HTTP response (408, 429, or 5xx).
+    #[error("transient HTTP {}: {body}", status.0)]
     #[strum(serialize = "transient_http_status")]
-    #[error("transient HTTP {status}: {body}")]
     TransientHttpStatus { status: StatusCode, body: String },
     /// The response body was not valid JSON.
-    #[strum(serialize = "parse")]
     #[error("failed to parse LLM JSON response")]
+    #[strum(serialize = "parse")]
     Parse,
     /// The model returned no usable content.
-    #[strum(serialize = "empty_response")]
     #[error("LLM returned an empty response")]
+    #[strum(serialize = "empty_response")]
     EmptyResponse,
     /// The response JSON had an unexpected shape (missing/!assistant message,
     /// missing content, malformed tool call).
-    #[strum(serialize = "malformed_response")]
     #[error("malformed LLM response: {0}")]
+    #[strum(serialize = "malformed_response")]
     MalformedResponse(&'static str),
     /// Any other API-side failure (allocation, serialization, ...).
-    #[strum(serialize = "api")]
     #[error("{0}")]
+    #[strum(serialize = "api")]
     ApiError(&'static str),
 }
 
@@ -73,10 +67,8 @@ impl ClawApiError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            ClawApiError::TransientTransport(_)
-                | ClawApiError::TransientHttpStatus { .. }
-                | ClawApiError::Timeout
-        )
+            ClawApiError::TransientHttpStatus { .. } | ClawApiError::Timeout
+        ) || matches!(self, ClawApiError::Transport(error) if error.retryable())
     }
 
     /// Whether this failure came from aborting an in-flight request.
@@ -99,7 +91,7 @@ pub enum InitError {
 }
 
 /// Failures from a structured JSON chat completion request.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum ChatJsonError {
     /// Model returned neither parseable JSON nor tool calls.
     #[error("LLM returned empty structured output")]
@@ -136,26 +128,31 @@ impl ChatJsonError {
 /// use claw_api::{ChatError, ClawApiError};
 /// fn handle(err: &ChatError) {
 ///     match err {
-///         ChatError::Api(ClawApiError::TransientTransport(http)) => {
+///         ChatError::Api(ClawApiError::Transport(http)) if http.retryable() => {
 ///             eprintln!("transient, may retry: {http}");
 ///         }
 ///         other => eprintln!("permanent failure: {other}"),
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone, IntoStaticStr, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum ChatError {
     /// The caller-supplied tools JSON was invalid.
-    #[strum(serialize = "invalid_tools_json")]
     #[error("invalid tools JSON")]
     InvalidToolsJson,
     /// A shared API/transport/parse failure.
-    #[strum(serialize = "api")]
     #[error(transparent)]
     Api(#[from] ClawApiError),
 }
 
 impl ChatError {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::InvalidToolsJson => "invalid_tools_json",
+            Self::Api(error) => error.into(),
+        }
+    }
+
     /// A streaming response that ended before the provider's terminal marker.
     #[must_use]
     pub fn truncated_stream() -> Self {
@@ -181,50 +178,23 @@ impl ChatError {
 
 /// Failures from a one-shot media inference request (includes the media-prep
 /// pipeline used only by this call).
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum InferMediaError {
     /// The request was missing a prompt or media asset.
     #[error("media request is incomplete")]
     IncompleteRequest,
-    /// Multiple media assets were supplied, but current backends accept one.
-    #[error("multiple media assets are not supported")]
-    MultipleMediaAssetsUnsupported,
-    /// Media path was empty.
-    #[error("media path is empty")]
-    MediaPathEmpty,
-    /// Media path was not absolute.
-    #[error("media path must be an absolute path")]
-    MediaPathNotAbsolute,
     /// Media URL was empty.
     #[error("media URL is empty")]
     MediaUrlEmpty,
-    /// The media file extension/MIME is not a supported image type.
-    #[error("only local jpg/jpeg/png/gif/webp files are supported")]
-    UnsupportedMediaType,
-    /// The media file does not exist.
-    #[error("media file not found")]
-    MediaNotFound,
     /// The media file was empty.
     #[error("media file is empty")]
     MediaFileEmpty,
     /// The media file exceeded the configured size limit.
     #[error("media file is too large")]
     MediaTooLarge,
-    /// Reading the media file failed.
-    #[error("failed to read media file")]
-    MediaReadFailed,
-    /// The asset kind is not supported (e.g. inline bytes).
-    #[error("unsupported media asset kind")]
-    UnsupportedMediaKind,
-    /// The profile only accepts remote image URLs.
-    #[error("selected profile only supports remote image URLs")]
-    RemoteOnlyProfile,
     /// The backend requires local image data (e.g. Anthropic base64).
     #[error("backend requires local image data")]
     RequiresLocalImage,
-    /// Building the provider-specific image payload failed.
-    #[error("failed to prepare image payload")]
-    PayloadPrepFailed,
     /// A shared API/transport/parse failure.
     #[error(transparent)]
     Api(#[from] ClawApiError),

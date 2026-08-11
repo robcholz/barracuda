@@ -1,16 +1,11 @@
 pub mod claw_api
-pub use claw_api::NetworkErrorKind
+pub use claw_api::StatusCode
 pub use claw_api::stream
 pub enum claw_api::BackendKind
 pub claw_api::BackendKind::AnthropicCompatible
 pub claw_api::BackendKind::OpenAiCompatible
 impl claw_api::BackendKind
 pub fn claw_api::BackendKind::as_str(self) -> &'static str
-impl core::fmt::Display for claw_api::BackendKind
-pub fn claw_api::BackendKind::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for claw_api::BackendKind
-pub type claw_api::BackendKind::Err = claw_api::ParseBackendKindError
-pub fn claw_api::BackendKind::from_str(id: &str) -> core::result::Result<Self, Self::Err>
 pub enum claw_api::ChatError
 pub claw_api::ChatError::Api(claw_api::ClawApiError)
 pub claw_api::ChatError::InvalidToolsJson
@@ -34,46 +29,35 @@ pub claw_api::ClawApiError::ApiError(&'static str)
 pub claw_api::ClawApiError::EmptyResponse
 pub claw_api::ClawApiError::HttpStatus
 pub claw_api::ClawApiError::HttpStatus::body: alloc::string::String
-pub claw_api::ClawApiError::HttpStatus::status: claw_api::StatusCode
+pub claw_api::ClawApiError::HttpStatus::status: reqwless::response::StatusCode
 pub claw_api::ClawApiError::MalformedResponse(&'static str)
 pub claw_api::ClawApiError::NotConfigured
 pub claw_api::ClawApiError::Parse
 pub claw_api::ClawApiError::Timeout
 pub claw_api::ClawApiError::TransientHttpStatus
 pub claw_api::ClawApiError::TransientHttpStatus::body: alloc::string::String
-pub claw_api::ClawApiError::TransientHttpStatus::status: claw_api::StatusCode
-pub claw_api::ClawApiError::TransientTransport(claw_api::HttpError)
+pub claw_api::ClawApiError::TransientHttpStatus::status: reqwless::response::StatusCode
 pub claw_api::ClawApiError::Transport(claw_api::HttpError)
 impl claw_api::ClawApiError
 pub fn claw_api::ClawApiError::is_aborted(&self) -> bool
 pub fn claw_api::ClawApiError::is_retryable(&self) -> bool
 pub enum claw_api::HttpError
-pub claw_api::HttpError::BufferTooSmall
 pub claw_api::HttpError::Cancelled
 pub claw_api::HttpError::Codec
 pub claw_api::HttpError::ConnectionAborted
-pub claw_api::HttpError::Dns
 pub claw_api::HttpError::InvalidUrl
 pub claw_api::HttpError::InvalidUtf8
-pub claw_api::HttpError::Network(embedded_io::ErrorKind)
-pub claw_api::HttpError::Tls
+pub claw_api::HttpError::Reqwless(reqwless::Error)
 pub claw_api::HttpError::TlsNotConfigured
+impl claw_api::HttpError
+pub fn claw_api::HttpError::retryable(&self) -> bool
 pub enum claw_api::InferMediaError
 pub claw_api::InferMediaError::Api(claw_api::ClawApiError)
 pub claw_api::InferMediaError::IncompleteRequest
 pub claw_api::InferMediaError::MediaFileEmpty
-pub claw_api::InferMediaError::MediaNotFound
-pub claw_api::InferMediaError::MediaPathEmpty
-pub claw_api::InferMediaError::MediaPathNotAbsolute
-pub claw_api::InferMediaError::MediaReadFailed
 pub claw_api::InferMediaError::MediaTooLarge
 pub claw_api::InferMediaError::MediaUrlEmpty
-pub claw_api::InferMediaError::MultipleMediaAssetsUnsupported
-pub claw_api::InferMediaError::PayloadPrepFailed
-pub claw_api::InferMediaError::RemoteOnlyProfile
 pub claw_api::InferMediaError::RequiresLocalImage
-pub claw_api::InferMediaError::UnsupportedMediaKind
-pub claw_api::InferMediaError::UnsupportedMediaType
 impl claw_api::InferMediaError
 pub fn claw_api::InferMediaError::is_retryable(&self) -> bool
 pub enum claw_api::InitError
@@ -89,16 +73,11 @@ pub claw_api::MediaAsset::RemoteUrl::url: alloc::string::String
 impl claw_api::MediaAsset
 pub fn claw_api::MediaAsset::inline_bytes(bytes: alloc::vec::Vec<u8>, mime_type: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn claw_api::MediaAsset::remote_url(url: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn claw_api::MediaAsset::with_mime_type(self, mime_type: impl core::convert::Into<alloc::string::String>) -> Self
 pub struct claw_api::ChatJsonRequest<'a>
-pub claw_api::ChatJsonRequest::messages: &'a serde_json::value::Value
+pub claw_api::ChatJsonRequest::chat: claw_api::ChatRequest<'a>
 pub claw_api::ChatJsonRequest::output_schema: core::option::Option<claw_api::StaticOutputSchema<'a>>
-pub claw_api::ChatJsonRequest::reminders: &'a [serde_json::value::Value]
-pub claw_api::ChatJsonRequest::retry: claw_api::RetryPolicy
-pub claw_api::ChatJsonRequest::system_prompt: &'a str
-pub claw_api::ChatJsonRequest::tools_json: core::option::Option<&'a str>
 impl<'a> claw_api::ChatJsonRequest<'a>
-pub fn claw_api::ChatJsonRequest<'a>::new(system_prompt: &'a str, messages: &'a serde_json::value::Value) -> Self
+pub fn claw_api::ChatJsonRequest<'a>::new(system_prompt: &'a str, messages: &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatJsonRequest<'a>::with_output_schema(self, name: &'a str, schema_json: &'a str) -> Self
 pub fn claw_api::ChatJsonRequest<'a>::with_reminders(self, reminders: &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatJsonRequest<'a>::with_retry(self, retry: claw_api::RetryPolicy) -> Self
@@ -109,13 +88,13 @@ pub claw_api::ChatJsonResponse::raw_message_json: core::option::Option<alloc::st
 pub claw_api::ChatJsonResponse::reasoning_content: core::option::Option<alloc::string::String>
 pub claw_api::ChatJsonResponse::tool_calls: alloc::vec::Vec<claw_api::ToolCall>
 pub struct claw_api::ChatRequest<'a>
-pub claw_api::ChatRequest::messages: &'a serde_json::value::Value
+pub claw_api::ChatRequest::messages: &'a [serde_json::value::Value]
 pub claw_api::ChatRequest::reminders: &'a [serde_json::value::Value]
 pub claw_api::ChatRequest::retry: claw_api::RetryPolicy
 pub claw_api::ChatRequest::system_prompt: &'a str
 pub claw_api::ChatRequest::tools_json: core::option::Option<&'a str>
 impl<'a> claw_api::ChatRequest<'a>
-pub fn claw_api::ChatRequest<'a>::new(system_prompt: &'a str, messages: &'a serde_json::value::Value) -> Self
+pub fn claw_api::ChatRequest<'a>::new(system_prompt: &'a str, messages: &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatRequest<'a>::with_reminders(self, reminders: &'a [serde_json::value::Value]) -> Self
 pub fn claw_api::ChatRequest<'a>::with_retry(self, retry: claw_api::RetryPolicy) -> Self
 pub fn claw_api::ChatRequest<'a>::with_tools(self, tools_json: &'a str) -> Self
@@ -154,19 +133,16 @@ pub claw_api::LlmResponse::reasoning_content: core::option::Option<alloc::string
 pub claw_api::LlmResponse::text: core::option::Option<alloc::string::String>
 pub claw_api::LlmResponse::tool_calls: alloc::vec::Vec<claw_api::ToolCall>
 pub struct claw_api::MediaRequest<'a>
-pub claw_api::MediaRequest::media: &'a [claw_api::MediaAsset]
+pub claw_api::MediaRequest::media: &'a claw_api::MediaAsset
 pub claw_api::MediaRequest::retry: claw_api::RetryPolicy
 pub claw_api::MediaRequest::system_prompt: core::option::Option<&'a str>
 pub claw_api::MediaRequest::user_prompt: core::option::Option<&'a str>
 impl<'a> claw_api::MediaRequest<'a>
-pub fn claw_api::MediaRequest<'a>::new(media: &'a [claw_api::MediaAsset]) -> Self
+pub fn claw_api::MediaRequest<'a>::new(media: &'a claw_api::MediaAsset) -> Self
 pub fn claw_api::MediaRequest<'a>::with_retry(self, retry: claw_api::RetryPolicy) -> Self
 pub fn claw_api::MediaRequest<'a>::with_system_prompt(self, system_prompt: &'a str) -> Self
 pub fn claw_api::MediaRequest<'a>::with_user_prompt(self, user_prompt: &'a str) -> Self
 pub struct claw_api::ParseBackendKindError
-impl core::error::Error for claw_api::ParseBackendKindError
-impl core::fmt::Display for claw_api::ParseBackendKindError
-pub fn claw_api::ParseBackendKindError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_api::RetryPolicy
 pub claw_api::RetryPolicy::backoff_multiplier: u32
 pub claw_api::RetryPolicy::initial_backoff_ms: u32
@@ -185,18 +161,7 @@ pub fn claw_api::RetryPolicy::default() -> Self
 pub struct claw_api::StaticOutputSchema<'a>
 pub claw_api::StaticOutputSchema::json: &'a str
 pub claw_api::StaticOutputSchema::name: &'a str
-pub struct claw_api::StatusCode(_)
-impl claw_api::StatusCode
-pub const claw_api::StatusCode::NO_CONTENT: Self
-pub const claw_api::StatusCode::OK: Self
-pub const fn claw_api::StatusCode::as_u16(self) -> u16
-pub const fn claw_api::StatusCode::is_success(self) -> bool
-pub const fn claw_api::StatusCode::new(code: u16) -> Self
-impl core::fmt::Display for claw_api::StatusCode
-pub fn claw_api::StatusCode::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_api::ToolCall
 pub claw_api::ToolCall::arguments_json: alloc::string::String
 pub claw_api::ToolCall::id: alloc::string::String
 pub claw_api::ToolCall::name: alloc::string::String
-impl claw_api::ToolCall
-pub fn claw_api::ToolCall::display_name(&self) -> &str

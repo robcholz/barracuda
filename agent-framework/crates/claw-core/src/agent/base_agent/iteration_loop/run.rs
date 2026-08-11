@@ -557,7 +557,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use claw_api::{ChatError, ClawApiError, HttpError as NetError, NetworkErrorKind};
+    use claw_api::{ChatError, ClawApiError, HttpError as NetError};
     use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
         Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
@@ -750,27 +750,33 @@ mod tests {
         let error = ToolPhase::new(tool_calls, &tools, &AllowAll)
             .err()
             .expect("duplicate ids fail the iteration");
-        assert_eq!(
+        assert!(matches!(
             error,
-            IterationLoopError::DuplicateProviderToolCallId("duplicate".to_owned())
-        );
+            IterationLoopError::DuplicateProviderToolCallId(id) if id == "duplicate"
+        ));
         assert_eq!(executions.load(Ordering::SeqCst), 0);
     }
 
     #[test]
     fn chat_phase_errors_preserve_nested_network_debug_context() {
-        let chat_error = ChatError::Api(ClawApiError::TransientTransport(NetError::Network(
-            NetworkErrorKind::ConnectionReset,
-        )));
-
-        let init = format!("{:?}", IterationLoopError::ChatInit(chat_error.clone()));
-        let stream = format!("{:?}", IterationLoopError::ChatStream(chat_error));
+        let init = format!(
+            "{:?}",
+            IterationLoopError::ChatInit(ChatError::Api(ClawApiError::Transport(
+                NetError::ConnectionAborted,
+            )))
+        );
+        let stream = format!(
+            "{:?}",
+            IterationLoopError::ChatStream(ChatError::Api(ClawApiError::Transport(
+                NetError::ConnectionAborted,
+            )))
+        );
 
         assert!(init.starts_with("ChatInit("), "{init}");
         assert!(stream.starts_with("ChatStream("), "{stream}");
         assert!(!init.contains('\n'), "{init}");
         assert!(!stream.contains('\n'), "{stream}");
-        for expected in ["TransientTransport(", "Network(", "ConnectionReset"] {
+        for expected in ["Transport(", "ConnectionAborted"] {
             assert!(init.contains(expected), "missing `{expected}` in {init}");
             assert!(
                 stream.contains(expected),

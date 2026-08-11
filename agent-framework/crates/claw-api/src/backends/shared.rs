@@ -4,132 +4,72 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use claw_utils::Cancel;
 use embedded_nal_async::{Dns, TcpConnect};
+use reqwless::response::Status;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::super::chat_stream::{drain_body, ProviderStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError};
-use super::super::transport::{
-    Error as NetError, HttpTransport as NetClient, Response, ResponsePart, ResponseStream,
-    StatusCode,
-};
+use super::super::transport::{HttpTransport as NetClient, Response, ResponsePart, ResponseStream};
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
-use super::super::types::{ClawApiConfig, LlmResponse, MediaAsset, ToolCall};
+use super::super::types::{ClawApiConfig, LlmResponse, ToolCall};
+use super::super::StatusCode;
 use super::sse::ProviderSse;
 
 /// HTTP statuses that indicate a transient, retryable server condition.
 const STATUS_REQUEST_TIMEOUT: u16 = 408;
-const STATUS_TOO_MANY_REQUESTS: u16 = 429;
-const STATUS_SERVER_ERROR_MIN: u16 = 500;
-const STATUS_SERVER_ERROR_MAX: u16 = 599;
 const MAX_ERROR_BODY_BYTES: usize = 1024;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) struct BackendContext {
-    api_key: String,
     model: String,
-    base_url: String,
-    timeout_ms: u32,
+    endpoint: String,
+    headers: Vec<(String, String)>,
+    pub(super) timeout_ms: u32,
     max_tokens: u32,
-    image_max_bytes: usize,
+    pub(super) image_max_bytes: usize,
 }
 
 impl BackendContext {
-    pub(super) fn from_config(config: &ClawApiConfig) -> Self {
-        Self {
-            api_key: config.api_key.clone(),
-            model: config.model.clone(),
-            base_url: config.base_url.clone(),
-            timeout_ms: config.timeout_ms,
-            max_tokens: config.max_tokens,
-            image_max_bytes: config.image_max_bytes,
-        }
-    }
-
-    pub(super) fn api_key(&self) -> &str {
-        &self.api_key
-    }
-
-    pub(super) fn model(&self) -> &str {
-        &self.model
-    }
-
-    pub(super) fn max_tokens(&self) -> u32 {
-        self.max_tokens
-    }
-
-    pub(super) fn timeout_ms(&self) -> u32 {
-        self.timeout_ms
-    }
-
-    pub(super) fn image_max_bytes(&self) -> usize {
-        self.image_max_bytes
-    }
-
-    pub(super) fn endpoint_url(&self, chat_path: &str) -> String {
-        join_url(&self.base_url, chat_path)
-    }
-
-    /// Assemble the owned inputs for a single JSON POST to `path`.
-    ///
-    /// The backend builds the serialized `body` and chooses `auth`/`headers`;
-    /// the reqwless send path then borrows the result without re-deriving its
-    /// URL, authentication, or headers.
-    pub(super) fn prepare(
-        &self,
+    pub(super) fn new(
+        config: ClawApiConfig,
         path: &str,
-        body: String,
-        auth: PreparedAuth,
-        headers: Vec<(&'static str, String)>,
-    ) -> PreparedRequest {
-        PreparedRequest {
-            url: self.endpoint_url(path),
-            body,
-            auth,
-            headers,
+        make_headers: impl FnOnce(String) -> Vec<(String, String)>,
+    ) -> Self {
+        let ClawApiConfig {
+            api_key,
+            model,
+            base_url,
+            timeout_ms,
+            max_tokens,
+            image_max_bytes,
+            ..
+        } = config;
+        Self {
+            model,
+            endpoint: join_url(&base_url, path),
+            headers: make_headers(api_key),
+            timeout_ms,
+            max_tokens,
+            image_max_bytes,
         }
     }
-}
 
-/// Owned authentication for a [`PreparedRequest`].
-pub(super) enum PreparedAuth {
-    None,
-    Bearer(String),
-}
+    pub(super) fn request_body(&self) -> Map<String, Value> {
+        let mut body = Map::new();
+        body.insert("model".to_string(), Value::String(self.model.clone()));
+        body.insert("max_tokens".to_string(), Value::from(self.max_tokens));
+        body
+    }
 
-/// A fully assembled but not-yet-sent JSON POST.
-///
-/// Owning the URL, body, auth, and headers keeps provider request construction
-/// separate from the concrete reqwless send operation.
-pub(super) struct PreparedRequest {
-    url: String,
-    body: String,
-    auth: PreparedAuth,
-    headers: Vec<(&'static str, String)>,
-}
+    fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
 
-impl PreparedRequest {
-    fn owned_headers(&self) -> Vec<(String, String)> {
-        let capacity = self
-            .headers
-            .len()
-            .saturating_add(usize::from(matches!(self.auth, PreparedAuth::Bearer(_))));
-        let mut headers = Vec::with_capacity(capacity);
-        match &self.auth {
-            PreparedAuth::None => {}
-            PreparedAuth::Bearer(key) if !key.is_empty() => {
-                headers.push(("Authorization".to_string(), format!("Bearer {key}")));
-            }
-            PreparedAuth::Bearer(_) => {}
-        }
-        headers.extend(
-            self.headers
-                .iter()
-                .map(|(name, value)| ((*name).to_string(), value.clone())),
-        );
-        headers
+    fn headers(&self) -> &[(String, String)] {
+        &self.headers
     }
 }
 
@@ -156,73 +96,53 @@ fn truncated_error_body(mut body: String) -> String {
 }
 
 fn status_is_transient(status: StatusCode) -> bool {
-    let code = status.as_u16();
-    code == STATUS_REQUEST_TIMEOUT
-        || code == STATUS_TOO_MANY_REQUESTS
-        || (STATUS_SERVER_ERROR_MIN..=STATUS_SERVER_ERROR_MAX).contains(&code)
+    let code = status.0;
+    code == STATUS_REQUEST_TIMEOUT || status == Status::TooManyRequests || status.is_server_error()
 }
 
-/// Send a [`PreparedRequest`] over the async transport.
-pub(super) async fn post_prepared_async<S: TcpConnect + Dns>(
+pub(super) async fn post_json<S: TcpConnect + Dns>(
     http: &mut NetClient<'_, S>,
-    prepared: &PreparedRequest,
-    cancel: Cancel<'_>,
+    context: &BackendContext,
+    body: &str,
 ) -> Result<Response, ClawApiError> {
-    let headers = prepared.owned_headers();
-    let header_refs = headers
+    let header_refs = context
+        .headers()
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect::<Vec<_>>();
     let response = http
-        .post_json(&prepared.url, &prepared.body, &header_refs, cancel)
-        .await
-        .map_err(map_net_error)?;
-    if response.status.is_success() {
+        .post_json(context.endpoint(), body, &header_refs)
+        .await?;
+    if response.status.is_successful() {
         Ok(response)
     } else {
         Err(map_status_error(response.status, response.body))
     }
 }
 
-/// Open a streaming chat completion from a [`PreparedRequest`], wrapping a 2xx
-/// body stream in `sse` and surfacing a non-2xx status as a drained error body.
-pub(super) async fn post_prepared_stream<'h, S: TcpConnect + Dns>(
+pub(super) async fn post_stream<'h, S: TcpConnect + Dns>(
     http: &'h mut NetClient<'_, S>,
-    prepared: &PreparedRequest,
-    cancel: Cancel<'h>,
+    context: &BackendContext,
+    body: String,
     sse: ProviderSse,
 ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
-    let owned_headers = prepared.owned_headers();
     let mut stream = http.post_json_stream(
-        prepared.url.clone(),
-        prepared.body.clone(),
-        owned_headers,
-        cancel,
+        context.endpoint().to_string(),
+        body,
+        context.headers().to_vec(),
     );
     let status = match futures_lite::StreamExt::next(&mut stream).await {
         Some(Ok(ResponsePart::Head(status))) => status,
         Some(Ok(ResponsePart::Data(_))) | None => {
             return Err(ClawApiError::ApiError("HTTP stream ended before response head").into())
         }
-        Some(Err(error)) => return Err(map_net_error(error).into()),
+        Some(Err(error)) => return Err(ClawApiError::from(error).into()),
     };
-    if !status.is_success() {
-        let body = drain_body(stream).await.map_err(map_net_error)?;
+    if !status.is_successful() {
+        let body = drain_body(stream).await.map_err(ClawApiError::from)?;
         return Err(map_status_error(status, body).into());
     }
     Ok(ProviderStream::new(stream, sse))
-}
-
-pub(crate) fn map_net_error(error: NetError) -> ClawApiError {
-    let transient = matches!(
-        error,
-        NetError::Dns | NetError::Network(_) | NetError::ConnectionAborted
-    );
-    if transient {
-        ClawApiError::TransientTransport(error)
-    } else {
-        ClawApiError::Transport(error)
-    }
 }
 
 /// Extract the required non-empty assistant text from a media inference reply.
@@ -233,8 +153,7 @@ pub(super) fn media_text(parsed: LlmResponse) -> Result<String, InferMediaError>
     }
 }
 
-/// `join_url` from the backends: join `base_url` and `path` with exactly one
-/// slash between them.
+/// Join `base_url` and `path` with exactly one slash between them.
 fn join_url(base_url: &str, path: &str) -> String {
     let base_has_slash = base_url.ends_with('/');
     let path_has_slash = path.starts_with('/');
@@ -247,63 +166,158 @@ fn join_url(base_url: &str, path: &str) -> String {
     }
 }
 
-/// Parse an OpenAI chat-completions response, mirroring `parse_chat_response`
-/// in `claw_llm_backend_openai_compatible.c`.
+#[derive(Deserialize, Serialize)]
+struct OpenAiResponse {
+    #[serde(default)]
+    choices: Vec<OpenAiChoice>,
+    #[cfg(feature = "cache_profile")]
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiChoice {
+    message: Option<OpenAiMessage>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiMessage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<OpenAiToolCall>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiToolCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    function: Option<OpenAiFunctionCall>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiFunctionCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    arguments: Option<String>,
+}
+
+#[cfg(feature = "cache_profile")]
+#[derive(Deserialize, Serialize)]
+pub(super) struct OpenAiUsage {
+    prompt_tokens: Option<u64>,
+    input_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    prompt_tokens_details: Option<TokenDetails>,
+    input_tokens_details: Option<TokenDetails>,
+    cache_write_tokens: Option<u64>,
+}
+
+#[cfg(feature = "cache_profile")]
+#[derive(Deserialize, Serialize)]
+struct TokenDetails {
+    cached_tokens: Option<u64>,
+}
+
+#[cfg(feature = "cache_profile")]
+impl OpenAiUsage {
+    pub(super) fn profile(self) -> Option<ProviderUsage> {
+        let profile = ProviderUsage {
+            input_tokens: self.prompt_tokens.or(self.input_tokens),
+            output_tokens: self.completion_tokens.or(self.output_tokens),
+            cache_read_tokens: self
+                .prompt_tokens_details
+                .and_then(|details| details.cached_tokens)
+                .or_else(|| {
+                    self.input_tokens_details
+                        .and_then(|details| details.cached_tokens)
+                }),
+            cache_write_tokens: self.cache_write_tokens,
+        };
+        (profile.input_tokens.is_some()
+            || profile.output_tokens.is_some()
+            || profile.cache_read_tokens.is_some()
+            || profile.cache_write_tokens.is_some())
+        .then_some(profile)
+    }
+}
+
+#[cfg(feature = "cache_profile")]
+#[derive(Deserialize, Serialize)]
+pub(super) struct AnthropicUsage {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+}
+
+#[cfg(feature = "cache_profile")]
+impl AnthropicUsage {
+    pub(super) fn profile(self) -> Option<ProviderUsage> {
+        let profile = ProviderUsage {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            cache_read_tokens: self.cache_read_input_tokens,
+            cache_write_tokens: self.cache_creation_input_tokens,
+        };
+        (profile.input_tokens.is_some()
+            || profile.output_tokens.is_some()
+            || profile.cache_read_tokens.is_some()
+            || profile.cache_write_tokens.is_some())
+        .then_some(profile)
+    }
+}
+
+/// Parse an OpenAI chat-completions response.
 pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, ClawApiError> {
-    let root: Value = serde_json::from_str(body).map_err(|_| ClawApiError::Parse)?;
+    let mut response: OpenAiResponse =
+        serde_json::from_str(body).map_err(|_| ClawApiError::Parse)?;
+    let message = response
+        .choices
+        .first_mut()
+        .and_then(|choice| choice.message.take())
+        .ok_or(ClawApiError::MalformedResponse("response missing message"))?;
 
-    let message = root
-        .get("choices")
-        .and_then(|c| c.as_array())
-        .and_then(|a| a.first())
-        .and_then(|c0| c0.get("message"));
-    let message = match message {
-        Some(m) if m.is_object() => m,
-        _ => return Err(ClawApiError::MalformedResponse("response missing message")),
-    };
-
-    if message.get("role").and_then(|r| r.as_str()) != Some("assistant") {
+    if message.role.as_deref() != Some("assistant") {
         return Err(ClawApiError::MalformedResponse(
             "response message is not assistant",
         ));
     }
 
-    let raw_message_json = serde_json::to_string(message)
+    let raw_message_json = serde_json::to_string(&message)
         .map_err(|_| ClawApiError::ApiError("out of memory copying raw message"))?;
 
-    let text = message
-        .get("content")
-        .and_then(|c| c.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+    let text = message.content.filter(|content| !content.is_empty());
+    let reasoning_content = message.reasoning_content;
 
-    // reasoning_content: kept even when empty, as long as it is a string.
-    let reasoning_content = message
-        .get("reasoning_content")
-        .and_then(|r| r.as_str())
-        .map(|s| s.to_string());
-
-    let mut tool_calls = Vec::new();
-    if let Some(arr) = message.get("tool_calls").and_then(|t| t.as_array()) {
-        for tc in arr {
-            let function = tc.get("function");
-            let id = tc.get("id");
-            let name = function.and_then(|f| f.get("name"));
-            let args = function.and_then(|f| f.get("arguments"));
-            match (
-                id.and_then(Value::as_str),
-                name.and_then(Value::as_str),
-                args.and_then(Value::as_str),
-            ) {
-                (Some(id), Some(name), Some(args)) => tool_calls.push(ToolCall {
-                    id: id.to_string(),
-                    name: name.to_string(),
-                    arguments_json: args.to_string(),
-                }),
-                _ => return Err(ClawApiError::MalformedResponse("malformed tool call")),
-            }
-        }
-    }
+    let tool_calls = message
+        .tool_calls
+        .into_iter()
+        .map(|call| -> Result<_, ClawApiError> {
+            let function = call
+                .function
+                .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?;
+            Ok(ToolCall {
+                id: call
+                    .id
+                    .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?,
+                name: function
+                    .name
+                    .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?,
+                arguments_json: function
+                    .arguments
+                    .ok_or(ClawApiError::MalformedResponse("malformed tool call"))?,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     if text.is_none() && tool_calls.is_empty() {
         return Err(ClawApiError::EmptyResponse);
@@ -315,57 +329,8 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Claw
         raw_message_json: Some(raw_message_json),
         tool_calls,
         #[cfg(feature = "cache_profile")]
-        usage: parse_openai_usage(&root),
+        usage: response.usage.and_then(OpenAiUsage::profile),
     })
-}
-
-/// Extract OpenAI-compatible usage counters for cache profiling.
-#[cfg(feature = "cache_profile")]
-pub(super) fn parse_openai_usage(root: &Value) -> Option<ProviderUsage> {
-    let usage = root.get("usage")?;
-    let prompt_details = usage.get("prompt_tokens_details");
-    let input_details = usage.get("input_tokens_details");
-    let profile = ProviderUsage {
-        input_tokens: usage
-            .get("prompt_tokens")
-            .or_else(|| usage.get("input_tokens"))
-            .and_then(Value::as_u64),
-        output_tokens: usage
-            .get("completion_tokens")
-            .or_else(|| usage.get("output_tokens"))
-            .and_then(Value::as_u64),
-        cache_read_tokens: prompt_details
-            .and_then(|details| details.get("cached_tokens"))
-            .or_else(|| input_details.and_then(|details| details.get("cached_tokens")))
-            .and_then(Value::as_u64),
-        cache_write_tokens: usage.get("cache_write_tokens").and_then(Value::as_u64),
-    };
-    (profile.input_tokens.is_some()
-        || profile.output_tokens.is_some()
-        || profile.cache_read_tokens.is_some()
-        || profile.cache_write_tokens.is_some())
-    .then_some(profile)
-}
-
-/// Extract Anthropic usage counters for cache profiling.
-#[cfg(feature = "cache_profile")]
-pub(super) fn parse_anthropic_usage(root: &Value) -> Option<ProviderUsage> {
-    let usage = root
-        .get("usage")
-        .or_else(|| root.get("message").and_then(|message| message.get("usage")))?;
-    let profile = ProviderUsage {
-        input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
-        output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
-        cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
-        cache_write_tokens: usage
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_u64),
-    };
-    (profile.input_tokens.is_some()
-        || profile.output_tokens.is_some()
-        || profile.cache_read_tokens.is_some()
-        || profile.cache_write_tokens.is_some())
-    .then_some(profile)
 }
 
 /// Insert OpenAI-style `tools` into a chat request body map.
@@ -381,15 +346,7 @@ pub(super) fn insert_tools_into_body(
     Ok(())
 }
 
-/// Select the single media asset a backend will send.
-///
-/// An empty asset list is a returnable [`InferMediaError::IncompleteRequest`].
-/// Sending more than one asset in a single request is rejected rather than
-/// silently dropping the extra assets.
-pub(super) fn single_media_asset(media: &[MediaAsset]) -> Result<&MediaAsset, InferMediaError> {
-    match media {
-        [] => Err(InferMediaError::IncompleteRequest),
-        [asset] => Ok(asset),
-        _ => Err(InferMediaError::MultipleMediaAssetsUnsupported),
-    }
+pub(super) fn serialize_chat_body(body: Map<String, Value>) -> Result<String, ChatError> {
+    serde_json::to_string(&Value::Object(body))
+        .map_err(|_| ClawApiError::ApiError("out of memory serializing request").into())
 }
