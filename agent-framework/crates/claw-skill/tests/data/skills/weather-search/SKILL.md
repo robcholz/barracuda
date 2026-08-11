@@ -1,15 +1,6 @@
 ---
-{
-  "name": "weather_search",
-  "description": "How to answer current weather, temperature, and forecast queries through direct web search capabilities.",
-  "metadata": {
-    "cap_groups": [
-      "cap_time",
-      "cap_web_search"
-    ],
-    "manage_mode": "readonly"
-  }
-}
+name: weather-search
+description: Answer current weather, temperature, and forecast queries through web search. Use for weather questions and forecasts.
 ---
 
 # Weather 天气

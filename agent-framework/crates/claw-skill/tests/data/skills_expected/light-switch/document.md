@@ -1,9 +1,8 @@
-<skill_content name="light_switch">
 # Light Switch
 
 Use this skill when the user asks to turn a board light on or off, change an LED strip color, or adjust light brightness.
 
-Run exactly one script with `lua_run_script` after reading `board_hardware_info`.
+Run exactly one script with `lua_run_script` after reading `board-hardware-info`.
 
 You MUST pass args when using `lua_run_script` to control the light, as specified in the input schema shown below in the section `LED Strip Script Args Schema` and `GPIO Light Script Args Schema`.
 
@@ -102,40 +101,40 @@ Use `args` as the JSON object shown below.
 
 Turn off:
 ```json
-{"path":"skills/light_switch/scripts/led_strip_switch.lua","args":{"enabled":false}}
+{"path":"scripts/led_strip_switch.lua","args":{"enabled":false}}
 ```
 
 Turn on white:
 ```json
-{"path":"skills/light_switch/scripts/led_strip_switch.lua","args":{"enabled":true}}
+{"path":"scripts/led_strip_switch.lua","args":{"enabled":true}}
 ```
 
 Set red at half brightness:
 ```json
-{"path":"skills/light_switch/scripts/led_strip_switch.lua","args":{"enabled":true,"brightness":128,"color":{"r":255,"g":0,"b":0}}}
+{"path":"scripts/led_strip_switch.lua","args":{"enabled":true,"brightness":128,"color":{"r":255,"g":0,"b":0}}}
 ```
 
 Set all pixels in a 3-pixel LED strip to red at half brightness:
 ```json
-{"path":"skills/light_switch/scripts/led_strip_switch.lua","args":{"io":46,"led_count":3,"enabled":true,"brightness":128,"color":{"r":255,"g":0,"b":0}}}
+{"path":"scripts/led_strip_switch.lua","args":{"io":46,"led_count":3,"enabled":true,"brightness":128,"color":{"r":255,"g":0,"b":0}}}
 ```
 
 ## GPIO Light Tool Call Inputs
 
 Turn off an active-high GPIO light:
 ```json
-{"path":"skills/light_switch/scripts/gpio_light_switch.lua","args":{"io":23,"enabled":false,"active_level":1}}
+{"path":"scripts/gpio_light_switch.lua","args":{"io":23,"enabled":false,"active_level":1}}
 ```
 
 Turn on an active-low GPIO light:
 ```json
-{"path":"skills/light_switch/scripts/gpio_light_switch.lua","args":{"io":43,"enabled":true,"active_level":0}}
+{"path":"scripts/gpio_light_switch.lua","args":{"io":43,"enabled":true,"active_level":0}}
 ```
 
 ## Recommended Flow
 
-1. Activate the `board_hardware_info` skill and query the board hardware info before operating hardware.
-2. Use the `Device Inventory` headings and occupied IO lines from `board_hardware_info`; do not guess pins outside that skill.
+1. Activate the `board-hardware-info` skill and query the board hardware info before operating hardware.
+2. Use the `Device Inventory` headings and occupied IO lines from `board-hardware-info`; do not guess pins outside that skill.
 3. Prefer an `led_strip` device when present. Use its occupied IO, typically the referenced RMT TX `gpio` line, as `io`.
 4. Use `max_leds` from hardware info as `led_count` when available; otherwise keep the default `led_count: 1`.
 5. If no `led_strip` device exists, look for a GPIO light by device name, such as `flashlight`, `led_*`, `*_led`, or names containing `light`.
@@ -143,10 +142,9 @@ Turn on an active-low GPIO light:
 7. For GPIO lights, use the GPIO from the device occupied IO such as `gpio` or `pin`.
 8. Use `active_level` from hardware info when available. If explicit active-high or active-low text is visible, map it to `1` or `0`.
 9. If no active-level information is available, use the script default `active_level: 1` and do not claim active-low behavior.
-10. Do not use the default `io` value if `board_hardware_info` provides one.
-11. For LED strips, run `skills/light_switch/scripts/led_strip_switch.lua` with the resolved `io`, `led_count`, and any requested color or brightness.
-12. For GPIO lights, run `skills/light_switch/scripts/gpio_light_switch.lua` with the resolved `io`, `active_level`, and requested enabled state.
+10. Do not use the default `io` value if `board-hardware-info` provides one.
+11. For LED strips, run `scripts/led_strip_switch.lua` with the resolved `io`, `led_count`, and any requested color or brightness.
+12. For GPIO lights, run `scripts/gpio_light_switch.lua` with the resolved `io`, `active_level`, and requested enabled state.
 13. For GPIO lights, ignore color and map `brightness: 0` to off.
 14. If neither LED strip nor GPIO light hardware is listed, inform the user that the board does not declare a controllable light and stop.
 15. Report the result or error directly to the user.
-</skill_content>

@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "skill_read",
+    "description": "Read the Markdown instructions for one available Agent Skill. Use the discovery catalog to choose a relevant skill, then read it before following its workflow.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The standard skill name shown by skill_list."
+        }
+      },
+      "required": ["name"]
+    }
+  }
+}

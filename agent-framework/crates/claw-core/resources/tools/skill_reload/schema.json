@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "skill_reload",
-    "description": "Re-scan the skills directories from disk so skills installed, edited, or removed at runtime become visible. Call this once after skills change on disk, then use skill_list or skill_activate.",
+    "description": "Re-scan the skills directories from disk so skills installed, edited, or removed at runtime become visible. Call this once after skills change on disk, then use skill_list or skill_read.",
     "parameters": {
       "type": "object",
       "properties": {},

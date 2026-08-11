@@ -1,237 +1,173 @@
-//! Skill identity, catalog metadata, and `SKILL.md` front-matter parsing.
+//! Agent Skills identity, discovery metadata, and `SKILL.md` parsing.
 
-use alloc::borrow::{Cow, ToOwned};
+use alloc::borrow::Cow;
+use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::vec::Vec;
 use core::fmt;
 
 use claw_interface::FsError;
 use serde::Deserialize;
-use strum::{EnumString, IntoStaticStr};
 use thiserror::Error;
 
-/// A skill's identity: its directory name under a skills root.
+const MAX_NAME_CHARS: usize = 64;
+const MAX_DESCRIPTION_CHARS: usize = 1024;
+const MAX_COMPATIBILITY_CHARS: usize = 500;
+
+/// A skill's standard name and its directory name under a skills root.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SkillId(Cow<'static, str>);
+pub struct SkillName(Cow<'static, str>);
 
-impl SkillId {
-    /// Wrap a runtime directory name as a skill id.
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(Cow::Owned(id.into()))
+impl SkillName {
+    /// Construct a skill name. Filesystem registries validate it while scanning.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(Cow::Owned(name.into()))
     }
 
-    /// Wrap a static id without allocation.
-    pub const fn from_static(id: &'static str) -> Self {
-        Self(Cow::Borrowed(id))
+    /// Wrap a static name without allocation.
+    pub const fn from_static(name: &'static str) -> Self {
+        Self(Cow::Borrowed(name))
     }
 
-    /// The id as a string slice.
+    /// The name as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl fmt::Display for SkillId {
+impl fmt::Display for SkillName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
 }
 
-/// Runtime interpretation of `metadata.manage_mode`.
-#[derive(Clone, Copy, Debug, Default, EnumString, IntoStaticStr, PartialEq, Eq)]
-#[strum(
-    parse_err_ty = ParseSkillManageModeError,
-    parse_err_fn = ParseSkillManageModeError::new
-)]
-pub enum SkillManageMode {
-    /// `"readonly"` and `"web"` are both treated as read-only on device.
-    #[default]
-    #[strum(to_string = "readonly", serialize = "web")]
-    Readonly,
-    /// `"runtime"` skills may be owned by runtime installers.
-    #[strum(serialize = "runtime")]
-    Runtime,
-}
-
-/// Failure parsing a skill management mode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
-#[error("unknown skill manage mode; expected readonly, web, or runtime")]
-pub struct ParseSkillManageModeError;
-
-impl ParseSkillManageModeError {
-    fn new(_: &str) -> Self {
-        Self
-    }
-}
-
-/// Metadata nested under the `metadata` key in `SKILL.md` front-matter.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SkillFrontmatterMetadata {
-    cap_groups: Vec<String>,
-    manage_mode: SkillManageMode,
-    category: Vec<String>,
-    peripherals: Vec<String>,
-    tags: Vec<String>,
-}
-
-impl SkillFrontmatterMetadata {
-    /// Build normalized metadata supplied by an external skill registry.
-    pub fn new(
-        cap_groups: Vec<String>,
-        manage_mode: SkillManageMode,
-        category: Vec<String>,
-        peripherals: Vec<String>,
-        tags: Vec<String>,
-    ) -> Self {
-        Self {
-            cap_groups,
-            manage_mode,
-            category,
-            peripherals,
-            tags,
-        }
-    }
-
-    /// Capability groups declared by this skill. Parsed but not wired to tool
-    /// visibility in this Rust implementation pass.
-    pub fn cap_groups(&self) -> &[String] {
-        &self.cap_groups
-    }
-
-    /// Skill management mode after device-side normalization.
-    pub fn manage_mode(&self) -> SkillManageMode {
-        self.manage_mode
-    }
-
-    /// Optional category labels from Skills Lab metadata.
-    pub fn category(&self) -> &[String] {
-        &self.category
-    }
-
-    /// Optional peripheral labels from Skills Lab metadata.
-    pub fn peripherals(&self) -> &[String] {
-        &self.peripherals
-    }
-
-    /// Optional search tags from Skills Lab metadata.
-    pub fn tags(&self) -> &[String] {
-        &self.tags
-    }
-}
-
-/// One catalog entry plus the document source needed for activation.
+/// Discovery metadata for one standard Agent Skill.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Skill {
-    id: SkillId,
-    name: String,
+    name: SkillName,
     description: String,
-    author: Option<String>,
-    metadata: SkillFrontmatterMetadata,
-    file: String,
-    pub(crate) root: String,
+    license: Option<String>,
+    compatibility: Option<String>,
+    metadata: BTreeMap<String, String>,
+    allowed_tools: Option<String>,
+    directory: Option<String>,
 }
 
 impl Skill {
-    /// Build a catalog entry supplied by an external skill registry.
-    pub fn from_catalog_entry(
-        id: SkillId,
-        description: String,
-        file: String,
-        metadata: SkillFrontmatterMetadata,
-    ) -> Self {
-        let name = id.as_str().to_owned();
-        Self {
-            id,
+    /// Build the required discovery metadata supplied by an external registry.
+    pub fn new(name: SkillName, description: String) -> Result<Self, SkillError> {
+        validate_name(&name)?;
+        validate_required_text(&name, "description", &description, MAX_DESCRIPTION_CHARS)?;
+        Ok(Self {
             name,
             description,
-            author: None,
-            metadata,
-            file,
-            root: String::new(),
-        }
+            license: None,
+            compatibility: None,
+            metadata: BTreeMap::new(),
+            allowed_tools: None,
+            directory: None,
+        })
     }
 
-    /// The skill id, equal to the containing directory name.
-    pub fn id(&self) -> &SkillId {
-        &self.id
-    }
-
-    /// The `name` declared in front-matter.
-    pub fn name(&self) -> &str {
+    /// The `name` declared in frontmatter and matched to the parent directory.
+    pub fn name(&self) -> &SkillName {
         &self.name
     }
 
-    /// One-line description shown in the catalog.
+    /// What the skill does and when an agent should use it.
     pub fn description(&self) -> &str {
         &self.description
     }
 
-    /// Optional front-matter author.
-    pub fn author(&self) -> Option<&str> {
-        self.author.as_deref()
+    /// Optional license name or reference to a bundled license file.
+    pub fn license(&self) -> Option<&str> {
+        self.license.as_deref()
     }
 
-    /// Relative document path, normally `<id>/SKILL.md`.
-    pub fn file(&self) -> &str {
-        &self.file
+    /// Optional environment requirements.
+    pub fn compatibility(&self) -> Option<&str> {
+        self.compatibility.as_deref()
     }
 
-    /// Parsed front-matter metadata.
-    pub fn metadata(&self) -> &SkillFrontmatterMetadata {
+    /// Optional implementation-specific string metadata.
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
         &self.metadata
+    }
+
+    /// Optional experimental space-separated pre-approved tool declaration.
+    pub fn allowed_tools(&self) -> Option<&str> {
+        self.allowed_tools.as_deref()
+    }
+
+    /// Filesystem directory used to resolve relative skill resources.
+    ///
+    /// External registries may omit this when they resolve resources through a
+    /// non-filesystem backend.
+    pub fn directory(&self) -> Option<&str> {
+        self.directory.as_deref()
     }
 }
 
-/// An activated skill document snapshot.
+/// An owned snapshot of a skill's Markdown instructions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SkillDocument {
     content: String,
+    directory: Option<String>,
 }
 
 impl SkillDocument {
-    pub(crate) fn new(content: String) -> Self {
-        Self { content }
+    pub(crate) fn new(content: String, directory: Option<String>) -> Self {
+        Self { content, directory }
     }
 
-    /// Processed document content returned by `skill_activate`.
+    /// Markdown below the `SKILL.md` frontmatter.
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    /// Consume the snapshot and return the owned content.
+    /// Consume the snapshot and return its Markdown instructions.
     pub fn into_content(self) -> String {
         self.content
     }
+
+    /// Filesystem directory used to resolve relative resource paths.
+    pub fn directory(&self) -> Option<&str> {
+        self.directory.as_deref()
+    }
+
+    /// Consume the snapshot and return its instructions and optional directory.
+    pub fn into_parts(self) -> (String, Option<String>) {
+        (self.content, self.directory)
+    }
 }
 
-/// Failure reading, parsing, or resolving a skill.
+/// Failure reading, parsing, or resolving a standard Agent Skill.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum SkillError {
-    /// No skill with the given id is registered.
+    /// No skill with the given name is registered.
     #[error("skill not found: {0}")]
-    NotFound(SkillId),
+    NotFound(SkillName),
     /// Listing a skills root directory failed.
     #[error("failed to scan skills root '{0}': {1}")]
     ScanFailed(String, FsError),
     /// Reading a skill's `SKILL.md` failed.
     #[error("failed to read skill '{0}': {1}")]
-    ReadFailed(SkillId, FsError),
+    ReadFailed(SkillName, FsError),
     /// A skill's `SKILL.md` bytes were not valid UTF-8.
     #[error("skill '{0}' is not valid UTF-8")]
-    InvalidUtf8(SkillId),
-    /// A skill's front-matter is missing its opening `---` fence.
-    #[error("skill '{0}' is missing the opening '---' front-matter fence")]
-    MissingOpeningFence(SkillId),
-    /// A skill's front-matter is missing its closing `---` fence.
-    #[error("skill '{0}' is missing the closing '---' front-matter fence")]
-    MissingClosingFence(SkillId),
-    /// A skill's front-matter block is not valid JSON.
-    #[error("skill '{0}' has invalid front-matter JSON: {1}")]
-    InvalidJson(SkillId, String),
-    /// A skill's front-matter is valid JSON but violates the skill contract.
-    #[error("skill '{0}' has invalid front-matter: {1}")]
-    InvalidFrontmatter(SkillId, String),
+    InvalidUtf8(SkillName),
+    /// A skill's frontmatter is missing its opening `---` line.
+    #[error("skill '{0}' is missing the opening '---' frontmatter fence")]
+    MissingOpeningFence(SkillName),
+    /// A skill's frontmatter is missing its closing `---` line.
+    #[error("skill '{0}' is missing the closing '---' frontmatter fence")]
+    MissingClosingFence(SkillName),
+    /// A skill's frontmatter is not valid YAML.
+    #[error("skill '{0}' has invalid YAML frontmatter: {1}")]
+    InvalidYaml(SkillName, String),
+    /// Parsed frontmatter violates the Agent Skills specification.
+    #[error("skill '{0}' has invalid frontmatter: {1}")]
+    InvalidFrontmatter(SkillName, String),
     /// A non-filesystem registry operation failed.
     #[error("skill backend operation '{operation}' failed with code {code}")]
     Backend {
@@ -243,109 +179,156 @@ pub enum SkillError {
 }
 
 #[derive(Deserialize)]
-struct RawFrontMatter {
+#[serde(rename_all = "kebab-case")]
+struct RawFrontmatter {
     name: Option<String>,
     description: Option<String>,
-    author: Option<String>,
-    metadata: Option<RawMetadata>,
+    license: Option<String>,
+    compatibility: Option<String>,
+    #[serde(default)]
+    metadata: BTreeMap<String, String>,
+    allowed_tools: Option<String>,
 }
 
-#[derive(Default, Deserialize)]
-struct RawMetadata {
-    #[serde(default)]
-    cap_groups: Vec<String>,
-    manage_mode: Option<String>,
-    #[serde(default)]
-    category: Vec<String>,
-    #[serde(default)]
-    peripherals: Vec<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-}
-
-pub(crate) fn parse_front_matter(id: SkillId, root: &str, head: &str) -> Result<Skill, SkillError> {
-    let (json, _) = front_matter_sections(&id, head)?;
-    let front_matter: RawFrontMatter = serde_json::from_str(json.trim())
-        .map_err(|error| SkillError::InvalidJson(id.clone(), error.to_string()))?;
-
-    let name = required_string(&id, "name", front_matter.name)?;
-    if name != id.as_str() {
-        return Err(SkillError::InvalidFrontmatter(
-            id,
-            format!("front-matter name '{name}' must match the skill directory name"),
+pub(crate) fn parse_frontmatter(
+    directory_name: SkillName,
+    root: &str,
+    document: &str,
+) -> Result<Skill, SkillError> {
+    validate_name(&directory_name)?;
+    let (yaml, _) = frontmatter_sections(&directory_name, document)?;
+    if yaml.trim_start().starts_with('{') {
+        return Err(SkillError::InvalidYaml(
+            directory_name.clone(),
+            "JSON object frontmatter is not accepted; use standard YAML mappings".into(),
         ));
     }
-    let description = required_string(&id, "description", front_matter.description)?;
-    let raw_metadata = front_matter
-        .metadata
-        .ok_or_else(|| SkillError::InvalidFrontmatter(id.clone(), "missing metadata".into()))?;
-    let metadata = parse_metadata(&id, raw_metadata)?;
-    let file = format!("{}/SKILL.md", id.as_str());
+    let mut documents = yaml_peg::serde::from_str::<RawFrontmatter>(yaml)
+        .map_err(|error| SkillError::InvalidYaml(directory_name.clone(), error.to_string()))?;
+    if documents.len() != 1 {
+        return Err(SkillError::InvalidYaml(
+            directory_name.clone(),
+            "frontmatter must contain exactly one YAML document".into(),
+        ));
+    }
+    let raw = documents.remove(0);
+
+    let name = required_string(&directory_name, "name", raw.name)?;
+    if name != directory_name.as_str() {
+        return Err(SkillError::InvalidFrontmatter(
+            directory_name,
+            format!("frontmatter name '{name}' must match the skill directory name"),
+        ));
+    }
+    let description = required_string(&directory_name, "description", raw.description)?;
+    validate_required_text(
+        &directory_name,
+        "description",
+        &description,
+        MAX_DESCRIPTION_CHARS,
+    )?;
+    validate_optional_text(
+        &directory_name,
+        "compatibility",
+        raw.compatibility.as_deref(),
+        MAX_COMPATIBILITY_CHARS,
+    )?;
 
     Ok(Skill {
-        id,
-        name,
+        name: directory_name,
         description,
-        author: front_matter.author,
-        metadata,
-        file,
-        root: root.to_owned(),
+        license: raw.license,
+        compatibility: raw.compatibility,
+        metadata: raw.metadata,
+        allowed_tools: raw.allowed_tools,
+        directory: Some(format!("{}/{}", root.trim_end_matches('/'), name)),
     })
 }
 
-pub(crate) fn front_matter_sections<'a>(
-    id: &SkillId,
+pub(crate) fn frontmatter_sections<'a>(
+    name: &SkillName,
     text: &'a str,
 ) -> Result<(&'a str, &'a str), SkillError> {
     let after_open = text
-        .trim_start()
-        .strip_prefix("---")
-        .ok_or_else(|| SkillError::MissingOpeningFence(id.clone()))?;
-    let close = after_open
-        .find("\n---")
-        .ok_or_else(|| SkillError::MissingClosingFence(id.clone()))?;
-    let body = if let Some(closing_fence) = after_open[close..].strip_prefix('\n') {
-        if let Some((_, body)) = closing_fence.split_once('\n') {
-            body
-        } else {
-            ""
+        .strip_prefix("---\n")
+        .or_else(|| text.strip_prefix("---\r\n"))
+        .ok_or_else(|| SkillError::MissingOpeningFence(name.clone()))?;
+
+    let mut offset = 0;
+    for line_with_ending in after_open.split_inclusive('\n') {
+        let line = line_with_ending.trim_end_matches(['\r', '\n']);
+        if line == "---" {
+            let body_start = offset + line_with_ending.len();
+            return Ok((&after_open[..offset], &after_open[body_start..]));
         }
+        offset += line_with_ending.len();
+    }
+    if after_open[offset..]
+        .strip_suffix('\r')
+        .unwrap_or(&after_open[offset..])
+        == "---"
+    {
+        return Ok((&after_open[..offset], ""));
+    }
+    Err(SkillError::MissingClosingFence(name.clone()))
+}
+
+fn validate_name(name: &SkillName) -> Result<(), SkillError> {
+    let value = name.as_str();
+    let len = value.chars().count();
+    let valid = (1..=MAX_NAME_CHARS).contains(&len)
+        && !value.starts_with('-')
+        && !value.ends_with('-')
+        && !value.contains("--")
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-');
+    if valid {
+        Ok(())
     } else {
-        ""
-    };
-    Ok((&after_open[..close], body))
+        Err(SkillError::InvalidFrontmatter(
+            name.clone(),
+            "name must be 1-64 lowercase ASCII letters, digits, or hyphens; it cannot start or end with a hyphen or contain consecutive hyphens".into(),
+        ))
+    }
 }
 
 fn required_string(
-    id: &SkillId,
+    name: &SkillName,
     field: &'static str,
     value: Option<String>,
 ) -> Result<String, SkillError> {
-    let value = value
-        .ok_or_else(|| SkillError::InvalidFrontmatter(id.clone(), format!("missing {field}")))?;
-    if value.trim().is_empty() {
-        return Err(SkillError::InvalidFrontmatter(
-            id.clone(),
-            format!("{field} must not be empty"),
-        ));
-    }
-    Ok(value)
+    value.ok_or_else(|| SkillError::InvalidFrontmatter(name.clone(), format!("missing {field}")))
 }
 
-fn parse_metadata(id: &SkillId, raw: RawMetadata) -> Result<SkillFrontmatterMetadata, SkillError> {
-    let manage_mode = required_string(id, "metadata.manage_mode", raw.manage_mode)?;
-    let manage_mode = SkillManageMode::try_from(manage_mode.as_str()).map_err(|_| {
-        SkillError::InvalidFrontmatter(
-            id.clone(),
-            format!("unsupported metadata.manage_mode '{manage_mode}'"),
-        )
-    })?;
+fn validate_required_text(
+    name: &SkillName,
+    field: &'static str,
+    value: &str,
+    max_chars: usize,
+) -> Result<(), SkillError> {
+    if value.trim().is_empty() || value.chars().count() > max_chars {
+        return Err(SkillError::InvalidFrontmatter(
+            name.clone(),
+            format!("{field} must contain 1-{max_chars} characters"),
+        ));
+    }
+    Ok(())
+}
 
-    Ok(SkillFrontmatterMetadata {
-        cap_groups: raw.cap_groups,
-        manage_mode,
-        category: raw.category,
-        peripherals: raw.peripherals,
-        tags: raw.tags,
-    })
+fn validate_optional_text(
+    name: &SkillName,
+    field: &'static str,
+    value: Option<&str>,
+    max_chars: usize,
+) -> Result<(), SkillError> {
+    if let Some(value) = value {
+        if value.trim().is_empty() || value.chars().count() > max_chars {
+            return Err(SkillError::InvalidFrontmatter(
+                name.clone(),
+                format!("{field} must contain 1-{max_chars} characters when present"),
+            ));
+        }
+    }
+    Ok(())
 }

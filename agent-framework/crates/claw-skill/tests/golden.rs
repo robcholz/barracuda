@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use claw_interface::DiskFs;
-use claw_skill::{FsSkillRegistry, SkillId};
+use claw_skill::{FsSkillRegistry, SkillName};
 use serde_json::Value;
 
 const SKILLS_ROOT: &str = "skills";
@@ -36,7 +36,7 @@ fn registry() -> Arc<FsSkillRegistry<DiskFs>> {
 
 fn catalog_json(registry: &Arc<FsSkillRegistry<DiskFs>>) -> String {
     let mut set = registry.skill_set();
-    let mut rendered = set.list_skill().expect("render catalog").to_string();
+    let mut rendered = set.list_skills().to_string();
     rendered.push('\n');
     rendered
 }
@@ -49,7 +49,7 @@ fn catalog_ids(catalog: &str) -> Vec<String> {
         .iter()
         .map(|entry| {
             entry
-                .get("id")
+                .get("name")
                 .and_then(Value::as_str)
                 .expect("catalog id")
                 .to_string()
@@ -94,8 +94,8 @@ fn documents_match_golden() {
     let mut set = registry.skill_set();
     for id in catalog_ids(&catalog) {
         let document = set
-            .activate_skill(&SkillId::new(id.clone()))
-            .expect("activate skill document");
+            .read_skill(&SkillName::new(id.clone()))
+            .expect("read skill document");
         assert!(
             !document.content().contains("\n---\n"),
             "front-matter not stripped for {id}"
@@ -109,7 +109,7 @@ fn documents_match_golden() {
 }
 
 #[test]
-fn skill_set_activates_fixture_documents() {
+fn skill_set_reads_fixture_documents() {
     let registry = registry();
     let catalog = catalog_json(&registry);
     let first = catalog_ids(&catalog)
@@ -119,17 +119,17 @@ fn skill_set_activates_fixture_documents() {
 
     let mut set = registry.skill_set();
     let document = set
-        .activate_skill(&SkillId::new(first.clone()))
-        .expect("activate skill");
+        .read_skill(&SkillName::new(first.clone()))
+        .expect("read skill");
     assert!(
-        document.content().contains(&first),
-        "activated document omits the skill id"
+        !document.content().is_empty(),
+        "skill instructions are empty for {first}"
     );
 }
 
 #[test]
-fn activating_unknown_skill_is_not_found() {
+fn reading_unknown_skill_is_not_found() {
     let registry = registry();
     let mut set = registry.skill_set();
-    assert!(set.activate_skill(&SkillId::new("does_not_exist")).is_err());
+    assert!(set.read_skill(&SkillName::new("does-not-exist")).is_err());
 }

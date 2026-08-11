@@ -10,29 +10,26 @@ use std::sync::Arc;
 use claw_interface::{ClawFs, MemFs};
 use claw_skill::FsSkillRegistry;
 
-/// Build a `SKILL.md` with a JSON front-matter header and a markdown body.
-fn skill_md(id: &str, description: &str, body: &str) -> Vec<u8> {
-    format!(
-        "---\n{{\"name\":\"{id}\",\"description\":\"{description}\",\"metadata\":{{\"manage_mode\":\"readonly\"}}}}\n---\n{body}"
-    )
-    .into_bytes()
+/// Build a standard `SKILL.md` with YAML frontmatter and a Markdown body.
+fn skill_md(name: &str, description: &str, body: &str) -> Vec<u8> {
+    format!("---\nname: {name}\ndescription: {description}\n---\n{body}").into_bytes()
 }
 
 fn main() -> anyhow::Result<()> {
     // Lay out two skills under the `skills` root.
     let filesystem = Arc::new(MemFs::new());
     filesystem.write_atomic(
-        "skills/weather_search/SKILL.md",
+        "skills/weather-search/SKILL.md",
         &skill_md(
-            "weather_search",
+            "weather-search",
             "Answer weather and forecast questions via web search.",
             "# Weather\n...",
         ),
     )?;
     filesystem.write_atomic(
-        "skills/light_switch/SKILL.md",
+        "skills/light-switch/SKILL.md",
         &skill_md(
-            "light_switch",
+            "light-switch",
             "Turn board lights and LED strips on or off.",
             "# Light switch\n...",
         ),
@@ -42,7 +39,7 @@ fn main() -> anyhow::Result<()> {
     let mut set = registry.skill_set();
 
     println!("== JSON catalog ==");
-    println!("{}", set.list_skill()?);
+    println!("{}", set.list_skills());
 
     println!("\n== prompt catalog ==");
     print!("{}", set.catalog_context());

@@ -1,4 +1,3 @@
-<skill_content name="weather_search">
 # Weather 天气
 
 Get current weather and forecasts through direct capabilities. Support weather, forecast, temperature, 天气, 预报, 温度 queries.
@@ -17,4 +16,3 @@ User: "What's the weather in Tokyo?"
 -> `get_current_time` with `{}`
 -> `web_search` with `{"query":"weather Tokyo today February 2026"}`
 -> "Tokyo: 8C, partly cloudy. High 12C, low 4C. Light wind from the north."
-</skill_content>

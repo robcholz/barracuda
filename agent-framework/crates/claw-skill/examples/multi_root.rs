@@ -9,13 +9,10 @@
 use std::sync::Arc;
 
 use claw_interface::{ClawFs, MemFs};
-use claw_skill::{FsSkillRegistry, SkillId};
+use claw_skill::{FsSkillRegistry, SkillName};
 
-fn skill_md(id: &str, description: &str) -> Vec<u8> {
-    format!(
-        "---\n{{\"name\":\"{id}\",\"description\":\"{description}\",\"metadata\":{{\"manage_mode\":\"readonly\"}}}}\n---\n# body\n"
-    )
-    .into_bytes()
+fn skill_md(name: &str, description: &str) -> Vec<u8> {
+    format!("---\nname: {name}\ndescription: {description}\n---\n# body\n").into_bytes()
 }
 
 fn main() -> anyhow::Result<()> {
@@ -55,7 +52,7 @@ fn main() -> anyhow::Result<()> {
     let catalog = set.catalog_context().to_string();
     println!("{catalog}");
     assert!(catalog.contains("- time: installed"));
-    let document = set.activate_skill(&SkillId::new("time"))?;
+    let document = set.read_skill(&SkillName::new("time"))?;
     assert!(document.content().contains("# body"));
 
     Ok(())

@@ -9,13 +9,10 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use claw_interface::{ClawFs, FsError};
 
-use super::skill::{front_matter_sections, parse_front_matter, Skill, SkillError, SkillId};
+use super::skill::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
 use super::skill_set::SkillSet;
 
 pub type SkillRegistryVersion = u32;
-
-const METADATA_PREFIX_BYTES: u64 = 2048;
-const CUR_SKILL_DIR_PLACEHOLDER: &str = "{CUR_SKILL_DIR}";
 
 /// Immutable point-in-time catalog view.
 #[derive(Debug)]
@@ -51,8 +48,8 @@ impl CatalogSnapshot {
     }
 
     /// Look up one skill by id.
-    pub fn get(&self, id: &SkillId) -> Option<&Skill> {
-        self.skills.iter().find(|skill| skill.id() == id)
+    pub fn get(&self, name: &SkillName) -> Option<&Skill> {
+        self.skills.iter().find(|skill| skill.name() == name)
     }
 }
 
@@ -73,8 +70,8 @@ pub trait SkillRegistry: 'static {
     /// Refresh the registry while preserving the previous snapshot on failure.
     fn reload(&self) -> Result<(), SkillError>;
 
-    /// Render one activated skill document into `out`.
-    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError>;
+    /// Read one skill's Markdown instructions into `out`.
+    fn read_document_into(&self, name: &SkillName, out: &mut String) -> Result<(), SkillError>;
 }
 
 struct ErasedSkillRegistry<R: SkillRegistry + ?Sized>(Arc<R>);
@@ -92,8 +89,8 @@ impl<R: SkillRegistry + ?Sized> SkillRegistry for ErasedSkillRegistry<R> {
         self.0.reload()
     }
 
-    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError> {
-        self.0.load_document_into(id, out)
+    fn read_document_into(&self, name: &SkillName, out: &mut String) -> Result<(), SkillError> {
+        self.0.read_document_into(name, out)
     }
 }
 
@@ -114,8 +111,8 @@ impl SkillRegistry for EmptySkillRegistry {
         Ok(())
     }
 
-    fn load_document_into(&self, id: &SkillId, _out: &mut String) -> Result<(), SkillError> {
-        Err(SkillError::NotFound(id.clone()))
+    fn read_document_into(&self, name: &SkillName, _out: &mut String) -> Result<(), SkillError> {
+        Err(SkillError::NotFound(name.clone()))
     }
 }
 
@@ -167,23 +164,26 @@ impl<F: ClawFs> FsSkillRegistry<F> {
         Ok(())
     }
 
-    pub(crate) fn load_document_into(
+    pub(crate) fn read_document_into(
         &self,
-        id: &SkillId,
+        name: &SkillName,
         out: &mut String,
     ) -> Result<(), SkillError> {
         let snapshot = self.catalog();
         let skill = snapshot
-            .get(id)
-            .ok_or_else(|| SkillError::NotFound(id.clone()))?;
-        let skill_dir = skill_directory_path(&skill.root, id.as_str());
-        let path = format!("{skill_dir}/SKILL.md");
+            .get(name)
+            .ok_or_else(|| SkillError::NotFound(name.clone()))?;
+        let directory = skill.directory().ok_or_else(|| SkillError::Backend {
+            operation: "read_document",
+            code: -1,
+        })?;
+        let path = format!("{directory}/SKILL.md");
         let bytes = self
             .read_skill_document(&path)
-            .map_err(|error| SkillError::ReadFailed(id.clone(), error))?;
-        let text = String::from_utf8(bytes).map_err(|_| SkillError::InvalidUtf8(id.clone()))?;
-        let (_, body) = front_matter_sections(id, &text)?;
-        append_wrapped_document(id, body, &skill_dir, out);
+            .map_err(|error| SkillError::ReadFailed(name.clone(), error))?;
+        let text = String::from_utf8(bytes).map_err(|_| SkillError::InvalidUtf8(name.clone()))?;
+        let (_, body) = frontmatter_sections(name, &text)?;
+        out.push_str(body.trim());
         Ok(())
     }
 
@@ -210,8 +210,8 @@ impl<F: ClawFs + 'static> SkillRegistry for FsSkillRegistry<F> {
         FsSkillRegistry::reload(self)
     }
 
-    fn load_document_into(&self, id: &SkillId, out: &mut String) -> Result<(), SkillError> {
-        FsSkillRegistry::load_document_into(self, id, out)
+    fn read_document_into(&self, name: &SkillName, out: &mut String) -> Result<(), SkillError> {
+        FsSkillRegistry::read_document_into(self, name, out)
     }
 }
 
@@ -228,19 +228,19 @@ fn scan_catalog<F: ClawFs>(
             Err(error) => return Err(SkillError::ScanFailed(root.clone(), error)),
         };
         for name in names {
-            let id = SkillId::new(name);
-            if skills.iter().any(|skill: &Skill| skill.id() == &id) {
+            let name = SkillName::new(name);
+            if skills.iter().any(|skill: &Skill| skill.name() == &name) {
                 continue;
             }
-            let path = skill_document_path(root, id.as_str());
+            let path = skill_document_path(root, name.as_str());
             if !filesystem.exists(&path) {
                 continue;
             }
-            let head = read_head(filesystem, &id, &path)?;
-            skills.push(parse_front_matter(id, root, &head)?);
+            let document = read_document(filesystem, &name, &path)?;
+            skills.push(parse_frontmatter(name, root, &document)?);
         }
     }
-    skills.sort_by(|left, right| left.id().cmp(right.id()));
+    skills.sort_by(|left, right| left.name().cmp(right.name()));
     Ok(CatalogSnapshot {
         version,
         skills: Arc::from(skills),
@@ -255,42 +255,13 @@ fn skill_directory_path(root: &str, id: &str) -> String {
     format!("{}/{}", root.trim_end_matches('/'), id)
 }
 
-fn append_wrapped_document(id: &SkillId, body: &str, skill_dir: &str, out: &mut String) {
-    out.push_str("<skill_content name=\"");
-    append_xml_attribute_escaped(id.as_str(), out);
-    out.push_str("\">\n");
-    append_with_cur_skill_dir_expanded(body.trim(), skill_dir, out);
-    out.push_str("\n</skill_content>");
-}
-
-fn append_with_cur_skill_dir_expanded(body: &str, skill_dir: &str, out: &mut String) {
-    let mut pieces = body.split(CUR_SKILL_DIR_PLACEHOLDER);
-    if let Some(first) = pieces.next() {
-        out.push_str(first);
-    }
-    for piece in pieces {
-        out.push_str(skill_dir);
-        out.push_str(piece);
-    }
-}
-
-fn append_xml_attribute_escaped(text: &str, out: &mut String) {
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '"' => out.push_str("&quot;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '\'' => out.push_str("&apos;"),
-            _ => out.push(ch),
-        }
-    }
-}
-
-fn read_head<F: ClawFs>(filesystem: &F, id: &SkillId, path: &str) -> Result<String, SkillError> {
-    let read_failed = |error| SkillError::ReadFailed(id.clone(), error);
-    let size = filesystem.len(path).map_err(read_failed)?;
-    let take = size.min(METADATA_PREFIX_BYTES) as usize;
-    let bytes = filesystem.read_at(path, 0, take).map_err(read_failed)?;
-    String::from_utf8(bytes).map_err(|_| SkillError::InvalidUtf8(id.clone()))
+fn read_document<F: ClawFs>(
+    filesystem: &F,
+    name: &SkillName,
+    path: &str,
+) -> Result<String, SkillError> {
+    let bytes = filesystem
+        .read(path)
+        .map_err(|error| SkillError::ReadFailed(name.clone(), error))?;
+    String::from_utf8(bytes).map_err(|_| SkillError::InvalidUtf8(name.clone()))
 }

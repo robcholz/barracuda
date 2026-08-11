@@ -3,14 +3,13 @@ name = "claw-skill"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Filesystem-backed skill registry and per-agent catalog/document activation cache"
+description = "no_std filesystem runtime for standard Agent Skills"
 
 [dependencies]
 claw-interface = { path = "../claw-interface" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
-strum = { version = "0.28", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
+yaml-peg = { version = "1.0.8", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 # `diskfs` reads the data-driven golden fixtures from the checkout; `MemFs` is
@@ -18,3 +17,4 @@ thiserror = { version = "2", default-features = false }
 claw-interface = { path = "../claw-interface", features = ["diskfs"] }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use core::fmt::Write as _;
 
 use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
-use super::skill::{SkillDocument, SkillError, SkillId};
+use super::skill::{SkillDocument, SkillError, SkillName};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CatalogBufferKind {
@@ -47,12 +47,12 @@ impl SkillSet {
 
     /// JSON catalog for tool output. The returned borrow is valid until the next
     /// mutable method call on this `SkillSet`.
-    pub fn list_skill(&mut self) -> Result<&str, SkillError> {
+    pub fn list_skills(&mut self) -> &str {
         let snapshot = self.registry.catalog();
         if !self.catalog_cache_is_fresh(&snapshot, CatalogBufferKind::ListJson) {
             self.render_list_json(&snapshot);
         }
-        Ok(&self.catalog_buffer)
+        &self.catalog_buffer
     }
 
     /// Prompt-facing catalog summary. The returned borrow is valid until the
@@ -65,12 +65,17 @@ impl SkillSet {
         &self.catalog_buffer
     }
 
-    /// Read and render one activated skill document.
-    pub fn activate_skill(&mut self, id: &SkillId) -> Result<SkillDocument, SkillError> {
+    /// Read one skill's Markdown instructions on demand.
+    pub fn read_skill(&mut self, name: &SkillName) -> Result<SkillDocument, SkillError> {
         self.document_buffer.clear();
+        let directory = self
+            .registry
+            .catalog()
+            .get(name)
+            .and_then(|skill| skill.directory().map(String::from));
         self.registry
-            .load_document_into(id, &mut self.document_buffer)?;
-        Ok(SkillDocument::new(self.document_buffer.clone()))
+            .read_document_into(name, &mut self.document_buffer)?;
+        Ok(SkillDocument::new(self.document_buffer.clone(), directory))
     }
 
     fn catalog_cache_is_fresh(&self, snapshot: &CatalogSnapshot, kind: CatalogBufferKind) -> bool {
@@ -85,46 +90,19 @@ impl SkillSet {
                 self.catalog_buffer.push(',');
             }
             self.catalog_buffer.push('{');
-            push_json_field(&mut self.catalog_buffer, "id", skill.id().as_str(), false);
-            push_json_field(&mut self.catalog_buffer, "name", skill.name(), true);
+            push_json_field(
+                &mut self.catalog_buffer,
+                "name",
+                skill.name().as_str(),
+                false,
+            );
             push_json_field(
                 &mut self.catalog_buffer,
                 "description",
                 skill.description(),
                 true,
             );
-            if let Some(author) = skill.author() {
-                push_json_field(&mut self.catalog_buffer, "author", author, true);
-            }
-            push_json_field(&mut self.catalog_buffer, "file", skill.file(), true);
-            self.catalog_buffer.push_str(",\"metadata\":{");
-            let manage_mode: &'static str = skill.metadata().manage_mode().into();
-            push_json_array_field(
-                &mut self.catalog_buffer,
-                "cap_groups",
-                skill.metadata().cap_groups(),
-                false,
-            );
-            push_json_field(&mut self.catalog_buffer, "manage_mode", manage_mode, true);
-            push_json_array_field(
-                &mut self.catalog_buffer,
-                "category",
-                skill.metadata().category(),
-                true,
-            );
-            push_json_array_field(
-                &mut self.catalog_buffer,
-                "peripherals",
-                skill.metadata().peripherals(),
-                true,
-            );
-            push_json_array_field(
-                &mut self.catalog_buffer,
-                "tags",
-                skill.metadata().tags(),
-                true,
-            );
-            self.catalog_buffer.push_str("}}");
+            self.catalog_buffer.push('}');
         }
         self.catalog_buffer.push(']');
         self.catalog_version = snapshot.version();
@@ -136,7 +114,7 @@ impl SkillSet {
         self.catalog_buffer.push_str("Available skills:\n");
         for skill in snapshot.skills() {
             self.catalog_buffer.push_str("- ");
-            self.catalog_buffer.push_str(skill.id().as_str());
+            self.catalog_buffer.push_str(skill.name().as_str());
             self.catalog_buffer.push_str(": ");
             self.catalog_buffer.push_str(skill.description());
             self.catalog_buffer.push('\n');
@@ -153,21 +131,6 @@ fn push_json_field(out: &mut String, key: &str, value: &str, comma: bool) {
     push_json_string(out, key);
     out.push(':');
     push_json_string(out, value);
-}
-
-fn push_json_array_field(out: &mut String, key: &str, values: &[String], comma: bool) {
-    if comma {
-        out.push(',');
-    }
-    push_json_string(out, key);
-    out.push_str(":[");
-    for (index, value) in values.iter().enumerate() {
-        if index > 0 {
-            out.push(',');
-        }
-        push_json_string(out, value);
-    }
-    out.push(']');
 }
 
 fn push_json_string(out: &mut String, value: &str) {
