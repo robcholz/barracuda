@@ -2,18 +2,18 @@ use core::cell::RefCell;
 
 use async_channel::{Receiver, Sender, TrySendError};
 
-use claw_api::{ChatError, ClawApiAsync, ClawApiError};
-use claw_interface::{ClawHttp, ClawTimer};
+use claw_api::{ChatError, ClawApi, ClawApiError};
+use claw_net::{Dns, TcpConnect};
 
 /// Private shared lease helper used by the concrete memory-side LLM providers.
-pub(super) struct SharedAsyncLlm<H: ClawHttp, Timer: ClawTimer> {
-    api_tx: Sender<ClawApiAsync<H, Timer>>,
-    api_rx: Receiver<ClawApiAsync<H, Timer>>,
-    initial_api: RefCell<Option<ClawApiAsync<H, Timer>>>,
+pub(super) struct SharedAsyncLlm<H: TcpConnect + Dns + 'static> {
+    api_tx: Sender<ClawApi<'static, H>>,
+    api_rx: Receiver<ClawApi<'static, H>>,
+    initial_api: RefCell<Option<ClawApi<'static, H>>>,
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> SharedAsyncLlm<H, Timer> {
-    pub(super) fn new(api: ClawApiAsync<H, Timer>) -> Self {
+impl<H: TcpConnect + Dns + 'static> SharedAsyncLlm<H> {
+    pub(super) fn new(api: ClawApi<'static, H>) -> Self {
         let (api_tx, api_rx) = async_channel::bounded(1);
         Self {
             api_tx,
@@ -22,7 +22,7 @@ impl<H: ClawHttp, Timer: ClawTimer> SharedAsyncLlm<H, Timer> {
         }
     }
 
-    pub(super) async fn lease(&self) -> Result<AsyncLlmLease<'_, H, Timer>, ChatError> {
+    pub(super) async fn lease(&self) -> Result<AsyncLlmLease<'_, H>, ChatError> {
         let initial_api = self.initial_api.borrow_mut().take();
         let api = match initial_api {
             Some(api) => api,
@@ -35,18 +35,18 @@ impl<H: ClawHttp, Timer: ClawTimer> SharedAsyncLlm<H, Timer> {
     }
 }
 
-pub(super) struct AsyncLlmLease<'owner, H: ClawHttp, Timer: ClawTimer> {
-    owner: &'owner SharedAsyncLlm<H, Timer>,
-    api: Option<ClawApiAsync<H, Timer>>,
+pub(super) struct AsyncLlmLease<'owner, H: TcpConnect + Dns + 'static> {
+    owner: &'owner SharedAsyncLlm<H>,
+    api: Option<ClawApi<'static, H>>,
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> AsyncLlmLease<'_, H, Timer> {
-    pub(super) fn api_mut(&mut self) -> Result<&mut ClawApiAsync<H, Timer>, ChatError> {
+impl<H: TcpConnect + Dns + 'static> AsyncLlmLease<'_, H> {
+    pub(super) fn api_mut(&mut self) -> Result<&mut ClawApi<'static, H>, ChatError> {
         self.api.as_mut().ok_or_else(channel_error)
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Drop for AsyncLlmLease<'_, H, Timer> {
+impl<H: TcpConnect + Dns + 'static> Drop for AsyncLlmLease<'_, H> {
     fn drop(&mut self) {
         if let Some(api) = self.api.take() {
             match self.owner.api_tx.try_send(api) {
@@ -80,8 +80,8 @@ mod tests {
     use std::sync::Arc;
     use std::task::Wake;
 
-    use claw_api::ClawApiAsync;
-    use claw_interface::{BlockingHttpAdapter, ImmediateTimer, NoopHttp};
+    use claw_api::ClawApi;
+    use claw_net::testing::NeverStack;
 
     use super::SharedAsyncLlm;
 
@@ -111,7 +111,8 @@ mod tests {
 
     #[test]
     fn every_independent_lease_waiter_makes_progress() {
-        let api = ClawApiAsync::new(BlockingHttpAdapter::new(NoopHttp), ImmediateTimer);
+        static NETWORK: NeverStack = NeverStack;
+        let api = ClawApi::new(&NETWORK, 256, 256);
         let shared = SharedAsyncLlm::new(api);
         let holder = futures_lite::future::block_on(shared.lease());
 

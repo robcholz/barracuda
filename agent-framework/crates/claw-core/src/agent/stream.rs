@@ -5,7 +5,7 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
-use claw_interface::{ClawHttp, ClawTimer};
+use claw_net::{Dns, TcpConnect};
 use futures_core::Stream;
 
 use super::base_agent::{
@@ -145,26 +145,26 @@ impl AgentHandle {
 ///
 /// The final item returns the Agent to its authoritative slot.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum AgentStreamItem<Http: ClawHttp, Timer: ClawTimer> {
+pub(crate) enum AgentStreamItem<Http: TcpConnect + Dns + 'static> {
     Event(Result<AgentEvent, AgentError>),
-    Returned(Agent<Http, Timer>),
+    Returned(Agent<Http>),
 }
 
 /// Owned event stream for one physical Agent checkout.
-pub(crate) struct AgentStream<Http: ClawHttp, Timer: ClawTimer> {
-    stream: Pin<Box<dyn Stream<Item = AgentStreamItem<Http, Timer>>>>,
+pub(crate) struct AgentStream<Http: TcpConnect + Dns + 'static> {
+    stream: Pin<Box<dyn Stream<Item = AgentStreamItem<Http>>>>,
 }
 
-impl<Http: ClawHttp, Timer: ClawTimer> AgentStream<Http, Timer> {
-    pub(super) fn new(stream: impl Stream<Item = AgentStreamItem<Http, Timer>> + 'static) -> Self {
+impl<Http: TcpConnect + Dns + 'static> AgentStream<Http> {
+    pub(super) fn new(stream: impl Stream<Item = AgentStreamItem<Http>> + 'static) -> Self {
         Self {
             stream: Box::pin(stream),
         }
     }
 }
 
-impl<Http: ClawHttp, Timer: ClawTimer> Stream for AgentStream<Http, Timer> {
-    type Item = AgentStreamItem<Http, Timer>;
+impl<Http: TcpConnect + Dns> Stream for AgentStream<Http> {
+    type Item = AgentStreamItem<Http>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().stream.as_mut().poll_next(context)

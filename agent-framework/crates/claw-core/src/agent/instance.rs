@@ -8,8 +8,7 @@ use core::{
 
 use async_channel::{Receiver, TryRecvError};
 use claw_api::ToolCall;
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawHttp, ClawTimer};
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::DurableState;
 use claw_tool::{ToolDetachHandle, ToolInvocation, ToolOutput};
 use futures_core::Stream;
@@ -151,27 +150,25 @@ impl PendingTurn {
 }
 
 /// One long-lived Agent instance around the single-task [`BaseAgent`] core.
-pub(crate) struct Agent<H: ClawHttp, Timer: ClawTimer> {
-    base: BaseAgent<H, Timer>,
+pub(crate) struct Agent<H: TcpConnect + Dns + 'static> {
+    base: BaseAgent<H>,
     ephemeral: AgentEphemeralState,
 }
 
-impl<H, Timer> Agent<H, Timer>
+impl<H> Agent<H>
 where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
+    H: TcpConnect + Dns + 'static,
 {
-    pub(super) fn new(base: BaseAgent<H, Timer>) -> Self {
+    pub(super) fn new(base: BaseAgent<H>) -> Self {
         Self {
             base,
             ephemeral: AgentEphemeralState::new(),
         }
     }
 
-    pub(crate) fn into_stream(self, message: Message) -> (AgentStream<H, Timer>, AgentHandle)
+    pub(crate) fn into_stream(self, message: Message) -> (AgentStream<H>, AgentHandle)
     where
         H: 'static,
-        Timer: 'static,
     {
         let (handle, commands, activity, awaiting_approval) = AgentHandle::channel();
         let stream =
@@ -184,17 +181,16 @@ where
     }
 }
 
-struct OwnedAgentGuard<H: ClawHttp, Timer: ClawTimer> {
-    agent: Option<Agent<H, Timer>>,
+struct OwnedAgentGuard<H: TcpConnect + Dns + 'static> {
+    agent: Option<Agent<H>>,
     activity: Rc<Cell<AgentActivity>>,
 }
 
-impl<H, Timer> OwnedAgentGuard<H, Timer>
+impl<H> OwnedAgentGuard<H>
 where
-    H: ClawHttp + StreamingHttp + 'static,
-    Timer: ClawTimer + 'static,
+    H: TcpConnect + Dns + 'static,
 {
-    fn new(agent: Agent<H, Timer>, activity: Rc<Cell<AgentActivity>>) -> Self {
+    fn new(agent: Agent<H>, activity: Rc<Cell<AgentActivity>>) -> Self {
         Self {
             agent: Some(agent),
             activity,
@@ -206,7 +202,7 @@ where
         first_message: Message,
         commands: Receiver<AgentCommand>,
         awaiting_approval: Rc<RefCell<Option<super::ToolCallId>>>,
-    ) -> impl futures_core::Stream<Item = AgentStreamItem<H, Timer>> + 'static {
+    ) -> impl futures_core::Stream<Item = AgentStreamItem<H>> + 'static {
         yield_stream(|yielder| async move {
             let activity = Rc::clone(&self.activity);
             {
@@ -399,7 +395,7 @@ where
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Drop for OwnedAgentGuard<H, Timer> {
+impl<H: TcpConnect + Dns + 'static> Drop for OwnedAgentGuard<H> {
     fn drop(&mut self) {
         self.activity.set(AgentActivity::Closed);
         if let Some(agent) = &mut self.agent {

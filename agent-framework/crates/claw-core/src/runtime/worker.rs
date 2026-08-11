@@ -11,8 +11,9 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_api::ClawApiFactory;
+use claw_interface::ClawFs;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;
 use futures_core::Stream;
@@ -44,34 +45,51 @@ pub(super) enum RuntimeCommand {
     Stop,
 }
 
-pub(super) struct RuntimeWorker<Filesystem, Http, Timer>
+pub(super) struct RuntimeWorkerInit<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
+{
+    pub(super) filesystem: Arc<Filesystem>,
+    pub(super) tool_registry: Arc<ToolRegistry>,
+    pub(super) persistence: SharedPersistence<Filesystem>,
+    pub(super) persistence_dir: String,
+    pub(super) skill_roots: Vec<String>,
+    pub(super) api_manager: SharedApiManager,
+    pub(super) llm_factory: ClawApiFactory<Http>,
+    pub(super) commands: Receiver<RuntimeCommand>,
+}
+
+pub(super) struct RuntimeWorker<Filesystem, Http>
+where
+    Filesystem: ClawFs + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     persistence: SharedPersistence<Filesystem>,
-    session_manager: SessionManager<Filesystem, Http, Timer>,
+    session_manager: SessionManager<Filesystem, Http>,
     commands: Pin<Box<Receiver<RuntimeCommand>>>,
     stopping: bool,
     next_task: WorkerTask,
 }
 
-impl<Filesystem, Http, Timer> RuntimeWorker<Filesystem, Http, Timer>
+impl<Filesystem, Http> RuntimeWorker<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     pub(super) fn new(
-        filesystem: Arc<Filesystem>,
-        tool_registry: Arc<ToolRegistry>,
-        persistence: SharedPersistence<Filesystem>,
-        persistence_dir: String,
-        skill_roots: Vec<String>,
-        api_manager: SharedApiManager,
-        commands: Receiver<RuntimeCommand>,
+        init: RuntimeWorkerInit<Filesystem, Http>,
     ) -> Result<Self, AgentRuntimeBuildError> {
+        let RuntimeWorkerInit {
+            filesystem,
+            tool_registry,
+            persistence,
+            persistence_dir,
+            skill_roots,
+            api_manager,
+            llm_factory,
+            commands,
+        } = init;
         let session_manager = SessionManager::new(
             filesystem,
             tool_registry,
@@ -79,6 +97,7 @@ where
             persistence_dir,
             skill_roots,
             api_manager,
+            llm_factory,
         )
         .map_err(map_session_manager_init_error)?;
         Ok(Self {
@@ -136,19 +155,17 @@ where
     }
 }
 
-impl<Filesystem, Http, Timer> Unpin for RuntimeWorker<Filesystem, Http, Timer>
+impl<Filesystem, Http> Unpin for RuntimeWorker<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
 }
 
-impl<Filesystem, Http, Timer> Future for RuntimeWorker<Filesystem, Http, Timer>
+impl<Filesystem, Http> Future for RuntimeWorker<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     type Output = ();
 

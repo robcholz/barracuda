@@ -1,6 +1,5 @@
 //! Single-Agent Session orchestration adapter implementation.
 
-use core::marker::PhantomData;
 use core::task::{Context, Poll};
 
 use claw_tool::ToolGroup;
@@ -9,19 +8,14 @@ use crate::agent::{AgentId, AgentKind};
 
 use super::{AgentNotice, OrchestrationHost, OrchestrationPhysicalError};
 
-pub(in crate::session) struct SessionOrchestration<Timer> {
-    marker: PhantomData<fn() -> Timer>,
-}
+#[derive(Default)]
+pub(in crate::session) struct SessionOrchestration;
 
-impl<Timer> Default for SessionOrchestration<Timer> {
-    fn default() -> Self {
-        Self {
-            marker: PhantomData,
-        }
+impl SessionOrchestration {
+    pub(in crate::session) const fn new() -> Self {
+        Self
     }
-}
 
-impl<Timer> SessionOrchestration<Timer> {
     pub(in crate::session) fn tool_groups(
         &self,
         caller: AgentId,

@@ -1,8 +1,10 @@
 use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
 use core::cell::RefCell;
 
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_api::ClawApiFactory;
+use claw_interface::ClawFs;
 use claw_memory::{LongTermInitError, LongTermMemory};
+use claw_net::{Dns, TcpConnect};
 
 use crate::agent::context_providers::LongTermMemoryContextProvider;
 use crate::config::SharedApiManager;
@@ -53,14 +55,14 @@ impl<F: ClawFs + 'static> AgentMemoryStores<F> {
 }
 
 impl<F: ClawFs + 'static> LongTermDeps<F> {
-    pub(super) fn from_root<H, Timer>(
+    pub(super) fn from_root<H>(
         filesystem: Arc<F>,
         long_term_dir: &str,
         api_manager: SharedApiManager,
+        llm_factory: ClawApiFactory<H>,
     ) -> Result<Self, LongTermInitError>
     where
-        H: ClawHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
+        H: TcpConnect + Dns + 'static,
     {
         let global_dir = join_storage_path(long_term_dir, GLOBAL_LONG_TERM_DIR);
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
@@ -70,8 +72,9 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
                 &global_dir,
             )?,
             agent_stores: AgentMemoryStores::new(filesystem, agent_root_dir),
-            build_provider: LongTermMemoryContextProvider::<F>::llm_builder::<H, Timer>(
+            build_provider: LongTermMemoryContextProvider::<F>::llm_builder::<H>(
                 api_manager,
+                llm_factory,
             ),
         })
     }

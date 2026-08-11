@@ -1,4 +1,5 @@
 pub mod claw_api
+pub use claw_api::NetworkErrorKind
 pub use claw_api::stream
 pub enum claw_api::BackendKind
 pub claw_api::BackendKind::AnthropicCompatible
@@ -31,14 +32,32 @@ pub claw_api::ChatStreamEvent::ToolCalls(claw_utils::stream::StreamPart<claw_api
 pub enum claw_api::ClawApiError
 pub claw_api::ClawApiError::ApiError(&'static str)
 pub claw_api::ClawApiError::EmptyResponse
+pub claw_api::ClawApiError::HttpStatus
+pub claw_api::ClawApiError::HttpStatus::body: alloc::string::String
+pub claw_api::ClawApiError::HttpStatus::status: claw_api::StatusCode
 pub claw_api::ClawApiError::MalformedResponse(&'static str)
 pub claw_api::ClawApiError::NotConfigured
 pub claw_api::ClawApiError::Parse
-pub claw_api::ClawApiError::TransientTransport(claw_interface::http::HttpError)
-pub claw_api::ClawApiError::Transport(claw_interface::http::HttpError)
+pub claw_api::ClawApiError::Timeout
+pub claw_api::ClawApiError::TransientHttpStatus
+pub claw_api::ClawApiError::TransientHttpStatus::body: alloc::string::String
+pub claw_api::ClawApiError::TransientHttpStatus::status: claw_api::StatusCode
+pub claw_api::ClawApiError::TransientTransport(claw_api::HttpError)
+pub claw_api::ClawApiError::Transport(claw_api::HttpError)
 impl claw_api::ClawApiError
 pub fn claw_api::ClawApiError::is_aborted(&self) -> bool
 pub fn claw_api::ClawApiError::is_retryable(&self) -> bool
+pub enum claw_api::HttpError
+pub claw_api::HttpError::BufferTooSmall
+pub claw_api::HttpError::Cancelled
+pub claw_api::HttpError::Codec
+pub claw_api::HttpError::ConnectionAborted
+pub claw_api::HttpError::Dns
+pub claw_api::HttpError::InvalidUrl
+pub claw_api::HttpError::InvalidUtf8
+pub claw_api::HttpError::Network(embedded_io::ErrorKind)
+pub claw_api::HttpError::Tls
+pub claw_api::HttpError::TlsNotConfigured
 pub enum claw_api::InferMediaError
 pub claw_api::InferMediaError::Api(claw_api::ClawApiError)
 pub claw_api::InferMediaError::IncompleteRequest
@@ -104,21 +123,14 @@ pub struct claw_api::ChatStream<'a>
 impl futures_core::stream::Stream for claw_api::ChatStream<'_>
 pub type claw_api::ChatStream<'_>::Item = core::result::Result<claw_api::ChatStreamEvent, claw_api::ChatError>
 pub fn claw_api::ChatStream<'_>::poll_next(self: core::pin::Pin<&mut Self>, cx: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
-pub struct claw_api::ClawApi<H: claw_interface::http::blocking::ClawHttp>
-impl<H: claw_interface::http::blocking::ClawHttp> claw_api::ClawApi<H>
-pub fn claw_api::ClawApi<H>::chat(&mut self, request: &claw_api::ChatRequest<'_>, abort: &core::sync::atomic::AtomicBool) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
-pub fn claw_api::ClawApi<H>::chat_json<T: serde_core::de::DeserializeOwned>(&mut self, request: &claw_api::ChatJsonRequest<'_>, abort: &core::sync::atomic::AtomicBool) -> core::result::Result<claw_api::ChatJsonResponse<T>, claw_api::ChatJsonError>
-pub fn claw_api::ClawApi<H>::infer_media(&mut self, request: &claw_api::MediaRequest<'_>, abort: &core::sync::atomic::AtomicBool) -> core::result::Result<alloc::string::String, claw_api::InferMediaError>
-pub fn claw_api::ClawApi<H>::new(http: H) -> Self
-pub fn claw_api::ClawApi<H>::set_config(&mut self, config: claw_api::ClawApiConfig) -> core::result::Result<(), claw_api::InitError>
-pub struct claw_api::ClawApiAsync<H: claw_interface::http::ClawHttp, Timer: claw_interface::timer::ClawTimer>
-impl<H: claw_interface::http::ClawHttp, Timer: claw_interface::timer::ClawTimer> claw_api::ClawApiAsync<H, Timer>
-pub async fn claw_api::ClawApiAsync<H, Timer>::chat(&mut self, request: &claw_api::ChatRequest<'_>, cancel: claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
-pub async fn claw_api::ClawApiAsync<H, Timer>::chat_json<T: serde_core::de::DeserializeOwned>(&mut self, request: &claw_api::ChatJsonRequest<'_>, cancel: claw_interface::http::Cancel<'_>) -> core::result::Result<claw_api::ChatJsonResponse<T>, claw_api::ChatJsonError>
-pub async fn claw_api::ClawApiAsync<H, Timer>::chat_stream<'h, 'r>(&'h mut self, request: &'r claw_api::ChatRequest<'r>, cancel: claw_interface::http::Cancel<'h>) -> core::result::Result<claw_api::ChatStream<'h>, claw_api::ChatError> where H: claw_interface::http::StreamingHttp, 'r: 'h
-pub async fn claw_api::ClawApiAsync<H, Timer>::infer_media(&mut self, request: &claw_api::MediaRequest<'_>, cancel: claw_interface::http::Cancel<'_>) -> core::result::Result<alloc::string::String, claw_api::InferMediaError>
-pub fn claw_api::ClawApiAsync<H, Timer>::new(http: H, timer: Timer) -> Self
-pub fn claw_api::ClawApiAsync<H, Timer>::set_config(&mut self, config: claw_api::ClawApiConfig) -> core::result::Result<(), claw_api::InitError>
+pub struct claw_api::ClawApi<'net, S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'net>
+impl<'net, S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'net> claw_api::ClawApi<'net, S>
+pub async fn claw_api::ClawApi<'net, S>::chat(&mut self, request: &claw_api::ChatRequest<'_>, cancel: claw_utils::cancel::Cancel<'_>) -> core::result::Result<claw_api::LlmResponse, claw_api::ChatError>
+pub async fn claw_api::ClawApi<'net, S>::chat_json<Output: serde_core::de::DeserializeOwned>(&mut self, request: &claw_api::ChatJsonRequest<'_>, cancel: claw_utils::cancel::Cancel<'_>) -> core::result::Result<claw_api::ChatJsonResponse<Output>, claw_api::ChatJsonError>
+pub async fn claw_api::ClawApi<'net, S>::chat_stream<'h, 'r>(&'h mut self, request: &'r claw_api::ChatRequest<'r>, cancel: claw_utils::cancel::Cancel<'h>) -> core::result::Result<claw_api::ChatStream<'h>, claw_api::ChatError> where 'r: 'h
+pub async fn claw_api::ClawApi<'net, S>::infer_media(&mut self, request: &claw_api::MediaRequest<'_>, cancel: claw_utils::cancel::Cancel<'_>) -> core::result::Result<alloc::string::String, claw_api::InferMediaError>
+pub fn claw_api::ClawApi<'net, S>::new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self
+pub fn claw_api::ClawApi<'net, S>::set_config(&mut self, config: claw_api::ClawApiConfig) -> core::result::Result<(), claw_api::InitError>
 pub struct claw_api::ClawApiConfig
 pub claw_api::ClawApiConfig::api_key: alloc::string::String
 pub claw_api::ClawApiConfig::backend: claw_api::BackendKind
@@ -130,6 +142,12 @@ pub claw_api::ClawApiConfig::timeout_ms: u32
 impl claw_api::ClawApiConfig
 pub fn claw_api::ClawApiConfig::new(backend: claw_api::BackendKind, api_key: impl core::convert::Into<alloc::string::String>, model: impl core::convert::Into<alloc::string::String>, base_url: impl core::convert::Into<alloc::string::String>) -> Self
 pub fn claw_api::ClawApiConfig::validate(&self) -> core::result::Result<(), claw_api::InitError>
+pub struct claw_api::ClawApiFactory<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static>
+impl<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static> claw_api::ClawApiFactory<S>
+pub fn claw_api::ClawApiFactory<S>::create(&self) -> claw_api::ClawApi<'static, S>
+pub fn claw_api::ClawApiFactory<S>::new(make: impl core::ops::function::Fn() -> claw_api::ClawApi<'static, S> + 'static) -> Self
+impl<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static> core::clone::Clone for claw_api::ClawApiFactory<S>
+pub fn claw_api::ClawApiFactory<S>::clone(&self) -> Self
 pub struct claw_api::LlmResponse
 pub claw_api::LlmResponse::raw_message_json: core::option::Option<alloc::string::String>
 pub claw_api::LlmResponse::reasoning_content: core::option::Option<alloc::string::String>
@@ -167,6 +185,15 @@ pub fn claw_api::RetryPolicy::default() -> Self
 pub struct claw_api::StaticOutputSchema<'a>
 pub claw_api::StaticOutputSchema::json: &'a str
 pub claw_api::StaticOutputSchema::name: &'a str
+pub struct claw_api::StatusCode(_)
+impl claw_api::StatusCode
+pub const claw_api::StatusCode::NO_CONTENT: Self
+pub const claw_api::StatusCode::OK: Self
+pub const fn claw_api::StatusCode::as_u16(self) -> u16
+pub const fn claw_api::StatusCode::is_success(self) -> bool
+pub const fn claw_api::StatusCode::new(code: u16) -> Self
+impl core::fmt::Display for claw_api::StatusCode
+pub fn claw_api::StatusCode::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct claw_api::ToolCall
 pub claw_api::ToolCall::arguments_json: alloc::string::String
 pub claw_api::ToolCall::id: alloc::string::String

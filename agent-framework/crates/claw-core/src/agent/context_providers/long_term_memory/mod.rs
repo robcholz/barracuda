@@ -5,9 +5,11 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc};
 
+use claw_api::ClawApiFactory;
 use claw_context::{Block, BlockKind, ContextSink};
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_interface::ClawFs;
 use claw_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
+use claw_net::{Dns, TcpConnect};
 use claw_tool::ToolGroup;
 
 use crate::agent::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
@@ -97,14 +99,14 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
     }
 
     /// Build the shared LLM-backed provider constructor used by AgentManager.
-    pub(in crate::agent) fn llm_builder<H, Timer>(
+    pub(in crate::agent) fn llm_builder<H>(
         api_manager: SharedApiManager,
+        llm_factory: ClawApiFactory<H>,
     ) -> Arc<ProviderBuilder<F>>
     where
-        H: ClawHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
+        H: TcpConnect + Dns + 'static,
     {
-        let extractor = LlmExtractor::<H, Timer>::shared(api_manager);
+        let extractor = LlmExtractor::<H>::shared(api_manager, &llm_factory);
         Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
     }
 

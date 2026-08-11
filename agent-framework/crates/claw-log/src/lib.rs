@@ -60,7 +60,7 @@ pub enum InitLoggerError {
 /// It is `env_logger`'s authoritative filter (`RUST_LOG` is intentionally not
 /// consulted) and layers under the compile-time `log_max_*` ceiling.
 ///
-/// On host, dependencies that log through the `log` facade (reqwest, rustls, …)
+/// On host, dependencies that log through the `log` facade (TLS/network crates, …)
 /// are capped at [`LevelFilter::Warn`] regardless of `max_level`, mirroring the
 /// tracing target allowlist, so their verbose/debug output never floods the CLI.
 ///
@@ -102,9 +102,9 @@ fn install_logger(max_level: LevelFilter, output: LogOutput) -> Result<(), InitL
     let mut builder = env_logger::Builder::new();
     builder
         // No `parse_env`/`RUST_LOG`. Mirror the tracing target allowlist: noisy
-        // dependencies (reqwest/rustls/… emit through the `log` facade) only
+        // dependencies (TLS/network crates emit through the `log` facade) only
         // surface at `Warn`+, while first-party `claw*` targets honor `max_level`.
-        // So `init_logger(Trace)` keeps our verbose logs without the reqwest flood.
+        // So `init_logger(Trace)` keeps our verbose logs without dependency noise.
         .filter_level(LevelFilter::Warn)
         .filter_module(CLAW_TARGET_PREFIX, max_level)
         // Render `<L> (<ms>) <tag>: <msg>`; anstream strips ANSI when the target
@@ -159,7 +159,7 @@ impl TraceSink for ClawTraceSink {
 
 /// Target prefix for this framework's own crates (`claw_core`, `claw_tool`, …).
 /// The subscriber traces only these, so dependency `tracing`
-/// noise (reqwest/hyper/h2/rustls on the host CLIs) is dropped.
+/// noise (TLS/network crates used by host CLIs) is dropped.
 const CLAW_TARGET_PREFIX: &str = "claw";
 
 /// Caller-supplied configuration for [`init_tracing`].
@@ -205,7 +205,8 @@ impl TracingConfig {
 /// backend as the `log` facade (`env_logger`).
 ///
 /// Only spans/events whose `target` starts with `claw` are traced; dependency
-/// output (reqwest/hyper/h2/…) is filtered out so it does not flood the trace.
+/// output from third-party network crates is filtered out so it does not flood
+/// the trace.
 /// `config` declares the inherited-context groups (see [`TracingConfig`]).
 ///
 /// Pair it with [`init_logger`] so plain `log::` records are emitted too; the

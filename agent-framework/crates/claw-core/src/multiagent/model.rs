@@ -4,7 +4,6 @@ use alloc::{
     vec::Vec,
 };
 use core::num::NonZeroU32;
-use core::time::Duration;
 
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
@@ -61,10 +60,6 @@ impl SubagentTimeout {
 
     pub(crate) const fn millis(self) -> u32 {
         self.0.get()
-    }
-
-    pub(crate) fn duration(self) -> Duration {
-        Duration::from_millis(u64::from(self.millis()))
     }
 }
 

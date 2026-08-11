@@ -14,24 +14,30 @@ mod command;
 mod line_editor;
 
 use std::collections::VecDeque;
+use std::convert::Infallible;
+use std::ffi::CStr;
 use std::fs::File;
 use std::future::Future;
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Duration;
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, bail, Result};
 use claw_agent::{
     stream::StreamPart, AgentPersistenceConfig, AgentSystem, ApiPurpose, BackendKind,
-    ClawApiConfig, InputRequestId, InputRequestKind, IterationEvent, Message, ProviderUsage,
-    SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence, SessionStream,
-    ToolCall, ToolOutput, TurnEvent, TurnOrigin,
+    ClawApiConfig, ClawApiFactory, InputRequestId, InputRequestKind, IterationEvent, Message,
+    ProviderUsage, SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence,
+    SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
-use claw_interface::{DiskFs, RealHttp, TokioTimer};
+use claw_api::{Certificate, ClawApi, Tls, TlsConfig, TlsVersion, X509};
+use claw_interface::DiskFs;
 use claw_log::{FlatTreeSubscriber, LevelFilter, LogOutput, TraceSink};
+use claw_net::TokioStack;
+use embassy_time::{Duration, Ticker};
 use futures_lite::StreamExt;
+use rand_core::{TryCryptoRng, TryRng};
+use static_cell::StaticCell;
 
 use command::{
     parse_input, CliInput, PermissionLevelArg, ReasoningEffortArg, SessionPersistenceArg,
@@ -40,8 +46,57 @@ use line_editor::{ChatLineEditor, LineInput};
 
 const MEMORY_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/output/claw-agent-chat");
 const WAITING_TICK: Duration = Duration::from_millis(400);
+const SYSTEM_CA_BUNDLE_CANDIDATES: &[&str] = &[
+    "/etc/ssl/cert.pem",
+    "/etc/ssl/certs/ca-certificates.crt",
+    "/etc/pki/tls/certs/ca-bundle.crt",
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    "/etc/ssl/ca-bundle.pem",
+    "/usr/local/share/certs/ca-root-nss.crt",
+];
 
-type ChatSystem = AgentSystem<DiskFs, RealHttp, TokioTimer>;
+type ChatSystem = AgentSystem<DiskFs, TokioStack>;
+
+static NETWORK: TokioStack = TokioStack;
+static TLS_RNG: StaticCell<SystemRng> = StaticCell::new();
+static TLS_RUNTIME: StaticCell<Tls<'static>> = StaticCell::new();
+
+struct SystemRng(File);
+
+impl SystemRng {
+    fn open() -> Result<Self> {
+        Ok(Self(File::open("/dev/urandom")?))
+    }
+
+    fn fill_or_abort(&mut self, bytes: &mut [u8]) {
+        if std::io::Read::read_exact(&mut self.0, bytes).is_err() {
+            std::process::abort();
+        }
+    }
+}
+
+impl TryRng for SystemRng {
+    type Error = Infallible;
+
+    fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+        let mut bytes = [0; 4];
+        self.fill_or_abort(&mut bytes);
+        Ok(u32::from_ne_bytes(bytes))
+    }
+
+    fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+        let mut bytes = [0; 8];
+        self.fill_or_abort(&mut bytes);
+        Ok(u64::from_ne_bytes(bytes))
+    }
+
+    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), Self::Error> {
+        self.fill_or_abort(bytes);
+        Ok(())
+    }
+}
+
+impl TryCryptoRng for SystemRng {}
 
 struct ChatTraceSink {
     file: Mutex<File>,
@@ -908,8 +963,9 @@ async fn run() -> Result<()> {
         required("CLAW_LLM_BASE_URL")?,
     );
     llm_config.timeout_ms = 60_000;
+    let llm_factory = secure_llm_factory()?;
     let (system, service) =
-        AgentSystem::<DiskFs, RealHttp, TokioTimer>::new(DiskFs::absolute(), persistence)?;
+        AgentSystem::<DiskFs, TokioStack>::new(DiskFs::absolute(), persistence, llm_factory)?;
     let service_task = tokio::task::spawn_local(service);
     system.link_api(llm_config, ApiPurpose::RootAgent, true)?;
     system.start_all()?;
@@ -928,14 +984,13 @@ async fn run() -> Result<()> {
     let mut pending_settings = PendingSessionSettings::default();
     let mut total_usage = ProviderUsage::default();
     let mut prompt_active = false;
-    let mut waiting_ticks =
-        tokio::time::interval_at(tokio::time::Instant::now() + WAITING_TICK, WAITING_TICK);
-    waiting_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut waiting_ticks = Ticker::every(WAITING_TICK);
     show_prompt(&mut editor, &mut prompt_active).await?;
 
     loop {
         let activity = next_activity(editor.next_input(), next_session_event(&mut chat), async {
-            waiting_ticks.tick().await;
+            waiting_ticks.next().await;
+            waiting_ticks.reset();
         })
         .await;
         match activity {
@@ -1247,6 +1302,56 @@ fn required(key: &str) -> Result<String> {
     }
 }
 
+fn resolve_ca_bundle_path_from(
+    claw_bundle: Option<PathBuf>,
+    ssl_cert_file: Option<PathBuf>,
+    system_candidates: &[PathBuf],
+) -> Result<PathBuf> {
+    claw_bundle
+        .filter(|path| !path.as_os_str().is_empty())
+        .or_else(|| ssl_cert_file.filter(|path| !path.as_os_str().is_empty()))
+        .or_else(|| {
+            system_candidates
+                .iter()
+                .find(|path| path.is_file())
+                .cloned()
+        })
+        .ok_or_else(|| {
+            anyhow!("no system PEM CA bundle found; set CLAW_TLS_CA_BUNDLE or SSL_CERT_FILE")
+        })
+}
+
+fn secure_llm_factory() -> Result<ClawApiFactory<TokioStack>> {
+    let system_candidates: Vec<PathBuf> = SYSTEM_CA_BUNDLE_CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .collect();
+    let ca_path = resolve_ca_bundle_path_from(
+        std::env::var_os("CLAW_TLS_CA_BUNDLE").map(PathBuf::from),
+        std::env::var_os("SSL_CERT_FILE").map(PathBuf::from),
+        &system_candidates,
+    )?;
+    let mut ca_pem = std::fs::read(&ca_path)
+        .map_err(|error| anyhow!("failed to read CA bundle {}: {error}", ca_path.display()))?;
+    if !ca_pem.ends_with(&[0]) {
+        ca_pem.push(0);
+    }
+    let ca_cstr = CStr::from_bytes_with_nul(&ca_pem)
+        .map_err(|error| anyhow!("CA bundle must contain no interior NUL bytes: {error}"))?;
+    let certificate = Certificate::new(X509::PEM(ca_cstr))
+        .map_err(|error| anyhow!("failed to parse CA bundle: {error:?}"))?;
+    let rng = TLS_RNG.init(SystemRng::open()?);
+    let tls = Tls::new(rng).map_err(|error| anyhow!("failed to initialize mbedTLS: {error:?}"))?;
+    let tls = TLS_RUNTIME
+        .try_init(tls)
+        .ok_or_else(|| anyhow!("mbedTLS runtime is already initialized"))?;
+    let tls_reference = tls.reference();
+    Ok(ClawApiFactory::new(move || {
+        let tls = TlsConfig::new(TlsVersion::Tls1_2, certificate.clone(), None, tls_reference);
+        ClawApi::new_with_tls(&NETWORK, tls, 16 * 1024, 8 * 1024)
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use claw_agent::AgentService;
@@ -1254,17 +1359,67 @@ mod tests {
 
     use super::*;
 
-    type ChatService = AgentService<DiskFs, RealHttp, TokioTimer>;
+    type ChatService = AgentService<DiskFs, TokioStack>;
 
     fn test_system(root: &TempDir) -> (ChatSystem, ChatService) {
         let persistence = AgentPersistenceConfig {
             persistence_root: root.path().to_string_lossy().into_owned(),
             skill_roots: Vec::new(),
         };
+        let llm_factory = ClawApiFactory::new(|| ClawApi::new(&NETWORK, 1024, 1024));
         let (system, service) =
-            ChatSystem::new(DiskFs::absolute(), persistence).expect("agent system");
+            ChatSystem::new(DiskFs::absolute(), persistence, llm_factory).expect("agent system");
         system.start_all().expect("start tools");
         (system, service)
+    }
+
+    #[test]
+    fn ca_bundle_falls_back_to_an_existing_system_path() {
+        let root = TempDir::new("claw-cli-ca").expect("temp dir");
+        let missing = root.path().join("missing.pem");
+        let available = root.path().join("system-ca.pem");
+        std::fs::write(&available, b"test CA").expect("write CA fixture");
+
+        let selected = resolve_ca_bundle_path_from(None, None, &[missing, available.clone()])
+            .expect("discover system CA bundle");
+
+        assert_eq!(selected, available);
+    }
+
+    #[test]
+    fn empty_ca_environment_values_do_not_disable_system_discovery() {
+        let root = TempDir::new("claw-cli-empty-ca-env").expect("temp dir");
+        let available = root.path().join("system-ca.pem");
+        std::fs::write(&available, b"test CA").expect("write CA fixture");
+
+        let selected = resolve_ca_bundle_path_from(
+            Some(PathBuf::new()),
+            Some(PathBuf::new()),
+            &[available.clone()],
+        )
+        .expect("ignore empty environment values");
+
+        assert_eq!(selected, available);
+    }
+
+    #[test]
+    fn explicit_ca_bundle_takes_precedence_over_system_discovery() {
+        let explicit = PathBuf::from("explicit-ca.pem");
+        let selected = resolve_ca_bundle_path_from(
+            Some(explicit.clone()),
+            Some(PathBuf::from("ssl-cert-file.pem")),
+            &[PathBuf::from("system-ca.pem")],
+        )
+        .expect("select explicit CA bundle");
+
+        assert_eq!(selected, explicit);
+    }
+
+    #[test]
+    fn missing_ca_bundle_reports_how_to_override_discovery() {
+        let error = resolve_ca_bundle_path_from(None, None, &[]).expect_err("missing CA bundle");
+
+        assert!(error.to_string().contains("CLAW_TLS_CA_BUNDLE"));
     }
 
     #[test]

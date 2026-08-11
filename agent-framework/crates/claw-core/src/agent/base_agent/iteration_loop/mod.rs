@@ -16,8 +16,8 @@ use core::pin::Pin;
 
 use claw_permission::Action;
 
-use claw_api::{ClawApiAsync, RetryPolicy};
-use claw_interface::{ClawHttp, ClawTimer};
+use claw_api::{ClawApi, RetryPolicy};
+use claw_net::{Dns, TcpConnect};
 
 use super::stream::RunControl;
 
@@ -82,10 +82,10 @@ impl ToolPermissionPolicy for claw_permission::AllowAll {
 /// One LLM response followed by its complete tool-call round.
 ///
 /// Generic over the HTTP transport `H` so the LLM call stays statically
-/// dispatched. The loop borrows the agent's [`ClawApiAsync`] mutably for exactly one
+/// dispatched. The loop borrows the agent's [`ClawApi`] mutably for exactly one
 /// `chat` round, so it is consumed by [`run`](Self::run).
-pub(crate) struct IterationLoop<'a, H: ClawHttp, Timer: ClawTimer, P> {
-    pub llm: &'a mut ClawApiAsync<H, Timer>,
+pub(crate) struct IterationLoop<'a, H: TcpConnect + Dns + 'static, P> {
+    pub llm: &'a mut ClawApi<'static, H>,
     pub control: &'a RunControl,
     pub permission: &'a P,
     /// Retry policy applied to this iteration's LLM call (see [`RetryPolicy`]).

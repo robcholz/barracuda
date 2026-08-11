@@ -89,7 +89,8 @@ pub struct ProviderUsage {
     pub cache_write_tokens: Option<u64>,
 }
 
-/// Default per-request HTTP timeout, in milliseconds.
+/// Default HTTP operation timeout, in milliseconds. For streaming responses,
+/// the timeout is reset after each decoded provider event.
 const DEFAULT_TIMEOUT_MS: u32 = 120 * 1000;
 /// Default maximum output tokens sent to the backend.
 const DEFAULT_MAX_TOKENS: u32 = 8192;
@@ -142,7 +143,7 @@ impl ClawApiConfig {
     /// Validate the fields required by every backend.
     ///
     /// This is the same validation performed by [`crate::ClawApi::set_config`]
-    /// and [`crate::ClawApiAsync::set_config`].
+    /// and [`crate::ClawApi::set_config`].
     pub fn validate(&self) -> Result<(), crate::InitError> {
         if self.api_key.is_empty() {
             return Err(crate::InitError::MissingApiKey);

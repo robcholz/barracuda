@@ -16,7 +16,7 @@ use core::marker::PhantomData;
 use claw_api::InitError;
 #[cfg(feature = "cache_profile")]
 pub use claw_api::ProviderUsage;
-pub use claw_api::{BackendKind, ClawApiConfig};
+pub use claw_api::{BackendKind, ClawApiConfig, ClawApiFactory};
 pub use claw_core::stream;
 pub use claw_core::AgentService;
 pub use claw_core::{
@@ -29,8 +29,8 @@ pub use claw_core::{
     ToolOutput, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer, FsError};
+use claw_interface::{ClawFs, FsError};
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::{Persistence, PersistenceError, SharedPersistence};
 use claw_tool::{ToolRegistry, ToolRegistryError};
 
@@ -89,28 +89,26 @@ pub enum AgentError {
 
 /// A ready-to-drive agent runtime.
 ///
-/// The `Filesystem`/`Http`/`Timer` parameters record which concrete backends the
+/// The `Filesystem`/`Http` parameters record which concrete backends the
 /// core runtime worker owns. The backend-erased [`AgentRuntime`] handle retains
 /// the actual filesystem instance; this marker only preserves the public
 /// `AgentSystem` type relationship.
-type BackendMarker<Filesystem, Http, Timer> = PhantomData<fn() -> (Filesystem, Http, Timer)>;
+type BackendMarker<Filesystem, Http> = PhantomData<fn() -> (Filesystem, Http)>;
 
-pub struct AgentSystem<Filesystem, Http, Timer>
+pub struct AgentSystem<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     tools: Arc<ToolRegistry>,
     runtime: AgentRuntime,
-    _marker: BackendMarker<Filesystem, Http, Timer>,
+    _marker: BackendMarker<Filesystem, Http>,
 }
 
-impl<Filesystem, Http, Timer> AgentSystem<Filesystem, Http, Timer>
+impl<Filesystem, Http> AgentSystem<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     /// Build an agent system with an empty tool registry.
     ///
@@ -123,8 +121,14 @@ where
     pub fn new(
         filesystem: Filesystem,
         persistence: AgentPersistenceConfig,
-    ) -> AgentResult<(Self, AgentService<Filesystem, Http, Timer>)> {
-        Self::with_tool_groups(filesystem, persistence, core::iter::empty::<ToolGroup>())
+        llm_factory: ClawApiFactory<Http>,
+    ) -> AgentResult<(Self, AgentService<Filesystem, Http>)> {
+        Self::with_tool_groups(
+            filesystem,
+            persistence,
+            llm_factory,
+            core::iter::empty::<ToolGroup>(),
+        )
     }
 
     /// Build a fully injectable agent system with its initial tool groups.
@@ -140,8 +144,9 @@ where
     pub fn with_tool_groups(
         filesystem: Filesystem,
         persistence: AgentPersistenceConfig,
+        llm_factory: ClawApiFactory<Http>,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> AgentResult<(Self, AgentService<Filesystem, Http, Timer>)> {
+    ) -> AgentResult<(Self, AgentService<Filesystem, Http>)> {
         let filesystem = Arc::new(filesystem);
         let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
             Arc::clone(&filesystem),
@@ -151,12 +156,13 @@ where
         for group in tool_groups {
             tools.register_group(group)?;
         }
-        let (runtime, service) = AgentRuntime::new::<Filesystem, Http, Timer>(
+        let (runtime, service) = AgentRuntime::new::<Filesystem, Http>(
             filesystem,
             Arc::clone(&tools),
             shared_persistence,
             persistence.persistence_root,
             persistence.skill_roots,
+            llm_factory,
         )?;
 
         Ok((

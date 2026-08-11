@@ -11,19 +11,18 @@ use alloc::{
 };
 use core::cell::RefCell;
 use core::future::Future;
-use core::marker::PhantomData;
 use core::pin::Pin;
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::task::{Context, Poll};
 
-use claw_api::{ChatRequest, ClawApiAsync, RetryPolicy, ToolCall};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_api::{ChatRequest, ClawApiFactory, RetryPolicy, ToolCall};
+use claw_net::{Dns, TcpConnect};
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
     tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
     ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
+use claw_utils::Cancel;
 use futures_lite::StreamExt as _;
 use serde_json::{json, Value};
 
@@ -36,24 +35,26 @@ use super::{ApprovalFuture, ApprovalResolver, ApprovalResolverError};
 const APPROVAL_RESOLVER_PROMPT: &str = prompt!("approval/resolver_system.md");
 const USER_REJECTED: &str = "user rejected";
 
-pub(crate) struct LlmApprovalResolver<Http, Timer> {
+pub(crate) struct LlmApprovalResolver<Http: TcpConnect + Dns + 'static> {
     api_manager: SharedApiManager,
-    marker: PhantomData<fn() -> (Http, Timer)>,
+    llm_factory: ClawApiFactory<Http>,
 }
 
-impl<Http, Timer> LlmApprovalResolver<Http, Timer> {
-    pub(crate) fn new(api_manager: SharedApiManager) -> Self {
+impl<Http> LlmApprovalResolver<Http>
+where
+    Http: TcpConnect + Dns + 'static,
+{
+    pub(crate) fn new(api_manager: SharedApiManager, llm_factory: ClawApiFactory<Http>) -> Self {
         Self {
             api_manager,
-            marker: PhantomData,
+            llm_factory,
         }
     }
 }
 
-impl<Http, Timer> ApprovalResolver for LlmApprovalResolver<Http, Timer>
+impl<Http> ApprovalResolver for LlmApprovalResolver<Http>
 where
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     async fn resolve(
         self: Rc<Self>,
@@ -62,11 +63,13 @@ where
         reply: Message,
     ) -> Result<ApprovalDecision, ApprovalResolverError> {
         let api_manager = Arc::clone(&self.api_manager);
+        let llm_factory = self.llm_factory.clone();
         let cancelled = Arc::new(AtomicBool::new(false));
         let task_cancelled = Arc::clone(&cancelled);
         let future: ApprovalFuture = Box::pin(async move {
-            resolve_permission_reply::<Http, Timer>(
+            resolve_permission_reply::<Http>(
                 &api_manager,
+                &llm_factory,
                 &tool_call,
                 &reason,
                 reply.as_str(),
@@ -172,18 +175,18 @@ impl SyncToolHandler for ResolvePermissionReplyTool {
     }
 }
 
-async fn resolve_permission_reply<Http, Timer>(
+async fn resolve_permission_reply<Http>(
     api_manager: &SharedApiManager,
+    llm_factory: &ClawApiFactory<Http>,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
     cancelled: &AtomicBool,
 ) -> Result<ApprovalDecision, ApprovalResolverError>
 where
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
-    let mut llm = ClawApiAsync::<Http, Timer>::new(Http::default(), Timer::default());
+    let mut llm = llm_factory.create();
     if let Some(config) = api_manager.borrow().get_api(ApiPurpose::RootAgent) {
         llm.set_config(config)?;
     }

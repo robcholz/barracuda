@@ -2,8 +2,7 @@ use alloc::collections::BTreeMap;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawHttp, ClawTimer};
+use claw_net::{Dns, TcpConnect};
 use futures_core::Stream;
 
 use crate::agent::{
@@ -13,7 +12,7 @@ use crate::agent::{
 };
 use crate::Message;
 
-pub(super) type AgentSlots<Http, Timer> = BTreeMap<AgentId, AgentSlot<Http, Timer>>;
+pub(super) type AgentSlots<Http> = BTreeMap<AgentId, AgentSlot<Http>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {
@@ -23,8 +22,8 @@ enum InFlightLifecycle {
     Reaping,
 }
 
-struct InFlight<Http: ClawHttp, Timer: ClawTimer> {
-    stream: AgentStream<Http, Timer>,
+struct InFlight<Http: TcpConnect + Dns + 'static> {
+    stream: AgentStream<Http>,
     control: AgentHandle,
     span: Option<tracing::Span>,
     lifecycle: InFlightLifecycle,
@@ -34,9 +33,9 @@ struct InFlight<Http: ClawHttp, Timer: ClawTimer> {
 // `Agent` is intentionally stored inline in its owning slot. Boxing it only to
 // equalize enum variants adds one allocation to every resident Agent.
 #[allow(clippy::large_enum_variant)]
-enum Execution<Http: ClawHttp, Timer: ClawTimer> {
-    Resident(Agent<Http, Timer>),
-    InFlight(InFlight<Http, Timer>),
+enum Execution<Http: TcpConnect + Dns + 'static> {
+    Resident(Agent<Http>),
+    InFlight(InFlight<Http>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,17 +55,16 @@ pub(super) enum AgentSlotUpdate {
 ///
 /// A resident slot owns the Agent directly. While it is running, the slot owns
 /// the AgentStream and its control capability.
-pub(super) struct AgentSlot<Http: ClawHttp, Timer: ClawTimer> {
-    execution: Option<Execution<Http, Timer>>,
+pub(super) struct AgentSlot<Http: TcpConnect + Dns + 'static> {
+    execution: Option<Execution<Http>>,
     reasoning_effort: ReasoningEffortHandle,
 }
 
-impl<Http, Timer> AgentSlot<Http, Timer>
+impl<Http> AgentSlot<Http>
 where
-    Http: ClawHttp + StreamingHttp + 'static,
-    Timer: ClawTimer + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
-    pub(super) fn new(agent: Agent<Http, Timer>, reasoning_effort: ReasoningEffortHandle) -> Self {
+    pub(super) fn new(agent: Agent<Http>, reasoning_effort: ReasoningEffortHandle) -> Self {
         Self {
             execution: Some(Execution::Resident(agent)),
             reasoning_effort,

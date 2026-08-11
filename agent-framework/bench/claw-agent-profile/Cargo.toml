@@ -12,9 +12,9 @@ name = "claw-agent-profile"
 path = "src/main.rs"
 
 [dependencies]
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 claw-agent = { path = "../../crates/claw-agent" }
-claw-interface = { path = "../../crates/claw-interface", features = [
-    "httpmock",
-    "timermock",
-] }
+claw-api = { path = "../../crates/claw-api" }
+claw-net = { path = "../../crates/claw-net", features = ["testing"] }
+claw-interface = { path = "../../crates/claw-interface" }
 claw-profile = { path = "../claw-profile", features = ["dhat-heap"] }

@@ -19,57 +19,17 @@
 use claw_agent::{
     stream::StreamPart,
     tools::{SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec},
-    AgentSystem, ApiPurpose, BackendKind, ClawApiConfig, IterationEvent, Message, SessionEvent,
-    SessionPersistence, TurnEvent,
+    AgentSystem, ApiPurpose, BackendKind, ClawApiConfig, ClawApiFactory, IterationEvent, Message,
+    SessionEvent, SessionPersistence, TurnEvent,
 };
-use claw_interface::http::SliceChunks;
-use claw_interface::{
-    BlockingHttpAdapter, Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture,
-    HttpStatusCode, ImmediateTimer, MemFs, SharedScriptHttp, StreamingHttp,
-};
+use claw_api::ClawApi;
+use claw_interface::MemFs;
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
+use claw_net::testing::{ScriptStep, ScriptedStack};
 use futures_lite::StreamExt;
+use static_cell::StaticCell;
 
-#[derive(Default)]
-struct Sse<T>(T);
-
-impl<T: ClawHttp> ClawHttp for Sse<T> {
-    fn post_json<'a>(
-        &'a mut self,
-        request: &'a HttpJsonRequest<'a>,
-        cancel: Cancel<'a>,
-    ) -> HttpResponseFuture<'a> {
-        self.0.post_json(request, cancel)
-    }
-}
-
-impl<T: ClawHttp> StreamingHttp for Sse<T> {
-    type ByteStream<'a>
-        = SliceChunks<'a>
-    where
-        Self: 'a;
-
-    async fn post_json_streaming<'a, 'r>(
-        &'a mut self,
-        request: &'r HttpJsonRequest<'r>,
-        cancel: Cancel<'a>,
-    ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
-        let response = self.0.post_json(request, cancel).await?;
-        let message: serde_json::Value =
-            serde_json::from_str(&response.body).map_err(|_| HttpError::Aborted)?;
-        let content = message["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or_default();
-        let event = serde_json::json!({
-            "choices": [{ "delta": { "content": content } }]
-        });
-        let body = format!("data: {event}\n\ndata: [DONE]\n\n");
-        Ok((
-            response.status_code,
-            SliceChunks::once_with_cancel(body.into_bytes(), cancel),
-        ))
-    }
-}
+static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
 
 /// A tool: returns a fixed timestamp. Registering it makes `time_now`
 /// resolvable by the agent; whether the model calls it is up to the prompt.
@@ -94,21 +54,13 @@ impl SyncToolHandler for TimeNowTool {
     }
 }
 
-/// A scripted assistant turn returning plain text (no tool call this round).
-fn assistant_text(text: &str) -> String {
-    serde_json::json!({
-        "choices": [{ "message": { "role": "assistant", "content": text } }]
-    })
-    .to_string()
-}
-
 /// A test LLM config; its base URL is never dialed (HTTP is the scripted double).
 fn scripted_llm() -> ClawApiConfig {
     ClawApiConfig::new(
         BackendKind::OpenAiCompatible,
         "sk-example",
         "gpt-example",
-        "https://example.invalid",
+        "http://example.invalid",
     )
 }
 
@@ -126,20 +78,25 @@ async fn run() -> anyhow::Result<()> {
 
     // 1. Build the system. Hermetic backends (in-memory fs + scripted LLM) keep
     //    the example offline and deterministic.
-    SharedScriptHttp::install(vec![assistant_text(
-        "Hello from the agent — the local time is 2026-06-29T17:00:00Z.",
-    )]);
+    let event = serde_json::json!({
+        "choices": [{
+            "delta": {
+                "content": "Hello from the agent — the local time is 2026-06-29T17:00:00Z."
+            }
+        }]
+    });
+    let sse = format!("data: {event}\n\ndata: [DONE]\n\n");
+    let network: &'static ScriptedStack =
+        NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[sse.as_str()])]));
+    let llm_factory = ClawApiFactory::new(move || ClawApi::new(network, 4096, 1024));
 
-    let (system, service) = AgentSystem::<
-        MemFs,
-        Sse<BlockingHttpAdapter<SharedScriptHttp>>,
-        ImmediateTimer,
-    >::with_tool_groups(
+    let (system, service) = AgentSystem::<MemFs, ScriptedStack>::with_tool_groups(
         MemFs::new(),
         claw_agent::AgentPersistenceConfig {
             persistence_root: "/mem".to_string(),
             skill_roots: Vec::new(),
         },
+        llm_factory,
         [ToolGroup::new(
             "example",
             true,

@@ -2,7 +2,7 @@
 //!
 //! Inline image bytes are base64-encoded with the `base64` crate. Filesystem
 //! access belongs to the platform/application layer, which can read through
-//! [`claw_interface::ClawFs`] and construct [`MediaAsset::inline_bytes`].
+//! their filesystem adapter and construct [`MediaAsset::inline_bytes`].
 
 use alloc::format;
 use alloc::string::String;

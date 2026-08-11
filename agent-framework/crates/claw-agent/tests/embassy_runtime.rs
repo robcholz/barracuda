@@ -1,44 +1,21 @@
-use claw_agent::{AgentPersistenceConfig, AgentSystem, SessionPersistence};
-use claw_interface::http::{
-    Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
-    StreamingHttp,
-};
-use claw_interface::{ImmediateTimer, MemFs};
+use claw_agent::{AgentPersistenceConfig, AgentSystem, ClawApiFactory, SessionPersistence};
+use claw_api::ClawApi;
+use claw_interface::MemFs;
+use claw_net::testing::NeverStack;
 use futures_lite::future::{block_on, zip};
 
-#[derive(Default)]
-struct NullHttp;
-
-impl ClawHttp for NullHttp {
-    fn post_json<'a>(
-        &'a mut self,
-        _request: &'a HttpJsonRequest<'a>,
-        _cancel: Cancel<'a>,
-    ) -> HttpResponseFuture<'a> {
-        Box::pin(async { Err(HttpError::Aborted) })
-    }
-}
-
-impl StreamingHttp for NullHttp {
-    type ByteStream<'a> = SliceChunks<'a>;
-
-    async fn post_json_streaming<'a, 'r>(
-        &'a mut self,
-        _request: &'r HttpJsonRequest<'r>,
-        _cancel: Cancel<'a>,
-    ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
-        Err(HttpError::Aborted)
-    }
-}
+static NETWORK: NeverStack = NeverStack;
 
 #[test]
 fn executor_neutral_service_drives_public_session_api() {
-    let (system, service) = AgentSystem::<MemFs, NullHttp, ImmediateTimer>::new(
+    let llm_factory = ClawApiFactory::new(|| ClawApi::new(&NETWORK, 1024, 1024));
+    let (system, service) = AgentSystem::<MemFs, NeverStack>::new(
         MemFs::new(),
         AgentPersistenceConfig {
             persistence_root: "/agent".into(),
             skill_roots: Vec::new(),
         },
+        llm_factory,
     )
     .expect("runtime builds");
 

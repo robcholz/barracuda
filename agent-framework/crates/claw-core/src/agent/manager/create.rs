@@ -2,9 +2,9 @@ use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 
 use claw_api::RetryPolicy;
 use claw_context::{Block, BlockKind};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer, MemFs};
+use claw_interface::{ClawFs, MemFs};
 use claw_memory::{Transcript, TranscriptStore};
+use claw_net::{Dns, TcpConnect};
 use claw_permission::PermissionPolicy;
 use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
@@ -42,11 +42,8 @@ struct AgentEnvironment {
     state: Option<BaseAgentState>,
 }
 
-impl<
-        Filesystem: ClawFs + 'static,
-        Http: ClawHttp + StreamingHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
-    > AgentManager<Filesystem, Http, Timer>
+impl<Filesystem: ClawFs + 'static, Http: TcpConnect + Dns + 'static>
+    AgentManager<Filesystem, Http>
 {
     pub(crate) fn resume_from(
         &self,
@@ -55,7 +52,7 @@ impl<
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
@@ -86,7 +83,7 @@ impl<
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -155,7 +152,7 @@ impl<
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(Agent<Http, Timer>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
@@ -191,13 +188,13 @@ impl<
 
         // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
-        let conversation_history =
-            ConversationHistoryContextProvider::with_llm_compaction::<Http, Timer>(
-                Arc::clone(&self.api_manager),
-                COMPACTION_TRIGGER_TOKENS,
-                COMPACTION_KEEP_RECENT_TOKENS,
-                COMPACTION_SEGMENT_TOKEN_BUDGET,
-            );
+        let conversation_history = ConversationHistoryContextProvider::with_llm_compaction::<Http>(
+            Arc::clone(&self.api_manager),
+            self.llm_factory.clone(),
+            COMPACTION_TRIGGER_TOKENS,
+            COMPACTION_KEEP_RECENT_TOKENS,
+            COMPACTION_SEGMENT_TOKEN_BUDGET,
+        );
         let profile_provider = ProfileContextProvider::new(self.profile_store.clone());
         let provider = match self.long_term.provider(kind.as_str()) {
             Ok(provider) => provider,
@@ -252,7 +249,7 @@ impl<
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
-        let base = BaseAgent::<Http, Timer>::build(base_config)?;
+        let base = BaseAgent::<Http>::build(base_config, self.llm_factory.create())?;
         let agent = Agent::new(base);
 
         log::info!("Agent {id} ({}) created", kind.as_str());

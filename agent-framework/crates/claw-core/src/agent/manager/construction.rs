@@ -1,10 +1,10 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
-use core::marker::PhantomData;
 
 use crate::config::SharedApiManager;
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_api::ClawApiFactory;
+use claw_interface::ClawFs;
 use claw_memory::ProfileStore;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::SharedPersistence;
 use claw_skill::SkillRegistry;
 use claw_tool::ToolRegistry;
@@ -16,11 +16,8 @@ use super::layout::AgentManagerLayout;
 use super::long_term::LongTermDeps;
 use super::AgentManager;
 
-impl<
-        Filesystem: ClawFs + 'static,
-        Http: ClawHttp + StreamingHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
-    > AgentManager<Filesystem, Http, Timer>
+impl<Filesystem: ClawFs + 'static, Http: TcpConnect + Dns + 'static>
+    AgentManager<Filesystem, Http>
 {
     /// The manager owns the memory layout below `persistence_dir`: transcripts,
     /// editable profile documents, and long-term memory. All durable stores
@@ -37,6 +34,7 @@ impl<
         memory_directory: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
+        llm_factory: ClawApiFactory<Http>,
     ) -> Result<Self, AgentManagerError> {
         let span = tracing::info_span!("agent.manager");
         let _enter = span.enter();
@@ -47,10 +45,11 @@ impl<
         }
         let layout = AgentManagerLayout::new(memory_directory);
 
-        let long_term = match LongTermDeps::<Filesystem>::from_root::<Http, Timer>(
+        let long_term = match LongTermDeps::<Filesystem>::from_root::<Http>(
             Arc::clone(&filesystem),
             &layout.long_term_dir,
             Arc::clone(&api_manager),
+            llm_factory.clone(),
         ) {
             Ok(deps) => deps,
             Err(error) => {
@@ -69,8 +68,7 @@ impl<
             persistence,
             api_manager,
             tool_registry,
-            _http: PhantomData,
-            _timer: PhantomData,
+            llm_factory,
             transcript_dir: layout.transcript_dir,
             long_term,
             profile_store,

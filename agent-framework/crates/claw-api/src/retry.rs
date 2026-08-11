@@ -3,59 +3,59 @@
 //! Retry is a per-request policy ([`crate::RetryPolicy`] on each request),
 //! so the loop lives just above the backend call rather than in the transport.
 //! Only operations whose error reports [`is_retryable`](crate::ClawApiError::is_retryable)
-//! are retried; the backoff sleep polls the abort flag cooperatively.
+//! are retried; deadlines and backoff use the global `embassy-time` driver.
 
-use core::sync::atomic::{AtomicBool, Ordering};
-use core::time::Duration;
+use claw_utils::Cancel;
+use core::future::{poll_fn, Future};
+use core::task::Poll;
+use embassy_time::Timer;
 
-use claw_interface::{Cancel, ClawTimer, SleepOutcome};
+const CANCEL_POLL_INTERVAL_MS: u32 = 50;
 
-use crate::types::RetryPolicy;
-
-/// Run `op`, retrying transient failures per `policy`.
-///
-/// `is_retryable` classifies an error; `on_abort` produces the error returned
-/// when the abort flag fires during a backoff sleep.
-pub(crate) fn run_with_retry<T, E>(
-    policy: &RetryPolicy,
-    abort: &AtomicBool,
-    is_retryable: impl Fn(&E) -> bool,
-    on_abort: impl Fn() -> E,
-    mut op: impl FnMut() -> Result<T, E>,
-) -> Result<T, E> {
-    let mut attempt = 0u32;
-    loop {
-        match op() {
-            Ok(value) => return Ok(value),
-            Err(err) => {
-                if !is_retryable(&err) || attempt >= policy.max_retries {
-                    return Err(err);
-                }
-                attempt = attempt.saturating_add(1);
-                // The blocking compatibility client has no runtime-independent
-                // clock. Production retry backoff is provided by the async
-                // client through `ClawTimer`; here retries remain immediate.
-                if abort.load(Ordering::Acquire) {
-                    return Err(on_abort());
-                }
-            }
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeadlineError {
+    Cancelled,
+    Elapsed,
 }
 
-/// Async backoff sleep using the caller-injected timer seam.
-pub(crate) async fn sleep_abortable_async<T: ClawTimer>(
-    total_ms: u32,
-    timer: &mut T,
+pub(crate) async fn with_timeout<F>(
+    future: F,
+    timeout_ms: u32,
     cancel: Cancel<'_>,
-) -> bool {
-    if total_ms == 0 {
-        return !cancel.is_cancelled();
+) -> Result<F::Output, DeadlineError>
+where
+    F: Future,
+{
+    if cancel.is_cancelled() {
+        return Err(DeadlineError::Cancelled);
     }
-    matches!(
-        timer
-            .sleep(Duration::from_millis(u64::from(total_ms)), cancel)
-            .await,
-        SleepOutcome::Completed
-    )
+    let mut operation = core::pin::pin!(future);
+    let mut timeout = core::pin::pin!(Timer::after_millis(u64::from(timeout_ms)));
+    poll_fn(move |context| {
+        if cancel.is_cancelled() {
+            return Poll::Ready(Err(DeadlineError::Cancelled));
+        }
+        if let Poll::Ready(output) = operation.as_mut().poll(context) {
+            return Poll::Ready(Ok(output));
+        }
+        timeout
+            .as_mut()
+            .poll(context)
+            .map(|()| Err(DeadlineError::Elapsed))
+    })
+    .await
+}
+
+/// Async backoff sleep with frequent cancellation checks.
+pub(crate) async fn sleep_abortable_async(total_ms: u32, cancel: Cancel<'_>) -> bool {
+    let mut remaining_ms = total_ms;
+    while remaining_ms > 0 {
+        if cancel.is_cancelled() {
+            return false;
+        }
+        let slice_ms = remaining_ms.min(CANCEL_POLL_INTERVAL_MS);
+        Timer::after_millis(u64::from(slice_ms)).await;
+        remaining_ms = remaining_ms.saturating_sub(slice_ms);
+    }
+    !cancel.is_cancelled()
 }

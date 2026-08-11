@@ -1,4 +1,4 @@
-//! [`ChatStream`]: the streaming counterpart of [`crate::ClawApiAsync::chat`].
+//! [`ChatStream`]: the streaming counterpart of [`crate::ClawApi::chat`].
 //!
 //! The public stream hides connection attempts and retry backoff. Each attempt
 //! uses a private provider stream that parses one transport byte stream into
@@ -14,11 +14,10 @@ use core::task::{Context, Poll};
 use futures_core::Stream;
 use futures_lite::StreamExt;
 
-use claw_interface::http::HttpError;
-
-use crate::backends::shared::map_http_error;
+use crate::backends::shared::map_net_error;
 use crate::backends::sse::ProviderSse;
 use crate::errors::{ChatError, ClawApiError};
+use crate::transport::{Error as NetError, ResponsePart};
 use crate::types::ChatStreamEvent;
 
 /// A streaming chat completion.
@@ -74,8 +73,11 @@ impl Stream for ChatStream<'_> {
 /// One provider response attempt over one transport byte stream.
 pub(crate) struct ProviderStream<S> {
     bytes: S,
-    /// `None` once the stream has completed or yielded a terminal error.
+    /// `None` after provider completion or a terminal parser error.
     parser: Option<ProviderSse>,
+    /// Provider completion was observed; drain the remaining HTTP framing so
+    /// reqwless can safely reuse the connection.
+    drain_after_done: bool,
     queue: VecDeque<Result<ChatStreamEvent, ChatError>>,
 }
 
@@ -84,6 +86,7 @@ impl<S> ProviderStream<S> {
         Self {
             bytes,
             parser: Some(parser),
+            drain_after_done: false,
             queue: VecDeque::new(),
         }
     }
@@ -91,7 +94,7 @@ impl<S> ProviderStream<S> {
 
 impl<S> Stream for ProviderStream<S>
 where
-    S: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin,
+    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
 {
     type Item = Result<ChatStreamEvent, ChatError>;
 
@@ -102,11 +105,14 @@ where
             if let Some(item) = this.queue.pop_front() {
                 return Poll::Ready(Some(item));
             }
-            if this.parser.is_none() {
+            if this.parser.is_none() && !this.drain_after_done {
                 return Poll::Ready(None);
             }
             match Pin::new(&mut this.bytes).poll_next(cx) {
-                Poll::Ready(Some(Ok(chunk))) => {
+                Poll::Ready(Some(Ok(ResponsePart::Data(chunk)))) => {
+                    if this.drain_after_done {
+                        continue;
+                    }
                     let mut deltas = Vec::new();
                     let Some(parser) = this.parser.as_mut() else {
                         return Poll::Ready(None);
@@ -119,13 +125,24 @@ where
                         this.queue.push_back(Err(error));
                     } else if done {
                         this.parser = None;
+                        this.drain_after_done = true;
                     }
+                }
+                Poll::Ready(Some(Ok(ResponsePart::Head(_)))) => {
+                    this.parser = None;
+                    return Poll::Ready(Some(Err(ChatError::Api(ClawApiError::ApiError(
+                        "HTTP response head was emitted twice",
+                    )))));
                 }
                 Poll::Ready(Some(Err(error))) => {
                     this.parser = None;
                     return Poll::Ready(Some(Err(read_error(error))));
                 }
                 Poll::Ready(None) => {
+                    if this.drain_after_done {
+                        this.drain_after_done = false;
+                        return Poll::Ready(None);
+                    }
                     this.parser = None;
                     return Poll::Ready(Some(Err(ChatError::truncated_stream())));
                 }
@@ -137,19 +154,22 @@ where
 
 /// Preserve the transport's transient/permanent classification. The outer
 /// stream driver separately decides whether replay is still safe.
-fn read_error(error: HttpError) -> ChatError {
-    map_http_error(error).into()
+fn read_error(error: NetError) -> ChatError {
+    map_net_error(error).into()
 }
 
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body
 /// before failing a streaming request.
-pub(crate) async fn drain_body<S>(mut stream: S) -> Result<String, HttpError>
+pub(crate) async fn drain_body<S>(mut stream: S) -> Result<String, NetError>
 where
-    S: Stream<Item = Result<Vec<u8>, HttpError>> + Unpin,
+    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
 {
     let mut buf = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        buf.extend_from_slice(&chunk?);
+    while let Some(part) = stream.next().await {
+        match part? {
+            ResponsePart::Head(_) => return Err(NetError::Codec),
+            ResponsePart::Data(chunk) => buf.extend_from_slice(&chunk),
+        }
     }
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }

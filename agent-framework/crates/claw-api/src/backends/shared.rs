@@ -3,16 +3,17 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicBool;
 
-use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, HttpAuth, HttpError, HttpHeader,
-    HttpJsonRequest, HttpResponse, HttpStatusCode, StreamingHttp,
-};
+use claw_utils::Cancel;
+use embedded_nal_async::{Dns, TcpConnect};
 use serde_json::{Map, Value};
 
 use super::super::chat_stream::{drain_body, ProviderStream};
 use super::super::errors::{ChatError, ClawApiError, InferMediaError};
+use super::super::transport::{
+    Error as NetError, HttpTransport as NetClient, Response, ResponsePart, ResponseStream,
+    StatusCode,
+};
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
 use super::super::types::{ClawApiConfig, LlmResponse, MediaAsset, ToolCall};
@@ -23,6 +24,7 @@ const STATUS_REQUEST_TIMEOUT: u16 = 408;
 const STATUS_TOO_MANY_REQUESTS: u16 = 429;
 const STATUS_SERVER_ERROR_MIN: u16 = 500;
 const STATUS_SERVER_ERROR_MAX: u16 = 599;
+const MAX_ERROR_BODY_BYTES: usize = 1024;
 
 #[derive(Clone, Debug)]
 pub(super) struct BackendContext {
@@ -58,6 +60,10 @@ impl BackendContext {
         self.max_tokens
     }
 
+    pub(super) fn timeout_ms(&self) -> u32 {
+        self.timeout_ms
+    }
+
     pub(super) fn image_max_bytes(&self) -> usize {
         self.image_max_bytes
     }
@@ -68,10 +74,9 @@ impl BackendContext {
 
     /// Assemble the owned inputs for a single JSON POST to `path`.
     ///
-    /// This is the transport-agnostic half of a request: the backend builds the
-    /// serialized `body` and chooses `auth`/`headers`, and the blocking and async
-    /// send paths then borrow the same [`PreparedRequest`] instead of each
-    /// re-deriving the URL, auth, and headers.
+    /// The backend builds the serialized `body` and chooses `auth`/`headers`;
+    /// the reqwless send path then borrows the result without re-deriving its
+    /// URL, authentication, or headers.
     pub(super) fn prepare(
         &self,
         path: &str,
@@ -82,15 +87,13 @@ impl BackendContext {
         PreparedRequest {
             url: self.endpoint_url(path),
             body,
-            timeout_ms: self.timeout_ms,
             auth,
             headers,
         }
     }
 }
 
-/// Owned authentication for a [`PreparedRequest`], mapped to a borrowing
-/// [`HttpAuth`] only at send time.
+/// Owned authentication for a [`PreparedRequest`].
 pub(super) enum PreparedAuth {
     None,
     Bearer(String),
@@ -98,132 +101,128 @@ pub(super) enum PreparedAuth {
 
 /// A fully assembled but not-yet-sent JSON POST.
 ///
-/// Owning the URL, body, auth, and headers lets the blocking and async send
-/// helpers share one assembly path; the only remaining difference between them
-/// is the actual `post_json` call.
+/// Owning the URL, body, auth, and headers keeps provider request construction
+/// separate from the concrete reqwless send operation.
 pub(super) struct PreparedRequest {
     url: String,
     body: String,
-    timeout_ms: u32,
     auth: PreparedAuth,
     headers: Vec<(&'static str, String)>,
 }
 
 impl PreparedRequest {
-    fn header_refs(&self) -> Vec<HttpHeader<'_>> {
-        self.headers
-            .iter()
-            .map(|(name, value)| HttpHeader { name, value })
-            .collect()
-    }
-
-    fn auth(&self) -> HttpAuth<'_> {
+    fn owned_headers(&self) -> Vec<(String, String)> {
+        let capacity = self
+            .headers
+            .len()
+            .saturating_add(usize::from(matches!(self.auth, PreparedAuth::Bearer(_))));
+        let mut headers = Vec::with_capacity(capacity);
         match &self.auth {
-            PreparedAuth::None => HttpAuth::None,
-            PreparedAuth::Bearer(key) => HttpAuth::Bearer(key),
+            PreparedAuth::None => {}
+            PreparedAuth::Bearer(key) if !key.is_empty() => {
+                headers.push(("Authorization".to_string(), format!("Bearer {key}")));
+            }
+            PreparedAuth::Bearer(_) => {}
         }
-    }
-
-    fn request<'a>(&'a self, headers: &'a [HttpHeader<'a>]) -> HttpJsonRequest<'a> {
-        HttpJsonRequest {
-            url: &self.url,
-            body: &self.body,
-            auth: self.auth(),
-            timeout_ms: self.timeout_ms,
-            headers,
-        }
+        headers.extend(
+            self.headers
+                .iter()
+                .map(|(name, value)| ((*name).to_string(), value.clone())),
+        );
+        headers
     }
 }
 
-/// Map a transport [`HttpError`] to a [`ClawApiError`], classifying whether the
-/// failure is transient (retryable) or permanent. The retry decision is made by
-/// the [`crate::ClawApi`] retry loop via [`ClawApiError::is_retryable`].
-pub(crate) fn map_http_error(err: HttpError) -> ClawApiError {
-    if is_transient(&err) {
-        ClawApiError::TransientTransport(err)
+fn map_status_error(status: StatusCode, body: String) -> ClawApiError {
+    let body = truncated_error_body(body);
+    if status_is_transient(status) {
+        ClawApiError::TransientHttpStatus { status, body }
     } else {
-        ClawApiError::Transport(err)
+        ClawApiError::HttpStatus { status, body }
     }
 }
 
-fn is_transient(err: &HttpError) -> bool {
-    match err {
-        HttpError::Aborted | HttpError::InvalidUrl | HttpError::InvalidBody => false,
-        HttpError::ClientInitFailed | HttpError::RequestFailed(_) => true,
-        HttpError::UnexpectedStatus { status, .. } => status_is_transient(*status),
+fn truncated_error_body(mut body: String) -> String {
+    if body.len() <= MAX_ERROR_BODY_BYTES {
+        return body;
     }
+    let mut end = MAX_ERROR_BODY_BYTES;
+    while !body.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    body.truncate(end);
+    body.push('…');
+    body
 }
 
-fn status_is_transient(status: HttpStatusCode) -> bool {
+fn status_is_transient(status: StatusCode) -> bool {
     let code = status.as_u16();
     code == STATUS_REQUEST_TIMEOUT
         || code == STATUS_TOO_MANY_REQUESTS
         || (STATUS_SERVER_ERROR_MIN..=STATUS_SERVER_ERROR_MAX).contains(&code)
 }
 
-pub(super) fn post_json<H: BlockingClawHttp>(
-    http: &mut H,
-    request: &HttpJsonRequest<'_>,
-    abort: &AtomicBool,
-) -> Result<HttpResponse, ClawApiError> {
-    http.post_json(request, abort).map_err(map_http_error)
-}
-
-pub(super) async fn post_json_async<'a, H: ClawHttp>(
-    http: &'a mut H,
-    request: &'a HttpJsonRequest<'a>,
-    cancel: Cancel<'a>,
-) -> Result<HttpResponse, ClawApiError> {
-    http.post_json(request, cancel)
-        .await
-        .map_err(map_http_error)
-}
-
-/// Send a [`PreparedRequest`] over the blocking transport.
-pub(super) fn post_prepared<H: BlockingClawHttp>(
-    http: &mut H,
-    prepared: &PreparedRequest,
-    abort: &AtomicBool,
-) -> Result<HttpResponse, ClawApiError> {
-    let headers = prepared.header_refs();
-    let request = prepared.request(&headers);
-    post_json(http, &request, abort)
-}
-
 /// Send a [`PreparedRequest`] over the async transport.
-pub(super) async fn post_prepared_async<H: ClawHttp>(
-    http: &mut H,
+pub(super) async fn post_prepared_async<S: TcpConnect + Dns>(
+    http: &mut NetClient<'_, S>,
     prepared: &PreparedRequest,
     cancel: Cancel<'_>,
-) -> Result<HttpResponse, ClawApiError> {
-    let headers = prepared.header_refs();
-    let request = prepared.request(&headers);
-    post_json_async(http, &request, cancel).await
+) -> Result<Response, ClawApiError> {
+    let headers = prepared.owned_headers();
+    let header_refs = headers
+        .iter()
+        .map(|(name, value)| (name.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    let response = http
+        .post_json(&prepared.url, &prepared.body, &header_refs, cancel)
+        .await
+        .map_err(map_net_error)?;
+    if response.status.is_success() {
+        Ok(response)
+    } else {
+        Err(map_status_error(response.status, response.body))
+    }
 }
 
 /// Open a streaming chat completion from a [`PreparedRequest`], wrapping a 2xx
 /// body stream in `sse` and surfacing a non-2xx status as a drained error body.
-pub(super) async fn post_prepared_stream<'h, H: StreamingHttp>(
-    http: &'h mut H,
+pub(super) async fn post_prepared_stream<'h, S: TcpConnect + Dns>(
+    http: &'h mut NetClient<'_, S>,
     prepared: &PreparedRequest,
     cancel: Cancel<'h>,
     sse: ProviderSse,
-) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
-    let headers = prepared.header_refs();
-    let request = prepared.request(&headers);
-    let (status, stream) = http
-        .post_json_streaming(&request, cancel)
-        .await
-        .map_err(map_http_error)?;
+) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
+    let owned_headers = prepared.owned_headers();
+    let mut stream = http.post_json_stream(
+        prepared.url.clone(),
+        prepared.body.clone(),
+        owned_headers,
+        cancel,
+    );
+    let status = match futures_lite::StreamExt::next(&mut stream).await {
+        Some(Ok(ResponsePart::Head(status))) => status,
+        Some(Ok(ResponsePart::Data(_))) | None => {
+            return Err(ClawApiError::ApiError("HTTP stream ended before response head").into())
+        }
+        Some(Err(error)) => return Err(map_net_error(error).into()),
+    };
     if !status.is_success() {
-        let body = drain_body(stream).await.map_err(map_http_error)?;
-        return Err(map_http_error(HttpError::UnexpectedStatus {
-            status,
-            message: format!("HTTP {status}: {body}"),
-        })
-        .into());
+        let body = drain_body(stream).await.map_err(map_net_error)?;
+        return Err(map_status_error(status, body).into());
     }
     Ok(ProviderStream::new(stream, sse))
+}
+
+pub(crate) fn map_net_error(error: NetError) -> ClawApiError {
+    let transient = matches!(
+        error,
+        NetError::Dns | NetError::Network(_) | NetError::ConnectionAborted
+    );
+    if transient {
+        ClawApiError::TransientTransport(error)
+    } else {
+        ClawApiError::Transport(error)
+    }
 }
 
 /// Extract the required non-empty assistant text from a media inference reply.

@@ -9,25 +9,24 @@
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Map, Value};
 
-use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, StreamingHttp,
-};
+use claw_utils::Cancel;
+use embedded_nal_async::{Dns, TcpConnect};
 
 use super::super::chat_stream::ProviderStream;
 use super::super::errors::{ChatError, ClawApiError, InferMediaError, InitError};
 use super::super::media::prepare_asset;
+use super::super::transport::{HttpTransport as NetClient, ResponseStream};
 use super::super::types::{
     ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest, ToolCall,
 };
 #[cfg(feature = "cache_profile")]
 use super::shared::parse_anthropic_usage;
 use super::shared::{
-    media_text, post_prepared, post_prepared_async, post_prepared_stream, single_media_asset,
-    BackendContext, PreparedAuth, PreparedRequest,
+    media_text, post_prepared_async, post_prepared_stream, single_media_asset, BackendContext,
+    PreparedAuth, PreparedRequest,
 };
 use super::sse::{AnthropicSse, ProviderSse};
 use super::BackendImpl;
@@ -492,46 +491,13 @@ impl BackendImpl for Anthropic {
         })
     }
 
-    /// `anthropic_chat`
-    fn chat<H: BlockingClawHttp>(
-        &self,
-        http: &mut H,
-        request: &ChatRequest,
-        abort: &AtomicBool,
-    ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat(request)?;
-        let response = post_prepared(http, &prepared, abort)?;
-        Ok(parse_chat_response(&response.body)?)
+    fn timeout_ms(&self) -> u32 {
+        self.context.timeout_ms()
     }
 
-    fn chat_json<H: BlockingClawHttp>(
+    async fn chat_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
-        request: &ChatJsonRequest<'_>,
-        _schema_name: &str,
-        schema: &Value,
-        abort: &AtomicBool,
-    ) -> Result<LlmResponse, ChatError> {
-        let prepared = self.prepare_chat_json(request, schema)?;
-        let response = post_prepared(http, &prepared, abort)?;
-        Ok(parse_chat_response(&response.body)?)
-    }
-
-    /// `anthropic_infer_media`
-    fn infer_media<H: BlockingClawHttp>(
-        &self,
-        http: &mut H,
-        request: &MediaRequest,
-        abort: &AtomicBool,
-    ) -> Result<String, InferMediaError> {
-        let prepared = self.prepare_media(request)?;
-        let response = post_prepared(http, &prepared, abort)?;
-        media_text(parse_chat_response(&response.body)?)
-    }
-
-    async fn chat_async<H: ClawHttp>(
-        &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &ChatRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError> {
@@ -540,9 +506,9 @@ impl BackendImpl for Anthropic {
         Ok(parse_chat_response(&response.body)?)
     }
 
-    async fn chat_json_async<H: ClawHttp>(
+    async fn chat_json_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &ChatJsonRequest<'_>,
         _schema_name: &str,
         schema: &Value,
@@ -553,9 +519,9 @@ impl BackendImpl for Anthropic {
         Ok(parse_chat_response(&response.body)?)
     }
 
-    async fn infer_media_async<H: ClawHttp>(
+    async fn infer_media_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &MediaRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError> {
@@ -564,12 +530,12 @@ impl BackendImpl for Anthropic {
         media_text(parse_chat_response(&response.body)?)
     }
 
-    async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+    async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
         &self,
-        http: &'h mut H,
+        http: &'h mut NetClient<'_, S>,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
+    ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
         let prepared = self.prepare_stream(request)?;
         post_prepared_stream(
             http,

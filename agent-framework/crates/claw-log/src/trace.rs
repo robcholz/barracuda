@@ -347,7 +347,7 @@ pub struct FlatTreeSubscriber<S: TraceSink> {
     sink: S,
     /// Target-prefix allowlist. Empty means "accept every target"; otherwise a
     /// span/event is kept only if its `target` starts with one of these prefixes.
-    /// Used to keep third-party library noise (reqwest/hyper/h2/rustls/…) out of
+    /// Used to keep third-party TLS/network library noise out of
     /// the trace — see [`with_allowed_target_prefix`](Self::with_allowed_target_prefix).
     allowed_prefixes: Vec<String>,
     /// Inherited-context groups, in registration order. Empty = no incremental
@@ -380,7 +380,7 @@ impl<S: TraceSink> FlatTreeSubscriber<S> {
     ///
     /// Call once per allowed prefix. The intended use is `"claw"` so only this
     /// firmware's own crates are traced and noisy dependency `tracing` output
-    /// (reqwest/hyper/h2/…) is dropped. Because filtering is by static target, a
+    /// from third-party network crates is dropped. Because filtering is by static target, a
     /// rejected callsite is cached as [`Interest::never`](tracing::subscriber::Interest)
     /// by `tracing`'s default `register_callsite`, so it costs nothing after the
     /// first check.
@@ -479,7 +479,7 @@ impl<S: TraceSink> FlatTreeSubscriber<S> {
 
 impl<S: TraceSink + 'static> Subscriber for FlatTreeSubscriber<S> {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        // Target allowlist keeps dependency `tracing` noise (reqwest/hyper/h2/…)
+        // Target allowlist keeps third-party network `tracing` noise
         // out of the trace. Level filtering is left to the compile-time
         // `tracing` `max_level_*` features and the sink's runtime ceiling.
         // `tracing`'s default `register_callsite` caches this per callsite, so a

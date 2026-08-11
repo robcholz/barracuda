@@ -3,7 +3,7 @@ name = "claw-interface"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Shared types and dependency-injection traits for the claw_modules Rust crates (esp_err, ClawEvent, EventPublisher, ClawHttp)"
+description = "Filesystem dependency-injection traits for ESP-Claw"
 
 [lib]
 crate-type = ["rlib"]
@@ -11,47 +11,28 @@ crate-type = ["rlib"]
 [features]
 # Concepts:
 # - target selection and concrete HAL adapters live at the application boundary.
-# - `host-backends` is the opt-in bundle of concrete host-target
-#   implementations used by host CLIs and live host tests.
-# - `test-doubles` is the opt-in bundle of hermetic doubles used by tests and
-#   examples.
+# - `host-backends` is the opt-in host filesystem implementation used by host
+#   CLIs and live host tests.
 # - `dev` belongs to application crates that bundle workflows; this crate only
 #   exposes implementations and doubles.
 #
 # Nothing is enabled by default so pure core/device crates only see the traits.
 default = []
-host-backends = ["diskfs", "realhttp", "tokiotimer"]
-test-doubles = ["httpmock", "timermock"]
+host-backends = ["diskfs"]
 
 # - `diskfs`:       `std::fs` backend for host CLIs and disk-backed tests.
 # - `diskfs-pretty`: pretty-print `.json` writes via serde_json (implies diskfs).
-# - `httpmock`:     scripted / failing / never-called ClawHttp test doubles.
-# - `timermock`:    immediate/yielding ClawTimer test doubles.
-# - `realhttp`:     reqwest ClawHttp and blocking::ClawHttp backends for host CLIs / live tests.
-# - `tokiotimer`:   tokio-backed ClawTimer for host async clients.
 diskfs = []
 diskfs-pretty = ["diskfs", "dep:serde_json"]
-httpmock = ["dep:serde_json"]
-timermock = []
-realhttp = ["dep:reqwest", "dep:futures-lite"]
-tokiotimer = ["dep:tokio"]
 [dependencies]
 thiserror = { version = "2", default-features = false }
-futures-core = { version = "0.3", default-features = false }
-futures-lite = { version = "2", optional = true }
 serde_json = { version = "1", default-features = false, features = ["alloc"], optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "stream"], optional = true }
-tokio = { version = "1.52.3", default-features = false, features = ["time"], optional = true }
 
 [dev-dependencies]
 embedded-executor = "0.6.1"
 lock_api = "0.4.14"
-tokio = { version = "1.52.3", features = ["rt", "net", "time", "io-util"] }
 # Ergonomic error handling for the host dev workflow `di_seams` example.
 anyhow = "1"
 
-# The DI-seams example drives hermetic `MemFs` / `ScriptedHttp` doubles on the
-# host target, so it requires the features that gate them.
 [[example]]
 name = "di_seams"
-required-features = ["test-doubles"]

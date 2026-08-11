@@ -15,6 +15,7 @@ no_std_crates=(
     claw-context
     claw-core
     claw-interface
+    claw-net
     claw-memory
     claw-permission
     claw-persistence
@@ -28,6 +29,7 @@ host_test_crates=(
     claw-context
     claw-core
     claw-interface
+    claw-net
     claw-memory
     claw-permission
     claw-persistence
@@ -46,6 +48,9 @@ for crate in "${no_std_crates[@]}"; do
     run cargo check --locked -p "$crate" --target "$bare_target" --no-default-features
 done
 
+run cargo check --locked -p claw-api --target "$bare_target" \
+    --no-default-features --features embedded-tls
+
 for tier in reasoning_short reasoning_medium reasoning_long; do
     run cargo check --locked -p claw-core --target "$bare_target" \
         --no-default-features --features "$tier multiagent"
@@ -54,8 +59,12 @@ for tier in reasoning_short reasoning_medium reasoning_long; do
 done
 
 for crate in "${host_test_crates[@]}"; do
+    if [[ "$crate" == "claw-net" ]]; then
+        continue
+    fi
     run cargo test --locked -p "$crate"
 done
+run cargo test --locked -p claw-net --features testing
 run cargo test --locked -p claw-agent --test embassy_runtime
 run cargo test --locked -p claw-cli
 

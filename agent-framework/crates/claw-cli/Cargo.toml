@@ -17,7 +17,9 @@ reasoning_long = ["claw-agent/reasoning_long"]
 
 [dependencies]
 claw-agent = { path = "../claw-agent", default-features = false, features=["cache_profile", "multiagent"] }
-claw-interface = { path = "../claw-interface", features = ["host-backends"] }
+claw-api = { path = "../claw-api", features = ["mbedtls-host"] }
+claw-net = { path = "../claw-net", features = ["tokio"] }
+claw-interface = { path = "../claw-interface", features = ["diskfs"] }
 claw-log = { path = "../claw-log" }
 anyhow = "1"
 dotenvy = "0.15"
@@ -29,7 +31,11 @@ strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
 thiserror = "2"
+static_cell = "2"
+rand_core = "0.10.1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [dev-dependencies]
+claw-net = { path = "../claw-net", features = ["testing"] }
 tempdir = "0.3"

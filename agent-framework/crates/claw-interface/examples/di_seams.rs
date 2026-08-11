@@ -1,25 +1,18 @@
-//! The two dependency-injection seams in action: `ClawFs` (persistence) and
-//! `ClawHttp` (networking), each driven by a host-target reference double.
+//! The filesystem dependency-injection seam driven by its in-memory backend.
 //!
 //! Run with:
 //!
 //! ```bash
-//! cargo run -p claw-interface --example di_seams \
-//!     --features httpmock --target x86_64-unknown-linux-gnu
+//! cargo run -p claw-interface --example di_seams
 //! ```
 //!
-//! Core crates depend only on the `ClawFs` / `ClawHttp` *traits*. Device
-//! applications provide concrete adapters, while tests and host tools
-//! substitute doubles like the `MemFs` and `ScriptedHttp` used here.
+//! Networking lives in `claw-api`, where reqwless consumes a concrete
+//! `embedded-nal-async` TCP/DNS stack through a platform adapter.
 
-use core::sync::atomic::AtomicBool;
-
-use claw_interface::http::blocking::ClawHttp as _;
-use claw_interface::{ClawFs, HttpAuth, HttpHeader, HttpJsonRequest, MemFs, ScriptedHttp};
+use claw_interface::{ClawFs, MemFs};
 
 fn main() -> anyhow::Result<()> {
     filesystem_seam()?;
-    http_seam()?;
     Ok(())
 }
 
@@ -51,33 +44,5 @@ fn filesystem_seam() -> anyhow::Result<()> {
         "missing -> {:?}",
         filesystem.read("/data/conversations/none")
     );
-    Ok(())
-}
-
-/// `ClawHttp`: a blocking JSON POST. `ScriptedHttp` hands back canned bodies in
-/// order, standing in for a device network driver.
-fn http_seam() -> anyhow::Result<()> {
-    let mut http = ScriptedHttp::new([
-        r#"{"choices":[{"message":{"content":"first"}}]}"#,
-        r#"{"choices":[{"message":{"content":"second"}}]}"#,
-    ]);
-
-    let abort = AtomicBool::new(false);
-    let request = HttpJsonRequest {
-        url: "https://api.example.com/v1/chat/completions",
-        body: r#"{"model":"demo","messages":[]}"#,
-        auth: HttpAuth::Bearer("sk-demo"),
-        timeout_ms: 30_000,
-        headers: &[HttpHeader {
-            name: "X-Demo",
-            value: "1",
-        }],
-    };
-
-    println!("\n== ClawHttp (ScriptedHttp) ==");
-    for _ in 0..2 {
-        let response = http.post_json(&request, &abort)?;
-        println!("status {} -> {}", response.status_code, response.body);
-    }
     Ok(())
 }

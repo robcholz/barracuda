@@ -17,16 +17,16 @@ mod openai_compatible;
 pub(crate) mod shared;
 pub(crate) mod sse;
 
-use core::{fmt, str::FromStr, sync::atomic::AtomicBool};
+use core::{fmt, str::FromStr};
 
-use claw_interface::http::{
-    blocking::ClawHttp as BlockingClawHttp, Cancel, ClawHttp, StreamingHttp,
-};
+use claw_utils::Cancel;
+use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::chat_stream::ProviderStream;
 use super::errors::{ChatError, InferMediaError, InitError};
+use super::transport::{HttpTransport as NetClient, ResponseStream};
 use super::types::{ChatJsonRequest, ChatRequest, ClawApiConfig, LlmResponse, MediaRequest};
 
 /// Failed to parse a string backend id into [`BackendKind`].
@@ -56,62 +56,41 @@ trait BackendImpl: Sized {
     /// `api_key`, `model`, and `base_url` are guaranteed non-empty here.
     fn make(config: &ClawApiConfig) -> Result<Self, InitError>;
 
-    fn chat<H: BlockingClawHttp>(
-        &self,
-        http: &mut H,
-        request: &ChatRequest<'_>,
-        abort: &AtomicBool,
-    ) -> Result<LlmResponse, ChatError>;
+    fn timeout_ms(&self) -> u32;
 
-    fn chat_json<H: BlockingClawHttp>(
+    async fn chat_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
-        request: &ChatJsonRequest<'_>,
-        schema_name: &str,
-        schema: &Value,
-        abort: &AtomicBool,
-    ) -> Result<LlmResponse, ChatError>;
-
-    fn infer_media<H: BlockingClawHttp>(
-        &self,
-        http: &mut H,
-        request: &MediaRequest<'_>,
-        abort: &AtomicBool,
-    ) -> Result<String, InferMediaError>;
-
-    async fn chat_async<H: ClawHttp>(
-        &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &ChatRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError>;
 
-    async fn chat_json_async<H: ClawHttp>(
+    async fn chat_json_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
         cancel: Cancel<'_>,
     ) -> Result<LlmResponse, ChatError>;
 
-    async fn infer_media_async<H: ClawHttp>(
+    async fn infer_media_async<S: TcpConnect + Dns>(
         &self,
-        http: &mut H,
+        http: &mut NetClient<'_, S>,
         request: &MediaRequest<'_>,
         cancel: Cancel<'_>,
     ) -> Result<String, InferMediaError>;
 
-    /// Streaming chat completion over [`StreamingHttp`]. Builds a `stream: true`
+    /// Streaming chat completion. Builds a `stream: true`
     /// request, and on 2xx wraps the response body stream in a provider parser
     /// backed by this backend's SSE parser; a non-2xx status reads the error body
     /// and fails.
-    async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+    async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
         &self,
-        http: &'h mut H,
+        http: &'h mut NetClient<'_, S>,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError>;
+    ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError>;
 }
 
 /// Constructed backend instance, dispatched by [`BackendKind`].
@@ -166,49 +145,16 @@ macro_rules! define_backends {
         }
 
         impl Backend {
-            pub(crate) fn chat<H: BlockingClawHttp>(
-                &self,
-                http: &mut H,
-                request: &ChatRequest<'_>,
-                abort: &AtomicBool,
-            ) -> Result<LlmResponse, ChatError> {
+
+            pub(crate) fn timeout_ms(&self) -> u32 {
                 match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::chat(backend, http, request, abort), )+
+                    $( BackendInner::$variant(backend) => BackendImpl::timeout_ms(backend), )+
                 }
             }
 
-            pub(crate) fn chat_json<H: BlockingClawHttp>(
+            pub(crate) async fn chat_async<S: TcpConnect + Dns>(
                 &self,
-                http: &mut H,
-                request: &ChatJsonRequest<'_>,
-                schema_name: &str,
-                schema: &Value,
-                abort: &AtomicBool,
-            ) -> Result<LlmResponse, ChatError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::chat_json(
-                            backend, http, request, schema_name, schema, abort,
-                        ), )+
-                }
-            }
-
-            pub(crate) fn infer_media<H: BlockingClawHttp>(
-                &self,
-                http: &mut H,
-                request: &MediaRequest<'_>,
-                abort: &AtomicBool,
-            ) -> Result<String, InferMediaError> {
-                match &self.0 {
-                    $( BackendInner::$variant(backend) =>
-                        BackendImpl::infer_media(backend, http, request, abort), )+
-                }
-            }
-
-            pub(crate) async fn chat_async<H: ClawHttp>(
-                &self,
-                http: &mut H,
+                http: &mut NetClient<'_, S>,
                 request: &ChatRequest<'_>,
                 cancel: Cancel<'_>,
             ) -> Result<LlmResponse, ChatError> {
@@ -218,9 +164,9 @@ macro_rules! define_backends {
                 }
             }
 
-            pub(crate) async fn chat_json_async<H: ClawHttp>(
+            pub(crate) async fn chat_json_async<S: TcpConnect + Dns>(
                 &self,
-                http: &mut H,
+                http: &mut NetClient<'_, S>,
                 request: &ChatJsonRequest<'_>,
                 schema_name: &str,
                 schema: &Value,
@@ -235,9 +181,9 @@ macro_rules! define_backends {
                 }
             }
 
-            pub(crate) async fn infer_media_async<H: ClawHttp>(
+            pub(crate) async fn infer_media_async<S: TcpConnect + Dns>(
                 &self,
-                http: &mut H,
+                http: &mut NetClient<'_, S>,
                 request: &MediaRequest<'_>,
                 cancel: Cancel<'_>,
             ) -> Result<String, InferMediaError> {
@@ -248,12 +194,12 @@ macro_rules! define_backends {
                 }
             }
 
-            pub(crate) async fn chat_stream_async<'h, 'r, H: StreamingHttp>(
+            pub(crate) async fn chat_stream_async<'h, 'r, S: TcpConnect + Dns>(
                 &self,
-                http: &'h mut H,
+                http: &'h mut NetClient<'_, S>,
                 request: &'r ChatRequest<'r>,
                 cancel: Cancel<'h>,
-            ) -> Result<ProviderStream<H::ByteStream<'h>>, ChatError> {
+            ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
                 match &self.0 {
                     $( BackendInner::$variant(backend) =>
                         BackendImpl::chat_stream_async(backend, http, request, cancel)

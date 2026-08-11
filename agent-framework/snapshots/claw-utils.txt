@@ -21,6 +21,12 @@ pub claw_utils::IdParseError::Empty
 pub claw_utils::IdParseError::Invalid
 pub claw_utils::IdParseError::Invalid::kind: &'static str
 pub claw_utils::IdParseError::Invalid::value: alloc::string::String
+pub struct claw_utils::Cancel<'a>(_)
+impl claw_utils::Cancel<'static>
+pub fn claw_utils::Cancel<'static>::never() -> Self
+impl<'a> claw_utils::Cancel<'a>
+pub fn claw_utils::Cancel<'a>::is_cancelled(self) -> bool
+pub const fn claw_utils::Cancel<'a>::new(flag: &'a core::sync::atomic::AtomicBool) -> Self
 pub struct claw_utils::JobCancelled
 pub struct claw_utils::JobHandle<T>
 impl<T> claw_utils::JobHandle<T>

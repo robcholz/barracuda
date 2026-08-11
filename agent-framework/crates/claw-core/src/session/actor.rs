@@ -12,8 +12,8 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_interface::ClawFs;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::DurableState;
 use claw_tool::ToolGroup;
 use claw_utils::stream::StreamPart;
@@ -196,24 +196,23 @@ impl SessionActorExit {
 ///
 /// The actor polls its active Agents fairly and projects only root-Agent events
 /// onto the public Session stream.
-pub(super) struct SessionActor<Filesystem, Http, Timer>
+pub(super) struct SessionActor<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
+    agent_manager: SharedAgentManager<Filesystem, Http>,
     agent_id_allocator: AgentIdAllocatorHandle,
 
-    agents: AgentSlots<Http, Timer>,
+    agents: AgentSlots<Http>,
     inbox: VecDeque<Message>,
     active_turn: Option<ActiveTurn>,
     next_turn: u32,
-    approval: ApprovalFlow<LlmApprovalResolver<Http, Timer>>,
-    orchestration: SessionOrchestration<Timer>,
+    approval: ApprovalFlow<LlmApprovalResolver<Http>>,
+    orchestration: SessionOrchestration,
     managed_agents: BTreeSet<crate::agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
@@ -225,19 +224,18 @@ where
     lifecycle: ActorLifecycle,
 }
 
-impl<Filesystem, Http, Timer> SessionActor<Filesystem, Http, Timer>
+impl<Filesystem, Http> SessionActor<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     pub(super) fn new(
         session: SessionId,
         persistence: SessionPersistence,
-        agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
+        agent_manager: SharedAgentManager<Filesystem, Http>,
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
-        approval_resolver: SharedApprovalResolver<Http, Timer>,
+        approval_resolver: SharedApprovalResolver<Http>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = async_channel::unbounded();
         (
@@ -252,7 +250,7 @@ where
                 active_turn: None,
                 next_turn: 1,
                 approval: ApprovalFlow::new(approval_resolver),
-                orchestration: SessionOrchestration::default(),
+                orchestration: SessionOrchestration::new(),
                 managed_agents: BTreeSet::new(),
                 active_agent_poll_queue: VecDeque::new(),
                 commands: Box::pin(commands),
@@ -982,7 +980,7 @@ where
         self.state.get().root_agent
     }
 
-    fn root_mut(&mut self) -> Option<&mut AgentSlot<Http, Timer>> {
+    fn root_mut(&mut self) -> Option<&mut AgentSlot<Http>> {
         let root = self.root_id()?;
         self.agents.get_mut(&root)
     }
@@ -1041,11 +1039,10 @@ where
     }
 }
 
-impl<Filesystem, Http, Timer> OrchestrationHost for SessionActor<Filesystem, Http, Timer>
+impl<Filesystem, Http> OrchestrationHost for SessionActor<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     fn allocate_agent_id(&mut self) -> AgentId {
         self.agent_id_allocator.next()

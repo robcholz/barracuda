@@ -8,9 +8,10 @@ use alloc::{
 };
 use core::sync::atomic::AtomicBool;
 
-use claw_api::{ChatRequest, ClawApiAsync};
-use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_api::{ChatRequest, ClawApiFactory};
 use claw_memory::{CompactError, CompactFuture, Compactor};
+use claw_net::{Dns, TcpConnect};
+use claw_utils::Cancel;
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
@@ -21,21 +22,21 @@ const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_syst
 const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
 
 /// A [`Compactor`] that summarizes an aged history window via the LLM client.
-pub(super) struct LlmCompactor<H: ClawHttp, Timer: ClawTimer> {
-    api: SharedAsyncLlm<H, Timer>,
+pub(super) struct LlmCompactor<H: TcpConnect + Dns + 'static> {
+    api: SharedAsyncLlm<H>,
     api_manager: SharedApiManager,
 }
 
-impl<H: ClawHttp + Default, Timer: ClawTimer + Default> LlmCompactor<H, Timer> {
-    pub(super) fn new(api_manager: SharedApiManager) -> Self {
+impl<H: TcpConnect + Dns + 'static> LlmCompactor<H> {
+    pub(super) fn new(api_manager: SharedApiManager, llm_factory: &ClawApiFactory<H>) -> Self {
         Self {
-            api: SharedAsyncLlm::new(ClawApiAsync::new(H::default(), Timer::default())),
+            api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
         }
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Compactor for LlmCompactor<H, Timer> {
+impl<H: TcpConnect + Dns + 'static> Compactor for LlmCompactor<H> {
     fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
         Box::pin(async move {
             let transcript = render_transcript(window);

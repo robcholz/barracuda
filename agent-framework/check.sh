@@ -26,6 +26,7 @@ crates=(
     claw-context
     claw-core
     claw-interface
+    claw-net
     claw-log
     claw-memory
     claw-permission

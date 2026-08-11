@@ -35,6 +35,8 @@ reasoning_long = []   # 32000 bytes
 claw-interface = { path = "../claw-interface" }
 claw-utils = { path = "../claw-utils" }
 claw-api = { path = "../claw-api" }
+claw-net = { path = "../claw-net" }
+embassy-time.workspace = true
 claw-persistence = { path = "../claw-persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
@@ -61,9 +63,8 @@ claw-tool = { path = "../claw-tool" }
 log = { version = "0.4", default-features = false }
 # Observability facade reserved for the trace instrumentation pass. `log-always`
 # is intentionally NOT enabled: with a real subscriber it would double-emit every
-# event (once via the log bridge, once via the subscriber). `std` kept;
-# `attributes` dropped to avoid the `syn` build cost until `#[instrument]` is
-# actually used.
+# event (once via the log bridge, once via the subscriber). The facade stays
+# `no_std`; `attributes` is enabled for the spans used by the runtime.
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
@@ -86,17 +87,16 @@ claw-tool = { path = "../claw-tool", features = ["build-support"] }
 [dev-dependencies]
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
-# Host-target live backends (`diskfs`/`realhttp`) plus hermetic
-# doubles (`test-doubles`) shared from claw-interface (tests only).
+# Host filesystem implementation shared from claw-interface (tests only).
 claw-interface = { path = "../claw-interface", features = [
-    "test-doubles",
     "diskfs",
-    "realhttp",
 ] }
 # Never-compacts `NoopCompactor` shared from claw-memory (tests only).
 claw-memory = { path = "../claw-memory", features = ["compactor-stub"] }
 # `block_on` for tests (smol family; replaces the removed `claw_utils::block_on`).
 futures-lite = "2"
+claw-net = { path = "../claw-net", features = ["testing"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]
 unsafe_code = "forbid"

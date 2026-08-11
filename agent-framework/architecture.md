@@ -18,15 +18,27 @@ can spawn it with the current executor's `Spawner`; it cannot be submitted
 directly through `SendSpawner` or moved to an interrupt/other-thread executor.
 Keep the service and its `AgentSystem` control surface on one executor.
 
-The application supplies `ClawFs`, `ClawHttp`/`StreamingHttp`, and `ClawTimer`
-implementations. HALs belong in adapter crates outside the framework; the core
-has no chip-specific dependency.
+The application supplies `ClawFs` and an `embedded-nal-async::TcpConnect + Dns`
+network stack. `claw-api` drives reqwless directly, while `claw-net` contains
+only platform/test adapters; the core has no chip-specific dependency. Timeouts and backoff
+use `embassy-time` directly. The final application supplies Embassy's global
+time driver through its HAL; there is no framework timer trait or timer generic.
+Host binaries enable Embassy's `std` driver while retaining Tokio only for the
+executor and TCP/DNS implementation.
+
+`ClawApi` owns its reqwless client, persistent `HttpResource`, and reusable HTTP
+buffers exclusively. `ClawApiFactory` controls construction at the application
+boundary; it is not a request-time pool. Portable firmware can select
+`embedded-tls` with certificate verification, while a platform can select the
+mbedTLS backend. Only the TCP/DNS/TLS HAL changes—the reqwless HTTP path does
+not fork between host and device.
 
 ## Crates
 
-- `claw-interface`: platform traits and shared boundary types.
+- `claw-interface`: filesystem platform traits.
+- `claw-net`: TCP/DNS platform and deterministic test adapters.
 - `claw-utils`: no_std identifiers, task-pool, and text utilities.
-- `claw-api`: executor-neutral streaming LLM clients.
+- `claw-api`: executor-neutral reqwless LLM clients and TLS ownership.
 - `claw-permission`, `claw-sandbox`, `claw-tool`: policy and tool runtime.
 - `claw-context`, `claw-memory`, `claw-skill`, `claw-persistence`: durable
   context and storage subsystems.

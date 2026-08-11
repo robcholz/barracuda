@@ -9,13 +9,13 @@ use alloc::{
 #[cfg(feature = "cache_profile")]
 use claw_api::ProviderUsage;
 use claw_api::{ChatRequest, ChatStreamEvent, ToolCall};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_net::{Dns, TcpConnect};
 use claw_tool::{
     ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
 };
 use claw_utils::stream::StreamPart;
 use claw_utils::yield_stream::try_yield_stream;
+use claw_utils::Cancel;
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
@@ -90,10 +90,9 @@ fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
     );
 }
 
-impl<'a, H, Timer, P> IterationLoop<'a, H, Timer, P>
+impl<'a, H, P> IterationLoop<'a, H, P>
 where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
+    H: TcpConnect + Dns + 'static,
     P: ToolPermissionPolicy + 'a,
 {
     /// Run one LLM/tool iteration as a directly polled stream.
@@ -558,8 +557,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
-    use claw_api::{ChatError, ClawApiError};
-    use claw_interface::http::{HttpError, HttpRequestFailure};
+    use claw_api::{ChatError, ClawApiError, HttpError as NetError, NetworkErrorKind};
     use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
         SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
@@ -758,11 +756,10 @@ mod tests {
     }
 
     #[test]
-    fn chat_phase_errors_preserve_nested_http_debug_context() {
-        let chat_error =
-            ChatError::Api(ClawApiError::TransientTransport(HttpError::RequestFailed(
-                HttpRequestFailure::driver("network_poll", "async transport errno=104"),
-            )));
+    fn chat_phase_errors_preserve_nested_network_debug_context() {
+        let chat_error = ChatError::Api(ClawApiError::TransientTransport(NetError::Network(
+            NetworkErrorKind::ConnectionReset,
+        )));
 
         let init = format!("{:?}", IterationLoopError::ChatInit(chat_error.clone()));
         let stream = format!("{:?}", IterationLoopError::ChatStream(chat_error));
@@ -771,13 +768,7 @@ mod tests {
         assert!(stream.starts_with("ChatStream("), "{stream}");
         assert!(!init.contains('\n'), "{init}");
         assert!(!stream.contains('\n'), "{stream}");
-        for expected in [
-            "TransientTransport(",
-            "RequestFailed(",
-            "Driver {",
-            "operation: \"network_poll\"",
-            "message: \"async transport errno=104\"",
-        ] {
+        for expected in ["TransientTransport(", "Network(", "ConnectionReset"] {
             assert!(init.contains(expected), "missing `{expected}` in {init}");
             assert!(
                 stream.contains(expected),

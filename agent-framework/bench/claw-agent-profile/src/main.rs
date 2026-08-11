@@ -9,17 +9,16 @@
 
 use std::path::{Path, PathBuf};
 
-use claw_agent::{AgentPersistenceConfig, AgentSystem};
-use claw_interface::http::{
-    Cancel, ClawHttp, HttpError, HttpJsonRequest, HttpResponseFuture, HttpStatusCode, SliceChunks,
-    StreamingHttp,
-};
-use claw_interface::{ImmediateTimer, MemFs};
+use claw_agent::{AgentPersistenceConfig, AgentSystem, ClawApiFactory};
+use claw_api::ClawApi;
+use claw_interface::MemFs;
+use claw_net::testing::NeverStack;
 use claw_profile::dhat::{AllocationStats, HeapProfile};
 
 claw_profile::install_dhat_allocator!();
 
-type ProfileAgentSystem = AgentSystem<MemFs, NeverHttp, ImmediateTimer>;
+type ProfileAgentSystem = AgentSystem<MemFs, NeverStack>;
+static NETWORK: NeverStack = NeverStack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scenario {
@@ -40,34 +39,6 @@ impl Scenario {
         match self {
             Self::AgentInit => "agent-init",
         }
-    }
-}
-
-#[derive(Default)]
-struct NeverHttp;
-
-impl ClawHttp for NeverHttp {
-    fn post_json<'a>(
-        &'a mut self,
-        _request: &'a HttpJsonRequest<'a>,
-        _cancel: Cancel<'a>,
-    ) -> HttpResponseFuture<'a> {
-        Box::pin(async { panic!("agent-init must not call HTTP") })
-    }
-}
-
-impl StreamingHttp for NeverHttp {
-    type ByteStream<'a>
-        = SliceChunks<'a>
-    where
-        Self: 'a;
-
-    async fn post_json_streaming<'a, 'r>(
-        &'a mut self,
-        _request: &'r HttpJsonRequest<'r>,
-        _cancel: Cancel<'a>,
-    ) -> Result<(HttpStatusCode, Self::ByteStream<'a>), HttpError> {
-        panic!("agent-init must not call streaming HTTP")
     }
 }
 
@@ -111,12 +82,14 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 
 fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, claw_agent::AgentError> {
     let profile = HeapProfile::start(output_file);
+    let llm_factory = ClawApiFactory::new(|| ClawApi::new(&NETWORK, 1024, 1024));
     let (system, service) = ProfileAgentSystem::new(
         MemFs::new(),
         AgentPersistenceConfig {
             persistence_root: "/profile/agent-init".to_owned(),
             skill_roots: Vec::new(),
         },
+        llm_factory,
     )?;
 
     // Finish while the system is alive: `current_bytes` then represents memory

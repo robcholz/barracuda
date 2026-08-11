@@ -1,10 +1,9 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use claw_api::{ClawApiAsync, RetryPolicy, ToolCall};
+use claw_api::{ClawApi, RetryPolicy, ToolCall};
 use claw_context::{Block, BlockKind, Context};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawHttp, ClawTimer};
 use claw_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
+use claw_net::{Dns, TcpConnect};
 use claw_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use claw_persistence::DurableState;
 use claw_tool::ToolSet;
@@ -67,9 +66,9 @@ enum IterationCompletion {
 
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
-pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
+pub(crate) struct BaseAgent<H: TcpConnect + Dns + 'static> {
     state: DurableState<BaseAgentState>,
-    llm: ClawApiAsync<H, Timer>,
+    llm: ClawApi<'static, H>,
     api_manager: SharedApiManager,
     api_purpose: ApiPurpose,
     retry_policy: RetryPolicy,
@@ -85,12 +84,11 @@ pub(crate) struct BaseAgent<H: ClawHttp, Timer: ClawTimer> {
     context_providers: Vec<Box<dyn ContextProvider>>,
 }
 
-impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
-    pub(in crate::agent) fn build(config: BaseAgentConfig) -> Result<Self, claw_tool::ToolSetError>
-    where
-        H: Default,
-        Timer: Default,
-    {
+impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
+    pub(in crate::agent) fn build(
+        config: BaseAgentConfig,
+        llm: ClawApi<'static, H>,
+    ) -> Result<Self, claw_tool::ToolSetError> {
         let mut tools = config.tools;
         for provider in &config.context_providers {
             if let Some(group) = provider.tools() {
@@ -106,7 +104,7 @@ impl<H: ClawHttp + StreamingHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
 
         Ok(Self {
             state: config.state,
-            llm: ClawApiAsync::new(H::default(), Timer::default()),
+            llm,
             api_manager: config.api_manager,
             api_purpose: config.api_purpose,
             retry_policy: config.retry_policy,
@@ -479,7 +477,7 @@ const fn reasoning_limit() -> usize {
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> BaseAgent<H, Timer> {
+impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
     pub(in crate::agent) fn state(&self) -> &DurableState<BaseAgentState> {
         &self.state
     }
@@ -541,16 +539,15 @@ impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
 
 /// Restores BaseAgent's stopped-state invariant if its borrowing stream is
 /// dropped before producing a terminal event or error.
-struct ActiveRunGuard<'a, H: ClawHttp, Timer: ClawTimer> {
-    agent: &'a mut BaseAgent<H, Timer>,
+struct ActiveRunGuard<'a, H: TcpConnect + Dns + 'static> {
+    agent: &'a mut BaseAgent<H>,
 }
 
-impl<'a, H, Timer> ActiveRunGuard<'a, H, Timer>
+impl<'a, H> ActiveRunGuard<'a, H>
 where
-    H: ClawHttp + StreamingHttp,
-    Timer: ClawTimer,
+    H: TcpConnect + Dns + 'static,
 {
-    fn new(agent: &'a mut BaseAgent<H, Timer>) -> Self {
+    fn new(agent: &'a mut BaseAgent<H>) -> Self {
         Self { agent }
     }
 
@@ -865,7 +862,7 @@ where
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Drop for ActiveRunGuard<'_, H, Timer> {
+impl<H: TcpConnect + Dns + 'static> Drop for ActiveRunGuard<'_, H> {
     fn drop(&mut self) {
         if self.agent.is_stopped() {
             return;

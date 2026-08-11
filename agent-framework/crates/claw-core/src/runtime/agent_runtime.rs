@@ -12,10 +12,10 @@ use core::{
 };
 
 use async_channel::Sender;
-use claw_api::{ClawApiConfig, InitError};
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_api::{ClawApiConfig, ClawApiFactory, InitError};
+use claw_interface::ClawFs;
 use claw_memory::LongTermInitError;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::{PersistenceError, SharedPersistence};
 use claw_skill::SkillError;
 use claw_tool::ToolRegistry;
@@ -27,7 +27,7 @@ use crate::session::{
     SessionPersistence, SessionStream,
 };
 
-use super::worker::{RuntimeCommand, RuntimeWorker};
+use super::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
 
 /// What can go wrong while building an [`AgentRuntime`] and [`AgentService`].
 #[derive(Debug, thiserror::Error)]
@@ -76,28 +76,25 @@ pub struct AgentRuntime {
 ///
 /// Dropping this future stops the runtime. Dropping every [`AgentRuntime`]
 /// handle closes its command channel, which lets the service shut down cleanly.
-pub struct AgentService<Filesystem, Http, Timer>
+pub struct AgentService<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
-    worker: RuntimeWorker<Filesystem, Http, Timer>,
+    worker: RuntimeWorker<Filesystem, Http>,
 }
 
-impl<Filesystem, Http, Timer> Unpin for AgentService<Filesystem, Http, Timer>
+impl<Filesystem, Http> Unpin for AgentService<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
 }
 
-impl<Filesystem, Http, Timer> Future for AgentService<Filesystem, Http, Timer>
+impl<Filesystem, Http> Future for AgentService<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     type Output = ();
 
@@ -109,29 +106,30 @@ where
 impl AgentRuntime {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
-    pub fn new<Filesystem, Http, Timer>(
+    pub fn new<Filesystem, Http>(
         filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
         skill_roots: Vec<String>,
-    ) -> Result<(Self, AgentService<Filesystem, Http, Timer>), AgentRuntimeBuildError>
+        llm_factory: ClawApiFactory<Http>,
+    ) -> Result<(Self, AgentService<Filesystem, Http>), AgentRuntimeBuildError>
     where
         Filesystem: ClawFs + 'static,
-        Http: ClawHttp + StreamingHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
+        Http: TcpConnect + Dns + 'static,
     {
         let (commands, command_rx) = async_channel::unbounded();
         let api_manager = SharedApiManager::default();
-        let worker = RuntimeWorker::new(
+        let worker = RuntimeWorker::new(RuntimeWorkerInit {
             filesystem,
             tool_registry,
             persistence,
             persistence_dir,
             skill_roots,
-            Arc::clone(&api_manager),
-            command_rx,
-        )?;
+            api_manager: Arc::clone(&api_manager),
+            llm_factory,
+            commands: command_rx,
+        })?;
         Ok((
             Self {
                 commands,

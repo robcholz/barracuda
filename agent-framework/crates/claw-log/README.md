@@ -64,7 +64,7 @@ Two layers cap verbosity:
   formatting, no FFI). Exactly one `log_max_*` may be enabled at a time. Default
   is `log_max_info`.
 - **Runtime**: `init_logger`'s `max_level` argument. Noisy host dependencies
-  (reqwest/rustls/…) are capped at `Warn` regardless, so
+  (TLS/network crates) are capped at `Warn` regardless, so
   `init_logger(Trace)` keeps first-party verbosity without the dependency flood.
 
 ## Example

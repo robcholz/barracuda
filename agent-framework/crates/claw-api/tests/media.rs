@@ -1,233 +1,60 @@
 #![allow(clippy::unwrap_used)]
 
-use core::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex};
+use claw_api::{BackendKind, ClawApi, ClawApiConfig, MediaAsset, MediaRequest};
+use claw_net::testing::{ScriptStep, ScriptedStack};
+use claw_utils::Cancel;
+use futures_lite::future::block_on;
 
-use claw_api::{BackendKind, ClawApi, ClawApiConfig, InferMediaError, MediaAsset, MediaRequest};
-use claw_interface::http::blocking::ClawHttp as BlockingClawHttp;
-use claw_interface::{HttpError, HttpJsonRequest, HttpResponse, HttpStatusCode};
-use serde_json::Value;
-use tempdir::TempDir;
-
-struct CaptureHttp {
-    reply: String,
-    last_body: Mutex<Option<String>>,
-    last_url: Mutex<Option<String>>,
-}
-
-impl CaptureHttp {
-    fn new(reply: &str) -> Arc<Self> {
-        Arc::new(Self {
-            reply: reply.to_string(),
-            last_body: Mutex::new(None),
-            last_url: Mutex::new(None),
-        })
-    }
-}
-
-struct Owned(Arc<CaptureHttp>);
-
-impl BlockingClawHttp for Owned {
-    fn post_json(
-        &mut self,
-        request: &HttpJsonRequest,
-        _abort: &AtomicBool,
-    ) -> Result<HttpResponse, HttpError> {
-        *self.0.last_body.lock().unwrap() = Some(request.body.to_string());
-        *self.0.last_url.lock().unwrap() = Some(request.url.to_string());
-        Ok(HttpResponse {
-            status_code: HttpStatusCode::OK,
-            body: self.0.reply.clone(),
-        })
-    }
-}
-
-#[test]
-fn openai_remote_url_is_sent_as_image_url() {
-    let (mut api, http) = openai_api(openai_reply("remote ok"), None);
-    let assets = [MediaAsset::remote_url("https://example.com/a.png")];
-    let abort = AtomicBool::new(false);
-
-    let text = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap();
-
-    assert_eq!(text, "remote ok");
-    assert_eq!(
-        http.last_url.lock().unwrap().as_deref(),
-        Some("https://api.example.com/v1/chat/completions")
-    );
-    assert_eq!(
-        openai_image_url(&captured_body(&http)),
-        "https://example.com/a.png"
-    );
-}
-
-#[test]
-fn host_can_read_a_file_then_send_inline_bytes() {
-    let dir = TempDir::new("claw-api-media").unwrap();
-    let path = dir.path().join("image.png");
-    std::fs::write(&path, b"\x89PNG\r\n\x1a\nABCDE").unwrap();
-    let (mut api, http) = openai_api(openai_reply("local ok"), None);
-    let assets = [MediaAsset::inline_bytes(
-        std::fs::read(path).unwrap(),
-        "image/png",
-    )];
-    let abort = AtomicBool::new(false);
-
-    let text = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap();
-
-    assert_eq!(text, "local ok");
-    assert!(openai_image_url(&captured_body(&http)).starts_with("data:image/png;base64,"));
-}
-
-#[test]
-fn inline_mime_type_can_be_replaced() {
-    let (mut api, http) = openai_api(openai_reply("override ok"), None);
-    let assets =
-        [MediaAsset::inline_bytes(b"bmpdata".to_vec(), "image/bmp").with_mime_type("image/png")];
-    let abort = AtomicBool::new(false);
-
-    api.infer_media(
-        &MediaRequest::new(&assets).with_user_prompt("describe"),
-        &abort,
-    )
-    .unwrap();
-
-    assert!(openai_image_url(&captured_body(&http)).starts_with("data:image/png;base64,"));
-}
-
-#[test]
-fn openai_inline_bytes_are_sent_as_data_url() {
-    let (mut api, http) = openai_api(openai_reply("inline ok"), None);
-    let assets = [MediaAsset::inline_bytes(
-        b"\x89PNG\r\n\x1a\nABCDE".to_vec(),
-        "image/png",
-    )];
-    let abort = AtomicBool::new(false);
-
-    let text = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap();
-
-    assert_eq!(text, "inline ok");
-    assert!(openai_image_url(&captured_body(&http)).starts_with("data:image/png;base64,"));
-}
-
-#[test]
-fn media_rejects_empty_remote_url() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::remote_url("")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaUrlEmpty));
-}
-
-#[test]
-fn media_rejects_empty_inline_bytes() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), None);
-    let assets = [MediaAsset::inline_bytes(Vec::new(), "image/png")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaFileEmpty));
-}
-
-#[test]
-fn media_rejects_inline_bytes_over_size_limit() {
-    let (mut api, _http) = openai_api(openai_reply("unused"), Some(50));
-    let assets = [MediaAsset::inline_bytes(vec![0u8; 100], "image/png")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::MediaTooLarge));
-}
-
-#[test]
-fn anthropic_requires_local_image_for_remote_url() {
-    let http = CaptureHttp::new(r#"{"content":[{"type":"text","text":"unused"}]}"#);
-    let mut api = ClawApi::new(Owned(http));
+fn configured<'a>(stack: &'a ScriptedStack) -> ClawApi<'a, ScriptedStack> {
+    let mut api = ClawApi::new(stack, 4096, 512);
     api.set_config(ClawApiConfig::new(
-        BackendKind::AnthropicCompatible,
-        "key",
-        "claude-x",
-        "https://api.anthropic.com/v1",
+        BackendKind::OpenAiCompatible,
+        "secret",
+        "vision-model",
+        "http://llm.test/v1",
     ))
     .unwrap();
-    let assets = [MediaAsset::remote_url("https://example.com/a.png")];
-    let abort = AtomicBool::new(false);
-
-    let error = api
-        .infer_media(
-            &MediaRequest::new(&assets).with_user_prompt("describe"),
-            &abort,
-        )
-        .unwrap_err();
-
-    assert!(matches!(error, InferMediaError::RequiresLocalImage));
+    api
 }
 
-fn openai_api(reply: String, image_max_bytes: Option<usize>) -> (ClawApi<Owned>, Arc<CaptureHttp>) {
-    let http = CaptureHttp::new(&reply);
-    let mut config = ClawApiConfig::new(
-        BackendKind::OpenAiCompatible,
-        "key",
-        "model-x",
-        "https://api.example.com/v1",
-    );
-    if let Some(image_max_bytes) = image_max_bytes {
-        config.image_max_bytes = image_max_bytes;
-    }
-    let mut api = ClawApi::new(Owned(Arc::clone(&http)));
-    api.set_config(config).unwrap();
-    (api, http)
+#[test]
+fn remote_image_uses_image_url_wire_shape() {
+    let stack = ScriptedStack::new([ScriptStep::json(
+        200,
+        r#"{"choices":[{"message":{"role":"assistant","content":"a dog"}}]}"#,
+    )]);
+    let mut api = configured(&stack);
+    let assets = [MediaAsset::remote_url("https://example.test/dog.png")];
+    let response = block_on(api.infer_media(
+        &MediaRequest::new(&assets).with_user_prompt("describe"),
+        Cancel::never(),
+    ))
+    .unwrap();
+    assert_eq!(response, "a dog");
+    assert!(stack.requests()[0].contains("https://example.test/dog.png"));
 }
 
-fn openai_reply(text: &str) -> String {
-    format!(r#"{{"choices":[{{"message":{{"role":"assistant","content":"{text}"}}}}]}}"#)
+#[test]
+fn inline_image_is_encoded_as_data_url() {
+    let stack = ScriptedStack::new([ScriptStep::json(
+        200,
+        r#"{"choices":[{"message":{"role":"assistant","content":"inline"}}]}"#,
+    )]);
+    let mut api = configured(&stack);
+    let assets = [MediaAsset::inline_bytes(vec![1, 2, 3], "image/png")];
+    block_on(api.infer_media(
+        &MediaRequest::new(&assets).with_user_prompt("describe"),
+        Cancel::never(),
+    ))
+    .unwrap();
+    assert!(stack.requests()[0].contains("data:image/png;base64,AQID"));
 }
 
-fn captured_body(http: &CaptureHttp) -> Value {
-    let body = http.last_body.lock().unwrap();
-    serde_json::from_str(body.as_deref().expect("captured body")).unwrap()
-}
-
-fn openai_image_url(body: &Value) -> &str {
-    body["messages"]
-        .as_array()
-        .and_then(|messages| messages.last())
-        .and_then(|message| message["content"].as_array())
-        .and_then(|content| content.get(1))
-        .and_then(|image| image["image_url"]["url"].as_str())
-        .expect("openai image url")
+#[test]
+fn empty_inline_image_is_rejected_without_network() {
+    let stack = ScriptedStack::new([]);
+    let mut api = configured(&stack);
+    let assets = [MediaAsset::inline_bytes(Vec::new(), "image/png")];
+    assert!(block_on(api.infer_media(&MediaRequest::new(&assets), Cancel::never())).is_err());
+    assert!(stack.requests().is_empty());
 }

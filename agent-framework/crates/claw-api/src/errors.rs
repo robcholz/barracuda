@@ -6,13 +6,14 @@
 //! the media pipeline are disjoint. The shared API/transport/parse failures live
 //! in [`ClawApiError`], which the per-function enums wrap via `#[from]`.
 //!
-//! Transport variants retain the typed [`HttpError`] source; other dynamic
+//! Transport variants retain the typed [`crate::HttpError`] source; other dynamic
 //! messages are limited to the variants whose domain data is itself text.
 
 use alloc::string::String;
-use claw_interface::http::HttpError;
 use strum::IntoStaticStr;
 use thiserror::Error;
+
+use crate::transport::{Error as NetError, StatusCode};
 
 const TRUNCATED_STREAM_MESSAGE: &str = "stream ended before provider completion";
 
@@ -29,12 +30,24 @@ pub enum ClawApiError {
     /// output.
     #[strum(serialize = "transport")]
     #[error("HTTP transport error: {0}")]
-    Transport(#[source] HttpError),
+    Transport(#[source] NetError),
     /// Transient transport failure (network error, HTTP 408/429/5xx) eligible
     /// for retry by the [`crate::ClawApi`] retry loop.
     #[strum(serialize = "transient_transport")]
     #[error("transient HTTP transport error: {0}")]
-    TransientTransport(#[source] HttpError),
+    TransientTransport(#[source] NetError),
+    /// The configured request deadline elapsed.
+    #[strum(serialize = "timeout")]
+    #[error("LLM HTTP request timed out")]
+    Timeout,
+    /// Permanent non-success HTTP response.
+    #[strum(serialize = "http_status")]
+    #[error("HTTP {status}: {body}")]
+    HttpStatus { status: StatusCode, body: String },
+    /// Retryable non-success HTTP response (408, 429, or 5xx).
+    #[strum(serialize = "transient_http_status")]
+    #[error("transient HTTP {status}: {body}")]
+    TransientHttpStatus { status: StatusCode, body: String },
     /// The response body was not valid JSON.
     #[strum(serialize = "parse")]
     #[error("failed to parse LLM JSON response")]
@@ -58,13 +71,18 @@ impl ClawApiError {
     /// Whether retrying the same request might succeed.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
-        matches!(self, ClawApiError::TransientTransport(_))
+        matches!(
+            self,
+            ClawApiError::TransientTransport(_)
+                | ClawApiError::TransientHttpStatus { .. }
+                | ClawApiError::Timeout
+        )
     }
 
     /// Whether this failure came from aborting an in-flight request.
     #[must_use]
     pub fn is_aborted(&self) -> bool {
-        matches!(self, ClawApiError::Transport(HttpError::Aborted))
+        matches!(self, ClawApiError::Transport(NetError::Cancelled))
     }
 }
 

@@ -11,10 +11,24 @@ crate-type = ["rlib"]
 
 [features]
 cache_profile = []
+embedded-tls = ["reqwless/embedded-tls"]
+mbedtls = ["reqwless/mbedtls-rs"]
+mbedtls-host = [
+    "mbedtls",
+    "dep:mbedtls-rs",
+    "mbedtls-rs/std",
+    "mbedtls-rs/pem-parse",
+    "dep:critical-section",
+]
 
 [dependencies]
-claw-interface = { path = "../claw-interface" }
 claw-utils = { path = "../claw-utils" }
+embassy-time.workspace = true
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+embedded-nal-async = "0.9"
+ouroboros = { version = "0.18.5", default-features = false }
+reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
@@ -24,13 +38,13 @@ futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 # Shape-only attempt/retry spans consumed by the firmware's claw-log subscriber.
 tracing = { version = "0.1", default-features = false }
+mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
+critical-section = { version = "1", features = ["std"], optional = true }
 
 [dev-dependencies]
+claw-net = { path = "../claw-net", features = ["testing"] }
+embedded-io = "0.7"
 serde_json = "1"
-# Host-target live HTTP backend (`RealHttp`) for the `#[ignore]`d live
-# mock-endpoint integration tests, plus a hermetic timer double. Never in the
-# firmware lib build.
-claw-interface = { path = "../claw-interface", features = ["realhttp", "timermock", "httpmock"] }
 # Ergonomic error handling for host-target doc-tests and the chat example.
 anyhow = "1"
 # `block_on` for tests (smol family; replaces the removed local spin executor).
@@ -38,6 +52,7 @@ futures-lite = "2"
 tempdir = "0.3"
 # Capturing subscriber used by the attempt/retry trace contract tests.
 claw-log = { path = "../claw-log" }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]
 unsafe_code = "forbid"

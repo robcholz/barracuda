@@ -1,4 +1,4 @@
-//! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApiAsync`].
+//! [`LlmExtractor`] — an [`Extractor`] backed by [`ClawApi`].
 //!
 //! It asks the model to read a conversation transcript and return a JSON array of
 //! durable facts. Like the conversation provider's LLM compactor, it lives in
@@ -17,9 +17,10 @@ use core::sync::atomic::AtomicBool;
 
 use serde_json::{json, Value};
 
-use claw_api::{ChatRequest, ClawApiAsync};
-use claw_interface::{Cancel, ClawHttp, ClawTimer};
+use claw_api::{ChatRequest, ClawApiFactory};
 use claw_memory::MemoryId;
+use claw_net::{Dns, TcpConnect};
+use claw_utils::Cancel;
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
@@ -43,32 +44,35 @@ const EXTRACT_TRANSCRIPT_HEADER: &str = "CONVERSATION:";
 /// An [`Extractor`] that distills facts via the LLM client.
 ///
 /// Owns its own async LLM client. The extractor is shared across agents as an
-/// `Arc<dyn Extractor>`, while [`ClawApiAsync::chat`] needs `&mut self`, so
+/// `Arc<dyn Extractor>`, while [`ClawApi::chat`] needs `&mut self`, so
 /// calls borrow the client exclusively without holding a mutex while the future
 /// is running.
-pub(super) struct LlmExtractor<H: ClawHttp, Timer: ClawTimer> {
-    api: SharedAsyncLlm<H, Timer>,
+pub(super) struct LlmExtractor<H: TcpConnect + Dns + 'static> {
+    api: SharedAsyncLlm<H>,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
     api_manager: SharedApiManager,
 }
 
-impl<H: ClawHttp + Default + 'static, Timer: ClawTimer + Default + 'static> LlmExtractor<H, Timer> {
+impl<H: TcpConnect + Dns + 'static> LlmExtractor<H> {
     /// Build an extractor with its own unconfigured LLM client.
-    fn new(api_manager: SharedApiManager) -> Self {
+    fn new(api_manager: SharedApiManager, llm_factory: &ClawApiFactory<H>) -> Self {
         Self {
-            api: SharedAsyncLlm::new(ClawApiAsync::new(H::default(), Timer::default())),
+            api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
         }
     }
 
     /// A ready-to-inject [`Extractor`] using `api_manager`.
-    pub(super) fn shared(api_manager: SharedApiManager) -> Arc<dyn Extractor> {
-        Arc::new(Self::new(api_manager))
+    pub(super) fn shared(
+        api_manager: SharedApiManager,
+        llm_factory: &ClawApiFactory<H>,
+    ) -> Arc<dyn Extractor> {
+        Arc::new(Self::new(api_manager, llm_factory))
     }
 }
 
-impl<H: ClawHttp, Timer: ClawTimer> Extractor for LlmExtractor<H, Timer> {
+impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
         Box::pin(async move {
             let prompt = format!(

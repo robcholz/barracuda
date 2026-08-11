@@ -179,7 +179,7 @@ fn target_allowlist_drops_foreign_targets() {
     let subscriber = FlatTreeSubscriber::with_sink(sink.clone()).with_allowed_target_prefix("claw");
 
     tracing::subscriber::with_default(subscriber, || {
-        tracing::info!(target: "reqwest::connect", "pool checkout");
+        tracing::info!(target: "reqwless::connect", "connection open");
         tracing::info!(target: "claw_core::demo", "kept");
     });
 

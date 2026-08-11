@@ -10,9 +10,10 @@
 
 mod llm_compactor;
 
+use claw_api::ClawApiFactory;
 use claw_context::{BlockKind, ContextSink};
-use claw_interface::{ClawHttp, ClawTimer};
 use claw_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
+use claw_net::{Dns, TcpConnect};
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -84,18 +85,18 @@ impl ConversationHistoryContextProvider {
 
     /// Build the configured LLM-backed conversation projection used by Agent
     /// AgentManager without exposing its compactor implementation or policy type.
-    pub(in crate::agent) fn with_llm_compaction<H, Timer>(
+    pub(in crate::agent) fn with_llm_compaction<H>(
         api_manager: SharedApiManager,
+        llm_factory: ClawApiFactory<H>,
         trigger_tokens: usize,
         keep_recent_tokens: usize,
         segment_token_budget: usize,
     ) -> Self
     where
-        H: ClawHttp + Default + 'static,
-        Timer: ClawTimer + Default + 'static,
+        H: TcpConnect + Dns + 'static,
     {
         Self::new(
-            Box::new(LlmCompactor::<H, Timer>::new(api_manager)),
+            Box::new(LlmCompactor::<H>::new(api_manager, &llm_factory)),
             CompactionPolicy::new(trigger_tokens, keep_recent_tokens, segment_token_budget),
         )
     }

@@ -10,8 +10,9 @@ use alloc::{
 use core::task::{Context, Poll};
 
 use async_channel::Sender;
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_api::ClawApiFactory;
+use claw_interface::ClawFs;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::{DurableState, InvalidInstanceId, PersistenceError, SharedPersistence};
 use claw_tool::ToolRegistry;
 
@@ -28,8 +29,7 @@ use super::state::{
 };
 use super::{SessionEvent, SessionStream};
 
-pub(super) type SharedAgentManager<Filesystem, Http, Timer> =
-    Rc<AgentManager<Filesystem, Http, Timer>>;
+pub(super) type SharedAgentManager<Filesystem, Http> = Rc<AgentManager<Filesystem, Http>>;
 
 crate::define_prefixed_id!(SessionId, "session-", "session");
 
@@ -81,26 +81,24 @@ pub enum SessionDeleteError {
     InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
-struct LiveActor<Filesystem, Http, Timer>
+struct LiveActor<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     commands: Sender<SessionCommand>,
-    actor: SessionActor<Filesystem, Http, Timer>,
+    actor: SessionActor<Filesystem, Http>,
     span: tracing::Span,
 }
 
-struct SessionEntry<Filesystem, Http, Timer>
+struct SessionEntry<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    actor: Option<LiveActor<Filesystem, Http, Timer>>,
+    actor: Option<LiveActor<Filesystem, Http>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -122,25 +120,23 @@ pub(crate) enum SessionManagerInitError {
 /// Session-owned metadata stays in `SessionPersistentState`; Agent records and
 /// transcripts remain canonical in `AgentManager`. A live `SessionActor`
 /// coordinates both without exposing either store to the worker loop.
-pub(crate) struct SessionManager<Filesystem, Http, Timer>
+pub(crate) struct SessionManager<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     persistence: SharedPersistence<Filesystem>,
     state: DurableState<SessionManagerState>,
-    agent_manager: SharedAgentManager<Filesystem, Http, Timer>,
-    approval_resolver: SharedApprovalResolver<Http, Timer>,
-    sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>>,
+    agent_manager: SharedAgentManager<Filesystem, Http>,
+    approval_resolver: SharedApprovalResolver<Http>,
+    sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http>>,
     actor_poll_queue: VecDeque<SessionId>,
 }
 
-impl<Filesystem, Http, Timer> SessionManager<Filesystem, Http, Timer>
+impl<Filesystem, Http> SessionManager<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     pub(crate) fn new(
         filesystem: Arc<Filesystem>,
@@ -149,6 +145,7 @@ where
         persistence_dir: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
+        llm_factory: ClawApiFactory<Http>,
     ) -> Result<Self, SessionManagerInitError> {
         let state = {
             let entry = persistence.singleton::<SessionManagerState>(SESSION_MANAGER_STATE_NAME)?;
@@ -163,12 +160,12 @@ where
             persistence_dir,
             skill_roots,
             Arc::clone(&api_manager),
+            llm_factory.clone(),
         )?);
-        let approval_resolver: SharedApprovalResolver<Http, Timer> =
-            Rc::new(LlmApprovalResolver::<Http, Timer>::new(api_manager));
+        let approval_resolver: SharedApprovalResolver<Http> =
+            Rc::new(LlmApprovalResolver::<Http>::new(api_manager, llm_factory));
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http, Timer>> =
-            BTreeMap::new();
+        let mut sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http>> = BTreeMap::new();
         for instance in states.list()? {
             let session = SessionId::from_wire(instance.as_str())?;
             let persisted = states

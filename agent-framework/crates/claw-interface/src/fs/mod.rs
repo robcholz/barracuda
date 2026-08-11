@@ -1,7 +1,7 @@
 //! The `ClawFs` filesystem injection trait.
 //!
 //! This is the persistence seam for everything that has to survive a reboot
-//! (conversation tapes, profile/long-term memory, …). Like [`ClawHttp`], it is a
+//! (conversation tapes, profile/long-term memory, …). It is a
 //! dependency-injection point: device applications implement it over their
 //! storage stack, while host tests provide `std::fs` or an in-memory map.
 //! Modules never touch `std::fs` directly so they stay portable.
@@ -29,7 +29,6 @@
 //! Paths are byte-oriented, opaque strings already resolved against the DATA
 //! root by the caller (`claw_paths`); this trait does no path joining.
 //!
-//! [`ClawHttp`]: crate::http::ClawHttp
 
 use alloc::format;
 use alloc::string::String;

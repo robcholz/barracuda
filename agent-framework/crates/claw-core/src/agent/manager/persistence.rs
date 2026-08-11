@@ -1,8 +1,8 @@
 use alloc::{borrow::ToOwned, collections::BTreeSet, vec::Vec};
 
-use claw_interface::http::StreamingHttp;
-use claw_interface::{ClawFs, ClawHttp, ClawTimer};
+use claw_interface::ClawFs;
 use claw_memory::TranscriptStore;
+use claw_net::{Dns, TcpConnect};
 use claw_persistence::{DurableState, InstanceId};
 
 use super::AgentId;
@@ -17,11 +17,10 @@ fn agent_instance(id: AgentId) -> Result<InstanceId, AgentCreateError> {
     InstanceId::new(id.to_wire()).map_err(AgentCreateError::from)
 }
 
-impl<Filesystem, Http, Timer> AgentManager<Filesystem, Http, Timer>
+impl<Filesystem, Http> AgentManager<Filesystem, Http>
 where
     Filesystem: ClawFs + 'static,
-    Http: ClawHttp + StreamingHttp + Default + 'static,
-    Timer: ClawTimer + Default + 'static,
+    Http: TcpConnect + Dns + 'static,
 {
     /// Delete transcript files whose owning Agent record no longer exists.
     pub(super) fn purge_dead(&self) -> Result<(), AgentCreateError> {

@@ -4,44 +4,17 @@
 //! crates.
 //!
 //! This is the inbound boundary (C / OS -> Rust): it defines the
-//! dependency-injection traits that abstract over platform facilities —
-//! filesystem ([`ClawFs`]) and networking
-//! ([`ClawHttp`] plus [`StreamingHttp`]) — plus
-//! the shared types those traits work with. The pure-Rust core crates
-//! (`claw-api`, `claw_core`, `claw-tool`, `claw-memory`, `claw-sandbox`, ...)
-//! depend only on these traits, never on a platform directly, so the device
-//! build and host tests can plug in different implementations of the same seam.
+//! dependency-injection traits that abstract over filesystem facilities.
+//! Networking is provided by `claw-net`; time is provided globally by
+//! `embassy-time`.
 
 extern crate alloc;
-#[cfg(any(
-    feature = "diskfs",
-    feature = "httpmock",
-    feature = "realhttp",
-    feature = "tokiotimer"
-))]
+#[cfg(feature = "diskfs")]
 extern crate std;
 
 pub mod fs;
-pub mod http;
-pub mod timer;
 
 pub use fs::{ClawFile, ClawFs, FsError, FsIoError};
 #[cfg(feature = "diskfs")]
 pub use fs::{DiskFile, DiskFs};
 pub use fs::{MemFile, MemFs};
-#[cfg(feature = "realhttp")]
-pub use http::RealHttp;
-#[cfg(feature = "httpmock")]
-pub use http::{
-    BlockingHttpAdapter, CapturingHttp, FailingHttp, NeverHttp, NoopHttp, ScriptStep, ScriptedHttp,
-    SharedScriptHttp, YieldingHttpAdapter,
-};
-pub use http::{
-    Cancel, ClawHttp, HttpAuth, HttpError, HttpGetRequest, HttpHeader, HttpJsonRequest,
-    HttpRequestFailure, HttpResponse, HttpResponseFuture, HttpStatusCode, StreamingHttp,
-};
-#[cfg(feature = "timermock")]
-pub use timer::mock::{ImmediateTimer, YieldingTimer};
-#[cfg(feature = "tokiotimer")]
-pub use timer::tokio_timer::TokioTimer;
-pub use timer::{ClawTimer, SleepOutcome, TimerFuture};

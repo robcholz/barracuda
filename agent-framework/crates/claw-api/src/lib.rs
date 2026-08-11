@@ -9,29 +9,27 @@
 //!
 //! # Overview
 //!
-//! The entry points are [`ClawApi`] for blocking transports and [`ClawApiAsync`]
-//! for async/streaming transports. Install a complete [`ClawApiConfig`], then
-//! issue requests:
+//! [`ClawApi`] owns one long-lived reqwless client, including its persistent
+//! connection and reusable buffers. Install a complete [`ClawApiConfig`], then issue
+//! requests:
 //!
 //! | Method | Request | Returns |
 //! |---|---|---|
 //! | [`ClawApi::chat`] | [`ChatRequest`] | [`LlmResponse`] (text + tool calls) |
 //! | [`ClawApi::chat_json`] | [`ChatJsonRequest`] | [`ChatJsonResponse`] (parsed `T` + tool calls) |
 //! | [`ClawApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
-//! | [`ClawApiAsync::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
+//! | [`ClawApi::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
-//! Networking is **injected**: `claw-api` never opens sockets itself. Device
-//! applications implement [`ClawHttp`](claw_interface::http::ClawHttp) and
-//! [`StreamingHttp`](claw_interface::http::StreamingHttp) over their selected
-//! network stack; tests and host tools provide their own implementation.
+//! Networking uses reqwless directly. The application supplies one concrete
+//! `embedded_nal_async::TcpConnect + Dns` stack directly to [`ClawApi`]; Embassy
+//! and host applications share all HTTP behavior and differ only at the TCP/DNS
+//! HAL boundary.
 //!
 //! # Cancellation
 //!
-//! Blocking calls take `&AtomicBool`; async calls take
-//! [`Cancel`](claw_interface::http::Cancel). For streaming, that token covers
-//! send, headers, and response-body reads; dropping [`ChatStream`] also cancels
-//! the body. An abort surfaces as a non-retryable [`ClawApiError::Transport`]
-//! containing [`HttpError::Aborted`](claw_interface::HttpError::Aborted).
+//! Calls take [`claw_utils::Cancel`]. For streaming, that token covers send,
+//! headers, and response-body reads; dropping [`ChatStream`] also cancels the
+//! body. Cancellation is non-retryable.
 //!
 //! # Retries
 //!
@@ -44,46 +42,7 @@
 //! [`RetryPolicy`] for the knobs and [`ClawApiError::is_retryable`] for the
 //! classification.
 //!
-//! # End-to-end example
-//!
-//! ```no_run
-//! use std::sync::atomic::AtomicBool;
-//! use claw_api::{BackendKind, ChatRequest, ClawApi, ClawApiConfig, RetryPolicy};
-//! use claw_interface::http::{blocking::ClawHttp, HttpError, HttpJsonRequest, HttpResponse, HttpStatusCode};
-//!
-//! // 1. Provide an HTTP transport; here we stub a fixed OpenAI-shaped reply.
-//! struct MyHttp;
-//! impl ClawHttp for MyHttp {
-//!     fn post_json(&mut self, _req: &HttpJsonRequest, _abort: &AtomicBool)
-//!         -> Result<HttpResponse, HttpError> {
-//!         Ok(HttpResponse {
-//!             status_code: HttpStatusCode::OK,
-//!             body: r#"{"choices":[{"message":{"role":"assistant","content":"Hi!"}}]}"#.into(),
-//!         })
-//!     }
-//! }
-//!
-//! // 2. Build the client once. It owns the transport and is driven via `&mut`.
-//! let config = ClawApiConfig::new(
-//!     BackendKind::OpenAiCompatible,
-//!     "sk-...",
-//!     "gpt-4o-mini",
-//!     "https://api.openai.com/v1",
-//! );
-//! let mut api = ClawApi::new(MyHttp);
-//! api.set_config(config)?;
-//!
-//! // 3. Chat. The abort flag can be flipped from another thread to cancel.
-//! let messages = serde_json::json!([{ "role": "user", "content": "Hello" }]);
-//! let abort = AtomicBool::new(false);
-//! let reply = api.chat(
-//!     &ChatRequest::new("You are a helpful assistant.", &messages)
-//!         .with_retry(RetryPolicy::new(3)), // optional: override default retry
-//!     &abort,
-//! )?;
-//! assert_eq!(reply.text.as_deref(), Some("Hi!"));
-//! # Ok::<(), anyhow::Error>(())
-//! ```
+//! See `examples/client.rs` for a complete wire-level example.
 
 #![cfg_attr(
     not(test),
@@ -111,13 +70,24 @@ mod client;
 mod errors;
 mod media;
 mod retry;
+mod transport;
 mod types;
 
 pub use backends::{BackendKind, ParseBackendKindError};
 pub use chat_stream::ChatStream;
 pub use claw_utils::stream;
-pub use client::{ClawApi, ClawApiAsync};
+pub use client::{ClawApi, ClawApiFactory};
+pub use embedded_io::ErrorKind as NetworkErrorKind;
 pub use errors::{ChatError, ChatJsonError, ClawApiError, InferMediaError, InitError};
+#[cfg(feature = "mbedtls-host")]
+pub use mbedtls_rs::Tls;
+#[cfg(feature = "mbedtls")]
+pub use reqwless::client::TlsConfig;
+#[cfg(feature = "embedded-tls")]
+pub use reqwless::client::{TlsConfig, TlsVerify};
+#[cfg(feature = "mbedtls")]
+pub use reqwless::{Certificate, Credentials, TlsReference, TlsVersion, X509};
+pub use transport::{Error as HttpError, StatusCode};
 #[cfg(feature = "cache_profile")]
 pub use types::ProviderUsage;
 pub use types::{

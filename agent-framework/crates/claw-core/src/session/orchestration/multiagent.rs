@@ -7,12 +7,11 @@ use alloc::{
     vec::Vec,
 };
 use core::future::Future;
-use core::marker::PhantomData;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use claw_interface::{Cancel, ClawTimer};
 use claw_tool::ToolGroup;
+use embassy_time::Timer;
 
 use crate::agent::{AgentId, AgentKind};
 use crate::multiagent::{
@@ -25,27 +24,29 @@ use super::{
     OrchestrationPhysicalError, ReapStatus, RemovalOutcome,
 };
 
-pub(in crate::session) struct SessionOrchestration<Timer> {
+pub(in crate::session) struct SessionOrchestration {
     domain: Multiagent,
     timeouts: AgentTimeouts,
     reaping: BTreeSet<AgentId>,
     next_source: OrchestrationPollSource,
-    marker: PhantomData<fn() -> Timer>,
 }
 
-impl<Timer> Default for SessionOrchestration<Timer> {
+impl Default for SessionOrchestration {
     fn default() -> Self {
         Self {
             domain: Multiagent::new(),
             timeouts: AgentTimeouts::default(),
             reaping: BTreeSet::new(),
             next_source: OrchestrationPollSource::Effect,
-            marker: PhantomData,
         }
     }
 }
 
-impl<Timer> SessionOrchestration<Timer> {
+impl SessionOrchestration {
+    pub(in crate::session) fn new() -> Self {
+        Self::default()
+    }
+
     pub(in crate::session) fn tool_groups(
         &self,
         caller: AgentId,
@@ -105,10 +106,7 @@ impl<Timer> SessionOrchestration<Timer> {
     }
 }
 
-impl<Timer> SessionOrchestration<Timer>
-where
-    Timer: ClawTimer + Default + 'static,
-{
+impl SessionOrchestration {
     pub(in crate::session) fn poll(
         &mut self,
         context: &mut Context<'_>,
@@ -215,7 +213,7 @@ where
                 timeout,
             } => {
                 if self.domain.contains(agent) {
-                    self.timeouts.arm::<Timer>(agent, timeout);
+                    self.timeouts.arm(agent, timeout);
                 }
             }
         }
@@ -235,13 +233,9 @@ struct AgentTimeouts {
 }
 
 impl AgentTimeouts {
-    fn arm<Timer>(&mut self, agent: AgentId, timeout: SubagentTimeout)
-    where
-        Timer: ClawTimer + Default + 'static,
-    {
+    fn arm(&mut self, agent: AgentId, timeout: SubagentTimeout) {
         let future = Box::pin(async move {
-            let mut timer = Timer::default();
-            let _ = timer.sleep(timeout.duration(), Cancel::never()).await;
+            Timer::after_millis(u64::from(timeout.millis())).await;
             agent
         });
         self.entries.insert(agent, TimeoutEntry { timeout, future });

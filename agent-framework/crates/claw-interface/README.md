@@ -3,12 +3,8 @@
 The OS / platform abstraction layer for the claw Rust crates.
 
 This is the **inbound boundary** (C / OS → Rust): it defines the
-**dependency-injection traits** that abstract over platform facilities —
-filesystem (`ClawFs`) and networking (`ClawHttp` / `StreamingHttp`) — plus the
-**shared types** those traits work with. The pure-Rust core crates (`claw-api`, `claw_core`,
-`claw-capability`, `claw-memory`, `claw-sandbox`, …) depend only on these traits, never
-on a platform directly, so the device build and host tests can plug in different
-implementations of the same seam.
+**dependency-injection traits** for filesystems. HTTP is provided by `claw-net`,
+and deadlines/backoff use the global `embassy-time` driver.
 
 ## What's here
 
@@ -24,18 +20,6 @@ tear-free whole-file checkpoints.
 | `ClawFs` | The trait: `read`, `read_at`, `len`, `write_atomic`, `append`, `create_dir_all`, `exists`, `remove`, `list_dir`. |
 | `FsError` | Coarse failure: `NotFound` vs `Io(..)`. |
 
-### `http` — the HTTP networking seams
-
-JSON request injection for buffered and streaming transports.
-
-| Item | Role |
-|---|---|
-| `http::blocking::ClawHttp` | Blocking compatibility seam: `post_json(request, abort)` → buffered `HttpResponse`. |
-| `ClawHttp` / `HttpResponseFuture` / `Cancel` | Object-safe async buffered POST/GET transport with cooperative cancellation. |
-| `StreamingHttp` | Generic streaming POST seam. Its `ByteStream<'a>` GAT retains `&'a mut self`, so one transport cannot run another request until the body stream reaches EOF or is dropped. |
-| `HttpJsonRequest` / `HttpGetRequest` / `HttpHeader` / `HttpResponse` | Shared request/response shapes. |
-| `HttpError` | Transport failure (`Aborted`, `InvalidUrl`, `RequestFailed`, `UnexpectedStatus`, …). |
-
 ## Host-only reference implementations (opt-in features)
 
 These live beside the traits only to keep the few distinct implementations in
@@ -46,24 +30,16 @@ one place. They are **never** enabled in a device build.
 | built in | `MemFs` — a per-instance in-memory `ClawFs` implementation (no extra deps). |
 | `diskfs` | `DiskFs` — a `std::fs`-backed `ClawFs` for host CLIs and disk tests. |
 | `diskfs-pretty` | `DiskFs` that pretty-prints `.json` writes (implies `diskfs`). |
-| `httpmock` | Buffered doubles and adapters (`ScriptedHttp`, `CapturingHttp`, `FailingHttp`, `NeverHttp`, `NoopHttp`, `BlockingHttpAdapter`, `YieldingHttpAdapter`) plus `ChunkedHttp` for streaming tests. |
-| `realhttp` | `http::blocking::RealHttp` and async/streaming `http::RealHttp`, backed by reqwest. |
 
 ## Example
 
 ```bash
-cargo run -p claw-interface --example di_seams \
-    --features httpmock --target x86_64-unknown-linux-gnu
+cargo run -p claw-interface --example di_seams
 ```
 
-Exercises both seams with host doubles: a `MemFs` for the `ClawFs` operations
-the modules rely on, and a `ScriptedHttp` serving canned LLM replies through the
-`ClawHttp` trait. (The example declares these as `required-features`.)
+Exercises the `ClawFs` seam with `MemFs`.
 
 ## Where it fits
 
-Everything downstream — `claw-api`, `claw_core`, `claw-tool`, `claw-memory`,
-`claw-sandbox`, … — depends on this crate's traits and types and stays
-platform-agnostic. An Embassy application implements these traits with its
-selected HAL/network/storage stack; the host implementations are the
-feature-gated doubles above.
+Filesystem access remains injected here. Networking is platform-agnostic at the
+`embedded-nal-async` boundary in `claw-net`; time uses `embassy-time` directly.
