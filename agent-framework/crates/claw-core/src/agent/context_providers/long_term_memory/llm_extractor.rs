@@ -146,9 +146,7 @@ mod tests {
             ToolCall {
                 id: "2".into(),
                 name: "memory_update".into(),
-                arguments_json:
-                    r#"{"id":" memory-1 ","content":"likes coffee","tags":[],"keywords":["drink"]}"#
-                        .into(),
+                arguments_json: r#"{"id":" memory-1 ","content":"likes coffee"}"#.into(),
             },
             ToolCall {
                 id: "3".into(),
@@ -166,8 +164,11 @@ mod tests {
         ));
         assert!(matches!(
             &operations[1],
-            MemoryOp::Replace { id, item }
-                if id.as_str() == "memory-1" && item.content == "likes coffee"
+            MemoryOp::Update { id, patch }
+                if id.as_str() == "memory-1"
+                    && patch.content.as_deref() == Some("likes coffee")
+                    && patch.tags.is_none()
+                    && patch.keywords.is_none()
         ));
         assert!(matches!(
             &operations[2],

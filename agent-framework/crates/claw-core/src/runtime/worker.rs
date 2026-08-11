@@ -2,7 +2,7 @@
 
 use alloc::{
     boxed::Box,
-    string::{String, ToString},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -229,9 +229,7 @@ impl WorkerTask {
 fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntimeBuildError {
     match error {
         SessionManagerInitError::AgentManager(error) => error.into(),
-        SessionManagerInitError::AgentReconciliation(error) => {
-            AgentRuntimeBuildError::AgentReconciliation(error.to_string())
-        }
+        SessionManagerInitError::AgentReconciliation(error) => error.into(),
         SessionManagerInitError::Persistence(error) => error.into(),
         SessionManagerInitError::InvalidSessionId(error) => error.into(),
         SessionManagerInitError::MissingState(session) => {

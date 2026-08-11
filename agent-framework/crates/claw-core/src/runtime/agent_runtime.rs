@@ -1,7 +1,7 @@
 //! Executor-neutral process runtime ownership and configuration entry point.
 
 use alloc::{
-    string::{String, ToString},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -20,7 +20,7 @@ use claw_persistence::{PersistenceError, SharedPersistence};
 use claw_skill::SkillError;
 use claw_tool::ToolRegistry;
 
-use crate::agent::AgentManagerError;
+use crate::agent::{AgentCreateError, AgentManagerError};
 use crate::config::{ApiPurpose, SharedApiManager};
 use crate::session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
@@ -45,7 +45,7 @@ pub enum AgentRuntimeBuildError {
     #[error("persisted session state is missing: {0}")]
     MissingPersistedSessionState(SessionId),
     #[error("failed to reconcile persisted agents: {0}")]
-    AgentReconciliation(String),
+    AgentReconciliation(#[from] AgentCreateError),
 }
 
 impl From<AgentManagerError> for AgentRuntimeBuildError {
@@ -54,9 +54,7 @@ impl From<AgentManagerError> for AgentRuntimeBuildError {
             AgentManagerError::MissingPersistenceDir => Self::MissingPersistenceDir,
             AgentManagerError::LongTermInit(source) => Self::LongTermInit(source),
             AgentManagerError::SkillRegistry(source) => Self::SkillRegistry(source),
-            AgentManagerError::AgentReconciliation(source) => {
-                Self::AgentReconciliation(source.to_string())
-            }
+            AgentManagerError::AgentReconciliation(source) => Self::AgentReconciliation(source),
         }
     }
 }
@@ -82,6 +80,28 @@ where
     Http: TcpConnect + Dns + 'static,
 {
     worker: RuntimeWorker<Filesystem, Http>,
+}
+
+#[cfg(test)]
+mod tests {
+    use core::error::Error as _;
+
+    use super::AgentRuntimeBuildError;
+    use crate::agent::{AgentCreateError, AgentManagerError};
+
+    #[test]
+    fn reconciliation_failure_preserves_typed_source() {
+        let error = AgentRuntimeBuildError::from(AgentManagerError::AgentReconciliation(
+            AgentCreateError::UnknownKind("worker".into()),
+        ));
+
+        assert!(error.source().is_some());
+        assert!(matches!(
+            error,
+            AgentRuntimeBuildError::AgentReconciliation(AgentCreateError::UnknownKind(kind))
+                if kind == "worker"
+        ));
+    }
 }
 
 impl<Filesystem, Http> Unpin for AgentService<Filesystem, Http>

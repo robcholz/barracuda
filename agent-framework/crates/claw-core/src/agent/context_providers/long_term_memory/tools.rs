@@ -46,15 +46,12 @@ fn decode_extraction_operation(call: ToolCall) -> Result<MemoryOp, ToolInvokeErr
         "memory_update" => {
             validate_extraction_arguments(&invocation, &UPDATE_VALIDATOR)?;
             let args = invocation.arguments::<UpdateArgs>()?;
-            let content = args.content.ok_or_else(|| {
-                ToolError::InvalidArguments("'content' is required for extracted updates".into())
-            })?;
-            Ok(MemoryOp::Replace {
+            Ok(MemoryOp::Update {
                 id: MemoryId::from(trimmed(args.id).as_str()),
-                item: ExtractedItem {
-                    content: trimmed(content),
-                    tags: optional_trimmed_strings(args.tags).unwrap_or_default(),
-                    keywords: optional_trimmed_strings(args.keywords).unwrap_or_default(),
+                patch: MemoryPatch {
+                    content: optional_trimmed(args.content),
+                    tags: optional_trimmed_strings(args.tags),
+                    keywords: optional_trimmed_strings(args.keywords),
                 },
             })
         }

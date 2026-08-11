@@ -11,11 +11,11 @@
 //!
 //! Giving the extractor the current memory (as [`MemorySnapshot`]s carrying each
 //! item's id) is what lets it go beyond appending: it can reference an existing
-//! id to [`Replace`](MemoryOp::Replace) a stale fact or [`Forget`](MemoryOp::Forget)
+//! id to [`Update`](MemoryOp::Update) a stale fact or [`Forget`](MemoryOp::Forget)
 //! one the user retracted, instead of only ever adding.
 
 use claw_api::ChatError;
-use claw_memory::MemoryId;
+use claw_memory::{MemoryId, MemoryPatch};
 use claw_tool::ToolInvokeError;
 use core::future::Future;
 use core::pin::Pin;
@@ -42,7 +42,7 @@ pub(crate) struct ExtractedItem {
 /// ordering.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MemorySnapshot {
-    /// The stored fact's stable id (the handle for `Replace`/`Forget`).
+    /// The stored fact's stable id (the handle for `Update`/`Forget`).
     pub(super) id: MemoryId,
     /// The stored fact's content.
     pub(super) content: String,
@@ -61,19 +61,19 @@ pub(crate) struct ExtractionInput<'a> {
 
 /// A single change an [`Extractor`] proposes against long-term memory.
 ///
-/// The provider applies each op: `Add` stores a new fact, `Replace` edits the
-/// cited fact in place, `Forget` removes it. `Replace`/`Forget` name a fact by
+/// The provider applies each op: `Add` stores a new fact, `Update` patches the
+/// cited fact in place, `Forget` removes it. `Update`/`Forget` name a fact by
 /// the [`MemoryId`] the extractor saw in a [`MemorySnapshot`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MemoryOp {
     /// Store a newly-distilled fact.
     Add(ExtractedItem),
-    /// Replace the cited fact's content/labels with `item`.
-    Replace {
+    /// Patch the cited fact using the canonical `memory_update` semantics.
+    Update {
         /// The existing fact to edit.
         id: MemoryId,
-        /// Its new content/labels.
-        item: ExtractedItem,
+        /// Only fields present in the tool call are replaced.
+        patch: MemoryPatch,
     },
     /// Remove the cited fact (the user retracted or superseded it).
     Forget {

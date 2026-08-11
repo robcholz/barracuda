@@ -1,5 +1,5 @@
 use claw_interface::ClawFs;
-use claw_memory::{MemoryDraft, MemoryPatch, Transcript, Turn, TurnId};
+use claw_memory::{MemoryDraft, Transcript, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -81,13 +81,13 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
         match result {
             Ok(ops) => {
                 let mut add_count = 0u64;
-                let mut replace_count = 0u64;
+                let mut update_count = 0u64;
                 let mut forget_count = 0u64;
                 for op in &ops {
                     match op {
                         MemoryOp::Add(_) => add_count = add_count.saturating_add(1),
-                        MemoryOp::Replace { .. } => {
-                            replace_count = replace_count.saturating_add(1);
+                        MemoryOp::Update { .. } => {
+                            update_count = update_count.saturating_add(1);
                         }
                         MemoryOp::Forget { .. } => {
                             forget_count = forget_count.saturating_add(1);
@@ -96,7 +96,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
                 }
                 log::info!(
                     "long-term memory extraction completed: operations={}, \
-                     added={add_count}, replaced={replace_count}, forgotten={forget_count}",
+                     added={add_count}, updated={update_count}, forgotten={forget_count}",
                     ops.len()
                 );
                 span.in_scope(|| {
@@ -104,7 +104,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
                         name: "completed",
                         operation_count = ops.len() as u64,
                         add_count,
-                        replace_count,
+                        update_count,
                         forget_count,
                     );
                 });
@@ -135,12 +135,7 @@ impl<F: ClawFs + 'static> LongTermMemoryContextProvider<F> {
                     .with_source("extracted");
                 self.stores.store(draft);
             }
-            MemoryOp::Replace { id, item } => {
-                let patch = MemoryPatch {
-                    content: Some(item.content),
-                    tags: Some(item.tags),
-                    keywords: Some(item.keywords),
-                };
+            MemoryOp::Update { id, patch } => {
                 let _ = self.stores.update(&id, patch);
             }
             MemoryOp::Forget { id } => {

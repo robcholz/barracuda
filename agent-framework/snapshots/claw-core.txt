@@ -21,7 +21,7 @@ pub claw_core::AgentCreateError::TranscriptDelete(claw_memory::transcript_store:
 pub claw_core::AgentCreateError::TranscriptList(claw_memory::transcript_store::TranscriptListError)
 pub claw_core::AgentCreateError::UnknownKind(alloc::string::String)
 pub enum claw_core::AgentRuntimeBuildError
-pub claw_core::AgentRuntimeBuildError::AgentReconciliation(alloc::string::String)
+pub claw_core::AgentRuntimeBuildError::AgentReconciliation(claw_core::AgentCreateError)
 pub claw_core::AgentRuntimeBuildError::InvalidSessionId(claw_utils::IdParseError)
 pub claw_core::AgentRuntimeBuildError::LongTermInit(claw_memory::long_term_memory::LongTermInitError)
 pub claw_core::AgentRuntimeBuildError::MissingPersistedSessionState(claw_core::SessionId)
