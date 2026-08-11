@@ -1,13 +1,13 @@
 use alloc::{string::ToString, sync::Arc};
 
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use super::super::tool_port::SubagentControl;
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
-    Tool::from_sync(ListSubagentsTool { control })
+    Tool::new(ListSubagentsTool { control })
 }
 
 struct ListSubagentsTool {
@@ -22,11 +22,13 @@ impl ToolSpec for ListSubagentsTool {
     }
 }
 
-impl SyncToolHandler for ListSubagentsTool {
-    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        Ok(ToolOutput {
-            content: serde_json::json!({ "subagents": self.control.list() }).to_string(),
-            ok: true,
+impl ToolHandler for ListSubagentsTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            Ok(ToolOutput {
+                content: serde_json::json!({ "subagents": self.control.list() }).to_string(),
+                ok: true,
+            })
         })
     }
 }

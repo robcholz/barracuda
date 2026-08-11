@@ -43,16 +43,15 @@ pub use claw_agent::TurnOrigin
 pub use claw_agent::stream
 pub mod claw_agent::tools
 pub use claw_agent::tools::Action
-pub use claw_agent::tools::AsyncToolHandler
 pub use claw_agent::tools::Resource
 pub use claw_agent::tools::RetryCount
 pub use claw_agent::tools::RiskClass
-pub use claw_agent::tools::SyncToolHandler
 pub use claw_agent::tools::Tool
 pub use claw_agent::tools::ToolConfig
 pub use claw_agent::tools::ToolError
 pub use claw_agent::tools::ToolFuture
 pub use claw_agent::tools::ToolGroup
+pub use claw_agent::tools::ToolHandler
 pub use claw_agent::tools::ToolInvocation
 pub use claw_agent::tools::ToolInvokeError
 pub use claw_agent::tools::ToolOutput

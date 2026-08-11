@@ -2,14 +2,14 @@ use alloc::{boxed::Box, sync::Arc};
 
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, AsyncToolHandler, Tool, ToolFuture, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use super::super::tool_port::SubagentControl;
 use super::helper::{action_with_agent_resource, required_agent_id};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
-    Tool::from_async(DeleteSubagentTool { control })
+    Tool::new(DeleteSubagentTool { control })
 }
 
 struct DeleteSubagentTool {
@@ -24,7 +24,7 @@ impl ToolSpec for DeleteSubagentTool {
     }
 }
 
-impl AsyncToolHandler for DeleteSubagentTool {
+impl ToolHandler for DeleteSubagentTool {
     fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments_value()?;

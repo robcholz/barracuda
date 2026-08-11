@@ -18,7 +18,7 @@
 
 use claw_agent::{
     stream::StreamPart,
-    tools::{SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSpec},
+    tools::{Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSpec},
     AgentSystem, ApiPurpose, BackendKind, ClawApiConfig, ClawApiFactory, IterationEvent, Message,
     SessionEvent, SessionPersistence, TurnEvent,
 };
@@ -45,11 +45,13 @@ impl ToolSpec for TimeNowTool {
     }
 }
 
-impl SyncToolHandler for TimeNowTool {
-    fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-        Ok(ToolOutput {
-            content: "2026-06-29T17:00:00Z".into(),
-            ok: true,
+impl ToolHandler for TimeNowTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async {
+            Ok(ToolOutput {
+                content: "2026-06-29T17:00:00Z".into(),
+                ok: true,
+            })
         })
     }
 }
@@ -97,11 +99,7 @@ async fn run() -> anyhow::Result<()> {
             skill_roots: Vec::new(),
         },
         llm_factory,
-        [ToolGroup::new(
-            "example",
-            true,
-            [Tool::from_sync(TimeNowTool)],
-        )],
+        [ToolGroup::new("example", true, [Tool::new(TimeNowTool)])],
     )?;
     let service_task = tokio::task::spawn_local(service);
     system.link_api(scripted_llm(), ApiPurpose::RootAgent, true)?;

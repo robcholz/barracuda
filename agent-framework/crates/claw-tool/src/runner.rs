@@ -264,8 +264,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        DetachedTool, DetachedToolFuture, DetachedToolHandler, SyncToolHandler, ToolConfig,
-        ToolGroup, ToolSet, ToolSpec,
+        DetachedTool, DetachedToolFuture, DetachedToolHandler, ToolConfig, ToolFuture, ToolGroup,
+        ToolHandler, ToolSet, ToolSpec,
     };
 
     struct EchoTool {
@@ -282,11 +282,13 @@ mod tests {
         }
     }
 
-    impl SyncToolHandler for EchoTool {
-        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-            Ok(ToolOutput {
-                content: self.name.to_owned(),
-                ok: true,
+    impl ToolHandler for EchoTool {
+        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+            Box::pin(async move {
+                Ok(ToolOutput {
+                    content: self.name.to_owned(),
+                    ok: true,
+                })
             })
         }
     }
@@ -329,10 +331,10 @@ mod tests {
             "test",
             true,
             [
-                Tool::from_sync(EchoTool { name: "joined" }),
-                Tool::from_sync(EchoTool { name: "detached_a" })
+                Tool::new(EchoTool { name: "joined" }),
+                Tool::new(EchoTool { name: "detached_a" })
                     .with_config(ToolConfig { detached: true }),
-                Tool::from_sync(EchoTool { name: "detached_b" })
+                Tool::new(EchoTool { name: "detached_b" })
                     .with_config(ToolConfig { detached: true }),
             ],
         ));

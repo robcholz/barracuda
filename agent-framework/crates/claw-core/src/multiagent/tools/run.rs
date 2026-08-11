@@ -2,8 +2,7 @@ use alloc::{boxed::Box, string::ToString, sync::Arc};
 
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, AsyncToolHandler, Tool, ToolError, ToolFuture, ToolInvocation, ToolOutput,
-    ToolSpec,
+    tool_metadata, Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use super::super::model::TranscriptText;
@@ -13,7 +12,7 @@ use super::helper::trace_subagent_bound;
 use super::spawn::SpawnRequest;
 
 pub(super) fn tool(control: Arc<SubagentControl>, policy: SpawnPolicy) -> Tool {
-    Tool::from_async(RunSubagentTool { control, policy })
+    Tool::new(RunSubagentTool { control, policy })
 }
 
 struct RunSubagentTool {
@@ -29,7 +28,7 @@ impl ToolSpec for RunSubagentTool {
     }
 }
 
-impl AsyncToolHandler for RunSubagentTool {
+impl ToolHandler for RunSubagentTool {
     fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(async move {
             let request = SpawnRequest::parse(call, &self.policy, "subagent_run")?;
@@ -44,7 +43,7 @@ impl AsyncToolHandler for RunSubagentTool {
                 .await
                 .map_err(|error| ToolError::InvokeRejected(error.to_string()))?;
             trace_subagent_bound(child);
-            let result = result.recv().await.map_err(|_| {
+            let result = result.await.map_err(|_| {
                 ToolError::InvokeRejected(format!("subagent {child} result channel closed"))
             })?;
             self.control.acknowledge_delivery(child);

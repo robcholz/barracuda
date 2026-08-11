@@ -5,8 +5,8 @@ use core::cell::RefCell;
 
 use claw_skill::{SkillError, SkillId, SkillSet};
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
+    ToolSpec,
 };
 use serde_json::Value;
 
@@ -17,13 +17,13 @@ pub(super) fn skill_tools(skills: Arc<RefCell<SkillSet>>) -> ToolGroup {
         "skill",
         true,
         [
-            Tool::from_sync(ListSkillTool {
+            Tool::new(ListSkillTool {
                 skills: Arc::clone(&skills),
             }),
-            Tool::from_sync(ActivateSkillTool {
+            Tool::new(ActivateSkillTool {
                 skills: Arc::clone(&skills),
             }),
-            Tool::from_sync(ReloadSkillsTool { skills }),
+            Tool::new(ReloadSkillsTool { skills }),
         ],
     )
 }
@@ -37,21 +37,23 @@ impl ToolSpec for ListSkillTool {
     tool_metadata!("skill_list");
 }
 
-impl SyncToolHandler for ListSkillTool {
-    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let mut skills = lock_skill_set(&self.skills);
-        let output = match skills.list_skill() {
-            Ok(output) => output.to_owned(),
-            Err(error) => {
-                return Ok(ToolOutput {
-                    content: format!("Could not list skills: {error}"),
-                    ok: false,
-                });
-            }
-        };
-        Ok(ToolOutput {
-            content: output,
-            ok: true,
+impl ToolHandler for ListSkillTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let mut skills = lock_skill_set(&self.skills);
+            let output = match skills.list_skill() {
+                Ok(output) => output.to_owned(),
+                Err(error) => {
+                    return Ok(ToolOutput {
+                        content: format!("Could not list skills: {error}"),
+                        ok: false,
+                    });
+                }
+            };
+            Ok(ToolOutput {
+                content: output,
+                ok: true,
+            })
         })
     }
 }
@@ -65,45 +67,48 @@ impl ToolSpec for ActivateSkillTool {
     tool_metadata!("skill_activate");
 }
 
-impl SyncToolHandler for ActivateSkillTool {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let skill_id = match args.get("skill_id") {
-            Some(Value::String(skill_id)) => skill_id.trim(),
-            Some(_) => {
-                return Err(
-                    ToolError::InvalidArguments("`skill_id` must be a string".into()).into(),
-                );
-            }
-            None => {
+impl ToolHandler for ActivateSkillTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let args = call.arguments_value()?;
+            let skill_id = match args.get("skill_id") {
+                Some(Value::String(skill_id)) => skill_id.trim(),
+                Some(_) => {
+                    return Err(
+                        ToolError::InvalidArguments("`skill_id` must be a string".into()).into(),
+                    );
+                }
+                None => {
+                    return Err(ToolError::InvokeRejected(
+                        "`skill_id` is required: pass the id of a skill from skill_list."
+                            .to_string(),
+                    )
+                    .into());
+                }
+            };
+            if skill_id.is_empty() {
                 return Err(ToolError::InvokeRejected(
                     "`skill_id` is required: pass the id of a skill from skill_list.".to_string(),
                 )
                 .into());
             }
-        };
-        if skill_id.is_empty() {
-            return Err(ToolError::InvokeRejected(
-                "`skill_id` is required: pass the id of a skill from skill_list.".to_string(),
-            )
-            .into());
-        }
 
-        let mut skills = lock_skill_set(&self.skills);
-        match skills.activate_skill(&SkillId::new(skill_id)) {
-            Ok(document) => Ok(ToolOutput {
-                content: document.into_content(),
-                ok: true,
-            }),
-            Err(SkillError::NotFound(_)) => Err(ToolError::InvokeRejected(format!(
-                "unknown skill \"{skill_id}\"; call skill_list to see what is available."
-            ))
-            .into()),
-            Err(error) => Ok(ToolOutput {
-                content: format!("Could not activate skill \"{skill_id}\": {error}"),
-                ok: false,
-            }),
-        }
+            let mut skills = lock_skill_set(&self.skills);
+            match skills.activate_skill(&SkillId::new(skill_id)) {
+                Ok(document) => Ok(ToolOutput {
+                    content: document.into_content(),
+                    ok: true,
+                }),
+                Err(SkillError::NotFound(_)) => Err(ToolError::InvokeRejected(format!(
+                    "unknown skill \"{skill_id}\"; call skill_list to see what is available."
+                ))
+                .into()),
+                Err(error) => Ok(ToolOutput {
+                    content: format!("Could not activate skill \"{skill_id}\": {error}"),
+                    ok: false,
+                }),
+            }
+        })
     }
 }
 
@@ -116,18 +121,20 @@ impl ToolSpec for ReloadSkillsTool {
     tool_metadata!("skill_reload");
 }
 
-impl SyncToolHandler for ReloadSkillsTool {
-    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let skills = lock_skill_set(&self.skills);
-        if let Err(error) = skills.reload() {
-            return Ok(ToolOutput {
-                content: format!("Could not refresh skills from disk: {error}"),
-                ok: false,
-            });
-        }
-        Ok(ToolOutput {
-            content: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
-            ok: true,
+impl ToolHandler for ReloadSkillsTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let skills = lock_skill_set(&self.skills);
+            if let Err(error) = skills.reload() {
+                return Ok(ToolOutput {
+                    content: format!("Could not refresh skills from disk: {error}"),
+                    ok: false,
+                });
+            }
+            Ok(ToolOutput {
+                content: "Skills refreshed. Use skill_list to inspect the catalog.".to_string(),
+                ok: true,
+            })
         })
     }
 }

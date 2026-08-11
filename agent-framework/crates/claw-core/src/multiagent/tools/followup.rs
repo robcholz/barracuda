@@ -2,7 +2,7 @@ use alloc::{boxed::Box, sync::Arc};
 
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, AsyncToolHandler, Tool, ToolFuture, ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use crate::agent::tools::helper::non_blank_argument;
@@ -12,7 +12,7 @@ use super::super::tool_port::SubagentControl;
 use super::helper::{action_with_agent_resource, required_agent_id};
 
 pub(super) fn tool(control: Arc<SubagentControl>) -> Tool {
-    Tool::from_async(FollowupSubagentTool { control })
+    Tool::new(FollowupSubagentTool { control })
 }
 
 struct FollowupSubagentTool {
@@ -27,7 +27,7 @@ impl ToolSpec for FollowupSubagentTool {
     }
 }
 
-impl AsyncToolHandler for FollowupSubagentTool {
+impl ToolHandler for FollowupSubagentTool {
     fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments_value()?;

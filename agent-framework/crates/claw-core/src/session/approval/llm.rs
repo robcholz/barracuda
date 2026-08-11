@@ -18,8 +18,8 @@ use claw_api::{ChatRequest, ClawApiFactory, RetryPolicy, ToolCall};
 use claw_net::{Dns, TcpConnect};
 use claw_permission::{Action, RiskClass};
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolRunner, ToolSet, ToolSpec,
+    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
+    ToolRunner, ToolSet, ToolSpec,
 };
 use claw_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
@@ -117,59 +117,61 @@ impl ToolSpec for ResolvePermissionReplyTool {
     }
 }
 
-impl SyncToolHandler for ResolvePermissionReplyTool {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args: Value = serde_json::from_str(call.arguments_json()).map_err(|error| {
-            ToolError::InvalidArgumentsJson(format!("invalid tool arguments JSON: {error}"))
-        })?;
-        if !args.is_object() {
-            return Err(ToolError::InvalidArgumentsJson(
-                "tool arguments must be a JSON object".into(),
-            )
-            .into());
-        }
-
-        let Some(decision) = args
-            .get("decision")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return Err(ToolError::InvalidArguments(
-                "decision is required and must be a non-empty string".into(),
-            )
-            .into());
-        };
-
-        let resolution = match decision {
-            "yes" => ApprovalDecision::Approved,
-            "no" => ApprovalDecision::Rejected(USER_REJECTED.to_owned()),
-            "other" => {
-                let Some(reason) = args
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                else {
-                    return Err(ToolError::InvalidArguments(
-                        "reason is required when decision is other".into(),
-                    )
-                    .into());
-                };
-                ApprovalDecision::Rejected(reason.to_owned())
-            }
-            other => {
-                return Err(ToolError::InvalidArguments(format!(
-                    "decision must be yes|no|other, got '{other}'"
-                ))
+impl ToolHandler for ResolvePermissionReplyTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let args: Value = serde_json::from_str(call.arguments_json()).map_err(|error| {
+                ToolError::InvalidArgumentsJson(format!("invalid tool arguments JSON: {error}"))
+            })?;
+            if !args.is_object() {
+                return Err(ToolError::InvalidArgumentsJson(
+                    "tool arguments must be a JSON object".into(),
+                )
                 .into());
             }
-        };
 
-        *self.resolution.borrow_mut() = Some(resolution);
-        Ok(ToolOutput {
-            content: "approval reply resolved".to_string(),
-            ok: true,
+            let Some(decision) = args
+                .get("decision")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return Err(ToolError::InvalidArguments(
+                    "decision is required and must be a non-empty string".into(),
+                )
+                .into());
+            };
+
+            let resolution = match decision {
+                "yes" => ApprovalDecision::Approved,
+                "no" => ApprovalDecision::Rejected(USER_REJECTED.to_owned()),
+                "other" => {
+                    let Some(reason) = args
+                        .get("reason")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    else {
+                        return Err(ToolError::InvalidArguments(
+                            "reason is required when decision is other".into(),
+                        )
+                        .into());
+                    };
+                    ApprovalDecision::Rejected(reason.to_owned())
+                }
+                other => {
+                    return Err(ToolError::InvalidArguments(format!(
+                        "decision must be yes|no|other, got '{other}'"
+                    ))
+                    .into());
+                }
+            };
+
+            *self.resolution.borrow_mut() = Some(resolution);
+            Ok(ToolOutput {
+                content: "approval reply resolved".to_string(),
+                ok: true,
+            })
         })
     }
 }
@@ -194,9 +196,9 @@ where
     tools.add_group(ToolGroup::new(
         "permission",
         true,
-        [Tool::from_sync(ResolvePermissionReplyTool::new(
-            Arc::clone(&resolution),
-        ))],
+        [Tool::new(ResolvePermissionReplyTool::new(Arc::clone(
+            &resolution,
+        )))],
     ))?;
     let tools = tools.begin()?;
     let messages = json!([

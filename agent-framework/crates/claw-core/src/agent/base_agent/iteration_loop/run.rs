@@ -560,7 +560,7 @@ mod tests {
     use claw_api::{ChatError, ClawApiError, HttpError as NetError, NetworkErrorKind};
     use claw_permission::{AllowAll, RiskClass};
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
+        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
     };
     use futures_lite::future::block_on;
 
@@ -586,12 +586,14 @@ mod tests {
         }
     }
 
-    impl SyncToolHandler for CountingTool {
-        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(ToolOutput {
-                content: self.name.to_owned(),
-                ok: true,
+    impl ToolHandler for CountingTool {
+        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(ToolOutput {
+                    content: self.name.to_owned(),
+                    ok: true,
+                })
             })
         }
     }
@@ -632,11 +634,11 @@ mod tests {
                 "test",
                 true,
                 [
-                    Tool::from_sync(CountingTool {
+                    Tool::new(CountingTool {
                         name: "allowed",
                         calls: Arc::clone(executions),
                     }),
-                    Tool::from_sync(CountingTool {
+                    Tool::new(CountingTool {
                         name: "denied",
                         calls: Arc::clone(executions),
                     }),

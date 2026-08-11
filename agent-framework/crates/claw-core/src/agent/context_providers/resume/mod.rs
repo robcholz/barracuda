@@ -106,7 +106,7 @@ mod tests {
     use claw_context::Context;
     use claw_persistence::DurableState;
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
+        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
     };
 
     #[test]
@@ -151,11 +151,7 @@ mod tests {
     fn restored_tool_groups_are_reminded_without_loading_tools() {
         let mut tool_set = ToolSet::empty();
         tool_set
-            .add_group(ToolGroup::new(
-                "hidden",
-                false,
-                [Tool::from_sync(HiddenTool)],
-            ))
+            .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         state
@@ -192,11 +188,13 @@ mod tests {
         }
     }
 
-    impl SyncToolHandler for HiddenTool {
-        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-            Ok(ToolOutput {
-                content: "ok".to_owned(),
-                ok: true,
+    impl ToolHandler for HiddenTool {
+        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+            alloc::boxed::Box::pin(async {
+                Ok(ToolOutput {
+                    content: "ok".to_owned(),
+                    ok: true,
+                })
             })
         }
     }

@@ -35,10 +35,9 @@ pub fn claw_tool::RetryCount::none() -> Self
 pub struct claw_tool::Tool
 impl claw_tool::Tool
 pub fn claw_tool::Tool::config(&self) -> claw_tool::ToolConfig
-pub fn claw_tool::Tool::from_async(handler: impl claw_tool::AsyncToolHandler + 'static) -> Self
 pub fn claw_tool::Tool::from_detached(handler: impl claw_tool::DetachedToolHandler + 'static) -> Self
-pub fn claw_tool::Tool::from_sync(handler: impl claw_tool::SyncToolHandler + 'static) -> Self
 pub fn claw_tool::Tool::name(&self) -> &str
+pub fn claw_tool::Tool::new(handler: impl claw_tool::ToolHandler + 'static) -> Self
 pub fn claw_tool::Tool::schema(&self) -> &str
 pub fn claw_tool::Tool::usage(&self) -> core::option::Option<&str>
 pub fn claw_tool::Tool::with_config(self, config: claw_tool::ToolConfig) -> Self
@@ -126,12 +125,10 @@ pub fn claw_tool::ToolSetHandle<'a>::deferred_context(&self) -> &str
 pub fn claw_tool::ToolSetHandle<'a>::reminders(&self) -> &str
 pub fn claw_tool::ToolSetHandle<'a>::static_context(&self) -> &str
 pub fn claw_tool::ToolSetHandle<'a>::static_schemas(&self) -> &str
-pub trait claw_tool::AsyncToolHandler: claw_tool::ToolSpec
-pub fn claw_tool::AsyncToolHandler::invoke<'a>(&'a self, call: &'a claw_tool::ToolInvocation) -> claw_tool::ToolFuture<'a>
 pub trait claw_tool::DetachedToolHandler: claw_tool::ToolSpec
 pub fn claw_tool::DetachedToolHandler::invoke<'a>(&'a self, call: &'a claw_tool::ToolInvocation) -> claw_tool::DetachedToolFuture<'a>
-pub trait claw_tool::SyncToolHandler: claw_tool::ToolSpec
-pub fn claw_tool::SyncToolHandler::invoke(&self, call: &claw_tool::ToolInvocation) -> claw_tool::ToolResult<claw_tool::ToolOutput>
+pub trait claw_tool::ToolHandler: claw_tool::ToolSpec
+pub fn claw_tool::ToolHandler::invoke<'a>(&'a self, call: &'a claw_tool::ToolInvocation) -> claw_tool::ToolFuture<'a>
 pub trait claw_tool::ToolSpec
 pub fn claw_tool::ToolSpec::classify(&self, _call: &claw_tool::ToolInvocation) -> claw_permission::action::Action
 pub fn claw_tool::ToolSpec::concurrent(&self) -> bool

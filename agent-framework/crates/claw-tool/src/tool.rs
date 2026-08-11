@@ -168,11 +168,7 @@ pub trait ToolSpec {
     }
 }
 
-pub trait SyncToolHandler: ToolSpec {
-    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput>;
-}
-
-pub trait AsyncToolHandler: ToolSpec {
+pub trait ToolHandler: ToolSpec {
     fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
 }
 
@@ -221,22 +217,14 @@ pub struct Tool {
 }
 
 enum ToolInner {
-    Sync(Box<dyn SyncToolHandler>),
-    Async(Box<dyn AsyncToolHandler>),
+    Handler(Box<dyn ToolHandler>),
     Detached(Box<dyn DetachedToolHandler>),
 }
 
 impl Tool {
-    pub fn from_sync(handler: impl SyncToolHandler + 'static) -> Self {
+    pub fn new(handler: impl ToolHandler + 'static) -> Self {
         Self {
-            inner: Arc::new(ToolInner::Sync(Box::new(handler))),
-            config: ToolConfig::default(),
-        }
-    }
-
-    pub fn from_async(handler: impl AsyncToolHandler + 'static) -> Self {
-        Self {
-            inner: Arc::new(ToolInner::Async(Box::new(handler))),
+            inner: Arc::new(ToolInner::Handler(Box::new(handler))),
             config: ToolConfig::default(),
         }
     }
@@ -296,8 +284,7 @@ impl Tool {
 
     async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         match self.inner.as_ref() {
-            ToolInner::Sync(handler) => handler.invoke(call),
-            ToolInner::Async(handler) => handler.invoke(call).await,
+            ToolInner::Handler(handler) => handler.invoke(call).await,
             ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
                 "dynamically detached tool requires detached execution".to_owned(),
             )
@@ -311,7 +298,7 @@ impl Tool {
     ) -> ToolResult<DetachedTool> {
         match self.inner.as_ref() {
             ToolInner::Detached(handler) => handler.invoke(call).await,
-            ToolInner::Sync(_) | ToolInner::Async(_) => Err(ToolError::InvokeRejected(
+            ToolInner::Handler(_) => Err(ToolError::InvokeRejected(
                 "tool does not support dynamic detached execution".to_owned(),
             )
             .into()),
@@ -320,8 +307,7 @@ impl Tool {
 
     fn spec(&self) -> &dyn ToolSpec {
         match self.inner.as_ref() {
-            ToolInner::Sync(handler) => handler.as_ref(),
-            ToolInner::Async(handler) => handler.as_ref(),
+            ToolInner::Handler(handler) => handler.as_ref(),
             ToolInner::Detached(handler) => handler.as_ref(),
         }
     }

@@ -8,8 +8,9 @@ use anyhow::{anyhow, Result};
 use claw_interface::MemFs;
 use claw_persistence::{Persistence, SharedPersistence};
 use claw_tool::{
-    RetryCount, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolRegistry, ToolRegistryError, ToolResult, ToolRunner, ToolSetHandle, ToolSpec,
+    RetryCount, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle,
+    ToolSpec,
 };
 use futures_lite::StreamExt as _;
 
@@ -17,7 +18,7 @@ use futures_lite::StreamExt as _;
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {
     let registry = registry()?;
     let mut tool_set = registry.tool_set();
-    tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
+    tool_set.add_group(ToolGroup::new("local", true, [Tool::new(EchoTool)]))?;
 
     let handle = tool_set.begin()?;
     assert_eq!(
@@ -45,8 +46,7 @@ fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
     let registry = registry()?;
     let mut tool_set = registry.tool_set();
 
-    let error = match tool_set.add_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)]))
-    {
+    let error = match tool_set.add_group(ToolGroup::new("echo", true, [Tool::new(EchoTool)])) {
         Ok(()) => return Err(anyhow!("group and tool names must be distinct")),
         Err(error) => error,
     };
@@ -62,7 +62,7 @@ fn local_group_id_cannot_equal_its_tool_name() -> Result<()> {
 fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
     let registry = registry()?;
     let mut tool_set = registry.tool_set();
-    tool_set.add_group(ToolGroup::new("local", true, [Tool::from_sync(EchoTool)]))?;
+    tool_set.add_group(ToolGroup::new("local", true, [Tool::new(EchoTool)]))?;
 
     tool_set.temporarily_disable_tool("echo".into())?;
 
@@ -108,7 +108,7 @@ fn temporary_disable_blocks_runner_but_keeps_tool_context() -> Result<()> {
 #[test]
 fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("test", true, [Tool::new(EchoTool)]))?;
     let mut tool_set = registry.tool_set();
 
     {
@@ -150,12 +150,8 @@ fn registry_tools_appear_only_after_registry_is_started() -> Result<()> {
 fn registry_rejects_duplicate_tools_across_groups() -> Result<()> {
     let registry = registry()?;
 
-    registry.register_group(ToolGroup::new("first", true, [Tool::from_sync(EchoTool)]))?;
-    let err = match registry.register_group(ToolGroup::new(
-        "second",
-        true,
-        [Tool::from_sync(EchoTool)],
-    )) {
+    registry.register_group(ToolGroup::new("first", true, [Tool::new(EchoTool)]))?;
+    let err = match registry.register_group(ToolGroup::new("second", true, [Tool::new(EchoTool)])) {
         Ok(()) => return Err(anyhow!("duplicate tool should fail")),
         Err(error) => error,
     };
@@ -168,11 +164,10 @@ fn registry_rejects_duplicate_tools_across_groups() -> Result<()> {
 fn registry_rejects_a_group_id_that_is_also_a_tool_name() -> Result<()> {
     let registry = registry()?;
 
-    let error =
-        match registry.register_group(ToolGroup::new("echo", true, [Tool::from_sync(EchoTool)])) {
-            Ok(()) => return Err(anyhow!("group and tool names must be distinct")),
-            Err(error) => error,
-        };
+    let error = match registry.register_group(ToolGroup::new("echo", true, [Tool::new(EchoTool)])) {
+        Ok(()) => return Err(anyhow!("group and tool names must be distinct")),
+        Err(error) => error,
+    };
 
     assert!(matches!(
         error,
@@ -184,12 +179,8 @@ fn registry_rejects_a_group_id_that_is_also_a_tool_name() -> Result<()> {
 #[test]
 fn tool_set_blacklist_matches_an_exact_registry_group() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new("allowed", true, [Tool::from_sync(EchoTool)]))?;
-    registry.register_group(ToolGroup::new(
-        "blocked",
-        true,
-        [Tool::from_sync(OtherTool)],
-    ))?;
+    registry.register_group(ToolGroup::new("allowed", true, [Tool::new(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("blocked", true, [Tool::new(OtherTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set_with_blacklist(&["blocked"]);
@@ -221,7 +212,7 @@ fn tool_set_blacklist_matches_one_exact_tool_name() -> Result<()> {
     registry.register_group(ToolGroup::new(
         "mixed",
         true,
-        [Tool::from_sync(EchoTool), Tool::from_sync(OtherTool)],
+        [Tool::new(EchoTool), Tool::new(OtherTool)],
     ))?;
     registry.start_all()?;
 
@@ -247,7 +238,7 @@ fn tool_set_blacklist_applies_to_groups_added_after_construction() -> Result<()>
     let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["plan"]);
 
-    tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
+    tool_set.add_group(ToolGroup::new("plan", true, [Tool::new(EchoTool)]))?;
 
     let handle = tool_set.begin()?;
     assert_eq!(handle.static_schemas(), "no schemas");
@@ -266,7 +257,7 @@ fn blacklist_does_not_interpret_wildcards() -> Result<()> {
     let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["plan_*"]);
 
-    tool_set.add_group(ToolGroup::new("plan", true, [Tool::from_sync(EchoTool)]))?;
+    tool_set.add_group(ToolGroup::new("plan", true, [Tool::new(EchoTool)]))?;
 
     let handle = tool_set.begin()?;
     assert!(matches!(
@@ -281,7 +272,7 @@ fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
     let registry = registry()?;
     let mut tool_set = registry.tool_set_with_blacklist(&["late"]);
 
-    registry.register_group(ToolGroup::new("late", true, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("late", true, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
     let handle = tool_set.begin()?;
@@ -292,7 +283,7 @@ fn blacklist_applies_to_registry_groups_registered_later() -> Result<()> {
 #[test]
 fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set();
@@ -311,12 +302,8 @@ fn tool_set_uses_registry_group_default_visibility() -> Result<()> {
 #[test]
 fn hidden_group_is_searchable_then_loadable() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new(
-        "visible",
-        true,
-        [Tool::from_sync(OtherTool)],
-    ))?;
-    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("visible", true, [Tool::new(OtherTool)]))?;
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set();
@@ -388,7 +375,7 @@ fn hidden_group_is_searchable_then_loadable() -> Result<()> {
 #[test]
 fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set_with_blacklist(&["hidden"]);
@@ -404,7 +391,7 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
 #[test]
 fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
     let registry = registry()?;
-    registry.register_group(ToolGroup::new("hidden", false, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("hidden", false, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
     let mut tool_set = registry.tool_set();
 
@@ -421,13 +408,13 @@ fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
 fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
     let persistence = persistence()?;
     let registry = ToolRegistry::new(Arc::clone(&persistence))?;
-    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("test", true, [Tool::new(EchoTool)]))?;
     registry.disable("echo")?;
     persistence.maybe_persist()?;
     drop(registry);
 
     let registry = Arc::new(ToolRegistry::new(persistence)?);
-    registry.register_group(ToolGroup::new("test", true, [Tool::from_sync(EchoTool)]))?;
+    registry.register_group(ToolGroup::new("test", true, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
     let mut tool_set = registry.tool_set();
@@ -500,14 +487,16 @@ impl ToolSpec for EchoTool {
     }
 }
 
-impl SyncToolHandler for EchoTool {
-    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
-        if call.name() != self.name() {
-            return Err(ToolError::NotFound(call.name().to_owned()).into());
-        }
-        Ok(ToolOutput {
-            content: call.arguments_json().to_owned(),
-            ok: true,
+impl ToolHandler for EchoTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async move {
+            if call.name() != self.name() {
+                return Err(ToolError::NotFound(call.name().to_owned()).into());
+            }
+            Ok(ToolOutput {
+                content: call.arguments_json().to_owned(),
+                ok: true,
+            })
         })
     }
 }
@@ -524,14 +513,16 @@ impl ToolSpec for OtherTool {
     }
 }
 
-impl SyncToolHandler for OtherTool {
-    fn invoke(&self, call: &ToolInvocation) -> ToolResult<ToolOutput> {
-        if call.name() != self.name() {
-            return Err(ToolError::NotFound(call.name().to_owned()).into());
-        }
-        Ok(ToolOutput {
-            content: "other".into(),
-            ok: true,
+impl ToolHandler for OtherTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async move {
+            if call.name() != self.name() {
+                return Err(ToolError::NotFound(call.name().to_owned()).into());
+            }
+            Ok(ToolOutput {
+                content: "other".into(),
+                ok: true,
+            })
         })
     }
 }
@@ -555,16 +546,18 @@ impl ToolSpec for FailBeforeSuccess {
     }
 }
 
-impl SyncToolHandler for FailBeforeSuccess {
-    fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-        if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err(ToolInvokeError::new(ToolError::InvokeRejected(
-                "try again".into(),
-            )));
-        }
-        Ok(ToolOutput {
-            content: "ok".into(),
-            ok: true,
+impl ToolHandler for FailBeforeSuccess {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        Box::pin(async move {
+            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Err(ToolInvokeError::new(ToolError::InvokeRejected(
+                    "try again".into(),
+                )));
+            }
+            Ok(ToolOutput {
+                content: "ok".into(),
+                ok: true,
+            })
         })
     }
 }
@@ -593,7 +586,7 @@ fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<T
     tool_set.add_group(ToolGroup::new(
         "retry",
         true,
-        [Tool::from_sync(FailBeforeSuccess {
+        [Tool::new(FailBeforeSuccess {
             attempts,
             retry_count,
         })],

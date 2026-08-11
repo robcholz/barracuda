@@ -3,8 +3,8 @@
 use claw_permission::{Action, RiskClass};
 use claw_persistence::DurableState;
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolDiscoveryHandle, ToolError, ToolGroup,
-    ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolDiscoveryHandle, ToolError, ToolFuture, ToolGroup, ToolHandler,
+    ToolInvocation, ToolOutput, ToolSpec,
 };
 use serde_json::json;
 
@@ -22,10 +22,10 @@ pub(super) fn discovery_tools(
         "tool_discovery",
         true,
         [
-            Tool::from_sync(ToolSearchTool {
+            Tool::new(ToolSearchTool {
                 discovery: discovery.clone(),
             }),
-            Tool::from_sync(ToolLoadTool { discovery, state }),
+            Tool::new(ToolLoadTool { discovery, state }),
         ],
     )
 }
@@ -50,30 +50,32 @@ impl ToolSpec for ToolLoadTool {
     }
 }
 
-impl SyncToolHandler for ToolLoadTool {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let group_id = optional_string_argument(&args, "group_id")?
-            .map(|group_id| group_id.trim().to_owned())
-            .filter(|group_id| !group_id.is_empty())
-            .ok_or_else(|| {
-                ToolError::InvalidArguments("tool_load 'group_id' is required".into())
-            })?;
+impl ToolHandler for ToolLoadTool {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let args = call.arguments_value()?;
+            let group_id = optional_string_argument(&args, "group_id")?
+                .map(|group_id| group_id.trim().to_owned())
+                .filter(|group_id| !group_id.is_empty())
+                .ok_or_else(|| {
+                    ToolError::InvalidArguments("tool_load 'group_id' is required".into())
+                })?;
 
-        let loaded = self.discovery.request_load(group_id.clone());
-        if loaded {
-            self.state
-                .get_mut()
-                .record_loaded_tool_group(group_id.clone());
-        }
-        Ok(ToolOutput {
-            content: json!({
-                "group_id": group_id,
-                "loaded": loaded,
-                "available_next_turn": loaded,
+            let loaded = self.discovery.request_load(group_id.clone());
+            if loaded {
+                self.state
+                    .get_mut()
+                    .record_loaded_tool_group(group_id.clone());
+            }
+            Ok(ToolOutput {
+                content: json!({
+                    "group_id": group_id,
+                    "loaded": loaded,
+                    "available_next_turn": loaded,
+                })
+                .to_string(),
+                ok: loaded,
             })
-            .to_string(),
-            ok: loaded,
         })
     }
 }
@@ -86,11 +88,13 @@ impl ToolSpec for ToolSearchTool {
     }
 }
 
-impl SyncToolHandler for ToolSearchTool {
-    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        Ok(ToolOutput {
-            content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
-            ok: true,
+impl ToolHandler for ToolSearchTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            Ok(ToolOutput {
+                content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
+                ok: true,
+            })
         })
     }
 }
@@ -100,8 +104,9 @@ impl SyncToolHandler for ToolSearchTool {
 mod tests {
     use claw_persistence::DurableState;
     use claw_tool::{
-        SyncToolHandler, Tool, ToolGroup, ToolInvocation, ToolOutput, ToolResult, ToolSet, ToolSpec,
+        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
     };
+    use futures_lite::future::block_on;
 
     use super::ToolLoadTool;
     use crate::agent::{AgentKind, BaseAgentState};
@@ -110,11 +115,7 @@ mod tests {
     fn successful_load_is_recorded_in_agent_state() {
         let mut tool_set = ToolSet::empty();
         tool_set
-            .add_group(ToolGroup::new(
-                "hidden",
-                false,
-                [Tool::from_sync(HiddenTool)],
-            ))
+            .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");
         let discovery = tool_set.discovery();
         {
@@ -129,7 +130,7 @@ mod tests {
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
                 .expect("valid invocation");
 
-        let output = tool.invoke(&call).expect("load succeeds");
+        let output = block_on(tool.invoke(&call)).expect("load succeeds");
 
         assert!(output.ok);
         assert!(state.get().loaded_tool_groups().contains("hidden"));
@@ -147,11 +148,13 @@ mod tests {
         }
     }
 
-    impl SyncToolHandler for HiddenTool {
-        fn invoke(&self, _call: &ToolInvocation) -> ToolResult<ToolOutput> {
-            Ok(ToolOutput {
-                content: "ok".to_owned(),
-                ok: true,
+    impl ToolHandler for HiddenTool {
+        fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+            alloc::boxed::Box::pin(async {
+                Ok(ToolOutput {
+                    content: "ok".to_owned(),
+                    ok: true,
+                })
             })
         }
     }

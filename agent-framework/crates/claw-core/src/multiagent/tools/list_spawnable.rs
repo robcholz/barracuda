@@ -1,11 +1,11 @@
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolInvocation, ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 
 use super::super::policy::SpawnPolicy;
 
 pub(super) fn tool(policy: SpawnPolicy) -> Tool {
-    Tool::from_sync(ListSpawnableAgentsTool { policy })
+    Tool::new(ListSpawnableAgentsTool { policy })
 }
 
 struct ListSpawnableAgentsTool {
@@ -20,19 +20,21 @@ impl ToolSpec for ListSpawnableAgentsTool {
     }
 }
 
-impl SyncToolHandler for ListSpawnableAgentsTool {
-    fn invoke(&self, _call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let kinds: Vec<serde_json::Value> = self
-            .policy
-            .catalog()
-            .iter()
-            .map(|(kind, description)| {
-                serde_json::json!({ "kind": kind.as_str(), "description": description })
+impl ToolHandler for ListSpawnableAgentsTool {
+    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let kinds: Vec<serde_json::Value> = self
+                .policy
+                .catalog()
+                .iter()
+                .map(|(kind, description)| {
+                    serde_json::json!({ "kind": kind.as_str(), "description": description })
+                })
+                .collect();
+            Ok(ToolOutput {
+                content: serde_json::json!({ "spawnable_agents": kinds }).to_string(),
+                ok: true,
             })
-            .collect();
-        Ok(ToolOutput {
-            content: serde_json::json!({ "spawnable_agents": kinds }).to_string(),
-            ok: true,
         })
     }
 }

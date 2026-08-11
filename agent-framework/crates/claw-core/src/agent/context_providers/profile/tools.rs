@@ -6,8 +6,8 @@ use claw_interface::ClawFs;
 use claw_memory::{ProfileDocument, ProfileStore};
 use claw_permission::{Action, Resource, RiskClass};
 use claw_tool::{
-    tool_metadata, SyncToolHandler, Tool, ToolError, ToolGroup, ToolInvocation, ToolInvokeError,
-    ToolOutput, ToolSpec,
+    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolSpec,
 };
 use serde_json::Value;
 
@@ -18,13 +18,13 @@ pub(crate) fn profile_tools<F: ClawFs + 'static>(store: ProfileStore<F>) -> Tool
         "profile",
         true,
         [
-            Tool::from_sync(ProfileReadTool {
+            Tool::new(ProfileReadTool {
                 store: store.clone(),
             }),
-            Tool::from_sync(ProfileReplaceTool {
+            Tool::new(ProfileReplaceTool {
                 store: store.clone(),
             }),
-            Tool::from_sync(ProfileClearTool { store }),
+            Tool::new(ProfileClearTool { store }),
         ],
     )
 }
@@ -45,28 +45,30 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReadTool<F> {
     }
 }
 
-impl<F: ClawFs + 'static> SyncToolHandler for ProfileReadTool<F> {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let document = document_from_args(&args)?;
-        match self.store.read(document) {
-            Ok(Some(content)) => Ok(ToolOutput {
-                content: if content.trim().is_empty() {
-                    format!("Profile document {document} is empty.")
-                } else {
-                    format!("Profile document {document}:\n{content}")
-                },
-                ok: true,
-            }),
-            Ok(None) => Ok(ToolOutput {
-                content: format!("Profile document {document} does not exist."),
-                ok: true,
-            }),
-            Err(error) => Ok(ToolOutput {
-                content: format!("Could not read profile document {document}: {error}."),
-                ok: false,
-            }),
-        }
+impl<F: ClawFs + 'static> ToolHandler for ProfileReadTool<F> {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let args = call.arguments_value()?;
+            let document = document_from_args(&args)?;
+            match self.store.read(document) {
+                Ok(Some(content)) => Ok(ToolOutput {
+                    content: if content.trim().is_empty() {
+                        format!("Profile document {document} is empty.")
+                    } else {
+                        format!("Profile document {document}:\n{content}")
+                    },
+                    ok: true,
+                }),
+                Ok(None) => Ok(ToolOutput {
+                    content: format!("Profile document {document} does not exist."),
+                    ok: true,
+                }),
+                Err(error) => Ok(ToolOutput {
+                    content: format!("Could not read profile document {document}: {error}."),
+                    ok: false,
+                }),
+            }
+        })
     }
 }
 
@@ -82,25 +84,27 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileReplaceTool<F> {
     }
 }
 
-impl<F: ClawFs + 'static> SyncToolHandler for ProfileReplaceTool<F> {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let document = document_from_args(&args)?;
-        let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
-            ToolInvokeError::new(ToolError::InvokeRejected(
-                "missing required string field 'content'".into(),
-            ))
-        })?;
-        match self.store.replace(document, content) {
-            Ok(()) => Ok(ToolOutput {
-                content: format!("Replaced profile document {document}."),
-                ok: true,
-            }),
-            Err(error) => Ok(ToolOutput {
-                content: format!("Could not replace profile document {document}: {error}."),
-                ok: false,
-            }),
-        }
+impl<F: ClawFs + 'static> ToolHandler for ProfileReplaceTool<F> {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let args = call.arguments_value()?;
+            let document = document_from_args(&args)?;
+            let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
+                ToolInvokeError::new(ToolError::InvokeRejected(
+                    "missing required string field 'content'".into(),
+                ))
+            })?;
+            match self.store.replace(document, content) {
+                Ok(()) => Ok(ToolOutput {
+                    content: format!("Replaced profile document {document}."),
+                    ok: true,
+                }),
+                Err(error) => Ok(ToolOutput {
+                    content: format!("Could not replace profile document {document}: {error}."),
+                    ok: false,
+                }),
+            }
+        })
     }
 }
 
@@ -116,20 +120,22 @@ impl<F: ClawFs + 'static> ToolSpec for ProfileClearTool<F> {
     }
 }
 
-impl<F: ClawFs + 'static> SyncToolHandler for ProfileClearTool<F> {
-    fn invoke(&self, call: &ToolInvocation) -> Result<ToolOutput, ToolInvokeError> {
-        let args = call.arguments_value()?;
-        let document = document_from_args(&args)?;
-        match self.store.clear(document) {
-            Ok(()) => Ok(ToolOutput {
-                content: format!("Cleared profile document {document}."),
-                ok: true,
-            }),
-            Err(error) => Ok(ToolOutput {
-                content: format!("Could not clear profile document {document}: {error}."),
-                ok: false,
-            }),
-        }
+impl<F: ClawFs + 'static> ToolHandler for ProfileClearTool<F> {
+    fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
+        alloc::boxed::Box::pin(async move {
+            let args = call.arguments_value()?;
+            let document = document_from_args(&args)?;
+            match self.store.clear(document) {
+                Ok(()) => Ok(ToolOutput {
+                    content: format!("Cleared profile document {document}."),
+                    ok: true,
+                }),
+                Err(error) => Ok(ToolOutput {
+                    content: format!("Could not clear profile document {document}: {error}."),
+                    ok: false,
+                }),
+            }
+        })
     }
 }
 

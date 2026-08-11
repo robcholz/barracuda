@@ -23,7 +23,7 @@ pub use set::{
     ToolSetHandle,
 };
 pub use tool::{
-    AsyncToolHandler, DetachedTool, DetachedToolFuture, DetachedToolHandler, RetryCount,
-    SyncToolHandler, Tool, ToolCompletionFuture, ToolConfig, ToolError, ToolFuture, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
+    DetachedTool, DetachedToolFuture, DetachedToolHandler, RetryCount, Tool, ToolCompletionFuture,
+    ToolConfig, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
+    ToolResult, ToolSpec,
 };
