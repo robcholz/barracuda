@@ -27,11 +27,6 @@ pub claw_tool::ToolSetError::NotFound(claw_tool::ToolName)
 pub struct claw_tool::DetachedTool
 impl claw_tool::DetachedTool
 pub fn claw_tool::DetachedTool::new(accepted: claw_tool::ToolOutput, completion: claw_tool::ToolCompletionFuture) -> Self
-pub struct claw_tool::RetryCount
-impl claw_tool::RetryCount
-pub fn claw_tool::RetryCount::extra(extra_attempts: u32) -> Self
-pub fn claw_tool::RetryCount::extra_attempts(self) -> u32
-pub fn claw_tool::RetryCount::none() -> Self
 pub struct claw_tool::Tool
 impl claw_tool::Tool
 pub fn claw_tool::Tool::config(&self) -> claw_tool::ToolConfig
@@ -133,7 +128,6 @@ pub trait claw_tool::ToolSpec
 pub fn claw_tool::ToolSpec::classify(&self, _call: &claw_tool::ToolInvocation) -> claw_permission::action::Action
 pub fn claw_tool::ToolSpec::concurrent(&self) -> bool
 pub fn claw_tool::ToolSpec::name(&self) -> &str
-pub fn claw_tool::ToolSpec::retry_count(&self) -> claw_tool::RetryCount
 pub fn claw_tool::ToolSpec::schema(&self) -> &str
 pub fn claw_tool::ToolSpec::usage(&self) -> core::option::Option<&str>
 pub type claw_tool::DetachedToolFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = claw_tool::ToolResult<claw_tool::DetachedTool>> + 'a)>>

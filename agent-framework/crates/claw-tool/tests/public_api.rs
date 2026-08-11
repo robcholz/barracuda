@@ -1,6 +1,5 @@
 use core::future::Future;
 use core::task::{Context, Poll};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::task::Waker;
 
@@ -8,9 +7,8 @@ use anyhow::{anyhow, Result};
 use claw_interface::MemFs;
 use claw_persistence::{Persistence, SharedPersistence};
 use claw_tool::{
-    RetryCount, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle,
-    ToolSpec,
+    Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolRegistry,
+    ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
 };
 use futures_lite::StreamExt as _;
 
@@ -439,38 +437,6 @@ fn invocation_rejects_non_object_arguments() {
     ));
 }
 
-#[test]
-fn runner_retries_tool_according_to_retry_count() -> Result<()> {
-    let attempts = Arc::new(AtomicU32::new(0));
-    let outcome = run_retry_tool(RetryCount::extra(1), Arc::clone(&attempts))?;
-
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "ok".into(),
-            ok: true,
-        }
-    );
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    Ok(())
-}
-
-#[test]
-fn runner_does_not_retry_by_default() -> Result<()> {
-    let attempts = Arc::new(AtomicU32::new(0));
-    let outcome = run_retry_tool(RetryCount::none(), Arc::clone(&attempts))?;
-
-    assert_eq!(
-        outcome,
-        ToolOutput {
-            content: "tool invocation rejected: try again".into(),
-            ok: false,
-        }
-    );
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    Ok(())
-}
-
 struct EchoTool;
 
 impl ToolSpec for EchoTool {
@@ -527,41 +493,6 @@ impl ToolHandler for OtherTool {
     }
 }
 
-struct FailBeforeSuccess {
-    attempts: Arc<AtomicU32>,
-    retry_count: RetryCount,
-}
-
-impl ToolSpec for FailBeforeSuccess {
-    fn name(&self) -> &str {
-        "retry_demo"
-    }
-
-    fn schema(&self) -> &str {
-        "{}"
-    }
-
-    fn retry_count(&self) -> RetryCount {
-        self.retry_count
-    }
-}
-
-impl ToolHandler for FailBeforeSuccess {
-    fn invoke<'a>(&'a self, _call: &'a ToolInvocation) -> ToolFuture<'a> {
-        Box::pin(async move {
-            if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Err(ToolInvokeError::new(ToolError::InvokeRejected(
-                    "try again".into(),
-                )));
-            }
-            Ok(ToolOutput {
-                content: "ok".into(),
-                ok: true,
-            })
-        })
-    }
-}
-
 fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolInvocation> {
     ToolInvocation::try_new(None, name, arguments_json).map_err(|error| anyhow!("{error:?}"))
 }
@@ -579,21 +510,6 @@ fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<Too
             .map(|(_, output)| output)
             .ok_or_else(|| anyhow!("join stream ended without a result"))
     })?
-}
-
-fn run_retry_tool(retry_count: RetryCount, attempts: Arc<AtomicU32>) -> Result<ToolOutput> {
-    let mut tool_set = claw_tool::ToolSet::empty();
-    tool_set.add_group(ToolGroup::new(
-        "retry",
-        true,
-        [Tool::new(FailBeforeSuccess {
-            attempts,
-            retry_count,
-        })],
-    ))?;
-    let handle = tool_set.begin()?;
-    let call = invocation("retry_demo", "{}")?;
-    execute_tool(&handle, &call)
 }
 
 fn persistence() -> Result<SharedPersistence<MemFs>> {

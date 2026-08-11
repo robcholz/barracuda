@@ -127,25 +127,6 @@ impl From<ToolError> for ToolInvokeError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct RetryCount {
-    extra_attempts: u32,
-}
-
-impl RetryCount {
-    pub fn none() -> Self {
-        Self { extra_attempts: 0 }
-    }
-
-    pub fn extra(extra_attempts: u32) -> Self {
-        Self { extra_attempts }
-    }
-
-    pub fn extra_attempts(self) -> u32 {
-        self.extra_attempts
-    }
-}
-
 pub trait ToolSpec {
     fn name(&self) -> &str;
 
@@ -157,10 +138,6 @@ pub trait ToolSpec {
 
     fn concurrent(&self) -> bool {
         false
-    }
-
-    fn retry_count(&self) -> RetryCount {
-        RetryCount::none()
     }
 
     fn classify(&self, _call: &ToolInvocation) -> Action {
@@ -262,27 +239,6 @@ impl Tool {
     }
 
     pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
-        retry_no_backoff(self.spec().retry_count().extra_attempts(), move || {
-            self.invoke_once(call)
-        })
-        .await
-    }
-
-    pub(crate) fn is_dynamically_detached(&self) -> bool {
-        matches!(self.inner.as_ref(), ToolInner::Detached(_))
-    }
-
-    pub(crate) async fn invoke_detached<'a>(
-        &'a self,
-        call: &'a ToolInvocation,
-    ) -> ToolResult<DetachedTool> {
-        retry_no_backoff(self.spec().retry_count().extra_attempts(), move || {
-            self.invoke_detached_once(call)
-        })
-        .await
-    }
-
-    async fn invoke_once<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         match self.inner.as_ref() {
             ToolInner::Handler(handler) => handler.invoke(call).await,
             ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
@@ -292,7 +248,11 @@ impl Tool {
         }
     }
 
-    async fn invoke_detached_once<'a>(
+    pub(crate) fn is_dynamically_detached(&self) -> bool {
+        matches!(self.inner.as_ref(), ToolInner::Detached(_))
+    }
+
+    pub(crate) async fn invoke_detached<'a>(
         &'a self,
         call: &'a ToolInvocation,
     ) -> ToolResult<DetachedTool> {
@@ -316,25 +276,5 @@ impl Tool {
 impl fmt::Debug for Tool {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_tuple("Tool").field(&self.name()).finish()
-    }
-}
-
-/// Retry an attempt with no backoff until it succeeds or the extra attempts run
-/// out. Shared by the joined and detached invocation paths so retry handling
-/// lives in one place.
-async fn retry_no_backoff<T, Fut>(
-    extra_attempts: u32,
-    mut attempt: impl FnMut() -> Fut,
-) -> ToolResult<T>
-where
-    Fut: Future<Output = ToolResult<T>>,
-{
-    let mut remaining = extra_attempts;
-    loop {
-        match attempt().await {
-            Ok(output) => return Ok(output),
-            Err(_) if remaining > 0 => remaining = remaining.saturating_sub(1),
-            Err(error) => return Err(error),
-        }
     }
 }

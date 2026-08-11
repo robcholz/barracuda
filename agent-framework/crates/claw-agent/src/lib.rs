@@ -37,7 +37,7 @@ use claw_tool::{ToolRegistry, ToolRegistryError};
 /// Types needed to define tools accepted by [`AgentSystem::with_tool_groups`].
 pub mod tools {
     pub use claw_tool::{
-        tool_metadata, Action, Resource, RetryCount, RiskClass, Tool, ToolConfig, ToolError,
+        tool_metadata, Action, Resource, RiskClass, Tool, ToolConfig, ToolError,
         ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
         ToolResult, ToolSpec,
     };
