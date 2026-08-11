@@ -342,16 +342,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
-name = "bytes-utils"
-version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dafe3a8757b027e2be6e4e5601ed563c55989fcf1546e933c66c8eb3a058d35"
-dependencies = [
- "bytes",
- "either",
-]
-
-[[package]]
 name = "camino"
 version = "1.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -495,6 +485,7 @@ dependencies = [
  "embedded-io",
  "embedded-io-async",
  "embedded-nal-async",
+ "eventsource-stream",
  "futures-core",
  "futures-lite",
  "mbedtls-rs",
@@ -502,7 +493,6 @@ dependencies = [
  "reqwless",
  "serde",
  "serde_json",
- "sseer",
  "strum 0.28.0",
  "tempdir",
  "thiserror 2.0.18",
@@ -1309,6 +1299,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8be9f3dfaaffdae2972880079a491a1a8bb7cbed0b8dd7a347f668b4150a3b93"
 dependencies = [
  "event-listener",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "eventsource-stream"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab"
+dependencies = [
+ "futures-core",
+ "nom",
  "pin-project-lite",
 ]
 
@@ -2548,19 +2549,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "der 0.7.10",
-]
-
-[[package]]
-name = "sseer"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7362b2e53ed631553b757f306f5612f6f99f621279842c614998fab91934627a"
-dependencies = [
- "bytes",
- "bytes-utils",
- "futures-core",
- "memchr",
- "pin-project-lite",
 ]
 
 [[package]]

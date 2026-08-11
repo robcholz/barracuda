@@ -11,10 +11,9 @@ use alloc::vec::Vec;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use eventsource_stream::{EventStream, EventStreamError};
 use futures_core::Stream;
 use futures_lite::StreamExt;
-use sseer::errors::EventStreamError;
-use sseer::EventStream;
 
 use crate::backends::shared::map_net_error;
 use crate::backends::sse::ProviderSse;
@@ -134,7 +133,7 @@ where
                     this.parser = None;
                     return Poll::Ready(Some(Err(error)));
                 }
-                Poll::Ready(Some(Err(EventStreamError::Utf8Error(_)))) => {
+                Poll::Ready(Some(Err(EventStreamError::Utf8(_) | EventStreamError::Parser(_)))) => {
                     this.parser = None;
                     return Poll::Ready(Some(Err(ClawApiError::Parse.into())));
                 }

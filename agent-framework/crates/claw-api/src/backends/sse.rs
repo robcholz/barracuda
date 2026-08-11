@@ -1,9 +1,10 @@
 //! Streaming SSE parsing: turn a provider's `text/event-stream` body into
 //! ordered [`ChatStreamEvent`]s.
 //!
-//! `sseer` owns standards-compliant SSE framing, including fragmented UTF-8 and
-//! multiline `data:` fields. Each provider parser remains a synchronous state
-//! machine driven by one complete SSE data payload at a time.
+//! `eventsource-stream` owns standards-compliant SSE framing, including
+//! fragmented UTF-8 and multiline `data:` fields. Each provider parser remains
+//! a synchronous state machine driven by one complete SSE data payload at a
+//! time.
 //!
 //! Ordering contract (both providers): within one response the three logical
 //! streams are explicitly closed in order: `Reasoning(Delta)* ->
@@ -510,8 +511,8 @@ fn block_index(value: &Value) -> Result<usize, ChatError> {
 #[cfg(test)]
 mod tests {
     use alloc::vec;
+    use eventsource_stream::EventStream;
     use futures_lite::{future::block_on, StreamExt as _};
-    use sseer::EventStream;
 
     use super::*;
 
