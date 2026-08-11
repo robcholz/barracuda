@@ -19,7 +19,7 @@ use super::super::async_llm::SharedAsyncLlm;
 use crate::config::{ApiPurpose, SharedApiManager};
 
 use super::extraction::{ExtractError, ExtractFuture, ExtractionInput, Extractor, MemorySnapshot};
-use super::tools::{decode_extraction_operations as decode_operations, EXTRACTION_TOOLS_JSON};
+use super::tools::ExtractionTools;
 
 /// System prompt steering the extraction through canonical memory tool calls.
 const EXTRACT_SYSTEM_PROMPT: &str = prompt!("memory/long_term_extraction_system.md");
@@ -64,6 +64,7 @@ impl<H: TcpConnect + Dns + 'static> LlmExtractor<H> {
 impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
         Box::pin(async move {
+            let mut extraction_tools = ExtractionTools::new().map_err(ExtractError::from)?;
             let prompt = format!(
                 "{EXTRACT_MEMORY_HEADER}\n{}\n\n{EXTRACT_TRANSCRIPT_HEADER}\n{}",
                 render_existing(input.existing),
@@ -71,8 +72,9 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
             );
             let messages = [json!({ "role": "user", "content": prompt })];
 
-            let request = ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages)
-                .with_tools(EXTRACTION_TOOLS_JSON);
+            let tool_schemas = extraction_tools.schemas().map_err(ExtractError::from)?;
+            let request =
+                ChatRequest::new(EXTRACT_SYSTEM_PROMPT, &messages).with_tools(&tool_schemas);
             let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
             let chat_span =
                 tracing::info_span!("api.chat", purpose = "memory_extraction", max_attempts,);
@@ -89,7 +91,10 @@ impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
             .await
             .map_err(ExtractError::from)?;
 
-            decode_operations(response.tool_calls).map_err(ExtractError::from)
+            extraction_tools
+                .run(response.tool_calls)
+                .await
+                .map_err(ExtractError::from)
         })
     }
 }
@@ -116,13 +121,16 @@ fn render_existing(existing: &[MemorySnapshot]) -> String {
 #[cfg(test)]
 mod tests {
     use claw_api::ToolCall;
+    use futures_lite::future::block_on;
 
     use super::super::extraction::MemoryOp;
 
     #[test]
     fn extraction_tools_come_from_the_canonical_tool_resources() {
-        let schemas: serde_json::Value = serde_json::from_str(super::EXTRACTION_TOOLS_JSON)
-            .expect("extraction tools are valid JSON");
+        let mut tools = super::ExtractionTools::new().expect("extraction tools build");
+        let schemas_json = tools.schemas().expect("extraction tool schemas render");
+        let schemas: serde_json::Value =
+            serde_json::from_str(&schemas_json).expect("extraction tools are valid JSON");
         let names = schemas
             .as_array()
             .expect("tool schemas form an array")
@@ -130,7 +138,7 @@ mod tests {
             .filter_map(|schema| schema.pointer("/function/name")?.as_str())
             .collect::<alloc::vec::Vec<_>>();
 
-        assert_eq!(names, ["memory_store", "memory_update", "memory_forget"]);
+        assert_eq!(names, ["memory_forget", "memory_store", "memory_update"]);
     }
 
     #[test]
@@ -155,7 +163,7 @@ mod tests {
             },
         ];
 
-        let operations = super::decode_operations(calls).expect("valid tool calls decode");
+        let operations = block_on(run_extraction_tools(calls)).expect("valid tool calls execute");
         assert_eq!(operations.len(), 3);
         assert!(matches!(
             &operations[0],
@@ -184,6 +192,27 @@ mod tests {
             arguments_json: r#"{"content":"fact","tags":["   "]}"#.into(),
         }];
 
-        assert!(super::decode_operations(calls).is_err());
+        assert!(block_on(run_extraction_tools(calls)).is_err());
+    }
+
+    #[test]
+    fn extraction_tool_calls_use_standard_tool_lookup_errors() {
+        let calls = vec![ToolCall {
+            id: "1".into(),
+            name: "unexpected".into(),
+            arguments_json: "{}".into(),
+        }];
+
+        let error = block_on(run_extraction_tools(calls))
+            .expect_err("an unregistered extraction tool must fail");
+
+        assert!(error.to_string().contains("tool not found: unexpected"));
+    }
+
+    async fn run_extraction_tools(
+        calls: Vec<ToolCall>,
+    ) -> Result<Vec<MemoryOp>, claw_tool::ToolInvokeError> {
+        let mut tools = super::ExtractionTools::new()?;
+        tools.run(calls).await
     }
 }
