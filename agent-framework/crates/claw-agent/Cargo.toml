@@ -19,22 +19,12 @@ name = "embassy_runtime"
 #   to this executor-neutral framework crate.
 # - `cache_profile` forwards provider usage support.
 #
-# `claw-agent` is the public feature-selection boundary. It disables
-# `claw-core`'s implicit defaults below and forwards every runtime-shape choice,
-# so consumers never need to configure an implementation crate directly.
-default = ["reasoning_medium"]
 multiagent = ["claw-core/multiagent"]
 # Provider token/cache usage diagnostics.
 cache_profile = [
     "claw-api/cache_profile",
     "claw-core/cache_profile",
 ]
-
-# Compile-time byte cap on accumulated reasoning deltas. Exactly one tier must
-# be selected; the default preserves the existing 2000-byte cap.
-reasoning_short = ["claw-core/reasoning_short"]
-reasoning_medium = ["claw-core/reasoning_medium"]
-reasoning_long = ["claw-core/reasoning_long"]
 
 [dependencies]
 claw-core = { path = "../claw-core", default-features = false }

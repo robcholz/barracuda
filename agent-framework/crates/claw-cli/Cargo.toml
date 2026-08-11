@@ -9,12 +9,6 @@ description = "Host CLI applications for the ESP-Claw agent framework"
 name = "claw-agent-chat"
 path = "src/main.rs"
 
-[features]
-default = ["reasoning_medium"]
-reasoning_short = ["claw-agent/reasoning_short"]
-reasoning_medium = ["claw-agent/reasoning_medium"]
-reasoning_long = ["claw-agent/reasoning_long"]
-
 [dependencies]
 claw-agent = { path = "../claw-agent", default-features = false, features=["cache_profile", "multiagent"] }
 claw-api = { path = "../claw-api", features = ["mbedtls-host"] }

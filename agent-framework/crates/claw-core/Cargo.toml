@@ -22,15 +22,6 @@ cache_profile = ["claw-api/cache_profile"]
 # Disabled builds contain only the root-Agent Session path.
 multiagent = []
 
-# Compile-time byte cap on accumulated `SessionEvent::Reasoning` deltas in one
-# iteration. EXACTLY ONE may be enabled (event.rs emits a compile_error! for zero
-# or multiple). Default is `reasoning_short`; to change the tier, disable
-# defaults (`default-features = false`) and pick one.
-default = ["reasoning_short"]
-reasoning_short = []  # 2000 bytes
-reasoning_medium = [] # 8000 bytes
-reasoning_long = []   # 32000 bytes
-
 [dependencies]
 claw-interface = { path = "../claw-interface" }
 claw-utils = { path = "../claw-utils" }

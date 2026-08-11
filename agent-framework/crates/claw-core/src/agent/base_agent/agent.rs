@@ -322,7 +322,6 @@ struct IterationConsumer<'a> {
     assistant: Option<AssistantHandle<'a>>,
     draft: AssistantDraft,
     phase: ContentPhase,
-    reasoning_bytes: usize,
     assistant_finished: bool,
     saw_tool_calls: bool,
 }
@@ -335,15 +334,13 @@ impl<'a> IterationConsumer<'a> {
             assistant: Some(assistant),
             draft: AssistantDraft::default(),
             phase: ContentPhase::Reasoning,
-            reasoning_bytes: 0,
             assistant_finished: false,
             saw_tool_calls: false,
         })
     }
 
-    /// Apply one reasoning part before returning the matching owner-facing
-    /// item. `None` means the fragment was intentionally capped.
-    fn consume_reasoning(&mut self, part: StreamPart<String>) -> Option<StreamPart<String>> {
+    /// Apply one reasoning part before returning the matching owner-facing item.
+    fn consume_reasoning(&mut self, part: StreamPart<String>) -> StreamPart<String> {
         debug_assert!(!self.assistant_finished);
         match part {
             StreamPart::Delta(fragment) => {
@@ -351,12 +348,12 @@ impl<'a> IterationConsumer<'a> {
                 if let Some(assistant) = self.assistant.as_mut() {
                     assistant.append(AssistantFragment::Reasoning(&fragment));
                 }
-                self.reasoning_progress(fragment)
+                StreamPart::Delta(fragment)
             }
             StreamPart::End => {
                 debug_assert_eq!(self.phase, ContentPhase::Reasoning);
                 self.phase = ContentPhase::Output;
-                Some(StreamPart::End)
+                StreamPart::End
             }
         }
     }
@@ -382,24 +379,6 @@ impl<'a> IterationConsumer<'a> {
                 Ok(StreamPart::End)
             }
         }
-    }
-
-    fn reasoning_progress(&mut self, mut fragment: String) -> Option<StreamPart<String>> {
-        debug_assert_eq!(self.phase, ContentPhase::Reasoning);
-        if fragment.is_empty() || self.reasoning_bytes >= reasoning_limit() {
-            return None;
-        }
-        let remaining = reasoning_limit().saturating_sub(self.reasoning_bytes);
-        let mut end = remaining.min(fragment.len());
-        while end > 0 && !fragment.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
-        if end == 0 {
-            return None;
-        }
-        self.reasoning_bytes = self.reasoning_bytes.saturating_add(end);
-        fragment.truncate(end);
-        Some(StreamPart::Delta(fragment))
     }
 
     fn finish_content(&mut self) -> Vec<AgentIterationEvent> {
@@ -455,25 +434,6 @@ impl<'a> IterationConsumer<'a> {
         }
         self.assistant_finished = true;
         Ok(())
-    }
-}
-
-const fn reasoning_limit() -> usize {
-    #[cfg(feature = "reasoning_short")]
-    {
-        2_000
-    }
-    #[cfg(all(feature = "reasoning_medium", not(feature = "reasoning_short")))]
-    {
-        8_000
-    }
-    #[cfg(all(
-        feature = "reasoning_long",
-        not(feature = "reasoning_short"),
-        not(feature = "reasoning_medium")
-    ))]
-    {
-        32_000
     }
 }
 
@@ -692,13 +652,12 @@ where
                         };
                         match event {
                             IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
-                                if let Some(part) = consumer.consume_reasoning(part) {
-                                    yielder
-                                        .yield_one(Ok(BaseAgentEvent::Iteration(
-                                            StreamPart::Delta(AgentIterationEvent::Reasoning(part)),
-                                        )))
-                                        .await;
-                                }
+                                let part = consumer.consume_reasoning(part);
+                                yielder
+                                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                        AgentIterationEvent::Reasoning(part),
+                                    ))))
+                                    .await;
                             }
                             IterationLoopEvent::Iteration(IterationEvent::Output(part)) => {
                                 match consumer.consume_output(part) {
@@ -893,9 +852,7 @@ mod tests {
 
         let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
         let mut actual = vec![AgentIterationEvent::Reasoning(
-            consumer
-                .consume_reasoning(StreamPart::End)
-                .expect("reasoning end is visible"),
+            consumer.consume_reasoning(StreamPart::End),
         )];
         let first = consumer
             .consume_output(StreamPart::Delta("Hel".to_owned()))
@@ -981,6 +938,25 @@ mod tests {
             })
         );
         drop(turn);
+    }
+
+    #[test]
+    fn long_reasoning_delta_is_forwarded_in_full() {
+        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 3, "/transcript")
+            .expect("in-memory transcript opens");
+        let turn = transcript.open_turn().expect("turn opens");
+        {
+            let mut user = turn.user().expect("user message opens");
+            user.append("hello");
+        }
+
+        let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
+        let reasoning = "界".repeat(1_000);
+
+        assert_eq!(
+            consumer.consume_reasoning(StreamPart::Delta(reasoning.clone())),
+            StreamPart::Delta(reasoning)
+        );
     }
 
     fn assistant_content(transcript: &TranscriptStore<MemFs>) -> Option<String> {

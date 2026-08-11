@@ -51,12 +51,10 @@ done
 run cargo check --locked -p claw-api --target "$bare_target" \
     --no-default-features --features embedded-tls
 
-for tier in reasoning_short reasoning_medium reasoning_long; do
-    run cargo check --locked -p claw-core --target "$bare_target" \
-        --no-default-features --features "$tier multiagent"
-    run cargo check --locked -p claw-agent --target "$bare_target" \
-        --no-default-features --features "$tier multiagent cache_profile"
-done
+run cargo check --locked -p claw-core --target "$bare_target" \
+    --no-default-features --features multiagent
+run cargo check --locked -p claw-agent --target "$bare_target" \
+    --no-default-features --features "multiagent cache_profile"
 
 for crate in "${host_test_crates[@]}"; do
     if [[ "$crate" == "claw-net" ]]; then

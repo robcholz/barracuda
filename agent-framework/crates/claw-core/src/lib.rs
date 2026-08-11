@@ -11,25 +11,6 @@
 #[macro_use]
 extern crate alloc;
 
-// The reasoning cap is a crate-wide compile-time tier. Reject missing or
-// ambiguous feature selections before any runtime modules are built.
-#[cfg(not(any(
-    feature = "reasoning_short",
-    feature = "reasoning_medium",
-    feature = "reasoning_long",
-)))]
-compile_error!(
-    "enable exactly one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
-);
-#[cfg(any(
-    all(feature = "reasoning_short", feature = "reasoning_medium"),
-    all(feature = "reasoning_short", feature = "reasoning_long"),
-    all(feature = "reasoning_medium", feature = "reasoning_long"),
-))]
-compile_error!(
-    "enable only one reasoning tier feature: `reasoning_short`, `reasoning_medium`, or `reasoning_long`"
-);
-
 /// Embed a prompt relative to `claw-core/resources/prompt/`.
 macro_rules! prompt {
     ($path:literal $(,)?) => {

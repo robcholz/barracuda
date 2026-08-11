@@ -3,12 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# `claw-core` defaults to reasoning_short while the public `claw-agent`
-# boundary defaults to reasoning_medium. Building both workspace packages in
-# one Cargo invocation unions those mutually exclusive features. Check the
-# assembled workspace first, then the implementation crate on its own.
-cargo check --workspace --exclude claw-core
-cargo check -p claw-core
+cargo check --workspace
 cargo check -p claw-agent --target riscv32imac-unknown-none-elf --features multiagent
 
 if ! cargo public-api --version >/dev/null 2>&1; then
