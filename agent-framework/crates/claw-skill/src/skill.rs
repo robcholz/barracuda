@@ -6,7 +6,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use core::fmt;
 
-use claw_interface::FsError;
+use claw_fs::FsError;
 use serde::Deserialize;
 use thiserror::Error;
 

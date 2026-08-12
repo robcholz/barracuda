@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_memory::{
     ProfileDocument, ProfileError, ProfileStore, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES,
 };

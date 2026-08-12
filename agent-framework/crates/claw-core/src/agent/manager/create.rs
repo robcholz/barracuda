@@ -2,7 +2,7 @@ use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 
 use claw_api::RetryPolicy;
 use claw_context::{Block, BlockKind};
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_memory::{Transcript, TranscriptStore};
 use claw_net::{Dns, TcpConnect};
 use claw_permission::PermissionPolicy;

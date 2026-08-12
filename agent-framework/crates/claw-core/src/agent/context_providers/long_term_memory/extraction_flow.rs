@@ -1,4 +1,4 @@
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{MemoryDraft, Transcript, Turn, TurnId};
 use serde_json::Value;
 use tracing::Instrument as _;
@@ -207,7 +207,7 @@ mod tests {
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex, MutexGuard};
 
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
     use claw_memory::{LongTermMemory, TranscriptStore};
     use claw_tool::ToolError;
     use futures_lite::future::block_on;

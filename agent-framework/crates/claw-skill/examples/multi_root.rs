@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_skill::{FsSkillRegistry, SkillName};
 
 fn skill_md(name: &str, description: &str) -> Vec<u8> {

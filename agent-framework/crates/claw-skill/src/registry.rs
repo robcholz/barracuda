@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use claw_interface::{ClawFs, FsError};
+use claw_fs::{ClawFs, FsError};
 
 use super::skill::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
 use super::skill_set::SkillSet;

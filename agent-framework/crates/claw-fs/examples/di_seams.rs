@@ -3,13 +3,13 @@
 //! Run with:
 //!
 //! ```bash
-//! cargo run -p claw-interface --example di_seams
+//! cargo run -p claw-fs --example di_seams
 //! ```
 //!
 //! Networking lives in `claw-api`, where reqwless consumes a concrete
 //! `embedded-nal-async` TCP/DNS stack through a platform adapter.
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 
 fn main() -> anyhow::Result<()> {
     filesystem_seam()?;

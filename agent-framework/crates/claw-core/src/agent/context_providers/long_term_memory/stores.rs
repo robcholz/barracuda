@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{
     LongTermError, LongTermInitError, LongTermMemory, MemoryDraft, MemoryId, MemoryItem,
     MemoryPatch, StoreOutcome,

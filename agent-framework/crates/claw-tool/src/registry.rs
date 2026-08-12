@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use core::cell::{Ref, RefCell, RefMut};
 use core::fmt;
 
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_persistence::{
     DurablePartError, DurableState, DurableStateCodec, PersistenceError, SchemaVersion,
     SharedPersistence, StateBlob, StateSlice,

@@ -7,7 +7,7 @@ use alloc::{boxed::Box, string::String, sync::Arc};
 
 use claw_api::ClawApiFactory;
 use claw_context::{Block, BlockKind, ContextSink};
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
 use claw_net::{Dns, TcpConnect};
 use claw_tool::ToolGroup;

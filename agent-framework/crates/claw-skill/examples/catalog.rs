@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_skill::FsSkillRegistry;
 
 /// Build a standard `SKILL.md` with YAML frontmatter and a Markdown body.

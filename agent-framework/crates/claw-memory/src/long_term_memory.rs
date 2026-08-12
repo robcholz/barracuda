@@ -47,7 +47,7 @@ use core::{
 
 use serde::{Deserialize, Serialize};
 
-use claw_interface::{ClawFs, FsError};
+use claw_fs::{ClawFs, FsError};
 
 /// Journal filename under the store directory.
 const RECORDS_FILE: &str = "memory_records.jsonl";
@@ -254,7 +254,7 @@ struct Inner<F: ClawFs + 'static> {
 /// # Examples
 ///
 /// ```
-/// use claw_interface::MemFs;
+/// use claw_fs::MemFs;
 /// use claw_memory::{LongTermMemory, MemoryDraft, StoreOutcome};
 ///
 /// # let filesystem = std::sync::Arc::new(MemFs::new());

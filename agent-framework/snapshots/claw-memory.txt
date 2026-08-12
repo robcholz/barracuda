@@ -15,24 +15,24 @@ pub claw_memory::long_term_memory::LongTermError::NotFound(claw_memory::long_ter
 pub enum claw_memory::long_term_memory::LongTermInitError
 pub claw_memory::long_term_memory::LongTermInitError::Unreadable
 pub claw_memory::long_term_memory::LongTermInitError::Unreadable::path: alloc::string::String
-pub claw_memory::long_term_memory::LongTermInitError::Unreadable::source: claw_interface::fs::FsError
+pub claw_memory::long_term_memory::LongTermInitError::Unreadable::source: claw_fs::fs::FsError
 pub enum claw_memory::long_term_memory::StoreOutcome
 pub claw_memory::long_term_memory::StoreOutcome::Created(claw_memory::long_term_memory::MemoryItem)
 pub claw_memory::long_term_memory::StoreOutcome::Duplicate(claw_memory::long_term_memory::MemoryItem)
 impl claw_memory::long_term_memory::StoreOutcome
 pub fn claw_memory::long_term_memory::StoreOutcome::item(&self) -> &claw_memory::long_term_memory::MemoryItem
-pub struct claw_memory::long_term_memory::LongTermMemory<F: claw_interface::fs::ClawFs + 'static>
-impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::long_term_memory::LongTermMemory<F>
+pub struct claw_memory::long_term_memory::LongTermMemory<F: claw_fs::fs::ClawFs + 'static>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_memory::long_term_memory::LongTermMemory<F>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::catalog(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::forget(&self, id: &claw_memory::long_term_memory::MemoryId) -> core::result::Result<(), claw_memory::long_term_memory::LongTermError>
-pub fn claw_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<claw_interface::fs::FsError>
+pub fn claw_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<claw_fs::fs::FsError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::list(&self) -> alloc::vec::Vec<claw_memory::long_term_memory::MemoryItem>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::new(filesystem: alloc::sync::Arc<F>, dir: &str, id_prefix: &str) -> core::result::Result<Self, claw_memory::long_term_memory::LongTermInitError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::recall(&self, labels: &[alloc::string::String], query: core::option::Option<&str>, limit: usize) -> alloc::vec::Vec<claw_memory::long_term_memory::MemoryItem>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::store(&self, draft: claw_memory::long_term_memory::MemoryDraft) -> claw_memory::long_term_memory::StoreOutcome
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::update(&self, id: &claw_memory::long_term_memory::MemoryId, patch: claw_memory::long_term_memory::MemoryPatch) -> core::result::Result<claw_memory::long_term_memory::MemoryItem, claw_memory::long_term_memory::LongTermError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::version(&self) -> u64
-impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::long_term_memory::LongTermMemory<F>
+impl<F: claw_fs::fs::ClawFs + 'static> core::clone::Clone for claw_memory::long_term_memory::LongTermMemory<F>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::clone(&self) -> Self
 pub struct claw_memory::long_term_memory::MemoryDraft
 pub claw_memory::long_term_memory::MemoryDraft::content: alloc::string::String
@@ -76,7 +76,7 @@ pub fn claw_memory::profile::ProfileDocument::fmt(&self, formatter: &mut core::f
 pub enum claw_memory::profile::ProfileError
 pub claw_memory::profile::ProfileError::File
 pub claw_memory::profile::ProfileError::File::document: claw_memory::profile::ProfileDocument
-pub claw_memory::profile::ProfileError::File::source: claw_interface::fs::FsError
+pub claw_memory::profile::ProfileError::File::source: claw_fs::fs::FsError
 pub claw_memory::profile::ProfileError::InvalidUtf8
 pub claw_memory::profile::ProfileError::InvalidUtf8::document: claw_memory::profile::ProfileDocument
 pub claw_memory::profile::ProfileError::TooLarge
@@ -88,8 +88,8 @@ pub struct claw_memory::profile::ProfileSnapshot
 pub claw_memory::profile::ProfileSnapshot::assistant_identity: core::option::Option<alloc::string::String>
 pub claw_memory::profile::ProfileSnapshot::soul: core::option::Option<alloc::string::String>
 pub claw_memory::profile::ProfileSnapshot::user_profile: core::option::Option<alloc::string::String>
-pub struct claw_memory::profile::ProfileStore<F: claw_interface::fs::ClawFs + 'static>
-impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::profile::ProfileStore<F>
+pub struct claw_memory::profile::ProfileStore<F: claw_fs::fs::ClawFs + 'static>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_memory::profile::ProfileStore<F>
 pub fn claw_memory::profile::ProfileStore<F>::clear(&self, document: claw_memory::profile::ProfileDocument) -> core::result::Result<(), claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::dir(&self) -> &str
 pub fn claw_memory::profile::ProfileStore<F>::ensure_default(&self, document: claw_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<bool, claw_memory::profile::ProfileError>
@@ -98,7 +98,7 @@ pub fn claw_memory::profile::ProfileStore<F>::path(&self, document: claw_memory:
 pub fn claw_memory::profile::ProfileStore<F>::read(&self, document: claw_memory::profile::ProfileDocument) -> core::result::Result<core::option::Option<alloc::string::String>, claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::replace(&self, document: claw_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<(), claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::snapshot(&self) -> core::result::Result<claw_memory::profile::ProfileSnapshot, claw_memory::profile::ProfileError>
-impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::profile::ProfileStore<F>
+impl<F: claw_fs::fs::ClawFs + 'static> core::clone::Clone for claw_memory::profile::ProfileStore<F>
 pub fn claw_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub const claw_memory::profile::ASSISTANT_IDENTITY_FILE: &str
 pub const claw_memory::profile::DEFAULT_PROFILE_DOCUMENT_MAX_BYTES: usize
@@ -112,16 +112,16 @@ pub claw_memory::transcript_store::AssistantFragment::ToolCall(serde_json::value
 pub enum claw_memory::transcript_store::TranscriptDeleteError
 pub claw_memory::transcript_store::TranscriptDeleteError::Delete
 pub claw_memory::transcript_store::TranscriptDeleteError::Delete::path: alloc::string::String
-pub claw_memory::transcript_store::TranscriptDeleteError::Delete::source: claw_interface::fs::FsError
+pub claw_memory::transcript_store::TranscriptDeleteError::Delete::source: claw_fs::fs::FsError
 pub enum claw_memory::transcript_store::TranscriptInitError
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable
 pub claw_memory::transcript_store::TranscriptInitError::Unreadable::path: alloc::string::String
-pub claw_memory::transcript_store::TranscriptInitError::Unreadable::source: claw_interface::fs::FsError
+pub claw_memory::transcript_store::TranscriptInitError::Unreadable::source: claw_fs::fs::FsError
 pub enum claw_memory::transcript_store::TranscriptListError
 pub claw_memory::transcript_store::TranscriptListError::InvalidFilename(alloc::string::String)
 pub claw_memory::transcript_store::TranscriptListError::List
 pub claw_memory::transcript_store::TranscriptListError::List::path: alloc::string::String
-pub claw_memory::transcript_store::TranscriptListError::List::source: claw_interface::fs::FsError
+pub claw_memory::transcript_store::TranscriptListError::List::source: claw_fs::fs::FsError
 pub enum claw_memory::transcript_store::TurnError
 pub claw_memory::transcript_store::TurnError::AlreadyOpen
 pub claw_memory::transcript_store::TurnError::Inactive
@@ -136,19 +136,19 @@ impl claw_memory::transcript_store::ToolHandle<'_>
 pub fn claw_memory::transcript_store::ToolHandle<'_>::append(&mut self, fragment: &str)
 impl core::ops::drop::Drop for claw_memory::transcript_store::ToolHandle<'_>
 pub fn claw_memory::transcript_store::ToolHandle<'_>::drop(&mut self)
-pub struct claw_memory::transcript_store::TranscriptStore<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::TranscriptStore<F>
+pub struct claw_memory::transcript_store::TranscriptStore<F: claw_fs::fs::ClawFs>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::delete(filesystem: &F, transcript_id: u32, dir: &str) -> core::result::Result<(), claw_memory::transcript_store::TranscriptDeleteError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(filesystem: &F, dir: &str) -> core::result::Result<alloc::vec::Vec<u32>, claw_memory::transcript_store::TranscriptListError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(filesystem: alloc::sync::Arc<F>, transcript_id: u32, dir: &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> core::ops::drop::Drop for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> core::ops::drop::Drop for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::drop(&mut self)
 pub struct claw_memory::transcript_store::Turn
 pub claw_memory::transcript_store::Turn::id: core::option::Option<claw_memory::transcript_store::TurnId>
@@ -185,7 +185,7 @@ pub trait claw_memory::transcript_store::Transcript
 pub fn claw_memory::transcript_store::Transcript::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::Transcript::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::Transcript::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
@@ -204,7 +204,7 @@ pub claw_memory::LongTermError::NotFound(claw_memory::long_term_memory::MemoryId
 pub enum claw_memory::LongTermInitError
 pub claw_memory::LongTermInitError::Unreadable
 pub claw_memory::LongTermInitError::Unreadable::path: alloc::string::String
-pub claw_memory::LongTermInitError::Unreadable::source: claw_interface::fs::FsError
+pub claw_memory::LongTermInitError::Unreadable::source: claw_fs::fs::FsError
 pub enum claw_memory::ProfileDocument
 pub claw_memory::ProfileDocument::AssistantIdentity
 pub claw_memory::ProfileDocument::Soul
@@ -218,7 +218,7 @@ pub fn claw_memory::profile::ProfileDocument::fmt(&self, formatter: &mut core::f
 pub enum claw_memory::ProfileError
 pub claw_memory::ProfileError::File
 pub claw_memory::ProfileError::File::document: claw_memory::profile::ProfileDocument
-pub claw_memory::ProfileError::File::source: claw_interface::fs::FsError
+pub claw_memory::ProfileError::File::source: claw_fs::fs::FsError
 pub claw_memory::ProfileError::InvalidUtf8
 pub claw_memory::ProfileError::InvalidUtf8::document: claw_memory::profile::ProfileDocument
 pub claw_memory::ProfileError::TooLarge
@@ -233,16 +233,16 @@ pub fn claw_memory::long_term_memory::StoreOutcome::item(&self) -> &claw_memory:
 pub enum claw_memory::TranscriptDeleteError
 pub claw_memory::TranscriptDeleteError::Delete
 pub claw_memory::TranscriptDeleteError::Delete::path: alloc::string::String
-pub claw_memory::TranscriptDeleteError::Delete::source: claw_interface::fs::FsError
+pub claw_memory::TranscriptDeleteError::Delete::source: claw_fs::fs::FsError
 pub enum claw_memory::TranscriptInitError
 pub claw_memory::TranscriptInitError::Unreadable
 pub claw_memory::TranscriptInitError::Unreadable::path: alloc::string::String
-pub claw_memory::TranscriptInitError::Unreadable::source: claw_interface::fs::FsError
+pub claw_memory::TranscriptInitError::Unreadable::source: claw_fs::fs::FsError
 pub enum claw_memory::TranscriptListError
 pub claw_memory::TranscriptListError::InvalidFilename(alloc::string::String)
 pub claw_memory::TranscriptListError::List
 pub claw_memory::TranscriptListError::List::path: alloc::string::String
-pub claw_memory::TranscriptListError::List::source: claw_interface::fs::FsError
+pub claw_memory::TranscriptListError::List::source: claw_fs::fs::FsError
 pub enum claw_memory::TurnError
 pub claw_memory::TurnError::AlreadyOpen
 pub claw_memory::TurnError::Inactive
@@ -252,18 +252,18 @@ impl claw_memory::transcript_store::AssistantHandle<'_>
 pub fn claw_memory::transcript_store::AssistantHandle<'_>::append(&mut self, fragment: claw_memory::transcript_store::AssistantFragment<'_>)
 impl core::ops::drop::Drop for claw_memory::transcript_store::AssistantHandle<'_>
 pub fn claw_memory::transcript_store::AssistantHandle<'_>::drop(&mut self)
-pub struct claw_memory::LongTermMemory<F: claw_interface::fs::ClawFs + 'static>
-impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::long_term_memory::LongTermMemory<F>
+pub struct claw_memory::LongTermMemory<F: claw_fs::fs::ClawFs + 'static>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_memory::long_term_memory::LongTermMemory<F>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::catalog(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::forget(&self, id: &claw_memory::long_term_memory::MemoryId) -> core::result::Result<(), claw_memory::long_term_memory::LongTermError>
-pub fn claw_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<claw_interface::fs::FsError>
+pub fn claw_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<claw_fs::fs::FsError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::list(&self) -> alloc::vec::Vec<claw_memory::long_term_memory::MemoryItem>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::new(filesystem: alloc::sync::Arc<F>, dir: &str, id_prefix: &str) -> core::result::Result<Self, claw_memory::long_term_memory::LongTermInitError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::recall(&self, labels: &[alloc::string::String], query: core::option::Option<&str>, limit: usize) -> alloc::vec::Vec<claw_memory::long_term_memory::MemoryItem>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::store(&self, draft: claw_memory::long_term_memory::MemoryDraft) -> claw_memory::long_term_memory::StoreOutcome
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::update(&self, id: &claw_memory::long_term_memory::MemoryId, patch: claw_memory::long_term_memory::MemoryPatch) -> core::result::Result<claw_memory::long_term_memory::MemoryItem, claw_memory::long_term_memory::LongTermError>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::version(&self) -> u64
-impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::long_term_memory::LongTermMemory<F>
+impl<F: claw_fs::fs::ClawFs + 'static> core::clone::Clone for claw_memory::long_term_memory::LongTermMemory<F>
 pub fn claw_memory::long_term_memory::LongTermMemory<F>::clone(&self) -> Self
 pub struct claw_memory::MemoryDraft
 pub claw_memory::MemoryDraft::content: alloc::string::String
@@ -298,8 +298,8 @@ pub struct claw_memory::ProfileSnapshot
 pub claw_memory::ProfileSnapshot::assistant_identity: core::option::Option<alloc::string::String>
 pub claw_memory::ProfileSnapshot::soul: core::option::Option<alloc::string::String>
 pub claw_memory::ProfileSnapshot::user_profile: core::option::Option<alloc::string::String>
-pub struct claw_memory::ProfileStore<F: claw_interface::fs::ClawFs + 'static>
-impl<F: claw_interface::fs::ClawFs + 'static> claw_memory::profile::ProfileStore<F>
+pub struct claw_memory::ProfileStore<F: claw_fs::fs::ClawFs + 'static>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_memory::profile::ProfileStore<F>
 pub fn claw_memory::profile::ProfileStore<F>::clear(&self, document: claw_memory::profile::ProfileDocument) -> core::result::Result<(), claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::dir(&self) -> &str
 pub fn claw_memory::profile::ProfileStore<F>::ensure_default(&self, document: claw_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<bool, claw_memory::profile::ProfileError>
@@ -308,26 +308,26 @@ pub fn claw_memory::profile::ProfileStore<F>::path(&self, document: claw_memory:
 pub fn claw_memory::profile::ProfileStore<F>::read(&self, document: claw_memory::profile::ProfileDocument) -> core::result::Result<core::option::Option<alloc::string::String>, claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::replace(&self, document: claw_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<(), claw_memory::profile::ProfileError>
 pub fn claw_memory::profile::ProfileStore<F>::snapshot(&self) -> core::result::Result<claw_memory::profile::ProfileSnapshot, claw_memory::profile::ProfileError>
-impl<F: claw_interface::fs::ClawFs + 'static> core::clone::Clone for claw_memory::profile::ProfileStore<F>
+impl<F: claw_fs::fs::ClawFs + 'static> core::clone::Clone for claw_memory::profile::ProfileStore<F>
 pub fn claw_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub struct claw_memory::ToolHandle<'a>
 impl claw_memory::transcript_store::ToolHandle<'_>
 pub fn claw_memory::transcript_store::ToolHandle<'_>::append(&mut self, fragment: &str)
 impl core::ops::drop::Drop for claw_memory::transcript_store::ToolHandle<'_>
 pub fn claw_memory::transcript_store::ToolHandle<'_>::drop(&mut self)
-pub struct claw_memory::TranscriptStore<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::TranscriptStore<F>
+pub struct claw_memory::TranscriptStore<F: claw_fs::fs::ClawFs>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::delete(filesystem: &F, transcript_id: u32, dir: &str) -> core::result::Result<(), claw_memory::transcript_store::TranscriptDeleteError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(filesystem: &F, dir: &str) -> core::result::Result<alloc::vec::Vec<u32>, claw_memory::transcript_store::TranscriptListError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::new(filesystem: alloc::sync::Arc<F>, transcript_id: u32, dir: &str) -> core::result::Result<Self, claw_memory::transcript_store::TranscriptInitError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> core::ops::drop::Drop for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> core::ops::drop::Drop for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::drop(&mut self)
 pub struct claw_memory::Turn
 pub claw_memory::Turn::id: core::option::Option<claw_memory::transcript_store::TurnId>
@@ -370,7 +370,7 @@ pub trait claw_memory::Transcript
 pub fn claw_memory::Transcript::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::Transcript::turn_version(&self) -> u64
 pub fn claw_memory::Transcript::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>
-impl<F: claw_interface::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
+impl<F: claw_fs::fs::ClawFs> claw_memory::transcript_store::Transcript for claw_memory::transcript_store::TranscriptStore<F>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<claw_memory::transcript_store::TurnHandle, claw_memory::transcript_store::TurnError>
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn claw_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<claw_memory::transcript_store::Turn>>

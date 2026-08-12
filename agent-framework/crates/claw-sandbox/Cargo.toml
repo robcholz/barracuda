@@ -12,12 +12,12 @@ name = "claw_sandbox"
 crate-type = ["rlib"]
 
 [dependencies]
-claw-interface = { path = "../claw-interface" }
+claw-fs = { path = "../claw-fs" }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 # Hermetic in-memory ClawFs double for host-target sandbox tests.
-claw-interface = { path = "../claw-interface" }
+claw-fs = { path = "../claw-fs" }
 # Ergonomic error handling for the host dev workflow `sandbox_demo` example.
 anyhow = "1"
 

@@ -834,7 +834,7 @@ impl<H: TcpConnect + Dns + 'static> Drop for ActiveRunGuard<'_, H> {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
     use claw_memory::TranscriptStore;
     use serde_json::json;
 

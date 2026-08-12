@@ -14,7 +14,7 @@ no_std_crates=(
     claw-api
     claw-context
     claw-core
-    claw-interface
+    claw-fs
     claw-net
     claw-memory
     claw-permission
@@ -29,7 +29,7 @@ host_test_crates=(
     claw-api
     claw-context
     claw-core
-    claw-interface
+    claw-fs
     claw-net
     claw-memory
     claw-permission

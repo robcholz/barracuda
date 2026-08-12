@@ -1,6 +1,6 @@
 #![no_std]
 
-//! `claw_interface` — the OS / platform abstraction layer for the claw Rust
+//! `claw_fs` — the OS / platform abstraction layer for the claw Rust
 //! crates.
 //!
 //! This is the inbound boundary (C / OS -> Rust): it defines the

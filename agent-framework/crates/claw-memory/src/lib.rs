@@ -8,8 +8,8 @@
 //!   `identity.md`, `user.md`).
 //! - [`LongTermMemory`] — the durable fact store.
 //!
-//! As a core crate it depends only on the [`claw_interface`] inbound traits — the
-//! [`ClawFs`](claw_interface::ClawFs) persistence seam — never on the platform
+//! As a core crate it depends only on the [`claw_fs`] inbound traits — the
+//! [`ClawFs`](claw_fs::ClawFs) persistence seam — never on the platform
 //! boundary or on the LLM client (`claw-api`).
 //!
 //! # Compaction is *not* here
@@ -26,7 +26,7 @@
 //! # Using the transcript store
 //!
 //! ```no_run
-//! use claw_interface::MemFs;
+//! use claw_fs::MemFs;
 //! use claw_memory::{AssistantFragment, TranscriptStore};
 //! use std::sync::Arc;
 //!

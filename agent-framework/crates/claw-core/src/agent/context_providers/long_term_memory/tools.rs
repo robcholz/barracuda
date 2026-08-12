@@ -7,7 +7,7 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use claw_api::ToolCall;
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{MemoryDraft, MemoryId, MemoryItem, MemoryPatch, StoreOutcome};
 use claw_tool::{
     tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
@@ -362,7 +362,7 @@ fn render_items(header: &str, items: &[MemoryItem]) -> String {
 mod tests {
     use alloc::sync::Arc;
 
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
     use claw_memory::LongTermMemory;
     use futures_lite::future::block_on;
 

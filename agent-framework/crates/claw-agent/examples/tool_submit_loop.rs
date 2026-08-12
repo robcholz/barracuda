@@ -23,7 +23,7 @@ use claw_agent::{
     SessionEvent, SessionPersistence, TurnEvent,
 };
 use claw_api::ClawApi;
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_log::{LevelFilter, LogOutput, TracingConfig};
 use claw_net::testing::{ScriptStep, ScriptedStack};
 use futures_lite::StreamExt;

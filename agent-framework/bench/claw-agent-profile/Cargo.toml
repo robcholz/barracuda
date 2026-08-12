@@ -16,5 +16,5 @@ embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 claw-agent = { path = "../../crates/claw-agent" }
 claw-api = { path = "../../crates/claw-api" }
 claw-net = { path = "../../crates/claw-net", features = ["testing"] }
-claw-interface = { path = "../../crates/claw-interface" }
+claw-fs = { path = "../../crates/claw-fs" }
 claw-profile = { path = "../claw-profile", features = ["dhat-heap"] }

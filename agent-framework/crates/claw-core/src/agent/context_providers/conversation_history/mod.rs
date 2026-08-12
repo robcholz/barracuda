@@ -271,7 +271,7 @@ mod tests {
     use std::sync::Arc;
 
     use claw_context::Context;
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
     use claw_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
     use futures_lite::future::block_on;
     use serde_json::{json, Value};

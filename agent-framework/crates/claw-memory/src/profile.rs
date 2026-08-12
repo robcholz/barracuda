@@ -12,7 +12,7 @@ use alloc::{
 };
 use core::fmt;
 
-use claw_interface::{ClawFs, FsError};
+use claw_fs::{ClawFs, FsError};
 use strum::{EnumString, IntoStaticStr};
 
 /// Filename for the assistant soul/persona document.

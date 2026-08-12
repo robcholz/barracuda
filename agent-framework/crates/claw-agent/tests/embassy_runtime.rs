@@ -1,6 +1,6 @@
 use claw_agent::{AgentPersistenceConfig, AgentSystem, ClawApiFactory, SessionPersistence};
 use claw_api::ClawApi;
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_net::testing::NeverStack;
 use futures_lite::future::{block_on, zip};
 

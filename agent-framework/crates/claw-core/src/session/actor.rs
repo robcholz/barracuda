@@ -12,7 +12,7 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use claw_api::ToolCall;
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::DurableState;
 use claw_tool::ToolGroup;

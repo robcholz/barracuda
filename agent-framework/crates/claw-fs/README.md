@@ -1,4 +1,4 @@
-# claw-interface
+# claw-fs
 
 The OS / platform abstraction layer for the claw Rust crates.
 
@@ -34,7 +34,7 @@ one place. They are **never** enabled in a device build.
 ## Example
 
 ```bash
-cargo run -p claw-interface --example di_seams
+cargo run -p claw-fs --example di_seams
 ```
 
 Exercises the `ClawFs` seam with `MemFs`.

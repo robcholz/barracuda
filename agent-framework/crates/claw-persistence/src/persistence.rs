@@ -10,7 +10,7 @@ use core::cell::RefCell;
 use core::error::Error;
 use core::marker::PhantomData;
 
-use claw_interface::{ClawFs, FsError};
+use claw_fs::{ClawFs, FsError};
 
 use crate::{
     is_valid_key, DurablePartError, DurableState, DurableStateCodec, InstanceId, PartGeneration,
@@ -592,7 +592,7 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
-    use claw_interface::{ClawFs, MemFs};
+    use claw_fs::{ClawFs, MemFs};
 
     use super::*;
 

@@ -7,12 +7,12 @@
 //! the sandbox, or a write to a read-only root — as distinct error variants
 //! rather than folding them into a generic I/O error.
 //!
-//! [`ClawFs`]: claw_interface::ClawFs
+//! [`ClawFs`]: claw_fs::ClawFs
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use claw_interface::FsError;
+use claw_fs::FsError;
 
 /// The virtual path prefixes that are visible inside the sandbox.
 ///
@@ -76,7 +76,7 @@ pub enum SandboxError {
 /// - mutating methods can fail with [`SandboxError::ReadOnly`] on a read-only
 ///   root.
 ///
-/// [`ClawFs`]: claw_interface::ClawFs
+/// [`ClawFs`]: claw_fs::ClawFs
 pub trait SandboxFs {
     /// Read the whole file at `path`.
     fn read(&self, path: &str) -> Result<Vec<u8>, SandboxError>;
@@ -100,7 +100,7 @@ pub trait SandboxFs {
     /// the two are distinct, unlike [`ClawFs::exists`], which collapses both
     /// into `false`.
     ///
-    /// [`ClawFs::exists`]: claw_interface::ClawFs::exists
+    /// [`ClawFs::exists`]: claw_fs::ClawFs::exists
     fn exists(&self, path: &str) -> Result<bool, SandboxError>;
 
     /// Remove `path`. Removing a missing (but visible) path succeeds.

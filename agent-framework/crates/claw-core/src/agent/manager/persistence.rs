@@ -1,6 +1,6 @@
 use alloc::{borrow::ToOwned, collections::BTreeSet, vec::Vec};
 
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::TranscriptStore;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::{DurableState, InstanceId};

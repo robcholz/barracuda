@@ -2,7 +2,7 @@ use alloc::{borrow::ToOwned, collections::BTreeMap, string::String, sync::Arc};
 use core::cell::RefCell;
 
 use claw_api::ClawApiFactory;
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{LongTermInitError, LongTermMemory};
 use claw_net::{Dns, TcpConnect};
 
@@ -93,7 +93,7 @@ impl<F: ClawFs + 'static> LongTermDeps<F> {
 mod tests {
     use std::sync::Arc;
 
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
     use claw_memory::{MemoryDraft, StoreOutcome};
 
     use super::AgentMemoryStores;

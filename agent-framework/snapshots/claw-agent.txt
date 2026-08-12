@@ -66,13 +66,13 @@ pub claw_agent::AgentError::Runtime(claw_core::runtime::agent_runtime::AgentRunt
 pub claw_agent::AgentError::SessionCreate(claw_core::session::manager::SessionCreateError)
 pub claw_agent::AgentError::StorageClear
 pub claw_agent::AgentError::StorageClear::path: alloc::string::String
-pub claw_agent::AgentError::StorageClear::source: claw_interface::fs::FsError
+pub claw_agent::AgentError::StorageClear::source: claw_fs::fs::FsError
 pub claw_agent::AgentError::Tool(claw_tool::registry::ToolRegistryError)
 pub struct claw_agent::AgentPersistenceConfig
 pub claw_agent::AgentPersistenceConfig::persistence_root: alloc::string::String
 pub claw_agent::AgentPersistenceConfig::skill_roots: alloc::vec::Vec<alloc::string::String>
-pub struct claw_agent::AgentSystem<Filesystem, Http> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
-impl<Filesystem, Http> claw_agent::AgentSystem<Filesystem, Http> where Filesystem: claw_interface::fs::ClawFs + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+pub struct claw_agent::AgentSystem<Filesystem, Http> where Filesystem: claw_fs::fs::ClawFs + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+impl<Filesystem, Http> claw_agent::AgentSystem<Filesystem, Http> where Filesystem: claw_fs::fs::ClawFs + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
 pub async fn claw_agent::AgentSystem<Filesystem, Http>::delete_session(&self, session: claw_core::session::manager::SessionId) -> core::result::Result<(), claw_core::session::manager::SessionDeleteError>
 pub fn claw_agent::AgentSystem<Filesystem, Http>::disable_tool(&self, name: &str) -> claw_agent::AgentResult<()>
 pub fn claw_agent::AgentSystem<Filesystem, Http>::enable_tool(&self, name: &str) -> claw_agent::AgentResult<()>

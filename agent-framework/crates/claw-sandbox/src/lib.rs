@@ -9,7 +9,7 @@
 //! them is rejected. Backed by an injected [`ClawFs`], the same confinement
 //! applies on-device and in host tests.
 //!
-//! [`ClawFs`]: claw_interface::ClawFs
+//! [`ClawFs`]: claw_fs::ClawFs
 
 extern crate alloc;
 

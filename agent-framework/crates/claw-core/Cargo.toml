@@ -24,7 +24,7 @@ multiagent = []
 
 [dependencies]
 json-validator = { path = "../json-validator" }
-claw-interface = { path = "../claw-interface" }
+claw-fs = { path = "../claw-fs" }
 claw-utils = { path = "../claw-utils" }
 claw-api = { path = "../claw-api" }
 claw-net = { path = "../claw-net" }
@@ -81,8 +81,8 @@ claw-tool = { path = "../claw-tool", features = ["build-support"] }
 [dev-dependencies]
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
-# Host filesystem implementation shared from claw-interface (tests only).
-claw-interface = { path = "../claw-interface", features = [
+# Host filesystem implementation shared from claw-fs (tests only).
+claw-fs = { path = "../claw-fs", features = [
     "diskfs",
 ] }
 # Never-compacts `NoopCompactor` shared from claw-memory (tests only).

@@ -35,7 +35,7 @@ not fork between host and device.
 
 ## Crates
 
-- `claw-interface`: filesystem platform traits.
+- `claw-fs`: filesystem platform traits.
 - `claw-net`: TCP/DNS platform and deterministic test adapters.
 - `claw-utils`: no_std identifiers, task-pool, and text utilities.
 - `claw-api`: executor-neutral reqwless LLM clients and TLS ownership.

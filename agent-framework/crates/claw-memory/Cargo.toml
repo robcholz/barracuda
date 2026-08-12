@@ -17,7 +17,7 @@ compactor-stub = []
 # `Compactor` (e.g. `claw_core::LlmCompactor`) are passed in by the caller, so
 # this crate pulls in neither a concrete platform boundary nor the LLM
 # client (`claw-api`).
-claw-interface = { path = "../claw-interface" }
+claw-fs = { path = "../claw-fs" }
 # Shared id/allocator macros (`define_id_allocator!` for the `TurnId` counter).
 claw-utils = { path = "../claw-utils" }
 log = { version = "0.4", default-features = false }
@@ -29,7 +29,7 @@ thiserror = { version = "2", default-features = false }
 [dev-dependencies]
 # Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
 # disk-backed inspection backend. None of these reach device builds.
-claw-interface = { path = "../claw-interface", features = ["diskfs-pretty"] }
+claw-fs = { path = "../claw-fs", features = ["diskfs-pretty"] }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

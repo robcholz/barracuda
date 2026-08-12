@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use claw_agent::{AgentPersistenceConfig, AgentSystem, ClawApiFactory};
 use claw_api::ClawApi;
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_net::testing::NeverStack;
 use claw_profile::dhat::{AllocationStats, HeapProfile};
 

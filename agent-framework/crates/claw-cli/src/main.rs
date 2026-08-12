@@ -31,7 +31,7 @@ use claw_agent::{
     SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
 use claw_api::{Certificate, ClawApi, Tls, TlsConfig, TlsVersion, X509};
-use claw_interface::DiskFs;
+use claw_fs::DiskFs;
 use claw_log::{FlatTreeSubscriber, LevelFilter, LogOutput, TraceSink};
 use claw_net::TokioStack;
 use embassy_time::{Duration, Ticker};

@@ -11,7 +11,7 @@ use alloc::{string::String, sync::Arc};
 
 use crate::config::SharedApiManager;
 use claw_api::ClawApiFactory;
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::ProfileStore;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::SharedPersistence;

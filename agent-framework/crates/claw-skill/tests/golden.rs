@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use claw_interface::DiskFs;
+use claw_fs::DiskFs;
 use claw_skill::{FsSkillRegistry, SkillName};
 use serde_json::Value;
 

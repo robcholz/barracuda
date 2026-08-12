@@ -9,7 +9,7 @@ use core::{
 
 use async_channel::Sender;
 use claw_api::{ClawApiConfig, ClawApiFactory, InitError};
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::LongTermInitError;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::{PersistenceError, SharedPersistence};

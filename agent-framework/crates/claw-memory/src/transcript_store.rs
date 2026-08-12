@@ -60,7 +60,7 @@
 //! instance. Persistence behavior therefore comes entirely from the injected
 //! filesystem instead of a separate store mode.
 //!
-//! [`MemFs`]: claw_interface::MemFs
+//! [`MemFs`]: claw_fs::MemFs
 
 use alloc::{
     borrow::ToOwned, boxed::Box, collections::BTreeSet, format, string::String, sync::Arc, vec::Vec,
@@ -70,7 +70,7 @@ use core::cell::{RefCell, RefMut};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use claw_interface::{ClawFile, ClawFs, FsError};
+use claw_fs::{ClawFile, ClawFs, FsError};
 
 /// Per-transcript filenames: `{dir}/{id}{DATA_EXT|INDEX_EXT}`.
 const DATA_EXT: &str = ".jsonl";
@@ -405,7 +405,7 @@ impl<F: ClawFs> Drop for TranscriptStore<F> {
 /// # Examples
 ///
 /// ```
-/// # use claw_interface::MemFs;
+/// # use claw_fs::MemFs;
 /// # use claw_memory::{AssistantFragment, TranscriptStore};
 /// let filesystem = std::sync::Arc::new(MemFs::new());
 /// let store = TranscriptStore::new(filesystem, 42, "/data/transcripts")
@@ -562,7 +562,7 @@ impl<F: ClawFs> TranscriptStore<F> {
     /// # Examples
     ///
     /// ```
-    /// # use claw_interface::MemFs;
+    /// # use claw_fs::MemFs;
     /// # use claw_memory::TranscriptStore;
     /// let filesystem = std::sync::Arc::new(MemFs::new());
     /// let store = TranscriptStore::new(filesystem, 7, "/data/transcripts")
@@ -732,7 +732,7 @@ impl<F: ClawFs> Transcript for TranscriptStore<F> {
 /// # Examples
 ///
 /// ```
-/// # use claw_interface::MemFs;
+/// # use claw_fs::MemFs;
 /// # use claw_memory::{AssistantFragment, TranscriptStore};
 /// # let filesystem = std::sync::Arc::new(MemFs::new());
 /// # let store = TranscriptStore::new(filesystem, 1, "/data/transcripts").unwrap();
@@ -1347,7 +1347,7 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-    use claw_interface::MemFs;
+    use claw_fs::MemFs;
 
     #[test]
     fn invalid_index_is_rebuilt_from_data_log() {

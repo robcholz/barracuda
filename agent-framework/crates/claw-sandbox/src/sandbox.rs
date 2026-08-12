@@ -15,7 +15,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 
 use crate::fs::{SandboxError, SandboxFs};
 

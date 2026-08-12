@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::task::Waker;
 
 use anyhow::{anyhow, Result};
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_persistence::{Persistence, SharedPersistence};
 use claw_tool::{
     EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,

@@ -1,7 +1,7 @@
 pub mod claw_sandbox
 pub mod claw_sandbox::fs
 pub enum claw_sandbox::fs::SandboxError
-pub claw_sandbox::fs::SandboxError::Fs(claw_interface::fs::FsError)
+pub claw_sandbox::fs::SandboxError::Fs(claw_fs::fs::FsError)
 pub claw_sandbox::fs::SandboxError::OutsideSandbox(alloc::string::String)
 pub claw_sandbox::fs::SandboxError::ReadOnly(alloc::string::String)
 pub const claw_sandbox::fs::READ_ONLY_PREFIXES: &[&str]
@@ -15,7 +15,7 @@ pub fn claw_sandbox::fs::SandboxFs::read(&self, path: &str) -> core::result::Res
 pub fn claw_sandbox::fs::SandboxFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::fs::SandboxFs::remove(&self, path: &str) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::fs::SandboxFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, claw_sandbox::fs::SandboxError>
@@ -30,10 +30,10 @@ pub claw_sandbox::sandbox::RealRoots::shared_data: &'static str
 pub claw_sandbox::sandbox::RealRoots::shared_skills: &'static str
 pub claw_sandbox::sandbox::RealRoots::shared_tmp: &'static str
 pub claw_sandbox::sandbox::RealRoots::system_skills: &'static str
-pub struct claw_sandbox::sandbox::Sandbox<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
+pub struct claw_sandbox::sandbox::Sandbox<F: claw_fs::fs::ClawFs>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::new(filesystem: alloc::sync::Arc<F>, sandbox_host_dir: impl core::convert::Into<alloc::string::String>, real: claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, claw_sandbox::fs::SandboxError>
@@ -43,7 +43,7 @@ pub fn claw_sandbox::sandbox::Sandbox<F>::read_at(&self, path: &str, offset: u64
 pub fn claw_sandbox::sandbox::Sandbox<F>::remove(&self, path: &str) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub enum claw_sandbox::SandboxError
-pub claw_sandbox::SandboxError::Fs(claw_interface::fs::FsError)
+pub claw_sandbox::SandboxError::Fs(claw_fs::fs::FsError)
 pub claw_sandbox::SandboxError::OutsideSandbox(alloc::string::String)
 pub claw_sandbox::SandboxError::ReadOnly(alloc::string::String)
 pub struct claw_sandbox::RealRoots
@@ -51,10 +51,10 @@ pub claw_sandbox::RealRoots::shared_data: &'static str
 pub claw_sandbox::RealRoots::shared_skills: &'static str
 pub claw_sandbox::RealRoots::shared_tmp: &'static str
 pub claw_sandbox::RealRoots::system_skills: &'static str
-pub struct claw_sandbox::Sandbox<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
+pub struct claw_sandbox::Sandbox<F: claw_fs::fs::ClawFs>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::new(filesystem: alloc::sync::Arc<F>, sandbox_host_dir: impl core::convert::Into<alloc::string::String>, real: claw_sandbox::sandbox::RealRoots) -> core::result::Result<Self, claw_sandbox::fs::SandboxError>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, claw_sandbox::fs::SandboxError>
@@ -74,7 +74,7 @@ pub fn claw_sandbox::SandboxFs::read(&self, path: &str) -> core::result::Result<
 pub fn claw_sandbox::SandboxFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::SandboxFs::remove(&self, path: &str) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::SandboxFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
-impl<F: claw_interface::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
+impl<F: claw_fs::fs::ClawFs> claw_sandbox::fs::SandboxFs for claw_sandbox::sandbox::Sandbox<F>
 pub fn claw_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, claw_sandbox::fs::SandboxError>
 pub fn claw_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, claw_sandbox::fs::SandboxError>

@@ -3,6 +3,8 @@ pub use claw_tool::Action
 pub use claw_tool::Resource
 pub use claw_tool::RiskClass
 pub macro claw_tool::tool_metadata!
+pub macro claw_tool::tool_schemas!
+pub macro claw_tool::tool_validator!
 pub enum claw_tool::ToolError
 pub claw_tool::ToolError::ArgumentsSchema(json_validator::ValidationError)
 pub claw_tool::ToolError::InvalidArguments(alloc::string::String)
@@ -91,7 +93,7 @@ pub struct claw_tool::ToolRegistry
 impl claw_tool::ToolRegistry
 pub fn claw_tool::ToolRegistry::disable(&self, name: &str) -> core::result::Result<(), claw_tool::ToolRegistryError>
 pub fn claw_tool::ToolRegistry::enable(&self, name: &str) -> core::result::Result<(), claw_tool::ToolRegistryError>
-pub fn claw_tool::ToolRegistry::new<Filesystem>(persistence: claw_persistence::SharedPersistence<Filesystem>) -> core::result::Result<Self, claw_persistence::persistence::PersistenceError> where Filesystem: claw_interface::fs::ClawFs
+pub fn claw_tool::ToolRegistry::new<Filesystem>(persistence: claw_persistence::SharedPersistence<Filesystem>) -> core::result::Result<Self, claw_persistence::persistence::PersistenceError> where Filesystem: claw_fs::fs::ClawFs
 pub fn claw_tool::ToolRegistry::register_group(&self, group: claw_tool::ToolGroup) -> core::result::Result<(), claw_tool::ToolRegistryError>
 pub fn claw_tool::ToolRegistry::start_all(&self) -> core::result::Result<(), claw_tool::ToolRegistryError>
 pub fn claw_tool::ToolRegistry::stop_all(&self) -> core::result::Result<(), claw_tool::ToolRegistryError>

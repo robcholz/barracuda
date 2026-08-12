@@ -1,0 +1,150 @@
+pub mod claw_fs
+pub mod claw_fs::fs
+pub enum claw_fs::fs::FsError
+pub claw_fs::fs::FsError::Io(claw_fs::fs::FsIoError)
+pub claw_fs::fs::FsError::NotFound
+impl claw_fs::fs::FsError
+pub fn claw_fs::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_fs::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub struct claw_fs::fs::FsIoError
+impl claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_fs::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+impl core::cmp::Eq for claw_fs::fs::FsIoError
+impl core::cmp::PartialEq for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::eq(&self, other: &Self) -> bool
+impl core::error::Error for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct claw_fs::fs::MemFile
+impl claw_fs::fs::ClawFile for claw_fs::MemFile
+pub fn claw_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub struct claw_fs::fs::MemFs
+impl claw_fs::MemFs
+pub fn claw_fs::MemFs::clear(&self)
+pub fn claw_fs::MemFs::new() -> Self
+impl claw_fs::fs::ClawFs for claw_fs::MemFs
+pub type claw_fs::MemFs::File = claw_fs::MemFile
+pub fn claw_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+impl core::default::Default for claw_fs::MemFs
+pub fn claw_fs::MemFs::default() -> Self
+pub trait claw_fs::fs::ClawFile
+pub fn claw_fs::fs::ClawFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+impl claw_fs::fs::ClawFile for claw_fs::MemFile
+pub fn claw_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub trait claw_fs::fs::ClawFs: 'static
+pub type claw_fs::fs::ClawFs::File: claw_fs::fs::ClawFile
+pub fn claw_fs::fs::ClawFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::create_dir_all(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::fs::ClawFs::len(&self, path: &str) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::fs::ClawFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+impl claw_fs::fs::ClawFs for claw_fs::MemFs
+pub type claw_fs::MemFs::File = claw_fs::MemFile
+pub fn claw_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub enum claw_fs::FsError
+pub claw_fs::FsError::Io(claw_fs::fs::FsIoError)
+pub claw_fs::FsError::NotFound
+impl claw_fs::fs::FsError
+pub fn claw_fs::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn claw_fs::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub struct claw_fs::FsIoError
+impl claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn claw_fs::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+impl core::cmp::Eq for claw_fs::fs::FsIoError
+impl core::cmp::PartialEq for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::eq(&self, other: &Self) -> bool
+impl core::error::Error for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for claw_fs::fs::FsIoError
+pub fn claw_fs::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct claw_fs::MemFile
+impl claw_fs::fs::ClawFile for claw_fs::MemFile
+pub fn claw_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub struct claw_fs::MemFs
+impl claw_fs::MemFs
+pub fn claw_fs::MemFs::clear(&self)
+pub fn claw_fs::MemFs::new() -> Self
+impl claw_fs::fs::ClawFs for claw_fs::MemFs
+pub type claw_fs::MemFs::File = claw_fs::MemFile
+pub fn claw_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+impl core::default::Default for claw_fs::MemFs
+pub fn claw_fs::MemFs::default() -> Self
+pub trait claw_fs::ClawFile
+pub fn claw_fs::ClawFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+impl claw_fs::fs::ClawFile for claw_fs::MemFile
+pub fn claw_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::size(&self) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub trait claw_fs::ClawFs: 'static
+pub type claw_fs::ClawFs::File: claw_fs::fs::ClawFile
+pub fn claw_fs::ClawFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::create_dir_all(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::ClawFs::len(&self, path: &str) -> core::result::Result<u64, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::ClawFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), claw_fs::fs::FsError>
+impl claw_fs::fs::ClawFs for claw_fs::MemFs
+pub type claw_fs::MemFs::File = claw_fs::MemFile
+pub fn claw_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::exists(&self, path: &str) -> bool
+pub fn claw_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), claw_fs::fs::FsError>
+pub fn claw_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), claw_fs::fs::FsError>

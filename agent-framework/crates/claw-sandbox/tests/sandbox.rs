@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_sandbox::{RealRoots, Sandbox, SandboxError, SandboxFs};
 
 const REAL: RealRoots = RealRoots {

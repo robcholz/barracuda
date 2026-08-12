@@ -29,7 +29,7 @@ pub use claw_core::{
     ToolOutput, TurnEvent, TurnEventError, TurnId, TurnOrigin,
 };
 use claw_core::{AgentRuntime, AgentRuntimeBuildError};
-use claw_interface::{ClawFs, FsError};
+use claw_fs::{ClawFs, FsError};
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::{Persistence, PersistenceError, SharedPersistence};
 use claw_tool::{ToolRegistry, ToolRegistryError};

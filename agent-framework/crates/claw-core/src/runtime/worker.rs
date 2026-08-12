@@ -7,7 +7,7 @@ use core::task::{Context, Poll};
 
 use async_channel::Receiver;
 use claw_api::ClawApiFactory;
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_net::{Dns, TcpConnect};
 use claw_persistence::SharedPersistence;
 use claw_tool::ToolRegistry;

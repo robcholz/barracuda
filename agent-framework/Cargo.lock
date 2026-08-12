@@ -454,7 +454,7 @@ dependencies = [
  "anyhow",
  "claw-api",
  "claw-core",
- "claw-interface",
+ "claw-fs",
  "claw-log",
  "claw-net",
  "claw-persistence",
@@ -476,7 +476,7 @@ version = "0.1.0"
 dependencies = [
  "claw-agent",
  "claw-api",
- "claw-interface",
+ "claw-fs",
  "claw-net",
  "claw-profile",
  "embassy-time",
@@ -519,7 +519,7 @@ dependencies = [
  "anyhow",
  "claw-agent",
  "claw-api",
- "claw-interface",
+ "claw-fs",
  "claw-log",
  "claw-net",
  "dotenvy",
@@ -553,7 +553,7 @@ dependencies = [
  "async-stream",
  "claw-api",
  "claw-context",
- "claw-interface",
+ "claw-fs",
  "claw-memory",
  "claw-net",
  "claw-permission",
@@ -580,7 +580,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "claw-interface"
+name = "claw-fs"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -606,7 +606,7 @@ name = "claw-memory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "claw-interface",
+ "claw-fs",
  "claw-utils",
  "futures-lite",
  "log",
@@ -638,7 +638,7 @@ dependencies = [
 name = "claw-persistence"
 version = "0.1.0"
 dependencies = [
- "claw-interface",
+ "claw-fs",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -656,7 +656,7 @@ name = "claw-sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "claw-interface",
+ "claw-fs",
  "thiserror 2.0.18",
 ]
 
@@ -665,7 +665,7 @@ name = "claw-skill"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "claw-interface",
+ "claw-fs",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -677,7 +677,7 @@ name = "claw-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "claw-interface",
+ "claw-fs",
  "claw-permission",
  "claw-persistence",
  "futures-channel",

@@ -23,8 +23,8 @@ pub claw_persistence::PersistenceError::TypeMismatch::actual: &'static str
 pub claw_persistence::PersistenceError::TypeMismatch::expected: &'static str
 pub claw_persistence::PersistenceError::TypeMismatch::kind: &'static str
 pub claw_persistence::PersistenceError::TypeMismatch::name: alloc::string::String
-pub struct claw_persistence::Collection<'a, Filesystem: claw_interface::fs::ClawFs, T>
-impl<Filesystem, T> claw_persistence::Collection<'_, Filesystem, T> where Filesystem: claw_interface::fs::ClawFs, T: claw_persistence::DurableStateCodec + 'static
+pub struct claw_persistence::Collection<'a, Filesystem: claw_fs::fs::ClawFs, T>
+impl<Filesystem, T> claw_persistence::Collection<'_, Filesystem, T> where Filesystem: claw_fs::fs::ClawFs, T: claw_persistence::DurableStateCodec + 'static
 pub fn claw_persistence::Collection<'_, Filesystem, T>::list(&self) -> core::result::Result<alloc::vec::Vec<claw_persistence::InstanceId>, claw_persistence::PersistenceError>
 pub fn claw_persistence::Collection<'_, Filesystem, T>::load(&self, instance_id: &claw_persistence::InstanceId) -> core::result::Result<core::option::Option<T>, claw_persistence::PersistenceError>
 pub fn claw_persistence::Collection<'_, Filesystem, T>::register(&self, instance_id: &claw_persistence::InstanceId, state: &claw_persistence::DurableState<T>) -> core::result::Result<(), claw_persistence::PersistenceError>
@@ -44,14 +44,14 @@ pub fn claw_persistence::InstanceId::new(id: impl core::convert::Into<alloc::str
 pub struct claw_persistence::InvalidInstanceId
 impl claw_persistence::InvalidInstanceId
 pub fn claw_persistence::InvalidInstanceId::as_str(&self) -> &str
-pub struct claw_persistence::Persistence<Filesystem: claw_interface::fs::ClawFs>
-impl<Filesystem: claw_interface::fs::ClawFs> claw_persistence::Persistence<Filesystem>
+pub struct claw_persistence::Persistence<Filesystem: claw_fs::fs::ClawFs>
+impl<Filesystem: claw_fs::fs::ClawFs> claw_persistence::Persistence<Filesystem>
 pub fn claw_persistence::Persistence<Filesystem>::collection<T>(&self, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<claw_persistence::Collection<'_, Filesystem, T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + 'static
 pub fn claw_persistence::Persistence<Filesystem>::maybe_persist(&self) -> core::result::Result<(), claw_persistence::PersistenceError>
 pub fn claw_persistence::Persistence<Filesystem>::new(filesystem: alloc::sync::Arc<Filesystem>, persistence_directory: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_persistence::PersistenceError>
 pub fn claw_persistence::Persistence<Filesystem>::singleton<T>(&self, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<claw_persistence::Singleton<'_, Filesystem, T>, claw_persistence::PersistenceError> where T: claw_persistence::DurableStateCodec + 'static
-pub struct claw_persistence::Singleton<'a, Filesystem: claw_interface::fs::ClawFs, T>
-impl<Filesystem, T> claw_persistence::Singleton<'_, Filesystem, T> where Filesystem: claw_interface::fs::ClawFs, T: claw_persistence::DurableStateCodec + 'static
+pub struct claw_persistence::Singleton<'a, Filesystem: claw_fs::fs::ClawFs, T>
+impl<Filesystem, T> claw_persistence::Singleton<'_, Filesystem, T> where Filesystem: claw_fs::fs::ClawFs, T: claw_persistence::DurableStateCodec + 'static
 pub fn claw_persistence::Singleton<'_, Filesystem, T>::load(&self) -> core::result::Result<core::option::Option<T>, claw_persistence::PersistenceError>
 pub fn claw_persistence::Singleton<'_, Filesystem, T>::register(&self, state: &claw_persistence::DurableState<T>) -> core::result::Result<(), claw_persistence::PersistenceError>
 pub fn claw_persistence::Singleton<'_, Filesystem, T>::remove(&self) -> core::result::Result<(), claw_persistence::PersistenceError>

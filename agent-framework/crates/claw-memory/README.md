@@ -16,10 +16,10 @@ the ready-made LLM-backed compactor (`LlmCompactor`) and the rolling-summary
 provider that drives it both live in `claw_core` (the layer that owns the LLM
 client). The store is never asked to compact.
 
-As a core crate it depends only on the `claw-interface` `ClawFs` persistence
+As a core crate it depends only on the `claw-fs` `ClawFs` persistence
 seam, never on a concrete platform. The concrete filesystem is selected by the
 store type parameter (device firmware uses its real FS type;
-host CLIs and tests use `claw_interface::MemFs` / `DiskFs`), so the crate is
+host CLIs and tests use `claw_fs::MemFs` / `DiskFs`), so the crate is
 fully host-testable.
 
 ## Public API

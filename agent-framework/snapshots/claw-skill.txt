@@ -9,8 +9,8 @@ pub claw_skill::SkillError::InvalidYaml(claw_skill::SkillName, alloc::string::St
 pub claw_skill::SkillError::MissingClosingFence(claw_skill::SkillName)
 pub claw_skill::SkillError::MissingOpeningFence(claw_skill::SkillName)
 pub claw_skill::SkillError::NotFound(claw_skill::SkillName)
-pub claw_skill::SkillError::ReadFailed(claw_skill::SkillName, claw_interface::fs::FsError)
-pub claw_skill::SkillError::ScanFailed(alloc::string::String, claw_interface::fs::FsError)
+pub claw_skill::SkillError::ReadFailed(claw_skill::SkillName, claw_fs::fs::FsError)
+pub claw_skill::SkillError::ScanFailed(alloc::string::String, claw_fs::fs::FsError)
 pub struct claw_skill::CatalogSnapshot
 impl claw_skill::CatalogSnapshot
 pub fn claw_skill::CatalogSnapshot::from_skills(version: claw_skill::SkillRegistryVersion, skills: alloc::vec::Vec<claw_skill::Skill>) -> Self
@@ -23,12 +23,12 @@ pub fn claw_skill::EmptySkillRegistry::catalog(&self) -> alloc::sync::Arc<claw_s
 pub fn claw_skill::EmptySkillRegistry::read_document_into(&self, name: &claw_skill::SkillName, _out: &mut alloc::string::String) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::EmptySkillRegistry::reload(&self) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::EmptySkillRegistry::skill_set(self: alloc::sync::Arc<Self>) -> claw_skill::SkillSet
-pub struct claw_skill::FsSkillRegistry<F: claw_interface::fs::ClawFs>
-impl<F: claw_interface::fs::ClawFs> claw_skill::FsSkillRegistry<F>
+pub struct claw_skill::FsSkillRegistry<F: claw_fs::fs::ClawFs>
+impl<F: claw_fs::fs::ClawFs> claw_skill::FsSkillRegistry<F>
 pub fn claw_skill::FsSkillRegistry<F>::new(filesystem: alloc::sync::Arc<F>) -> Self
 pub fn claw_skill::FsSkillRegistry<F>::set_root(self, root: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::skill_set(self: &alloc::sync::Arc<Self>) -> claw_skill::SkillSet where F: 'static
-impl<F: claw_interface::fs::ClawFs + 'static> claw_skill::SkillRegistry for claw_skill::FsSkillRegistry<F>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_skill::SkillRegistry for claw_skill::FsSkillRegistry<F>
 pub fn claw_skill::FsSkillRegistry<F>::catalog(&self) -> alloc::sync::Arc<claw_skill::CatalogSnapshot>
 pub fn claw_skill::FsSkillRegistry<F>::read_document_into(&self, name: &claw_skill::SkillName, out: &mut alloc::string::String) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::reload(&self) -> core::result::Result<(), claw_skill::SkillError>
@@ -73,7 +73,7 @@ pub fn claw_skill::EmptySkillRegistry::catalog(&self) -> alloc::sync::Arc<claw_s
 pub fn claw_skill::EmptySkillRegistry::read_document_into(&self, name: &claw_skill::SkillName, _out: &mut alloc::string::String) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::EmptySkillRegistry::reload(&self) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::EmptySkillRegistry::skill_set(self: alloc::sync::Arc<Self>) -> claw_skill::SkillSet
-impl<F: claw_interface::fs::ClawFs + 'static> claw_skill::SkillRegistry for claw_skill::FsSkillRegistry<F>
+impl<F: claw_fs::fs::ClawFs + 'static> claw_skill::SkillRegistry for claw_skill::FsSkillRegistry<F>
 pub fn claw_skill::FsSkillRegistry<F>::catalog(&self) -> alloc::sync::Arc<claw_skill::CatalogSnapshot>
 pub fn claw_skill::FsSkillRegistry<F>::read_document_into(&self, name: &claw_skill::SkillName, out: &mut alloc::string::String) -> core::result::Result<(), claw_skill::SkillError>
 pub fn claw_skill::FsSkillRegistry<F>::reload(&self) -> core::result::Result<(), claw_skill::SkillError>

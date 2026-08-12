@@ -10,7 +10,7 @@ exclude = [
 ]
 default-members = [
     "crates/claw-agent",
-    "crates/claw-interface",
+    "crates/claw-fs",
 ]
 
 [workspace.dependencies]

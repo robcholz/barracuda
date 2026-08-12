@@ -13,7 +13,7 @@ path = "src/main.rs"
 claw-agent = { path = "../claw-agent", default-features = false, features=["cache_profile", "multiagent"] }
 claw-api = { path = "../claw-api", features = ["mbedtls-host"] }
 claw-net = { path = "../claw-net", features = ["tokio"] }
-claw-interface = { path = "../claw-interface", features = ["diskfs"] }
+claw-fs = { path = "../claw-fs", features = ["diskfs"] }
 claw-log = { path = "../claw-log" }
 anyhow = "1"
 dotenvy = "0.15"

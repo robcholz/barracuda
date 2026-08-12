@@ -4,7 +4,7 @@ The sandbox filesystem the agent runs inside.
 
 `claw-sandbox` confines all agent file access to a fixed set of **virtual
 roots** and rejects anything outside them. It wraps an injected
-`claw_interface::ClawFs` backing store, so the exact same confinement applies
+`claw_fs::ClawFs` backing store, so the exact same confinement applies
 on-device (over FATFS / SD) and in host tests (over an in-memory `MemFs`).
 
 ## Virtual roots
@@ -46,6 +46,6 @@ demonstrates that bare roots, outside paths, and `..` escapes are all denied.
 
 ## Where it fits
 
-`claw-sandbox` is a pure-Rust crate depending only on `claw-interface` (the
+`claw-sandbox` is a pure-Rust crate depending only on `claw-fs` (the
 `ClawFs` seam) and `thiserror`; it bundles into the firmware's `claw_rt`
 staticlib and is fully host-testable with the in-memory `MemFs` double.

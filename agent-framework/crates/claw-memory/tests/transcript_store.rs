@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_memory::{AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId};
 
 #[test]

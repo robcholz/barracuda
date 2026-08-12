@@ -3,7 +3,7 @@
 use alloc::string::String;
 use core::str::FromStr;
 
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{ProfileDocument, ProfileStore};
 use claw_permission::{Action, Resource, RiskClass};
 use claw_tool::{

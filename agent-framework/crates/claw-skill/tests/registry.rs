@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use claw_interface::{ClawFs, MemFs};
+use claw_fs::{ClawFs, MemFs};
 use claw_skill::{CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry};
 
 struct ExternalRegistry {

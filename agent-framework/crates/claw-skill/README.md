@@ -48,7 +48,7 @@ its `cap_groups`, `manage_mode`, category, peripheral, and tag schema.
 ```rust
 use std::sync::Arc;
 
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_skill::{FsSkillRegistry, SkillName};
 
 fn build(filesystem: Arc<MemFs>) -> Result<(), claw_skill::SkillError> {

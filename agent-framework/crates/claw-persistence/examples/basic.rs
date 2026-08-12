@@ -11,7 +11,7 @@
 
 use std::{borrow::Cow, error::Error, sync::Arc};
 
-use claw_interface::MemFs;
+use claw_fs::MemFs;
 use claw_persistence::{
     DurablePartError, DurableState, DurableStateCodec, InstanceId, Persistence, SchemaVersion,
     StateBlob, StateSlice,

@@ -5,7 +5,7 @@
 //! read/write projection is owned by the baked tool blacklist.
 
 use claw_context::{Block, BlockKind, ContextSink};
-use claw_interface::ClawFs;
+use claw_fs::ClawFs;
 use claw_memory::{ProfileDocument, ProfileError, ProfileStore};
 use claw_tool::ToolGroup;
 
