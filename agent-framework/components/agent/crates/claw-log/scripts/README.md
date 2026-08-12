@@ -126,6 +126,6 @@ complete slice at the observable trace/ancestor boundary and marks it with
 ```bash
 # from agent-framework/
 uv run --package claw-trace \
-  pytest -c crates/components/agent/crates/claw-log/pyproject.toml crates/components/agent/crates/claw-log/scripts/tests
-uv run --package claw-trace ruff format crates/components/agent/crates/claw-log
+  pytest -c components/agent/crates/claw-log/pyproject.toml components/agent/crates/claw-log/scripts/tests
+uv run --package claw-trace ruff format components/agent/crates/claw-log
 ```

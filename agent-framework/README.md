@@ -2,8 +2,9 @@
 
 ## Layout
 
-- `crates/` contains production Rust crates.
-- `crates/components/agent/bench/` contains agent measurement and profiling workloads.
+- `components/` contains event-router components; a component may own multiple crates.
+- `shared/` contains crates shared across components and applications.
+- `components/agent/bench/` contains agent measurement and profiling workloads.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:
@@ -43,12 +44,12 @@ Visualization
 The command uses `claw-log`'s canonical Python exporter. Its synthetic Chrome
 process/thread mapping (including `run.system`, session grouping, and the
 `unattributed` fallback) is documented in
-[`crates/components/agent/crates/claw-log/scripts/README.md`](crates/components/agent/crates/claw-log/scripts/README.md).
+[`components/agent/crates/claw-log/scripts/README.md`](components/agent/crates/claw-log/scripts/README.md).
 
 ### Context Visualization
 
 ```bash
-uv run --script crates/components/agent/crates/claw-context/scripts/context_viewer.py
+uv run --script components/agent/crates/claw-context/scripts/context_viewer.py
 ```
 
 ## Embassy integration

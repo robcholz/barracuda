@@ -48,7 +48,7 @@ sections. The command does not calculate a delta against an older build.
 ## Stack usage
 
 Run Clippy's static stack-frame estimate with the 4 KiB threshold configured in
-`crates/components/agent/bench/clippy.toml`:
+`components/agent/bench/clippy.toml`:
 
 ```bash
 CLIPPY_CONF_DIR=bench cargo clippy -p claw-agent-profile --all-targets -- \

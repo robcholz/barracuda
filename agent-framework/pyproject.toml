@@ -10,7 +10,7 @@ package = false
 
 [tool.uv.workspace]
 members = [
-    "crates/components/agent/tools/llm-tape",
-    "crates/components/agent/crates/claw-log",
-    "crates/components/agent/crates/claw-log/scripts/serial_log",
+    "components/agent/tools/llm-tape",
+    "components/agent/crates/claw-log",
+    "components/agent/crates/claw-log/scripts/serial_log",
 ]

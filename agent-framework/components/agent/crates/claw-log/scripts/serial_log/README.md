@@ -83,7 +83,7 @@ stream.stop()
 # from agent-framework/
 uv sync --all-packages --all-groups
 uv run --package serial-log pytest \
-  -c crates/components/agent/crates/claw-log/scripts/serial_log/pyproject.toml \
-  crates/components/agent/crates/claw-log/scripts/serial_log/tests
-uv run --package serial-log ruff format crates/components/agent/crates/claw-log/scripts/serial_log
+  -c components/agent/crates/claw-log/scripts/serial_log/pyproject.toml \
+  components/agent/crates/claw-log/scripts/serial_log/tests
+uv run --package serial-log ruff format components/agent/crates/claw-log/scripts/serial_log
 ```

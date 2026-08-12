@@ -10,11 +10,11 @@ name = "claw-agent-chat"
 path = "src/main.rs"
 
 [dependencies]
-claw-agent = { path = "../../crates/components/agent/crates/claw-agent", default-features = false, features=["cache_profile", "multiagent"] }
-claw-api = { path = "../../crates/components/agent/crates/claw-api", features = ["mbedtls-host"] }
-claw-net = { path = "../../crates/shared/claw-net", features = ["tokio"] }
-claw-fs = { path = "../../crates/shared/claw-fs", features = ["diskfs"] }
-claw-log = { path = "../../crates/components/agent/crates/claw-log" }
+claw-agent = { path = "../../components/agent/crates/claw-agent", default-features = false, features=["cache_profile", "multiagent"] }
+claw-api = { path = "../../components/agent/crates/claw-api", features = ["mbedtls-host"] }
+claw-net = { path = "../../shared/claw-net", features = ["tokio"] }
+claw-fs = { path = "../../shared/claw-fs", features = ["diskfs"] }
+claw-log = { path = "../../components/agent/crates/claw-log" }
 anyhow = "1"
 dotenvy = "0.15"
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
@@ -31,5 +31,5 @@ tracing = { version = "0.1", default-features = false, features = ["std"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [dev-dependencies]
-claw-net = { path = "../../crates/shared/claw-net", features = ["testing"] }
+claw-net = { path = "../../shared/claw-net", features = ["testing"] }
 tempdir = "0.3"

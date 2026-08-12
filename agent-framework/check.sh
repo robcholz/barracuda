@@ -36,10 +36,10 @@ crates=(
 manifest_path() {
     case "$1" in
         claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
-            printf 'crates/shared/%s/Cargo.toml' "$1"
+            printf 'shared/%s/Cargo.toml' "$1"
             ;;
         *)
-            printf 'crates/components/agent/crates/%s/Cargo.toml' "$1"
+            printf 'components/agent/crates/%s/Cargo.toml' "$1"
             ;;
     esac
 }

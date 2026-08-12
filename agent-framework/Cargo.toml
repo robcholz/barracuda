@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/components/agent/crates/*",
-    "crates/components/agent/bench/crates/*",
-    "crates/shared/*",
+    "components/agent/crates/*",
+    "components/agent/bench/crates/*",
+    "shared/*",
     "apps/*",
 ]
 default-members = [
-    "crates/components/agent/crates/claw-agent",
-    "crates/shared/claw-fs",
+    "components/agent/crates/claw-agent",
+    "shared/claw-fs",
 ]
 
 [workspace.dependencies]
