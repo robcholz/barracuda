@@ -29,8 +29,20 @@ crates=(
     json-validator-macros
 )
 
+manifest_path() {
+    case "$1" in
+        claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
+            printf 'crates/shared/%s/Cargo.toml' "$1"
+            ;;
+        *)
+            printf 'crates/components/agent/crates/%s/Cargo.toml' "$1"
+            ;;
+    esac
+}
+
 for crate in "${crates[@]}"; do
+    manifest="$(manifest_path "${crate}")"
     echo "updating public API snapshot: ${crate}"
-    cargo public-api --manifest-path "crates/${crate}/Cargo.toml" --color never -sss \
+    cargo public-api --manifest-path "${manifest}" --color never -sss \
         >"snapshots/${crate}.txt"
 done

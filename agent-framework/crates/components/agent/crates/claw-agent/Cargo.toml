@@ -1,0 +1,58 @@
+[package]
+name = "claw-agent"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Assembled agent-system API over claw-core runtime and Sessions"
+autotests = false
+
+[lib]
+name = "claw_agent"
+path = "src/lib.rs"
+
+[[test]]
+name = "embassy_runtime"
+
+[features]
+# Concepts:
+# - target selection and concrete HAL adapters belong to the application, not
+#   to this executor-neutral framework crate.
+# - `cache_profile` forwards provider usage support.
+#
+multiagent = ["claw-core/multiagent"]
+# Provider token/cache usage diagnostics.
+cache_profile = [
+    "claw-api/cache_profile",
+    "claw-core/cache_profile",
+]
+
+[dependencies]
+json-validator = { path = "../../../../shared/json-validator" }
+claw-core = { path = "../claw-core", default-features = false }
+claw-api = { path = "../claw-api" }
+claw-net = { path = "../../../../shared/claw-net" }
+claw-persistence = { path = "../claw-persistence" }
+claw-tool = { path = "../claw-tool" }
+# Filesystem traits remain platform-neutral. HTTP is concrete reqwless I/O
+# through `claw-net`; time is provided globally by `embassy-time`.
+claw-fs = { path = "../../../../shared/claw-fs" }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+# Host-only dependencies used by tests and the `tool_submit_loop` API example.
+anyhow = "1"
+claw-log = { path = "../claw-log" }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# In-memory fs + scripted network doubles so the end-to-end tests run hermetically
+# (no network, no API key) entirely through the public API.
+claw-fs = { path = "../../../../shared/claw-fs", features = [
+    "diskfs",
+] }
+serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+# `block_on` for tests (smol family; replaces the removed local spin executor).
+futures-lite = "2"
+claw-net = { path = "../../../../shared/claw-net", features = ["testing"] }
+tempdir = "0.3"
+static_cell = "2"
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

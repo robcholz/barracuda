@@ -33,10 +33,22 @@ crates=(
     json-validator-macros
 )
 
+manifest_path() {
+    case "$1" in
+        claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
+            printf 'crates/shared/%s/Cargo.toml' "$1"
+            ;;
+        *)
+            printf 'crates/components/agent/crates/%s/Cargo.toml' "$1"
+            ;;
+    esac
+}
+
 for crate in "${crates[@]}"; do
     snapshot="snapshots/${crate}.txt"
     current="${tmpdir}/${crate}.txt"
+    manifest="$(manifest_path "${crate}")"
     echo "checking public API snapshot: ${crate}"
-    cargo public-api --manifest-path "crates/${crate}/Cargo.toml" --color never -sss >"${current}"
+    cargo public-api --manifest-path "${manifest}" --color never -sss >"${current}"
     diff -u "${snapshot}" "${current}"
 done

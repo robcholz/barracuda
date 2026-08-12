@@ -1,16 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/*",
-    "bench/*",
-]
-exclude = [
-    "bench/llm-tape",
-    "bench/tapes",
+    "crates/components/agent/crates/*",
+    "crates/components/agent/bench/crates/*",
+    "crates/shared/*",
+    "apps/*",
 ]
 default-members = [
-    "crates/claw-agent",
-    "crates/claw-fs",
+    "crates/components/agent/crates/claw-agent",
+    "crates/shared/claw-fs",
 ]
 
 [workspace.dependencies]

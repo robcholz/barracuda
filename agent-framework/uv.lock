@@ -176,7 +176,7 @@ wheels = [
 [[package]]
 name = "claw-trace"
 version = "0.1.0"
-source = { editable = "crates/claw-log" }
+source = { editable = "crates/components/agent/crates/claw-log" }
 dependencies = [
     { name = "chrometrace" },
     { name = "serial-log" },
@@ -191,7 +191,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chrometrace", specifier = ">=0.2.1" },
-    { name = "serial-log", editable = "crates/claw-log/scripts/serial_log" },
+    { name = "serial-log", editable = "crates/components/agent/crates/claw-log/scripts/serial_log" },
 ]
 
 [package.metadata.requires-dev]
@@ -335,7 +335,7 @@ wheels = [
 [[package]]
 name = "llm-tape"
 version = "0.1.0"
-source = { editable = "bench/llm-tape" }
+source = { editable = "crates/components/agent/tools/llm-tape" }
 dependencies = [
     { name = "aiohttp" },
     { name = "loguru" },
@@ -687,7 +687,7 @@ wheels = [
 [[package]]
 name = "serial-log"
 version = "0.1.0"
-source = { editable = "crates/claw-log/scripts/serial_log" }
+source = { editable = "crates/components/agent/crates/claw-log/scripts/serial_log" }
 
 [package.dev-dependencies]
 dev = [
