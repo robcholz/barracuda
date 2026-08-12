@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "subagent_watch",
-    "description": "Get the current state of an active subagent or a completed subagent whose detached result has not yet been accepted, including its kind, depth, and status.",
+    "description": "Inspect a subagent when its current status is needed for a decision. Completed results are delivered automatically; this is not a wait primitive. Do not poll it in consecutive iterations.",
     "parameters": {
       "type": "object",
       "properties": {

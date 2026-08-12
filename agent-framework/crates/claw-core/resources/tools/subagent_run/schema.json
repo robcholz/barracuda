@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "subagent_run",
-    "description": "Run a subagent and wait for its result.",
+    "description": "Run a subagent synchronously and block the current agent until its result arrives. Do not use this by default; prefer subagent_spawn unless the current step explicitly requires the result before continuing.",
     "parameters": {
       "type": "object",
       "properties": {

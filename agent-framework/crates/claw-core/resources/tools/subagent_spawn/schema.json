@@ -2,7 +2,7 @@
   "type": "function",
   "function": {
     "name": "subagent_spawn",
-    "description": "Start a background subagent.",
+    "description": "Start a background subagent. Its final result is delivered automatically, so do not repeatedly call subagent_watch to wait for completion.",
     "parameters": {
       "type": "object",
       "properties": {
