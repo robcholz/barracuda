@@ -66,6 +66,7 @@ for crate in "${host_test_crates[@]}"; do
     run cargo test --locked -p "$crate"
 done
 run cargo test --locked -p claw-net --features testing
+run cargo test --locked -p claw-context --features intrusive-observability
 run cargo test --locked -p claw-agent --test embassy_runtime
 run cargo test --locked -p claw-cli
 

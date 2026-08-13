@@ -11,8 +11,27 @@ name = "claw_context"
 # staticlib that the firmware links.
 crate-type = ["rlib"]
 
+[features]
+default = []
+# Host-only raw Context snapshots streamed by the internal WebSocket observer.
+# Firmware builds leave this disabled and retain the crate's no_std dependency
+# surface.
+intrusive-observability = [
+    "dep:axum",
+    "dep:futures-util",
+    "dep:serde",
+    "dep:tokio",
+]
+
 [dependencies]
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"], optional = true }
+futures-util = { version = "0.3", optional = true }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
 
 [lints.rust]
 unsafe_code = "forbid"

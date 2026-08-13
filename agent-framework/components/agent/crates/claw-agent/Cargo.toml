@@ -20,6 +20,7 @@ name = "embassy_runtime"
 # - `cache_profile` forwards provider usage support.
 #
 multiagent = ["claw-core/multiagent"]
+intrusive-observability = ["claw-core/intrusive-observability"]
 # Provider token/cache usage diagnostics.
 cache_profile = [
     "claw-api/cache_profile",
@@ -42,6 +43,9 @@ thiserror = { version = "2", default-features = false }
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
 anyhow = "1"
 claw-log = { path = "../claw-log" }
+# Host test dependencies enable serde's std support, so yaml-peg must expose
+# its matching std error implementation in the unified test graph.
+claw-skill = { path = "../claw-skill", features = ["std"] }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted network doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API.

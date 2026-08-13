@@ -39,6 +39,8 @@
 //! ```
 
 extern crate alloc;
+#[cfg(feature = "intrusive-observability")]
+extern crate std;
 
 mod block;
 mod context;

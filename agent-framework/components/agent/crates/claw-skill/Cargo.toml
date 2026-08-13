@@ -5,6 +5,12 @@ version = "0.1.0"
 edition = "2021"
 description = "no_std filesystem runtime for standard Agent Skills"
 
+[features]
+default = []
+# Host consumers that unify serde's std support must also enable yaml-peg's
+# matching error implementation.
+std = ["yaml-peg/std"]
+
 [dependencies]
 claw-fs = { path = "../../../../shared/claw-fs" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

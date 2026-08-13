@@ -21,6 +21,11 @@ cache_profile = ["claw-api/cache_profile"]
 # Compile the Session-scoped subagent graph, tools, and lifecycle driver.
 # Disabled builds contain only the root-Agent Session path.
 multiagent = []
+# Host-only raw Context snapshots served over a private WebSocket endpoint.
+intrusive-observability = [
+    "claw-context/intrusive-observability",
+    "claw-skill/std",
+]
 
 [dependencies]
 json-validator = { path = "../../../../shared/json-validator" }
