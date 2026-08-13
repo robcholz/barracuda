@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "components/agent/crates/*",
     "components/agent/bench/crates/*",
+    "components/message-gateway/crates/*",
     "shared/*",
     "apps/*",
 ]

@@ -16,6 +16,7 @@ crates=(
     claw-persistence
     claw-context
     claw-core
+    gateway
     claw-fs
     claw-net
     claw-log
@@ -31,6 +32,9 @@ crates=(
 
 manifest_path() {
     case "$1" in
+        gateway)
+            printf 'components/message-gateway/crates/gateway/Cargo.toml'
+            ;;
         claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
             printf 'shared/%s/Cargo.toml' "$1"
             ;;
