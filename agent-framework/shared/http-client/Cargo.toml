@@ -1,0 +1,41 @@
+[package]
+name = "http-client"
+version = "0.1.0"
+edition = "2021"
+description = "Shared no_std async HTTP client for ESP-Claw components"
+license = "Apache-2.0"
+
+[lib]
+name = "http_client"
+
+[features]
+default = []
+embedded-tls = ["reqwless/embedded-tls"]
+mbedtls = ["reqwless/mbedtls-rs"]
+
+[dependencies]
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+embedded-nal-async = "0.9"
+embassy-sync.workspace = true
+futures-core = { version = "0.3", default-features = false }
+ouroboros = { version = "0.18.5", default-features = false }
+reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+claw-net = { path = "../claw-net", features = ["testing"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

@@ -1,0 +1,385 @@
+use alloc::{
+    boxed::Box,
+    rc::Rc,
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+use core::{cell::RefCell, future::poll_fn, future::Future, pin::Pin};
+
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
+use embedded_io::Error as _;
+use embedded_io_async::Read as _;
+use embedded_nal_async::{Dns, TcpConnect};
+use ouroboros::self_referencing;
+use reqwless::{
+    client::{HttpClient as ReqwlessHttpClient, HttpResource},
+    request::{Method as ReqwlessMethod, RequestBody, RequestBuilder as _},
+};
+
+use crate::{Body, BodyError, BodyStream, HttpClient, HttpFuture, Method, Request, Response};
+
+#[cfg(all(feature = "embedded-tls", feature = "mbedtls"))]
+compile_error!("select exactly one http-client TLS backend");
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("HTTPS requested without a TLS configuration")]
+    TlsNotConfigured,
+    #[error("invalid URL")]
+    InvalidUrl,
+    #[error("invalid HTTP header")]
+    InvalidHeader,
+    #[error("connection was aborted")]
+    ConnectionAborted,
+    #[error(transparent)]
+    Body(#[from] BodyError),
+    #[error(transparent)]
+    Reqwless(#[from] reqwless::Error),
+}
+
+struct StreamBodyState {
+    stream: BodyStream,
+    failure: Option<BodyError>,
+    completed: bool,
+}
+
+#[derive(Clone)]
+struct StreamBody {
+    state: Rc<RefCell<StreamBodyState>>,
+    content_length: Option<usize>,
+}
+
+impl StreamBody {
+    fn new(stream: BodyStream, content_length: Option<usize>) -> Self {
+        Self {
+            state: Rc::new(RefCell::new(StreamBodyState {
+                stream,
+                failure: None,
+                completed: false,
+            })),
+            content_length,
+        }
+    }
+
+    fn failure(&self) -> Option<BodyError> {
+        self.state.borrow().failure.clone()
+    }
+}
+
+impl RequestBody for StreamBody {
+    fn len(&self) -> Option<usize> {
+        self.content_length
+    }
+
+    async fn write<W: embedded_io_async::Write>(&self, writer: &mut W) -> Result<(), W::Error> {
+        if self.state.borrow().completed {
+            return Ok(());
+        }
+        loop {
+            let next =
+                poll_fn(|context| self.state.borrow_mut().stream.as_mut().poll_next(context)).await;
+            match next {
+                Some(Ok(chunk)) => writer.write_all(&chunk).await?,
+                Some(Err(error)) => {
+                    let mut state = self.state.borrow_mut();
+                    state.failure = Some(error);
+                    state.completed = true;
+                    return Ok(());
+                }
+                None => {
+                    self.state.borrow_mut().completed = true;
+                    return Ok(());
+                }
+            }
+        }
+    }
+}
+
+struct ConnectionOwner<'net, S>
+where
+    S: TcpConnect + Dns,
+{
+    client: ReqwlessHttpClient<'net, S, S>,
+    origin: String,
+}
+
+#[self_referencing]
+struct Connected<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    owner: ConnectionOwner<'net, S>,
+    #[borrows(mut owner)]
+    #[not_covariant]
+    resource: HttpResource<'this, S::Connection<'this>>,
+}
+
+struct Transport<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    disconnected: Option<ReqwlessHttpClient<'net, S, S>>,
+    connected: Option<Connected<'net, S>>,
+    connected_origin: Option<String>,
+    header_buffer: Vec<u8>,
+    read_buffer: Vec<u8>,
+    tls_configured: bool,
+}
+
+impl<'net, S> Transport<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    fn from_client(
+        client: ReqwlessHttpClient<'net, S, S>,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+        tls_configured: bool,
+    ) -> Self {
+        Self {
+            disconnected: Some(client),
+            connected: None,
+            connected_origin: None,
+            header_buffer: vec![0; header_buffer_size],
+            read_buffer: vec![0; read_buffer_size],
+            tls_configured,
+        }
+    }
+
+    fn disconnect(&mut self) {
+        if let Some(connected) = self.connected.take() {
+            self.disconnected = Some(connected.into_heads().owner.client);
+        }
+        self.connected_origin = None;
+    }
+
+    async fn ensure_connected(&mut self, origin: &str) -> Result<(), Error> {
+        if self.connected_origin.as_deref() == Some(origin) && self.connected.is_some() {
+            return Ok(());
+        }
+        self.disconnect();
+        let client = self.disconnected.take().ok_or(Error::ConnectionAborted)?;
+        let owner = ConnectionOwner {
+            client,
+            origin: origin.to_string(),
+        };
+        let builder = ConnectedAsyncTryBuilder {
+            owner,
+            resource_builder: |owner| {
+                Box::pin(async move {
+                    let ConnectionOwner { client, origin } = owner;
+                    client.resource(origin.as_str()).await
+                })
+            },
+        };
+        match builder.try_build_or_recover().await {
+            Ok(connected) => {
+                self.connected = Some(connected);
+                self.connected_origin = Some(origin.to_string());
+                Ok(())
+            }
+            Err((error, heads)) => {
+                self.disconnected = Some(heads.owner.client);
+                Err(error.into())
+            }
+        }
+    }
+
+    async fn execute_inner(&mut self, request: Request) -> Result<Response, Error> {
+        if request.url.starts_with("https://") && !self.tls_configured {
+            return Err(Error::TlsNotConfigured);
+        }
+        validate_headers(&request)?;
+        let (origin, path) = split_url(&request.url)?;
+        let origin = origin.to_string();
+        let path = path.to_string();
+        self.ensure_connected(&origin).await?;
+
+        let header_refs: Vec<(&str, &str)> = request
+            .headers
+            .iter()
+            .map(|header| (header.name.as_str(), header.value.as_str()))
+            .collect();
+        let method = map_method(request.method);
+        let Self {
+            connected,
+            header_buffer,
+            read_buffer,
+            ..
+        } = self;
+        let connected = connected.as_mut().ok_or(Error::ConnectionAborted)?;
+
+        connected
+            .with_resource_mut(|resource| {
+                Box::pin(async move {
+                    match request.body {
+                        Body::Empty => {
+                            let response = resource
+                                .request(method, &path)
+                                .headers(&header_refs)
+                                .send(header_buffer.as_mut_slice())
+                                .await?;
+                            read_response(response, read_buffer).await
+                        }
+                        Body::Bytes(bytes) => {
+                            let response = resource
+                                .request(method, &path)
+                                .headers(&header_refs)
+                                .body(bytes.as_slice())
+                                .send(header_buffer.as_mut_slice())
+                                .await?;
+                            read_response(response, read_buffer).await
+                        }
+                        Body::Stream {
+                            stream,
+                            content_length,
+                        } => {
+                            let body = StreamBody::new(stream, content_length);
+                            let probe = body.clone();
+                            let response = resource
+                                .request(method, &path)
+                                .headers(&header_refs)
+                                .body(body)
+                                .send(header_buffer.as_mut_slice())
+                                .await?;
+                            if let Some(error) = probe.failure() {
+                                return Err(Error::Body(error));
+                            }
+                            read_response(response, read_buffer).await
+                        }
+                    }
+                }) as Pin<Box<dyn Future<Output = Result<Response, Error>> + '_>>
+            })
+            .await
+    }
+
+    async fn execute(&mut self, request: Request) -> Result<Response, Error> {
+        let result = self.execute_inner(request).await;
+        if result.is_err() {
+            self.disconnect();
+        }
+        result
+    }
+}
+
+async fn read_response<C>(
+    response: reqwless::response::Response<'_, '_, C>,
+    read_buffer: &mut Vec<u8>,
+) -> Result<Response, Error>
+where
+    C: embedded_io_async::Read,
+{
+    let status = response.status.0;
+    let mut reader = response.body().reader();
+    let mut body = Vec::new();
+    loop {
+        let read = reader
+            .read(read_buffer.as_mut_slice())
+            .await
+            .map_err(|error| reqwless::Error::Network(error.kind()))?;
+        if read == 0 {
+            break;
+        }
+        let chunk = read_buffer.get(..read).ok_or(reqwless::Error::Codec)?;
+        body.extend_from_slice(chunk);
+    }
+    Ok(Response { status, body })
+}
+
+fn map_method(method: Method) -> ReqwlessMethod {
+    match method {
+        Method::Get => ReqwlessMethod::GET,
+        Method::Post => ReqwlessMethod::POST,
+        Method::Put => ReqwlessMethod::PUT,
+        Method::Delete => ReqwlessMethod::DELETE,
+        Method::Patch => ReqwlessMethod::PATCH,
+    }
+}
+
+fn validate_headers(request: &Request) -> Result<(), Error> {
+    if request.headers.iter().any(|header| {
+        header.name.is_empty()
+            || header.name.bytes().any(|byte| byte <= b' ' || byte == b':')
+            || header.value.contains('\r')
+            || header.value.contains('\n')
+    }) {
+        return Err(Error::InvalidHeader);
+    }
+    Ok(())
+}
+
+fn split_url(url: &str) -> Result<(&str, &str), Error> {
+    let scheme_end = url.find("://").ok_or(Error::InvalidUrl)?;
+    let authority_start = scheme_end.checked_add(3).ok_or(Error::InvalidUrl)?;
+    let scheme = url.get(..scheme_end).ok_or(Error::InvalidUrl)?;
+    if !matches!(scheme, "http" | "https") {
+        return Err(Error::InvalidUrl);
+    }
+    let path_start = url
+        .get(authority_start..)
+        .and_then(|remainder| remainder.find('/'))
+        .and_then(|offset| authority_start.checked_add(offset));
+    match path_start {
+        Some(index) if index > authority_start => Ok((
+            url.get(..index).ok_or(Error::InvalidUrl)?,
+            url.get(index..).ok_or(Error::InvalidUrl)?,
+        )),
+        None if authority_start < url.len() => Ok((url, "/")),
+        _ => Err(Error::InvalidUrl),
+    }
+}
+
+pub struct ReqwlessClient<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    transport: Mutex<NoopRawMutex, Transport<'net, S>>,
+}
+
+impl<'net, S> ReqwlessClient<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    pub fn new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self {
+        Self {
+            transport: Mutex::new(Transport::from_client(
+                ReqwlessHttpClient::new(network, network),
+                header_buffer_size,
+                read_buffer_size,
+                false,
+            )),
+        }
+    }
+}
+
+#[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
+impl<'net, S> ReqwlessClient<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    pub fn new_with_tls(
+        network: &'net S,
+        tls: reqwless::client::TlsConfig<'net>,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+    ) -> Self {
+        Self {
+            transport: Mutex::new(Transport::from_client(
+                ReqwlessHttpClient::new_with_tls(network, network, tls),
+                header_buffer_size,
+                read_buffer_size,
+                true,
+            )),
+        }
+    }
+}
+
+impl<'net, S> HttpClient for ReqwlessClient<'net, S>
+where
+    S: TcpConnect + Dns + 'net,
+{
+    fn execute(&self, request: Request) -> HttpFuture<'_> {
+        Box::pin(async move { self.transport.lock().await.execute(request).await })
+    }
+}

@@ -26,6 +26,10 @@ crates=(
     claw-skill
     claw-tool
     claw-utils
+    http-client
+    telegram
+    wechat
+    bluebubbles
     json-validator
     json-validator-macros
 )
@@ -34,6 +38,12 @@ manifest_path() {
     case "$1" in
         gateway)
             printf 'components/message-gateway/crates/gateway/Cargo.toml'
+            ;;
+        telegram|wechat|bluebubbles)
+            printf 'components/message-gateway/crates/%s/Cargo.toml' "$1"
+            ;;
+        http-client)
+            printf 'shared/http-client/Cargo.toml'
             ;;
         claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
             printf 'shared/%s/Cargo.toml' "$1"

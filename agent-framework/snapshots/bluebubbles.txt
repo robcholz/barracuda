@@ -1,0 +1,20 @@
+pub mod bluebubbles
+pub struct bluebubbles::BlueBubbles
+impl bluebubbles::BlueBubbles
+pub fn bluebubbles::BlueBubbles::new(http: alloc::rc::Rc<dyn http_client::model::HttpClient>, config: bluebubbles::BlueBubblesConfig) -> Self
+impl gateway::channel::MessageChannel for bluebubbles::BlueBubbles
+pub fn bluebubbles::BlueBubbles::channel(&self) -> &str
+pub fn bluebubbles::BlueBubbles::delete_message(&self, request: gateway::model::DeleteMessageRequest) -> gateway::channel::ChannelFuture<'_, ()>
+pub fn bluebubbles::BlueBubbles::edit_message(&self, request: gateway::model::EditMessageRequest) -> gateway::channel::ChannelFuture<'_, gateway::model::SendReceipt>
+pub fn bluebubbles::BlueBubbles::react(&self, request: gateway::model::ReactRequest) -> gateway::channel::ChannelFuture<'_, ()>
+pub fn bluebubbles::BlueBubbles::send_media(&self, kind: gateway::model::MediaKind, request: gateway::model::SendMediaRequest) -> gateway::channel::ChannelFuture<'_, gateway::model::SendReceipt>
+pub fn bluebubbles::BlueBubbles::send_message(&self, request: gateway::model::SendMessageRequest) -> gateway::channel::ChannelFuture<'_, gateway::model::SendReceipt>
+pub fn bluebubbles::BlueBubbles::set_typing(&self, request: gateway::model::SetTypingRequest) -> gateway::channel::ChannelFuture<'_, ()>
+pub struct bluebubbles::BlueBubblesConfig
+pub bluebubbles::BlueBubblesConfig::password: alloc::string::String
+pub bluebubbles::BlueBubblesConfig::server_url: alloc::string::String
+pub bluebubbles::BlueBubblesConfig::stream_edit_min_delta_bytes: usize
+pub bluebubbles::BlueBubblesConfig::stream_max_edits: usize
+pub bluebubbles::BlueBubblesConfig::use_private_api: bool
+impl bluebubbles::BlueBubblesConfig
+pub fn bluebubbles::BlueBubblesConfig::new(server_url: impl core::convert::Into<alloc::string::String>, password: impl core::convert::Into<alloc::string::String>) -> Self

@@ -1,0 +1,16 @@
+pub mod wechat
+pub struct wechat::Wechat
+impl wechat::Wechat
+pub fn wechat::Wechat::new(http: alloc::rc::Rc<dyn http_client::model::HttpClient>, config: wechat::WechatConfig) -> Self
+impl gateway::channel::MessageChannel for wechat::Wechat
+pub fn wechat::Wechat::channel(&self) -> &str
+pub fn wechat::Wechat::send_message(&self, request: gateway::model::SendMessageRequest) -> gateway::channel::ChannelFuture<'_, gateway::model::SendReceipt>
+pub struct wechat::WechatConfig
+pub wechat::WechatConfig::api_base: alloc::string::String
+pub wechat::WechatConfig::app_id: alloc::string::String
+pub wechat::WechatConfig::client_version: alloc::string::String
+pub wechat::WechatConfig::route_tag: core::option::Option<alloc::string::String>
+pub wechat::WechatConfig::token: alloc::string::String
+pub wechat::WechatConfig::x_wechat_uin: alloc::string::String
+impl wechat::WechatConfig
+pub fn wechat::WechatConfig::new(token: impl core::convert::Into<alloc::string::String>) -> Self

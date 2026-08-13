@@ -357,6 +357,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bluebubbles"
+version = "0.1.0"
+dependencies = [
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "percent-encoding",
+ "serde_json",
+]
+
+[[package]]
 name = "bstr"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1822,6 +1833,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-client"
+version = "0.1.0"
+dependencies = [
+ "claw-net",
+ "embassy-sync",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
+ "futures-core",
+ "futures-lite",
+ "ouroboros",
+ "reqwless",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2974,6 +3001,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0bf256ce5efdfa370213c1dabab5935a12e49f2c58d15e9eac2870d3b4f27263"
 
 [[package]]
+name = "telegram"
+version = "0.1.0"
+dependencies = [
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "serde_json",
+]
+
+[[package]]
 name = "tempdir"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3308,6 +3345,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef64dbcc55df09c7e5a46182d181c2cfa3e925f3da937ea764728b4bbb9dcbf"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wechat"
+version = "0.1.0"
+dependencies = [
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "serde_json",
 ]
 
 [[package]]
