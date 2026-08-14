@@ -1,7 +1,6 @@
 # Environment
 .env
 .env.local
-test_secrets.h
 
 # Python
 .cache
@@ -12,8 +11,8 @@ test_secrets.h
 # Rust
 target/
 output/
-simulator.log
-logger.log
+
+# Test
 simulator_log.log
 simulator_trace.log
 trace.json

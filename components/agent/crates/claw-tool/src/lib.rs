@@ -1,0 +1,33 @@
+#![no_std]
+// Tool handles are ref-counted but intentionally executor-local and non-Send.
+#![allow(clippy::arc_with_non_send_sync)]
+
+extern crate alloc;
+#[cfg(feature = "build-support")]
+extern crate std;
+
+#[cfg(feature = "build-support")]
+pub mod bake;
+mod context;
+mod registry;
+mod runner;
+mod set;
+#[allow(clippy::module_inception)]
+mod tool;
+mod validate;
+
+pub use claw_permission::{Action, Resource, RiskClass};
+pub use context::{
+    AgentStorage, AgentStorageBackend, AgentStorageError, AgentStorageScope, ToolContext,
+};
+pub use registry::{ToolGroup, ToolGroupId, ToolRegistry, ToolRegistryError, ToolRegistryVersion};
+pub use runner::{ToolDetachHandle, ToolJoinHandle, ToolRunner};
+pub use set::{
+    ToolCatalogEntry, ToolDiscoveryHandle, ToolGroupCatalog, ToolName, ToolSet, ToolSetError,
+    ToolSetHandle,
+};
+pub use tool::{
+    DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolCompletionFuture,
+    ToolConfig, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
+    ToolResult, ToolSpec,
+};
