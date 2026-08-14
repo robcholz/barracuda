@@ -4,6 +4,7 @@ members = [
     "components/agent/crates/*",
     "components/agent/bench/crates/*",
     "components/message-gateway/crates/*",
+    "components/vm",
     "shared/*",
     "apps/*",
 ]

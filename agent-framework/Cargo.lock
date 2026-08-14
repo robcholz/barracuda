@@ -674,6 +674,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "claw-lua"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "futures-lite",
+ "lunka",
+]
+
+[[package]]
 name = "claw-memory"
 version = "0.1.0"
 dependencies = [
@@ -773,6 +782,13 @@ dependencies = [
  "futures-util",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "claw-vm"
+version = "0.1.0"
+dependencies = [
+ "claw-lua",
 ]
 
 [[package]]
@@ -917,6 +933,12 @@ checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
 ]
+
+[[package]]
+name = "current_platform"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74858bcfe44b22016cb49337d7b6f04618c58e5dbfdef61b06b8c434324a0bc"
 
 [[package]]
 name = "cvt"
@@ -2106,6 +2128,24 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "lunka"
+version = "0.14.0"
+source = "git+https://github.com/robcholz/lunka.git?rev=820b3d89a6ccfcdae3286f9b4548831dc568cf54#820b3d89a6ccfcdae3286f9b4548831dc568cf54"
+dependencies = [
+ "lunka-src",
+]
+
+[[package]]
+name = "lunka-src"
+version = "54.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59eb06a054a60c04c7ca44aee6b2b197feaff6364907ed7f43d68580adfc02b2"
+dependencies = [
+ "cc",
+ "current_platform",
+]
 
 [[package]]
 name = "matchit"

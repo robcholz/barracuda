@@ -1,0 +1,17 @@
+[package]
+name = "claw-lua"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal no_std Lua wrapper with native Rust async bindings"
+license = "Apache-2.0"
+
+[features]
+default = []
+vendored = ["lunka/link-vendored"]
+
+[dependencies]
+async-channel = { version = "2.5", default-features = false }
+lunka = { git = "https://github.com/robcholz/lunka.git", rev = "820b3d89a6ccfcdae3286f9b4548831dc568cf54", default-features = false, features = ["alloc", "auxlib", "stdlibs"] }
+
+[dev-dependencies]
+futures-lite = "2"

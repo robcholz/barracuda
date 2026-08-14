@@ -23,6 +23,8 @@ no_std_crates=(
     claw-skill
     claw-tool
     claw-utils
+    claw-lua
+    claw-vm
     json-validator
 )
 host_test_crates=(
@@ -69,6 +71,8 @@ run cargo test --locked -p claw-net --features testing
 run cargo test --locked -p claw-context --features intrusive-observability
 run cargo test --locked -p claw-agent --test embassy_runtime
 run cargo test --locked -p claw-cli
+run cargo test --locked -p claw-lua --features vendored
+run cargo test --locked -p claw-vm --features vendored
 
 run cargo clippy --locked -p claw-core --lib -- -D warnings
 run cargo clippy --locked -p claw-agent --lib -- -D warnings
