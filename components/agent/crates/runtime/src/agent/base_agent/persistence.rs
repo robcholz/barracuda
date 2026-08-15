@@ -11,9 +11,8 @@ use alloc::{
 use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, SchemaVersion, StateBlob, StateSlice,
 };
-use barracuda_agent_tool::{
-    AgentStorageBackend, AgentStorageError, AgentStorageScope, ToolGroupId,
-};
+use barracuda_agent_tool::runtime::{AgentStorageBackend, AgentStorageScope};
+use barracuda_agent_tool::{AgentStorageError, ToolGroupId};
 use barracuda_model_api::ToolCall;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,7 +32,6 @@ pub(in crate::agent) struct BaseAgentState {
     /// Calls checkpointed before execution and retained until their results
     /// have been recorded in the transcript.
     inflight_toolcalls: Vec<ToolCall>,
-    #[serde(default)]
     toolcall_states: BTreeMap<ToolGroupId, ToolCallState>,
 }
 
@@ -90,7 +88,7 @@ impl BaseAgentState {
     }
 }
 
-pub(in crate::agent) fn tool_storage_scope(
+pub(in crate::agent) fn agent_storage_scope(
     state: &DurableState<BaseAgentState>,
 ) -> AgentStorageScope {
     AgentStorageScope::new(Arc::new(AgentToolStorage {
@@ -156,7 +154,7 @@ mod tests {
     use crate::agent::AgentKind;
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_persistence::{DurableStateCodec, StateSlice};
-    use barracuda_agent_tool::AgentStorageBackend;
+    use barracuda_agent_tool::runtime::AgentStorageBackend;
     use barracuda_model_api::ToolCall;
 
     #[test]

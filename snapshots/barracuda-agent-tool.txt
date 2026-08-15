@@ -40,10 +40,6 @@ impl barracuda_agent_tool::AgentStorage
 pub fn barracuda_agent_tool::AgentStorage::clear(&self) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError>
 pub fn barracuda_agent_tool::AgentStorage::load<T>(&self) -> core::result::Result<core::option::Option<T>, barracuda_agent_tool::AgentStorageError> where T: serde_core::de::DeserializeOwned
 pub fn barracuda_agent_tool::AgentStorage::store<T>(&self, value: &T) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError> where T: serde_core::ser::Serialize
-pub struct barracuda_agent_tool::AgentStorageScope
-impl barracuda_agent_tool::AgentStorageScope
-pub fn barracuda_agent_tool::AgentStorageScope::new(backend: alloc::sync::Arc<dyn barracuda_agent_tool::AgentStorageBackend>) -> Self
-pub fn barracuda_agent_tool::AgentStorageScope::unavailable() -> Self
 pub struct barracuda_agent_tool::DetachedTool
 impl barracuda_agent_tool::DetachedTool
 pub fn barracuda_agent_tool::DetachedTool::new(accepted: barracuda_agent_tool::ToolOutput, completion: barracuda_agent_tool::ToolCompletionFuture) -> Self
@@ -127,7 +123,6 @@ impl core::fmt::Debug for barracuda_agent_tool::ToolRegistry
 pub fn barracuda_agent_tool::ToolRegistry::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct barracuda_agent_tool::ToolRunner<'a>
 impl<'a> barracuda_agent_tool::ToolRunner<'a>
-pub fn barracuda_agent_tool::ToolRunner<'a>::new(tools: &'a barracuda_agent_tool::ToolSetHandle<'a>, storage: barracuda_agent_tool::AgentStorageScope) -> Self
 pub fn barracuda_agent_tool::ToolRunner<'a>::run(&self, calls: alloc::vec::Vec<barracuda_agent_tool::ToolInvocation>) -> (barracuda_agent_tool::ToolJoinHandle, core::option::Option<barracuda_agent_tool::ToolDetachHandle>)
 pub fn barracuda_agent_tool::ToolRunner<'a>::stateless(tools: &'a barracuda_agent_tool::ToolSetHandle<'a>) -> Self
 pub struct barracuda_agent_tool::ToolSet
@@ -149,10 +144,6 @@ pub fn barracuda_agent_tool::ToolSetHandle<'a>::deferred_context(&self) -> &str
 pub fn barracuda_agent_tool::ToolSetHandle<'a>::reminders(&self) -> &str
 pub fn barracuda_agent_tool::ToolSetHandle<'a>::static_context(&self) -> &str
 pub fn barracuda_agent_tool::ToolSetHandle<'a>::static_schemas(&self) -> &str
-pub trait barracuda_agent_tool::AgentStorageBackend: 'static
-pub fn barracuda_agent_tool::AgentStorageBackend::clear(&self, group: &str) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError>
-pub fn barracuda_agent_tool::AgentStorageBackend::load(&self, group: &str) -> core::result::Result<core::option::Option<serde_json::value::Value>, barracuda_agent_tool::AgentStorageError>
-pub fn barracuda_agent_tool::AgentStorageBackend::store(&self, group: &str, object: serde_json::value::Value) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError>
 pub trait barracuda_agent_tool::DetachedToolHandler: barracuda_agent_tool::ToolSpec
 pub type barracuda_agent_tool::DetachedToolHandler::Args: serde_core::de::DeserializeOwned
 pub fn barracuda_agent_tool::DetachedToolHandler::invoke<'a>(&'a self, context: barracuda_agent_tool::ToolContext, args: Self::Args) -> barracuda_agent_tool::DetachedToolFuture<'a>

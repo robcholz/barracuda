@@ -6,9 +6,9 @@ use alloc::{
     vec::Vec,
 };
 
+use barracuda_agent_tool::runtime::{agent_runner, AgentStorageScope};
 use barracuda_agent_tool::{
-    AgentStorageScope, ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner,
-    ToolSetHandle,
+    ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolSetHandle,
 };
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
@@ -525,7 +525,7 @@ fn dispatch_scheduled_calls(
         .into_iter()
         .map(|call| call.invocation)
         .collect::<Vec<_>>();
-    let (joined, detached) = ToolRunner::new(tools, agent_storage.clone()).run(calls);
+    let (joined, detached) = agent_runner(tools, agent_storage.clone()).run(calls);
     (Some(joined), detached)
 }
 

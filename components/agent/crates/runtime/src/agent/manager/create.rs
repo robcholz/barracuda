@@ -11,7 +11,7 @@ use barracuda_net::{Dns, TcpConnect};
 
 use crate::agent::baked;
 use crate::agent::base_agent::{
-    agent_effect_channel, tool_storage_scope, BaseAgent, BaseAgentConfig, ContextProvider,
+    agent_effect_channel, agent_storage_scope, BaseAgent, BaseAgentConfig, ContextProvider,
 };
 use crate::agent::context_providers::{
     AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
@@ -175,7 +175,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let runtime = manifest.runtime();
         let skill_set = Arc::clone(&self.skill_registry).skill_set();
         let state = DurableState::new(recovery_state.unwrap_or_else(|| BaseAgentState::new(kind)));
-        let agent_storage = tool_storage_scope(&state);
+        let agent_storage = agent_storage_scope(&state);
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.

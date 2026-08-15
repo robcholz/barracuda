@@ -13,9 +13,9 @@ use futures_core::Stream;
 use futures_util::stream::FuturesUnordered;
 use tracing::Instrument as _;
 
+use super::context::AgentStorageScope;
 use super::{
-    AgentStorageScope, Tool, ToolCompletionFuture, ToolContext, ToolInvocation, ToolOutput,
-    ToolResult, ToolSetHandle,
+    Tool, ToolCompletionFuture, ToolContext, ToolInvocation, ToolOutput, ToolResult, ToolSetHandle,
 };
 
 const DETACHED_ACCEPTED: &str = concat!(
@@ -105,14 +105,14 @@ pub struct ToolRunner<'a> {
 }
 
 impl<'a> ToolRunner<'a> {
-    pub fn new(tools: &'a ToolSetHandle<'a>, storage: AgentStorageScope) -> Self {
+    pub(crate) fn with_storage(tools: &'a ToolSetHandle<'a>, storage: AgentStorageScope) -> Self {
         Self { tools, storage }
     }
 
     /// Build a runner for framework-internal tool protocols that do not belong
     /// to an Agent. Storage access from such a handler fails explicitly.
     pub fn stateless(tools: &'a ToolSetHandle<'a>) -> Self {
-        Self::new(tools, AgentStorageScope::unavailable())
+        Self::with_storage(tools, AgentStorageScope::unavailable())
     }
 
     pub fn run(&self, calls: Vec<ToolInvocation>) -> (ToolJoinHandle, Option<ToolDetachHandle>) {
@@ -286,10 +286,10 @@ mod tests {
     use futures_lite::StreamExt as _;
 
     use super::*;
+    use crate::runtime::{AgentStorageBackend, AgentStorageScope};
     use crate::{
-        AgentStorageBackend, AgentStorageError, AgentStorageScope, DetachedTool,
-        DetachedToolFuture, DetachedToolHandler, EmptyArgs, ToolConfig, ToolFuture, ToolGroup,
-        ToolHandler, ToolSet, ToolSpec,
+        AgentStorageError, DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs,
+        ToolConfig, ToolFuture, ToolGroup, ToolHandler, ToolSet, ToolSpec,
     };
 
     #[derive(Default)]
@@ -586,14 +586,14 @@ mod tests {
         let Ok(store) = ToolInvocation::try_new(Some("store"), "store", "{}") else {
             return;
         };
-        let (stored, _) = ToolRunner::new(&tools, storage.clone()).run(vec![store]);
+        let (stored, _) = ToolRunner::with_storage(&tools, storage.clone()).run(vec![store]);
         let stored = block_on(stored.collect::<Vec<_>>());
         assert!(stored.first().is_some_and(|(_, output)| output.ok));
 
         let Ok(shared) = ToolInvocation::try_new(Some("shared"), "shared_load", "{}") else {
             return;
         };
-        let (shared, _) = ToolRunner::new(&tools, storage.clone()).run(vec![shared]);
+        let (shared, _) = ToolRunner::with_storage(&tools, storage.clone()).run(vec![shared]);
         let shared = block_on(shared.collect::<Vec<_>>());
         assert!(shared
             .first()
@@ -602,7 +602,7 @@ mod tests {
         let Ok(isolated) = ToolInvocation::try_new(Some("isolated"), "isolated_load", "{}") else {
             return;
         };
-        let (isolated, _) = ToolRunner::new(&tools, storage).run(vec![isolated]);
+        let (isolated, _) = ToolRunner::with_storage(&tools, storage).run(vec![isolated]);
         let isolated = block_on(isolated.collect::<Vec<_>>());
         assert!(isolated
             .first()

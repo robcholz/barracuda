@@ -15,7 +15,7 @@ pub(in crate::agent) use self::context_provider::{
     ContextProvider, ContextProviderFuture, ContextProviderResult, TurnLifecycle,
 };
 pub(in crate::agent) use self::effect::{agent_effect_channel, AgentEffect, AgentEffectEmitter};
-pub(in crate::agent) use self::persistence::{tool_storage_scope, BaseAgentState};
+pub(in crate::agent) use self::persistence::{agent_storage_scope, BaseAgentState};
 pub use self::stream::{AgentApprovalError, AgentError};
 pub(crate) use self::stream::{
     AgentCompletion, AgentInputRequest, AgentIterationEvent, AgentOutcome, AgentSubmitError,

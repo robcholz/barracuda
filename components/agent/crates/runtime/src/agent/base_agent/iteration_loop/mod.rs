@@ -15,7 +15,7 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_agent_permission::Action;
-use barracuda_agent_tool::AgentStorageScope;
+use barracuda_agent_tool::runtime::AgentStorageScope;
 
 use barracuda_model_api::{ModelApi, RetryPolicy};
 use barracuda_net::{Dns, TcpConnect};

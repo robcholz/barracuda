@@ -4,7 +4,7 @@ use barracuda_agent_context::{Block, BlockKind, Context};
 use barracuda_agent_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::AgentStorageScope;
+use barracuda_agent_tool::runtime::AgentStorageScope;
 use barracuda_agent_tool::ToolSet;
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_net::{Dns, TcpConnect};
