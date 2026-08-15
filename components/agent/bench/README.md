@@ -7,7 +7,7 @@ Run commands from the repository root.
 Profile allocations while initializing an `AgentSystem`:
 
 ```bash
-cargo run --profile profiling -p claw-agent-profile -- agent-init
+cargo run --profile profiling -p barracuda-agent-profile -- agent-init
 ```
 
 The command prints allocation totals, peak live bytes, and retained bytes. Its
@@ -20,11 +20,11 @@ target/profiles/agent-init.dhat.json
 Pass a second argument to choose another output path:
 
 ```bash
-cargo run --profile profiling -p claw-agent-profile -- \
+cargo run --profile profiling -p barracuda-agent-profile -- \
   agent-init target/profiles/custom.dhat.json
 ```
 
-`claw-profile` is the shared profiling library; it has no standalone command.
+`barracuda-profile` is the shared profiling library; it has no standalone command.
 
 ## LLM API byte recording and replay
 
@@ -38,8 +38,8 @@ it does not parse SSE or model output.
 Build the host profiling executable and print its load-image breakdown:
 
 ```bash
-cargo build --profile profiling -p claw-agent-profile
-size target/profiling/claw-agent-profile
+cargo build --profile profiling -p barracuda-agent-profile
+size target/profiling/barracuda-agent-profile
 ```
 
 In the output, `dec` is `text + data + bss`. Use `size -A` for individual ELF
@@ -51,7 +51,7 @@ Run Clippy's static stack-frame estimate with the 4 KiB threshold configured in
 `components/agent/bench/clippy.toml`:
 
 ```bash
-CLIPPY_CONF_DIR=bench cargo clippy -p claw-agent-profile --all-targets -- \
+CLIPPY_CONF_DIR=bench cargo clippy -p barracuda-agent-profile --all-targets -- \
   -W clippy::large-stack-frames -W clippy::large-stack-arrays
 ```
 
@@ -61,10 +61,10 @@ useful for regression checks but may differ from optimized runtime stack usage.
 ## Bounded runtime stack
 
 Run agent initialization with the runtime worker stack size requested by
-`claw-core` (currently 64 KiB):
+`barracuda-agent-runtime` (currently 64 KiB):
 
 ```bash
-cargo run --profile profiling -p claw-agent-profile --bin claw-agent-stack
+cargo run --profile profiling -p barracuda-agent-profile --bin barracuda-agent-stack
 ```
 
 The command exits successfully only if the `agent-init` workload completes

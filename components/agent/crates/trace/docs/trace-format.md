@@ -1,0 +1,194 @@
+# Trace Format Specification
+
+`barracuda-agent-trace`'s `FlatTreeSubscriber` flattens the tracing span tree into single lines that an offline parser can reconstruct back into a tree. This document is the **authoritative definition**; the `trace.rs` implementation and its unit tests must follow it strictly.
+
+## Line Structure
+
+```
+TRACE <timestamp> <type> <tracing-context> <incremental-context>* <custom-context>
+```
+
+- Anything before `TRACE` is the transport-layer prefix (ESP_LOG's `I (…) tag:` / the host logger's prefix) and is **not part of this format**; parsing starts at the `TRACE` marker.
+- `<timestamp>`: framework-filled **monotonic timestamp (ms, since boot; on host normalized to an equivalent monotonic clock)**, the first token after `TRACE`. The duration of a span is the `<timestamp>` difference between its `exit` and `enter` and **does not depend on the transport prefix**.
+- The three layers, and the tokens inside each `<...>`, are separated by a **single space** (no alignment padding); a line never contains a newline (`\n` is converted to a space before emit).
+- Each token inside `<...>` is `key=value`, and **neither key nor value may contain a space** (space is the separator). The writer asserts this with `debug_assert!`; anything containing spaces must go in the custom context.
+- **All parsable structural information lives inside the `<...>` blocks**; everything after them is the custom context — free text, **not parsed** (spaces / commas / pipes / angle brackets are all allowed).
+- A line begins with exactly one tracing-context block, followed (on `enter` only) by **zero or more** incremental-context blocks `<context=group …>`. The parser reads the leading `<...>` blocks; the remainder of the line is the custom context.
+
+## ① `<type>`
+
+`enter` (enter a span) / `exit` (leave a span) / `event` (an instantaneous record inside a span).
+
+## ② tracing-context (framework-filled, one `<...>` block)
+
+Coordinates the framework derives from metadata, the active span stack, and logical-task inheritance. Contents are fixed per type:
+
+| type | `<...>` contents |
+|------|------|
+| `enter` | `span=<id> parent=<id\|none> task=<label> span-name=<name> target=<module>` |
+| `exit`  | `span=<id> task=<label>` |
+| `event` | `span=<id\|none> task=<label> event-name=<name> target=<module>` |
+
+- `span`/`parent`: a framework-assigned, **monotonically increasing, never-recycled** unique id (not the raw tracing id), globally unique across the whole trace stream, so pairing/tree-building is unambiguous.
+- `span`: the id of the span this record belongs to; for an `event` with no enclosing span it is `none` (how the consumer renders an orphan is decided by the visualizer and is out of scope for this spec).
+- `parent`: the id of the parent span; the outermost span has no parent and is recorded as `none`.
+- `task`: the logical async-task label used as the offline/Chrome lane. A span opens a logical task with the reserved `trace.task=<label>` field; that field is consumed by `barracuda-agent-trace` and is not emitted as custom context. Descendant spans and events inherit the label, and the span's `exit` reuses its stored label even if the future resumes or is dropped on another executor thread. Whitespace in an explicit label is normalized to `_` so it remains one structural token.
+- If no enclosing span has opened `trace.task`, `task` falls back to the host thread name or ESP FreeRTOS task name. This fallback identifies synchronous/control work only; it is not an async task identity.
+- `enter`/`exit` come **one pair per span**, corresponding to span creation/destruction (not per poll); they are paired by the same `span` (duration = the `<timestamp>` difference), and the span name is looked up by `span` from the `enter` line.
+
+Every independently scheduled future whose span lifetime may overlap another future must open its own stable `trace.task`. Reusing a physical executor-thread label for overlapping async work violates the format's per-task replay contract.
+
+## ③ incremental-context (caller-configured groups, `enter` only)
+
+Inherited context is organized into one or more **named groups**, each a closed, ordered key set. Groups are **not** baked into `barracuda-agent-trace`; the caller registers them at subscriber init:
+
+```rust
+TracingConfig::default()
+    .with_context_group_keys(
+        "run",
+        ["system", "session", "turn", "agent", "iteration"],
+    )
+```
+
+`barracuda_agent_runtime` registers the `run` group above (fixed order
+`system → session → turn → agent → iteration`); other subsystems may register
+their own groups. `system` is the semantic agent-system root for startup/global
+records; it is a scope label, not an allocated or persisted runtime id.
+
+Each group that opens at least one key on a span renders as its own block on that span's `enter` line, in registration order:
+
+```
+<context=<group> <key>=<value> …>
+```
+
+**Call site (how a field becomes incremental context):** a span field named `group.key` (dotted) is routed to that group's context; any other field is custom context.
+
+```rust
+info_span!(
+    "agent",
+    trace.task = %agent_id,
+    run.agent = %agent_id,
+    depth = 1,
+);
+//  trace.task: reserved logical-task control field
+//  run.agent:  group=run, key=agent
+//  depth:      custom context
+```
+
+- A field's `group` prefix must be a registered group **and** its `key` must be in that group's closed set; a registered prefix with an unknown key is a typo and trips `debug_assert!`. A dotted field whose prefix is **not** a registered group (e.g. `http.method`) is ordinary custom context.
+- Within one logical task, a key appears on the `enter` line of the span that opens or changes it; ordinary descendant lines and events do **not** repeat it.
+- A span that opens a new `trace.task` is the exception: its `enter` line repeats the **complete effective context** (inherited context plus its own fields). The new task therefore seeds an independent per-task stack instead of depending on the executor thread's stack. Descendants on that task return to incremental deltas.
+- The consumer reconstructs context independently per `task`: `enter` pushes, `exit` pops, and the full context of any line is the merged task stack (child overrides parent), per group. Events use their explicit `span` id after the span's context has been reconstructed.
+- **Prefix-closed (per group)**: because the span hierarchy is a fixed nesting, a group's reconstructed key set is always a prefix of its declared order — e.g. for `run`, `session` present ⟹ `system` present; `agent` present ⟹ `system`+`session`+`turn` present; `iteration` present ⟹ all four earlier keys are present. There is never a "has `agent` but missing `turn`" gap.
+- The canonical Chrome exporter rejects `run.session` without `run.system`; it
+  does not support the older context shape. An empty `run` prefix is valid:
+  records outside both scopes are exported as `unattributed`.
+- A group that opens no key on a span emits **no block** (no empty `<context=…>`). `event` lines carry no incremental block at all.
+
+## ④ custom-context (call site, free-form)
+
+Each span/event's own content — **developer-defined, no format requirement, no `|`** — appended verbatim after the `<...>` blocks; the framework does not parse it.
+
+- Only `enter` (span creation arguments) and `event` (record content) may carry a custom context.
+- An `exit` line has only the tracing context (`span=<id> task=<label>`); it carries **neither incremental nor custom context**.
+- The canonical Chrome exporter treats ordinary numeric `key=value` fields as
+  event arguments. A field opts into a Chrome counter only with the explicit
+  `counter.<series>=<number>` form; the exported series name omits the
+  `counter.` prefix. A nonnumeric explicitly marked value is an export error.
+- In exported Chrome arguments, `span` is a reserved structural field. A span
+  slice carries its own id; an instant event carries the id of its enclosing
+  span, and an orphan event carries no structural `span` argument. This
+  structural value takes precedence over a same-named custom `span=...` token.
+  Consequently an event-to-child relation can be joined exactly with
+  `event.args.span == child.args.parent`.
+
+### Chrome projection of span parents
+
+The canonical Chrome exporter consumes the structural `parent` relation; it is
+not merely copied into display arguments:
+
+- A parent and child on the same exported process/task lane become nested
+  complete (`ph=X`) slices. Their timestamps determine the visible nesting.
+- A parent and child on different lanes are connected with a standard Chrome
+  flow (`ph=s` / `ph=f`) named `span_parent`. Because legacy Chrome flow starts
+  and finishes cannot carry source/target slice ids, the exporter emits
+  thread-scoped instant proxies on the parent and child lanes and connects those
+  proxies. Proxy/endpoint arguments identify `source_span`, `target_span`,
+  `parent_span`, and `child_span`.
+- A capture may end before a span's `exit` is observed. The exporter ends that
+  slice at the latest observed trace timestamp, bounded by any closed ancestor,
+  and adds `incomplete=true`. It does not emit an unmatched duration-begin.
+
+This projection is generic: it depends only on span identity, parent identity,
+lane identity, and timing. It does not contain runtime-specific knowledge of
+agents, tools, or multiagent operations.
+
+### Cross-task flow links
+
+An ordinary event named `flow_link` declares a viewer-level relationship from
+its enclosing source span to a span on another logical task:
+
+```text
+TRACE 13 event <span=7 task=request-1 event-name=flow_link target=producer> flow.name=dispatch flow.target_task=worker-2 flow.target_span=worker flow.arg.request=request-1
+```
+
+- `flow.name` is required and becomes the Chrome/Perfetto flow name.
+- `flow.target_task` is required and selects the destination logical task.
+- `flow.target_span` is optional; when present it restricts the destination by
+  span name.
+- Every `flow.arg.<key>=<value>` is copied to the source span and both exported
+  flow endpoints with the `flow.arg.` prefix removed.
+- Source and destination must share their effective `run.system` and
+  `run.session` scopes. The destination is the earliest matching span whose
+  start falls within the source span's lifetime.
+- The Chrome exporter places distinct thread-scoped instant proxies around the
+  destination start, then connects them with the standard flow. Their visible
+  names include the source/target span names and flow name. Both carry
+  `flow_anchor=true`, `flow_anchor_role`, `source_span`, and `target_span`;
+  those span ids are authoritative. Chrome JSON has no field that can force an
+  endpoint's `slice.parent_id` to a structural span when a different same-lane
+  slice temporally encloses that timestamp.
+- Explicit `flow_link` flows and automatically projected `span_parent` flows
+  share one exporter-wide flow-id sequence, so their native Chrome flow ids
+  never collide.
+
+These fields are a generic trace/export contract. The low-level parser and
+Chrome exporter do not know which runtime subsystem emitted the link.
+
+## Span Hierarchy
+
+`agent.runtime` (opens `system`) > `session` (opens `session`) > `turn`
+(opens `turn`) > `agent` (opens `agent`) > `iteration_loop` (opens
+`iteration`). Startup restore uses `agent.runtime` > `session.restore` >
+`agent.create`; system-wide startup such as `agent.manager` stays directly
+below `agent.runtime` with no session key.
+
+- span = a unit of work with a start and end (`enter`/`exit` paired); event = an instantaneous fact.
+
+## Example (overlapping async agents)
+
+```
+TRACE 2090 enter <span=1 parent=none task=agent-runtime span-name=agent.runtime target=barracuda_agent_runtime::runtime::worker> <context=run system=agent-system>
+TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=barracuda_agent_runtime::session::manager> <context=run system=agent-system session=session-1>
+TRACE 2105 enter <span=3 parent=2 task=session-1 span-name=turn target=barracuda_agent_runtime::session::actor> <context=run turn=turn-7> cause=user
+TRACE 2110 enter <span=4 parent=3 task=agent-1 span-name=agent target=barracuda_agent_runtime::session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-1>
+TRACE 2112 enter <span=5 parent=4 task=agent-1 span-name=iteration_loop target=barracuda_agent_runtime::agent::iteration_loop> <context=run iteration=iteration-0>
+TRACE 2120 enter <span=6 parent=3 task=agent-2 span-name=agent target=barracuda_agent_runtime::session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-2>
+TRACE 2121 event <span=6 task=agent-2 event-name=polled target=barracuda_agent_runtime::session::actor> ready=true
+TRACE 2130 exit <span=6 task=agent-2>
+TRACE 2150 event <span=5 task=agent-1 event-name=completion target=barracuda_agent_runtime::agent::iteration_loop> status=done
+TRACE 2152 exit <span=5 task=agent-1>
+TRACE 2154 exit <span=4 task=agent-1>
+TRACE 2156 exit <span=3 task=session-1>
+TRACE 2158 exit <span=2 task=session-1>
+TRACE 2160 exit <span=1 task=agent-runtime>
+```
+
+- The Agent runtime owns the system lane and the session actor owns the
+  `session-1` lane. `agent-1` and `agent-2` overlap in wall-clock time but have
+  independent task stacks and therefore independent Chrome lanes. Each new
+  session/agent task root repeats its complete context; descendants only add
+  deltas. The `completion` event reconstructs as
+  `agent-system + session-1 + turn-7 + agent-1 + iteration-0`, while the
+  `polled` event reconstructs as
+  `agent-system + session-1 + turn-7 + agent-2`.

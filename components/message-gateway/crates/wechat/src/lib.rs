@@ -125,7 +125,7 @@ impl Wechat {
         }
         let payload = json!({
             "msg": msg,
-            "base_info": { "channel_version": "esp-claw-wechat" },
+            "base_info": { "channel_version": "barracuda-wechat" },
         });
         let bytes = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),

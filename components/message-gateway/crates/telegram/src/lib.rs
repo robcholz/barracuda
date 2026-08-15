@@ -171,7 +171,7 @@ impl Telegram {
         let filename = request.filename.unwrap_or_else(|| default_name.into());
         let mime = request.mime_type.unwrap_or_else(|| default_mime.into());
         let body = map_binary_body(request.body);
-        let boundary = format!("espclaw-telegram-{}", self.next_id());
+        let boundary = format!("barracuda-telegram-{}", self.next_id());
         let mut multipart = Multipart::new(boundary)
             .text("chat_id", request.target.conversation_id)
             .file(field, filename, mime, body);

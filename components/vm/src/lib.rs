@@ -1,9 +1,9 @@
-//! Script VM integration built on the shared `claw-lua` binding crate.
+//! Script VM integration built on the shared `barracuda-lua` binding crate.
 #![no_std]
 
-use claw_lua::Lua;
+use barracuda_lua::Lua;
 
-pub type Result<T> = claw_lua::Result<T>;
+pub type Result<T> = barracuda_lua::Result<T>;
 
 /// Owns the language runtime used by the VM component.
 pub struct Vm {

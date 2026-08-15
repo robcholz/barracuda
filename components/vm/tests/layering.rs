@@ -1,4 +1,4 @@
-use claw_vm::{Result, Vm};
+use barracuda_vm::{Result, Vm};
 
 #[test]
 fn vm_component_uses_the_shared_lua_wrapper() -> Result<()> {

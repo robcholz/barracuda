@@ -1,0 +1,7 @@
+pub mod barracuda_vm
+pub struct barracuda_vm::Vm
+impl barracuda_vm::Vm
+pub fn barracuda_vm::Vm::into_lua(self) -> barracuda_lua::runtime::Lua
+pub fn barracuda_vm::Vm::lua_mut(&mut self) -> &mut barracuda_lua::runtime::Lua
+pub fn barracuda_vm::Vm::new() -> barracuda_vm::Result<Self>
+pub type barracuda_vm::Result<T> = barracuda_lua::error::Result<T>

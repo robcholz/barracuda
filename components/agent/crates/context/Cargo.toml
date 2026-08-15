@@ -1,0 +1,47 @@
+[package]
+name = "barracuda-agent-context"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Context builder: assembles the LLM request context from memory, history, skills, and other providers"
+
+[lib]
+name = "barracuda_agent_context"
+# Pure-Rust rlib bundled (with the other logic crates) into the single `barracuda_rt`
+# staticlib that the firmware links.
+crate-type = ["rlib"]
+
+[features]
+default = []
+# Host-only raw Context snapshots streamed by the internal WebSocket observer.
+# Firmware builds leave this disabled and retain the crate's no_std dependency
+# surface.
+intrusive-observability = [
+    "dep:axum",
+    "dep:futures-util",
+    "dep:serde",
+    "dep:tokio",
+]
+
+[dependencies]
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"], optional = true }
+futures-util = { version = "0.3", optional = true }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }
+
+[dev-dependencies]
+tokio-tungstenite = "0.29"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

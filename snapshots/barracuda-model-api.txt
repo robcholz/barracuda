@@ -1,0 +1,167 @@
+pub mod barracuda_model_api
+pub use barracuda_model_api::StatusCode
+pub use barracuda_model_api::stream
+pub enum barracuda_model_api::BackendKind
+pub barracuda_model_api::BackendKind::AnthropicCompatible
+pub barracuda_model_api::BackendKind::OpenAiCompatible
+impl barracuda_model_api::BackendKind
+pub fn barracuda_model_api::BackendKind::as_str(self) -> &'static str
+pub enum barracuda_model_api::ChatError
+pub barracuda_model_api::ChatError::Api(barracuda_model_api::ModelApiError)
+pub barracuda_model_api::ChatError::InvalidToolsJson
+impl barracuda_model_api::ChatError
+pub fn barracuda_model_api::ChatError::is_aborted(&self) -> bool
+pub fn barracuda_model_api::ChatError::is_retryable(&self) -> bool
+pub fn barracuda_model_api::ChatError::truncated_stream() -> Self
+pub enum barracuda_model_api::ChatJsonError
+pub barracuda_model_api::ChatJsonError::Chat(barracuda_model_api::ChatError)
+pub barracuda_model_api::ChatJsonError::EmptyText
+pub barracuda_model_api::ChatJsonError::InvalidOutput(alloc::string::String)
+pub barracuda_model_api::ChatJsonError::MissingOutputSchema
+impl barracuda_model_api::ChatJsonError
+pub fn barracuda_model_api::ChatJsonError::is_retryable(&self) -> bool
+pub enum barracuda_model_api::ChatStreamEvent
+pub barracuda_model_api::ChatStreamEvent::Output(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
+pub barracuda_model_api::ChatStreamEvent::Reasoning(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
+pub barracuda_model_api::ChatStreamEvent::ToolCalls(barracuda_runtime_utils::stream::StreamPart<barracuda_model_api::ToolCall>)
+pub enum barracuda_model_api::HttpError
+pub barracuda_model_api::HttpError::Cancelled
+pub barracuda_model_api::HttpError::Codec
+pub barracuda_model_api::HttpError::ConnectionAborted
+pub barracuda_model_api::HttpError::InvalidUrl
+pub barracuda_model_api::HttpError::InvalidUtf8
+pub barracuda_model_api::HttpError::Reqwless(reqwless::Error)
+pub barracuda_model_api::HttpError::TlsNotConfigured
+impl barracuda_model_api::HttpError
+pub fn barracuda_model_api::HttpError::retryable(&self) -> bool
+pub enum barracuda_model_api::InferMediaError
+pub barracuda_model_api::InferMediaError::Api(barracuda_model_api::ModelApiError)
+pub barracuda_model_api::InferMediaError::IncompleteRequest
+pub barracuda_model_api::InferMediaError::MediaFileEmpty
+pub barracuda_model_api::InferMediaError::MediaTooLarge
+pub barracuda_model_api::InferMediaError::MediaUrlEmpty
+pub barracuda_model_api::InferMediaError::RequiresLocalImage
+impl barracuda_model_api::InferMediaError
+pub fn barracuda_model_api::InferMediaError::is_retryable(&self) -> bool
+pub enum barracuda_model_api::InitError
+pub barracuda_model_api::InitError::MissingApiKey
+pub barracuda_model_api::InitError::MissingBaseUrl
+pub barracuda_model_api::InitError::MissingModel
+pub enum barracuda_model_api::MediaAsset
+pub barracuda_model_api::MediaAsset::InlineBytes
+pub barracuda_model_api::MediaAsset::InlineBytes::bytes: alloc::vec::Vec<u8>
+pub barracuda_model_api::MediaAsset::InlineBytes::mime_type: alloc::string::String
+pub barracuda_model_api::MediaAsset::RemoteUrl
+pub barracuda_model_api::MediaAsset::RemoteUrl::url: alloc::string::String
+impl barracuda_model_api::MediaAsset
+pub fn barracuda_model_api::MediaAsset::inline_bytes(bytes: alloc::vec::Vec<u8>, mime_type: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn barracuda_model_api::MediaAsset::remote_url(url: impl core::convert::Into<alloc::string::String>) -> Self
+pub enum barracuda_model_api::ModelApiError
+pub barracuda_model_api::ModelApiError::ApiError(&'static str)
+pub barracuda_model_api::ModelApiError::EmptyResponse
+pub barracuda_model_api::ModelApiError::HttpStatus
+pub barracuda_model_api::ModelApiError::HttpStatus::body: alloc::string::String
+pub barracuda_model_api::ModelApiError::HttpStatus::status: reqwless::response::StatusCode
+pub barracuda_model_api::ModelApiError::MalformedResponse(&'static str)
+pub barracuda_model_api::ModelApiError::NotConfigured
+pub barracuda_model_api::ModelApiError::Parse
+pub barracuda_model_api::ModelApiError::Timeout
+pub barracuda_model_api::ModelApiError::TransientHttpStatus
+pub barracuda_model_api::ModelApiError::TransientHttpStatus::body: alloc::string::String
+pub barracuda_model_api::ModelApiError::TransientHttpStatus::status: reqwless::response::StatusCode
+pub barracuda_model_api::ModelApiError::Transport(barracuda_model_api::HttpError)
+impl barracuda_model_api::ModelApiError
+pub fn barracuda_model_api::ModelApiError::is_aborted(&self) -> bool
+pub fn barracuda_model_api::ModelApiError::is_retryable(&self) -> bool
+pub struct barracuda_model_api::ChatJsonRequest<'a>
+pub barracuda_model_api::ChatJsonRequest::chat: barracuda_model_api::ChatRequest<'a>
+pub barracuda_model_api::ChatJsonRequest::output_schema: core::option::Option<barracuda_model_api::StaticOutputSchema<'a>>
+impl<'a> barracuda_model_api::ChatJsonRequest<'a>
+pub fn barracuda_model_api::ChatJsonRequest<'a>::new(system_prompt: &'a str, messages: &'a [serde_json::value::Value]) -> Self
+pub fn barracuda_model_api::ChatJsonRequest<'a>::with_output_schema(self, name: &'a str, schema_json: &'a str) -> Self
+pub fn barracuda_model_api::ChatJsonRequest<'a>::with_reminders(self, reminders: &'a [serde_json::value::Value]) -> Self
+pub fn barracuda_model_api::ChatJsonRequest<'a>::with_retry(self, retry: barracuda_model_api::RetryPolicy) -> Self
+pub fn barracuda_model_api::ChatJsonRequest<'a>::with_tools(self, tools_json: &'a str) -> Self
+pub struct barracuda_model_api::ChatJsonResponse<T>
+pub barracuda_model_api::ChatJsonResponse::output: core::option::Option<T>
+pub barracuda_model_api::ChatJsonResponse::raw_message_json: core::option::Option<alloc::string::String>
+pub barracuda_model_api::ChatJsonResponse::reasoning_content: core::option::Option<alloc::string::String>
+pub barracuda_model_api::ChatJsonResponse::tool_calls: alloc::vec::Vec<barracuda_model_api::ToolCall>
+pub struct barracuda_model_api::ChatRequest<'a>
+pub barracuda_model_api::ChatRequest::messages: &'a [serde_json::value::Value]
+pub barracuda_model_api::ChatRequest::reminders: &'a [serde_json::value::Value]
+pub barracuda_model_api::ChatRequest::retry: barracuda_model_api::RetryPolicy
+pub barracuda_model_api::ChatRequest::system_prompt: &'a str
+pub barracuda_model_api::ChatRequest::tools_json: core::option::Option<&'a str>
+impl<'a> barracuda_model_api::ChatRequest<'a>
+pub fn barracuda_model_api::ChatRequest<'a>::new(system_prompt: &'a str, messages: &'a [serde_json::value::Value]) -> Self
+pub fn barracuda_model_api::ChatRequest<'a>::with_reminders(self, reminders: &'a [serde_json::value::Value]) -> Self
+pub fn barracuda_model_api::ChatRequest<'a>::with_retry(self, retry: barracuda_model_api::RetryPolicy) -> Self
+pub fn barracuda_model_api::ChatRequest<'a>::with_tools(self, tools_json: &'a str) -> Self
+pub struct barracuda_model_api::ChatStream<'a>
+impl futures_core::stream::Stream for barracuda_model_api::ChatStream<'_>
+pub type barracuda_model_api::ChatStream<'_>::Item = core::result::Result<barracuda_model_api::ChatStreamEvent, barracuda_model_api::ChatError>
+pub fn barracuda_model_api::ChatStream<'_>::poll_next(self: core::pin::Pin<&mut Self>, cx: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
+pub struct barracuda_model_api::LlmResponse
+pub barracuda_model_api::LlmResponse::raw_message_json: core::option::Option<alloc::string::String>
+pub barracuda_model_api::LlmResponse::reasoning_content: core::option::Option<alloc::string::String>
+pub barracuda_model_api::LlmResponse::text: core::option::Option<alloc::string::String>
+pub barracuda_model_api::LlmResponse::tool_calls: alloc::vec::Vec<barracuda_model_api::ToolCall>
+pub struct barracuda_model_api::MediaRequest<'a>
+pub barracuda_model_api::MediaRequest::media: &'a barracuda_model_api::MediaAsset
+pub barracuda_model_api::MediaRequest::retry: barracuda_model_api::RetryPolicy
+pub barracuda_model_api::MediaRequest::system_prompt: core::option::Option<&'a str>
+pub barracuda_model_api::MediaRequest::user_prompt: core::option::Option<&'a str>
+impl<'a> barracuda_model_api::MediaRequest<'a>
+pub fn barracuda_model_api::MediaRequest<'a>::new(media: &'a barracuda_model_api::MediaAsset) -> Self
+pub fn barracuda_model_api::MediaRequest<'a>::with_retry(self, retry: barracuda_model_api::RetryPolicy) -> Self
+pub fn barracuda_model_api::MediaRequest<'a>::with_system_prompt(self, system_prompt: &'a str) -> Self
+pub fn barracuda_model_api::MediaRequest<'a>::with_user_prompt(self, user_prompt: &'a str) -> Self
+pub struct barracuda_model_api::ModelApi<'net, S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'net>
+impl<'net, S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'net> barracuda_model_api::ModelApi<'net, S>
+pub async fn barracuda_model_api::ModelApi<'net, S>::chat(&mut self, request: &barracuda_model_api::ChatRequest<'_>, cancel: barracuda_runtime_utils::cancel::Cancel<'_>) -> core::result::Result<barracuda_model_api::LlmResponse, barracuda_model_api::ChatError>
+pub async fn barracuda_model_api::ModelApi<'net, S>::chat_json<Output: serde_core::de::DeserializeOwned>(&mut self, request: &barracuda_model_api::ChatJsonRequest<'_>, cancel: barracuda_runtime_utils::cancel::Cancel<'_>) -> core::result::Result<barracuda_model_api::ChatJsonResponse<Output>, barracuda_model_api::ChatJsonError>
+pub async fn barracuda_model_api::ModelApi<'net, S>::chat_stream<'h, 'r>(&'h mut self, request: &'r barracuda_model_api::ChatRequest<'r>, cancel: barracuda_runtime_utils::cancel::Cancel<'h>) -> core::result::Result<barracuda_model_api::ChatStream<'h>, barracuda_model_api::ChatError> where 'r: 'h
+pub async fn barracuda_model_api::ModelApi<'net, S>::infer_media(&mut self, request: &barracuda_model_api::MediaRequest<'_>, cancel: barracuda_runtime_utils::cancel::Cancel<'_>) -> core::result::Result<alloc::string::String, barracuda_model_api::InferMediaError>
+pub fn barracuda_model_api::ModelApi<'net, S>::new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self
+pub fn barracuda_model_api::ModelApi<'net, S>::set_config(&mut self, config: barracuda_model_api::ModelApiConfig) -> core::result::Result<(), barracuda_model_api::InitError>
+pub struct barracuda_model_api::ModelApiConfig
+pub barracuda_model_api::ModelApiConfig::api_key: alloc::string::String
+pub barracuda_model_api::ModelApiConfig::backend: barracuda_model_api::BackendKind
+pub barracuda_model_api::ModelApiConfig::base_url: alloc::string::String
+pub barracuda_model_api::ModelApiConfig::image_max_bytes: usize
+pub barracuda_model_api::ModelApiConfig::max_tokens: u32
+pub barracuda_model_api::ModelApiConfig::model: alloc::string::String
+pub barracuda_model_api::ModelApiConfig::timeout_ms: u32
+impl barracuda_model_api::ModelApiConfig
+pub fn barracuda_model_api::ModelApiConfig::new(backend: barracuda_model_api::BackendKind, api_key: impl core::convert::Into<alloc::string::String>, model: impl core::convert::Into<alloc::string::String>, base_url: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn barracuda_model_api::ModelApiConfig::validate(&self) -> core::result::Result<(), barracuda_model_api::InitError>
+pub struct barracuda_model_api::ModelApiFactory<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static>
+impl<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static> barracuda_model_api::ModelApiFactory<S>
+pub fn barracuda_model_api::ModelApiFactory<S>::create(&self) -> barracuda_model_api::ModelApi<'static, S>
+pub fn barracuda_model_api::ModelApiFactory<S>::new(make: impl core::ops::function::Fn() -> barracuda_model_api::ModelApi<'static, S> + 'static) -> Self
+impl<S: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static> core::clone::Clone for barracuda_model_api::ModelApiFactory<S>
+pub fn barracuda_model_api::ModelApiFactory<S>::clone(&self) -> Self
+pub struct barracuda_model_api::ParseBackendKindError
+pub struct barracuda_model_api::RetryPolicy
+pub barracuda_model_api::RetryPolicy::backoff_multiplier: u32
+pub barracuda_model_api::RetryPolicy::initial_backoff_ms: u32
+pub barracuda_model_api::RetryPolicy::max_backoff_ms: u32
+pub barracuda_model_api::RetryPolicy::max_retries: u32
+impl barracuda_model_api::RetryPolicy
+pub fn barracuda_model_api::RetryPolicy::backoff_ms(&self, attempt: u32) -> u32
+pub const fn barracuda_model_api::RetryPolicy::fixed(max_retries: u32, interval_ms: u32) -> Self
+pub const fn barracuda_model_api::RetryPolicy::new(max_retries: u32) -> Self
+pub const fn barracuda_model_api::RetryPolicy::none() -> Self
+pub const fn barracuda_model_api::RetryPolicy::with_interval_ms(self, interval_ms: u32) -> Self
+pub const fn barracuda_model_api::RetryPolicy::with_max_backoff_ms(self, max_backoff_ms: u32) -> Self
+pub const fn barracuda_model_api::RetryPolicy::with_multiplier(self, backoff_multiplier: u32) -> Self
+impl core::default::Default for barracuda_model_api::RetryPolicy
+pub fn barracuda_model_api::RetryPolicy::default() -> Self
+pub struct barracuda_model_api::StaticOutputSchema<'a>
+pub barracuda_model_api::StaticOutputSchema::json: &'a str
+pub barracuda_model_api::StaticOutputSchema::name: &'a str
+pub struct barracuda_model_api::ToolCall
+pub barracuda_model_api::ToolCall::arguments_json: alloc::string::String
+pub barracuda_model_api::ToolCall::id: alloc::string::String
+pub barracuda_model_api::ToolCall::name: alloc::string::String

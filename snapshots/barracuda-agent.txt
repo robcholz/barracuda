@@ -1,0 +1,91 @@
+pub mod barracuda_agent
+pub use barracuda_agent::AgentApprovalError
+pub use barracuda_agent::AgentCreateError
+pub use barracuda_agent::AgentId
+pub use barracuda_agent::AgentService
+pub use barracuda_agent::ApiPurpose
+pub use barracuda_agent::ApprovalResolverError
+pub use barracuda_agent::BackendKind
+pub use barracuda_agent::BaseAgentError
+pub use barracuda_agent::ContextProviderError
+pub use barracuda_agent::InputRequestId
+pub use barracuda_agent::InputRequestKind
+pub use barracuda_agent::IterationEvent
+pub use barracuda_agent::IterationId
+pub use barracuda_agent::IterationLoopError
+pub use barracuda_agent::Message
+pub use barracuda_agent::ModelApiConfig
+pub use barracuda_agent::ModelApiFactory
+pub use barracuda_agent::OpenSessionError
+pub use barracuda_agent::PermissionLevel
+pub use barracuda_agent::ReasoningEffort
+pub use barracuda_agent::SessionCloseReason
+pub use barracuda_agent::SessionControl
+pub use barracuda_agent::SessionControlError
+pub use barracuda_agent::SessionCreateError
+pub use barracuda_agent::SessionDeleteError
+pub use barracuda_agent::SessionError
+pub use barracuda_agent::SessionEvent
+pub use barracuda_agent::SessionEventError
+pub use barracuda_agent::SessionId
+pub use barracuda_agent::SessionInputError
+pub use barracuda_agent::SessionPersistence
+pub use barracuda_agent::SessionStream
+pub use barracuda_agent::SessionTurnError
+pub use barracuda_agent::ToolCall
+pub use barracuda_agent::ToolCallId
+pub use barracuda_agent::ToolGroup
+pub use barracuda_agent::ToolOutput
+pub use barracuda_agent::TurnEvent
+pub use barracuda_agent::TurnEventError
+pub use barracuda_agent::TurnId
+pub use barracuda_agent::TurnOrigin
+pub use barracuda_agent::stream
+pub mod barracuda_agent::tools
+pub use barracuda_agent::tools::Action
+pub use barracuda_agent::tools::AgentStorage
+pub use barracuda_agent::tools::AgentStorageError
+pub use barracuda_agent::tools::EmptyArgs
+pub use barracuda_agent::tools::Resource
+pub use barracuda_agent::tools::RiskClass
+pub use barracuda_agent::tools::Tool
+pub use barracuda_agent::tools::ToolConfig
+pub use barracuda_agent::tools::ToolContext
+pub use barracuda_agent::tools::ToolError
+pub use barracuda_agent::tools::ToolFuture
+pub use barracuda_agent::tools::ToolGroup
+pub use barracuda_agent::tools::ToolHandler
+pub use barracuda_agent::tools::ToolInvocation
+pub use barracuda_agent::tools::ToolInvokeError
+pub use barracuda_agent::tools::ToolOutput
+pub use barracuda_agent::tools::ToolResult
+pub use barracuda_agent::tools::ToolSpec
+pub use barracuda_agent::tools::tool_metadata
+pub enum barracuda_agent::AgentError
+pub barracuda_agent::AgentError::LlmConfig(barracuda_model_api::errors::InitError)
+pub barracuda_agent::AgentError::OpenSession(barracuda_agent_runtime::session::manager::OpenSessionError)
+pub barracuda_agent::AgentError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
+pub barracuda_agent::AgentError::Runtime(barracuda_agent_runtime::runtime::agent_runtime::AgentRuntimeBuildError)
+pub barracuda_agent::AgentError::SessionCreate(barracuda_agent_runtime::session::manager::SessionCreateError)
+pub barracuda_agent::AgentError::StorageClear
+pub barracuda_agent::AgentError::StorageClear::path: alloc::string::String
+pub barracuda_agent::AgentError::StorageClear::source: barracuda_fs::fs::FsError
+pub barracuda_agent::AgentError::Tool(barracuda_agent_tool::registry::ToolRegistryError)
+pub struct barracuda_agent::AgentPersistenceConfig
+pub barracuda_agent::AgentPersistenceConfig::persistence_root: alloc::string::String
+pub barracuda_agent::AgentPersistenceConfig::skill_roots: alloc::vec::Vec<alloc::string::String>
+pub struct barracuda_agent::AgentSystem<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+impl<Filesystem, Http> barracuda_agent::AgentSystem<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+pub async fn barracuda_agent::AgentSystem<Filesystem, Http>::delete_session(&self, session: barracuda_agent_runtime::session::manager::SessionId) -> core::result::Result<(), barracuda_agent_runtime::session::manager::SessionDeleteError>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::disable_tool(&self, name: &str) -> barracuda_agent::AgentResult<()>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::enable_tool(&self, name: &str) -> barracuda_agent::AgentResult<()>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::link_api(&self, api: barracuda_model_api::types::ModelApiConfig, purpose: barracuda_agent_runtime::config::api::ApiPurpose, default: bool) -> barracuda_agent::AgentResult<()>
+pub async fn barracuda_agent::AgentSystem<Filesystem, Http>::list_sessions(&self) -> alloc::vec::Vec<barracuda_agent_runtime::session::manager::SessionId>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::new(filesystem: Filesystem, persistence: barracuda_agent::AgentPersistenceConfig, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>) -> barracuda_agent::AgentResult<(Self, barracuda_agent_runtime::runtime::agent_runtime::AgentService<Filesystem, Http>)>
+pub async fn barracuda_agent::AgentSystem<Filesystem, Http>::new_session(&self, persistence: barracuda_agent_runtime::session::manager::SessionPersistence) -> barracuda_agent::AgentResult<barracuda_agent_runtime::session::manager::SessionId>
+pub async fn barracuda_agent::AgentSystem<Filesystem, Http>::open_session(&self, session: barracuda_agent_runtime::session::manager::SessionId) -> barracuda_agent::AgentResult<(barracuda_agent_runtime::session::control::SessionControl, barracuda_agent_runtime::session::stream::SessionStream)>
+pub async fn barracuda_agent::AgentSystem<Filesystem, Http>::shutdown(&self)
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::start_all(&self) -> barracuda_agent::AgentResult<()>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::stop_all(&self) -> barracuda_agent::AgentResult<()>
+pub fn barracuda_agent::AgentSystem<Filesystem, Http>::with_tool_groups(filesystem: Filesystem, persistence: barracuda_agent::AgentPersistenceConfig, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>, tool_groups: impl core::iter::traits::collect::IntoIterator<Item = barracuda_agent_tool::registry::ToolGroup>) -> barracuda_agent::AgentResult<(Self, barracuda_agent_runtime::runtime::agent_runtime::AgentService<Filesystem, Http>)>
+pub type barracuda_agent::AgentResult<T> = core::result::Result<T, barracuda_agent::AgentError>

@@ -1,4 +1,4 @@
-use claw_lua::{
+use barracuda_lua::{
     Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Result, Table, UserData,
     UserDataHandle, UserDataMethods, Variadic,
 };
@@ -126,14 +126,14 @@ fn dropping_execution_cancels_the_native_future() -> Result<()> {
 fn registers_values_and_functions_directly() -> Result<()> {
     let mut lua = Lua::new()?;
     lua.set("answer", 40_i64)?;
-    lua.set("name", "claw")?;
+    lua.set("name", "barracuda")?;
     lua.register("add", |(a, b): (i64, i64)| Some(Ok(a + b)))?;
     lua.register_async("double", |value: i64| async move { Some(Ok(value * 2)) })?;
 
     let result: (String, i64) = futures_lite::future::block_on(
         lua.load("return name, double(add(answer, 2))").eval_async(),
     )?;
-    assert_eq!(result, ("claw".into(), 84));
+    assert_eq!(result, ("barracuda".into(), 84));
     Ok(())
 }
 
@@ -141,7 +141,7 @@ fn registers_values_and_functions_directly() -> Result<()> {
 fn registers_a_lazy_require_only_library() -> Result<()> {
     let mut lua = Lua::new()?;
     lua.register_lib("native", |lib| {
-        lib.set("name", "claw")?;
+        lib.set("name", "barracuda")?;
         lib.register("add", |(a, b): (i64, i64)| Some(Ok(a + b)))?;
         lib.register_async("double", |value: i64| async move { Some(Ok(value * 2)) })?;
         Ok(())
@@ -164,7 +164,7 @@ fn registers_a_lazy_require_only_library() -> Result<()> {
         )
         .eval_async(),
     )?;
-    assert_eq!(result, (true, true, "claw".into(), 42));
+    assert_eq!(result, (true, true, "barracuda".into(), 42));
     Ok(())
 }
 
@@ -219,11 +219,11 @@ fn receives_creates_and_returns_tables_without_a_value_enum() -> Result<()> {
 
     let result: (i64, String, bool) = lua
         .load(
-            "local info = make_info('claw'); \
+            "local info = make_info('barracuda'); \
              return read_options({ timeout = 250 }), info.name, info.ready",
         )
         .eval()?;
-    assert_eq!(result, (250, "claw".into(), true));
+    assert_eq!(result, (250, "barracuda".into(), true));
     Ok(())
 }
 
@@ -468,7 +468,7 @@ fn failed_library_registration_is_atomic() -> Result<()> {
     let mut lua = Lua::new()?;
     let result = lua.register_lib("broken", |lib| {
         lib.set("partial", true)?;
-        Err(claw_lua::Error::runtime("stop"))
+        Err(barracuda_lua::Error::runtime("stop"))
     });
     assert!(result.is_err());
 

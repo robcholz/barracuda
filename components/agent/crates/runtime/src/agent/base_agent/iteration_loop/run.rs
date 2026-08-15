@@ -1,0 +1,823 @@
+use alloc::{
+    borrow::ToOwned,
+    collections::{BTreeSet, VecDeque},
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
+use barracuda_agent_tool::{
+    AgentStorageScope, ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner,
+    ToolSetHandle,
+};
+#[cfg(feature = "cache_profile")]
+use barracuda_model_api::ProviderUsage;
+use barracuda_model_api::{ChatRequest, ChatStreamEvent, ToolCall};
+use barracuda_net::{Dns, TcpConnect};
+use barracuda_runtime_utils::stream::StreamPart;
+use barracuda_runtime_utils::yield_stream::try_yield_stream;
+use barracuda_runtime_utils::Cancel;
+use futures_lite::{future, StreamExt};
+use tracing::Instrument as _;
+
+use super::types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
+use super::{
+    IterationLoop, PendingToolPermission, PermissionActivation, ToolAuthorization, ToolCallId,
+    ToolCallIdAllocator, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
+};
+
+struct ScheduledCall {
+    id: ToolCallId,
+    invocation: ToolInvocation,
+}
+
+impl ScheduledCall {
+    fn approval_call(&self) -> ToolCall {
+        self.tool_call()
+    }
+
+    fn tool_call(&self) -> ToolCall {
+        ToolCall {
+            id: self.invocation.id().unwrap_or_default().to_owned(),
+            name: self.invocation.name().to_owned(),
+            arguments_json: self.invocation.arguments_json().to_owned(),
+        }
+    }
+}
+
+struct PendingApproval<'a> {
+    call: ScheduledCall,
+    reason: Option<String>,
+    activate: Option<PermissionActivation<'a>>,
+    permission: PendingToolPermission<'a>,
+    announced: bool,
+}
+
+enum ToolBatchUpdate {
+    Permission(ToolPermission),
+    Execution(Option<(ToolInvocation, ToolOutput)>),
+    Stop(super::super::stream::RunStop),
+}
+
+struct ToolPhase<'a> {
+    tools: &'a ToolSetHandle<'a>,
+    agent_storage: AgentStorageScope,
+    joined: Option<ToolJoinHandle>,
+    detached: VecDeque<ToolDetachHandle>,
+    pending: VecDeque<PendingApproval<'a>>,
+    active_permission: Option<PendingApproval<'a>>,
+    ready_results: VecDeque<(ToolCall, ToolOutput)>,
+    remaining_results: usize,
+    results_ended: bool,
+}
+
+#[cfg(feature = "cache_profile")]
+fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
+    let (Some(input_tokens), Some(cache_read_tokens)) =
+        (usage.input_tokens, usage.cache_read_tokens)
+    else {
+        return;
+    };
+    if input_tokens == 0 {
+        return;
+    }
+
+    #[allow(clippy::arithmetic_side_effects)]
+    let hit_rate_pct = cache_read_tokens as f64 / input_tokens as f64 * 100.0;
+    tracing::info!(
+        name: "context_cache_hit_rate",
+        input_tokens,
+        cache_read_tokens,
+        counter.value = hit_rate_pct,
+    );
+}
+
+impl<'a, H, P> IterationLoop<'a, H, P>
+where
+    H: TcpConnect + Dns + 'static,
+    P: ToolPermissionPolicy + 'a,
+{
+    /// Run one LLM/tool iteration as a directly polled stream.
+    ///
+    /// A successful iteration ends at `None`; failures are yielded as `Err`.
+    /// Code after each `yield` cannot run until the owner polls again, making
+    /// `BeforeToolCalls` a natural pre-execution boundary.
+    pub(crate) fn run(
+        self,
+        step: LlmStep<'a>,
+    ) -> impl futures_core::Stream<Item = Result<IterationLoopEvent, IterationLoopError>> + 'a {
+        try_yield_stream(|yielder| async move {
+            let loop_ = self;
+            if loop_.control.is_cancelled() {
+                log::warn!("Agent iteration cancelled before LLM HTTP request");
+                tracing::warn!(name: "cancelled", checkpoint = "before_llm_http");
+                yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                return Ok(());
+            }
+
+            let chat_request = ChatRequest {
+                system_prompt: step.system_prompt,
+                messages: step.messages,
+                reminders: step.reminders,
+                tools_json: Some(step.tools.static_schemas()),
+                retry: loop_.retry,
+            };
+            let cancel = Cancel::new(loop_.control.cancel_flag());
+            let max_attempts = 1_u64;
+            let chat_span = tracing::info_span!(
+                "api.chat",
+                purpose = "iteration",
+                max_attempts,
+                run.iteration = %step.iteration_id,
+            );
+            let stream_result = loop_
+                .llm
+                .chat_stream(&chat_request, cancel)
+                .instrument(chat_span.clone())
+                .await;
+            let mut stream = match stream_result {
+                Ok(stream) => stream,
+                Err(error) if loop_.control.is_cancelled() || error.is_aborted() => {
+                    log::warn!("Agent iteration cancelled during LLM HTTP request");
+                    tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
+                    yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                    return Ok(());
+                }
+                Err(error) => {
+                    log::error!("Agent LLM chat failed");
+                    tracing::error!(name: "chat_failed", kind = "chat_init");
+                    Err(IterationLoopError::ChatInit(error))?
+                }
+            };
+
+            let mut tool_calls = Vec::new();
+            let mut output_bytes = 0_u64;
+            loop {
+                let next = StreamExt::next(&mut stream)
+                    .instrument(chat_span.clone())
+                    .await;
+                match next {
+                    Some(Ok(ChatStreamEvent::Reasoning(part))) => {
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Reasoning(
+                                part,
+                            )))
+                            .await;
+                    }
+                    Some(Ok(ChatStreamEvent::Output(part))) => {
+                        if let StreamPart::Delta(output) = &part {
+                            output_bytes = output_bytes.saturating_add(output.len() as u64);
+                        }
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Output(part)))
+                            .await;
+                    }
+                    Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))) => {
+                        tool_calls.push(call);
+                    }
+                    Some(Ok(ChatStreamEvent::ToolCalls(StreamPart::End))) => {}
+                    #[cfg(feature = "cache_profile")]
+                    Some(Ok(ChatStreamEvent::Usage(usage))) => {
+                        trace_context_cache_hit_rate(&usage);
+                        yielder
+                            .yield_one(IterationLoopEvent::Iteration(IterationEvent::Usage(usage)))
+                            .await;
+                    }
+                    Some(Err(error)) if loop_.control.is_cancelled() || error.is_aborted() => {
+                        log::warn!("Agent iteration cancelled during LLM HTTP request");
+                        tracing::warn!(name: "cancelled", checkpoint = "in_llm_http_abort");
+                        yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                        return Ok(());
+                    }
+                    Some(Err(error)) => {
+                        log::error!("Agent LLM chat failed");
+                        tracing::error!(name: "chat_failed", kind = "chat_stream");
+                        Err(IterationLoopError::ChatStream(error))?;
+                    }
+                    None => break,
+                }
+            }
+
+            if loop_.control.is_cancelled() {
+                log::warn!("Agent iteration cancelled after LLM response");
+                tracing::warn!(name: "cancelled", checkpoint = "after_llm");
+                yielder.yield_one(IterationLoopEvent::Cancelled).await;
+                return Ok(());
+            }
+            if tool_calls.is_empty() {
+                tracing::info!(name: "completed", output_bytes);
+                yielder
+                    .yield_one(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+                        StreamPart::End,
+                    )))
+                    .await;
+                return Ok(());
+            }
+
+            tracing::info!(name: "tool_calls", count = tool_calls.len() as u64);
+            yielder
+                .yield_one(IterationLoopEvent::Iteration(
+                    IterationEvent::BeforeToolCalls(tool_calls.clone()),
+                ))
+                .await;
+
+            let mut tools = ToolPhase::new(
+                tool_calls,
+                step.tools,
+                loop_.permission,
+                loop_.agent_storage,
+            )?;
+            while let Some(event) = tools.next(loop_.control).await? {
+                let terminal = matches!(
+                    event,
+                    IterationLoopEvent::Interrupted | IterationLoopEvent::Cancelled
+                );
+                yielder.yield_one(event).await;
+                if terminal {
+                    return Ok(());
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+impl<'a> ToolPhase<'a> {
+    fn new<P>(
+        tool_calls: Vec<ToolCall>,
+        tools: &'a ToolSetHandle<'a>,
+        permission: &'a P,
+        agent_storage: AgentStorageScope,
+    ) -> Result<Self, IterationLoopError>
+    where
+        P: ToolPermissionPolicy,
+    {
+        let mut provider_ids = BTreeSet::new();
+        for tool_call in &tool_calls {
+            if tool_call.id.is_empty() {
+                return Err(IterationLoopError::MissingProviderToolCallId);
+            }
+            if !provider_ids.insert(tool_call.id.as_str()) {
+                return Err(IterationLoopError::DuplicateProviderToolCallId(
+                    tool_call.id.clone(),
+                ));
+            }
+        }
+
+        let remaining_results = tool_calls.len();
+        let mut tool_call_id_allocator = ToolCallIdAllocator::new();
+        let mut allowed = Vec::new();
+        let mut pending = VecDeque::new();
+        let mut ready_results = VecDeque::new();
+
+        for tool_call in tool_calls {
+            let id = tool_call_id_allocator.next();
+            let invocation = match ToolInvocation::try_new(
+                Some(&tool_call.id),
+                &tool_call.name,
+                &tool_call.arguments_json,
+            ) {
+                Ok(invocation) => invocation,
+                Err(error) => {
+                    trace_immediate_tool_result(
+                        &tool_call,
+                        false,
+                        false,
+                        Some("invalid_invocation"),
+                    );
+                    ready_results.push_back((
+                        tool_call,
+                        ToolOutput {
+                            content: error.to_string(),
+                            ok: false,
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let action = match tools.classify(&invocation) {
+                Ok(action) => action,
+                Err(error) => {
+                    trace_immediate_tool_result(&tool_call, false, true, None);
+                    ready_results.push_back((
+                        tool_call,
+                        ToolOutput {
+                            content: error.to_string(),
+                            ok: false,
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let scheduled = ScheduledCall { id, invocation };
+
+            match permission.authorize(ToolPermissionRequest {
+                tool_call_id: id,
+                action: &action,
+            }) {
+                ToolAuthorization::Allow => allowed.push(scheduled),
+                ToolAuthorization::Deny(reason) => {
+                    let tool_call = scheduled.tool_call();
+                    trace_immediate_tool_result(&tool_call, false, true, None);
+                    ready_results.push_back((
+                        tool_call,
+                        ToolOutput {
+                            content: reason,
+                            ok: false,
+                        },
+                    ));
+                }
+                ToolAuthorization::Pending {
+                    reason,
+                    activate,
+                    permission,
+                } => pending.push_back(PendingApproval {
+                    call: scheduled,
+                    reason: Some(reason),
+                    activate: Some(activate),
+                    permission,
+                    announced: false,
+                }),
+            }
+        }
+        let (joined, detached) = dispatch_scheduled_calls(tools, &agent_storage, allowed);
+
+        Ok(Self {
+            tools,
+            agent_storage,
+            joined,
+            detached: detached.into_iter().collect(),
+            pending,
+            active_permission: None,
+            ready_results,
+            remaining_results,
+            results_ended: false,
+        })
+    }
+
+    async fn next(
+        &mut self,
+        control: &super::super::stream::RunControl,
+    ) -> Result<Option<IterationLoopEvent>, IterationLoopError> {
+        loop {
+            if let Some(detached) = self.detached.pop_front() {
+                return Ok(Some(IterationLoopEvent::Detached(detached)));
+            }
+            if let Some((call, output)) = self.ready_results.pop_front() {
+                return self.tool_result(call, output).map(Some);
+            }
+            if self.results_ended {
+                return Ok(None);
+            }
+            if self.remaining_results == 0 {
+                self.results_ended = true;
+                return Ok(Some(IterationLoopEvent::Iteration(
+                    IterationEvent::ToolResult(StreamPart::End),
+                )));
+            }
+            if control.is_cancelled() {
+                tracing::warn!(name: "cancelled", checkpoint = "tool_phase");
+                self.results_ended = true;
+                return Ok(Some(IterationLoopEvent::Cancelled));
+            }
+            if control.take_interrupt() {
+                tracing::warn!(name: "preempted", checkpoint = "before_tool");
+                self.results_ended = true;
+                return Ok(Some(IterationLoopEvent::Interrupted));
+            }
+
+            if self.active_permission.is_none() {
+                self.active_permission = self.pending.pop_front();
+            }
+            if let Some(waiting) = self.active_permission.as_mut() {
+                if !waiting.announced {
+                    if let Some(activate) = waiting.activate.take() {
+                        activate();
+                    }
+                    waiting.announced = true;
+                    return Ok(Some(IterationLoopEvent::ApprovalRequired {
+                        tool_call_id: waiting.call.id,
+                        tool_call: waiting.call.approval_call(),
+                        reason: waiting.reason.take().unwrap_or_default(),
+                    }));
+                }
+            }
+
+            if self.active_permission.is_none() && self.joined.is_none() {
+                return Err(IterationLoopError::IncompleteToolBatch);
+            }
+
+            let update = future::or(
+                async { ToolBatchUpdate::Stop(control.stop_requested().await) },
+                async {
+                    match (self.active_permission.as_mut(), self.joined.as_mut()) {
+                        (Some(waiting), Some(joined)) => {
+                            future::or(
+                                async {
+                                    ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
+                                },
+                                async { ToolBatchUpdate::Execution(joined.next().await) },
+                            )
+                            .await
+                        }
+                        (Some(waiting), None) => {
+                            ToolBatchUpdate::Permission(waiting.permission.as_mut().await)
+                        }
+                        (None, Some(joined)) => ToolBatchUpdate::Execution(joined.next().await),
+                        (None, None) => ToolBatchUpdate::Execution(None),
+                    }
+                },
+            )
+            .await;
+
+            match update {
+                ToolBatchUpdate::Execution(Some(result)) => {
+                    let (call, output) = tool_result_parts(result);
+                    return self.tool_result(call, output).map(Some);
+                }
+                ToolBatchUpdate::Execution(None) => self.joined = None,
+                ToolBatchUpdate::Stop(super::super::stream::RunStop::Interrupted) => {
+                    tracing::warn!(name: "preempted", checkpoint = "tool_phase");
+                    self.results_ended = true;
+                    return Ok(Some(IterationLoopEvent::Interrupted));
+                }
+                ToolBatchUpdate::Stop(super::super::stream::RunStop::Cancelled) => {
+                    tracing::warn!(name: "cancelled", checkpoint = "tool_phase");
+                    self.results_ended = true;
+                    return Ok(Some(IterationLoopEvent::Cancelled));
+                }
+                ToolBatchUpdate::Permission(decision) => {
+                    let waiting = self
+                        .active_permission
+                        .take()
+                        .ok_or(IterationLoopError::IncompleteToolBatch)?;
+                    match decision {
+                        ToolPermission::Allow => {
+                            let (joined, detached) = dispatch_scheduled_calls(
+                                self.tools,
+                                &self.agent_storage,
+                                vec![waiting.call],
+                            );
+                            self.merge_joined(joined);
+                            self.detached.extend(detached);
+                        }
+                        ToolPermission::Deny(reason) => {
+                            let tool_call = waiting.call.tool_call();
+                            trace_immediate_tool_result(&tool_call, false, true, None);
+                            return self
+                                .tool_result(
+                                    tool_call,
+                                    ToolOutput {
+                                        content: reason,
+                                        ok: false,
+                                    },
+                                )
+                                .map(Some);
+                        }
+                        ToolPermission::Interrupted => {
+                            self.results_ended = true;
+                            return Ok(Some(IterationLoopEvent::Interrupted));
+                        }
+                        ToolPermission::Cancelled => {
+                            self.results_ended = true;
+                            return Ok(Some(IterationLoopEvent::Cancelled));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn tool_result(
+        &mut self,
+        call: ToolCall,
+        output: ToolOutput,
+    ) -> Result<IterationLoopEvent, IterationLoopError> {
+        self.remaining_results = self
+            .remaining_results
+            .checked_sub(1)
+            .ok_or(IterationLoopError::IncompleteToolBatch)?;
+        Ok(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+            StreamPart::Delta((call, output)),
+        )))
+    }
+
+    fn merge_joined(&mut self, joined: Option<ToolJoinHandle>) {
+        let Some(joined) = joined else {
+            return;
+        };
+        match self.joined.as_mut() {
+            Some(active) => active.merge(joined),
+            None => self.joined = Some(joined),
+        }
+    }
+}
+
+fn dispatch_scheduled_calls(
+    tools: &ToolSetHandle<'_>,
+    agent_storage: &AgentStorageScope,
+    calls: Vec<ScheduledCall>,
+) -> (Option<ToolJoinHandle>, Option<ToolDetachHandle>) {
+    if calls.is_empty() {
+        return (None, None);
+    }
+    let calls = calls
+        .into_iter()
+        .map(|call| call.invocation)
+        .collect::<Vec<_>>();
+    let (joined, detached) = ToolRunner::new(tools, agent_storage.clone()).run(calls);
+    (Some(joined), detached)
+}
+
+fn tool_result_parts((invocation, output): (ToolInvocation, ToolOutput)) -> (ToolCall, ToolOutput) {
+    (
+        ToolCall {
+            id: invocation.id().unwrap_or_default().to_owned(),
+            name: invocation.name().to_owned(),
+            arguments_json: invocation.arguments_json().to_owned(),
+        },
+        output,
+    )
+}
+
+fn trace_immediate_tool_result(
+    call: &ToolCall,
+    ok: bool,
+    blocked: bool,
+    parse_failure: Option<&'static str>,
+) {
+    let span = tracing::info_span!("toolcall", tool = %call.name);
+    span.in_scope(|| {
+        tracing::info!(
+            name: "arguments",
+            argument_bytes = call.arguments_json.len() as u64,
+        );
+        if let Some(kind) = parse_failure {
+            tracing::warn!(name: "parse_failed", kind);
+        }
+        if ok {
+            tracing::info!(name: "result", ok, blocked);
+        } else {
+            tracing::warn!(name: "result", ok, blocked);
+        }
+    });
+}
+
+#[cfg(test)]
+#[allow(clippy::arithmetic_side_effects, clippy::expect_used)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use barracuda_agent_permission::{AllowAll, RiskClass};
+    use barracuda_agent_tool::{
+        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
+    };
+    use barracuda_model_api::{ChatError, HttpError as NetError, ModelApiError};
+    use futures_lite::future::block_on;
+
+    use super::*;
+    use crate::agent::base_agent::stream::BaseAgentStream;
+
+    struct CountingTool {
+        name: &'static str,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ToolSpec for CountingTool {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn schema(&self) -> &str {
+            r#"{"type":"function","function":{"name":"test","parameters":{"type":"object"}}}"#
+        }
+
+        fn arguments_validator(&self) -> &'static json_validator::Validator {
+            const VALIDATOR: json_validator::Validator =
+                json_validator::validator!("resources/tools/plan_enter/schema.json");
+            &VALIDATOR
+        }
+
+        fn classify(&self, _call: &ToolInvocation) -> barracuda_agent_permission::Action {
+            barracuda_agent_permission::Action::new(self.name, RiskClass::High)
+        }
+    }
+
+    impl ToolHandler for CountingTool {
+        type Args = barracuda_agent_tool::EmptyArgs;
+
+        fn invoke<'a>(
+            &'a self,
+            _context: barracuda_agent_tool::ToolContext,
+            _args: Self::Args,
+        ) -> ToolFuture<'a> {
+            Box::pin(async move {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok(ToolOutput {
+                    content: self.name.to_owned(),
+                    ok: true,
+                })
+            })
+        }
+    }
+
+    struct SelectivePermission {
+        executions: Arc<AtomicUsize>,
+        checks: Cell<usize>,
+        ids: RefCell<Vec<ToolCallId>>,
+    }
+
+    impl ToolPermissionPolicy for SelectivePermission {
+        fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
+            assert_eq!(self.executions.load(Ordering::SeqCst), 0);
+            self.checks.set(self.checks.get() + 1);
+            self.ids.borrow_mut().push(request.tool_call_id);
+            if request.action.verb() == "denied" {
+                let executions = Arc::clone(&self.executions);
+                ToolAuthorization::Pending {
+                    reason: "policy check".to_owned(),
+                    activate: Box::new(|| {}),
+                    permission: Box::pin(async move {
+                        while executions.load(Ordering::SeqCst) == 0 {
+                            futures_lite::future::yield_now().await;
+                        }
+                        ToolPermission::Deny("policy denied".to_owned())
+                    }),
+                }
+            } else {
+                ToolAuthorization::Allow
+            }
+        }
+    }
+
+    fn test_tools(executions: &Arc<AtomicUsize>) -> ToolSet {
+        let mut tool_set = ToolSet::empty();
+        tool_set
+            .add_group(ToolGroup::new(
+                "test",
+                true,
+                [
+                    Tool::new(CountingTool {
+                        name: "allowed",
+                        calls: Arc::clone(executions),
+                    }),
+                    Tool::new(CountingTool {
+                        name: "denied",
+                        calls: Arc::clone(executions),
+                    }),
+                ],
+            ))
+            .expect("test tools are valid");
+        tool_set
+    }
+
+    #[test]
+    fn allowed_tools_run_while_permission_is_pending_and_results_use_completion_order() {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut tool_set = test_tools(&executions);
+        let tools = tool_set.begin().expect("test tool set starts");
+        let tool_calls = vec![
+            ToolCall {
+                id: "call-deny".to_owned(),
+                name: "denied".to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+            ToolCall {
+                id: "call-allow".to_owned(),
+                name: "allowed".to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+        ];
+        let control = BaseAgentStream::control();
+        let permission = SelectivePermission {
+            executions: Arc::clone(&executions),
+            checks: Cell::new(0),
+            ids: RefCell::new(Vec::new()),
+        };
+        let mut phase = ToolPhase::new(
+            tool_calls,
+            &tools,
+            &permission,
+            AgentStorageScope::unavailable(),
+        )
+        .expect("phase prepares");
+
+        let events = block_on(async {
+            let mut events = Vec::new();
+            while let Some(event) = phase.next(&control).await.expect("tool phase advances") {
+                events.push(event);
+            }
+            events
+        });
+
+        assert!(matches!(
+            events.first(),
+            Some(IterationLoopEvent::ApprovalRequired { tool_call_id, .. })
+                if *tool_call_id == ToolCallId::new(0)
+        ));
+        assert_eq!(permission.checks.get(), 2);
+        assert_eq!(
+            permission.ids.borrow().as_slice(),
+            [ToolCallId::new(0), ToolCallId::new(1)]
+        );
+        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            events.last(),
+            Some(IterationLoopEvent::Iteration(IterationEvent::ToolResult(
+                StreamPart::End
+            )))
+        ));
+        let results = events
+            .into_iter()
+            .filter_map(|event| match event {
+                IterationLoopEvent::Iteration(IterationEvent::ToolResult(StreamPart::Delta((
+                    call,
+                    output,
+                )))) => Some((call.id, output)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            results,
+            vec![
+                (
+                    "call-allow".to_owned(),
+                    ToolOutput {
+                        content: "allowed".to_owned(),
+                        ok: true,
+                    },
+                ),
+                (
+                    "call-deny".to_owned(),
+                    ToolOutput {
+                        content: "policy denied".to_owned(),
+                        ok: false,
+                    },
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn yolo_policy_rejects_duplicate_provider_ids_before_execution() {
+        let executions = Arc::new(AtomicUsize::new(0));
+        let mut tool_set = test_tools(&executions);
+        let tools = tool_set.begin().expect("test tool set starts");
+        let tool_calls = vec![
+            ToolCall {
+                id: "duplicate".to_owned(),
+                name: "allowed".to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+            ToolCall {
+                id: "duplicate".to_owned(),
+                name: "allowed".to_owned(),
+                arguments_json: "{}".to_owned(),
+            },
+        ];
+
+        let error = ToolPhase::new(
+            tool_calls,
+            &tools,
+            &AllowAll,
+            AgentStorageScope::unavailable(),
+        )
+        .err()
+        .expect("duplicate ids fail the iteration");
+        assert!(matches!(
+            error,
+            IterationLoopError::DuplicateProviderToolCallId(id) if id == "duplicate"
+        ));
+        assert_eq!(executions.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn chat_phase_errors_preserve_nested_network_debug_context() {
+        let init = format!(
+            "{:?}",
+            IterationLoopError::ChatInit(ChatError::Api(ModelApiError::Transport(
+                NetError::ConnectionAborted,
+            )))
+        );
+        let stream = format!(
+            "{:?}",
+            IterationLoopError::ChatStream(ChatError::Api(ModelApiError::Transport(
+                NetError::ConnectionAborted,
+            )))
+        );
+
+        assert!(init.starts_with("ChatInit("), "{init}");
+        assert!(stream.starts_with("ChatStream("), "{stream}");
+        assert!(!init.contains('\n'), "{init}");
+        assert!(!stream.contains('\n'), "{stream}");
+        for expected in ["Transport(", "ConnectionAborted"] {
+            assert!(init.contains(expected), "missing `{expected}` in {init}");
+            assert!(
+                stream.contains(expected),
+                "missing `{expected}` in {stream}"
+            );
+        }
+    }
+}

@@ -1,0 +1,59 @@
+pub mod barracuda_runtime_utils
+pub mod barracuda_runtime_utils::stream
+pub enum barracuda_runtime_utils::stream::StreamPart<T>
+pub barracuda_runtime_utils::stream::StreamPart::Delta(T)
+pub barracuda_runtime_utils::stream::StreamPart::End
+pub mod barracuda_runtime_utils::yield_stream
+pub struct barracuda_runtime_utils::yield_stream::YieldOne<T>
+impl<T> core::future::future::Future for barracuda_runtime_utils::yield_stream::YieldOne<T>
+pub type barracuda_runtime_utils::yield_stream::YieldOne<T>::Output = ()
+pub fn barracuda_runtime_utils::yield_stream::YieldOne<T>::poll(self: core::pin::Pin<&mut Self>, _context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<()>
+impl<T> core::marker::Unpin for barracuda_runtime_utils::yield_stream::YieldOne<T>
+pub struct barracuda_runtime_utils::yield_stream::Yielder<T>
+impl<T> barracuda_runtime_utils::yield_stream::Yielder<T>
+pub fn barracuda_runtime_utils::yield_stream::Yielder<T>::yield_one(&self, value: T) -> barracuda_runtime_utils::yield_stream::YieldOne<T>
+pub fn barracuda_runtime_utils::yield_stream::try_yield_stream<'a, T, E, Build, Producer>(build: Build) -> core::pin::Pin<alloc::boxed::Box<(dyn futures_core::stream::Stream<Item = core::result::Result<T, E>> + 'a)>> where T: 'a, E: 'a, Build: core::ops::function::FnOnce(barracuda_runtime_utils::yield_stream::Yielder<T>) -> Producer, Producer: core::future::future::Future<Output = core::result::Result<(), E>> + 'a
+pub fn barracuda_runtime_utils::yield_stream::yield_stream<'a, T, Build, Producer>(build: Build) -> core::pin::Pin<alloc::boxed::Box<(dyn futures_core::stream::Stream<Item = T> + 'a)>> where T: 'a, Build: core::ops::function::FnOnce(barracuda_runtime_utils::yield_stream::Yielder<T>) -> Producer, Producer: core::future::future::Future<Output = ()> + 'a
+pub macro barracuda_runtime_utils::define_id_allocator!
+pub macro barracuda_runtime_utils::define_prefixed_id!
+pub enum barracuda_runtime_utils::IdParseError
+pub barracuda_runtime_utils::IdParseError::Empty
+pub barracuda_runtime_utils::IdParseError::Invalid
+pub barracuda_runtime_utils::IdParseError::Invalid::kind: &'static str
+pub barracuda_runtime_utils::IdParseError::Invalid::value: alloc::string::String
+pub struct barracuda_runtime_utils::Cancel<'a>(_)
+impl barracuda_runtime_utils::Cancel<'static>
+pub fn barracuda_runtime_utils::Cancel<'static>::never() -> Self
+impl<'a> barracuda_runtime_utils::Cancel<'a>
+pub fn barracuda_runtime_utils::Cancel<'a>::cancelled(self) -> impl core::future::future::Future<Output = ()> + 'a
+pub fn barracuda_runtime_utils::Cancel<'a>::is_cancelled(self) -> bool
+pub const fn barracuda_runtime_utils::Cancel<'a>::new(flag: &'a barracuda_runtime_utils::CancellationFlag) -> Self
+pub struct barracuda_runtime_utils::CancellationFlag
+impl barracuda_runtime_utils::CancellationFlag
+pub fn barracuda_runtime_utils::CancellationFlag::cancel(&self)
+pub fn barracuda_runtime_utils::CancellationFlag::is_cancelled(&self) -> bool
+pub const fn barracuda_runtime_utils::CancellationFlag::new() -> Self
+impl core::default::Default for barracuda_runtime_utils::CancellationFlag
+pub fn barracuda_runtime_utils::CancellationFlag::default() -> Self
+impl core::fmt::Debug for barracuda_runtime_utils::CancellationFlag
+pub fn barracuda_runtime_utils::CancellationFlag::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct barracuda_runtime_utils::JobCancelled
+pub struct barracuda_runtime_utils::JobHandle<T>
+impl<T> barracuda_runtime_utils::JobHandle<T>
+pub fn barracuda_runtime_utils::JobHandle<T>::try_take(&mut self) -> core::result::Result<core::option::Option<T>, barracuda_runtime_utils::JobCancelled>
+impl<T> core::future::future::Future for barracuda_runtime_utils::JobHandle<T>
+pub type barracuda_runtime_utils::JobHandle<T>::Output = core::result::Result<T, barracuda_runtime_utils::JobCancelled>
+pub fn barracuda_runtime_utils::JobHandle<T>::poll(self: core::pin::Pin<&mut Self>, task_context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+pub struct barracuda_runtime_utils::TaskPool
+impl barracuda_runtime_utils::TaskPool
+pub fn barracuda_runtime_utils::TaskPool::drive(&self, task_context: &mut core::task::wake::Context<'_>) -> usize
+pub fn barracuda_runtime_utils::TaskPool::submit<F>(&self, future: F) -> barracuda_runtime_utils::JobHandle<<F as core::future::future::Future>::Output> where F: core::future::future::Future + 'static, <F as core::future::future::Future>::Output: 'static
+impl core::default::Default for barracuda_runtime_utils::TaskPool
+pub fn barracuda_runtime_utils::TaskPool::default() -> Self
+pub struct barracuda_runtime_utils::TruncatedText<T>
+impl<T: core::convert::AsRef<str>> barracuda_runtime_utils::TruncatedText<T>
+pub fn barracuda_runtime_utils::TruncatedText<T>::new(text: T) -> Self
+pub fn barracuda_runtime_utils::TruncatedText<T>::with_limit(text: T, limit: usize) -> Self
+impl<T: core::convert::AsRef<str>> core::fmt::Display for barracuda_runtime_utils::TruncatedText<T>
+pub fn barracuda_runtime_utils::TruncatedText<T>::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn barracuda_runtime_utils::parse_prefixed_id(value: &str, prefix: &str, kind: &'static str) -> core::result::Result<u32, barracuda_runtime_utils::IdParseError>

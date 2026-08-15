@@ -1,13 +1,13 @@
 [package]
-name = "claw-vm"
+name = "barracuda-vm"
 version = "0.1.0"
 edition = "2024"
-description = "Lua-backed script VM component for the Claw agent framework"
+description = "Lua-backed script VM component for the Barracuda agent framework"
 license = "Apache-2.0"
 
 [features]
 default = []
-vendored = ["claw-lua/vendored"]
+vendored = ["barracuda-lua/vendored"]
 
 [dependencies]
-claw-lua = { path = "../../shared/lua" }
+barracuda-lua = { path = "../../shared/lua" }

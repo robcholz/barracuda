@@ -1,9 +1,4 @@
-use alloc::{
-    boxed::Box,
-    collections::VecDeque,
-    format,
-    string::{String, ToString},
-};
+use alloc::{boxed::Box, collections::VecDeque, format, string::String};
 use core::{
     cell::Cell,
     future::Future,
@@ -25,8 +20,7 @@ use gateway::{
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
 
-type Bus<const CAP: usize, const SUBS: usize> =
-    PubSubChannel<NoopRawMutex, WebEvent, CAP, SUBS, 0>;
+type Bus<const CAP: usize, const SUBS: usize> = PubSubChannel<NoopRawMutex, WebEvent, CAP, SUBS, 0>;
 type LiveSubscriber<'a, const CAP: usize, const SUBS: usize> =
     Subscriber<'a, NoopRawMutex, WebEvent, CAP, SUBS, 0>;
 
@@ -118,7 +112,9 @@ impl<const CAP: usize, const SUBS: usize> Web<CAP, SUBS> {
                 history.push_back(event.clone());
             }
         }
-        self.bus.immediate_publisher().publish_immediate(event.clone());
+        self.bus
+            .immediate_publisher()
+            .publish_immediate(event.clone());
         Ok(event)
     }
 

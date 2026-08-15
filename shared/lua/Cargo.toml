@@ -1,5 +1,5 @@
 [package]
-name = "claw-lua"
+name = "barracuda-lua"
 version = "0.1.0"
 edition = "2024"
 description = "Minimal no_std Lua wrapper with native Rust async bindings"

@@ -1,7 +1,7 @@
 [project]
-name = "agent-framework-tools"
+name = "barracuda-tools"
 version = "0.0.0"
-description = "Python tooling workspace for agent-framework."
+description = "Python tooling workspace for Barracuda."
 requires-python = ">=3.11"
 dependencies = []
 
@@ -11,6 +11,6 @@ package = false
 [tool.uv.workspace]
 members = [
     "components/agent/tools/llm-tape",
-    "components/agent/crates/claw-log",
-    "components/agent/crates/claw-log/scripts/serial_log",
+    "components/agent/crates/trace",
+    "components/agent/crates/trace/scripts/serial_log",
 ]

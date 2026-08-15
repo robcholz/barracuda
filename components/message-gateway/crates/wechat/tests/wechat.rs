@@ -91,7 +91,7 @@ fn registers_and_maps_text_to_the_ilink_api() {
         assert_eq!(json["msg"]["to_user_id"], "wx-user");
         assert_eq!(json["msg"]["context_token"], "context-token");
         assert_eq!(json["msg"]["item_list"][0]["text_item"]["text"], "hello");
-        assert_eq!(json["base_info"]["channel_version"], "esp-claw-wechat");
+        assert_eq!(json["base_info"]["channel_version"], "barracuda-wechat");
     });
 }
 

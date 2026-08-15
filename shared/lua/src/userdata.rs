@@ -388,7 +388,7 @@ impl<T> UserDataCell<T> {
 }
 
 fn userdata_type_name<T: UserData>() -> Result<CString> {
-    CString::new(format!("claw-lua:{}", core::any::type_name::<T>()))
+    CString::new(format!("barracuda-lua:{}", core::any::type_name::<T>()))
         .map_err(|_| Error::new(ErrorKind::Conversion, "userdata type name contains NUL"))
 }
 

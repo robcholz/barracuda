@@ -14,8 +14,8 @@ const INPUT_CAPACITY: usize = 16;
 const OUTPUT_CAPACITY: usize = 16;
 
 const INSTALL_PRINT: &str = r##"
-local emit = __claw_emit_print
-__claw_emit_print = nil
+local emit = __barracuda_emit_print
+__barracuda_emit_print = nil
 
 function print(...)
     local count = select("#", ...)
@@ -68,7 +68,7 @@ fn install_input(lua: &mut Lua, receiver: Receiver<String>) -> Result<()> {
 }
 
 fn install_output(lua: &mut Lua, sender: Sender<String>) -> Result<()> {
-    lua.register_async("__claw_emit_print", move |line: String| {
+    lua.register_async("__barracuda_emit_print", move |line: String| {
         let sender = sender.clone();
         async move {
             let _ = sender.send(line).await;

@@ -1,0 +1,196 @@
+pub mod barracuda_lua
+pub enum barracuda_lua::ErrorKind
+pub barracuda_lua::ErrorKind::Conversion
+pub barracuda_lua::ErrorKind::Create
+pub barracuda_lua::ErrorKind::Load
+pub barracuda_lua::ErrorKind::Runtime
+pub barracuda_lua::ErrorKind::UnexpectedYield
+pub enum barracuda_lua::MetaMethod
+pub barracuda_lua::MetaMethod::Close
+pub barracuda_lua::MetaMethod::Eq
+pub barracuda_lua::MetaMethod::ToString
+pub struct barracuda_lua::Chunk<'lua, 'code>
+impl<'lua> barracuda_lua::Chunk<'lua, '_>
+pub fn barracuda_lua::Chunk<'lua, '_>::eval<R: barracuda_lua::FromLuaMulti>(self) -> barracuda_lua::Result<R>
+pub fn barracuda_lua::Chunk<'lua, '_>::eval_async<R: barracuda_lua::FromLuaMulti>(self) -> barracuda_lua::Execution<'lua, R>
+pub fn barracuda_lua::Chunk<'lua, '_>::exec(self) -> barracuda_lua::Result<()>
+pub fn barracuda_lua::Chunk<'lua, '_>::exec_async(self) -> barracuda_lua::Execution<'lua, ()>
+pub struct barracuda_lua::Context<'lua>
+impl barracuda_lua::Context<'_>
+pub fn barracuda_lua::Context<'_>::create_userdata<T: barracuda_lua::UserData>(&mut self, value: T) -> barracuda_lua::Result<barracuda_lua::UserDataHandle<T>>
+impl<'lua> barracuda_lua::Context<'lua>
+pub fn barracuda_lua::Context<'lua>::create_registry_value<V: barracuda_lua::IntoLua>(&mut self, value: V) -> barracuda_lua::Result<barracuda_lua::RegistryKey>
+pub fn barracuda_lua::Context<'lua>::create_table(&mut self) -> barracuda_lua::Result<barracuda_lua::Table>
+pub fn barracuda_lua::Context<'lua>::registry_value<V: barracuda_lua::FromLua>(&mut self, key: &barracuda_lua::RegistryKey) -> barracuda_lua::Result<V>
+pub fn barracuda_lua::Context<'lua>::remove_registry_value(&mut self, key: barracuda_lua::RegistryKey) -> barracuda_lua::Result<()>
+pub struct barracuda_lua::Error
+impl barracuda_lua::Error
+pub fn barracuda_lua::Error::kind(&self) -> barracuda_lua::ErrorKind
+pub fn barracuda_lua::Error::message(&self) -> &str
+pub fn barracuda_lua::Error::runtime(message: impl core::convert::Into<alloc::string::String>) -> Self
+impl core::error::Error for barracuda_lua::Error
+impl core::fmt::Display for barracuda_lua::Error
+pub fn barracuda_lua::Error::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct barracuda_lua::Execution<'lua, R>
+impl<R: barracuda_lua::FromLuaMulti> core::future::future::Future for barracuda_lua::Execution<'_, R>
+pub type barracuda_lua::Execution<'_, R>::Output = core::result::Result<R, barracuda_lua::Error>
+pub fn barracuda_lua::Execution<'_, R>::poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+impl<R> core::ops::drop::Drop for barracuda_lua::Execution<'_, R>
+pub fn barracuda_lua::Execution<'_, R>::drop(&mut self)
+pub struct barracuda_lua::Function
+impl barracuda_lua::Function
+pub fn barracuda_lua::Function::call<A: barracuda_lua::IntoLuaMulti, R: barracuda_lua::FromLuaMulti>(&self, arguments: A) -> barracuda_lua::Result<R>
+pub fn barracuda_lua::Function::call_async<A: barracuda_lua::IntoLuaMulti + 'static, R: barracuda_lua::FromLuaMulti>(&self, arguments: A) -> barracuda_lua::FunctionCall<R>
+impl barracuda_lua::FromLua for barracuda_lua::Function
+impl barracuda_lua::IntoLua for barracuda_lua::Function
+pub struct barracuda_lua::FunctionCall<R>
+impl<R: barracuda_lua::FromLuaMulti> core::future::future::Future for barracuda_lua::FunctionCall<R>
+pub type barracuda_lua::FunctionCall<R>::Output = core::result::Result<R, barracuda_lua::Error>
+pub fn barracuda_lua::FunctionCall<R>::poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+impl<R> core::marker::Unpin for barracuda_lua::FunctionCall<R>
+impl<R> core::ops::drop::Drop for barracuda_lua::FunctionCall<R>
+pub fn barracuda_lua::FunctionCall<R>::drop(&mut self)
+pub struct barracuda_lua::Library<'lua>
+impl barracuda_lua::Library<'_>
+pub fn barracuda_lua::Library<'_>::register<A, R, F>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::Library<'_>::register_async<A, R, F, Fut>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
+pub fn barracuda_lua::Library<'_>::register_async_with<A, R, F, Fut>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut barracuda_lua::Context<'_>, A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
+pub fn barracuda_lua::Library<'_>::register_with<A, R, F>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut barracuda_lua::Context<'_>, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::Library<'_>::set<V: barracuda_lua::IntoLua>(&mut self, name: &str, value: V) -> barracuda_lua::Result<()>
+pub fn barracuda_lua::Library<'_>::table<F>(&mut self, name: &str, configure: F) -> barracuda_lua::Result<()> where F: core::ops::function::FnOnce(&mut barracuda_lua::Library<'_>) -> barracuda_lua::Result<()>
+pub struct barracuda_lua::Lua
+impl barracuda_lua::Lua
+pub fn barracuda_lua::Lua::create_registry_value<V: barracuda_lua::IntoLua>(&mut self, value: V) -> barracuda_lua::Result<barracuda_lua::RegistryKey>
+pub fn barracuda_lua::Lua::load<'lua, 'code>(&'lua mut self, code: &'code str) -> barracuda_lua::Chunk<'lua, 'code>
+pub fn barracuda_lua::Lua::new() -> barracuda_lua::Result<Self>
+pub fn barracuda_lua::Lua::register<A, R, F>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::Lua::register_async<A, R, F, Fut>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
+pub fn barracuda_lua::Lua::register_async_with<A, R, F, Fut>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut barracuda_lua::Context<'_>, A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
+pub fn barracuda_lua::Lua::register_lib<F>(&mut self, name: &str, configure: F) -> barracuda_lua::Result<()> where F: core::ops::function::FnOnce(&mut barracuda_lua::Library<'_>) -> barracuda_lua::Result<()>
+pub fn barracuda_lua::Lua::register_with<A, R, F>(&mut self, name: &str, function: F) -> barracuda_lua::Result<()> where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut barracuda_lua::Context<'_>, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::Lua::registry_value<V: barracuda_lua::FromLua>(&mut self, key: &barracuda_lua::RegistryKey) -> barracuda_lua::Result<V>
+pub fn barracuda_lua::Lua::remove_registry_value(&mut self, key: barracuda_lua::RegistryKey) -> barracuda_lua::Result<()>
+pub fn barracuda_lua::Lua::set<V: barracuda_lua::IntoLua>(&mut self, name: &str, value: V) -> barracuda_lua::Result<()>
+impl barracuda_lua::Lua
+pub fn barracuda_lua::Lua::run(self, source: &str) -> barracuda_lua::Result<(barracuda_lua::LuaInput, barracuda_lua::LuaOutput, barracuda_lua::LuaExecution)>
+impl core::ops::drop::Drop for barracuda_lua::Lua
+pub fn barracuda_lua::Lua::drop(&mut self)
+pub struct barracuda_lua::LuaExecution
+impl core::future::future::Future for barracuda_lua::LuaExecution
+pub type barracuda_lua::LuaExecution::Output = core::result::Result<(), barracuda_lua::Error>
+pub fn barracuda_lua::LuaExecution::poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
+impl core::marker::Unpin for barracuda_lua::LuaExecution
+impl core::ops::drop::Drop for barracuda_lua::LuaExecution
+pub fn barracuda_lua::LuaExecution::drop(&mut self)
+pub struct barracuda_lua::LuaInput
+impl barracuda_lua::LuaInput
+pub fn barracuda_lua::LuaInput::close(&self)
+pub async fn barracuda_lua::LuaInput::send(&self, input: impl core::convert::Into<alloc::string::String>) -> barracuda_lua::Result<()>
+pub struct barracuda_lua::LuaOutput
+impl barracuda_lua::LuaOutput
+pub async fn barracuda_lua::LuaOutput::next(&mut self) -> core::option::Option<alloc::string::String>
+pub struct barracuda_lua::RegistryKey
+pub struct barracuda_lua::Table
+impl barracuda_lua::Table
+pub fn barracuda_lua::Table::get<K: barracuda_lua::IntoLua, V: barracuda_lua::FromLua>(&self, key: K) -> barracuda_lua::Result<V>
+pub fn barracuda_lua::Table::is_empty(&self) -> barracuda_lua::Result<bool>
+pub fn barracuda_lua::Table::len(&self) -> barracuda_lua::Result<usize>
+pub fn barracuda_lua::Table::set<K: barracuda_lua::IntoLua, V: barracuda_lua::IntoLua>(&self, key: K, value: V) -> barracuda_lua::Result<()>
+impl barracuda_lua::FromLua for barracuda_lua::Table
+impl barracuda_lua::IntoLua for barracuda_lua::Table
+pub struct barracuda_lua::UserDataHandle<T: barracuda_lua::UserData>
+impl<T: barracuda_lua::UserData> barracuda_lua::UserDataHandle<T>
+pub fn barracuda_lua::UserDataHandle<T>::borrow(&self) -> barracuda_lua::Result<barracuda_lua::UserDataRef<'_, T>>
+pub fn barracuda_lua::UserDataHandle<T>::borrow_mut(&self) -> barracuda_lua::Result<barracuda_lua::UserDataRefMut<'_, T>>
+pub fn barracuda_lua::UserDataHandle<T>::with<R>(&self, function: impl core::ops::function::FnOnce(&T) -> R) -> barracuda_lua::Result<R>
+pub fn barracuda_lua::UserDataHandle<T>::with_mut<R>(&self, function: impl core::ops::function::FnOnce(&mut T) -> R) -> barracuda_lua::Result<R>
+impl<T: barracuda_lua::UserData> barracuda_lua::FromLua for barracuda_lua::UserDataHandle<T>
+impl<T: barracuda_lua::UserData> barracuda_lua::IntoLua for barracuda_lua::UserDataHandle<T>
+pub struct barracuda_lua::UserDataMethods<'lua, T: barracuda_lua::UserData>
+impl<T: barracuda_lua::UserData> barracuda_lua::UserDataMethods<'_, T>
+pub fn barracuda_lua::UserDataMethods<'_, T>::add_async_method<A, R, F, Fut>(&mut self, name: &str, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(barracuda_lua::UserDataHandle<T>, A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
+pub fn barracuda_lua::UserDataMethods<'_, T>::add_meta_method<A, R, F>(&mut self, method: barracuda_lua::MetaMethod, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&T, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::UserDataMethods<'_, T>::add_meta_method_mut<A, R, F>(&mut self, method: barracuda_lua::MetaMethod, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut T, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::UserDataMethods<'_, T>::add_method<A, R, F>(&mut self, name: &str, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&T, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub fn barracuda_lua::UserDataMethods<'_, T>::add_method_mut<A, R, F>(&mut self, name: &str, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(&mut T, A) -> barracuda_lua::LuaReturn<R> + 'static
+pub struct barracuda_lua::UserDataRef<'a, T>
+impl<T> core::ops::deref::Deref for barracuda_lua::UserDataRef<'_, T>
+pub type barracuda_lua::UserDataRef<'_, T>::Target = T
+pub fn barracuda_lua::UserDataRef<'_, T>::deref(&self) -> &Self::Target
+impl<T> core::ops::drop::Drop for barracuda_lua::UserDataRef<'_, T>
+pub fn barracuda_lua::UserDataRef<'_, T>::drop(&mut self)
+pub struct barracuda_lua::UserDataRefMut<'a, T>
+impl<T> core::ops::deref::Deref for barracuda_lua::UserDataRefMut<'_, T>
+pub type barracuda_lua::UserDataRefMut<'_, T>::Target = T
+pub fn barracuda_lua::UserDataRefMut<'_, T>::deref(&self) -> &Self::Target
+impl<T> core::ops::deref::DerefMut for barracuda_lua::UserDataRefMut<'_, T>
+pub fn barracuda_lua::UserDataRefMut<'_, T>::deref_mut(&mut self) -> &mut Self::Target
+impl<T> core::ops::drop::Drop for barracuda_lua::UserDataRefMut<'_, T>
+pub fn barracuda_lua::UserDataRefMut<'_, T>::drop(&mut self)
+pub struct barracuda_lua::Variadic<T>(_)
+impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for barracuda_lua::Variadic<T>
+impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for barracuda_lua::Variadic<T>
+impl<T> core::convert::From<alloc::vec::Vec<T>> for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::from(values: alloc::vec::Vec<T>) -> Self
+impl<T> core::convert::From<barracuda_lua::Variadic<T>> for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::from(values: barracuda_lua::Variadic<T>) -> Self
+impl<T> core::ops::deref::Deref for barracuda_lua::Variadic<T>
+pub type barracuda_lua::Variadic<T>::Target = [T]
+pub fn barracuda_lua::Variadic<T>::deref(&self) -> &Self::Target
+impl<T> core::ops::deref::DerefMut for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::deref_mut(&mut self) -> &mut Self::Target
+pub trait barracuda_lua::FromLua: core::marker::Sized
+impl barracuda_lua::FromLua for alloc::string::String
+impl barracuda_lua::FromLua for alloc::vec::Vec<u8>
+impl barracuda_lua::FromLua for barracuda_lua::Function
+impl barracuda_lua::FromLua for barracuda_lua::Table
+impl barracuda_lua::FromLua for bool
+impl barracuda_lua::FromLua for f64
+impl barracuda_lua::FromLua for i64
+impl<T: barracuda_lua::FromLua> barracuda_lua::FromLua for core::option::Option<T>
+impl<T: barracuda_lua::UserData> barracuda_lua::FromLua for barracuda_lua::UserDataHandle<T>
+pub trait barracuda_lua::FromLuaMulti: core::marker::Sized
+impl barracuda_lua::FromLuaMulti for ()
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua, K: barracuda_lua::FromLua, L: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J, K, L)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua, K: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J, K)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C)
+impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B)
+impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for T
+impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for barracuda_lua::Variadic<T>
+pub trait barracuda_lua::IntoLua
+impl barracuda_lua::IntoLua for &str
+impl barracuda_lua::IntoLua for alloc::string::String
+impl barracuda_lua::IntoLua for alloc::vec::Vec<u8>
+impl barracuda_lua::IntoLua for barracuda_lua::Function
+impl barracuda_lua::IntoLua for barracuda_lua::Table
+impl barracuda_lua::IntoLua for bool
+impl barracuda_lua::IntoLua for f64
+impl barracuda_lua::IntoLua for i64
+impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLua for core::option::Option<T>
+impl<T: barracuda_lua::UserData> barracuda_lua::IntoLua for barracuda_lua::UserDataHandle<T>
+pub trait barracuda_lua::IntoLuaMulti
+impl barracuda_lua::IntoLuaMulti for ()
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua, K: barracuda_lua::IntoLua, L: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J, K, L)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua, K: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J, K)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C)
+impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B)
+impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for T
+impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for barracuda_lua::Variadic<T>
+pub trait barracuda_lua::UserData: 'static
+pub fn barracuda_lua::UserData::add_methods(_methods: &mut barracuda_lua::UserDataMethods<'_, Self>) where Self: core::marker::Sized
+pub type barracuda_lua::LuaReturn<T> = core::option::Option<barracuda_lua::Result<T>>
+pub type barracuda_lua::Result<T> = core::result::Result<T, barracuda_lua::Error>

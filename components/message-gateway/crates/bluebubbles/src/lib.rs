@@ -73,7 +73,7 @@ impl BlueBubbles {
     }
 
     fn temp_guid(&self) -> String {
-        format!("temp-espclaw-{:016x}", self.next_id())
+        format!("temp-barracuda-{:016x}", self.next_id())
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -229,7 +229,7 @@ impl BlueBubbles {
             .mime_type
             .unwrap_or_else(|| default_mime(kind).into());
         let temp_guid = self.temp_guid();
-        let boundary = format!("espclaw-bluebubbles-{}", self.next_id());
+        let boundary = format!("barracuda-bluebubbles-{}", self.next_id());
         let mut multipart = Multipart::new(boundary)
             .text("chatGuid", request.target.conversation_id)
             .text("tempGuid", temp_guid.clone())

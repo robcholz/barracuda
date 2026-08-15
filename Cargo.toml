@@ -9,8 +9,8 @@ members = [
     "apps/*",
 ]
 default-members = [
-    "components/agent/crates/claw-agent",
-    "shared/claw-fs",
+    "components/agent/crates/agent",
+    "shared/fs",
 ]
 
 [workspace.dependencies]

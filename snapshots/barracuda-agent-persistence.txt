@@ -1,0 +1,70 @@
+pub mod barracuda_agent_persistence
+pub enum barracuda_agent_persistence::DurablePartError
+pub barracuda_agent_persistence::DurablePartError::Decode(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub barracuda_agent_persistence::DurablePartError::Encode(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub barracuda_agent_persistence::DurablePartError::InvalidState(&'static str)
+impl barracuda_agent_persistence::DurablePartError
+pub fn barracuda_agent_persistence::DurablePartError::decode(source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn barracuda_agent_persistence::DurablePartError::encode(source: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub enum barracuda_agent_persistence::PersistenceError
+pub barracuda_agent_persistence::PersistenceError::Codec(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub barracuda_agent_persistence::PersistenceError::CorruptState(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub barracuda_agent_persistence::PersistenceError::EmptyDirectory
+pub barracuda_agent_persistence::PersistenceError::InvalidCollection
+pub barracuda_agent_persistence::PersistenceError::InvalidCollection::name: alloc::string::String
+pub barracuda_agent_persistence::PersistenceError::InvalidSingleton
+pub barracuda_agent_persistence::PersistenceError::InvalidSingleton::name: alloc::string::String
+pub barracuda_agent_persistence::PersistenceError::StateAlreadyRegistered
+pub barracuda_agent_persistence::PersistenceError::StateAlreadyRegistered::instance_id: core::option::Option<barracuda_agent_persistence::InstanceId>
+pub barracuda_agent_persistence::PersistenceError::StateAlreadyRegistered::name: alloc::string::String
+pub barracuda_agent_persistence::PersistenceError::Storage(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
+pub barracuda_agent_persistence::PersistenceError::TypeMismatch
+pub barracuda_agent_persistence::PersistenceError::TypeMismatch::actual: &'static str
+pub barracuda_agent_persistence::PersistenceError::TypeMismatch::expected: &'static str
+pub barracuda_agent_persistence::PersistenceError::TypeMismatch::kind: &'static str
+pub barracuda_agent_persistence::PersistenceError::TypeMismatch::name: alloc::string::String
+pub struct barracuda_agent_persistence::Collection<'a, Filesystem: barracuda_fs::fs::FileSystem, T>
+impl<Filesystem, T> barracuda_agent_persistence::Collection<'_, Filesystem, T> where Filesystem: barracuda_fs::fs::FileSystem, T: barracuda_agent_persistence::DurableStateCodec + 'static
+pub fn barracuda_agent_persistence::Collection<'_, Filesystem, T>::list(&self) -> core::result::Result<alloc::vec::Vec<barracuda_agent_persistence::InstanceId>, barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Collection<'_, Filesystem, T>::load(&self, instance_id: &barracuda_agent_persistence::InstanceId) -> core::result::Result<core::option::Option<T>, barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Collection<'_, Filesystem, T>::register(&self, instance_id: &barracuda_agent_persistence::InstanceId, state: &barracuda_agent_persistence::DurableState<T>) -> core::result::Result<(), barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Collection<'_, Filesystem, T>::remove(&self, instance_id: &barracuda_agent_persistence::InstanceId) -> core::result::Result<(), barracuda_agent_persistence::PersistenceError>
+pub struct barracuda_agent_persistence::DurableState<T>
+impl<T> barracuda_agent_persistence::DurableState<T>
+pub fn barracuda_agent_persistence::DurableState<T>::get(&self) -> impl core::ops::deref::Deref<Target = T> + '_
+pub fn barracuda_agent_persistence::DurableState<T>::get_mut(&self) -> impl core::ops::deref::DerefMut<Target = T> + '_
+pub fn barracuda_agent_persistence::DurableState<T>::new(value: T) -> Self
+pub fn barracuda_agent_persistence::DurableState<T>::replace(&self, value: T)
+impl<T> core::clone::Clone for barracuda_agent_persistence::DurableState<T>
+pub fn barracuda_agent_persistence::DurableState<T>::clone(&self) -> Self
+pub struct barracuda_agent_persistence::InstanceId(_)
+impl barracuda_agent_persistence::InstanceId
+pub fn barracuda_agent_persistence::InstanceId::as_str(&self) -> &str
+pub fn barracuda_agent_persistence::InstanceId::new(id: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, barracuda_agent_persistence::InvalidInstanceId>
+pub struct barracuda_agent_persistence::InvalidInstanceId
+impl barracuda_agent_persistence::InvalidInstanceId
+pub fn barracuda_agent_persistence::InvalidInstanceId::as_str(&self) -> &str
+pub struct barracuda_agent_persistence::Persistence<Filesystem: barracuda_fs::fs::FileSystem>
+impl<Filesystem: barracuda_fs::fs::FileSystem> barracuda_agent_persistence::Persistence<Filesystem>
+pub fn barracuda_agent_persistence::Persistence<Filesystem>::collection<T>(&self, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<barracuda_agent_persistence::Collection<'_, Filesystem, T>, barracuda_agent_persistence::PersistenceError> where T: barracuda_agent_persistence::DurableStateCodec + 'static
+pub fn barracuda_agent_persistence::Persistence<Filesystem>::maybe_persist(&self) -> core::result::Result<(), barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Persistence<Filesystem>::new(filesystem: alloc::sync::Arc<Filesystem>, persistence_directory: impl core::convert::Into<alloc::string::String>) -> core::result::Result<Self, barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Persistence<Filesystem>::singleton<T>(&self, name: impl core::convert::Into<alloc::string::String>) -> core::result::Result<barracuda_agent_persistence::Singleton<'_, Filesystem, T>, barracuda_agent_persistence::PersistenceError> where T: barracuda_agent_persistence::DurableStateCodec + 'static
+pub struct barracuda_agent_persistence::Singleton<'a, Filesystem: barracuda_fs::fs::FileSystem, T>
+impl<Filesystem, T> barracuda_agent_persistence::Singleton<'_, Filesystem, T> where Filesystem: barracuda_fs::fs::FileSystem, T: barracuda_agent_persistence::DurableStateCodec + 'static
+pub fn barracuda_agent_persistence::Singleton<'_, Filesystem, T>::load(&self) -> core::result::Result<core::option::Option<T>, barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Singleton<'_, Filesystem, T>::register(&self, state: &barracuda_agent_persistence::DurableState<T>) -> core::result::Result<(), barracuda_agent_persistence::PersistenceError>
+pub fn barracuda_agent_persistence::Singleton<'_, Filesystem, T>::remove(&self) -> core::result::Result<(), barracuda_agent_persistence::PersistenceError>
+pub struct barracuda_agent_persistence::StateBlob<'a>
+pub barracuda_agent_persistence::StateBlob::bytes: alloc::borrow::Cow<'a, [u8]>
+impl<'a> barracuda_agent_persistence::StateBlob<'a>
+pub fn barracuda_agent_persistence::StateBlob<'a>::as_slice(&self) -> barracuda_agent_persistence::StateSlice<'_>
+pub fn barracuda_agent_persistence::StateBlob<'a>::into_owned(self) -> barracuda_agent_persistence::StateBlob<'static>
+pub struct barracuda_agent_persistence::StateSlice<'a>
+pub barracuda_agent_persistence::StateSlice::bytes: &'a [u8]
+pub trait barracuda_agent_persistence::DurableStateCodec: core::marker::Sized
+pub const barracuda_agent_persistence::DurableStateCodec::SCHEMA_VERSION: barracuda_agent_persistence::SchemaVersion
+pub fn barracuda_agent_persistence::DurableStateCodec::decode_state(schema_version: barracuda_agent_persistence::SchemaVersion, state: barracuda_agent_persistence::StateSlice<'_>) -> core::result::Result<Self, barracuda_agent_persistence::DurablePartError>
+pub fn barracuda_agent_persistence::DurableStateCodec::encode_state(&self) -> core::result::Result<barracuda_agent_persistence::StateBlob<'_>, barracuda_agent_persistence::DurablePartError>
+pub type barracuda_agent_persistence::SchemaVersion = u32
+pub type barracuda_agent_persistence::SharedPersistence<Filesystem> = alloc::sync::Arc<barracuda_agent_persistence::Persistence<Filesystem>>

@@ -278,6 +278,284 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-agent-persistence",
+ "barracuda-agent-runtime",
+ "barracuda-agent-skill",
+ "barracuda-agent-tool",
+ "barracuda-agent-trace",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "embassy-time",
+ "futures-lite",
+ "json-validator",
+ "serde_json",
+ "static_cell",
+ "tempdir",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-agent-context"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "barracuda-agent-memory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-fs",
+ "barracuda-runtime-utils",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-permission"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-persistence"
+version = "0.1.0"
+dependencies = [
+ "barracuda-fs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-profile"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "barracuda-profile",
+ "embassy-time",
+]
+
+[[package]]
+name = "barracuda-agent-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "async-stream",
+ "barracuda-agent-context",
+ "barracuda-agent-memory",
+ "barracuda-agent-permission",
+ "barracuda-agent-persistence",
+ "barracuda-agent-skill",
+ "barracuda-agent-tool",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "barracuda-runtime-utils",
+ "embassy-sync",
+ "embassy-time",
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "futures-util",
+ "getset",
+ "json-validator",
+ "log",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-agent-sandbox"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-fs",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-skill"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-fs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-agent-tool"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-agent-permission",
+ "barracuda-agent-persistence",
+ "barracuda-fs",
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "futures-util",
+ "json-validator",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-agent-trace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "log",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-cli"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "anyhow",
+ "barracuda-agent",
+ "barracuda-agent-trace",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "dotenvy",
+ "embassy-time",
+ "futures-lite",
+ "rand_core 0.10.1",
+ "rustyline",
+ "static_cell",
+ "strum 0.28.0",
+ "tempdir",
+ "terminal_size",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "unicode-width",
+]
+
+[[package]]
+name = "barracuda-fs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "embedded-executor",
+ "lock_api",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-lua"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "futures-lite",
+ "lunka",
+]
+
+[[package]]
+name = "barracuda-model-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-agent-trace",
+ "barracuda-net",
+ "barracuda-runtime-utils",
+ "base64 0.22.1",
+ "critical-section",
+ "embassy-futures",
+ "embassy-time",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
+ "eventsource-stream",
+ "futures-core",
+ "futures-lite",
+ "mbedtls-rs",
+ "ouroboros",
+ "reqwless",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "tempdir",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-net"
+version = "0.1.0"
+dependencies = [
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
+ "tokio",
+]
+
+[[package]]
+name = "barracuda-profile"
+version = "0.1.0"
+dependencies = [
+ "dhat",
+]
+
+[[package]]
+name = "barracuda-runtime-utils"
+version = "0.1.0"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "futures-util",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+]
+
+[[package]]
 name = "base16ct"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -511,284 +789,6 @@ dependencies = [
  "glob",
  "libc",
  "libloading",
-]
-
-[[package]]
-name = "claw-agent"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claw-api",
- "claw-core",
- "claw-fs",
- "claw-log",
- "claw-net",
- "claw-persistence",
- "claw-skill",
- "claw-tool",
- "embassy-time",
- "futures-lite",
- "json-validator",
- "serde_json",
- "static_cell",
- "tempdir",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "claw-agent-profile"
-version = "0.1.0"
-dependencies = [
- "claw-agent",
- "claw-api",
- "claw-fs",
- "claw-net",
- "claw-profile",
- "embassy-time",
-]
-
-[[package]]
-name = "claw-api"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "claw-log",
- "claw-net",
- "claw-utils",
- "critical-section",
- "embassy-futures",
- "embassy-time",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "embedded-nal-async",
- "eventsource-stream",
- "futures-core",
- "futures-lite",
- "mbedtls-rs",
- "ouroboros",
- "reqwless",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "tempdir",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "claw-cli"
-version = "0.1.0"
-dependencies = [
- "anstyle",
- "anyhow",
- "claw-agent",
- "claw-api",
- "claw-fs",
- "claw-log",
- "claw-net",
- "dotenvy",
- "embassy-time",
- "futures-lite",
- "rand_core 0.10.1",
- "rustyline",
- "static_cell",
- "strum 0.28.0",
- "tempdir",
- "terminal_size",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "unicode-width",
-]
-
-[[package]]
-name = "claw-context"
-version = "0.1.0"
-dependencies = [
- "axum",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "claw-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "async-stream",
- "claw-api",
- "claw-context",
- "claw-fs",
- "claw-memory",
- "claw-net",
- "claw-permission",
- "claw-persistence",
- "claw-skill",
- "claw-tool",
- "claw-utils",
- "embassy-sync",
- "embassy-time",
- "futures-channel",
- "futures-core",
- "futures-lite",
- "futures-util",
- "getset",
- "json-validator",
- "log",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "claw-fs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "embedded-executor",
- "lock_api",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-log"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "log",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "claw-lua"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "futures-lite",
- "lunka",
-]
-
-[[package]]
-name = "claw-memory"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claw-fs",
- "claw-utils",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-net"
-version = "0.1.0"
-dependencies = [
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "embedded-nal-async",
- "tokio",
-]
-
-[[package]]
-name = "claw-permission"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-persistence"
-version = "0.1.0"
-dependencies = [
- "claw-fs",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-profile"
-version = "0.1.0"
-dependencies = [
- "dhat",
-]
-
-[[package]]
-name = "claw-sandbox"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claw-fs",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-skill"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claw-fs",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "yaml-peg",
-]
-
-[[package]]
-name = "claw-tool"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "claw-fs",
- "claw-permission",
- "claw-persistence",
- "futures-channel",
- "futures-core",
- "futures-lite",
- "futures-util",
- "json-validator",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "claw-utils"
-version = "0.1.0"
-dependencies = [
- "futures-channel",
- "futures-core",
- "futures-lite",
- "futures-util",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "claw-vm"
-version = "0.1.0"
-dependencies = [
- "claw-lua",
 ]
 
 [[package]]
@@ -1858,7 +1858,7 @@ dependencies = [
 name = "http-client"
 version = "0.1.0"
 dependencies = [
- "claw-net",
+ "barracuda-net",
  "embassy-sync",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",

@@ -1,0 +1,18 @@
+[package]
+name = "barracuda-agent-persistence"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Persistence interfaces for durable runtime state"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-fs = { path = "../../../../shared/fs" }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-fs = { path = "../../../../shared/fs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

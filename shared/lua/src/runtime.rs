@@ -796,7 +796,7 @@ pub(crate) fn state_from_thread(lua: &mut Thread) -> Result<Rc<State>> {
     if pointer.is_null() {
         return Err(Error::new(
             ErrorKind::Runtime,
-            "Lua state is not owned by claw-lua",
+            "Lua state is not owned by barracuda-lua",
         ));
     }
     unsafe {
@@ -922,7 +922,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_lua_states_not_owned_by_claw_lua() {
+    fn rejects_lua_states_not_owned_by_barracuda_lua() {
         let mut lua = raw_lua();
         let state = lua.as_ptr();
         unsafe {
@@ -934,6 +934,6 @@ mod tests {
             Ok(_) => panic!("raw Lua state unexpectedly accepted"),
             Err(error) => error,
         };
-        assert!(error.message().contains("not owned by claw-lua"));
+        assert!(error.message().contains("not owned by barracuda-lua"));
     }
 }

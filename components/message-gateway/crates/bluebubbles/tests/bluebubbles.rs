@@ -93,7 +93,7 @@ fn registers_as_imessage_and_sends_replies_with_encoded_auth() {
         assert_eq!(json["selectedMessageGuid"], "parent-guid");
         assert!(json["tempGuid"]
             .as_str()
-            .is_some_and(|id| id.starts_with("temp-espclaw-")));
+            .is_some_and(|id| id.starts_with("temp-barracuda-")));
     });
 }
 
@@ -393,7 +393,7 @@ fn rejects_empty_messages_and_uses_temp_guid_when_server_omits_guid() {
             .send_message(SendMessageRequest::text(target(), "hello"))
             .await
             .expect("fallback receipt succeeds");
-        assert!(receipt.message_id.starts_with("temp-espclaw-"));
+        assert!(receipt.message_id.starts_with("temp-barracuda-"));
 
         let empty = channel
             .send_message(SendMessageRequest::text(target(), ""))

@@ -1,0 +1,350 @@
+//! Conversation-history projection and compaction for one agent.
+//!
+//! [`ConversationHistoryContextProvider`] owns both sides of the request-time
+//! history boundary: summary messages for the compacted prefix and a cached
+//! verbatim tail for everything after that prefix. Keeping the transcript,
+//! coverage cursor, summary, and tail cache in one object makes one
+//! [`ContextProvider::prepare`]/[`ContextProvider::contribute`] cycle an atomic
+//! projection: every committed turn is represented exactly once, while the open
+//! turn always remains verbatim.
+
+mod llm_compactor;
+
+use barracuda_agent_context::{BlockKind, ContextSink};
+use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
+use barracuda_model_api::ModelApiFactory;
+use barracuda_net::{Dns, TcpConnect};
+use serde_json::Value;
+use tracing::Instrument as _;
+
+use crate::agent::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
+use crate::config::SharedApiManager;
+
+use llm_compactor::LlmCompactor;
+
+/// Rough bytes-per-token divisor for the size estimate. See
+/// [`estimate_message_tokens`].
+const CHARS_PER_TOKEN: usize = 4;
+
+/// The conversation-compaction policy knobs the provider applies.
+#[derive(Clone, Copy, Debug)]
+struct CompactionPolicy {
+    /// Start compacting once the verbatim history past the cursor exceeds this.
+    trigger_tokens: usize,
+    /// Token budget for the verbatim tail kept out of every summary.
+    keep_recent_tokens: usize,
+    /// Max tokens summarized per compaction pass.
+    segment_token_budget: usize,
+}
+
+impl CompactionPolicy {
+    fn new(trigger_tokens: usize, keep_recent_tokens: usize, segment_token_budget: usize) -> Self {
+        Self {
+            trigger_tokens,
+            keep_recent_tokens,
+            segment_token_budget,
+        }
+    }
+}
+
+/// Failure while preparing the conversation-history projection.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ConversationHistoryProviderError {
+    /// Summarizing an aged transcript window failed.
+    #[error(transparent)]
+    Compaction(#[from] CompactError),
+}
+
+/// Owns the complete request-time projection of one conversation transcript.
+///
+/// The transcript itself is owned by `BaseAgent` (as `dyn Transcript`) and is
+/// lent to this provider for the duration of each [`ContextProvider::prepare`]
+/// call; the provider holds only the derived projection (summary + verbatim tail).
+pub(in crate::agent) struct ConversationHistoryContextProvider {
+    /// Transformation used to summarize one aged prefix window.
+    compactor: Box<dyn Compactor>,
+    policy: CompactionPolicy,
+    /// Highest committed turn represented by `summary_messages`.
+    covered_through: Option<TurnId>,
+    /// Non-overlapping summaries of committed transcript prefixes.
+    summary_messages: Vec<Value>,
+    /// Verbatim committed turns after `covered_through`, plus the open turn.
+    verbatim_tail: Vec<Value>,
+}
+
+impl ConversationHistoryContextProvider {
+    fn new(compactor: Box<dyn Compactor>, policy: CompactionPolicy) -> Self {
+        Self {
+            compactor,
+            policy,
+            covered_through: None,
+            summary_messages: Vec::new(),
+            verbatim_tail: Vec::new(),
+        }
+    }
+
+    /// Build the configured LLM-backed conversation projection used by Agent
+    /// AgentManager without exposing its compactor implementation or policy type.
+    pub(in crate::agent) fn with_llm_compaction<H>(
+        api_manager: SharedApiManager,
+        llm_factory: ModelApiFactory<H>,
+        trigger_tokens: usize,
+        keep_recent_tokens: usize,
+        segment_token_budget: usize,
+    ) -> Self
+    where
+        H: TcpConnect + Dns + 'static,
+    {
+        Self::new(
+            Box::new(LlmCompactor::<H>::new(api_manager, &llm_factory)),
+            CompactionPolicy::new(trigger_tokens, keep_recent_tokens, segment_token_budget),
+        )
+    }
+
+    /// Compact at most one aged prefix, then cache the exact complementary tail.
+    async fn prepare_projection(
+        &mut self,
+        transcript: &dyn Transcript,
+    ) -> Result<(), ConversationHistoryProviderError> {
+        if let Some((id_end, window_messages, estimated_tokens)) = self.select_window(transcript) {
+            let span = tracing::info_span!(
+                "context.compact",
+                message_count = window_messages.len() as u64,
+                estimated_tokens = estimated_tokens as u64,
+            );
+            let result = self
+                .compactor
+                .compact(&window_messages)
+                .instrument(span.clone())
+                .await;
+            match result {
+                Ok(messages) => {
+                    log::info!(
+                        "conversation compaction completed: summaries={}",
+                        messages.len()
+                    );
+                    span.in_scope(|| {
+                        tracing::info!(name: "completed", summary_count = messages.len() as u64);
+                    });
+                    self.covered_through = Some(
+                        self.covered_through
+                            .map_or(id_end, |current| current.max(id_end)),
+                    );
+                    self.summary_messages.extend(messages);
+                }
+                Err(error) => {
+                    let kind: &'static str = (&error).into();
+                    log::warn!("conversation compaction failed: kind={kind}");
+                    span.in_scope(|| tracing::warn!(name: "failed", kind));
+                    return Err(error.into());
+                }
+            }
+        }
+
+        // Refresh only after a successful boundary advance or no-op compaction,
+        // so the cached tail always complements the summary state this same
+        // object will contribute.
+        self.refresh_verbatim_tail(transcript);
+        Ok(())
+    }
+
+    fn refresh_verbatim_tail(&mut self, transcript: &dyn Transcript) {
+        self.verbatim_tail.clear();
+        let turns = transcript.turns();
+        for turn in turns
+            .iter()
+            .filter(|turn| is_uncovered(turn, self.covered_through))
+        {
+            self.verbatim_tail.extend(turn.messages.iter().cloned());
+        }
+    }
+
+    /// Pick the oldest uncovered committed turns eligible for the next summary.
+    ///
+    /// Summaries only ever cover **committed** turns, so the volatile open turn
+    /// (`id == None`) is excluded here — it always stays verbatim.
+    fn select_window(&self, transcript: &dyn Transcript) -> Option<(TurnId, Vec<Value>, usize)> {
+        let turns = transcript.turns();
+        let uncovered: Vec<(TurnId, &Turn)> = turns
+            .iter()
+            .filter_map(|turn| turn.id.map(|id| (id, turn)))
+            .filter(|(id, _)| self.covered_through.is_none_or(|covered| *id > covered))
+            .collect();
+
+        let uncovered_tokens: usize = uncovered
+            .iter()
+            .flat_map(|(_, turn)| turn.messages.iter())
+            .map(estimate_message_tokens)
+            .sum();
+        if uncovered_tokens <= self.policy.trigger_tokens {
+            return None;
+        }
+
+        let verbatim_count = recent_tail_count(&uncovered, self.policy.keep_recent_tokens);
+        let aged = uncovered.get(..uncovered.len().saturating_sub(verbatim_count))?;
+        let (first_id, _) = aged.first()?;
+
+        let mut window_messages = Vec::new();
+        let mut id_end = *first_id;
+        let mut tokens = 0usize;
+        for (id, turn) in aged {
+            let turn_tokens: usize = turn.messages.iter().map(estimate_message_tokens).sum();
+            if !window_messages.is_empty()
+                && tokens.saturating_add(turn_tokens) > self.policy.segment_token_budget
+            {
+                break;
+            }
+            window_messages.extend(turn.messages.iter().cloned());
+            id_end = *id;
+            tokens = tokens.saturating_add(turn_tokens);
+        }
+
+        (!window_messages.is_empty()).then_some((id_end, window_messages, tokens))
+    }
+}
+
+/// Whether a turn belongs in the verbatim tail: the open turn (`id == None`) is
+/// always verbatim, and a committed turn is verbatim while it is past the
+/// summary coverage cursor.
+fn is_uncovered(turn: &Turn, covered_through: Option<TurnId>) -> bool {
+    match turn.id {
+        None => true,
+        Some(id) => covered_through.is_none_or(|covered| id > covered),
+    }
+}
+
+impl ContextProvider for ConversationHistoryContextProvider {
+    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
+        Box::pin(async move {
+            self.prepare_projection(transcript)
+                .await
+                .map_err(|error| Box::new(error) as _)
+        })
+    }
+
+    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+        // The transcript is only borrowed during `prepare`, which the production
+        // lifecycle always runs first and which caches the summary + verbatim
+        // tail. `contribute` therefore just emits that cached projection.
+        for message in &self.summary_messages {
+            output.message(BlockKind::ConversationSummary, message);
+        }
+        for message in &self.verbatim_tail {
+            output.message(BlockKind::RecentContext, message);
+        }
+        Ok(())
+    }
+}
+
+/// How many of the newest `turns` form the verbatim tail under the token budget.
+fn recent_tail_count(turns: &[(TurnId, &Turn)], keep_recent_tokens: usize) -> usize {
+    if turns.is_empty() {
+        return 0;
+    }
+    let mut tokens = 0usize;
+    let mut count = 0usize;
+    for (_, turn) in turns.iter().rev() {
+        let turn_tokens: usize = turn.messages.iter().map(estimate_message_tokens).sum();
+        tokens = tokens.saturating_add(turn_tokens);
+        count = count.saturating_add(1);
+        if tokens >= keep_recent_tokens {
+            break;
+        }
+    }
+    count.max(1)
+}
+
+// todo: replace this byte-length heuristic with a tokenizer estimate matching
+// the active backend. It only needs to remain monotonic for trigger behavior.
+fn estimate_message_tokens(message: &Value) -> usize {
+    message
+        .to_string()
+        .len()
+        .checked_div(CHARS_PER_TOKEN)
+        .unwrap_or(0)
+        .saturating_add(1)
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use std::sync::Arc;
+
+    use barracuda_agent_context::Context;
+    use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
+    use barracuda_fs::MemFs;
+    use futures_lite::future::block_on;
+    use serde_json::{json, Value};
+
+    use super::{CompactionPolicy, ContextProvider, ConversationHistoryContextProvider};
+
+    struct WindowEchoCompactor;
+
+    impl Compactor for WindowEchoCompactor {
+        fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
+            Box::pin(async move {
+                let covered = window
+                    .iter()
+                    .filter_map(|message| message.get("content").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                Ok(vec![json!({
+                    "role": "system",
+                    "content": format!("summary:{covered}"),
+                })])
+            })
+        }
+    }
+
+    #[test]
+    fn one_projection_has_summary_prefix_and_exact_complementary_tail() {
+        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
+            .expect("in-memory transcript opens");
+        for text in ["turn-one", "turn-two", "turn-three"] {
+            let turn = transcript.open_turn().expect("test turn opens");
+            {
+                let mut user = turn.user().expect("user message opens");
+                user.append(text);
+            }
+            drop(turn);
+        }
+        let open_turn = transcript.open_turn().expect("test turn opens");
+        {
+            let mut user = open_turn.user().expect("user message opens");
+            user.append("open-four");
+        }
+        let expected_covered_through = transcript
+            .turns()
+            .iter()
+            .filter_map(|turn| turn.id)
+            .nth(1)
+            .expect("two committed turns exist");
+
+        let mut provider = ConversationHistoryContextProvider::new(
+            Box::new(WindowEchoCompactor),
+            CompactionPolicy::new(0, 1, usize::MAX),
+        );
+        assert!(block_on(provider.prepare(&transcript as &dyn Transcript)).is_ok());
+
+        let mut context = Context::new();
+        let mut sink = context.sink();
+        assert!(provider.contribute(&mut sink).is_ok());
+        let rendered = sink.into_history();
+
+        assert_eq!(provider.covered_through, Some(expected_covered_through));
+        assert_eq!(
+            rendered,
+            vec![
+                json!({"role": "system", "content": "summary:turn-one|turn-two"}),
+                json!({"role": "user", "content": "turn-three"}),
+                json!({"role": "user", "content": "open-four"}),
+            ]
+        );
+        let rendered_text = serde_json::to_string(&rendered).expect("history serializes");
+        assert_eq!(rendered_text.matches("turn-one").count(), 1);
+        assert_eq!(rendered_text.matches("turn-two").count(), 1);
+        assert_eq!(rendered_text.matches("turn-three").count(), 1);
+        assert_eq!(rendered_text.matches("open-four").count(), 1);
+    }
+}
+use alloc::{boxed::Box, string::ToString, vec::Vec};

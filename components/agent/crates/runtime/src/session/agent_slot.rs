@@ -1,0 +1,246 @@
+use alloc::collections::BTreeMap;
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
+use barracuda_net::{Dns, TcpConnect};
+use futures_core::Stream;
+
+use crate::agent::{
+    Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, AgentHandle, AgentId,
+    AgentStream, AgentStreamItem, ApprovalDecision, ReasoningEffort, ReasoningEffortHandle,
+    ToolCallId,
+};
+use crate::Message;
+
+pub(super) type AgentSlots<Http> = BTreeMap<AgentId, AgentSlot<Http>>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InFlightLifecycle {
+    Running,
+    Interrupting,
+    Cancelling,
+    Reaping,
+}
+
+struct InFlight<Http: TcpConnect + Dns + 'static> {
+    stream: AgentStream<Http>,
+    control: AgentHandle,
+    span: Option<tracing::Span>,
+    lifecycle: InFlightLifecycle,
+    terminal: Option<Result<AgentEvent, AgentError>>,
+}
+
+// `Agent` is intentionally stored inline in its owning slot. Boxing it only to
+// equalize enum variants adds one allocation to every resident Agent.
+#[allow(clippy::large_enum_variant)]
+enum Execution<Http: TcpConnect + Dns + 'static> {
+    Resident(Agent<Http>),
+    InFlight(InFlight<Http>),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum AgentDispatch {
+    Started,
+    Queued,
+}
+
+pub(super) enum AgentSlotUpdate {
+    Event(Result<AgentEvent, AgentError>),
+    Returned,
+    Reaped,
+    Ignored,
+}
+
+/// The authoritative ownership record for one Agent.
+///
+/// A resident slot owns the Agent directly. While it is running, the slot owns
+/// the AgentStream and its control capability.
+pub(super) struct AgentSlot<Http: TcpConnect + Dns + 'static> {
+    execution: Option<Execution<Http>>,
+    reasoning_effort: ReasoningEffortHandle,
+}
+
+impl<Http> AgentSlot<Http>
+where
+    Http: TcpConnect + Dns + 'static,
+{
+    pub(super) fn new(agent: Agent<Http>, reasoning_effort: ReasoningEffortHandle) -> Self {
+        Self {
+            execution: Some(Execution::Resident(agent)),
+            reasoning_effort,
+        }
+    }
+
+    pub(super) fn is_in_flight(&self) -> bool {
+        matches!(self.execution, Some(Execution::InFlight(_)))
+    }
+
+    pub(super) fn has_trace_span(&self) -> bool {
+        matches!(
+            self.execution,
+            Some(Execution::InFlight(InFlight { span: Some(_), .. }))
+        )
+    }
+
+    fn start<T>(
+        &mut self,
+        message: Message,
+        make_span: impl FnOnce() -> (tracing::Span, T),
+    ) -> Result<T, (Message, AgentDispatchError)> {
+        let execution = self.execution.take();
+        let agent = match execution {
+            Some(Execution::Resident(agent)) => agent,
+            Some(execution @ Execution::InFlight(_)) => {
+                self.execution = Some(execution);
+                return Err((message, AgentDispatchError::Busy));
+            }
+            None => return Err((message, AgentDispatchError::Closed)),
+        };
+        let (stream, control) = agent.into_stream(message);
+        let (span, value) = make_span();
+        self.execution = Some(Execution::InFlight(InFlight {
+            stream,
+            control,
+            span: Some(span),
+            lifecycle: InFlightLifecycle::Running,
+            terminal: None,
+        }));
+        Ok(value)
+    }
+
+    pub(super) fn dispatch<T>(
+        &mut self,
+        message: Message,
+        make_span: impl FnOnce() -> (tracing::Span, T),
+    ) -> Result<(AgentDispatch, T), (Message, AgentDispatchError)> {
+        match self.execution.as_mut() {
+            Some(Execution::InFlight(in_flight)) => {
+                let retry = message.clone();
+                in_flight
+                    .control
+                    .dispatch(message)
+                    .map_err(|error| (retry, error))?;
+                let (span, value) = make_span();
+                debug_assert!(in_flight.span.is_none());
+                in_flight.span = Some(span);
+                Ok((AgentDispatch::Queued, value))
+            }
+            Some(Execution::Resident(_)) => self
+                .start(message, make_span)
+                .map(|value| (AgentDispatch::Started, value)),
+            None => Err((message, AgentDispatchError::Closed)),
+        }
+    }
+
+    pub(super) fn set_trace_span(&mut self, span: tracing::Span) -> bool {
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return false;
+        };
+        debug_assert!(in_flight.span.is_none());
+        in_flight.span = Some(span);
+        true
+    }
+
+    pub(super) fn finish_trace_turn(&mut self) {
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return;
+        };
+        in_flight.span = None;
+    }
+
+    pub(super) fn interrupt(&mut self) -> bool {
+        let Some(Execution::InFlight(in_flight)) = &mut self.execution else {
+            return false;
+        };
+        if in_flight.lifecycle != InFlightLifecycle::Running {
+            return false;
+        }
+        in_flight.control.interrupt();
+        in_flight.lifecycle = InFlightLifecycle::Interrupting;
+        true
+    }
+
+    pub(super) fn cancel(&mut self) {
+        let Some(Execution::InFlight(in_flight)) = &mut self.execution else {
+            return;
+        };
+        in_flight.control.cancel();
+        if in_flight.lifecycle != InFlightLifecycle::Reaping {
+            in_flight.lifecycle = InFlightLifecycle::Cancelling;
+        }
+    }
+
+    pub(super) fn begin_reaping(&mut self) {
+        let Some(Execution::InFlight(in_flight)) = &mut self.execution else {
+            return;
+        };
+        in_flight.control.cancel();
+        in_flight.lifecycle = InFlightLifecycle::Reaping;
+        in_flight.terminal = None;
+    }
+
+    pub(super) fn resolve_approval(
+        &self,
+        tool_call_id: ToolCallId,
+        decision: ApprovalDecision,
+    ) -> Result<(), AgentApprovalError> {
+        let Some(Execution::InFlight(in_flight)) = &self.execution else {
+            return Err(AgentApprovalError::NotAwaitingApproval);
+        };
+        in_flight.control.resolve_approval(tool_call_id, decision)
+    }
+
+    pub(super) fn set_reasoning_effort(&self, effort: ReasoningEffort) {
+        self.reasoning_effort.set(effort);
+    }
+
+    pub(super) fn poll(&mut self, context: &mut Context<'_>) -> Poll<AgentSlotUpdate> {
+        let polled = {
+            let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+                return Poll::Pending;
+            };
+            match &in_flight.span {
+                Some(span) => span.in_scope(|| Pin::new(&mut in_flight.stream).poll_next(context)),
+                None => Pin::new(&mut in_flight.stream).poll_next(context),
+            }
+        };
+        let item = match polled {
+            Poll::Ready(Some(item)) => item,
+            Poll::Ready(None) => {
+                self.execution = None;
+                return Poll::Ready(AgentSlotUpdate::Event(Err(AgentError::StateInvariant)));
+            }
+            Poll::Pending => return Poll::Pending,
+        };
+        let Some(Execution::InFlight(in_flight)) = self.execution.as_mut() else {
+            return Poll::Ready(AgentSlotUpdate::Event(Err(AgentError::StateInvariant)));
+        };
+        let update = match item {
+            AgentStreamItem::Event(_) if in_flight.lifecycle == InFlightLifecycle::Reaping => {
+                AgentSlotUpdate::Ignored
+            }
+            AgentStreamItem::Event(event) if event.is_err() => {
+                debug_assert!(
+                    in_flight.terminal.is_none(),
+                    "one Agent stream has only one terminal event"
+                );
+                in_flight.terminal = Some(event);
+                AgentSlotUpdate::Ignored
+            }
+            AgentStreamItem::Event(event) => AgentSlotUpdate::Event(event),
+            AgentStreamItem::Returned(agent) => {
+                let reaping = in_flight.lifecycle == InFlightLifecycle::Reaping;
+                let terminal = in_flight.terminal.take();
+                self.execution = Some(Execution::Resident(agent));
+                if reaping {
+                    AgentSlotUpdate::Reaped
+                } else if let Some(terminal) = terminal {
+                    AgentSlotUpdate::Event(terminal)
+                } else {
+                    AgentSlotUpdate::Returned
+                }
+            }
+        };
+        Poll::Ready(update)
+    }
+}

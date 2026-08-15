@@ -43,9 +43,15 @@ fn registers_as_web_and_streams_text_as_start_delta_end() {
                 if event.id == 1
                     && matches!(event.data, WebEventData::MessageStart { ref message_id, .. } if message_id == &receipt.message_id)
         ));
-        assert!(matches!(first, WebDelivery::Event(event) if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "hel")));
-        assert!(matches!(second, WebDelivery::Event(event) if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "lo")));
-        assert!(matches!(end, WebDelivery::Event(event) if matches!(event.data, WebEventData::MessageEnd { .. })));
+        assert!(
+            matches!(first, WebDelivery::Event(event) if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "hel"))
+        );
+        assert!(
+            matches!(second, WebDelivery::Event(event) if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "lo"))
+        );
+        assert!(
+            matches!(end, WebDelivery::Event(event) if matches!(event.data, WebEventData::MessageEnd { .. }))
+        );
     });
 }
 
@@ -82,10 +88,7 @@ fn maps_all_media_and_mutation_operations_to_events() {
 
         let media = SendMediaRequest {
             target: target(),
-            body: BinaryBody::Stream(Box::pin(stream::iter([
-                Ok(vec![1, 2]),
-                Ok(vec![3]),
-            ]))),
+            body: BinaryBody::Stream(Box::pin(stream::iter([Ok(vec![1, 2]), Ok(vec![3])]))),
             filename: Some("photo.jpg".into()),
             mime_type: Some("image/jpeg".into()),
             caption: Some("photo".into()),
@@ -109,14 +112,30 @@ fn maps_all_media_and_mutation_operations_to_events() {
             .await
             .is_ok());
 
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { kind: MediaKind::Image, phase: MediaPhase::Start { .. }, .. })));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![1, 2])));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![3])));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::End { error: None }, .. })));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageEdit { text, .. } if text == "updated")));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageDelete { .. })));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageReaction { reaction, .. } if reaction == "👍")));
-        assert!(matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::ConversationTyping { typing: true, .. })));
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { kind: MediaKind::Image, phase: MediaPhase::Start { .. }, .. }))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![1, 2]))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::Delta { bytes }, .. } if bytes == &vec![3]))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::Media { phase: MediaPhase::End { error: None }, .. }))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageEdit { text, .. } if text == "updated"))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageDelete { .. }))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::MessageReaction { reaction, .. } if reaction == "👍"))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(&event.data, WebEventData::ConversationTyping { typing: true, .. }))
+        );
     });
 }
 
@@ -128,7 +147,12 @@ fn serializes_stable_sse_names_json_and_base64_media() {
         assert!(web
             .send_media(
                 MediaKind::File,
-                SendMediaRequest::bytes(target(), "a.bin", "application/octet-stream", vec![0, 1, 2]),
+                SendMediaRequest::bytes(
+                    target(),
+                    "a.bin",
+                    "application/octet-stream",
+                    vec![0, 1, 2]
+                ),
             )
             .await
             .is_ok());
@@ -158,7 +182,10 @@ fn replays_after_last_event_id_and_reports_bounded_history_gaps() {
             .is_ok());
 
         let mut replay = web.subscribe_from("chat-42", Some(1)).expect("subscriber");
-        assert!(matches!(replay.next().await, Some(WebDelivery::Lagged { missed: 1 })));
+        assert!(matches!(
+            replay.next().await,
+            Some(WebDelivery::Lagged { missed: 1 })
+        ));
         assert!(matches!(replay.next().await, Some(WebDelivery::Event(event)) if event.id == 3));
         assert!(matches!(replay.next().await, Some(WebDelivery::Event(event)) if event.id == 4));
     });
@@ -256,7 +283,10 @@ fn web_service_rejects_invalid_or_empty_rest_messages_before_the_sink() {
             )
             .await;
 
-        assert!(matches!(invalid_json, Err(InboundError::InvalidJson { .. })));
+        assert!(matches!(
+            invalid_json,
+            Err(InboundError::InvalidJson { .. })
+        ));
         assert!(matches!(empty, Err(InboundError::InvalidRequest { .. })));
         assert!(sink.messages.borrow().is_empty());
     });

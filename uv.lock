@@ -4,16 +4,11 @@ requires-python = ">=3.11"
 
 [manifest]
 members = [
-    "agent-framework-tools",
-    "claw-trace",
+    "barracuda-tools",
+    "barracuda-trace",
     "llm-tape",
     "serial-log",
 ]
-
-[[package]]
-name = "agent-framework-tools"
-version = "0.0.0"
-source = { virtual = "." }
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -165,18 +160,14 @@ wheels = [
 ]
 
 [[package]]
-name = "chrometrace"
-version = "0.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8b/d4/717a3a223fe22d56f41954b8f79f90b269ffb0092656e8aa1f60599bc121/chrometrace-0.2.1.tar.gz", hash = "sha256:81fb4d65b2bf547b1a7ebd2ad0cc5f7ee358d1384cbbe61f11ad199df56040ed", size = 27159, upload-time = "2025-10-15T14:10:38.536Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ba/ea/84b2d412d0b7573c0d5291508c8127bfc078d40035201a9d25ec8be30c85/chrometrace-0.2.1-py3-none-any.whl", hash = "sha256:0e7c3b5acd95f48a1c745533c642cf4b813b75261fbc3d50462c6a8e1347811e", size = 8676, upload-time = "2025-10-15T14:10:37.216Z" },
-]
+name = "barracuda-tools"
+version = "0.0.0"
+source = { virtual = "." }
 
 [[package]]
-name = "claw-trace"
+name = "barracuda-trace"
 version = "0.1.0"
-source = { editable = "components/agent/crates/claw-log" }
+source = { editable = "components/agent/crates/trace" }
 dependencies = [
     { name = "chrometrace" },
     { name = "serial-log" },
@@ -191,13 +182,22 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "chrometrace", specifier = ">=0.2.1" },
-    { name = "serial-log", editable = "components/agent/crates/claw-log/scripts/serial_log" },
+    { name = "serial-log", editable = "components/agent/crates/trace/scripts/serial_log" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.14,<0.15" },
+]
+
+[[package]]
+name = "chrometrace"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/d4/717a3a223fe22d56f41954b8f79f90b269ffb0092656e8aa1f60599bc121/chrometrace-0.2.1.tar.gz", hash = "sha256:81fb4d65b2bf547b1a7ebd2ad0cc5f7ee358d1384cbbe61f11ad199df56040ed", size = 27159, upload-time = "2025-10-15T14:10:38.536Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/ea/84b2d412d0b7573c0d5291508c8127bfc078d40035201a9d25ec8be30c85/chrometrace-0.2.1-py3-none-any.whl", hash = "sha256:0e7c3b5acd95f48a1c745533c642cf4b813b75261fbc3d50462c6a8e1347811e", size = 8676, upload-time = "2025-10-15T14:10:37.216Z" },
 ]
 
 [[package]]
@@ -687,7 +687,7 @@ wheels = [
 [[package]]
 name = "serial-log"
 version = "0.1.0"
-source = { editable = "components/agent/crates/claw-log/scripts/serial_log" }
+source = { editable = "components/agent/crates/trace/scripts/serial_log" }
 
 [package.dev-dependencies]
 dev = [

@@ -1,0 +1,85 @@
+pub mod barracuda_agent_sandbox
+pub mod barracuda_agent_sandbox::fs
+pub enum barracuda_agent_sandbox::fs::SandboxError
+pub barracuda_agent_sandbox::fs::SandboxError::Fs(barracuda_fs::fs::FsError)
+pub barracuda_agent_sandbox::fs::SandboxError::OutsideSandbox(alloc::string::String)
+pub barracuda_agent_sandbox::fs::SandboxError::ReadOnly(alloc::string::String)
+pub const barracuda_agent_sandbox::fs::READ_ONLY_PREFIXES: &[&str]
+pub const barracuda_agent_sandbox::fs::VISIBLE_PREFIXES: &[&str]
+pub trait barracuda_agent_sandbox::fs::SandboxFs
+pub fn barracuda_agent_sandbox::fs::SandboxFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::fs::SandboxFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::fs::SandboxFs for barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub mod barracuda_agent_sandbox::sandbox
+pub struct barracuda_agent_sandbox::sandbox::RealRoots
+pub barracuda_agent_sandbox::sandbox::RealRoots::shared_data: &'static str
+pub barracuda_agent_sandbox::sandbox::RealRoots::shared_skills: &'static str
+pub barracuda_agent_sandbox::sandbox::RealRoots::shared_tmp: &'static str
+pub barracuda_agent_sandbox::sandbox::RealRoots::system_skills: &'static str
+pub struct barracuda_agent_sandbox::sandbox::Sandbox<F: barracuda_fs::fs::FileSystem>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::new(filesystem: alloc::sync::Arc<F>, sandbox_host_dir: impl core::convert::Into<alloc::string::String>, real: barracuda_agent_sandbox::sandbox::RealRoots) -> core::result::Result<Self, barracuda_agent_sandbox::fs::SandboxError>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::fs::SandboxFs for barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub enum barracuda_agent_sandbox::SandboxError
+pub barracuda_agent_sandbox::SandboxError::Fs(barracuda_fs::fs::FsError)
+pub barracuda_agent_sandbox::SandboxError::OutsideSandbox(alloc::string::String)
+pub barracuda_agent_sandbox::SandboxError::ReadOnly(alloc::string::String)
+pub struct barracuda_agent_sandbox::RealRoots
+pub barracuda_agent_sandbox::RealRoots::shared_data: &'static str
+pub barracuda_agent_sandbox::RealRoots::shared_skills: &'static str
+pub barracuda_agent_sandbox::RealRoots::shared_tmp: &'static str
+pub barracuda_agent_sandbox::RealRoots::system_skills: &'static str
+pub struct barracuda_agent_sandbox::Sandbox<F: barracuda_fs::fs::FileSystem>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::new(filesystem: alloc::sync::Arc<F>, sandbox_host_dir: impl core::convert::Into<alloc::string::String>, real: barracuda_agent_sandbox::sandbox::RealRoots) -> core::result::Result<Self, barracuda_agent_sandbox::fs::SandboxError>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::fs::SandboxFs for barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub const barracuda_agent_sandbox::READ_ONLY_PREFIXES: &[&str]
+pub const barracuda_agent_sandbox::VISIBLE_PREFIXES: &[&str]
+pub trait barracuda_agent_sandbox::SandboxFs
+pub fn barracuda_agent_sandbox::SandboxFs::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::SandboxFs::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_sandbox::fs::SandboxFs for barracuda_agent_sandbox::sandbox::Sandbox<F>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::exists(&self, path: &str) -> core::result::Result<bool, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::len(&self, path: &str) -> core::result::Result<u64, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::remove(&self, path: &str) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>
+pub fn barracuda_agent_sandbox::sandbox::Sandbox<F>::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_agent_sandbox::fs::SandboxError>

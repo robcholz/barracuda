@@ -11,23 +11,23 @@ fi
 mkdir -p snapshots
 
 crates=(
-    claw-agent
-    claw-api
-    claw-persistence
-    claw-context
-    claw-core
+    barracuda-agent
+    barracuda-model-api
+    barracuda-agent-persistence
+    barracuda-agent-context
+    barracuda-agent-runtime
     gateway
-    claw-fs
-    claw-net
-    claw-log
-    claw-memory
-    claw-permission
-    claw-sandbox
-    claw-skill
-    claw-tool
-    claw-utils
-    claw-lua
-    claw-vm
+    barracuda-fs
+    barracuda-net
+    barracuda-agent-trace
+    barracuda-agent-memory
+    barracuda-agent-permission
+    barracuda-agent-sandbox
+    barracuda-agent-skill
+    barracuda-agent-tool
+    barracuda-runtime-utils
+    barracuda-lua
+    barracuda-vm
     http-client
     telegram
     wechat
@@ -38,27 +38,27 @@ crates=(
 
 manifest_path() {
     case "$1" in
-        gateway)
-            printf 'components/message-gateway/crates/gateway/Cargo.toml'
-            ;;
-        telegram|wechat|bluebubbles)
-            printf 'components/message-gateway/crates/%s/Cargo.toml' "$1"
-            ;;
-        http-client)
-            printf 'shared/http-client/Cargo.toml'
-            ;;
-        claw-lua)
-            printf 'shared/lua/Cargo.toml'
-            ;;
-        claw-vm)
-            printf 'components/vm/Cargo.toml'
-            ;;
-        claw-fs|claw-net|claw-utils|json-validator|json-validator-macros)
-            printf 'shared/%s/Cargo.toml' "$1"
-            ;;
-        *)
-            printf 'components/agent/crates/%s/Cargo.toml' "$1"
-            ;;
+        barracuda-agent) printf "components/agent/crates/agent/Cargo.toml" ;;
+        barracuda-model-api) printf "components/agent/crates/model-api/Cargo.toml" ;;
+        barracuda-agent-persistence) printf "components/agent/crates/persistence/Cargo.toml" ;;
+        barracuda-agent-context) printf "components/agent/crates/context/Cargo.toml" ;;
+        barracuda-agent-runtime) printf "components/agent/crates/runtime/Cargo.toml" ;;
+        barracuda-agent-trace) printf "components/agent/crates/trace/Cargo.toml" ;;
+        barracuda-agent-memory) printf "components/agent/crates/memory/Cargo.toml" ;;
+        barracuda-agent-permission) printf "components/agent/crates/permission/Cargo.toml" ;;
+        barracuda-agent-sandbox) printf "components/agent/crates/sandbox/Cargo.toml" ;;
+        barracuda-agent-skill) printf "components/agent/crates/skill/Cargo.toml" ;;
+        barracuda-agent-tool) printf "components/agent/crates/tool/Cargo.toml" ;;
+        gateway) printf "components/message-gateway/crates/gateway/Cargo.toml" ;;
+        telegram|wechat|bluebubbles) printf "components/message-gateway/crates/%s/Cargo.toml" "$1" ;;
+        http-client) printf "shared/http-client/Cargo.toml" ;;
+        barracuda-lua) printf "shared/lua/Cargo.toml" ;;
+        barracuda-vm) printf "components/vm/Cargo.toml" ;;
+        barracuda-fs) printf "shared/fs/Cargo.toml" ;;
+        barracuda-net) printf "shared/net/Cargo.toml" ;;
+        barracuda-runtime-utils) printf "shared/runtime-utils/Cargo.toml" ;;
+        json-validator|json-validator-macros) printf "shared/%s/Cargo.toml" "$1" ;;
+        *) echo "unknown crate: $1" >&2; return 1 ;;
     esac
 }
 

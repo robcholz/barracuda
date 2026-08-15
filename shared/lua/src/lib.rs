@@ -6,7 +6,7 @@
 //! only requires polling the returned future.
 //!
 //! ```
-//! use claw_lua::{Lua, Result};
+//! use barracuda_lua::{Lua, Result};
 //!
 //! # fn run() -> Result<()> {
 //! let mut lua = Lua::new()?;

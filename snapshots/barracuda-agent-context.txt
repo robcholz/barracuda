@@ -1,0 +1,82 @@
+pub mod barracuda_agent_context
+pub enum barracuda_agent_context::Band
+pub barracuda_agent_context::Band::Durable
+pub barracuda_agent_context::Band::Static
+pub barracuda_agent_context::Band::Volatile
+pub enum barracuda_agent_context::BlockKind
+pub barracuda_agent_context::BlockKind::ActiveMode
+pub barracuda_agent_context::BlockKind::AgentInstruction
+pub barracuda_agent_context::BlockKind::AgentMemory
+pub barracuda_agent_context::BlockKind::AssistantIdentity
+pub barracuda_agent_context::BlockKind::ConversationSummary
+pub barracuda_agent_context::BlockKind::Custom
+pub barracuda_agent_context::BlockKind::Custom::band: barracuda_agent_context::Band
+pub barracuda_agent_context::BlockKind::Custom::label: alloc::borrow::Cow<'static, str>
+pub barracuda_agent_context::BlockKind::Custom::order: u16
+pub barracuda_agent_context::BlockKind::Custom::scope: barracuda_agent_context::Scope
+pub barracuda_agent_context::BlockKind::DeferredTools
+pub barracuda_agent_context::BlockKind::GlobalMemory
+pub barracuda_agent_context::BlockKind::ModePolicy
+pub barracuda_agent_context::BlockKind::OutputContract
+pub barracuda_agent_context::BlockKind::ReasoningEffort
+pub barracuda_agent_context::BlockKind::RecentContext
+pub barracuda_agent_context::BlockKind::SessionContext
+pub barracuda_agent_context::BlockKind::SessionMemory
+pub barracuda_agent_context::BlockKind::SkillList
+pub barracuda_agent_context::BlockKind::Soul
+pub barracuda_agent_context::BlockKind::StaticTools
+pub barracuda_agent_context::BlockKind::ToolReminder
+pub barracuda_agent_context::BlockKind::UserProfile
+impl barracuda_agent_context::BlockKind
+pub fn barracuda_agent_context::BlockKind::band(&self) -> barracuda_agent_context::Band
+pub fn barracuda_agent_context::BlockKind::scope(&self) -> barracuda_agent_context::Scope
+pub fn barracuda_agent_context::BlockKind::sort_key(&self) -> (u8, u8, u16)
+pub enum barracuda_agent_context::ContextItem<'a>
+pub barracuda_agent_context::ContextItem::Block(barracuda_agent_context::Block<'a>)
+pub barracuda_agent_context::ContextItem::Message
+pub barracuda_agent_context::ContextItem::Message::kind: barracuda_agent_context::BlockKind
+pub barracuda_agent_context::ContextItem::Message::value: &'a serde_json::value::Value
+pub barracuda_agent_context::ContextItem::Reminder
+pub barracuda_agent_context::ContextItem::Reminder::kind: barracuda_agent_context::BlockKind
+pub barracuda_agent_context::ContextItem::Reminder::text: core::option::Option<alloc::borrow::Cow<'a, str>>
+impl<'a> barracuda_agent_context::ContextItem<'a>
+pub fn barracuda_agent_context::ContextItem<'a>::block(kind: barracuda_agent_context::BlockKind, content: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub fn barracuda_agent_context::ContextItem<'a>::clear_reminder(kind: barracuda_agent_context::BlockKind) -> Self
+pub fn barracuda_agent_context::ContextItem<'a>::message(kind: barracuda_agent_context::BlockKind, value: &'a serde_json::value::Value) -> Self
+pub fn barracuda_agent_context::ContextItem<'a>::reminder(kind: barracuda_agent_context::BlockKind, text: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub enum barracuda_agent_context::Scope
+pub barracuda_agent_context::Scope::Agent
+pub barracuda_agent_context::Scope::Conversation
+pub barracuda_agent_context::Scope::Global
+pub barracuda_agent_context::Scope::Session
+pub barracuda_agent_context::Scope::Turn
+pub struct barracuda_agent_context::Block<'a>
+pub barracuda_agent_context::Block::content: alloc::borrow::Cow<'a, str>
+pub barracuda_agent_context::Block::kind: barracuda_agent_context::BlockKind
+impl<'a> barracuda_agent_context::Block<'a>
+pub fn barracuda_agent_context::Block<'a>::new(kind: barracuda_agent_context::BlockKind, content: impl core::convert::Into<alloc::borrow::Cow<'a, str>>) -> Self
+pub struct barracuda_agent_context::Context
+impl barracuda_agent_context::Context
+pub fn barracuda_agent_context::Context::fork_blocks(&self) -> alloc::vec::Vec<barracuda_agent_context::Block<'static>>
+pub fn barracuda_agent_context::Context::new() -> Self
+pub fn barracuda_agent_context::Context::reminder(&mut self, text: core::option::Option<&str>) -> &mut Self
+pub fn barracuda_agent_context::Context::request<'a>(&'a mut self, history: &'a [serde_json::value::Value]) -> barracuda_agent_context::RequestContext<'a>
+pub fn barracuda_agent_context::Context::sink(&mut self) -> barracuda_agent_context::ContextSink<'_>
+pub fn barracuda_agent_context::Context::version(&self) -> u64
+pub fn barracuda_agent_context::Context::with(&mut self, block: barracuda_agent_context::Block<'_>) -> &mut Self
+pub fn barracuda_agent_context::Context::with_item(&mut self, item: barracuda_agent_context::ContextItem<'_>) -> &mut Self
+pub fn barracuda_agent_context::Context::with_reminder(&mut self, kind: barracuda_agent_context::BlockKind, text: core::option::Option<&str>) -> &mut Self
+impl core::default::Default for barracuda_agent_context::Context
+pub fn barracuda_agent_context::Context::default() -> Self
+pub struct barracuda_agent_context::ContextSink<'a>
+impl<'a> barracuda_agent_context::ContextSink<'a>
+pub fn barracuda_agent_context::ContextSink<'a>::block(&mut self, block: barracuda_agent_context::Block<'_>) -> &mut Self
+pub fn barracuda_agent_context::ContextSink<'a>::into_history(self) -> alloc::vec::Vec<serde_json::value::Value>
+pub fn barracuda_agent_context::ContextSink<'a>::item(&mut self, item: barracuda_agent_context::ContextItem<'_>) -> &mut Self
+pub fn barracuda_agent_context::ContextSink<'a>::message(&mut self, kind: barracuda_agent_context::BlockKind, value: &serde_json::value::Value) -> &mut Self
+pub fn barracuda_agent_context::ContextSink<'a>::reminder(&mut self, kind: barracuda_agent_context::BlockKind, text: core::option::Option<&str>) -> &mut Self
+pub struct barracuda_agent_context::RequestContext<'a>
+impl<'a> barracuda_agent_context::RequestContext<'a>
+pub fn barracuda_agent_context::RequestContext<'a>::history(&self) -> &'a [serde_json::value::Value]
+pub fn barracuda_agent_context::RequestContext<'a>::reminders(&self) -> &'a [serde_json::value::Value]
+pub fn barracuda_agent_context::RequestContext<'a>::system(&self) -> &'a str

@@ -1,7 +1,0 @@
-pub mod claw_vm
-pub struct claw_vm::Vm
-impl claw_vm::Vm
-pub fn claw_vm::Vm::into_lua(self) -> claw_lua::runtime::Lua
-pub fn claw_vm::Vm::lua_mut(&mut self) -> &mut claw_lua::runtime::Lua
-pub fn claw_vm::Vm::new() -> claw_vm::Result<Self>
-pub type claw_vm::Result<T> = claw_lua::error::Result<T>

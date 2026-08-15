@@ -2,7 +2,7 @@
 name = "http-client"
 version = "0.1.0"
 edition = "2021"
-description = "Shared no_std async HTTP client for ESP-Claw components"
+description = "Shared no_std async HTTP client for barracuda components"
 license = "Apache-2.0"
 
 [lib]
@@ -24,7 +24,7 @@ reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705c
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-claw-net = { path = "../claw-net", features = ["testing"] }
+barracuda-net = { path = "../net", features = ["testing"] }
 futures-lite = "2"
 
 [lints.rust]

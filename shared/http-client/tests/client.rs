@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use claw_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_net::testing::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use http_client::{Body, BodyError, HttpClient, Method, Request, ReqwlessClient, Response};
 
