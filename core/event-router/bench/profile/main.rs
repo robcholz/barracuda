@@ -78,7 +78,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_args() -> Result<(Scenario, PathBuf), String> {
-    let mut args = std::env::args().skip(1);
+    // Cargo appends `--bench` when launching a custom benchmark target.
+    let mut args = std::env::args()
+        .skip(1)
+        .filter(|argument| argument != "--bench");
     let scenario = Scenario::parse(args.next().as_deref().unwrap_or("rpc-unary"))?;
     let output_file = args
         .next()

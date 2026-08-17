@@ -530,6 +530,7 @@ name = "barracuda-event-router"
 version = "0.1.0"
 dependencies = [
  "barracuda-fs",
+ "barracuda-profile",
  "barracuda-router",
  "barracuda-rpc",
  "barracuda-workflow",
@@ -538,18 +539,6 @@ dependencies = [
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
-]
-
-[[package]]
-name = "barracuda-event-router-profile"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-profile",
- "barracuda-router",
- "barracuda-rpc",
- "futures-lite",
- "static_cell",
 ]
 
 [[package]]

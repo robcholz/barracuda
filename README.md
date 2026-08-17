@@ -5,6 +5,10 @@
 - `components/` contains event-router components; a component may own multiple crates.
 - `shared/` contains crates shared across components and applications.
 - `components/agent/bench/` contains agent measurement and profiling workloads.
+- `core/event-router/bench/profile/` contains Event Router heap/allocation
+  profiling workloads.
+- `core/event-router/bench/throughput/` contains the Event Router bytes/s
+  throughput benchmark and its uv-driven regression pipeline.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:

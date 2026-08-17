@@ -8,6 +8,16 @@ description = "Component and Workflow composition for Barracuda Event Router"
 [lib]
 crate-type = ["rlib"]
 
+[[bench]]
+name = "profile"
+path = "bench/profile/main.rs"
+harness = false
+
+[[bench]]
+name = "throughput"
+path = "bench/throughput/main.rs"
+harness = false
+
 [dependencies]
 barracuda-fs = { path = "../../shared/fs" }
 barracuda-router = { path = "crates/router" }
@@ -16,6 +26,7 @@ barracuda-workflow = { path = "crates/workflow" }
 thiserror = "2"
 
 [dev-dependencies]
+barracuda-profile = { path = "../../components/agent/bench/crates/profile", features = ["dhat-heap"] }
 futures-lite = "2"
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
 static_cell = "2.1.1"
