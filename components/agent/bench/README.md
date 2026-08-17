@@ -4,7 +4,7 @@ Run commands from the repository root.
 
 ## Agent heap profile
 
-Profile allocations while initializing an `AgentSystem`:
+Profile allocations while initializing an `AgentRuntime`:
 
 ```bash
 cargo run --profile profiling -p barracuda-agent-profile -- agent-init

@@ -14,6 +14,8 @@ no_std_crates=(
     barracuda-model-api
     barracuda-agent-context
     barracuda-agent-runtime
+    barracuda-agent-session
+    barracuda-agent-multiagent
     barracuda-fs
     barracuda-net
     barracuda-agent-memory
@@ -28,9 +30,12 @@ no_std_crates=(
     json-validator
 )
 host_test_crates=(
+    barracuda-agent
     barracuda-model-api
     barracuda-agent-context
     barracuda-agent-runtime
+    barracuda-agent-session
+    barracuda-agent-multiagent
     barracuda-fs
     barracuda-net
     barracuda-agent-memory
@@ -47,7 +52,7 @@ host_test_crates=(
 run cargo fmt --all --check
 
 for crate in "${no_std_crates[@]}"; do
-    if [[ "$crate" == "barracuda-agent-runtime" || "$crate" == "barracuda-agent" ]]; then
+    if [[ "$crate" == "barracuda-agent-runtime" || "$crate" == "barracuda-agent-session" || "$crate" == "barracuda-agent" ]]; then
         continue
     fi
     run cargo check --locked -p "$crate" --target "$bare_target" --no-default-features
@@ -56,9 +61,11 @@ done
 run cargo check --locked -p barracuda-model-api --target "$bare_target" \
     --no-default-features --features embedded-tls
 
-run cargo check --locked -p barracuda-agent-runtime --target "$bare_target" \
-    --no-default-features --features multiagent
 run cargo check --locked -p barracuda-agent --target "$bare_target" \
+    --no-default-features --features multiagent
+run cargo check --locked -p barracuda-agent-session --target "$bare_target" \
+    --no-default-features --features multiagent
+run cargo check --locked -p barracuda-agent-runtime --target "$bare_target" \
     --no-default-features --features "multiagent cache_profile"
 
 for crate in "${host_test_crates[@]}"; do
@@ -69,10 +76,12 @@ for crate in "${host_test_crates[@]}"; do
 done
 run cargo test --locked -p barracuda-net --features testing
 run cargo test --locked -p barracuda-agent-context --features intrusive-observability
-run cargo test --locked -p barracuda-agent --test embassy_runtime
+run cargo test --locked -p barracuda-agent-runtime --test embassy_runtime
 run cargo test --locked -p barracuda-cli
 run cargo test --locked -p barracuda-lua --features vendored
 run cargo test --locked -p barracuda-vm --features vendored
 
 run cargo clippy --locked -p barracuda-agent-runtime --lib -- -D warnings
+run cargo clippy --locked -p barracuda-agent-multiagent --lib -- -D warnings
+run cargo clippy --locked -p barracuda-agent-session --lib -- -D warnings
 run cargo clippy --locked -p barracuda-agent --lib -- -D warnings

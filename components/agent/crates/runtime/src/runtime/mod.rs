@@ -3,4 +3,5 @@
 mod agent_runtime;
 mod worker;
 
-pub use agent_runtime::{AgentRuntime, AgentRuntimeBuildError, AgentService};
+pub(crate) use agent_runtime::RuntimeControl;
+pub use agent_runtime::{AgentRuntimeBuildError, AgentService};

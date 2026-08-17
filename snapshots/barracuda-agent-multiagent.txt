@@ -1,0 +1,74 @@
+pub mod barracuda_agent_multiagent
+pub enum barracuda_agent_multiagent::DispatchOutcome
+pub barracuda_agent_multiagent::DispatchOutcome::Accepted
+pub barracuda_agent_multiagent::DispatchOutcome::Busy
+pub barracuda_agent_multiagent::DispatchOutcome::Missing
+pub enum barracuda_agent_multiagent::InterruptOutcome
+pub barracuda_agent_multiagent::InterruptOutcome::Accepted
+pub barracuda_agent_multiagent::InterruptOutcome::Inactive
+pub barracuda_agent_multiagent::InterruptOutcome::Missing
+pub enum barracuda_agent_multiagent::MultiagentEffect
+pub barracuda_agent_multiagent::MultiagentEffect::ArmTimeout
+pub barracuda_agent_multiagent::MultiagentEffect::ArmTimeout::agent: barracuda_agent::manager::AgentId
+pub barracuda_agent_multiagent::MultiagentEffect::ArmTimeout::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffect::ArmTimeout::timeout: barracuda_agent_multiagent::SubagentTimeout
+pub barracuda_agent_multiagent::MultiagentEffect::Dispatch
+pub barracuda_agent_multiagent::MultiagentEffect::Dispatch::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffect::Dispatch::message: barracuda_agent::message::Message
+pub barracuda_agent_multiagent::MultiagentEffect::Dispatch::target: barracuda_agent::manager::AgentId
+pub barracuda_agent_multiagent::MultiagentEffect::Interrupt
+pub barracuda_agent_multiagent::MultiagentEffect::Interrupt::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffect::Interrupt::target: barracuda_agent::manager::AgentId
+pub barracuda_agent_multiagent::MultiagentEffect::RemoveAgents
+pub barracuda_agent_multiagent::MultiagentEffect::RemoveAgents::agents: alloc::vec::Vec<barracuda_agent::manager::AgentId>
+pub barracuda_agent_multiagent::MultiagentEffect::RemoveAgents::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffect::Spawn
+pub barracuda_agent_multiagent::MultiagentEffect::Spawn::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffect::Spawn::spec: barracuda_agent_multiagent::SubagentSpec
+pub enum barracuda_agent_multiagent::MultiagentEffectResult
+pub barracuda_agent_multiagent::MultiagentEffectResult::Dispatched
+pub barracuda_agent_multiagent::MultiagentEffectResult::Dispatched::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffectResult::Dispatched::outcome: barracuda_agent_multiagent::DispatchOutcome
+pub barracuda_agent_multiagent::MultiagentEffectResult::Interrupted
+pub barracuda_agent_multiagent::MultiagentEffectResult::Interrupted::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffectResult::Interrupted::outcome: barracuda_agent_multiagent::InterruptOutcome
+pub barracuda_agent_multiagent::MultiagentEffectResult::Spawned
+pub barracuda_agent_multiagent::MultiagentEffectResult::Spawned::id: barracuda_agent_multiagent::EffectId
+pub barracuda_agent_multiagent::MultiagentEffectResult::Spawned::outcome: core::result::Result<barracuda_agent::manager::AgentId, barracuda_agent_multiagent::MultiagentPhysicalError>
+pub barracuda_agent_multiagent::MultiagentEffectResult::Spawned::spec: barracuda_agent_multiagent::SubagentSpec
+pub struct barracuda_agent_multiagent::EffectId(pub u64)
+pub struct barracuda_agent_multiagent::Multiagent
+impl barracuda_agent_multiagent::Multiagent
+pub fn barracuda_agent_multiagent::Multiagent::agent_ids(&self) -> alloc::vec::Vec<barracuda_agent::manager::AgentId>
+pub fn barracuda_agent_multiagent::Multiagent::apply_result(&mut self, result: barracuda_agent_multiagent::MultiagentEffectResult) -> core::option::Option<barracuda_agent::manager::AgentId>
+pub fn barracuda_agent_multiagent::Multiagent::cleanup_subagents(&mut self)
+pub fn barracuda_agent_multiagent::Multiagent::clear(&mut self)
+pub fn barracuda_agent_multiagent::Multiagent::contains(&self, id: barracuda_agent::manager::AgentId) -> bool
+pub fn barracuda_agent_multiagent::Multiagent::new() -> Self
+pub fn barracuda_agent_multiagent::Multiagent::on_agent_awaiting_approval(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::on_agent_cancelled(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::on_agent_completed(&mut self, agent: barracuda_agent::manager::AgentId, text: alloc::string::String, ok: bool)
+pub fn barracuda_agent_multiagent::Multiagent::on_agent_idle(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::on_agent_started(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::on_approval_resolved(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::physical_agent_removed(&mut self, agent: barracuda_agent::manager::AgentId, result: core::result::Result<(), barracuda_agent_multiagent::MultiagentPhysicalError>)
+pub fn barracuda_agent_multiagent::Multiagent::poll_effect(&mut self, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<barracuda_agent_multiagent::MultiagentEffect>>
+pub fn barracuda_agent_multiagent::Multiagent::register_root(&mut self, id: barracuda_agent::manager::AgentId, kind: barracuda_agent::baked::AgentKind) -> bool
+pub fn barracuda_agent_multiagent::Multiagent::root_children(&self) -> alloc::vec::Vec<barracuda_agent::manager::AgentId>
+pub fn barracuda_agent_multiagent::Multiagent::take_effect(&mut self) -> core::option::Option<barracuda_agent_multiagent::MultiagentEffect>
+pub fn barracuda_agent_multiagent::Multiagent::timeout(&mut self, agent: barracuda_agent::manager::AgentId)
+pub fn barracuda_agent_multiagent::Multiagent::tool_group(&self, caller: barracuda_agent::manager::AgentId, kind: &barracuda_agent::baked::AgentKind) -> core::option::Option<barracuda_agent_tool::registry::ToolGroup>
+impl core::default::Default for barracuda_agent_multiagent::Multiagent
+pub fn barracuda_agent_multiagent::Multiagent::default() -> Self
+pub struct barracuda_agent_multiagent::MultiagentPhysicalError
+impl barracuda_agent_multiagent::MultiagentPhysicalError
+pub fn barracuda_agent_multiagent::MultiagentPhysicalError::new(detail: alloc::string::String) -> Self
+pub struct barracuda_agent_multiagent::SubagentSpec
+impl barracuda_agent_multiagent::SubagentSpec
+pub fn barracuda_agent_multiagent::SubagentSpec::into_parts(self) -> (barracuda_agent::baked::AgentKind, core::option::Option<alloc::string::String>, barracuda_agent::message::Message, barracuda_agent_multiagent::SubagentTimeout)
+pub fn barracuda_agent_multiagent::SubagentSpec::kind(&self) -> &barracuda_agent::baked::AgentKind
+pub fn barracuda_agent_multiagent::SubagentSpec::new(kind: barracuda_agent::baked::AgentKind, name: core::option::Option<alloc::string::String>, goal: barracuda_agent::message::Message, timeout: barracuda_agent_multiagent::SubagentTimeout) -> Self
+pub struct barracuda_agent_multiagent::SubagentTimeout(_)
+impl barracuda_agent_multiagent::SubagentTimeout
+pub const fn barracuda_agent_multiagent::SubagentTimeout::millis(self) -> u32
+pub const fn barracuda_agent_multiagent::SubagentTimeout::new(milliseconds: core::num::nonzero::NonZeroU32) -> Self

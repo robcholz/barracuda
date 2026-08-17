@@ -1,0 +1,282 @@
+//! The output half of an open Session: typed events and stream failures.
+//!
+//! One open session has one long-lived stream. Appending a user message creates
+//! a [`TurnEvent`] bracket, and each root Agent iteration is nested inside it as
+//! an [`IterationEvent`] bracket. Only the root Agent is externally visible, so
+//! content events need no Agent id.
+//!
+//! See `.agents/design/sse.md` for the full model (ordering, SSE forward-compat).
+
+use alloc::{boxed::Box, string::String};
+use core::error::Error;
+use core::pin::Pin;
+use core::task::{Context, Poll};
+
+use async_channel::{Receiver, Sender};
+use barracuda_agent_tool::ToolOutput;
+use barracuda_model_api::ToolCall;
+use barracuda_runtime_utils::stream::StreamPart;
+use futures_core::Stream;
+use serde::{Deserialize, Serialize};
+
+use super::approval::ApprovalResolverError;
+use super::control::SessionCommand;
+use barracuda_agent::internal::{AgentApprovalError, AgentCreateError, AgentError, IterationId};
+
+barracuda_runtime_utils::define_prefixed_id!(InputRequestId, "input-", "input request");
+barracuda_runtime_utils::define_prefixed_id!(TurnId, "turn-", "turn");
+
+/// What caused a root-visible turn to start.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TurnOrigin {
+    /// A public caller appended a message.
+    #[default]
+    User,
+    /// A detached tool delivered its result after the previous turn ended.
+    ToolCall {
+        /// The original model-requested call whose completion opened the turn.
+        call: ToolCall,
+    },
+}
+
+/// Semantic input the active turn needs from its caller.
+///
+/// Callers choose how to present this request. A chat adapter may render it as
+/// an ordinary assistant message, while a GUI may use dedicated controls.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InputRequestKind {
+    /// A tool action is waiting for human permission.
+    PermissionApproval {
+        /// The complete model-requested call awaiting authorization.
+        tool_call: ToolCall,
+        /// Policy-provided reason why this call requires approval.
+        reason: String,
+    },
+}
+
+/// One item in a Session's event stream.
+#[derive(Debug)]
+pub enum SessionEvent {
+    /// An event scoped to the active turn.
+    Turn(TurnEvent),
+    /// A recoverable Session-scope problem.
+    Error(SessionEventError),
+    /// The Session was closed and no more events will be sent.
+    Closed(SessionCloseReason),
+}
+
+/// An event scoped to one root-visible turn.
+#[derive(Debug)]
+pub enum TurnEvent {
+    /// The turn started.
+    Started {
+        /// The session-local turn this bracket opens.
+        turn: TurnId,
+        /// Why the runtime opened this turn.
+        origin: TurnOrigin,
+    },
+    /// The current turn is paused until the caller responds to this request.
+    InputRequested {
+        /// Session-local request id required by `SessionControl::respond`.
+        request: InputRequestId,
+        /// What input is required. Presentation remains caller-owned.
+        kind: InputRequestKind,
+    },
+    /// An event scoped to the active root Agent iteration.
+    Iteration(IterationEvent),
+    /// Assistant-visible output supplied by an Agent effect after an iteration
+    /// has ended.
+    EffectOutput(StreamPart<String>),
+    /// A recoverable problem scoped to this turn.
+    Error(TurnEventError),
+    /// The turn ended.
+    Ended {
+        /// The session-local turn this bracket closes.
+        turn: TurnId,
+    },
+}
+
+/// An event scoped to one root Agent iteration.
+///
+/// The three content streams are emitted in this order:
+/// `Reasoning(Delta)* -> Reasoning(End) -> Output(Delta)* -> Output(End) ->
+/// ToolResult(Delta)* -> ToolResult(End)`. Every content stream emits exactly one
+/// [`StreamPart::End`], including streams with no deltas.
+#[derive(Debug)]
+pub enum IterationEvent {
+    /// The iteration started. Carries its only iteration id.
+    Started {
+        /// The iteration this bracket opens.
+        iteration: IterationId,
+    },
+    /// Model thinking text. Deltas are append fragments.
+    Reasoning(StreamPart<String>),
+    /// Assistant-visible model text. Deltas are append fragments.
+    Output(StreamPart<String>),
+    /// Completed tool executions. Each delta contains the original request and
+    /// its result; `End` means no more results will be emitted this iteration.
+    ToolResult(StreamPart<(ToolCall, ToolOutput)>),
+    /// Provider token/cache counters for the completed LLM iteration.
+    #[cfg(feature = "cache_profile")]
+    Usage {
+        /// Counters reported by the provider; individual fields may be absent.
+        usage: barracuda_model_api::ProviderUsage,
+    },
+    /// The iteration ended.
+    Ended,
+}
+
+/// A recoverable Session-scope problem.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionEventError {
+    /// Permanent deletion failed; the Session remains registered.
+    ///
+    /// The caller that requested deletion receives the typed lower-layer
+    /// failure through `SessionDeleteError`.
+    #[error("session deletion failed")]
+    DeleteFailed,
+}
+
+/// A recoverable problem reported inside an active [`TurnEvent`] bracket.
+#[derive(Debug, thiserror::Error)]
+pub enum TurnEventError {
+    /// The turn's Agent execution failed. The Session remains open.
+    #[error(transparent)]
+    Execution(#[from] SessionTurnError),
+    /// Resolving one caller response failed.
+    #[error("input request {request} could not be resolved: {source}")]
+    InputResolutionFailed {
+        /// The response request that failed.
+        request: InputRequestId,
+        /// The typed lower-layer failure.
+        #[source]
+        source: SessionInputError,
+    },
+}
+
+/// A typed lower-layer failure that ended one turn without invalidating the
+/// Session stream.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionTurnError {
+    /// The root Agent could not be constructed or restored.
+    #[error(transparent)]
+    AgentCreate(#[from] AgentCreateError),
+    /// A context provider could not prepare or project the request context.
+    #[error(transparent)]
+    ContextProvider(#[from] ContextProviderError),
+    /// The active Agent turn failed.
+    #[error(transparent)]
+    Agent(AgentError),
+}
+
+impl SessionTurnError {
+    pub(crate) fn from_agent(error: AgentError) -> Self {
+        match error {
+            AgentError::ContextProvider(source) => {
+                Self::ContextProvider(ContextProviderError(source))
+            }
+            error => Self::Agent(error),
+        }
+    }
+}
+
+/// A concrete provider failure erased at the Session event-stream boundary.
+#[derive(Debug, thiserror::Error)]
+#[error("context provider failed: {0}")]
+pub struct ContextProviderError(#[source] Box<dyn Error + Send + Sync + 'static>);
+
+/// A typed lower-layer failure while resolving caller input.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionInputError {
+    /// The resolver could not interpret the caller's response.
+    #[error(transparent)]
+    Resolver(#[from] ApprovalResolverError),
+    /// The resolved decision could not be delivered to the parked Agent.
+    #[error(transparent)]
+    AgentApproval(#[from] AgentApprovalError),
+}
+
+/// Why a Session event stream ended normally.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionCloseReason {
+    /// The caller explicitly closed the open Session lease.
+    Requested,
+    /// The Session was deleted.
+    Deleted,
+    /// The owning runtime shut down normally.
+    RuntimeShutdown,
+}
+
+/// An unrecoverable failure yielded by a [`SessionStream`].
+///
+/// Every `Err(SessionError)` is terminal and is followed by `None`.
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    /// The runtime worker disappeared before the Session closed normally.
+    #[error("agent runtime stopped before the session stream closed")]
+    RuntimeStopped,
+}
+
+/// The read-only output half of an open Session.
+///
+/// The parallel [`SessionControl`](super::SessionControl) owns command ingress.
+/// Dropping this stream closes their shared lease.
+pub struct SessionStream {
+    lease: u64,
+    commands: Sender<SessionCommand>,
+    events: Pin<Box<Receiver<SessionEvent>>>,
+    terminated: bool,
+}
+
+impl SessionStream {
+    pub(super) fn new(
+        lease: u64,
+        commands: Sender<SessionCommand>,
+        events: Receiver<SessionEvent>,
+    ) -> Self {
+        Self {
+            lease,
+            commands,
+            events: Box::pin(events),
+            terminated: false,
+        }
+    }
+}
+
+impl Stream for SessionStream {
+    type Item = Result<SessionEvent, SessionError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.terminated {
+            return Poll::Ready(None);
+        }
+        match self.events.as_mut().poll_next(context) {
+            Poll::Ready(Some(event)) => {
+                if matches!(&event, SessionEvent::Closed(_)) {
+                    self.terminated = true;
+                }
+                Poll::Ready(Some(Ok(event)))
+            }
+            Poll::Ready(None) => {
+                self.terminated = true;
+                Poll::Ready(Some(Err(SessionError::RuntimeStopped)))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for SessionStream {
+    fn drop(&mut self) {
+        if self.terminated {
+            return;
+        }
+        let (ack, _result) = futures_channel::oneshot::channel();
+        let _ = self.commands.try_send(SessionCommand::Close {
+            lease: self.lease,
+            ack,
+        });
+    }
+}

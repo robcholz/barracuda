@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use barracuda_agent::{AgentPersistenceConfig, AgentSystem, ModelApiFactory};
+use barracuda_agent_runtime::{AgentPersistenceConfig, AgentRuntime, ModelApiFactory};
 use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
 use barracuda_net::testing::NeverStack;
@@ -17,7 +17,7 @@ use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 
 barracuda_profile::install_dhat_allocator!();
 
-type ProfileAgentSystem = AgentSystem<MemFs, NeverStack>;
+type ProfileAgentRuntime = AgentRuntime<MemFs, NeverStack>;
 static NETWORK: NeverStack = NeverStack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,10 +80,12 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, barracuda_agent::AgentError> {
+fn profile_agent_init(
+    output_file: &Path,
+) -> Result<AllocationStats, barracuda_agent_runtime::AgentError> {
     let profile = HeapProfile::start(output_file);
     let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
-    let (system, service) = ProfileAgentSystem::new(
+    let (runtime, service) = ProfileAgentRuntime::new(
         MemFs::new(),
         AgentPersistenceConfig {
             persistence_root: "/profile/agent-init".to_owned(),
@@ -92,10 +94,10 @@ fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, barracuda_a
         llm_factory,
     )?;
 
-    // Finish while the system is alive: `current_bytes` then represents memory
-    // retained by a fully initialized AgentSystem.
+    // Finish while the runtime is alive: `current_bytes` then represents memory
+    // retained by a fully initialized AgentRuntime.
     let stats = profile.finish();
-    drop(system);
+    drop(runtime);
     drop(service);
     Ok(stats)
 }

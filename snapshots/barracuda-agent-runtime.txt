@@ -1,268 +1,102 @@
 pub mod barracuda_agent_runtime
+pub use barracuda_agent_runtime::AgentApprovalError
+pub use barracuda_agent_runtime::AgentCreateError
+pub use barracuda_agent_runtime::AgentId
+pub use barracuda_agent_runtime::ApiPurpose
+pub use barracuda_agent_runtime::ApprovalResolverError
+pub use barracuda_agent_runtime::BackendKind
+pub use barracuda_agent_runtime::BaseAgentError
+pub use barracuda_agent_runtime::ContextProviderError
+pub use barracuda_agent_runtime::InputRequestId
+pub use barracuda_agent_runtime::InputRequestKind
+pub use barracuda_agent_runtime::IterationEvent
+pub use barracuda_agent_runtime::IterationId
+pub use barracuda_agent_runtime::IterationLoopError
+pub use barracuda_agent_runtime::Message
+pub use barracuda_agent_runtime::ModelApiConfig
+pub use barracuda_agent_runtime::ModelApiFactory
+pub use barracuda_agent_runtime::OpenSessionError
 pub use barracuda_agent_runtime::PermissionLevel
+pub use barracuda_agent_runtime::ReasoningEffort
+pub use barracuda_agent_runtime::SessionCloseReason
+pub use barracuda_agent_runtime::SessionControl
+pub use barracuda_agent_runtime::SessionControlError
+pub use barracuda_agent_runtime::SessionCreateError
+pub use barracuda_agent_runtime::SessionDeleteError
+pub use barracuda_agent_runtime::SessionError
+pub use barracuda_agent_runtime::SessionEvent
+pub use barracuda_agent_runtime::SessionEventError
+pub use barracuda_agent_runtime::SessionId
+pub use barracuda_agent_runtime::SessionInputError
+pub use barracuda_agent_runtime::SessionPersistence
+pub use barracuda_agent_runtime::SessionStream
+pub use barracuda_agent_runtime::SessionTurnError
 pub use barracuda_agent_runtime::ToolCall
+pub use barracuda_agent_runtime::ToolCallId
+pub use barracuda_agent_runtime::ToolGroup
 pub use barracuda_agent_runtime::ToolOutput
+pub use barracuda_agent_runtime::TurnEvent
+pub use barracuda_agent_runtime::TurnEventError
+pub use barracuda_agent_runtime::TurnId
+pub use barracuda_agent_runtime::TurnOrigin
 pub use barracuda_agent_runtime::stream
-pub enum barracuda_agent_runtime::AgentApprovalError
-pub barracuda_agent_runtime::AgentApprovalError::NotAwaitingApproval
-pub barracuda_agent_runtime::AgentApprovalError::ToolCallMismatch
-pub barracuda_agent_runtime::AgentApprovalError::ToolCallMismatch::expected: barracuda_agent_runtime::ToolCallId
-pub barracuda_agent_runtime::AgentApprovalError::ToolCallMismatch::received: barracuda_agent_runtime::ToolCallId
-pub enum barracuda_agent_runtime::AgentCreateError
-pub barracuda_agent_runtime::AgentCreateError::AgentAlreadyExists(barracuda_agent_runtime::AgentId)
-pub barracuda_agent_runtime::AgentCreateError::AgentNotFound(barracuda_agent_runtime::AgentId)
-pub barracuda_agent_runtime::AgentCreateError::DuplicateContextProviderId(alloc::string::String)
-pub barracuda_agent_runtime::AgentCreateError::InvalidContextProviderId
-pub barracuda_agent_runtime::AgentCreateError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
-pub barracuda_agent_runtime::AgentCreateError::InvalidPersistedAgentId(alloc::string::String)
-pub barracuda_agent_runtime::AgentCreateError::LongTerm(barracuda_agent_memory::long_term_memory::LongTermInitError)
-pub barracuda_agent_runtime::AgentCreateError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
-pub barracuda_agent_runtime::AgentCreateError::Tools(barracuda_agent_tool::set::ToolSetError)
-pub barracuda_agent_runtime::AgentCreateError::Transcript(barracuda_agent_memory::transcript_store::TranscriptInitError)
-pub barracuda_agent_runtime::AgentCreateError::TranscriptDelete(barracuda_agent_memory::transcript_store::TranscriptDeleteError)
-pub barracuda_agent_runtime::AgentCreateError::TranscriptList(barracuda_agent_memory::transcript_store::TranscriptListError)
-pub barracuda_agent_runtime::AgentCreateError::UnknownKind(alloc::string::String)
+pub mod barracuda_agent_runtime::tools
+pub use barracuda_agent_runtime::tools::Action
+pub use barracuda_agent_runtime::tools::EmptyArgs
+pub use barracuda_agent_runtime::tools::Resource
+pub use barracuda_agent_runtime::tools::RiskClass
+pub use barracuda_agent_runtime::tools::Tool
+pub use barracuda_agent_runtime::tools::ToolConfig
+pub use barracuda_agent_runtime::tools::ToolError
+pub use barracuda_agent_runtime::tools::ToolFuture
+pub use barracuda_agent_runtime::tools::ToolGroup
+pub use barracuda_agent_runtime::tools::ToolHandler
+pub use barracuda_agent_runtime::tools::ToolInvocation
+pub use barracuda_agent_runtime::tools::ToolInvokeError
+pub use barracuda_agent_runtime::tools::ToolOutput
+pub use barracuda_agent_runtime::tools::ToolResult
+pub use barracuda_agent_runtime::tools::ToolSpec
+pub use barracuda_agent_runtime::tools::tool_metadata
+pub enum barracuda_agent_runtime::AgentError
+pub barracuda_agent_runtime::AgentError::LlmConfig(barracuda_model_api::errors::InitError)
+pub barracuda_agent_runtime::AgentError::OpenSession(barracuda_agent_session::manager::OpenSessionError)
+pub barracuda_agent_runtime::AgentError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
+pub barracuda_agent_runtime::AgentError::Runtime(barracuda_agent_runtime::AgentRuntimeBuildError)
+pub barracuda_agent_runtime::AgentError::SessionCreate(barracuda_agent_session::manager::SessionCreateError)
+pub barracuda_agent_runtime::AgentError::StorageClear
+pub barracuda_agent_runtime::AgentError::StorageClear::path: alloc::string::String
+pub barracuda_agent_runtime::AgentError::StorageClear::source: barracuda_fs::fs::FsError
+pub barracuda_agent_runtime::AgentError::Tool(barracuda_agent_tool::registry::ToolRegistryError)
 pub enum barracuda_agent_runtime::AgentRuntimeBuildError
-pub barracuda_agent_runtime::AgentRuntimeBuildError::AgentReconciliation(barracuda_agent_runtime::AgentCreateError)
+pub barracuda_agent_runtime::AgentRuntimeBuildError::AgentReconciliation(barracuda_agent::manager::error::AgentCreateError)
 pub barracuda_agent_runtime::AgentRuntimeBuildError::InvalidSessionId(barracuda_runtime_utils::IdParseError)
 pub barracuda_agent_runtime::AgentRuntimeBuildError::LongTermInit(barracuda_agent_memory::long_term_memory::LongTermInitError)
-pub barracuda_agent_runtime::AgentRuntimeBuildError::MissingPersistedSessionState(barracuda_agent_runtime::SessionId)
+pub barracuda_agent_runtime::AgentRuntimeBuildError::MissingPersistedSessionState(barracuda_agent_session::manager::SessionId)
 pub barracuda_agent_runtime::AgentRuntimeBuildError::MissingPersistenceDir
 pub barracuda_agent_runtime::AgentRuntimeBuildError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
 pub barracuda_agent_runtime::AgentRuntimeBuildError::SkillRegistry(barracuda_agent_skill::skill::SkillError)
-pub enum barracuda_agent_runtime::ApiPurpose
-pub barracuda_agent_runtime::ApiPurpose::Compaction
-pub barracuda_agent_runtime::ApiPurpose::Memory
-pub barracuda_agent_runtime::ApiPurpose::RootAgent
-pub barracuda_agent_runtime::ApiPurpose::SubAgent
-pub enum barracuda_agent_runtime::ApprovalResolverError
-pub barracuda_agent_runtime::ApprovalResolverError::Chat(barracuda_model_api::errors::ChatError)
-pub barracuda_agent_runtime::ApprovalResolverError::Init(barracuda_model_api::errors::InitError)
-pub barracuda_agent_runtime::ApprovalResolverError::MalformedToolCall
-pub barracuda_agent_runtime::ApprovalResolverError::ToolSet(barracuda_agent_tool::set::ToolSetError)
-pub enum barracuda_agent_runtime::BaseAgentError
-pub barracuda_agent_runtime::BaseAgentError::ConflictingEffects
-pub barracuda_agent_runtime::BaseAgentError::ConflictingEffects::count: usize
-pub barracuda_agent_runtime::BaseAgentError::ContextProvider(alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)>)
-pub barracuda_agent_runtime::BaseAgentError::Iteration(barracuda_agent_runtime::IterationLoopError)
-pub barracuda_agent_runtime::BaseAgentError::MalformedAssistantMessage
-pub barracuda_agent_runtime::BaseAgentError::StateInvariant
-pub barracuda_agent_runtime::BaseAgentError::Transcript(barracuda_agent_memory::transcript_store::TurnError)
-pub enum barracuda_agent_runtime::InputRequestKind
-pub barracuda_agent_runtime::InputRequestKind::PermissionApproval
-pub barracuda_agent_runtime::InputRequestKind::PermissionApproval::reason: alloc::string::String
-pub barracuda_agent_runtime::InputRequestKind::PermissionApproval::tool_call: barracuda_model_api::types::ToolCall
-pub enum barracuda_agent_runtime::IterationEvent
-pub barracuda_agent_runtime::IterationEvent::Ended
-pub barracuda_agent_runtime::IterationEvent::Output(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
-pub barracuda_agent_runtime::IterationEvent::Reasoning(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
-pub barracuda_agent_runtime::IterationEvent::Started
-pub barracuda_agent_runtime::IterationEvent::Started::iteration: barracuda_agent_runtime::IterationId
-pub barracuda_agent_runtime::IterationEvent::ToolResult(barracuda_runtime_utils::stream::StreamPart<(barracuda_model_api::types::ToolCall, barracuda_agent_tool::tool::ToolOutput)>)
-pub enum barracuda_agent_runtime::IterationLoopError
-pub barracuda_agent_runtime::IterationLoopError::ChatInit(barracuda_model_api::errors::ChatError)
-pub barracuda_agent_runtime::IterationLoopError::ChatStream(barracuda_model_api::errors::ChatError)
-pub barracuda_agent_runtime::IterationLoopError::DuplicateProviderToolCallId(alloc::string::String)
-pub barracuda_agent_runtime::IterationLoopError::IncompleteToolBatch
-pub barracuda_agent_runtime::IterationLoopError::MissingProviderToolCallId
-pub barracuda_agent_runtime::IterationLoopError::Tools(barracuda_agent_tool::set::ToolSetError)
-pub enum barracuda_agent_runtime::OpenSessionError
-pub barracuda_agent_runtime::OpenSessionError::AlreadyOpen(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::OpenSessionError::SessionNotFound(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::OpenSessionError::WorkerStopped
-pub enum barracuda_agent_runtime::ReasoningEffort
-pub barracuda_agent_runtime::ReasoningEffort::High
-pub barracuda_agent_runtime::ReasoningEffort::Low
-pub barracuda_agent_runtime::ReasoningEffort::Medium
-pub barracuda_agent_runtime::ReasoningEffort::Ultra
-pub enum barracuda_agent_runtime::SessionCloseReason
-pub barracuda_agent_runtime::SessionCloseReason::Deleted
-pub barracuda_agent_runtime::SessionCloseReason::Requested
-pub barracuda_agent_runtime::SessionCloseReason::RuntimeShutdown
-pub enum barracuda_agent_runtime::SessionControlError
-pub barracuda_agent_runtime::SessionControlError::InputRequestMismatch
-pub barracuda_agent_runtime::SessionControlError::InputRequestMismatch::expected: barracuda_agent_runtime::InputRequestId
-pub barracuda_agent_runtime::SessionControlError::InputRequestMismatch::received: barracuda_agent_runtime::InputRequestId
-pub barracuda_agent_runtime::SessionControlError::InputRequestMismatch::session: barracuda_agent_runtime::SessionId
-pub barracuda_agent_runtime::SessionControlError::NotAwaitingInput(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::SessionControlError::SessionClosed(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::SessionControlError::WorkerStopped
-pub enum barracuda_agent_runtime::SessionCreateError
-pub barracuda_agent_runtime::SessionCreateError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
-pub barracuda_agent_runtime::SessionCreateError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
-pub barracuda_agent_runtime::SessionCreateError::WorkerStopped
-pub enum barracuda_agent_runtime::SessionDeleteError
-pub barracuda_agent_runtime::SessionDeleteError::Agent(barracuda_agent_runtime::AgentCreateError)
-pub barracuda_agent_runtime::SessionDeleteError::AlreadyDeleting(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::SessionDeleteError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
-pub barracuda_agent_runtime::SessionDeleteError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
-pub barracuda_agent_runtime::SessionDeleteError::SessionNotFound(barracuda_agent_runtime::SessionId)
-pub barracuda_agent_runtime::SessionDeleteError::WorkerStopped
-pub enum barracuda_agent_runtime::SessionError
-pub barracuda_agent_runtime::SessionError::RuntimeStopped
-pub enum barracuda_agent_runtime::SessionEvent
-pub barracuda_agent_runtime::SessionEvent::Closed(barracuda_agent_runtime::SessionCloseReason)
-pub barracuda_agent_runtime::SessionEvent::Error(barracuda_agent_runtime::SessionEventError)
-pub barracuda_agent_runtime::SessionEvent::Turn(barracuda_agent_runtime::TurnEvent)
-pub enum barracuda_agent_runtime::SessionEventError
-pub barracuda_agent_runtime::SessionEventError::DeleteFailed
-pub enum barracuda_agent_runtime::SessionInputError
-pub barracuda_agent_runtime::SessionInputError::AgentApproval(barracuda_agent_runtime::AgentApprovalError)
-pub barracuda_agent_runtime::SessionInputError::Resolver(barracuda_agent_runtime::ApprovalResolverError)
-pub enum barracuda_agent_runtime::SessionPersistence
-pub barracuda_agent_runtime::SessionPersistence::Ephemeral
-pub barracuda_agent_runtime::SessionPersistence::Persistent
-pub enum barracuda_agent_runtime::SessionTurnError
-pub barracuda_agent_runtime::SessionTurnError::Agent(barracuda_agent_runtime::BaseAgentError)
-pub barracuda_agent_runtime::SessionTurnError::AgentCreate(barracuda_agent_runtime::AgentCreateError)
-pub barracuda_agent_runtime::SessionTurnError::ContextProvider(barracuda_agent_runtime::ContextProviderError)
-pub enum barracuda_agent_runtime::TurnEvent
-pub barracuda_agent_runtime::TurnEvent::EffectOutput(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
-pub barracuda_agent_runtime::TurnEvent::Ended
-pub barracuda_agent_runtime::TurnEvent::Ended::turn: barracuda_agent_runtime::TurnId
-pub barracuda_agent_runtime::TurnEvent::Error(barracuda_agent_runtime::TurnEventError)
-pub barracuda_agent_runtime::TurnEvent::InputRequested
-pub barracuda_agent_runtime::TurnEvent::InputRequested::kind: barracuda_agent_runtime::InputRequestKind
-pub barracuda_agent_runtime::TurnEvent::InputRequested::request: barracuda_agent_runtime::InputRequestId
-pub barracuda_agent_runtime::TurnEvent::Iteration(barracuda_agent_runtime::IterationEvent)
-pub barracuda_agent_runtime::TurnEvent::Started
-pub barracuda_agent_runtime::TurnEvent::Started::origin: barracuda_agent_runtime::TurnOrigin
-pub barracuda_agent_runtime::TurnEvent::Started::turn: barracuda_agent_runtime::TurnId
-pub enum barracuda_agent_runtime::TurnEventError
-pub barracuda_agent_runtime::TurnEventError::Execution(barracuda_agent_runtime::SessionTurnError)
-pub barracuda_agent_runtime::TurnEventError::InputResolutionFailed
-pub barracuda_agent_runtime::TurnEventError::InputResolutionFailed::request: barracuda_agent_runtime::InputRequestId
-pub barracuda_agent_runtime::TurnEventError::InputResolutionFailed::source: barracuda_agent_runtime::SessionInputError
-pub enum barracuda_agent_runtime::TurnOrigin
-pub barracuda_agent_runtime::TurnOrigin::ToolCall
-pub barracuda_agent_runtime::TurnOrigin::ToolCall::call: barracuda_model_api::types::ToolCall
-pub barracuda_agent_runtime::TurnOrigin::User
-pub struct barracuda_agent_runtime::AgentId(pub u32)
-impl barracuda_agent_runtime::AgentId
-pub fn barracuda_agent_runtime::AgentId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::AgentId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::AgentId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::AgentId
-pub fn barracuda_agent_runtime::AgentId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::AgentId
-pub fn barracuda_agent_runtime::AgentId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::AgentId
-pub type barracuda_agent_runtime::AgentId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::AgentId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::AgentId
-pub fn barracuda_agent_runtime::AgentId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::AgentId
-pub fn barracuda_agent_runtime::AgentId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct barracuda_agent_runtime::AgentRuntime
-impl barracuda_agent_runtime::AgentRuntime
-pub async fn barracuda_agent_runtime::AgentRuntime::create_session(&self, persistence: barracuda_agent_runtime::SessionPersistence) -> core::result::Result<barracuda_agent_runtime::SessionId, barracuda_agent_runtime::SessionCreateError>
-pub async fn barracuda_agent_runtime::AgentRuntime::delete_session(&self, session: barracuda_agent_runtime::SessionId) -> core::result::Result<(), barracuda_agent_runtime::SessionDeleteError>
-pub fn barracuda_agent_runtime::AgentRuntime::link_api(&self, api: barracuda_model_api::types::ModelApiConfig, purpose: barracuda_agent_runtime::ApiPurpose, default: bool) -> core::result::Result<(), barracuda_model_api::errors::InitError>
-pub async fn barracuda_agent_runtime::AgentRuntime::list_sessions(&self) -> alloc::vec::Vec<barracuda_agent_runtime::SessionId>
-pub fn barracuda_agent_runtime::AgentRuntime::new<Filesystem, Http>(filesystem: alloc::sync::Arc<Filesystem>, tool_registry: alloc::sync::Arc<barracuda_agent_tool::registry::ToolRegistry>, persistence: barracuda_agent_persistence::SharedPersistence<Filesystem>, persistence_dir: alloc::string::String, skill_roots: alloc::vec::Vec<alloc::string::String>, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>) -> core::result::Result<(Self, barracuda_agent_runtime::AgentService<Filesystem, Http>), barracuda_agent_runtime::AgentRuntimeBuildError> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
-pub async fn barracuda_agent_runtime::AgentRuntime::open_session(&self, session: barracuda_agent_runtime::SessionId) -> core::result::Result<(barracuda_agent_runtime::SessionControl, barracuda_agent_runtime::SessionStream), barracuda_agent_runtime::OpenSessionError>
-pub async fn barracuda_agent_runtime::AgentRuntime::shutdown(&self)
+impl core::convert::From<barracuda_agent::manager::error::AgentManagerError> for barracuda_agent_runtime::AgentRuntimeBuildError
+pub fn barracuda_agent_runtime::AgentRuntimeBuildError::from(error: barracuda_agent::manager::error::AgentManagerError) -> Self
+pub struct barracuda_agent_runtime::AgentPersistenceConfig
+pub barracuda_agent_runtime::AgentPersistenceConfig::persistence_root: alloc::string::String
+pub barracuda_agent_runtime::AgentPersistenceConfig::skill_roots: alloc::vec::Vec<alloc::string::String>
+pub struct barracuda_agent_runtime::AgentRuntime<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+impl<Filesystem, Http> barracuda_agent_runtime::AgentRuntime<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+pub async fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::delete_session(&self, session: barracuda_agent_session::manager::SessionId) -> core::result::Result<(), barracuda_agent_session::manager::SessionDeleteError>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::disable_tool(&self, name: &str) -> barracuda_agent_runtime::AgentResult<()>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::enable_tool(&self, name: &str) -> barracuda_agent_runtime::AgentResult<()>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::link_api(&self, api: barracuda_model_api::types::ModelApiConfig, purpose: barracuda_agent::config::api::ApiPurpose, default: bool) -> barracuda_agent_runtime::AgentResult<()>
+pub async fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::list_sessions(&self) -> alloc::vec::Vec<barracuda_agent_session::manager::SessionId>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::new(filesystem: Filesystem, persistence: barracuda_agent_runtime::AgentPersistenceConfig, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>) -> barracuda_agent_runtime::AgentResult<(Self, barracuda_agent_runtime::AgentService<Filesystem, Http>)>
+pub async fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::new_session(&self, persistence: barracuda_agent_session::manager::SessionPersistence) -> barracuda_agent_runtime::AgentResult<barracuda_agent_session::manager::SessionId>
+pub async fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::open_session(&self, session: barracuda_agent_session::manager::SessionId) -> barracuda_agent_runtime::AgentResult<(barracuda_agent_session::control::SessionControl, barracuda_agent_session::stream::SessionStream)>
+pub async fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::shutdown(&self)
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::start_all(&self) -> barracuda_agent_runtime::AgentResult<()>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::stop_all(&self) -> barracuda_agent_runtime::AgentResult<()>
+pub fn barracuda_agent_runtime::AgentRuntime<Filesystem, Http>::with_tool_groups(filesystem: Filesystem, persistence: barracuda_agent_runtime::AgentPersistenceConfig, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>, tool_groups: impl core::iter::traits::collect::IntoIterator<Item = barracuda_agent_tool::registry::ToolGroup>) -> barracuda_agent_runtime::AgentResult<(Self, barracuda_agent_runtime::AgentService<Filesystem, Http>)>
 pub struct barracuda_agent_runtime::AgentService<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
 impl<Filesystem, Http> core::future::future::Future for barracuda_agent_runtime::AgentService<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
 pub type barracuda_agent_runtime::AgentService<Filesystem, Http>::Output = ()
 pub fn barracuda_agent_runtime::AgentService<Filesystem, Http>::poll(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<Self::Output>
 impl<Filesystem, Http> core::marker::Unpin for barracuda_agent_runtime::AgentService<Filesystem, Http> where Filesystem: barracuda_fs::fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
-pub struct barracuda_agent_runtime::ContextProviderError(_)
-pub struct barracuda_agent_runtime::InputRequestId(pub u32)
-impl barracuda_agent_runtime::InputRequestId
-pub fn barracuda_agent_runtime::InputRequestId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::InputRequestId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::InputRequestId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::InputRequestId
-pub fn barracuda_agent_runtime::InputRequestId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::InputRequestId
-pub fn barracuda_agent_runtime::InputRequestId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::InputRequestId
-pub type barracuda_agent_runtime::InputRequestId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::InputRequestId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::InputRequestId
-pub fn barracuda_agent_runtime::InputRequestId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::InputRequestId
-pub fn barracuda_agent_runtime::InputRequestId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct barracuda_agent_runtime::IterationId(pub u32)
-impl barracuda_agent_runtime::IterationId
-pub fn barracuda_agent_runtime::IterationId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::IterationId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::IterationId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::IterationId
-pub fn barracuda_agent_runtime::IterationId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::IterationId
-pub fn barracuda_agent_runtime::IterationId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::IterationId
-pub type barracuda_agent_runtime::IterationId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::IterationId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::IterationId
-pub fn barracuda_agent_runtime::IterationId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::IterationId
-pub fn barracuda_agent_runtime::IterationId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct barracuda_agent_runtime::Message
-impl barracuda_agent_runtime::Message
-pub fn barracuda_agent_runtime::Message::text(text: impl core::convert::Into<alloc::string::String>) -> Self
-pub struct barracuda_agent_runtime::SessionControl
-impl barracuda_agent_runtime::SessionControl
-pub async fn barracuda_agent_runtime::SessionControl::append(&self, message: barracuda_agent_runtime::Message) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::cancel(&self) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::close(&self) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::interrupt(&self) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::respond(&self, request: barracuda_agent_runtime::InputRequestId, message: barracuda_agent_runtime::Message) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::set_permission_level(&self, level: barracuda_agent_permission::level::PermissionLevel) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub async fn barracuda_agent_runtime::SessionControl::set_reasoning_effort(&self, effort: barracuda_agent_runtime::ReasoningEffort) -> core::result::Result<(), barracuda_agent_runtime::SessionControlError>
-pub struct barracuda_agent_runtime::SessionId(pub u32)
-impl barracuda_agent_runtime::SessionId
-pub fn barracuda_agent_runtime::SessionId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::SessionId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::SessionId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::SessionId
-pub fn barracuda_agent_runtime::SessionId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::SessionId
-pub fn barracuda_agent_runtime::SessionId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::SessionId
-pub type barracuda_agent_runtime::SessionId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::SessionId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::SessionId
-pub fn barracuda_agent_runtime::SessionId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::SessionId
-pub fn barracuda_agent_runtime::SessionId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct barracuda_agent_runtime::SessionStream
-impl core::ops::drop::Drop for barracuda_agent_runtime::SessionStream
-pub fn barracuda_agent_runtime::SessionStream::drop(&mut self)
-impl futures_core::stream::Stream for barracuda_agent_runtime::SessionStream
-pub type barracuda_agent_runtime::SessionStream::Item = core::result::Result<barracuda_agent_runtime::SessionEvent, barracuda_agent_runtime::SessionError>
-pub fn barracuda_agent_runtime::SessionStream::poll_next(self: core::pin::Pin<&mut Self>, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<core::option::Option<Self::Item>>
-pub struct barracuda_agent_runtime::ToolCallId(pub u32)
-impl barracuda_agent_runtime::ToolCallId
-pub fn barracuda_agent_runtime::ToolCallId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::ToolCallId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::ToolCallId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::ToolCallId
-pub fn barracuda_agent_runtime::ToolCallId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::ToolCallId
-pub fn barracuda_agent_runtime::ToolCallId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::ToolCallId
-pub type barracuda_agent_runtime::ToolCallId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::ToolCallId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::ToolCallId
-pub fn barracuda_agent_runtime::ToolCallId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::ToolCallId
-pub fn barracuda_agent_runtime::ToolCallId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
-pub struct barracuda_agent_runtime::TurnId(pub u32)
-impl barracuda_agent_runtime::TurnId
-pub fn barracuda_agent_runtime::TurnId::from_wire(value: &str) -> core::result::Result<Self, barracuda_runtime_utils::IdParseError>
-pub const fn barracuda_agent_runtime::TurnId::new(id: u32) -> Self
-pub fn barracuda_agent_runtime::TurnId::to_wire(&self) -> alloc::string::String
-impl core::convert::From<u32> for barracuda_agent_runtime::TurnId
-pub fn barracuda_agent_runtime::TurnId::from(value: u32) -> Self
-impl core::fmt::Display for barracuda_agent_runtime::TurnId
-pub fn barracuda_agent_runtime::TurnId::fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::str::traits::FromStr for barracuda_agent_runtime::TurnId
-pub type barracuda_agent_runtime::TurnId::Err = barracuda_runtime_utils::IdParseError
-pub fn barracuda_agent_runtime::TurnId::from_str(value: &str) -> core::result::Result<Self, Self::Err>
-impl serde_core::ser::Serialize for barracuda_agent_runtime::TurnId
-pub fn barracuda_agent_runtime::TurnId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
-impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_runtime::TurnId
-pub fn barracuda_agent_runtime::TurnId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub type barracuda_agent_runtime::AgentResult<T> = core::result::Result<T, barracuda_agent_runtime::AgentError>

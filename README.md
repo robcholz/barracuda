@@ -55,13 +55,13 @@ uv run --script components/agent/crates/context/scripts/context_viewer.py
 ## Embassy integration
 
 Production crates use `no_std + alloc` and do not depend on a chip PAC or a
-concrete executor. Constructing an `AgentSystem` also returns an
+concrete executor. Constructing an `AgentRuntime` also returns an
 `AgentService` future. Spawn that future from the application, implement
 `FileSystem`, and provide an `embedded-nal-async` TCP/DNS stack to `barracuda-net`.
 
 ```rust,ignore
 let factory = ModelApiFactory::new(|| build_barracuda_model_api_from_static_resources());
-let (agent, service) = AgentSystem::new(filesystem, persistence, factory)?;
+let (agent, service) = AgentRuntime::new(filesystem, persistence, factory)?;
 spawner.spawn(run_agent_service(service))?;
 let session = agent.new_session(SessionPersistence::Persistent).await?;
 ```

@@ -1,4 +1,4 @@
-use barracuda_agent::{PermissionLevel, ReasoningEffort, SessionId, SessionPersistence};
+use barracuda_agent_runtime::{PermissionLevel, ReasoningEffort, SessionId, SessionPersistence};
 use strum::{EnumString, IntoStaticStr};
 
 const PERMISSIONS_COMMAND: &str = "/permissions";

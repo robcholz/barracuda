@@ -17,16 +17,18 @@ use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
 use barracuda_net::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
-use crate::agent::{AgentCreateError, AgentManagerError};
-use crate::config::{ApiPurpose, SharedApiManager};
-use crate::session::{
+use barracuda_agent::{
+    internal::{AgentManagerError, SharedApiManager},
+    AgentCreateError, ApiPurpose,
+};
+use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionPersistence, SessionStream,
 };
 
 use super::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
 
-/// What can go wrong while building an [`AgentRuntime`] and [`AgentService`].
+/// What can go wrong while building an [`AgentRuntime`](crate::AgentRuntime) and [`AgentService`].
 #[derive(Debug, thiserror::Error)]
 pub enum AgentRuntimeBuildError {
     #[error("persistence directory is required")]
@@ -62,14 +64,14 @@ impl From<AgentManagerError> for AgentRuntimeBuildError {
 /// must spawn the matching [`AgentService`] future on Embassy (or any other
 /// executor) and then use this handle from tasks on that executor.
 #[derive(Clone)]
-pub struct AgentRuntime {
+pub(crate) struct RuntimeControl {
     commands: Sender<RuntimeCommand>,
     api_manager: SharedApiManager,
 }
 
 /// The long-running executor-neutral agent service future.
 ///
-/// Dropping this future stops the runtime. Dropping every [`AgentRuntime`]
+/// Dropping this future stops the runtime. Dropping every `RuntimeControl`
 /// handle closes its command channel, which lets the service shut down cleanly.
 pub struct AgentService<Filesystem, Http>
 where
@@ -84,7 +86,7 @@ mod tests {
     use core::error::Error as _;
 
     use super::AgentRuntimeBuildError;
-    use crate::agent::{AgentCreateError, AgentManagerError};
+    use barracuda_agent::{internal::AgentManagerError, AgentCreateError};
 
     #[test]
     fn reconciliation_failure_preserves_typed_source() {
@@ -120,10 +122,10 @@ where
     }
 }
 
-impl AgentRuntime {
+impl RuntimeControl {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
-    pub fn new<Filesystem, Http>(
+    pub(crate) fn new<Filesystem, Http>(
         filesystem: Arc<Filesystem>,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
@@ -157,7 +159,7 @@ impl AgentRuntime {
     }
 
     /// Register an LLM API config for a purpose.
-    pub fn link_api(
+    pub(crate) fn link_api(
         &self,
         api: ModelApiConfig,
         purpose: ApiPurpose,
@@ -169,7 +171,7 @@ impl AgentRuntime {
     }
 
     /// Open a Session's long-lived event stream.
-    pub async fn open_session(
+    pub(crate) async fn open_session(
         &self,
         session: SessionId,
     ) -> Result<(SessionControl, SessionStream), OpenSessionError> {
@@ -182,7 +184,7 @@ impl AgentRuntime {
     }
 
     /// Create a fresh isolated Session.
-    pub async fn create_session(
+    pub(crate) async fn create_session(
         &self,
         persistence: SessionPersistence,
     ) -> Result<SessionId, SessionCreateError> {
@@ -197,7 +199,7 @@ impl AgentRuntime {
     }
 
     /// Return live Sessions, sorted by id.
-    pub async fn list_sessions(&self) -> Vec<SessionId> {
+    pub(crate) async fn list_sessions(&self) -> Vec<SessionId> {
         let (ack, result) = oneshot::channel();
         if self
             .commands
@@ -211,7 +213,10 @@ impl AgentRuntime {
     }
 
     /// Delete a live Session and its associated runtime state.
-    pub async fn delete_session(&self, session: SessionId) -> Result<(), SessionDeleteError> {
+    pub(crate) async fn delete_session(
+        &self,
+        session: SessionId,
+    ) -> Result<(), SessionDeleteError> {
         let (ack, result) = oneshot::channel();
         self.commands
             .send(RuntimeCommand::DeleteSession { session, ack })
@@ -223,7 +228,7 @@ impl AgentRuntime {
     }
 
     /// Ask the service to stop after its live actors finish closing.
-    pub async fn shutdown(&self) {
+    pub(crate) async fn shutdown(&self) {
         let _ = self.commands.send(RuntimeCommand::Stop).await;
     }
 }

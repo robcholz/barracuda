@@ -1,5 +1,5 @@
-//! `barracuda` — a minimal REPL that drives the whole agent system through
-//! the public [`barracuda_agent`] API: build an [`AgentSystem`], create a session,
+//! `barracuda` — a minimal REPL that drives the whole agent runtime through
+//! the public [`barracuda_agent_runtime`] API: build an [`AgentRuntime`], create a session,
 //! append user text, and print each turn's replies.
 //!
 //! LLM config is read from this crate's `.env.local`:
@@ -24,8 +24,8 @@ use std::sync::Mutex;
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, bail, Result};
-use barracuda_agent::{
-    stream::StreamPart, AgentPersistenceConfig, AgentSystem, ApiPurpose, BackendKind,
+use barracuda_agent_runtime::{
+    stream::StreamPart, AgentPersistenceConfig, AgentRuntime, ApiPurpose, BackendKind,
     InputRequestId, InputRequestKind, IterationEvent, Message, ModelApiConfig, ModelApiFactory,
     ProviderUsage, SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence,
     SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
@@ -55,7 +55,7 @@ const SYSTEM_CA_BUNDLE_CANDIDATES: &[&str] = &[
     "/usr/local/share/certs/ca-root-nss.crt",
 ];
 
-type ChatSystem = AgentSystem<DiskFs, TokioStack>;
+type ChatRuntime = AgentRuntime<DiskFs, TokioStack>;
 
 static NETWORK: TokioStack = TokioStack;
 static TLS_RNG: StaticCell<SystemRng> = StaticCell::new();
@@ -312,17 +312,17 @@ impl PendingSessionSettings {
     }
 }
 
-async fn open_chat(system: &ChatSystem, session: SessionId) -> Result<ChatDriver> {
-    let (control, events) = system.open_session(session).await?;
+async fn open_chat(runtime: &ChatRuntime, session: SessionId) -> Result<ChatDriver> {
+    let (control, events) = runtime.open_session(session).await?;
     Ok(ChatDriver::new(session, control, events))
 }
 
-async fn new_persistent_chat(system: &ChatSystem) -> Result<ChatDriver> {
-    let session = system.new_session(SessionPersistence::Persistent).await?;
-    match open_chat(system, session).await {
+async fn new_persistent_chat(runtime: &ChatRuntime) -> Result<ChatDriver> {
+    let session = runtime.new_session(SessionPersistence::Persistent).await?;
+    match open_chat(runtime, session).await {
         Ok(chat) => Ok(chat),
         Err(error) => {
-            system.delete_session(session).await.map_err(|rollback| {
+            runtime.delete_session(session).await.map_err(|rollback| {
                 anyhow!(
                     "failed to open new session {session}: {error}; failed to remove it: {rollback}"
                 )
@@ -333,11 +333,11 @@ async fn new_persistent_chat(system: &ChatSystem) -> Result<ChatDriver> {
 }
 
 async fn ensure_lazy_session<'a>(
-    system: &ChatSystem,
+    runtime: &ChatRuntime,
     chat: &'a mut Option<ChatDriver>,
 ) -> Result<&'a mut ChatDriver> {
     if chat.is_none() {
-        let next = new_persistent_chat(system).await?;
+        let next = new_persistent_chat(runtime).await?;
         let session = next.session;
         print_event(
             "session",
@@ -352,7 +352,7 @@ async fn ensure_lazy_session<'a>(
 }
 
 async fn switch_session(
-    system: &ChatSystem,
+    runtime: &ChatRuntime,
     chat: &mut Option<ChatDriver>,
     session: SessionId,
     verb: &str,
@@ -366,7 +366,7 @@ async fn switch_session(
         return Ok(false);
     }
 
-    let next = open_chat(system, session).await?;
+    let next = open_chat(runtime, session).await?;
     let previous = chat.as_ref().map(|chat| chat.session);
     if let Some(current) = chat.as_ref() {
         if let Err(error) = current.control.close().await {
@@ -384,17 +384,17 @@ async fn switch_session(
 }
 
 async fn new_session(
-    system: &ChatSystem,
+    runtime: &ChatRuntime,
     chat: &mut Option<ChatDriver>,
     persistence: SessionPersistenceArg,
 ) -> Result<bool> {
     let persistence_name: &'static str = persistence.into();
-    let session = system.new_session(persistence.into()).await?;
+    let session = runtime.new_session(persistence.into()).await?;
     let verb = format!("created {persistence_name}");
-    match switch_session(system, chat, session, &verb).await {
+    match switch_session(runtime, chat, session, &verb).await {
         Ok(switched) => Ok(switched),
         Err(error) => {
-            system.delete_session(session).await.map_err(|rollback| {
+            runtime.delete_session(session).await.map_err(|rollback| {
                 anyhow!(
                     "failed to switch to new session {session}: {error}; failed to remove it: \
                      {rollback}"
@@ -406,17 +406,17 @@ async fn new_session(
 }
 
 async fn resume_session(
-    system: &ChatSystem,
+    runtime: &ChatRuntime,
     chat: &mut Option<ChatDriver>,
     session: SessionId,
 ) -> Result<bool> {
-    switch_session(system, chat, session, "resumed").await
+    switch_session(runtime, chat, session, "resumed").await
 }
 
-async fn session_list(system: &ChatSystem, active: Option<SessionId>) {
+async fn session_list(runtime: &ChatRuntime, active: Option<SessionId>) {
     print_event(
         "session",
-        &format_session_list(system.list_sessions().await, active),
+        &format_session_list(runtime.list_sessions().await, active),
         EventStyle::Control,
     );
 }
@@ -442,7 +442,7 @@ fn format_session_list(mut sessions: Vec<SessionId>, active: Option<SessionId>) 
 }
 
 async fn delete_session(
-    system: &ChatSystem,
+    runtime: &ChatRuntime,
     chat: &mut Option<ChatDriver>,
     requested: Option<SessionId>,
 ) -> Result<bool> {
@@ -451,7 +451,7 @@ async fn delete_session(
         .or(active)
         .ok_or_else(|| anyhow!("no active session; specify /session delete <session_id>"))?;
     if Some(session) != active {
-        system.delete_session(session).await?;
+        runtime.delete_session(session).await?;
         print_event(
             "session",
             &format!("deleted {session}"),
@@ -460,9 +460,9 @@ async fn delete_session(
         return Ok(false);
     }
 
-    let replacement = choose_replacement_session(session, system.list_sessions().await);
+    let replacement = choose_replacement_session(session, runtime.list_sessions().await);
     let Some(replacement) = replacement else {
-        system.delete_session(session).await?;
+        runtime.delete_session(session).await?;
         *chat = None;
         print_event(
             "session",
@@ -472,8 +472,8 @@ async fn delete_session(
         return Ok(true);
     };
 
-    let next = open_chat(system, replacement).await?;
-    if let Err(error) = system.delete_session(session).await {
+    let next = open_chat(runtime, replacement).await?;
+    if let Err(error) = runtime.delete_session(session).await {
         drop(next);
         return Err(error.into());
     }
@@ -964,11 +964,11 @@ async fn run() -> Result<()> {
     );
     llm_config.timeout_ms = 60_000;
     let llm_factory = secure_llm_factory()?;
-    let (system, service) =
-        AgentSystem::<DiskFs, TokioStack>::new(DiskFs::absolute(), persistence, llm_factory)?;
+    let (runtime, service) =
+        AgentRuntime::<DiskFs, TokioStack>::new(DiskFs::absolute(), persistence, llm_factory)?;
     let service_task = tokio::task::spawn_local(service);
-    system.link_api(llm_config, ApiPurpose::RootAgent, true)?;
-    system.start_all()?;
+    runtime.link_api(llm_config, ApiPurpose::RootAgent, true)?;
+    runtime.start_all()?;
     let mut chat = None;
 
     eprintln!("Memory:  {MEMORY_DIR}");
@@ -1007,7 +1007,7 @@ async fn run() -> Result<()> {
                 match parse_input(input) {
                     Ok(CliInput::Message(message)) => match state {
                         ReplState::Idle => {
-                            let active = match ensure_lazy_session(&system, &mut chat).await {
+                            let active = match ensure_lazy_session(&runtime, &mut chat).await {
                                 Ok(active) => active,
                                 Err(error) => {
                                     print_event("error", &error.to_string(), EventStyle::Error);
@@ -1050,7 +1050,7 @@ async fn run() -> Result<()> {
                     },
                     Ok(CliInput::Append(message)) => {
                         let was_idle = state == ReplState::Idle;
-                        let active = match ensure_lazy_session(&system, &mut chat).await {
+                        let active = match ensure_lazy_session(&runtime, &mut chat).await {
                             Ok(active) => active,
                             Err(error) => {
                                 print_event("error", &error.to_string(), EventStyle::Error);
@@ -1101,7 +1101,7 @@ async fn run() -> Result<()> {
                     }
                     Ok(CliInput::SessionNew(persistence)) => {
                         if session_command_allowed(state, "create a session") {
-                            match new_session(&system, &mut chat, persistence).await {
+                            match new_session(&runtime, &mut chat, persistence).await {
                                 Ok(true) => {
                                     pending_stop = None;
                                     pending_user_turns.clear();
@@ -1117,7 +1117,7 @@ async fn run() -> Result<()> {
                     }
                     Ok(CliInput::SessionResume(session)) => {
                         if session_command_allowed(state, "resume a session") {
-                            match resume_session(&system, &mut chat, session).await {
+                            match resume_session(&runtime, &mut chat, session).await {
                                 Ok(true) => {
                                     pending_stop = None;
                                     pending_user_turns.clear();
@@ -1126,7 +1126,7 @@ async fn run() -> Result<()> {
                                 Ok(false) => {}
                                 Err(error) => {
                                     print_event("error", &error.to_string(), EventStyle::Error);
-                                    session_list(&system, chat.as_ref().map(|chat| chat.session))
+                                    session_list(&runtime, chat.as_ref().map(|chat| chat.session))
                                         .await;
                                 }
                             }
@@ -1135,7 +1135,7 @@ async fn run() -> Result<()> {
                     }
                     Ok(CliInput::SessionDelete(session)) => {
                         if session_command_allowed(state, "delete a session") {
-                            match delete_session(&system, &mut chat, session).await {
+                            match delete_session(&runtime, &mut chat, session).await {
                                 Ok(true) => {
                                     pending_stop = None;
                                     pending_user_turns.clear();
@@ -1168,7 +1168,7 @@ async fn run() -> Result<()> {
                         let show_session_list = error.should_show_session_list();
                         print_event("error", &error.to_string(), EventStyle::Error);
                         if show_session_list {
-                            session_list(&system, chat.as_ref().map(|chat| chat.session)).await;
+                            session_list(&runtime, chat.as_ref().map(|chat| chat.session)).await;
                         }
                         show_prompt(&mut editor, &mut prompt_active).await?;
                     }
@@ -1279,7 +1279,7 @@ async fn run() -> Result<()> {
     } else {
         eprintln!("Goodbye.");
     }
-    system.shutdown().await;
+    runtime.shutdown().await;
     let _ = service_task.await;
     Ok(())
 }
@@ -1354,23 +1354,23 @@ fn secure_llm_factory() -> Result<ModelApiFactory<TokioStack>> {
 
 #[cfg(test)]
 mod tests {
-    use barracuda_agent::AgentService;
+    use barracuda_agent_runtime::AgentService;
     use tempdir::TempDir;
 
     use super::*;
 
     type ChatService = AgentService<DiskFs, TokioStack>;
 
-    fn test_system(root: &TempDir) -> (ChatSystem, ChatService) {
+    fn test_system(root: &TempDir) -> (ChatRuntime, ChatService) {
         let persistence = AgentPersistenceConfig {
             persistence_root: root.path().to_string_lossy().into_owned(),
             skill_roots: Vec::new(),
         };
         let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
-        let (system, service) =
-            ChatSystem::new(DiskFs::absolute(), persistence, llm_factory).expect("agent system");
-        system.start_all().expect("start tools");
-        (system, service)
+        let (runtime, service) =
+            ChatRuntime::new(DiskFs::absolute(), persistence, llm_factory).expect("agent runtime");
+        runtime.start_all().expect("start tools");
+        (runtime, service)
     }
 
     #[test]
@@ -1485,7 +1485,7 @@ mod tests {
     #[test]
     fn idle_repl_receives_session_events_without_waiting_for_stdin() {
         let event = SessionEvent::Turn(TurnEvent::Started {
-            turn: barracuda_agent::TurnId(7),
+            turn: barracuda_agent_runtime::TurnId(7),
             origin: TurnOrigin::ToolCall {
                 call: ToolCall {
                     id: "call-3".to_owned(),
@@ -1504,7 +1504,7 @@ mod tests {
         assert!(matches!(
             activity,
             ReplActivity::Session(Some(Ok(SessionEvent::Turn(TurnEvent::Started {
-                turn: barracuda_agent::TurnId(7),
+                turn: barracuda_agent_runtime::TurnId(7),
                 origin: TurnOrigin::ToolCall { .. },
             }))))
         ));
@@ -1555,7 +1555,7 @@ mod tests {
     fn permission_request_rendering_belongs_to_the_cli() {
         assert_eq!(
             format_input_request(&InputRequestKind::PermissionApproval {
-                tool_call: barracuda_agent::ToolCall {
+                tool_call: barracuda_agent_runtime::ToolCall {
                     id: "call-1".to_owned(),
                     name: "skill_reload".to_owned(),
                     arguments_json: r#"{"name":"demo"}"#.to_owned(),
@@ -1634,19 +1634,19 @@ mod tests {
             .run_until(async {
                 let root =
                     TempDir::new("barracuda-cli-session-lifecycle").expect("temporary directory");
-                let (system, service) = test_system(&root);
+                let (runtime, service) = test_system(&root);
                 let service_task = tokio::task::spawn_local(service);
 
-                let existing = system
+                let existing = runtime
                     .new_session(SessionPersistence::Persistent)
                     .await
                     .expect("existing session");
                 let mut chat = None;
-                assert!(resume_session(&system, &mut chat, existing)
+                assert!(resume_session(&runtime, &mut chat, existing)
                     .await
                     .expect("resume without active session"));
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(existing));
-                assert_eq!(system.list_sessions().await, vec![existing]);
+                assert_eq!(runtime.list_sessions().await, vec![existing]);
                 active_chat(&mut chat)
                     .expect("active")
                     .control
@@ -1654,73 +1654,73 @@ mod tests {
                     .await
                     .expect("close existing");
                 chat = None;
-                system
+                runtime
                     .delete_session(existing)
                     .await
                     .expect("delete existing session");
 
-                assert!(system.list_sessions().await.is_empty());
-                assert!(delete_session(&system, &mut chat, None).await.is_err());
-                assert!(system.list_sessions().await.is_empty());
+                assert!(runtime.list_sessions().await.is_empty());
+                assert!(delete_session(&runtime, &mut chat, None).await.is_err());
+                assert!(runtime.list_sessions().await.is_empty());
 
-                let first = ensure_lazy_session(&system, &mut chat)
+                let first = ensure_lazy_session(&runtime, &mut chat)
                     .await
                     .expect("lazy session")
                     .session;
-                assert_eq!(system.list_sessions().await, vec![first]);
+                assert_eq!(runtime.list_sessions().await, vec![first]);
 
                 assert!(
-                    new_session(&system, &mut chat, SessionPersistenceArg::Ephemeral)
+                    new_session(&runtime, &mut chat, SessionPersistenceArg::Ephemeral)
                         .await
                         .expect("new and switch")
                 );
                 let second = chat.as_ref().map(|chat| chat.session).expect("active");
                 assert_ne!(first, second);
 
-                assert!(resume_session(&system, &mut chat, SessionId(999))
+                assert!(resume_session(&runtime, &mut chat, SessionId(999))
                     .await
                     .is_err());
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(second));
 
-                assert!(resume_session(&system, &mut chat, first)
+                assert!(resume_session(&runtime, &mut chat, first)
                     .await
                     .expect("resume first"));
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
 
-                assert!(delete_session(&system, &mut chat, Some(SessionId(999)))
+                assert!(delete_session(&runtime, &mut chat, Some(SessionId(999)))
                     .await
                     .is_err());
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
 
-                let third = system
+                let third = runtime
                     .new_session(SessionPersistence::Persistent)
                     .await
                     .expect("third session");
-                assert!(!delete_session(&system, &mut chat, Some(third))
+                assert!(!delete_session(&runtime, &mut chat, Some(third))
                     .await
                     .expect("delete inactive"));
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(first));
-                assert!(!system.list_sessions().await.contains(&third));
+                assert!(!runtime.list_sessions().await.contains(&third));
 
-                assert!(delete_session(&system, &mut chat, None)
+                assert!(delete_session(&runtime, &mut chat, None)
                     .await
                     .expect("delete active"));
                 assert_eq!(chat.as_ref().map(|chat| chat.session), Some(second));
-                assert!(!system.list_sessions().await.contains(&first));
+                assert!(!runtime.list_sessions().await.contains(&first));
 
-                assert!(delete_session(&system, &mut chat, None)
+                assert!(delete_session(&runtime, &mut chat, None)
                     .await
                     .expect("delete last active"));
                 assert!(chat.is_none());
-                assert!(system.list_sessions().await.is_empty());
+                assert!(runtime.list_sessions().await.is_empty());
 
-                let replacement = ensure_lazy_session(&system, &mut chat)
+                let replacement = ensure_lazy_session(&runtime, &mut chat)
                     .await
                     .expect("recreate lazily")
                     .session;
                 assert_ne!(replacement, second);
-                assert_eq!(system.list_sessions().await, vec![replacement]);
-                system.shutdown().await;
+                assert_eq!(runtime.list_sessions().await, vec![replacement]);
+                runtime.shutdown().await;
                 service_task.await.expect("service task");
             })
             .await;
@@ -1733,19 +1733,19 @@ mod tests {
                 let root =
                     TempDir::new("barracuda-cli-session-persistence").expect("temporary directory");
                 let (ephemeral, persistent) = {
-                    let (system, service) = test_system(&root);
+                    let (runtime, service) = test_system(&root);
                     let service_task = tokio::task::spawn_local(service);
                     let mut chat = None;
 
                     assert!(
-                        new_session(&system, &mut chat, SessionPersistenceArg::Ephemeral)
+                        new_session(&runtime, &mut chat, SessionPersistenceArg::Ephemeral)
                             .await
                             .expect("new ephemeral")
                     );
                     let ephemeral = active_chat(&mut chat).expect("active ephemeral").session;
 
                     assert!(
-                        new_session(&system, &mut chat, SessionPersistenceArg::Persistent)
+                        new_session(&runtime, &mut chat, SessionPersistenceArg::Persistent)
                             .await
                             .expect("new persistent")
                     );
@@ -1757,7 +1757,7 @@ mod tests {
                         .await
                         .expect("close persistent");
 
-                    system.shutdown().await;
+                    runtime.shutdown().await;
                     service_task.await.expect("service task");
                     (ephemeral, persistent)
                 };

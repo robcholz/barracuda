@@ -10,7 +10,7 @@ name = "barracuda"
 path = "src/main.rs"
 
 [dependencies]
-barracuda-agent = { path = "../../components/agent/crates/agent", default-features = false, features=["cache_profile", "multiagent", "intrusive-observability"] }
+barracuda-agent-runtime = { path = "../../components/agent/crates/runtime", default-features = false, features=["cache_profile", "multiagent", "intrusive-observability"] }
 barracuda-model-api = { path = "../../components/agent/crates/model-api", features = ["mbedtls-host"] }
 barracuda-net = { path = "../../shared/net", features = ["tokio"] }
 barracuda-fs = { path = "../../shared/fs", features = ["diskfs"] }

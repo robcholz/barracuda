@@ -282,87 +282,6 @@ name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-agent-persistence",
- "barracuda-agent-runtime",
- "barracuda-agent-skill",
- "barracuda-agent-tool",
- "barracuda-agent-trace",
- "barracuda-fs",
- "barracuda-model-api",
- "barracuda-net",
- "embassy-time",
- "futures-lite",
- "json-validator",
- "serde_json",
- "static_cell",
- "tempdir",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "barracuda-agent-context"
-version = "0.1.0"
-dependencies = [
- "axum",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "barracuda-agent-memory"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "barracuda-fs",
- "barracuda-runtime-utils",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "strum 0.28.0",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-agent-permission"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-agent-persistence"
-version = "0.1.0"
-dependencies = [
- "barracuda-fs",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-agent-profile"
-version = "0.1.0"
-dependencies = [
- "barracuda-agent",
- "barracuda-fs",
- "barracuda-model-api",
- "barracuda-net",
- "barracuda-profile",
- "embassy-time",
-]
-
-[[package]]
-name = "barracuda-agent-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
  "async-channel",
  "async-stream",
  "barracuda-agent-context",
@@ -394,12 +313,148 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent-context"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "barracuda-agent-memory"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "barracuda-fs",
+ "barracuda-runtime-utils",
+ "futures-lite",
+ "log",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-multiagent"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-agent",
+ "barracuda-agent-permission",
+ "barracuda-agent-tool",
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "json-validator",
+ "log",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "barracuda-agent-permission"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-persistence"
+version = "0.1.0"
+dependencies = [
+ "barracuda-fs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-profile"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-runtime",
+ "barracuda-agent-skill",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "barracuda-profile",
+ "embassy-time",
+]
+
+[[package]]
+name = "barracuda-agent-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "barracuda-agent",
+ "barracuda-agent-memory",
+ "barracuda-agent-persistence",
+ "barracuda-agent-session",
+ "barracuda-agent-skill",
+ "barracuda-agent-tool",
+ "barracuda-agent-trace",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "barracuda-runtime-utils",
+ "embassy-time",
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "json-validator",
+ "log",
+ "serde_json",
+ "static_cell",
+ "tempdir",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "barracuda-agent-sandbox"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "barracuda-fs",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-agent-session"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "barracuda-agent",
+ "barracuda-agent-multiagent",
+ "barracuda-agent-permission",
+ "barracuda-agent-persistence",
+ "barracuda-agent-tool",
+ "barracuda-fs",
+ "barracuda-model-api",
+ "barracuda-net",
+ "barracuda-runtime-utils",
+ "embassy-time",
+ "futures-channel",
+ "futures-core",
+ "futures-lite",
+ "json-validator",
+ "log",
+ "serde",
+ "serde_json",
+ "strum 0.28.0",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -450,7 +505,7 @@ version = "0.1.0"
 dependencies = [
  "anstyle",
  "anyhow",
- "barracuda-agent",
+ "barracuda-agent-runtime",
  "barracuda-agent-trace",
  "barracuda-fs",
  "barracuda-model-api",

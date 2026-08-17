@@ -14,8 +14,8 @@ use barracuda_net::{Dns, TcpConnect};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
-use crate::config::SharedApiManager;
-use crate::session::{
+use barracuda_agent::internal::SharedApiManager;
+use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
 };

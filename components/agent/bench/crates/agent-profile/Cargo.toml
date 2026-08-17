@@ -13,7 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-barracuda-agent = { path = "../../../crates/agent" }
+barracuda-agent-runtime = { path = "../../../crates/runtime" }
+barracuda-agent-skill = { path = "../../../crates/skill", features = ["std"] }
 barracuda-model-api = { path = "../../../crates/model-api" }
 barracuda-net = { path = "../../../../../shared/net", features = ["testing"] }
 barracuda-fs = { path = "../../../../../shared/fs" }

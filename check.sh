@@ -15,7 +15,7 @@ fi
 
 
 cargo check --workspace
-cargo check -p barracuda-agent --target riscv32imac-unknown-none-elf --features multiagent
+cargo check -p barracuda-agent-runtime --target riscv32imac-unknown-none-elf --features multiagent
 
 if ! cargo public-api --version >/dev/null 2>&1; then
     echo "cargo-public-api is required. Install it with: cargo +stable install cargo-public-api" >&2
@@ -31,6 +31,8 @@ crates=(
     barracuda-agent-persistence
     barracuda-agent-context
     barracuda-agent-runtime
+    barracuda-agent-session
+    barracuda-agent-multiagent
     gateway
     barracuda-fs
     barracuda-net
@@ -58,6 +60,8 @@ manifest_path() {
         barracuda-agent-persistence) printf "components/agent/crates/persistence/Cargo.toml" ;;
         barracuda-agent-context) printf "components/agent/crates/context/Cargo.toml" ;;
         barracuda-agent-runtime) printf "components/agent/crates/runtime/Cargo.toml" ;;
+        barracuda-agent-session) printf "components/agent/crates/session/Cargo.toml" ;;
+        barracuda-agent-multiagent) printf "components/agent/crates/multiagent/Cargo.toml" ;;
         barracuda-agent-trace) printf "components/agent/crates/trace/Cargo.toml" ;;
         barracuda-agent-memory) printf "components/agent/crates/memory/Cargo.toml" ;;
         barracuda-agent-permission) printf "components/agent/crates/permission/Cargo.toml" ;;

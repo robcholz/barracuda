@@ -1,0 +1,51 @@
+[package]
+name = "barracuda-agent-session"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Agent session lifecycle, actor, control, approval, and persistence"
+
+[features]
+cache_profile = ["barracuda-agent/cache_profile", "barracuda-model-api/cache_profile"]
+multiagent = ["dep:barracuda-agent-multiagent", "barracuda-agent/multiagent"]
+
+[dependencies]
+json-validator = { path = "../../../../shared/json-validator" }
+barracuda-agent = { path = "../agent" }
+barracuda-agent-multiagent = { path = "../multiagent", optional = true }
+barracuda-agent-permission = { path = "../permission" }
+barracuda-agent-persistence = { path = "../persistence" }
+barracuda-agent-tool = { path = "../tool" }
+barracuda-fs = { path = "../../../../shared/fs" }
+barracuda-model-api = { path = "../model-api" }
+barracuda-net = { path = "../../../../shared/net" }
+barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
+async-channel = { version = "2", default-features = false }
+embassy-time.workspace = true
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-core = { version = "0.3", default-features = false }
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+log = { version = "0.4", default-features = false }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+
+[dev-dependencies]
+barracuda-fs = { path = "../../../../shared/fs", features = ["diskfs"] }
+barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"
