@@ -12,17 +12,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    Component as EventComponent, ComponentFuture as EventComponentFuture,
-    ComponentResult as EventComponentResult, EventRouter, MemFs,
-    RegisterContext as EventRegisterContext, RpcLaneStorage as EventLanes,
-    RunContext as EventRunContext, UnregisterContext as EventUnregisterContext, WorkflowClient,
+    Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext, Router,
+    RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext,
+    WorkflowClient,
 };
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
-use barracuda_router::{
-    Component, ComponentFuture, ComponentResult, RegisterContext, Router, RunContext,
-    UnregisterContext,
-};
-use barracuda_rpc::{RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, Unary};
 use futures_lite::future::{block_on, poll_once};
 use static_cell::StaticCell;
 
@@ -245,15 +239,12 @@ struct CatalogLoader {
     state: Rc<CatalogState>,
 }
 
-impl EventComponent<EVENT_FRAME> for CatalogLoader {
-    fn register(
-        &mut self,
-        _context: &mut EventRegisterContext<'_, EVENT_FRAME>,
-    ) -> EventComponentResult<()> {
+impl Component<EVENT_FRAME> for CatalogLoader {
+    fn register(&mut self, _context: &mut RegisterContext<'_, EVENT_FRAME>) -> ComponentResult<()> {
         Ok(())
     }
 
-    fn run<'a>(&'a mut self, context: EventRunContext<EVENT_FRAME>) -> EventComponentFuture<'a> {
+    fn run<'a>(&'a mut self, context: RunContext<EVENT_FRAME>) -> ComponentFuture<'a> {
         Box::pin(async move {
             let client = WorkflowClient::<EVENT_FRAME>::new(context.rpc().clone());
             for document in &self.documents {
@@ -267,10 +258,7 @@ impl EventComponent<EVENT_FRAME> for CatalogLoader {
         })
     }
 
-    fn unregister(
-        &mut self,
-        _context: &mut EventUnregisterContext<'_>,
-    ) -> EventComponentResult<()> {
+    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
         Ok(())
     }
 }
@@ -286,9 +274,9 @@ fn profile_catalog(output: &Path) -> Report {
         })
         .collect();
     static FILESYSTEM: StaticCell<MemFs> = StaticCell::new();
-    static LANES: StaticCell<EventLanes<2, EVENT_FRAME, 2>> = StaticCell::new();
+    static LANES: StaticCell<RpcLaneStorage<2, EVENT_FRAME, 2>> = StaticCell::new();
     let filesystem: &'static MemFs = FILESYSTEM.init(MemFs::new());
-    let lanes = LANES.init(EventLanes::new());
+    let lanes = LANES.init(RpcLaneStorage::new());
     let mut router = EventRouter::new(lanes, filesystem, "catalog-profile").expect("create router");
     let state = Rc::new(CatalogState::default());
     router
