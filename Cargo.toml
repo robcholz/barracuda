@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "core/*",
+    "core/event-router/bench/profile",
     "core/event-router/crates/*",
     "components/agent/crates/*",
     "components/agent/bench/crates/*",
