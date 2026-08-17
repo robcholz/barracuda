@@ -10,10 +10,11 @@ use core::mem::size_of;
 use core::pin::Pin;
 
 use getset::CopyGetters;
+use smallvec::{smallvec, SmallVec};
 
 use super::address::{RpcAddress, RpcAddressError, RpcGroup};
 use super::context::{RpcCallId, RpcContext, RpcEndpointId};
-use super::lane::{LaneAcquireSet, LaneIo, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
+use super::lane::{LaneAcquireSet, LaneIoSet, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
 use super::payload::{RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter};
 use super::typed::{
     HandlerAdapter, RpcHandler, RpcInputMode, RpcMessage, RpcMethod, RpcMethodDescriptor,
@@ -448,7 +449,7 @@ impl RegistryCore {
         );
         Ok(PreparedCalls {
             request_frame_size: endpoint.descriptor.request_frame_size(),
-            targets: alloc::vec![PreparedTarget { endpoint, context }],
+            targets: smallvec![PreparedTarget { endpoint, context }],
             lanes: LaneAcquireSet::new(self.lanes, caller.caller_endpoint_id.is_some(), 1),
         })
     }
@@ -467,7 +468,7 @@ impl RegistryCore {
             .cloned()
             .ok_or_else(|| RpcError::NotFound(first_address.clone()))?;
         let input_descriptor = first.descriptor.clone();
-        let mut resolved = Vec::with_capacity(addresses.len());
+        let mut resolved = SmallVec::<[_; 1]>::with_capacity(addresses.len());
         for address in addresses {
             let endpoint = endpoints
                 .get(address)
@@ -483,7 +484,7 @@ impl RegistryCore {
         }
         drop(endpoints);
 
-        let mut targets = Vec::with_capacity(resolved.len());
+        let mut targets = SmallVec::with_capacity(resolved.len());
         let mut multicast_root = caller.root_call_id;
         for (address, endpoint) in resolved {
             if caller.caller_endpoint_id == Some(endpoint.endpoint_id) {
@@ -593,7 +594,7 @@ impl EndpointLifecycle {
 pub(crate) struct PreparedCalls {
     #[getset(get_copy = "pub(crate)")]
     request_frame_size: usize,
-    targets: Vec<PreparedTarget>,
+    targets: SmallVec<[PreparedTarget; 1]>,
     lanes: LaneAcquireSet,
 }
 
@@ -601,7 +602,7 @@ impl PreparedCalls {
     pub(crate) fn poll_acquire(
         &mut self,
         context: &mut core::task::Context<'_>,
-    ) -> core::task::Poll<RpcResult<Vec<LaneIo>>> {
+    ) -> core::task::Poll<RpcResult<LaneIoSet>> {
         if let Some(target) = self
             .targets
             .iter()
@@ -612,7 +613,7 @@ impl PreparedCalls {
         Pin::new(&mut self.lanes).poll(context)
     }
 
-    pub(crate) fn into_targets(self) -> Vec<PreparedTarget> {
+    pub(crate) fn into_targets(self) -> SmallVec<[PreparedTarget; 1]> {
         self.targets
     }
 }

@@ -6,6 +6,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
 use getset::CopyGetters;
+use smallvec::SmallVec;
 
 use super::{RpcDirection, RpcError, RpcResult};
 
@@ -31,6 +32,9 @@ pub(crate) enum LaneFrameKind {
 
 type BorrowedLaneFrame = (Ref<'static, [u8]>, LaneFrameKind);
 type BorrowedLaneFramePoll = Poll<RpcResult<Option<BorrowedLaneFrame>>>;
+type WakeList = SmallVec<[Waker; 1]>;
+type LaneIndices = SmallVec<[usize; 1]>;
+type LaneReaderSet = SmallVec<[LaneReader; 1]>;
 
 impl<const M: usize> AlignedFrame<M> {
     const fn new() -> Self {
@@ -149,16 +153,16 @@ impl<const M: usize> StaticPipe<M> {
         &self,
         length: usize,
         kind: LaneFrameKind,
-    ) -> (RpcResult<()>, Vec<Waker>) {
+    ) -> (RpcResult<()>, WakeList) {
         let mut state = self.state.borrow_mut();
         if state.frame != PipeFrameState::Reserved {
-            return (Err(RpcError::InvalidFrameState), Vec::new());
+            return (Err(RpcError::InvalidFrameState), WakeList::new());
         }
         if !state.writer_open {
-            return (Err(RpcError::FrameWriterClosed), Vec::new());
+            return (Err(RpcError::FrameWriterClosed), WakeList::new());
         }
         if !state.readers.iter().any(|reader| reader.open) {
-            return (Err(RpcError::FrameReaderClosed), Vec::new());
+            return (Err(RpcError::FrameReaderClosed), WakeList::new());
         }
         if length > M {
             return (
@@ -166,12 +170,12 @@ impl<const M: usize> StaticPipe<M> {
                     size: length,
                     capacity: M,
                 }),
-                Vec::new(),
+                WakeList::new(),
             );
         }
 
         state.frame = PipeFrameState::Ready { len: length, kind };
-        let mut wakers = Vec::new();
+        let mut wakers = WakeList::new();
         for reader in state.readers.iter_mut().filter(|reader| reader.open) {
             reader.frame = PipeReaderFrameState::Waiting;
             if let Some(waker) = reader.waker.take() {
@@ -234,19 +238,19 @@ impl<const M: usize> StaticPipe<M> {
         }
     }
 
-    fn release_borrowed_frame(&self, reader_id: usize) -> (Option<Waker>, Vec<Waker>) {
+    fn release_borrowed_frame(&self, reader_id: usize) -> (Option<Waker>, WakeList) {
         let mut state = self.state.borrow_mut();
         let Some(reader) = state.readers.get_mut(reader_id) else {
-            return (None, Vec::new());
+            return (None, WakeList::new());
         };
         if reader.frame != PipeReaderFrameState::Borrowed {
-            return (None, Vec::new());
+            return (None, WakeList::new());
         }
         reader.frame = PipeReaderFrameState::Consumed;
         Self::finish_frame_if_consumed(&mut state)
     }
 
-    fn close_writer(&self) -> Vec<Waker> {
+    fn close_writer(&self) -> WakeList {
         let mut state = self.state.borrow_mut();
         state.writer_open = false;
         state
@@ -264,14 +268,14 @@ impl<const M: usize> StaticPipe<M> {
         Self::finish_frame_if_consumed(&mut state).0
     }
 
-    fn finish_frame_if_consumed(state: &mut StaticPipeState) -> (Option<Waker>, Vec<Waker>) {
+    fn finish_frame_if_consumed(state: &mut StaticPipeState) -> (Option<Waker>, WakeList) {
         let complete = matches!(state.frame, PipeFrameState::Ready { .. })
             && state.readers.iter().all(|reader| {
                 reader.frame == PipeReaderFrameState::Consumed
                     || (!reader.open && reader.frame != PipeReaderFrameState::Borrowed)
             });
         if !complete {
-            return (None, Vec::new());
+            return (None, WakeList::new());
         }
         state.frame = PipeFrameState::Empty;
         let writer = state.writer_waker.take();
@@ -627,7 +631,7 @@ pub(crate) trait LanePool {
         nested: bool,
         count: usize,
         context: &mut Context<'_>,
-    ) -> Poll<RpcResult<Vec<usize>>>;
+    ) -> Poll<RpcResult<LaneIndices>>;
     fn cancel_waiter(&self, token: u64);
     fn poll_borrow_frame(
         &'static self,
@@ -670,7 +674,7 @@ impl<const N: usize, const M: usize, const Q: usize> LanePool for RpcLaneStorage
         nested: bool,
         count: usize,
         context: &mut Context<'_>,
-    ) -> Poll<RpcResult<Vec<usize>>> {
+    ) -> Poll<RpcResult<LaneIndices>> {
         if count == 0 || count > N {
             return Poll::Ready(Err(RpcError::LaneBatchTooLarge {
                 requested: count,
@@ -680,7 +684,7 @@ impl<const N: usize, const M: usize, const Q: usize> LanePool for RpcLaneStorage
         let mut state = self.state.borrow_mut();
         if let Some(ticket) = *token {
             if state.reserved_lane_count(ticket) == count {
-                let indices: Vec<_> = state
+                let indices: LaneIndices = state
                     .lanes
                     .iter()
                     .enumerate()
@@ -716,7 +720,7 @@ impl<const N: usize, const M: usize, const Q: usize> LanePool for RpcLaneStorage
         }
 
         if state.next_waiter_index().is_none() && state.free_lane_count() >= count {
-            let indices: Vec<_> = state
+            let indices: LaneIndices = state
                 .lanes
                 .iter()
                 .enumerate()
@@ -955,7 +959,7 @@ impl LaneAcquireSet {
 }
 
 impl Future for LaneAcquireSet {
-    type Output = RpcResult<Vec<LaneIo>>;
+    type Output = RpcResult<LaneIoSet>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -990,6 +994,8 @@ impl Drop for LaneAcquireSet {
     }
 }
 
+pub(crate) type LaneIoSet = SmallVec<[LaneIo; 1]>;
+
 pub(crate) struct LaneIo {
     pub(crate) request_reader: Option<LaneReader>,
     pub(crate) request_writer: Option<LaneWriter>,
@@ -1007,7 +1013,7 @@ impl LaneIo {
         }
     }
 
-    pub(crate) fn share_request_readers(&mut self, count: usize) -> RpcResult<Vec<LaneReader>> {
+    pub(crate) fn share_request_readers(&mut self, count: usize) -> RpcResult<LaneReaderSet> {
         let request_reader = self
             .request_reader
             .take()
@@ -1015,7 +1021,7 @@ impl LaneIo {
         let pool = request_reader.pool;
         let lane = request_reader.lane;
         pool.configure_readers(lane, RpcDirection::Request, count)?;
-        let mut readers = Vec::with_capacity(count);
+        let mut readers = LaneReaderSet::with_capacity(count);
         readers.push(request_reader);
         for reader_id in 1..count {
             readers.push(LaneReader::additional(

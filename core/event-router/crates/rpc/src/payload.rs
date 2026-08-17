@@ -7,6 +7,7 @@ use core::marker::PhantomData;
 use core::task::{Context, Poll, Waker};
 
 use getset::{Getters, MutGetters};
+use smallvec::SmallVec;
 
 use super::lane::{BorrowedFrame, LaneFrameKind, LaneIo, LaneReader, LaneWriter, ReservedFrame};
 use super::registry::{PreparedCalls, RpcFuture};
@@ -84,6 +85,10 @@ enum PayloadSide {
     Reader(usize),
 }
 
+#[allow(
+    clippy::large_enum_variant,
+    reason = "inline unicast preparation avoids a heap allocation on every RPC"
+)]
 enum PayloadCallPhase {
     Acquiring(PreparedCalls),
     Active,
@@ -100,12 +105,16 @@ struct PayloadBranchState {
     waker: Option<Waker>,
 }
 
+type PayloadBranches = SmallVec<[PayloadBranchState; 1]>;
+type DeferredHandlers = SmallVec<[RpcFuture<'static>; 1]>;
+type WakeList = SmallVec<[Waker; 1]>;
+
 struct PayloadCallState {
     phase: PayloadCallPhase,
     request: Option<LaneWriter>,
     writer_alive: bool,
     writer_waker: Option<Waker>,
-    branches: Vec<PayloadBranchState>,
+    branches: PayloadBranches,
 }
 
 impl PayloadCallState {
@@ -125,7 +134,7 @@ impl PayloadCallState {
         }
     }
 
-    fn take_peer_wakers(&mut self, side: PayloadSide) -> Vec<Waker> {
+    fn take_peer_wakers(&mut self, side: PayloadSide) -> WakeList {
         match side {
             PayloadSide::Writer => self
                 .branches
@@ -192,8 +201,8 @@ impl PayloadCallShared {
     }
 
     fn poll_ready(&self, side: PayloadSide, context: &mut Context<'_>) -> Poll<RpcResult<()>> {
-        let mut completed_handlers = Vec::new();
-        let mut handler_wakers = Vec::new();
+        let mut completed_handlers = DeferredHandlers::new();
+        let mut handler_wakers = WakeList::new();
         let (result, mut peer_wakers) = {
             let mut state = self.state.borrow_mut();
             state.update_waker(side, context.waker());
@@ -279,7 +288,7 @@ impl PayloadCallShared {
             }
         };
         drop(completed_handlers);
-        peer_wakers.append(&mut handler_wakers);
+        peer_wakers.extend(handler_wakers);
         for waker in peer_wakers {
             waker.wake();
         }
@@ -289,8 +298,8 @@ impl PayloadCallShared {
     fn poll_handlers(
         state: &mut PayloadCallState,
         context: &mut Context<'_>,
-        completed: &mut Vec<RpcFuture<'static>>,
-        wakers: &mut Vec<Waker>,
+        completed: &mut DeferredHandlers,
+        wakers: &mut WakeList,
     ) -> Poll<RpcResult<()>> {
         match &state.phase {
             PayloadCallPhase::Failed(error) => {
@@ -370,7 +379,7 @@ impl PayloadCallShared {
     fn drop_side(&self, side: PayloadSide) {
         let mut request = None;
         let mut response = None;
-        let peer_wakers: Vec<Waker> = {
+        let peer_wakers: WakeList = {
             let mut state = self.state.borrow_mut();
             match side {
                 PayloadSide::Writer => {

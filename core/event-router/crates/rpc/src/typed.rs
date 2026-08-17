@@ -20,7 +20,10 @@ use super::registry::{ErasedRpcHandler, PreparedCalls, RpcFuture};
 use super::{RpcAddress, RpcContext, RpcError, RpcResult};
 
 mod private {
-    use super::{RpcFrame, RpcHandlerFuture, RpcInputMode, RpcMessage, RpcOutputMode, RpcStream};
+    use super::{
+        RpcFrame, RpcHandlerFuture, RpcInputMode, RpcMessage, RpcOutputMode, RpcStream,
+        TypedCallDriver,
+    };
 
     pub trait Sealed {}
 
@@ -40,7 +43,7 @@ mod private {
     {
         fn into_stream(output: HandlerOutput) -> RpcStream<Result<T, E>>;
 
-        fn make_client_call(responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>) -> ClientCall;
+        fn make_client_call(responses: TypedCallDriver<T, E>) -> ClientCall;
     }
 
     pub(super) fn into_input_stream<Mode, T>(
@@ -88,7 +91,7 @@ mod private {
     }
 
     pub(super) fn make_client_call<Mode, T, E>(
-        responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>,
+        responses: TypedCallDriver<T, E>,
     ) -> <Mode as RpcOutputMode<T, E>>::ClientCall
     where
         Mode: RpcOutputMode<T, E>,
@@ -129,7 +132,7 @@ where
     T: RpcMessage,
 {
     fn into_stream(input: T) -> RpcStream<T> {
-        RpcStream::new(OnceStream::new(input))
+        RpcStream::once(input)
     }
 
     fn decode_stream(mut input: RpcStream<RpcFrame<T>>) -> RpcHandlerFuture<'static, RpcFrame<T>> {
@@ -143,12 +146,10 @@ where
     E: RpcMessage,
 {
     fn into_stream(output: Result<T, E>) -> RpcStream<Result<T, E>> {
-        RpcStream::new(OnceStream::new(output))
+        RpcStream::once(output)
     }
 
-    fn make_client_call(
-        responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>,
-    ) -> RpcUnaryCall<T, E> {
+    fn make_client_call(responses: TypedCallDriver<T, E>) -> RpcUnaryCall<T, E> {
         RpcUnaryCall::new(responses)
     }
 }
@@ -182,15 +183,20 @@ where
     }
 
     fn make_client_call(
-        responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>,
+        responses: TypedCallDriver<T, E>,
     ) -> RpcStream<Result<RpcFrame<T>, RpcFrame<E>>> {
-        responses
+        RpcStream::new(responses)
     }
 }
 
 /// A task-local RPC stream whose outer [`RpcResult`] reports transport failures.
 pub struct RpcStream<T> {
-    inner: Pin<Box<dyn Stream<Item = RpcResult<T>> + 'static>>,
+    inner: RpcStreamInner<T>,
+}
+
+enum RpcStreamInner<T> {
+    Once(Option<T>),
+    Dynamic(Pin<Box<dyn Stream<Item = RpcResult<T>> + 'static>>),
 }
 
 impl<T> RpcStream<T> {
@@ -201,7 +207,13 @@ impl<T> RpcStream<T> {
         S: Stream<Item = RpcResult<T>> + 'static,
     {
         Self {
-            inner: Box::pin(stream),
+            inner: RpcStreamInner::Dynamic(Box::pin(stream)),
+        }
+    }
+
+    fn once(value: T) -> Self {
+        Self {
+            inner: RpcStreamInner::Once(Some(value)),
         }
     }
 
@@ -219,7 +231,10 @@ impl<T> Stream for RpcStream<T> {
     type Item = RpcResult<T>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().inner.as_mut().poll_next(context)
+        match &mut self.get_mut().inner {
+            RpcStreamInner::Once(value) => Poll::Ready(value.take().map(Ok)),
+            RpcStreamInner::Dynamic(stream) => stream.as_mut().poll_next(context),
+        }
     }
 }
 
@@ -339,8 +354,9 @@ where
         private::into_input_stream::<M::Input, M::Request>(input),
         writer,
     );
-    let responses = RpcStream::new(TypedCallDriver::<M::Response, M::Error>::new(input, reader));
-    private::make_client_call::<M::Output, M::Response, M::Error>(responses)
+    private::make_client_call::<M::Output, M::Response, M::Error>(TypedCallDriver::new(
+        input, reader,
+    ))
 }
 
 pub(crate) fn make_typed_multicast<T, Mode>(
@@ -466,26 +482,6 @@ where
     type ClientCall = RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>;
 }
 
-struct OnceStream<T> {
-    value: Option<T>,
-}
-
-impl<T> OnceStream<T> {
-    fn new(value: T) -> Self {
-        Self { value: Some(value) }
-    }
-}
-
-impl<T> Unpin for OnceStream<T> {}
-
-impl<T> Stream for OnceStream<T> {
-    type Item = RpcResult<T>;
-
-    fn poll_next(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.get_mut().value.take().map(Ok))
-    }
-}
-
 fn encode_stream<T>(mut messages: RpcStream<T>, mut writer: RpcPayloadWriter) -> RpcFuture<'static>
 where
     T: RpcMessage,
@@ -498,7 +494,7 @@ where
     })
 }
 
-struct TypedCallDriver<T, E> {
+pub struct TypedCallDriver<T, E> {
     input: Option<RpcFuture<'static>>,
     reader: RpcPayloadReader,
     response_eof: bool,
@@ -654,12 +650,12 @@ where
 /// the method's zero-copy typed error frame. No separate call task is required.
 #[must_use = "futures do nothing unless polled or awaited"]
 pub struct RpcUnaryCall<T, E> {
-    responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>,
+    responses: TypedCallDriver<T, E>,
     finished: bool,
 }
 
 impl<T, E> RpcUnaryCall<T, E> {
-    fn new(responses: RpcStream<Result<RpcFrame<T>, RpcFrame<E>>>) -> Self {
+    fn new(responses: TypedCallDriver<T, E>) -> Self {
         Self {
             responses,
             finished: false,

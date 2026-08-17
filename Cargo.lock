@@ -639,6 +639,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "getset",
+ "smallvec",
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
