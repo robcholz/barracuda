@@ -3,7 +3,7 @@ name = "barracuda-profile"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
-description = "Profiling utilities and common heap metrics for Barracuda workloads"
+description = "Shared profiling utilities and heap metrics for Barracuda workloads"
 publish = false
 
 [lib]

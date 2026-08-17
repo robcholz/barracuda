@@ -24,7 +24,8 @@ cargo run --profile profiling -p barracuda-agent-profile -- \
   agent-init target/profiles/custom.dhat.json
 ```
 
-`barracuda-profile` is the shared profiling library; it has no standalone command.
+[`barracuda-profile`](../../../shared/profile/) is the shared profiling library;
+it has no standalone command and is not owned by the Agent component.
 
 ## LLM API byte recording and replay
 

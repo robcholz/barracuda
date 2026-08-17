@@ -18,4 +18,4 @@ barracuda-agent-skill = { path = "../../../crates/skill", features = ["std"] }
 barracuda-model-api = { path = "../../../crates/model-api" }
 barracuda-net = { path = "../../../../../shared/net", features = ["testing"] }
 barracuda-fs = { path = "../../../../../shared/fs" }
-barracuda-profile = { path = "../profile", features = ["dhat-heap"] }
+barracuda-profile = { path = "../../../../../shared/profile", features = ["dhat-heap"] }

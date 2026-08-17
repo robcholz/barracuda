@@ -26,7 +26,7 @@ barracuda-workflow = { path = "crates/workflow" }
 thiserror = "2"
 
 [dev-dependencies]
-barracuda-profile = { path = "../../components/agent/bench/crates/profile", features = ["dhat-heap"] }
+barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
 futures-lite = "2"
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
 static_cell = "2.1.1"

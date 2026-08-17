@@ -6,6 +6,38 @@ import run
 
 
 class RunTests(unittest.TestCase):
+    def test_profile_support_crate_is_shared_not_agent_owned(self):
+        repository_root = Path(__file__).resolve().parents[4]
+        event_router_manifest = (
+            repository_root / "core" / "event-router" / "Cargo.toml"
+        ).read_text(encoding="utf-8")
+        agent_profile_manifest = (
+            repository_root
+            / "components"
+            / "agent"
+            / "bench"
+            / "crates"
+            / "agent-profile"
+            / "Cargo.toml"
+        ).read_text(encoding="utf-8")
+
+        self.assertTrue((repository_root / "shared" / "profile" / "Cargo.toml").is_file())
+        self.assertFalse(
+            (
+                repository_root
+                / "components"
+                / "agent"
+                / "bench"
+                / "crates"
+                / "profile"
+                / "Cargo.toml"
+            ).exists()
+        )
+        self.assertIn('path = "../../shared/profile"', event_router_manifest)
+        self.assertIn(
+            'path = "../../../../../shared/profile"', agent_profile_manifest
+        )
+
     def test_measurement_workloads_are_internal_bench_targets(self):
         package_root = Path(__file__).resolve().parents[2]
         workspace_root = package_root.parents[1]
