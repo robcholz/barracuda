@@ -16,7 +16,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 futures-lite = "2"
-futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await", "async-await-macro"] }
 static_cell = "2.1.1"
 tokio = { version = "1", default-features = false, features = ["macros", "rt"] }
 
