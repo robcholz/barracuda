@@ -612,6 +612,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-rpc",
  "futures-lite",
+ "getset",
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
@@ -659,6 +660,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "futures-util",
+ "getset",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

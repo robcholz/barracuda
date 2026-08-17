@@ -5,6 +5,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use futures_core::Stream;
+use getset::Getters;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use barracuda_rpc::{
@@ -204,19 +205,13 @@ impl<const M: usize> InternalEmitFrame<M> {
 }
 
 /// Decoded metadata from an internal Event Header frame.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Getters, PartialEq, Eq)]
 pub(super) struct EmitHeader {
+    /// Event ID used by the Workflow matcher.
+    #[getset(get = "pub(super)")]
     event_id: EventId,
     cardinality: EventCardinality,
     message_size: usize,
-}
-
-impl EmitHeader {
-    /// Event ID used by the Workflow matcher.
-    #[must_use]
-    pub(super) fn event_id(&self) -> &EventId {
-        &self.event_id
-    }
 }
 
 /// Receiver-side view of one accepted `internal.emit` request.
@@ -226,7 +221,10 @@ impl EmitHeader {
 /// directly into a multicast request lane. Business payload bytes are never
 /// decoded or collected in an intermediate buffer.
 #[must_use = "an accepted Event request must be forwarded or discarded"]
+#[derive(Getters)]
 pub(super) struct InternalEmitRequest<const M: usize> {
+    /// Metadata used for Workflow rule matching and ingress selection.
+    #[getset(get = "pub(super)")]
     header: EmitHeader,
     frames: RpcStream<RpcFrame<InternalEmitFrame<M>>>,
 }
@@ -248,12 +246,6 @@ impl<const M: usize> InternalEmitRequest<M> {
             Err(rejection) => return Ok(Err(EmitErrorFrame::new(rejection))),
         };
         Ok(Ok(Self { header, frames }))
-    }
-
-    /// Returns metadata used for Workflow rule matching and ingress selection.
-    #[must_use]
-    pub(super) const fn header(&self) -> &EmitHeader {
-        &self.header
     }
 
     /// Forwards opaque Event messages into a prepared unicast or multicast

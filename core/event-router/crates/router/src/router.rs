@@ -9,6 +9,8 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use getset::CopyGetters;
+
 use super::component::{
     Component, ComponentError, ComponentFuture, RegisterContext, RunContext, UnregisterContext,
 };
@@ -17,18 +19,16 @@ use barracuda_rpc::{RpcError, RpcLaneStorage, RpcRegistration, RpcRegistry, RpcR
 const FIRST_COMPONENT_ID: u64 = 1;
 
 /// Stable identity assigned to one loaded Component instance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ComponentId(u64);
+#[derive(Clone, Copy, CopyGetters, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ComponentId {
+    /// Numeric identity value.
+    #[getset(get_copy = "pub")]
+    value: u64,
+}
 
 impl ComponentId {
     const fn from_raw(value: u64) -> Self {
-        Self(value)
-    }
-
-    /// Returns the numeric identity value.
-    #[must_use]
-    pub const fn value(self) -> u64 {
-        self.0
+        Self { value }
     }
 }
 
@@ -134,7 +134,7 @@ pub enum RouterError {
 
 impl core::fmt::Display for ComponentId {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(formatter, "component-{}", self.0)
+        write!(formatter, "component-{}", self.value)
     }
 }
 

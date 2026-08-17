@@ -8,6 +8,7 @@ use core::marker::PhantomData;
 use core::pin::Pin;
 
 use barracuda_rpc::{RpcClient, RpcError, RpcHandler, RpcMethod, RpcRegistration, RpcRegistryApi};
+use getset::Getters;
 
 /// Result returned by Component lifecycle operations.
 pub type ComponentResult<T> = Result<T, ComponentError>;
@@ -108,19 +109,16 @@ impl<'a, const M: usize> RegisterContext<'a, M> {
 }
 
 /// Context owned by a Component for the duration of [`Component::run`].
+#[derive(Getters)]
 pub struct RunContext<const M: usize> {
+    /// Client used to call RPC endpoints.
+    #[getset(get = "pub")]
     rpc: RpcClient,
 }
 
 impl<const M: usize> RunContext<M> {
     pub(crate) const fn new(rpc: RpcClient) -> Self {
         Self { rpc }
-    }
-
-    /// Returns the client used to call RPC endpoints.
-    #[must_use]
-    pub fn rpc(&self) -> &RpcClient {
-        &self.rpc
     }
 }
 

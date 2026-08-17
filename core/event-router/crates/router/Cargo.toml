@@ -10,6 +10,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-rpc = { path = "../rpc" }
+getset = "0.1.7"
 thiserror = "2"
 
 [dev-dependencies]

@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use barracuda_rpc::RpcAddress;
+use getset::Getters;
 
 use super::Rule;
 
@@ -75,9 +76,13 @@ pub enum WorkflowIdError {
 }
 
 /// One immutable Workflow definition loaded into the Workflow Runtime.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Getters, PartialEq, Eq)]
 pub struct WorkflowDefinition {
+    /// Stable Workflow identity.
+    #[getset(get = "pub")]
     id: WorkflowId,
+    /// Event ID rule that starts this Workflow.
+    #[getset(get = "pub")]
     event: Rule,
     steps: Vec<RpcAddress>,
 }
@@ -98,18 +103,6 @@ impl WorkflowDefinition {
             return Err(WorkflowDefinitionError::EmptySteps);
         }
         Ok(Self { id, event, steps })
-    }
-
-    /// Returns this Workflow's stable identity.
-    #[must_use]
-    pub const fn id(&self) -> &WorkflowId {
-        &self.id
-    }
-
-    /// Returns the Event ID rule that starts this Workflow.
-    #[must_use]
-    pub const fn event(&self) -> &Rule {
-        &self.event
     }
 
     /// Returns the ordered RPC call flow.

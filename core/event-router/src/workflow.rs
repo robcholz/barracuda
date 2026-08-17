@@ -35,22 +35,22 @@ where
     pub(super) fn new(
         filesystem: &'static Filesystem,
         directory: String,
-    ) -> Result<Self, EventRouterCreateError> {
+    ) -> Result<(Self, WorkflowRuntimeView), EventRouterCreateError> {
         if directory.trim().is_empty() {
             return Err(EventRouterCreateError::InvalidPersistenceDirectory);
         }
         filesystem.create_dir_all(&directory)?;
         let runtime = WorkflowRuntime::new();
         restore(&runtime.control(), filesystem, &directory)?;
-        Ok(Self {
-            runtime,
-            filesystem,
-            directory,
-        })
-    }
-
-    pub(super) fn view(&self) -> WorkflowRuntimeView {
-        self.runtime.view()
+        let view = runtime.view();
+        Ok((
+            Self {
+                runtime,
+                filesystem,
+                directory,
+            },
+            view,
+        ))
     }
 }
 

@@ -15,6 +15,7 @@ use barracuda_rpc::{
     RpcClient, RpcContext, RpcError, RpcFrame, RpcHandler, RpcMulticastBranch, RpcPayloadReader,
     RpcPayloadWriter, RpcResult, RpcStream,
 };
+use getset::Getters;
 
 use super::{EventId, WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowUnloadError};
 
@@ -59,24 +60,14 @@ pub enum WorkflowExecutionError {
 }
 
 /// Last recorded failure of one fire-and-forget Workflow execution.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Getters, PartialEq, Eq)]
 pub struct WorkflowFailure {
+    /// Failed Workflow identity.
+    #[getset(get = "pub")]
     workflow_id: WorkflowId,
+    /// Execution failure.
+    #[getset(get = "pub")]
     error: WorkflowExecutionError,
-}
-
-impl WorkflowFailure {
-    /// Returns the failed Workflow identity.
-    #[must_use]
-    pub const fn workflow_id(&self) -> &WorkflowId {
-        &self.workflow_id
-    }
-
-    /// Returns the execution failure.
-    #[must_use]
-    pub const fn error(&self) -> &WorkflowExecutionError {
-        &self.error
-    }
 }
 
 #[derive(Clone)]
@@ -356,41 +347,6 @@ impl WorkflowRuntime {
         workflow_id: &WorkflowId,
     ) -> Result<WorkflowDefinition, WorkflowUnloadError> {
         self.shared.unload(workflow_id)
-    }
-
-    #[cfg(test)]
-    /// Returns matching Workflow IDs in definition load order.
-    #[must_use]
-    pub(crate) fn matching_ids(&self, event_id: &EventId) -> Vec<WorkflowId> {
-        self.view().matching_ids(event_id)
-    }
-
-    #[cfg(test)]
-    /// Returns the number of executions that reached normal response EOF.
-    #[must_use]
-    pub(crate) fn completed_count(&self) -> usize {
-        self.shared.completed_count.get()
-    }
-
-    #[cfg(test)]
-    /// Returns the number of executions that ended with an RPC or Method error.
-    #[must_use]
-    pub(crate) fn failed_count(&self) -> usize {
-        self.shared.failed_count.get()
-    }
-
-    #[cfg(test)]
-    /// Returns the number of provisional executions cancelled with Event ingress.
-    #[must_use]
-    pub(crate) fn cancelled_count(&self) -> usize {
-        self.shared.cancelled_count.get()
-    }
-
-    #[cfg(test)]
-    /// Returns the most recently recorded execution failure.
-    #[must_use]
-    pub(crate) fn last_failure(&self) -> Option<WorkflowFailure> {
-        self.shared.last_failure.borrow().clone()
     }
 
     fn poll_running(&mut self, context: &mut Context<'_>) -> Poll<()> {
@@ -731,14 +687,10 @@ mod tests {
             ))
             .expect("load scheduler Workflow");
 
-        let matched = runtime.matching_ids(&event_id("gateway.message.received"));
+        let matched = view.matching_ids(&event_id("gateway.message.received"));
         let matched: alloc::vec::Vec<_> = matched.iter().map(WorkflowId::as_str).collect();
         assert_eq!(matched, ["broad", "exact"]);
         assert_eq!(view.definitions().len(), 3);
-        assert_eq!(
-            view.matching_ids(&event_id("gateway.message.received")),
-            runtime.matching_ids(&event_id("gateway.message.received"))
-        );
     }
 
     #[test]
@@ -755,6 +707,7 @@ mod tests {
             .unload(&WorkflowId::try_from("gateway").expect("valid Workflow ID"))
             .expect("unload Workflow");
         assert!(runtime
+            .view()
             .matching_ids(&event_id("gateway.message.received"))
             .is_empty());
         assert!(matches!(
@@ -988,8 +941,9 @@ mod tests {
             }
             Poll::Pending
         }));
-        assert_eq!(runtime.completed_count(), 2);
-        assert_eq!(runtime.failed_count(), 0);
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 2);
+        assert_eq!(info.failed_count, 0);
     }
 
     #[test]
@@ -1032,9 +986,10 @@ mod tests {
                 Poll::Pending
             }
         }));
-        assert_eq!(runtime.completed_count(), 0);
-        assert_eq!(runtime.failed_count(), 1);
-        let failure = runtime.last_failure().expect("recorded Workflow failure");
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 0);
+        assert_eq!(info.failed_count, 1);
+        let failure = info.last_failure.expect("recorded Workflow failure");
         assert_eq!(failure.workflow_id().as_str(), "reject");
         assert!(matches!(
             failure.error(),
@@ -1061,9 +1016,10 @@ mod tests {
             .await
             .expect("discard unmatched Event");
         });
-        assert_eq!(runtime.completed_count(), 0);
-        assert_eq!(runtime.failed_count(), 0);
-        assert_eq!(runtime.cancelled_count(), 0);
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 0);
+        assert_eq!(info.failed_count, 0);
+        assert_eq!(info.cancelled_count, 0);
     }
 
     #[test]
@@ -1136,8 +1092,9 @@ mod tests {
             Poll::Pending
         }));
         assert_eq!(collected.borrow().as_slice(), [10, 11, 12]);
-        assert_eq!(runtime.completed_count(), 1);
-        assert_eq!(runtime.failed_count(), 0);
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 1);
+        assert_eq!(info.failed_count, 0);
     }
 
     #[test]

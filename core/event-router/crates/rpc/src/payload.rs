@@ -6,6 +6,8 @@ use core::cell::RefCell;
 use core::marker::PhantomData;
 use core::task::{Context, Poll, Waker};
 
+use getset::{Getters, MutGetters};
+
 use super::lane::{BorrowedFrame, LaneFrameKind, LaneIo, LaneReader, LaneWriter, ReservedFrame};
 use super::registry::{PreparedCalls, RpcFuture};
 use super::{RpcAddress, RpcError, RpcResult};
@@ -633,23 +635,17 @@ impl Drop for RpcPayloadReader {
 }
 
 /// One independently readable response branch of a multicast RPC.
+#[derive(Getters, MutGetters)]
 pub struct RpcMulticastBranch {
+    /// Endpoint address represented by this branch.
+    #[getset(get = "pub")]
     address: RpcAddress,
+    /// Branch's independent response reader.
+    #[getset(get_mut = "pub")]
     reader: RpcPayloadReader,
 }
 
 impl RpcMulticastBranch {
-    /// Returns the endpoint address represented by this branch.
-    #[must_use]
-    pub fn address(&self) -> &RpcAddress {
-        &self.address
-    }
-
-    /// Returns the branch's independent response reader.
-    pub fn reader_mut(&mut self) -> &mut RpcPayloadReader {
-        &mut self.reader
-    }
-
     /// Consumes the branch and returns its response reader.
     #[must_use]
     pub fn into_reader(self) -> RpcPayloadReader {

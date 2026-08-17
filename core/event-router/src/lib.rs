@@ -93,8 +93,8 @@ impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
         Filesystem: FileSystem,
     {
         let mut router = Router::new(lanes);
-        let workflow_component = WorkflowComponent::new(filesystem, persistence_directory.into())?;
-        let workflow = workflow_component.view();
+        let (workflow_component, workflow) =
+            WorkflowComponent::new(filesystem, persistence_directory.into())?;
         router.load(Box::new(workflow_component))?;
         Ok(Self { router, workflow })
     }
