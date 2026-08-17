@@ -2,8 +2,10 @@
 
 use alloc::boxed::Box;
 use alloc::format;
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use barracuda_fs::{FileSystem, FsError};
 use barracuda_router::{
@@ -26,6 +28,7 @@ where
     runtime: WorkflowRuntime,
     filesystem: &'static Filesystem,
     directory: String,
+    index: Rc<RefCell<Vec<u8>>>,
 }
 
 impl<Filesystem> WorkflowComponent<Filesystem>
@@ -41,13 +44,14 @@ where
         }
         filesystem.create_dir_all(&directory)?;
         let runtime = WorkflowRuntime::new();
-        restore(&runtime.control(), filesystem, &directory)?;
         let view = runtime.view();
+        let index = restore(&runtime.control(), filesystem, &directory)?;
         Ok((
             Self {
                 runtime,
                 filesystem,
                 directory,
+                index: Rc::new(RefCell::new(index)),
             },
             view,
         ))
@@ -62,12 +66,12 @@ where
         context.register_rpc::<InternalEmit<M>, _>(self.runtime.ingress_handler::<M>())?;
 
         let load_control = self.runtime.control();
-        let load_view = self.runtime.view();
+        let load_index = Rc::clone(&self.index);
         let load_filesystem = self.filesystem;
         let load_directory = self.directory.clone();
         context.register_rpc::<WorkflowLoad<M>, _>(move |_context, frames| {
             let control = load_control.clone();
-            let view = load_view.clone();
+            let index = Rc::clone(&load_index);
             let directory = load_directory.clone();
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
@@ -89,15 +93,15 @@ where
                 {
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
-                let mut ids: Vec<_> = view
-                    .definitions()
-                    .into_iter()
-                    .map(|loaded| loaded.id().clone())
-                    .collect();
-                ids.push(definition.id().clone());
-                if write_index(load_filesystem, &directory, &ids).is_err() {
+                let mut index = index.borrow_mut();
+                let original_len = index.len();
+                index.extend_from_slice(definition.id().as_str().as_bytes());
+                index.push(b'\n');
+                if write_index(load_filesystem, &directory, &index).is_err() {
+                    index.truncate(original_len);
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
+                drop(index);
                 match control.load(definition) {
                     Ok(()) => Ok(Ok(())),
                     Err(_error) => Ok(Err(WorkflowControlRejection::DuplicateId)),
@@ -106,12 +110,12 @@ where
         })?;
 
         let unload_control = self.runtime.control();
-        let unload_view = self.runtime.view();
+        let unload_index = Rc::clone(&self.index);
         let unload_filesystem = self.filesystem;
         let unload_directory = self.directory.clone();
         context.register_rpc::<WorkflowUnload<M>, _>(move |_context, frames| {
             let control = unload_control.clone();
-            let view = unload_view.clone();
+            let index = Rc::clone(&unload_index);
             let directory = unload_directory.clone();
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
@@ -125,15 +129,15 @@ where
                 if !control.contains(&workflow_id) {
                     return Ok(Err(WorkflowControlRejection::NotFound));
                 }
-                let ids: Vec<_> = view
-                    .definitions()
-                    .into_iter()
-                    .filter(|loaded| loaded.id() != &workflow_id)
-                    .map(|loaded| loaded.id().clone())
-                    .collect();
-                if write_index(unload_filesystem, &directory, &ids).is_err() {
+                let mut index = index.borrow_mut();
+                let previous = index.clone();
+                if !remove_index_entry(&mut index, &workflow_id)
+                    || write_index(unload_filesystem, &directory, &index).is_err()
+                {
+                    *index = previous;
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
+                drop(index);
                 if control.unload(&workflow_id).is_err() {
                     return Ok(Err(WorkflowControlRejection::NotFound));
                 }
@@ -163,23 +167,23 @@ fn restore<Filesystem>(
     control: &WorkflowRuntimeControl,
     filesystem: &Filesystem,
     directory: &str,
-) -> Result<(), EventRouterCreateError>
+) -> Result<Vec<u8>, EventRouterCreateError>
 where
     Filesystem: FileSystem,
 {
     let index_path = index_path(directory);
     let index = match filesystem.read(&index_path) {
         Ok(index) => index,
-        Err(FsError::NotFound) => return Ok(()),
+        Err(FsError::NotFound) => return Ok(Vec::new()),
         Err(error) => return Err(error.into()),
     };
-    let index = core::str::from_utf8(&index).map_err(|_error| {
+    let index_text = core::str::from_utf8(&index).map_err(|_error| {
         EventRouterCreateError::InvalidPersistedWorkflow {
             path: index_path.clone(),
             rejection: WorkflowControlRejection::InvalidWorkflowId,
         }
     })?;
-    for id in index.lines() {
+    for id in index_text.lines() {
         let workflow_id = WorkflowId::try_from(id).map_err(|_error| {
             EventRouterCreateError::InvalidPersistedWorkflow {
                 path: index_path.clone(),
@@ -210,23 +214,39 @@ where
             }
         })?;
     }
-    Ok(())
+    Ok(index)
 }
 
 fn write_index<Filesystem>(
     filesystem: &Filesystem,
     directory: &str,
-    workflow_ids: &[WorkflowId],
+    bytes: &[u8],
 ) -> Result<(), FsError>
 where
     Filesystem: FileSystem,
 {
-    let mut bytes = Vec::new();
-    for workflow_id in workflow_ids {
-        bytes.extend_from_slice(workflow_id.as_str().as_bytes());
-        bytes.push(b'\n');
+    filesystem.write_atomic(&index_path(directory), bytes)
+}
+
+fn remove_index_entry(bytes: &mut Vec<u8>, workflow_id: &WorkflowId) -> bool {
+    let needle = workflow_id.as_str().as_bytes();
+    let mut start = 0;
+    while start < bytes.len() {
+        let Some(remaining) = bytes.get(start..) else {
+            return false;
+        };
+        let end = remaining
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(bytes.len(), |offset| start.saturating_add(offset));
+        if bytes.get(start..end) == Some(needle) {
+            let remove_end = end.saturating_add(usize::from(end < bytes.len()));
+            bytes.drain(start..remove_end);
+            return true;
+        }
+        start = end.saturating_add(1);
     }
-    filesystem.write_atomic(&index_path(directory), &bytes)
+    false
 }
 
 fn index_path(directory: &str) -> String {
