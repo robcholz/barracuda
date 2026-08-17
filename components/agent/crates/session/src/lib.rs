@@ -1,5 +1,4 @@
 #![no_std]
-#![deny(unreachable_pub)]
 #![allow(clippy::arc_with_non_send_sync)]
 
 //! Session lifecycle, public stream/control API, and actor-owned state.
@@ -32,7 +31,6 @@ pub use control::{SessionControl, SessionControlError};
 pub use manager::{
     OpenSessionError, SessionCreateError, SessionDeleteError, SessionId, SessionPersistence,
 };
-#[doc(hidden)]
 pub use manager::{SessionManager, SessionManagerInitError};
 pub use stream::{
     ContextProviderError, InputRequestId, InputRequestKind, IterationEvent, SessionCloseReason,

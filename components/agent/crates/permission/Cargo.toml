@@ -16,6 +16,7 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 thiserror = { version = "2", default-features = false }
 
 [lints.rust]
+unreachable_pub = "deny"
 unsafe_code = "forbid"
 
 [lints.clippy]

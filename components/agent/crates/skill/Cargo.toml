@@ -24,3 +24,6 @@ barracuda-fs = { path = "../../../../shared/fs", features = ["diskfs"] }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[lints.rust]
+unreachable_pub = "deny"

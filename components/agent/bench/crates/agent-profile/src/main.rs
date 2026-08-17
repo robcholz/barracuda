@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use barracuda_agent_runtime::{AgentPersistenceConfig, AgentRuntime, ModelApiFactory};
+use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
 use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
 use barracuda_net::testing::NeverStack;
@@ -82,12 +82,12 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 
 fn profile_agent_init(
     output_file: &Path,
-) -> Result<AllocationStats, barracuda_agent_runtime::AgentError> {
+) -> Result<AllocationStats, barracuda_agent_runtime::RuntimeError> {
     let profile = HeapProfile::start(output_file);
     let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
     let (runtime, service) = ProfileAgentRuntime::new(
         MemFs::new(),
-        AgentPersistenceConfig {
+        RuntimeStorageConfig {
             persistence_root: "/profile/agent-init".to_owned(),
             skill_roots: Vec::new(),
         },

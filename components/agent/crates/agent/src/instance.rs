@@ -19,11 +19,11 @@ use crate::agent_stream::{
     AgentActivity, AgentCommand, AgentEvent, AgentHandle, AgentStream, AgentStreamItem,
     AgentTurnOrigin,
 };
-use crate::base_agent::{AgentError, AgentIterationEvent};
-use crate::base_agent::{
-    AgentInputRequest, AgentOutcome, AgentSubmitError, BaseAgent, BaseAgentEvent,
+use crate::engine::{
+    AgentEngine, AgentEngineEvent, AgentInputRequest, AgentOutcome, AgentSubmitError,
 };
-use crate::BaseAgentState;
+use crate::engine::{AgentError, AgentIterationEvent};
+use crate::AgentEngineState;
 use crate::Message;
 use barracuda_runtime_utils::yield_stream::yield_stream;
 
@@ -150,9 +150,9 @@ impl PendingTurn {
     }
 }
 
-/// One long-lived Agent instance around the single-task `BaseAgent` core.
+/// One long-lived Agent instance around the single-task `AgentEngine` core.
 pub struct Agent<H: TcpConnect + Dns + 'static> {
-    base: BaseAgent<H>,
+    engine: AgentEngine<H>,
     ephemeral: AgentEphemeralState,
 }
 
@@ -160,9 +160,9 @@ impl<H> Agent<H>
 where
     H: TcpConnect + Dns + 'static,
 {
-    pub(super) fn new(base: BaseAgent<H>) -> Self {
+    pub(super) fn new(engine: AgentEngine<H>) -> Self {
         Self {
-            base,
+            engine,
             ephemeral: AgentEphemeralState::new(),
         }
     }
@@ -177,8 +177,8 @@ where
         (AgentStream::new(stream), handle)
     }
 
-    pub(crate) fn state(&self) -> &DurableState<BaseAgentState> {
-        self.base.state()
+    pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
+        self.engine.state()
     }
 }
 
@@ -207,7 +207,7 @@ where
         yield_stream(|yielder| async move {
             let activity = Rc::clone(&self.activity);
             {
-                let Some(Agent { base, ephemeral }) = self.agent.as_mut() else {
+                let Some(Agent { engine, ephemeral }) = self.agent.as_mut() else {
                     activity.set(AgentActivity::Closed);
                     yielder
                         .yield_one(AgentStreamItem::Event(Err(AgentError::StateInvariant)))
@@ -224,7 +224,7 @@ where
                         })))
                         .await;
 
-                    let mut run = match base.submit(turn.message) {
+                    let mut run = match engine.submit(turn.message) {
                         Ok(run) => run,
                         Err(AgentSubmitError::Transcript(error)) => {
                             yielder
@@ -252,7 +252,7 @@ where
                         enum ActiveWake {
                             Command(Option<AgentCommand>),
                             Detached(DetachedCompletion),
-                            Base(Option<Result<BaseAgentEvent, AgentError>>),
+                            Engine(Option<Result<AgentEngineEvent, AgentError>>),
                         }
                         let wake = future::or(
                             async { ActiveWake::Command(commands.recv().await.ok()) },
@@ -265,7 +265,7 @@ where
                                         .await,
                                     )
                                 },
-                                async { ActiveWake::Base(run.next().await) },
+                                async { ActiveWake::Engine(run.next().await) },
                             ),
                         )
                         .await;
@@ -292,7 +292,7 @@ where
                                 )));
                                 pending_completions.push(completion);
                             }
-                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Iteration(progress)))) => {
+                            ActiveWake::Engine(Some(Ok(AgentEngineEvent::Iteration(progress)))) => {
                                 if matches!(
                                     &progress,
                                     barracuda_runtime_utils::stream::StreamPart::Delta(
@@ -307,10 +307,12 @@ where
                                     ))))
                                     .await;
                             }
-                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Detached(handle)))) => {
+                            ActiveWake::Engine(Some(Ok(AgentEngineEvent::Detached(handle)))) => {
                                 ephemeral.push(handle);
                             }
-                            ActiveWake::Base(Some(Ok(BaseAgentEvent::InputRequired(request)))) => {
+                            ActiveWake::Engine(Some(Ok(AgentEngineEvent::InputRequired(
+                                request,
+                            )))) => {
                                 let AgentInputRequest::Approval { tool_call_id, .. } = &request;
                                 *awaiting_approval.borrow_mut() = Some(*tool_call_id);
                                 yielder
@@ -319,11 +321,11 @@ where
                                     )))
                                     .await;
                             }
-                            ActiveWake::Base(Some(Ok(BaseAgentEvent::Finished(finished)))) => {
+                            ActiveWake::Engine(Some(Ok(AgentEngineEvent::Finished(finished)))) => {
                                 outcome = Some(finished);
                             }
-                            ActiveWake::Base(Some(Err(error))) => failure = Some(error),
-                            ActiveWake::Base(None) => failure = Some(AgentError::StateInvariant),
+                            ActiveWake::Engine(Some(Err(error))) => failure = Some(error),
+                            ActiveWake::Engine(None) => failure = Some(AgentError::StateInvariant),
                         }
                     }
 

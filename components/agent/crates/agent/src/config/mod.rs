@@ -2,5 +2,4 @@
 
 mod api;
 
-pub use api::ApiPurpose;
-pub use api::SharedApiManager;
+pub use api::{ApiPurpose, ModelApiManager, SharedApiManager};

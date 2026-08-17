@@ -1,23 +1,5 @@
 pub mod barracuda_agent_trace
 pub use barracuda_agent_trace::LevelFilter
-pub mod barracuda_agent_trace::trace
-pub struct barracuda_agent_trace::trace::FlatTreeSubscriber<S: barracuda_agent_trace::trace::TraceSink>
-impl<S: barracuda_agent_trace::trace::TraceSink> barracuda_agent_trace::trace::FlatTreeSubscriber<S>
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_allowed_target_prefix(self, prefix: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_context_group_keys(self, name: &'static str, keys: impl core::iter::traits::collect::IntoIterator<Item = &'static str>) -> Self
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_sink(sink: S) -> Self
-impl<S: barracuda_agent_trace::trace::TraceSink + 'static> tracing_core::subscriber::Subscriber for barracuda_agent_trace::trace::FlatTreeSubscriber<S>
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::clone_span(&self, id: &tracing_core::span::Id) -> tracing_core::span::Id
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::enabled(&self, metadata: &tracing_core::metadata::Metadata<'_>) -> bool
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::enter(&self, span: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::event(&self, event: &tracing_core::event::Event<'_>)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::exit(&self, span: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::new_span(&self, attributes: &tracing_core::span::Attributes<'_>) -> tracing_core::span::Id
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::record(&self, _span: &tracing_core::span::Id, _values: &tracing_core::span::Record<'_>)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::record_follows_from(&self, _span: &tracing_core::span::Id, _follows: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::try_close(&self, id: tracing_core::span::Id) -> bool
-pub trait barracuda_agent_trace::trace::TraceSink: core::marker::Send + core::marker::Sync
-pub fn barracuda_agent_trace::trace::TraceSink::write_line(&self, level: tracing_core::metadata::Level, tag: &str, line: &str)
 pub enum barracuda_agent_trace::InitLoggerError
 pub barracuda_agent_trace::InitLoggerError::OpenLogFile
 pub barracuda_agent_trace::InitLoggerError::OpenLogFile::path: std::path::PathBuf
@@ -26,21 +8,21 @@ pub barracuda_agent_trace::InitLoggerError::SetLogger
 pub enum barracuda_agent_trace::LogOutput
 pub barracuda_agent_trace::LogOutput::File(std::path::PathBuf)
 pub barracuda_agent_trace::LogOutput::Stderr
-pub struct barracuda_agent_trace::FlatTreeSubscriber<S: barracuda_agent_trace::trace::TraceSink>
-impl<S: barracuda_agent_trace::trace::TraceSink> barracuda_agent_trace::trace::FlatTreeSubscriber<S>
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_allowed_target_prefix(self, prefix: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_context_group_keys(self, name: &'static str, keys: impl core::iter::traits::collect::IntoIterator<Item = &'static str>) -> Self
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::with_sink(sink: S) -> Self
-impl<S: barracuda_agent_trace::trace::TraceSink + 'static> tracing_core::subscriber::Subscriber for barracuda_agent_trace::trace::FlatTreeSubscriber<S>
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::clone_span(&self, id: &tracing_core::span::Id) -> tracing_core::span::Id
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::enabled(&self, metadata: &tracing_core::metadata::Metadata<'_>) -> bool
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::enter(&self, span: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::event(&self, event: &tracing_core::event::Event<'_>)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::exit(&self, span: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::new_span(&self, attributes: &tracing_core::span::Attributes<'_>) -> tracing_core::span::Id
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::record(&self, _span: &tracing_core::span::Id, _values: &tracing_core::span::Record<'_>)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::record_follows_from(&self, _span: &tracing_core::span::Id, _follows: &tracing_core::span::Id)
-pub fn barracuda_agent_trace::trace::FlatTreeSubscriber<S>::try_close(&self, id: tracing_core::span::Id) -> bool
+pub struct barracuda_agent_trace::FlatTreeSubscriber<S: barracuda_agent_trace::TraceSink>
+impl<S: barracuda_agent_trace::TraceSink> barracuda_agent_trace::FlatTreeSubscriber<S>
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::with_allowed_target_prefix(self, prefix: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::with_context_group_keys(self, name: &'static str, keys: impl core::iter::traits::collect::IntoIterator<Item = &'static str>) -> Self
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::with_sink(sink: S) -> Self
+impl<S: barracuda_agent_trace::TraceSink + 'static> tracing_core::subscriber::Subscriber for barracuda_agent_trace::FlatTreeSubscriber<S>
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::clone_span(&self, id: &tracing_core::span::Id) -> tracing_core::span::Id
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::enabled(&self, metadata: &tracing_core::metadata::Metadata<'_>) -> bool
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::enter(&self, span: &tracing_core::span::Id)
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::event(&self, event: &tracing_core::event::Event<'_>)
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::exit(&self, span: &tracing_core::span::Id)
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::new_span(&self, attributes: &tracing_core::span::Attributes<'_>) -> tracing_core::span::Id
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::record(&self, _span: &tracing_core::span::Id, _values: &tracing_core::span::Record<'_>)
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::record_follows_from(&self, _span: &tracing_core::span::Id, _follows: &tracing_core::span::Id)
+pub fn barracuda_agent_trace::FlatTreeSubscriber<S>::try_close(&self, id: tracing_core::span::Id) -> bool
 pub struct barracuda_agent_trace::TracingConfig
 impl barracuda_agent_trace::TracingConfig
 pub fn barracuda_agent_trace::TracingConfig::with_context_group_keys(self, name: &'static str, keys: impl core::iter::traits::collect::IntoIterator<Item = &'static str>) -> Self

@@ -1,6 +1,6 @@
-//! The context-provider port consumed by BaseAgent.
+//! The context-provider port consumed by AgentEngine.
 //!
-//! BaseAgent owns this contract; concrete providers implement it under
+//! AgentEngine owns this contract; concrete providers implement it under
 //! `agent/context_providers`. Providers pull the transcript view during
 //! [`prepare`](ContextProvider::prepare), project request context, and may expose
 //! one provider-owned tool group.
@@ -11,7 +11,7 @@ use core::error::Error;
 use core::future::Future;
 use core::pin::Pin;
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::ContextSink;
 use barracuda_agent_memory::Transcript;
 use barracuda_agent_tool::ToolGroup;

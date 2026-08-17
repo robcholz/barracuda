@@ -168,15 +168,15 @@ below `agent.runtime` with no session key.
 ## Example (overlapping async agents)
 
 ```
-TRACE 2090 enter <span=1 parent=none task=agent-runtime span-name=agent.runtime target=barracuda_agent_runtime::runtime::worker> <context=run system=agent-system>
-TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=barracuda_agent_runtime::session::manager> <context=run system=agent-system session=session-1>
-TRACE 2105 enter <span=3 parent=2 task=session-1 span-name=turn target=barracuda_agent_runtime::session::actor> <context=run turn=turn-7> cause=user
-TRACE 2110 enter <span=4 parent=3 task=agent-1 span-name=agent target=barracuda_agent_runtime::session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-1>
-TRACE 2112 enter <span=5 parent=4 task=agent-1 span-name=iteration_loop target=barracuda_agent_runtime::agent::iteration_loop> <context=run iteration=iteration-0>
-TRACE 2120 enter <span=6 parent=3 task=agent-2 span-name=agent target=barracuda_agent_runtime::session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-2>
-TRACE 2121 event <span=6 task=agent-2 event-name=polled target=barracuda_agent_runtime::session::actor> ready=true
+TRACE 2090 enter <span=1 parent=none task=agent-runtime span-name=agent.runtime target=barracuda_agent_runtime::worker> <context=run system=agent-system>
+TRACE 2100 enter <span=2 parent=1 task=session-1 span-name=session target=barracuda_agent_session::manager> <context=run system=agent-system session=session-1>
+TRACE 2105 enter <span=3 parent=2 task=session-1 span-name=turn target=barracuda_agent_session::actor> <context=run turn=turn-7> cause=user
+TRACE 2110 enter <span=4 parent=3 task=agent-1 span-name=agent target=barracuda_agent_session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-1>
+TRACE 2112 enter <span=5 parent=4 task=agent-1 span-name=iteration_loop target=barracuda_agent::engine::iteration_loop> <context=run iteration=iteration-0>
+TRACE 2120 enter <span=6 parent=3 task=agent-2 span-name=agent target=barracuda_agent_session::actor> <context=run system=agent-system session=session-1 turn=turn-7 agent=agent-2>
+TRACE 2121 event <span=6 task=agent-2 event-name=polled target=barracuda_agent_session::actor> ready=true
 TRACE 2130 exit <span=6 task=agent-2>
-TRACE 2150 event <span=5 task=agent-1 event-name=completion target=barracuda_agent_runtime::agent::iteration_loop> status=done
+TRACE 2150 event <span=5 task=agent-1 event-name=completion target=barracuda_agent::engine::iteration_loop> status=done
 TRACE 2152 exit <span=5 task=agent-1>
 TRACE 2154 exit <span=4 task=agent-1>
 TRACE 2156 exit <span=3 task=session-1>

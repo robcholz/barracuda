@@ -10,17 +10,17 @@ use barracuda_model_api::RetryPolicy;
 use barracuda_net::{Dns, TcpConnect};
 
 use crate::baked;
-use crate::base_agent::{
-    agent_effect_channel, BaseAgent, BaseAgentBuildError, BaseAgentConfig, ContextProvider,
-};
 use crate::config::ApiPurpose;
 use crate::context_providers::{
     AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
     ReasoningEffortContextProvider, ResumeContextProvider, SkillContextProvider,
     ToolDiscoveryContextProvider,
 };
+use crate::engine::{
+    agent_effect_channel, AgentEngine, AgentEngineBuildError, AgentEngineConfig, ContextProvider,
+};
 use crate::tools::internal_tools;
-use crate::{Agent, AgentKind, BaseAgentState, ReasoningEffort, ReasoningEffortHandle};
+use crate::{Agent, AgentEngineState, AgentKind, ReasoningEffort, ReasoningEffortHandle};
 
 use super::error::AgentCreateError;
 use super::{AgentId, AgentManager};
@@ -42,7 +42,7 @@ struct AgentEnvironment {
     extension_tools: Vec<ToolGroup>,
     inherited_context: Vec<Block<'static>>,
     reasoning_effort: ReasoningEffort,
-    state: Option<BaseAgentState>,
+    state: Option<AgentEngineState>,
 }
 
 impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
@@ -175,7 +175,8 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         })?;
         let runtime = manifest.runtime();
         let skill_set = Arc::clone(&self.skill_registry).skill_set();
-        let state = DurableState::new(recovery_state.unwrap_or_else(|| BaseAgentState::new(kind)));
+        let state =
+            DurableState::new(recovery_state.unwrap_or_else(|| AgentEngineState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.
@@ -190,7 +191,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let resume_provider = ResumeContextProvider::new(&state.get());
         let tool_discovery_provider = ToolDiscoveryContextProvider::new(tools.discovery());
 
-        // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
+        // Only `AgentEngine` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
         let conversation_history = ConversationHistoryContextProvider::with_llm_compaction::<Http>(
             Arc::clone(&self.api_manager),
@@ -216,7 +217,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
                 return Err(AgentCreateError::LongTerm(error));
             }
         };
-        // AgentManager is the only configured-agent assembly point. BaseAgent sees
+        // AgentManager is the only configured-agent assembly point. AgentEngine sees
         // one generic, immutable provider set; concrete mode, memory, and skill
         // semantics do not leak into its runtime protocol.
         let (reasoning_effort_provider, reasoning_effort_handle) =
@@ -236,7 +237,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         } else {
             ApiPurpose::SubAgent
         };
-        let base_config = BaseAgentConfig {
+        let engine_config = AgentEngineConfig {
             state,
             transcript,
             api_manager: Arc::clone(&self.api_manager),
@@ -252,19 +253,18 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
-        let base =
-            BaseAgent::<Http>::build(base_config, self.llm_factory.create()).map_err(|error| {
-                match error {
-                    BaseAgentBuildError::InvalidContextProviderId => {
-                        AgentCreateError::InvalidContextProviderId
-                    }
-                    BaseAgentBuildError::DuplicateContextProviderId(id) => {
-                        AgentCreateError::DuplicateContextProviderId(id)
-                    }
-                    BaseAgentBuildError::Tools(error) => AgentCreateError::Tools(error),
+        let engine = AgentEngine::<Http>::build(engine_config, self.llm_factory.create()).map_err(
+            |error| match error {
+                AgentEngineBuildError::InvalidContextProviderId => {
+                    AgentCreateError::InvalidContextProviderId
                 }
-            })?;
-        let agent = Agent::new(base);
+                AgentEngineBuildError::DuplicateContextProviderId(id) => {
+                    AgentCreateError::DuplicateContextProviderId(id)
+                }
+                AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
+            },
+        )?;
+        let agent = Agent::new(engine);
 
         log::info!("Agent {id} ({}) created", kind.as_str());
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());

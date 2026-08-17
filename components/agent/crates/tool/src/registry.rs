@@ -13,11 +13,11 @@ use barracuda_agent_persistence::{
 use barracuda_fs::FileSystem;
 use serde::{Deserialize, Serialize};
 
+use super::definition::Tool;
 use super::set::{ToolName, ToolSet};
-use super::tool::Tool;
 
 pub type ToolRegistryVersion = u64;
-pub type ToolGroupId = String;
+type ToolGroupId = String;
 
 const TOOL_REGISTRY_STATE_NAME: &str = "tool_registry";
 

@@ -1,5 +1,4 @@
 #![no_std]
-#![deny(unreachable_pub)]
 #![allow(clippy::arc_with_non_send_sync)]
 
 //! Optional per-Session multiagent domain component.

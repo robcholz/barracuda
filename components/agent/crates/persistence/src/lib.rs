@@ -10,9 +10,9 @@
 
 extern crate alloc;
 
-mod persistence;
+mod registry;
 
-pub use persistence::{Collection, Persistence, PersistenceError, Singleton};
+pub use registry::{Collection, Persistence, PersistenceError, Singleton};
 
 use alloc::borrow::Cow;
 use alloc::boxed::Box;

@@ -1,4 +1,4 @@
-//! Durable state owned by one BaseAgent.
+//! Durable state owned by one AgentEngine.
 //!
 //! Context-provider state is opaque here and lives directly under
 //! `context_provider_states.<context-provider-id>`.
@@ -19,12 +19,12 @@ use serde_json::Value;
 
 use crate::AgentKind;
 
-/// Complete currently implemented BaseAgent recovery DTO.
+/// Complete currently implemented AgentEngine recovery DTO.
 ///
 /// Conversation history is not included: it is a projection of the canonical
 /// transcript store. Runtime-only stream and poll state is not durable.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub(crate) struct BaseAgentState {
+pub(crate) struct AgentEngineState {
     kind: String,
     /// Calls checkpointed before execution and retained until their results
     /// have been recorded in the transcript.
@@ -32,7 +32,7 @@ pub(crate) struct BaseAgentState {
     context_provider_states: BTreeMap<String, Value>,
 }
 
-impl BaseAgentState {
+impl AgentEngineState {
     pub(crate) fn new(kind: &AgentKind) -> Self {
         Self {
             kind: kind.as_str().to_owned(),
@@ -64,12 +64,12 @@ impl BaseAgentState {
 
 #[derive(Clone)]
 pub(crate) struct AgentStorage {
-    state: DurableState<BaseAgentState>,
+    state: DurableState<AgentEngineState>,
     provider_id: &'static str,
 }
 
 impl AgentStorage {
-    pub(crate) fn new(state: &DurableState<BaseAgentState>, provider_id: &'static str) -> Self {
+    pub(crate) fn new(state: &DurableState<AgentEngineState>, provider_id: &'static str) -> Self {
         Self {
             state: state.clone(),
             provider_id,
@@ -92,7 +92,7 @@ impl AgentStorage {
     }
 }
 
-impl DurableStateCodec for BaseAgentState {
+impl DurableStateCodec for AgentEngineState {
     const SCHEMA_VERSION: SchemaVersion = 1;
 
     fn encode_state(&self) -> Result<StateBlob<'_>, DurablePartError> {
@@ -117,7 +117,7 @@ impl DurableStateCodec for BaseAgentState {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{AgentStorage, BaseAgentState};
+    use super::{AgentEngineState, AgentStorage};
     use crate::AgentKind;
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_persistence::{DurableStateCodec, StateSlice};
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn state_codec_round_trip_preserves_agent_state() {
-        let mut state = BaseAgentState::new(&AgentKind::from_static("worker"));
+        let mut state = AgentEngineState::new(&AgentKind::from_static("worker"));
         state.record_inflight_toolcalls(vec![ToolCall {
             id: "call-1".to_owned(),
             name: "profile_read".to_owned(),
@@ -136,8 +136,8 @@ mod tests {
         let json: serde_json::Value =
             serde_json::from_slice(&encoded.bytes).expect("state is JSON");
         assert_eq!(json["inflight_toolcalls"][0]["id"], "call-1");
-        let decoded = BaseAgentState::decode_state(
-            BaseAgentState::SCHEMA_VERSION,
+        let decoded = AgentEngineState::decode_state(
+            AgentEngineState::SCHEMA_VERSION,
             StateSlice {
                 bytes: &encoded.bytes,
             },
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn context_provider_state_is_stored_directly_under_its_namespace() {
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let storage = AgentStorage {
             state: state.clone(),
             provider_id: "todo",

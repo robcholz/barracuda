@@ -5,7 +5,7 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
 use barracuda_agent_tool::{Tool, ToolGroup};
@@ -13,8 +13,8 @@ use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_net::{Dns, TcpConnect};
 
-use crate::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 use crate::config::SharedApiManager;
+use crate::engine::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 
 mod extraction;
 mod extraction_flow;

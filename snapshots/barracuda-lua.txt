@@ -42,7 +42,9 @@ impl barracuda_lua::Function
 pub fn barracuda_lua::Function::call<A: barracuda_lua::IntoLuaMulti, R: barracuda_lua::FromLuaMulti>(&self, arguments: A) -> barracuda_lua::Result<R>
 pub fn barracuda_lua::Function::call_async<A: barracuda_lua::IntoLuaMulti + 'static, R: barracuda_lua::FromLuaMulti>(&self, arguments: A) -> barracuda_lua::FunctionCall<R>
 impl barracuda_lua::FromLua for barracuda_lua::Function
+pub fn barracuda_lua::Function::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::IntoLua for barracuda_lua::Function
+pub fn barracuda_lua::Function::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 pub struct barracuda_lua::FunctionCall<R>
 impl<R: barracuda_lua::FromLuaMulti> core::future::future::Future for barracuda_lua::FunctionCall<R>
 pub type barracuda_lua::FunctionCall<R>::Output = core::result::Result<R, barracuda_lua::Error>
@@ -97,7 +99,9 @@ pub fn barracuda_lua::Table::is_empty(&self) -> barracuda_lua::Result<bool>
 pub fn barracuda_lua::Table::len(&self) -> barracuda_lua::Result<usize>
 pub fn barracuda_lua::Table::set<K: barracuda_lua::IntoLua, V: barracuda_lua::IntoLua>(&self, key: K, value: V) -> barracuda_lua::Result<()>
 impl barracuda_lua::FromLua for barracuda_lua::Table
+pub fn barracuda_lua::Table::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::IntoLua for barracuda_lua::Table
+pub fn barracuda_lua::Table::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 pub struct barracuda_lua::UserDataHandle<T: barracuda_lua::UserData>
 impl<T: barracuda_lua::UserData> barracuda_lua::UserDataHandle<T>
 pub fn barracuda_lua::UserDataHandle<T>::borrow(&self) -> barracuda_lua::Result<barracuda_lua::UserDataRef<'_, T>>
@@ -105,7 +109,9 @@ pub fn barracuda_lua::UserDataHandle<T>::borrow_mut(&self) -> barracuda_lua::Res
 pub fn barracuda_lua::UserDataHandle<T>::with<R>(&self, function: impl core::ops::function::FnOnce(&T) -> R) -> barracuda_lua::Result<R>
 pub fn barracuda_lua::UserDataHandle<T>::with_mut<R>(&self, function: impl core::ops::function::FnOnce(&mut T) -> R) -> barracuda_lua::Result<R>
 impl<T: barracuda_lua::UserData> barracuda_lua::FromLua for barracuda_lua::UserDataHandle<T>
+pub fn barracuda_lua::UserDataHandle<T>::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<T: barracuda_lua::UserData> barracuda_lua::IntoLua for barracuda_lua::UserDataHandle<T>
+pub fn barracuda_lua::UserDataHandle<T>::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 pub struct barracuda_lua::UserDataMethods<'lua, T: barracuda_lua::UserData>
 impl<T: barracuda_lua::UserData> barracuda_lua::UserDataMethods<'_, T>
 pub fn barracuda_lua::UserDataMethods<'_, T>::add_async_method<A, R, F, Fut>(&mut self, name: &str, function: F) where A: barracuda_lua::FromLuaMulti + 'static, R: barracuda_lua::IntoLuaMulti + 'static, F: core::ops::function::Fn(barracuda_lua::UserDataHandle<T>, A) -> Fut + 'static, Fut: core::future::future::Future<Output = barracuda_lua::LuaReturn<R>> + 'static
@@ -129,7 +135,9 @@ impl<T> core::ops::drop::Drop for barracuda_lua::UserDataRefMut<'_, T>
 pub fn barracuda_lua::UserDataRefMut<'_, T>::drop(&mut self)
 pub struct barracuda_lua::Variadic<T>(_)
 impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<T> core::convert::From<alloc::vec::Vec<T>> for barracuda_lua::Variadic<T>
 pub fn barracuda_lua::Variadic<T>::from(values: alloc::vec::Vec<T>) -> Self
 impl<T> core::convert::From<barracuda_lua::Variadic<T>> for alloc::vec::Vec<T>
@@ -140,56 +148,107 @@ pub fn barracuda_lua::Variadic<T>::deref(&self) -> &Self::Target
 impl<T> core::ops::deref::DerefMut for barracuda_lua::Variadic<T>
 pub fn barracuda_lua::Variadic<T>::deref_mut(&mut self) -> &mut Self::Target
 pub trait barracuda_lua::FromLua: core::marker::Sized
+pub fn barracuda_lua::FromLua::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for alloc::string::String
+pub fn alloc::string::String::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for alloc::vec::Vec<u8>
+pub fn alloc::vec::Vec<u8>::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for barracuda_lua::Function
+pub fn barracuda_lua::Function::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for barracuda_lua::Table
+pub fn barracuda_lua::Table::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for bool
+pub fn bool::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for f64
+pub fn f64::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLua for i64
+pub fn i64::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<T: barracuda_lua::FromLua> barracuda_lua::FromLua for core::option::Option<T>
+pub fn core::option::Option<T>::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<T: barracuda_lua::UserData> barracuda_lua::FromLua for barracuda_lua::UserDataHandle<T>
+pub fn barracuda_lua::UserDataHandle<T>::from_lua(lua: &mut lunka::thread::Thread, index: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 pub trait barracuda_lua::FromLuaMulti: core::marker::Sized
+pub fn barracuda_lua::FromLuaMulti::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl barracuda_lua::FromLuaMulti for ()
+pub fn ()::from_lua_multi(_lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua, K: barracuda_lua::FromLua, L: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J, K, L)
+pub fn (A, B, C, D, E, F, G, H, I, J, K, L)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua, K: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J, K)
+pub fn (A, B, C, D, E, F, G, H, I, J, K)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua, J: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I, J)
+pub fn (A, B, C, D, E, F, G, H, I, J)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua, I: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H, I)
+pub fn (A, B, C, D, E, F, G, H, I)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua, H: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G, H)
+pub fn (A, B, C, D, E, F, G, H)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua, G: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F, G)
+pub fn (A, B, C, D, E, F, G)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua, F: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E, F)
+pub fn (A, B, C, D, E, F)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua, E: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D, E)
+pub fn (A, B, C, D, E)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua, D: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C, D)
+pub fn (A, B, C, D)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua, C: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B, C)
+pub fn (A, B, C)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<A: barracuda_lua::FromLua, B: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for (A, B)
+pub fn (A, B)::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for T
+pub fn T::from_lua_multi(lua: &mut lunka::thread::Thread, count: i32) -> core::result::Result<T, barracuda_lua::Error>
 impl<T: barracuda_lua::FromLua> barracuda_lua::FromLuaMulti for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::from_lua_multi(lua: &mut lunka::thread::Thread, count: core::ffi::primitives::c_int) -> barracuda_lua::Result<Self>
 pub trait barracuda_lua::IntoLua
+pub fn barracuda_lua::IntoLua::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for &str
+pub fn &str::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for alloc::string::String
+pub fn alloc::string::String::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for alloc::vec::Vec<u8>
+pub fn alloc::vec::Vec<u8>::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for barracuda_lua::Function
+pub fn barracuda_lua::Function::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for barracuda_lua::Table
+pub fn barracuda_lua::Table::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for bool
+pub fn bool::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for f64
+pub fn f64::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl barracuda_lua::IntoLua for i64
+pub fn i64::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLua for core::option::Option<T>
+pub fn core::option::Option<T>::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 impl<T: barracuda_lua::UserData> barracuda_lua::IntoLua for barracuda_lua::UserDataHandle<T>
+pub fn barracuda_lua::UserDataHandle<T>::push_to_lua(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<()>
 pub trait barracuda_lua::IntoLuaMulti
+pub fn barracuda_lua::IntoLuaMulti::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl barracuda_lua::IntoLuaMulti for ()
+pub fn ()::push_to_lua_multi(self, _lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua, K: barracuda_lua::IntoLua, L: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J, K, L)
+pub fn (A, B, C, D, E, F, G, H, I, J, K, L)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua, K: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J, K)
+pub fn (A, B, C, D, E, F, G, H, I, J, K)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua, J: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I, J)
+pub fn (A, B, C, D, E, F, G, H, I, J)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua, I: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H, I)
+pub fn (A, B, C, D, E, F, G, H, I)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua, H: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G, H)
+pub fn (A, B, C, D, E, F, G, H)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua, G: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F, G)
+pub fn (A, B, C, D, E, F, G)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua, F: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E, F)
+pub fn (A, B, C, D, E, F)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua, E: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D, E)
+pub fn (A, B, C, D, E)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua, D: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C, D)
+pub fn (A, B, C, D)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua, C: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B, C)
+pub fn (A, B, C)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<A: barracuda_lua::IntoLua, B: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for (A, B)
+pub fn (A, B)::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for T
+pub fn T::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> core::result::Result<i32, barracuda_lua::Error>
 impl<T: barracuda_lua::IntoLua> barracuda_lua::IntoLuaMulti for barracuda_lua::Variadic<T>
+pub fn barracuda_lua::Variadic<T>::push_to_lua_multi(self, lua: &mut lunka::thread::Thread) -> barracuda_lua::Result<core::ffi::primitives::c_int>
 pub trait barracuda_lua::UserData: 'static
 pub fn barracuda_lua::UserData::add_methods(_methods: &mut barracuda_lua::UserDataMethods<'_, Self>) where Self: core::marker::Sized
 pub type barracuda_lua::LuaReturn<T> = core::option::Option<barracuda_lua::Result<T>>

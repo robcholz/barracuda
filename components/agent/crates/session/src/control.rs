@@ -3,7 +3,7 @@ use barracuda_agent_permission::PermissionLevel;
 use futures_channel::oneshot;
 use strum::IntoStaticStr;
 
-use barracuda_agent::internal::ReasoningEffort;
+use barracuda_agent::ReasoningEffort;
 
 use super::{InputRequestId, SessionId};
 use barracuda_agent::Message;

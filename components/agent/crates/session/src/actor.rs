@@ -38,12 +38,12 @@ use super::{
     SessionInputError, SessionPersistence, SessionTurnError, TurnEvent, TurnEventError, TurnId,
     TurnOrigin,
 };
-use barracuda_agent::internal::{
+use barracuda_agent::Message;
+use barracuda_agent::{
     AgentCompletion, AgentCreateError, AgentDispatchError, AgentError, AgentEvent, AgentId,
     AgentInputRequest, AgentIterationEvent, AgentOutcome, AgentTurnOrigin, ApprovalDecision,
     PersistenceConfig, ReasoningEffort, ToolCallId,
 };
-use barracuda_agent::Message;
 
 enum RootDispatchError {
     Retry(Message),
@@ -214,7 +214,7 @@ where
     next_turn: u32,
     approval: ApprovalFlow<LlmApprovalResolver<Http>>,
     orchestration: SessionOrchestration,
-    managed_agents: BTreeSet<barracuda_agent::internal::AgentId>,
+    managed_agents: BTreeSet<barracuda_agent::AgentId>,
 
     active_agent_poll_queue: VecDeque<AgentId>,
     commands: Pin<Box<Receiver<SessionCommand>>>,
@@ -680,7 +680,7 @@ where
         let permission = Arc::new(SessionPermission::new(self.state.clone()));
         let root_agent = self.state.get().root_agent;
         let (id, kind, agent, reasoning_handle, fresh) = if let Some(id) = root_agent {
-            let kind = barracuda_agent::internal::baked::root_kind().clone();
+            let kind = barracuda_agent::baked::root_kind().clone();
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.resume_from(
                 id,
@@ -696,7 +696,7 @@ where
                 SessionPersistence::Persistent => PersistenceConfig::Persistent,
                 SessionPersistence::Ephemeral => PersistenceConfig::InMemory,
             };
-            let kind = barracuda_agent::internal::baked::root_kind().clone();
+            let kind = barracuda_agent::baked::root_kind().clone();
             let extension_tools = self.orchestration.tool_groups(id, &kind);
             let (agent, reasoning) = self.agent_manager.create(
                 id,
@@ -793,7 +793,7 @@ where
         self.drain_orchestration_effects();
     }
 
-    fn handle_agent_event(&mut self, agent: barracuda_agent::internal::AgentId, event: AgentEvent) {
+    fn handle_agent_event(&mut self, agent: barracuda_agent::AgentId, event: AgentEvent) {
         let is_root = self.root_id() == Some(agent);
         match event {
             AgentEvent::TurnStarted { origin } => {
@@ -903,7 +903,7 @@ where
 
     fn request_approval(
         &mut self,
-        agent: barracuda_agent::internal::AgentId,
+        agent: barracuda_agent::AgentId,
         tool_call_id: ToolCallId,
         tool_call: ToolCall,
         reason: String,
@@ -929,7 +929,7 @@ where
         let resolution = self
             .agents
             .get(&agent)
-            .ok_or(barracuda_agent::internal::AgentApprovalError::NotAwaitingApproval)
+            .ok_or(barracuda_agent::AgentApprovalError::NotAwaitingApproval)
             .and_then(|slot| slot.resolve_approval(tool_call_id, decision));
         if let Err(error) = resolution {
             self.emit_input_error(request, error.into());
@@ -982,7 +982,7 @@ where
         }
     }
 
-    fn root_id(&self) -> Option<barracuda_agent::internal::AgentId> {
+    fn root_id(&self) -> Option<barracuda_agent::AgentId> {
         self.state.get().root_agent
     }
 
@@ -1057,7 +1057,7 @@ where
     fn create_agent(
         &mut self,
         agent: AgentId,
-        kind: &barracuda_agent::internal::AgentKind,
+        kind: &barracuda_agent::AgentKind,
         extension_tools: Vec<ToolGroup>,
     ) -> Result<(), OrchestrationPhysicalError> {
         let permission = Arc::new(SessionPermission::new(self.state.clone()));
@@ -1159,10 +1159,7 @@ where
     }
 }
 
-fn agent_span(
-    agent: barracuda_agent::internal::AgentId,
-    turn: Option<&ActiveTurn>,
-) -> tracing::Span {
+fn agent_span(agent: barracuda_agent::AgentId, turn: Option<&ActiveTurn>) -> tracing::Span {
     match turn {
         Some(turn) => turn.span.in_scope(|| {
             tracing::info_span!(

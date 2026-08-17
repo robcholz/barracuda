@@ -2,7 +2,7 @@
 
 use alloc::{borrow::ToOwned, string::String, string::ToString};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, EmptyArgs, ToolDiscoveryHandle, ToolFuture, ToolHandler, ToolInvocation,
@@ -93,16 +93,16 @@ mod tests {
     use futures_lite::future::block_on;
     use futures_lite::StreamExt as _;
 
-    use crate::base_agent::{AgentStorage, ContextProvider};
     use crate::context_providers::tool_discovery::{
         loaded_tool_groups, ToolDiscoveryContextProvider,
     };
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
 
     #[test]
     fn successful_load_is_recorded_in_the_discovery_provider_object() {
         let mut tool_set = ToolSet::empty();
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         tool_set
             .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");

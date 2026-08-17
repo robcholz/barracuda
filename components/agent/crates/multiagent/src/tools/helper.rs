@@ -2,7 +2,7 @@ use barracuda_agent_permission::{Action, Resource, RiskClass};
 use barracuda_agent_tool::{ToolError, ToolInvocation, ToolInvokeError};
 use serde::Deserialize;
 
-use barracuda_agent::internal::AgentId;
+use barracuda_agent::AgentId;
 
 #[derive(Deserialize)]
 pub(super) struct AgentArgs {

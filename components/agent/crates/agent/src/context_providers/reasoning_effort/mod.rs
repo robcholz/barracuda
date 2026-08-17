@@ -2,13 +2,13 @@
 
 use alloc::sync::Arc;
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::signal::Signal;
 use serde::{Deserialize, Serialize};
 
-use crate::base_agent::{ContextProvider, ContextProviderResult};
+use crate::engine::{ContextProvider, ContextProviderResult};
 
 const LOW_PROMPT: &str = prompt!("effort/low.md");
 const MEDIUM_PROMPT: &str = prompt!("effort/medium.md");
@@ -99,11 +99,11 @@ mod tests {
     use barracuda_agent_persistence::DurableState;
 
     use super::{ReasoningEffort, ReasoningEffortContextProvider};
-    use crate::base_agent::{AgentStorage, ContextProvider};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
 
     fn render(provider: &mut ReasoningEffortContextProvider, context: &mut Context) -> String {
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let storage = AgentStorage::new(&state, provider.id());
         let history = {
             let mut sink = context.sink();

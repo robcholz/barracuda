@@ -4,7 +4,7 @@ use barracuda_agent_permission::PermissionLevel;
 use barracuda_agent_persistence::DurableState;
 use serde::{Deserialize, Serialize};
 
-use barracuda_agent::internal::{AgentId, AgentIdAllocator, ReasoningEffort};
+use barracuda_agent::{AgentId, AgentIdAllocator, ReasoningEffort};
 
 use super::manager::SessionId;
 
@@ -77,7 +77,7 @@ mod tests {
         SessionManagerState,
     };
     use crate::SessionId;
-    use barracuda_agent::internal::AgentId;
+    use barracuda_agent::AgentId;
 
     #[test]
     fn manager_state_owns_both_global_allocators() {

@@ -2,7 +2,7 @@
 //!
 //! This is deliberately not an agent tool. The channel user replies in free
 //! text, and the SessionActor runs one short LLM/tool round to classify that text
-//! into the internal [`ApprovalDecision`] it feeds back to the parked agent.
+//! into the agent-level [`ApprovalDecision`] it feeds back to the parked agent.
 
 use alloc::{
     boxed::Box,
@@ -18,7 +18,7 @@ use barracuda_agent_tool::ToolSetError;
 use barracuda_model_api::{ChatError, InitError, ToolCall};
 use tracing::Instrument as _;
 
-use barracuda_agent::internal::{AgentId, ApprovalDecision, ToolCallId};
+use barracuda_agent::{AgentId, ApprovalDecision, ToolCallId};
 
 use super::{InputRequestId, InputRequestKind};
 use barracuda_agent::Message;

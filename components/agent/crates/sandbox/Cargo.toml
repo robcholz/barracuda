@@ -22,6 +22,7 @@ barracuda-fs = { path = "../../../../shared/fs" }
 anyhow = "1"
 
 [lints.rust]
+unreachable_pub = "deny"
 unsafe_code = "forbid"
 
 [lints.clippy]

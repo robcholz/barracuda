@@ -5,8 +5,8 @@
 
 use barracuda_agent_tool::ToolGroup;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
 use barracuda_agent::Message;
+use barracuda_agent::{AgentId, AgentKind};
 
 #[cfg(feature = "multiagent")]
 mod multiagent;

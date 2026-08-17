@@ -14,13 +14,13 @@ use barracuda_net::{Dns, TcpConnect};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
-use barracuda_agent::internal::SharedApiManager;
+use barracuda_agent::SharedApiManager;
 use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionManager, SessionManagerInitError, SessionPersistence, SessionStream,
 };
 
-use super::agent_runtime::AgentRuntimeBuildError;
+use crate::service::RuntimeBuildError;
 
 pub(super) enum RuntimeCommand {
     CreateSession {
@@ -75,7 +75,7 @@ where
 {
     pub(super) fn new(
         init: RuntimeWorkerInit<Filesystem, Http>,
-    ) -> Result<Self, AgentRuntimeBuildError> {
+    ) -> Result<Self, RuntimeBuildError> {
         let RuntimeWorkerInit {
             filesystem,
             tool_registry,
@@ -222,14 +222,14 @@ impl WorkerTask {
     }
 }
 
-fn map_session_manager_init_error(error: SessionManagerInitError) -> AgentRuntimeBuildError {
+fn map_session_manager_init_error(error: SessionManagerInitError) -> RuntimeBuildError {
     match error {
         SessionManagerInitError::AgentManager(error) => error.into(),
         SessionManagerInitError::AgentReconciliation(error) => error.into(),
         SessionManagerInitError::Persistence(error) => error.into(),
         SessionManagerInitError::InvalidSessionId(error) => error.into(),
         SessionManagerInitError::MissingState(session) => {
-            AgentRuntimeBuildError::MissingPersistedSessionState(session)
+            RuntimeBuildError::MissingPersistedSessionState(session)
         }
     }
 }

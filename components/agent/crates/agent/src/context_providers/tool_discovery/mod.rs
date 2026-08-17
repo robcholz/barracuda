@@ -6,12 +6,12 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Band, BlockKind, ContextSink, Scope};
 use barracuda_agent_tool::{Tool, ToolDiscoveryHandle, ToolGroup};
 use serde_json::{json, Value};
 
-use crate::base_agent::{ContextProvider, ContextProviderResult};
+use crate::engine::{ContextProvider, ContextProviderResult};
 
 use self::tools::{ToolLoadTool, ToolSearchTool};
 
@@ -127,8 +127,8 @@ fn tool_discovery_reminder_kind() -> BlockKind {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::{record_loaded_tool_group, ToolDiscoveryContextProvider};
-    use crate::base_agent::{AgentStorage, ContextProvider};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
     use barracuda_agent_context::Context;
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::{
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn discovery_tools_remain_available() {
         let mut tool_set = ToolSet::empty();
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let provider = ToolDiscoveryContextProvider::new(tool_set.discovery());
         let storage = AgentStorage::new(&state, provider.id());
         tool_set
@@ -156,7 +156,7 @@ mod tests {
         tool_set
             .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let mut provider = ToolDiscoveryContextProvider::new(tool_set.discovery());
         let storage = AgentStorage::new(&state, provider.id());
         record_loaded_tool_group(&storage, "hidden".to_owned());

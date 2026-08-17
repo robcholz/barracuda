@@ -36,3 +36,6 @@ anyhow = "1"
 
 [[example]]
 name = "di_seams"
+
+[lints.rust]
+unreachable_pub = "deny"

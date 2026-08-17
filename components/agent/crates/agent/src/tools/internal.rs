@@ -7,7 +7,7 @@ use barracuda_agent_tool::{
 };
 use serde::Deserialize;
 
-use crate::base_agent::{AgentEffect, AgentEffectEmitter};
+use crate::engine::{AgentEffect, AgentEffectEmitter};
 
 #[derive(Deserialize)]
 struct EndConversationArgs {
@@ -23,7 +23,7 @@ pub(crate) fn internal_tools(effects: AgentEffectEmitter) -> ToolGroup {
     )
 }
 
-/// The self-control tool: emits a generic finish effect for BaseAgent's next
+/// The self-control tool: emits a generic finish effect for AgentEngine's next
 /// reduction boundary.
 struct EndConversationTool {
     effects: AgentEffectEmitter,
@@ -58,7 +58,7 @@ mod tests {
     use futures_lite::StreamExt as _;
 
     use super::{internal_tools, AgentEffect};
-    use crate::base_agent::agent_effect_channel;
+    use crate::engine::agent_effect_channel;
 
     #[test]
     fn conversation_end_emits_a_generic_finish_effect() {

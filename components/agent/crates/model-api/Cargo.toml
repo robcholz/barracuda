@@ -56,4 +56,5 @@ barracuda-agent-trace = { path = "../trace" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]
+unreachable_pub = "deny"
 unsafe_code = "forbid"

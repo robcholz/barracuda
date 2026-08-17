@@ -15,7 +15,8 @@
 //! `max_level` argument (authoritative — `env_logger` does NOT read `RUST_LOG`),
 //! and the compile-time ceiling selected by Cargo features.
 
-pub mod trace;
+
+mod subscriber;
 
 use std::io;
 use std::path::PathBuf;
@@ -25,7 +26,7 @@ use thiserror::Error;
 use tracing::Level as TraceLevel;
 
 pub use log::LevelFilter;
-pub use trace::{FlatTreeSubscriber, TraceSink};
+pub use subscriber::{FlatTreeSubscriber, TraceSink};
 
 /// Where the host `log` facade (and, through it, the `tracing` stream) writes.
 ///
@@ -166,7 +167,7 @@ const BARRACUDA_TARGET_PREFIX: &str = "barracuda";
 ///
 /// `barracuda-agent-trace` bakes in no domain knowledge: the caller declares the
 /// inherited-context groups (their names, keys, and order) here, keeping the
-/// generic trace layer decoupled from `barracuda_agent_runtime`'s concepts. Build with
+/// generic trace layer decoupled from agent-specific concepts. Build with
 /// [`Default`] and layer groups via [`with_context_group_keys`].
 ///
 /// ```

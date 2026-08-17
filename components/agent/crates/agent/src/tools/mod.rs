@@ -5,7 +5,7 @@
 //! such as multiagent are injected as ordinary `ToolGroup`s during construction.
 //!
 //! Human approval is **not** a tool: it is raised by the permission layer (an
-//! `Ask` decision in `base_agent`), not requested or resolved by the model.
+//! `Ask` decision in `engine`), not requested or resolved by the model.
 //!
 mod internal;
 

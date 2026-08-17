@@ -1,5 +1,5 @@
 use barracuda_agent_runtime::{
-    AgentPersistenceConfig, AgentRuntime, ModelApiFactory, SessionPersistence,
+    AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionPersistence,
 };
 use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
@@ -13,7 +13,7 @@ fn executor_neutral_service_drives_public_session_api() {
     let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
     let (runtime, service) = AgentRuntime::<MemFs, NeverStack>::new(
         MemFs::new(),
-        AgentPersistenceConfig {
+        RuntimeStorageConfig {
             persistence_root: "/agent".into(),
             skill_roots: Vec::new(),
         },

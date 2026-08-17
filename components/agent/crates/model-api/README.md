@@ -3,9 +3,7 @@
 LLM client: OpenAI- and Anthropic-compatible chat, structured JSON output, and
 image inference over reqwless.
 
-Extracted from `barracuda_agent_runtime::llm` into a standalone crate so the LLM surface can
-be reused independently of the agent core (e.g. by `barracuda-agent-memory`'s compactor and
-the `cap_llm_inspect` capability).
+The standalone LLM surface can be reused independently of agent execution.
 
 ## Entry point
 

@@ -31,3 +31,6 @@ anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed
 # `barracuda_runtime_utils::block_on`).
 futures-lite = "2"
+
+[lints.rust]
+unreachable_pub = "deny"

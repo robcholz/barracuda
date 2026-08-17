@@ -9,22 +9,18 @@ use lunka::{Thread, cdef::Type};
 use crate::{Error, ErrorKind, Result};
 
 pub trait FromLua: Sized {
-    #[doc(hidden)]
     fn from_lua(lua: &mut Thread, index: c_int) -> Result<Self>;
 }
 
 pub trait IntoLua {
-    #[doc(hidden)]
     fn push_to_lua(self, lua: &mut Thread) -> Result<()>;
 }
 
 pub trait FromLuaMulti: Sized {
-    #[doc(hidden)]
     fn from_lua_multi(lua: &mut Thread, count: c_int) -> Result<Self>;
 }
 
 pub trait IntoLuaMulti {
-    #[doc(hidden)]
     fn push_to_lua_multi(self, lua: &mut Thread) -> Result<c_int>;
 }
 

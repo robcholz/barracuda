@@ -1,25 +1,25 @@
-//! `barracuda_agent_runtime` assembles tools, persistence, and the core agent runtime.
+//! `barracuda_agent_runtime` assembles agents, sessions, tools, and persistence.
 //!
 //! `AgentRuntime` owns sessions and exposes session connections. Transport
 //! routing, channel inbound/outbound conversion, and reply destinations live in
 //! adapter crates above this layer.
 
 #![no_std]
-// Public subsystem handles share ownership inside one AgentService task.
+// Public subsystem handles share ownership inside one RuntimeService task.
 #![allow(clippy::arc_with_non_send_sync)]
 
 extern crate alloc;
 
-mod runtime;
+mod service;
+mod worker;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::marker::PhantomData;
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
-    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, BaseAgentError, IterationId,
-    IterationLoopError, Message, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId,
-    ToolOutput,
+    AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, IterationId, IterationLoopError,
+    Message, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
 };
 use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersistence};
 pub use barracuda_agent_session::{
@@ -36,8 +36,8 @@ use barracuda_model_api::InitError;
 pub use barracuda_model_api::ProviderUsage;
 pub use barracuda_model_api::{BackendKind, ModelApiConfig, ModelApiFactory};
 use barracuda_net::{Dns, TcpConnect};
-use runtime::RuntimeControl;
-pub use runtime::{AgentRuntimeBuildError, AgentService};
+use service::RuntimeControl;
+pub use service::{RuntimeBuildError, RuntimeService};
 
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
@@ -50,12 +50,12 @@ pub mod tools {
 
 pub use tools::ToolGroup;
 
-pub type AgentResult<T> = Result<T, AgentError>;
+pub type RuntimeResult<T> = Result<T, RuntimeError>;
 
 /// Explicit storage root for an [`AgentRuntime`], plus the skill roots the agent
 /// factory scans to populate every agent's skill catalog.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AgentPersistenceConfig {
+pub struct RuntimeStorageConfig {
     pub persistence_root: String,
     /// Skill roots in priority order (e.g. DATA before SYSTEM). Empty means no
     /// filesystem skills are loaded.
@@ -64,13 +64,13 @@ pub struct AgentPersistenceConfig {
 
 /// What can go wrong while building or driving an [`AgentRuntime`].
 #[derive(Debug, thiserror::Error)]
-pub enum AgentError {
+pub enum RuntimeError {
     /// An LLM API config could not be linked because a required field is empty.
     #[error(transparent)]
     LlmConfig(#[from] InitError),
-    /// Building the core agent runtime failed.
+    /// Building the agent runtime failed.
     #[error(transparent)]
-    Runtime(#[from] AgentRuntimeBuildError),
+    Build(#[from] RuntimeBuildError),
     /// The tool registry failed.
     #[error(transparent)]
     Tool(#[from] ToolRegistryError),
@@ -95,7 +95,7 @@ pub enum AgentError {
 /// A ready-to-drive agent runtime.
 ///
 /// The `Filesystem`/`Http` parameters record which concrete backends the
-/// core runtime worker owns. The backend-erased [`AgentRuntime`] handle retains
+/// service worker owns. The backend-erased [`AgentRuntime`] handle retains
 /// the actual filesystem instance; this marker only preserves the public
 /// `AgentRuntime` type relationship.
 type BackendMarker<Filesystem, Http> = PhantomData<fn() -> (Filesystem, Http)>;
@@ -122,12 +122,12 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError`] when storage cleanup or runtime construction fails.
+    /// Returns [`RuntimeError`] when storage cleanup or runtime construction fails.
     pub fn new(
         filesystem: Filesystem,
-        persistence: AgentPersistenceConfig,
+        persistence: RuntimeStorageConfig,
         llm_factory: ModelApiFactory<Http>,
-    ) -> AgentResult<(Self, AgentService<Filesystem, Http>)> {
+    ) -> RuntimeResult<(Self, RuntimeService<Filesystem, Http>)> {
         Self::with_tool_groups(
             filesystem,
             persistence,
@@ -144,14 +144,14 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError`] when persistence, tool registration, or runtime
+    /// Returns [`RuntimeError`] when persistence, tool registration, or runtime
     /// construction fails.
     pub fn with_tool_groups(
         filesystem: Filesystem,
-        persistence: AgentPersistenceConfig,
+        persistence: RuntimeStorageConfig,
         llm_factory: ModelApiFactory<Http>,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> AgentResult<(Self, AgentService<Filesystem, Http>)> {
+    ) -> RuntimeResult<(Self, RuntimeService<Filesystem, Http>)> {
         let filesystem = Arc::new(filesystem);
         let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
             Arc::clone(&filesystem),
@@ -184,8 +184,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError::Tool`] when the tool is not registered.
-    pub fn enable_tool(&self, name: &str) -> AgentResult<()> {
+    /// Returns [`RuntimeError::Tool`] when the tool is not registered.
+    pub fn enable_tool(&self, name: &str) -> RuntimeResult<()> {
         self.tools.enable(name)?;
         Ok(())
     }
@@ -194,8 +194,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError::Tool`] when the tool is not registered.
-    pub fn disable_tool(&self, name: &str) -> AgentResult<()> {
+    /// Returns [`RuntimeError::Tool`] when the tool is not registered.
+    pub fn disable_tool(&self, name: &str) -> RuntimeResult<()> {
         self.tools.disable(name)?;
         Ok(())
     }
@@ -204,8 +204,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError`] when the tool registry fails to start.
-    pub fn start_all(&self) -> AgentResult<()> {
+    /// Returns [`RuntimeError`] when the tool registry fails to start.
+    pub fn start_all(&self) -> RuntimeResult<()> {
         self.tools.start_all()?;
         Ok(())
     }
@@ -214,8 +214,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError`] when the tool registry fails to stop.
-    pub fn stop_all(&self) -> AgentResult<()> {
+    /// Returns [`RuntimeError`] when the tool registry fails to stop.
+    pub fn stop_all(&self) -> RuntimeResult<()> {
         self.tools.stop_all()?;
         Ok(())
     }
@@ -229,7 +229,7 @@ where
     pub async fn open_session(
         &self,
         session: SessionId,
-    ) -> AgentResult<(SessionControl, SessionStream)> {
+    ) -> RuntimeResult<(SessionControl, SessionStream)> {
         Ok(self.control.open_session(session).await?)
     }
 
@@ -242,14 +242,14 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError::LlmConfig`] without changing bindings when `api` is
+    /// Returns [`RuntimeError::LlmConfig`] without changing bindings when `api` is
     /// invalid.
     pub fn link_api(
         &self,
         api: ModelApiConfig,
         purpose: ApiPurpose,
         default: bool,
-    ) -> AgentResult<()> {
+    ) -> RuntimeResult<()> {
         self.control.link_api(api, purpose, default)?;
         Ok(())
     }
@@ -259,13 +259,13 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`AgentError::SessionCreate`] if persistent session state cannot
+    /// Returns [`RuntimeError::SessionCreate`] if persistent session state cannot
     /// be initialized or the runtime has stopped.
-    pub async fn new_session(&self, persistence: SessionPersistence) -> AgentResult<SessionId> {
+    pub async fn new_session(&self, persistence: SessionPersistence) -> RuntimeResult<SessionId> {
         self.control
             .create_session(persistence)
             .await
-            .map_err(AgentError::from)
+            .map_err(RuntimeError::from)
     }
 
     /// Return the live conversation sessions.

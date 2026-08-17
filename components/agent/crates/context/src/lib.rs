@@ -42,9 +42,9 @@ extern crate alloc;
 #[cfg(feature = "intrusive-observability")]
 extern crate std;
 
+mod assembly;
 mod block;
-mod context;
 mod reminder;
 
+pub use assembly::{Context, ContextItem, ContextSink, RequestContext};
 pub use block::{Band, Block, BlockKind, Scope};
-pub use context::{Context, ContextItem, ContextSink, RequestContext};

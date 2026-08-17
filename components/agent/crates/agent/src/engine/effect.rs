@@ -1,4 +1,4 @@
-//! Typed effects emitted by model-callable tools and reduced by BaseAgent.
+//! Typed effects emitted by model-callable tools and reduced by AgentEngine.
 
 use alloc::{collections::VecDeque, string::String, sync::Arc, vec::Vec};
 use core::cell::RefCell;
@@ -26,9 +26,9 @@ pub(crate) struct AgentEffectEmitter {
     inner: Arc<EffectQueue>,
 }
 
-/// Unique receiving endpoint owned by BaseAgent.
+/// Unique receiving endpoint owned by AgentEngine.
 ///
-/// Deliberately not `Clone`: BaseAgent is the only reducer of tool effects.
+/// Deliberately not `Clone`: AgentEngine is the only reducer of tool effects.
 pub(crate) struct AgentEffectInbox {
     inner: Arc<EffectQueue>,
 }

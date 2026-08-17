@@ -1,150 +1,75 @@
 pub mod barracuda_fs
-pub mod barracuda_fs::fs
-pub enum barracuda_fs::fs::FsError
-pub barracuda_fs::fs::FsError::Io(barracuda_fs::fs::FsIoError)
-pub barracuda_fs::fs::FsError::NotFound
-impl barracuda_fs::fs::FsError
-pub fn barracuda_fs::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-pub fn barracuda_fs::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
-pub struct barracuda_fs::fs::FsIoError
-impl barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn barracuda_fs::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-impl core::cmp::Eq for barracuda_fs::fs::FsIoError
-impl core::cmp::PartialEq for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::eq(&self, other: &Self) -> bool
-impl core::error::Error for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Display for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub struct barracuda_fs::fs::MemFile
-impl barracuda_fs::fs::FsFile for barracuda_fs::MemFile
-pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub struct barracuda_fs::fs::MemFs
-impl barracuda_fs::MemFs
-pub fn barracuda_fs::MemFs::clear(&self)
-pub fn barracuda_fs::MemFs::new() -> Self
-impl barracuda_fs::fs::FileSystem for barracuda_fs::MemFs
-pub type barracuda_fs::MemFs::File = barracuda_fs::MemFile
-pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-impl core::default::Default for barracuda_fs::MemFs
-pub fn barracuda_fs::MemFs::default() -> Self
-pub trait barracuda_fs::fs::FileSystem: 'static
-pub type barracuda_fs::fs::FileSystem::File: barracuda_fs::fs::FsFile
-pub fn barracuda_fs::fs::FileSystem::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::create_dir_all(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::fs::FileSystem::len(&self, path: &str) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FileSystem::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-impl barracuda_fs::fs::FileSystem for barracuda_fs::MemFs
-pub type barracuda_fs::MemFs::File = barracuda_fs::MemFile
-pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub trait barracuda_fs::fs::FsFile
-pub fn barracuda_fs::fs::FsFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FsFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FsFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::fs::FsFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-impl barracuda_fs::fs::FsFile for barracuda_fs::MemFile
-pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
 pub enum barracuda_fs::FsError
-pub barracuda_fs::FsError::Io(barracuda_fs::fs::FsIoError)
+pub barracuda_fs::FsError::Io(barracuda_fs::FsIoError)
 pub barracuda_fs::FsError::NotFound
-impl barracuda_fs::fs::FsError
-pub fn barracuda_fs::fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-pub fn barracuda_fs::fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
+impl barracuda_fs::FsError
+pub fn barracuda_fs::FsError::io(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+pub fn barracuda_fs::FsError::io_message(message: impl core::convert::Into<alloc::string::String>) -> Self
 pub struct barracuda_fs::FsIoError
-impl barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
-pub fn barracuda_fs::fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
-impl core::cmp::Eq for barracuda_fs::fs::FsIoError
-impl core::cmp::PartialEq for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::eq(&self, other: &Self) -> bool
-impl core::error::Error for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Display for barracuda_fs::fs::FsIoError
-pub fn barracuda_fs::fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl barracuda_fs::FsIoError
+pub fn barracuda_fs::FsIoError::message(message: impl core::convert::Into<alloc::string::String>) -> Self
+pub fn barracuda_fs::FsIoError::new(error: impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+impl core::cmp::Eq for barracuda_fs::FsIoError
+impl core::cmp::PartialEq for barracuda_fs::FsIoError
+pub fn barracuda_fs::FsIoError::eq(&self, other: &Self) -> bool
+impl core::error::Error for barracuda_fs::FsIoError
+pub fn barracuda_fs::FsIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for barracuda_fs::FsIoError
+pub fn barracuda_fs::FsIoError::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct barracuda_fs::MemFile
-impl barracuda_fs::fs::FsFile for barracuda_fs::MemFile
-pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
+impl barracuda_fs::FsFile for barracuda_fs::MemFile
+pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::FsError>
 pub struct barracuda_fs::MemFs
 impl barracuda_fs::MemFs
 pub fn barracuda_fs::MemFs::clear(&self)
 pub fn barracuda_fs::MemFs::new() -> Self
-impl barracuda_fs::fs::FileSystem for barracuda_fs::MemFs
+impl barracuda_fs::FileSystem for barracuda_fs::MemFs
 pub type barracuda_fs::MemFs::File = barracuda_fs::MemFile
-pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::FsError>
 pub fn barracuda_fs::MemFs::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::FsError>
 impl core::default::Default for barracuda_fs::MemFs
 pub fn barracuda_fs::MemFs::default() -> Self
 pub trait barracuda_fs::FileSystem: 'static
-pub type barracuda_fs::FileSystem::File: barracuda_fs::fs::FsFile
-pub fn barracuda_fs::FileSystem::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::create_dir_all(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub type barracuda_fs::FileSystem::File: barracuda_fs::FsFile
+pub fn barracuda_fs::FileSystem::append(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::create_dir_all(&self, path: &str) -> core::result::Result<(), barracuda_fs::FsError>
 pub fn barracuda_fs::FileSystem::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::FileSystem::len(&self, path: &str) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FileSystem::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-impl barracuda_fs::fs::FileSystem for barracuda_fs::MemFs
+pub fn barracuda_fs::FileSystem::len(&self, path: &str) -> core::result::Result<u64, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::read(&self, path: &str) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::read_at(&self, path: &str, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::FsError>
+pub fn barracuda_fs::FileSystem::write_atomic(&self, path: &str, data: &[u8]) -> core::result::Result<(), barracuda_fs::FsError>
+impl barracuda_fs::FileSystem for barracuda_fs::MemFs
 pub type barracuda_fs::MemFs::File = barracuda_fs::MemFile
-pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub fn barracuda_fs::MemFs::create(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::create_dir_all(&self, _path: &str) -> core::result::Result<(), barracuda_fs::FsError>
 pub fn barracuda_fs::MemFs::exists(&self, path: &str) -> bool
-pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub fn barracuda_fs::MemFs::list_dir(&self, path: &str) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::open(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::open_append(&self, path: &str) -> core::result::Result<Self::File, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::remove(&self, path: &str) -> core::result::Result<(), barracuda_fs::FsError>
+pub fn barracuda_fs::MemFs::rename(&self, from: &str, to: &str) -> core::result::Result<(), barracuda_fs::FsError>
 pub trait barracuda_fs::FsFile
-pub fn barracuda_fs::FsFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FsFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FsFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::FsFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
-impl barracuda_fs::fs::FsFile for barracuda_fs::MemFile
-pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::fs::FsError>
-pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::fs::FsError>
+pub fn barracuda_fs::FsFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::FsFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::FsFile::size(&self) -> core::result::Result<u64, barracuda_fs::FsError>
+pub fn barracuda_fs::FsFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::FsError>
+impl barracuda_fs::FsFile for barracuda_fs::MemFile
+pub fn barracuda_fs::MemFile::read_exact_at(&mut self, offset: u64, len: usize) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::read_to_end(&mut self) -> core::result::Result<alloc::vec::Vec<u8>, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::size(&self) -> core::result::Result<u64, barracuda_fs::FsError>
+pub fn barracuda_fs::MemFile::write_all(&mut self, data: &[u8]) -> core::result::Result<(), barracuda_fs::FsError>

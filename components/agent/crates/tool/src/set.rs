@@ -8,8 +8,8 @@ use core::cell::RefCell;
 use barracuda_agent_permission::Action;
 use serde::Serialize;
 
+use super::definition::{Tool, ToolError, ToolInvocation, ToolResult};
 use super::registry::{ToolGroup, ToolProjection, ToolRegistry, ToolRegistryVersion};
-use super::tool::{Tool, ToolError, ToolInvocation, ToolResult};
 
 pub type ToolName = String;
 

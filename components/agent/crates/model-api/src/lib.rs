@@ -3,9 +3,7 @@
 //! `barracuda-model-api` — LLM client: OpenAI-/Anthropic-compatible chat, structured JSON
 //! output, and image inference over an injected HTTP transport.
 //!
-//! Extracted from `barracuda_agent_runtime::llm` into a standalone crate so the LLM client
-//! surface can be reused independently of the agent core (e.g. by
-//! `barracuda_agent_memory`'s async extractor and `cap_llm_inspect`).
+//! The standalone LLM client is reusable independently of agent execution.
 //!
 //! # Overview
 //!

@@ -1,7 +1,7 @@
-//! Concrete providers driven by [`BaseAgent`](super::BaseAgent).
+//! Concrete providers driven by [`AgentEngine`](super::AgentEngine).
 //!
-//! BaseAgent owns the generic
-//! [`ContextProvider`](super::base_agent::ContextProvider) port. Domain behavior
+//! AgentEngine owns the generic
+//! [`ContextProvider`](super::engine::ContextProvider) port. Domain behavior
 //! such as agent mode, resume context, conversation projection, skills,
 //! profile, and long-term memory lives here as implementations.
 

@@ -565,7 +565,7 @@ mod tests {
     use futures_lite::future::block_on;
 
     use super::*;
-    use crate::base_agent::stream::BaseAgentStream;
+    use crate::engine::stream::AgentEngineStream;
 
     struct CountingTool {
         name: &'static str,
@@ -673,7 +673,7 @@ mod tests {
                 arguments_json: "{}".to_owned(),
             },
         ];
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         let permission = SelectivePermission {
             executions: Arc::clone(&executions),
             checks: Cell::new(0),

@@ -13,8 +13,8 @@ pub barracuda_agent_session::IterationEvent::Ended
 pub barracuda_agent_session::IterationEvent::Output(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
 pub barracuda_agent_session::IterationEvent::Reasoning(barracuda_runtime_utils::stream::StreamPart<alloc::string::String>)
 pub barracuda_agent_session::IterationEvent::Started
-pub barracuda_agent_session::IterationEvent::Started::iteration: barracuda_agent::base_agent::iteration_loop::IterationId
-pub barracuda_agent_session::IterationEvent::ToolResult(barracuda_runtime_utils::stream::StreamPart<(barracuda_model_api::types::ToolCall, barracuda_agent_tool::tool::ToolOutput)>)
+pub barracuda_agent_session::IterationEvent::Started::iteration: barracuda_agent::engine::iteration_loop::IterationId
+pub barracuda_agent_session::IterationEvent::ToolResult(barracuda_runtime_utils::stream::StreamPart<(barracuda_model_api::types::ToolCall, barracuda_agent_tool::definition::ToolOutput)>)
 pub enum barracuda_agent_session::OpenSessionError
 pub barracuda_agent_session::OpenSessionError::AlreadyOpen(barracuda_agent_session::SessionId)
 pub barracuda_agent_session::OpenSessionError::SessionNotFound(barracuda_agent_session::SessionId)
@@ -33,13 +33,13 @@ pub barracuda_agent_session::SessionControlError::SessionClosed(barracuda_agent_
 pub barracuda_agent_session::SessionControlError::WorkerStopped
 pub enum barracuda_agent_session::SessionCreateError
 pub barracuda_agent_session::SessionCreateError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
-pub barracuda_agent_session::SessionCreateError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
+pub barracuda_agent_session::SessionCreateError::Persistence(barracuda_agent_persistence::registry::PersistenceError)
 pub barracuda_agent_session::SessionCreateError::WorkerStopped
 pub enum barracuda_agent_session::SessionDeleteError
 pub barracuda_agent_session::SessionDeleteError::Agent(barracuda_agent::manager::error::AgentCreateError)
 pub barracuda_agent_session::SessionDeleteError::AlreadyDeleting(barracuda_agent_session::SessionId)
 pub barracuda_agent_session::SessionDeleteError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
-pub barracuda_agent_session::SessionDeleteError::Persistence(barracuda_agent_persistence::persistence::PersistenceError)
+pub barracuda_agent_session::SessionDeleteError::Persistence(barracuda_agent_persistence::registry::PersistenceError)
 pub barracuda_agent_session::SessionDeleteError::SessionNotFound(barracuda_agent_session::SessionId)
 pub barracuda_agent_session::SessionDeleteError::WorkerStopped
 pub enum barracuda_agent_session::SessionError
@@ -51,13 +51,19 @@ pub barracuda_agent_session::SessionEvent::Turn(barracuda_agent_session::TurnEve
 pub enum barracuda_agent_session::SessionEventError
 pub barracuda_agent_session::SessionEventError::DeleteFailed
 pub enum barracuda_agent_session::SessionInputError
-pub barracuda_agent_session::SessionInputError::AgentApproval(barracuda_agent::base_agent::stream::AgentApprovalError)
+pub barracuda_agent_session::SessionInputError::AgentApproval(barracuda_agent::engine::stream::AgentApprovalError)
 pub barracuda_agent_session::SessionInputError::Resolver(barracuda_agent_session::ApprovalResolverError)
+pub enum barracuda_agent_session::SessionManagerInitError
+pub barracuda_agent_session::SessionManagerInitError::AgentManager(barracuda_agent::manager::error::AgentManagerError)
+pub barracuda_agent_session::SessionManagerInitError::AgentReconciliation(barracuda_agent::manager::error::AgentCreateError)
+pub barracuda_agent_session::SessionManagerInitError::InvalidSessionId(barracuda_runtime_utils::IdParseError)
+pub barracuda_agent_session::SessionManagerInitError::MissingState(barracuda_agent_session::SessionId)
+pub barracuda_agent_session::SessionManagerInitError::Persistence(barracuda_agent_persistence::registry::PersistenceError)
 pub enum barracuda_agent_session::SessionPersistence
 pub barracuda_agent_session::SessionPersistence::Ephemeral
 pub barracuda_agent_session::SessionPersistence::Persistent
 pub enum barracuda_agent_session::SessionTurnError
-pub barracuda_agent_session::SessionTurnError::Agent(barracuda_agent::base_agent::stream::AgentError)
+pub barracuda_agent_session::SessionTurnError::Agent(barracuda_agent::engine::stream::AgentError)
 pub barracuda_agent_session::SessionTurnError::AgentCreate(barracuda_agent::manager::error::AgentCreateError)
 pub barracuda_agent_session::SessionTurnError::ContextProvider(barracuda_agent_session::ContextProviderError)
 pub enum barracuda_agent_session::TurnEvent
@@ -123,6 +129,16 @@ impl serde_core::ser::Serialize for barracuda_agent_session::SessionId
 pub fn barracuda_agent_session::SessionId::serialize<S: serde_core::ser::Serializer>(&self, serializer: S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 impl<'de> serde_core::de::Deserialize<'de> for barracuda_agent_session::SessionId
 pub fn barracuda_agent_session::SessionId::deserialize<D: serde_core::de::Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct barracuda_agent_session::SessionManager<Filesystem, Http> where Filesystem: barracuda_fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+impl<Filesystem, Http> barracuda_agent_session::SessionManager<Filesystem, Http> where Filesystem: barracuda_fs::FileSystem + 'static, Http: embedded_nal_async::stack::tcp::TcpConnect + embedded_nal_async::dns::Dns + 'static
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::create(&mut self, persistence: barracuda_agent_session::SessionPersistence) -> core::result::Result<barracuda_agent_session::SessionId, barracuda_agent_session::SessionCreateError>
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::delete(&mut self, session: barracuda_agent_session::SessionId, ack: futures_channel::oneshot::Sender<core::result::Result<(), barracuda_agent_session::SessionDeleteError>>)
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::has_live_actors(&self) -> bool
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::list(&self) -> alloc::vec::Vec<barracuda_agent_session::SessionId>
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::new(filesystem: alloc::sync::Arc<Filesystem>, tool_registry: alloc::sync::Arc<barracuda_agent_tool::registry::ToolRegistry>, persistence: barracuda_agent_persistence::SharedPersistence<Filesystem>, persistence_dir: alloc::string::String, skill_roots: alloc::vec::Vec<alloc::string::String>, api_manager: barracuda_agent::config::api::SharedApiManager, llm_factory: barracuda_model_api::client::ModelApiFactory<Http>) -> core::result::Result<Self, barracuda_agent_session::SessionManagerInitError>
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::open(&mut self, session: barracuda_agent_session::SessionId) -> core::result::Result<(barracuda_agent_session::SessionControl, barracuda_agent_session::SessionStream), barracuda_agent_session::OpenSessionError>
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::poll_actors(&mut self, context: &mut core::task::wake::Context<'_>) -> core::task::poll::Poll<()>
+pub fn barracuda_agent_session::SessionManager<Filesystem, Http>::shutdown(&mut self)
 pub struct barracuda_agent_session::SessionStream
 impl core::ops::drop::Drop for barracuda_agent_session::SessionStream
 pub fn barracuda_agent_session::SessionStream::drop(&mut self)

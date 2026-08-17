@@ -50,7 +50,7 @@ pub(crate) enum IterationEvent {
     Output(StreamPart<String>),
     #[cfg(feature = "cache_profile")]
     Usage(ProviderUsage),
-    /// BaseAgent records these calls before polling the iteration again and
+    /// AgentEngine records these calls before polling the iteration again and
     /// allowing tool execution to begin.
     BeforeToolCalls(Vec<ToolCall>),
     ToolResult(StreamPart<(ToolCall, ToolOutput)>),
@@ -60,7 +60,7 @@ pub(crate) enum IterationEvent {
 ///
 /// Normal iteration completion is represented by the surrounding stream
 /// returning `None`; only cancellation and interruption need explicit items
-/// because they carry distinct control semantics for `BaseAgent`.
+/// because they carry distinct control semantics for `AgentEngine`.
 pub(crate) enum IterationLoopEvent {
     Iteration(IterationEvent),
     Detached(ToolDetachHandle),

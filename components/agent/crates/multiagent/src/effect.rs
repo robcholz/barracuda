@@ -1,6 +1,6 @@
 //! Typed physical effects emitted by the Multiagent domain.
 
-use barracuda_agent::internal::AgentId;
+use barracuda_agent::AgentId;
 use barracuda_agent::Message;
 
 use super::model::{SubagentSpec, SubagentTimeout};

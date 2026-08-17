@@ -11,7 +11,7 @@ use alloc::sync::Arc;
 
 use barracuda_agent_tool::ToolGroup;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
+use barracuda_agent::{AgentId, AgentKind};
 
 use super::policy::SpawnPolicy;
 use super::tool_port::{MultiagentBridge, SubagentControl};

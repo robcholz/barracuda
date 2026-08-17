@@ -13,7 +13,7 @@ use core::task::{Context, Poll};
 use barracuda_agent_tool::ToolGroup;
 use embassy_time::Timer;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
+use barracuda_agent::{AgentId, AgentKind};
 use barracuda_agent_multiagent::{
     DispatchOutcome as DomainDispatchOutcome, InterruptOutcome as DomainInterruptOutcome,
     Multiagent, MultiagentEffect, MultiagentEffectResult, MultiagentPhysicalError, SubagentTimeout,

@@ -9,8 +9,8 @@ use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use strum::IntoStaticStr;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
 use barracuda_agent::Message;
+use barracuda_agent::{AgentId, AgentKind};
 
 /// Everything the Multiagent component needs to materialize one child Agent.
 #[derive(Clone)]
@@ -221,7 +221,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use super::{MultiagentSnapshot, SubagentSnapshot, SubagentStatus};
-    use barracuda_agent::internal::{AgentId, AgentKind};
+    use barracuda_agent::{AgentId, AgentKind};
 
     fn snapshot(
         id: AgentId,

@@ -34,7 +34,7 @@ pub enum PermissionDecision {
 /// Currently this is just the action itself. Agent identity (who is acting) is
 /// deliberately *not* carried here: no built-in policy keys on it, so threading
 /// it through would be a dead parameter. When a policy needs the acting
-/// principal, add it back as borrowed primitives (not `barracuda-agent-runtime`'s `AgentId` /
+/// principal, add it back as borrowed primitives (not `barracuda-agent`'s `AgentId` /
 /// `AgentKind`) so this crate stays *below* the core and the dependency stays
 /// one-directional.
 #[derive(Clone, Copy, Debug)]

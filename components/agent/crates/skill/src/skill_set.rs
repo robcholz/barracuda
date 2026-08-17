@@ -4,8 +4,8 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use core::fmt::Write as _;
 
+use super::document::{SkillDocument, SkillError, SkillName};
 use super::registry::{CatalogSnapshot, EmptySkillRegistry, SkillRegistry, SkillRegistryVersion};
-use super::skill::{SkillDocument, SkillError, SkillName};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CatalogBufferKind {

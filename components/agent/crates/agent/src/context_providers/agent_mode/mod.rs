@@ -1,18 +1,18 @@
 //! Agent-mode provider: state, context projection, and lifecycle behavior.
 //!
-//! BaseAgent only drives the generic provider, effect, and task-lifecycle
+//! AgentEngine only drives the generic provider, effect, and task-lifecycle
 //! protocols. The provider and its tools share the `plan` provider object;
 //! turn boundaries preserve that mode and the plan tools own transitions.
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_tool::{Tool, ToolGroup};
 use serde_json::json;
 use strum::IntoStaticStr;
 
 use self::tools::{EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool};
-use crate::base_agent::AgentEffectEmitter;
-use crate::base_agent::{ContextProvider, ContextProviderResult};
+use crate::engine::AgentEffectEmitter;
+use crate::engine::{ContextProvider, ContextProviderResult};
 
 mod tools;
 
@@ -98,12 +98,12 @@ mod tests {
     use serde_json::Value;
 
     use super::{store_mode, AgentMode, AgentModeContextProvider};
-    use crate::base_agent::{agent_effect_channel, AgentStorage};
-    use crate::base_agent::{ContextProvider, TurnLifecycle};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{agent_effect_channel, AgentStorage};
+    use crate::engine::{ContextProvider, TurnLifecycle};
+    use crate::{AgentEngineState, AgentKind};
 
     fn provider(mode: AgentMode) -> (AgentModeContextProvider, AgentStorage) {
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let (effects, _inbox) = agent_effect_channel();
         let provider = AgentModeContextProvider::new(effects);
         let storage = AgentStorage::new(&state, provider.id());

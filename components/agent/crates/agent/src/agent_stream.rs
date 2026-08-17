@@ -8,15 +8,15 @@ use barracuda_model_api::ToolCall;
 use barracuda_net::{Dns, TcpConnect};
 use futures_core::Stream;
 
-use crate::base_agent::AgentError;
-use crate::base_agent::{
+use crate::engine::AgentError;
+use crate::engine::{
     AgentApprovalError, AgentInputRequest, AgentIterationEvent, AgentOutcome, ApprovalDecision,
     ToolCallId,
 };
 use crate::Agent;
 use crate::Message;
 
-/// Why the long-lived Agent wrapper opened one BaseAgent task.
+/// Why the long-lived Agent wrapper opened one AgentEngine task.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentTurnOrigin {
     Message,

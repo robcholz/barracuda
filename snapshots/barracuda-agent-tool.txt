@@ -93,7 +93,7 @@ pub struct barracuda_agent_tool::ToolRegistry
 impl barracuda_agent_tool::ToolRegistry
 pub fn barracuda_agent_tool::ToolRegistry::disable(&self, name: &str) -> core::result::Result<(), barracuda_agent_tool::ToolRegistryError>
 pub fn barracuda_agent_tool::ToolRegistry::enable(&self, name: &str) -> core::result::Result<(), barracuda_agent_tool::ToolRegistryError>
-pub fn barracuda_agent_tool::ToolRegistry::new<Filesystem>(persistence: barracuda_agent_persistence::SharedPersistence<Filesystem>) -> core::result::Result<Self, barracuda_agent_persistence::persistence::PersistenceError> where Filesystem: barracuda_fs::fs::FileSystem
+pub fn barracuda_agent_tool::ToolRegistry::new<Filesystem>(persistence: barracuda_agent_persistence::SharedPersistence<Filesystem>) -> core::result::Result<Self, barracuda_agent_persistence::registry::PersistenceError> where Filesystem: barracuda_fs::FileSystem
 pub fn barracuda_agent_tool::ToolRegistry::register_group(&self, group: barracuda_agent_tool::ToolGroup) -> core::result::Result<(), barracuda_agent_tool::ToolRegistryError>
 pub fn barracuda_agent_tool::ToolRegistry::start_all(&self) -> core::result::Result<(), barracuda_agent_tool::ToolRegistryError>
 pub fn barracuda_agent_tool::ToolRegistry::stop_all(&self) -> core::result::Result<(), barracuda_agent_tool::ToolRegistryError>

@@ -104,7 +104,7 @@ runtime lifecycle.
 
 The current user input is not a `BlockKind`. It lives in the transcript:
 
-1. `BaseAgent::run` / `AppendMessage` appends the text as the open user turn.
+1. `AgentEngine::submit` / `AppendMessage` appends the text as the open user turn.
 2. `RecentMessagesContextProvider` reads committed turns after the summary cursor
    plus the in-progress open turn.
 3. The provider contributes those messages as `RecentContext` in the history tail.

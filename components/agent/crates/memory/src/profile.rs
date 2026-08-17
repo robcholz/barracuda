@@ -2,7 +2,7 @@
 //!
 //! Profile documents are not long-term facts. They are small, whole-file
 //! documents edited by users or by profile-specific tools and later projected into
-//! context by `barracuda-agent-runtime`.
+//! context by `barracuda-agent`.
 
 use alloc::{
     format,

@@ -19,8 +19,8 @@ use barracuda_model_api::ModelApiFactory;
 use barracuda_net::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
-use barracuda_agent::internal::SharedApiManager;
-use barracuda_agent::internal::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
+use barracuda_agent::SharedApiManager;
+use barracuda_agent::{AgentCreateError, AgentId, AgentManager, AgentManagerError};
 
 use super::actor::{SessionActor, SessionActorExit, SessionActorStatus};
 use super::approval::{LlmApprovalResolver, SharedApprovalResolver};

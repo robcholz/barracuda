@@ -56,7 +56,7 @@ uv run --script components/agent/crates/context/scripts/context_viewer.py
 
 Production crates use `no_std + alloc` and do not depend on a chip PAC or a
 concrete executor. Constructing an `AgentRuntime` also returns an
-`AgentService` future. Spawn that future from the application, implement
+`RuntimeService` future. Spawn that future from the application, implement
 `FileSystem`, and provide an `embedded-nal-async` TCP/DNS stack to `barracuda-net`.
 
 ```rust,ignore

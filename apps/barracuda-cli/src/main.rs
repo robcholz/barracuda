@@ -25,10 +25,10 @@ use std::sync::Mutex;
 use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, bail, Result};
 use barracuda_agent_runtime::{
-    stream::StreamPart, AgentPersistenceConfig, AgentRuntime, ApiPurpose, BackendKind,
-    InputRequestId, InputRequestKind, IterationEvent, Message, ModelApiConfig, ModelApiFactory,
-    ProviderUsage, SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence,
-    SessionStream, ToolCall, ToolOutput, TurnEvent, TurnOrigin,
+    stream::StreamPart, AgentRuntime, ApiPurpose, BackendKind, InputRequestId, InputRequestKind,
+    IterationEvent, Message, ModelApiConfig, ModelApiFactory, ProviderUsage, RuntimeStorageConfig,
+    SessionControl, SessionError, SessionEvent, SessionId, SessionPersistence, SessionStream,
+    ToolCall, ToolOutput, TurnEvent, TurnOrigin,
 };
 use barracuda_agent_trace::{FlatTreeSubscriber, LevelFilter, LogOutput, TraceSink};
 use barracuda_fs::DiskFs;
@@ -952,7 +952,7 @@ async fn run() -> Result<()> {
         }
     }
 
-    let persistence = AgentPersistenceConfig {
+    let persistence = RuntimeStorageConfig {
         persistence_root: MEMORY_DIR.to_string(),
         skill_roots: Vec::new(),
     };
@@ -1354,15 +1354,15 @@ fn secure_llm_factory() -> Result<ModelApiFactory<TokioStack>> {
 
 #[cfg(test)]
 mod tests {
-    use barracuda_agent_runtime::AgentService;
+    use barracuda_agent_runtime::RuntimeService;
     use tempdir::TempDir;
 
     use super::*;
 
-    type ChatService = AgentService<DiskFs, TokioStack>;
+    type ChatService = RuntimeService<DiskFs, TokioStack>;
 
     fn test_system(root: &TempDir) -> (ChatRuntime, ChatService) {
-        let persistence = AgentPersistenceConfig {
+        let persistence = RuntimeStorageConfig {
             persistence_root: root.path().to_string_lossy().into_owned(),
             skill_roots: Vec::new(),
         };

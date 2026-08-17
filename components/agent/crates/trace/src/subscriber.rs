@@ -81,7 +81,7 @@ pub trait TraceSink: Send + Sync {
 /// A named, ordered set of inherited-context keys (see [`with_context_group_keys`]).
 ///
 /// `barracuda-agent-trace` itself bakes in **no** group; the caller registers each one at
-/// subscriber init (e.g. `barracuda_agent_runtime` registers `"run"` with
+/// subscriber init (e.g. the agent runtime registers `"run"` with
 /// `["system", "session", "turn", "agent", "iteration"]`). A span field named
 /// `group.key` whose `group` matches `name` and whose `key` is in `keys` becomes
 /// this group's incremental context.
@@ -394,7 +394,7 @@ impl<S: TraceSink> FlatTreeSubscriber<S> {
     /// A span field named `name.<key>` then becomes this group's incremental
     /// context, rendered once (as a `<context=<name> …>` block) on the `enter`
     /// line of the span that opens it. `barracuda-agent-trace` bakes in no group; the caller
-    /// declares them — e.g. `barracuda_agent_runtime` registers `"run"` with
+    /// declares them — e.g. the agent runtime registers `"run"` with
     /// `["system", "session", "turn", "agent", "iteration"]`.
     pub fn with_context_group_keys(
         mut self,

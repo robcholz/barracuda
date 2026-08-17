@@ -7,13 +7,13 @@
 use alloc::sync::Arc;
 use core::cell::{RefCell, RefMut};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_skill::SkillSet;
 use barracuda_agent_tool::{Tool, ToolGroup};
 
 use self::tools::{ListSkillTool, ReadSkillTool, ReloadSkillsTool};
-use crate::base_agent::{ContextProvider, ContextProviderResult};
+use crate::engine::{ContextProvider, ContextProviderResult};
 
 mod tools;
 

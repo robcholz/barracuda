@@ -1,4 +1,4 @@
-use barracuda_agent::internal::{baked, AgentKind};
+use barracuda_agent::{baked, AgentKind};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SpawnPolicy {

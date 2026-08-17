@@ -13,8 +13,8 @@
 
 extern crate alloc;
 
-pub mod fs;
-pub mod sandbox;
+mod fs;
+mod routing;
 
 pub use fs::{SandboxError, SandboxFs, READ_ONLY_PREFIXES, VISIBLE_PREFIXES};
-pub use sandbox::{RealRoots, Sandbox};
+pub use routing::{RealRoots, Sandbox};

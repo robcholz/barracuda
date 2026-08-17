@@ -2,12 +2,12 @@
 
 use alloc::{borrow::Cow, string::String, vec::Vec};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Band, BlockKind, ContextSink, Scope};
 use barracuda_model_api::ToolCall;
 
-use crate::base_agent::{ContextProvider, ContextProviderResult};
-use crate::BaseAgentState;
+use crate::engine::{ContextProvider, ContextProviderResult};
+use crate::AgentEngineState;
 
 /// Contributes one warning for tool calls whose completion was unknown at restart.
 pub(crate) struct ResumeContextProvider {
@@ -16,7 +16,7 @@ pub(crate) struct ResumeContextProvider {
 }
 
 impl ResumeContextProvider {
-    pub(crate) fn new(state: &BaseAgentState) -> Self {
+    pub(crate) fn new(state: &AgentEngineState) -> Self {
         Self {
             inflight_toolcalls: state.inflight_toolcalls().to_vec(),
             reminder_pending: true,
@@ -75,12 +75,12 @@ mod tests {
     use barracuda_model_api::ToolCall;
 
     use super::ResumeContextProvider;
-    use crate::base_agent::{AgentStorage, ContextProvider};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
 
     #[test]
     fn inflight_toolcalls_are_reminded_once_without_exposing_tools() {
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         state.get_mut().record_inflight_toolcalls(vec![ToolCall {
             id: "call-1".to_owned(),
             name: "profile_read".to_owned(),

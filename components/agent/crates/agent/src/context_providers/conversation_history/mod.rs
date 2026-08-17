@@ -12,7 +12,7 @@ mod llm_compactor;
 
 use alloc::{boxed::Box, string::ToString, vec::Vec};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
 use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use barracuda_model_api::ModelApiFactory;
@@ -20,8 +20,8 @@ use barracuda_net::{Dns, TcpConnect};
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::base_agent::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 use crate::config::SharedApiManager;
+use crate::engine::{ContextProvider, ContextProviderFuture, ContextProviderResult};
 
 use llm_compactor::LlmCompactor;
 
@@ -60,7 +60,7 @@ pub(crate) enum ConversationHistoryProviderError {
 
 /// Owns the complete request-time projection of one conversation transcript.
 ///
-/// The transcript itself is owned by `BaseAgent` (as `dyn Transcript`) and is
+/// The transcript itself is owned by `AgentEngine` (as `dyn Transcript`) and is
 /// lent to this provider for the duration of each [`ContextProvider::prepare`]
 /// call; the provider holds only the derived projection (summary + verbatim tail).
 pub(crate) struct ConversationHistoryContextProvider {
@@ -293,8 +293,8 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{CompactionPolicy, ContextProvider, ConversationHistoryContextProvider};
-    use crate::base_agent::AgentStorage;
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::AgentStorage;
+    use crate::{AgentEngineState, AgentKind};
 
     struct WindowEchoCompactor;
 
@@ -342,7 +342,7 @@ mod tests {
             Box::new(WindowEchoCompactor),
             CompactionPolicy::new(0, 1, usize::MAX),
         );
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let storage = AgentStorage::new(&state, provider.id());
         assert!(block_on(provider.prepare(&storage, &transcript as &dyn Transcript)).is_ok());
 

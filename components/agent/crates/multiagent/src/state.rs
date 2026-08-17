@@ -4,7 +4,7 @@ use alloc::{
     vec::Vec,
 };
 
-use barracuda_agent::internal::{AgentId, AgentKind};
+use barracuda_agent::{AgentId, AgentKind};
 
 use super::model::{SubagentSnapshot, SubagentStatus, SubagentTimeout};
 

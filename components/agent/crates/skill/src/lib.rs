@@ -9,12 +9,12 @@
 
 extern crate alloc;
 
+mod document;
 mod registry;
-mod skill;
 mod skill_set;
 
+pub use document::{Skill, SkillDocument, SkillError, SkillName};
 pub use registry::{
     CatalogSnapshot, EmptySkillRegistry, FsSkillRegistry, SkillRegistry, SkillRegistryVersion,
 };
-pub use skill::{Skill, SkillDocument, SkillError, SkillName};
 pub use skill_set::SkillSet;

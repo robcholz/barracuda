@@ -2,7 +2,7 @@ use alloc::string::ToString;
 
 use serde_json::Value;
 
-use super::tool::{ToolError, ToolInvokeError, ToolResult};
+use super::definition::{ToolError, ToolInvokeError, ToolResult};
 
 pub(super) fn normalize_arguments_json(arguments_json: &str) -> ToolResult<(&str, Value)> {
     let text = normalized_arguments_json(arguments_json);

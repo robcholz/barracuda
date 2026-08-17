@@ -9,8 +9,8 @@ use async_channel::{Receiver, Sender};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
 use barracuda_agent::Message;
+use barracuda_agent::{AgentId, AgentKind};
 
 use super::model::{
     MultiagentSnapshot, SubagentResult, SubagentSnapshot, SubagentSpec, SubagentTimeout,

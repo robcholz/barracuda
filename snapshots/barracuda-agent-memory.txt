@@ -15,24 +15,24 @@ pub barracuda_agent_memory::long_term_memory::LongTermError::NotFound(barracuda_
 pub enum barracuda_agent_memory::long_term_memory::LongTermInitError
 pub barracuda_agent_memory::long_term_memory::LongTermInitError::Unreadable
 pub barracuda_agent_memory::long_term_memory::LongTermInitError::Unreadable::path: alloc::string::String
-pub barracuda_agent_memory::long_term_memory::LongTermInitError::Unreadable::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::long_term_memory::LongTermInitError::Unreadable::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::long_term_memory::StoreOutcome
 pub barracuda_agent_memory::long_term_memory::StoreOutcome::Created(barracuda_agent_memory::long_term_memory::MemoryItem)
 pub barracuda_agent_memory::long_term_memory::StoreOutcome::Duplicate(barracuda_agent_memory::long_term_memory::MemoryItem)
 impl barracuda_agent_memory::long_term_memory::StoreOutcome
 pub fn barracuda_agent_memory::long_term_memory::StoreOutcome::item(&self) -> &barracuda_agent_memory::long_term_memory::MemoryItem
-pub struct barracuda_agent_memory::long_term_memory::LongTermMemory<F: barracuda_fs::fs::FileSystem + 'static>
-impl<F: barracuda_fs::fs::FileSystem + 'static> barracuda_agent_memory::long_term_memory::LongTermMemory<F>
+pub struct barracuda_agent_memory::long_term_memory::LongTermMemory<F: barracuda_fs::FileSystem + 'static>
+impl<F: barracuda_fs::FileSystem + 'static> barracuda_agent_memory::long_term_memory::LongTermMemory<F>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::catalog(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::forget(&self, id: &barracuda_agent_memory::long_term_memory::MemoryId) -> core::result::Result<(), barracuda_agent_memory::long_term_memory::LongTermError>
-pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<barracuda_fs::fs::FsError>
+pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<barracuda_fs::FsError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::list(&self) -> alloc::vec::Vec<barracuda_agent_memory::long_term_memory::MemoryItem>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::new(filesystem: alloc::sync::Arc<F>, dir: &str, id_prefix: &str) -> core::result::Result<Self, barracuda_agent_memory::long_term_memory::LongTermInitError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::recall(&self, labels: &[alloc::string::String], query: core::option::Option<&str>, limit: usize) -> alloc::vec::Vec<barracuda_agent_memory::long_term_memory::MemoryItem>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::store(&self, draft: barracuda_agent_memory::long_term_memory::MemoryDraft) -> barracuda_agent_memory::long_term_memory::StoreOutcome
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::update(&self, id: &barracuda_agent_memory::long_term_memory::MemoryId, patch: barracuda_agent_memory::long_term_memory::MemoryPatch) -> core::result::Result<barracuda_agent_memory::long_term_memory::MemoryItem, barracuda_agent_memory::long_term_memory::LongTermError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::version(&self) -> u64
-impl<F: barracuda_fs::fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::long_term_memory::LongTermMemory<F>
+impl<F: barracuda_fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::long_term_memory::LongTermMemory<F>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::clone(&self) -> Self
 pub struct barracuda_agent_memory::long_term_memory::MemoryDraft
 pub barracuda_agent_memory::long_term_memory::MemoryDraft::content: alloc::string::String
@@ -76,7 +76,7 @@ pub fn barracuda_agent_memory::profile::ProfileDocument::fmt(&self, formatter: &
 pub enum barracuda_agent_memory::profile::ProfileError
 pub barracuda_agent_memory::profile::ProfileError::File
 pub barracuda_agent_memory::profile::ProfileError::File::document: barracuda_agent_memory::profile::ProfileDocument
-pub barracuda_agent_memory::profile::ProfileError::File::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::profile::ProfileError::File::source: barracuda_fs::FsError
 pub barracuda_agent_memory::profile::ProfileError::InvalidUtf8
 pub barracuda_agent_memory::profile::ProfileError::InvalidUtf8::document: barracuda_agent_memory::profile::ProfileDocument
 pub barracuda_agent_memory::profile::ProfileError::TooLarge
@@ -88,8 +88,8 @@ pub struct barracuda_agent_memory::profile::ProfileSnapshot
 pub barracuda_agent_memory::profile::ProfileSnapshot::assistant_identity: core::option::Option<alloc::string::String>
 pub barracuda_agent_memory::profile::ProfileSnapshot::soul: core::option::Option<alloc::string::String>
 pub barracuda_agent_memory::profile::ProfileSnapshot::user_profile: core::option::Option<alloc::string::String>
-pub struct barracuda_agent_memory::profile::ProfileStore<F: barracuda_fs::fs::FileSystem + 'static>
-impl<F: barracuda_fs::fs::FileSystem + 'static> barracuda_agent_memory::profile::ProfileStore<F>
+pub struct barracuda_agent_memory::profile::ProfileStore<F: barracuda_fs::FileSystem + 'static>
+impl<F: barracuda_fs::FileSystem + 'static> barracuda_agent_memory::profile::ProfileStore<F>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::clear(&self, document: barracuda_agent_memory::profile::ProfileDocument) -> core::result::Result<(), barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::dir(&self) -> &str
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::ensure_default(&self, document: barracuda_agent_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<bool, barracuda_agent_memory::profile::ProfileError>
@@ -98,7 +98,7 @@ pub fn barracuda_agent_memory::profile::ProfileStore<F>::path(&self, document: b
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::read(&self, document: barracuda_agent_memory::profile::ProfileDocument) -> core::result::Result<core::option::Option<alloc::string::String>, barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::replace(&self, document: barracuda_agent_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<(), barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::snapshot(&self) -> core::result::Result<barracuda_agent_memory::profile::ProfileSnapshot, barracuda_agent_memory::profile::ProfileError>
-impl<F: barracuda_fs::fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::profile::ProfileStore<F>
+impl<F: barracuda_fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::profile::ProfileStore<F>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub const barracuda_agent_memory::profile::ASSISTANT_IDENTITY_FILE: &str
 pub const barracuda_agent_memory::profile::DEFAULT_PROFILE_DOCUMENT_MAX_BYTES: usize
@@ -112,16 +112,16 @@ pub barracuda_agent_memory::transcript_store::AssistantFragment::ToolCall(serde_
 pub enum barracuda_agent_memory::transcript_store::TranscriptDeleteError
 pub barracuda_agent_memory::transcript_store::TranscriptDeleteError::Delete
 pub barracuda_agent_memory::transcript_store::TranscriptDeleteError::Delete::path: alloc::string::String
-pub barracuda_agent_memory::transcript_store::TranscriptDeleteError::Delete::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::transcript_store::TranscriptDeleteError::Delete::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::transcript_store::TranscriptInitError
 pub barracuda_agent_memory::transcript_store::TranscriptInitError::Unreadable
 pub barracuda_agent_memory::transcript_store::TranscriptInitError::Unreadable::path: alloc::string::String
-pub barracuda_agent_memory::transcript_store::TranscriptInitError::Unreadable::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::transcript_store::TranscriptInitError::Unreadable::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::transcript_store::TranscriptListError
 pub barracuda_agent_memory::transcript_store::TranscriptListError::InvalidFilename(alloc::string::String)
 pub barracuda_agent_memory::transcript_store::TranscriptListError::List
 pub barracuda_agent_memory::transcript_store::TranscriptListError::List::path: alloc::string::String
-pub barracuda_agent_memory::transcript_store::TranscriptListError::List::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::transcript_store::TranscriptListError::List::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::transcript_store::TurnError
 pub barracuda_agent_memory::transcript_store::TurnError::AlreadyOpen
 pub barracuda_agent_memory::transcript_store::TurnError::Inactive
@@ -136,19 +136,19 @@ impl barracuda_agent_memory::transcript_store::ToolHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::ToolHandle<'_>::append(&mut self, fragment: &str)
 impl core::ops::drop::Drop for barracuda_agent_memory::transcript_store::ToolHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::ToolHandle<'_>::drop(&mut self)
-pub struct barracuda_agent_memory::transcript_store::TranscriptStore<F: barracuda_fs::fs::FileSystem>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::TranscriptStore<F>
+pub struct barracuda_agent_memory::transcript_store::TranscriptStore<F: barracuda_fs::FileSystem>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::delete(filesystem: &F, transcript_id: u32, dir: &str) -> core::result::Result<(), barracuda_agent_memory::transcript_store::TranscriptDeleteError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(filesystem: &F, dir: &str) -> core::result::Result<alloc::vec::Vec<u32>, barracuda_agent_memory::transcript_store::TranscriptListError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::new(filesystem: alloc::sync::Arc<F>, transcript_id: u32, dir: &str) -> core::result::Result<Self, barracuda_agent_memory::transcript_store::TranscriptInitError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> core::ops::drop::Drop for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> core::ops::drop::Drop for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::drop(&mut self)
 pub struct barracuda_agent_memory::transcript_store::Turn
 pub barracuda_agent_memory::transcript_store::Turn::id: core::option::Option<barracuda_agent_memory::transcript_store::TurnId>
@@ -185,7 +185,7 @@ pub trait barracuda_agent_memory::transcript_store::Transcript
 pub fn barracuda_agent_memory::transcript_store::Transcript::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::Transcript::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::Transcript::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
@@ -204,7 +204,7 @@ pub barracuda_agent_memory::LongTermError::NotFound(barracuda_agent_memory::long
 pub enum barracuda_agent_memory::LongTermInitError
 pub barracuda_agent_memory::LongTermInitError::Unreadable
 pub barracuda_agent_memory::LongTermInitError::Unreadable::path: alloc::string::String
-pub barracuda_agent_memory::LongTermInitError::Unreadable::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::LongTermInitError::Unreadable::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::ProfileDocument
 pub barracuda_agent_memory::ProfileDocument::AssistantIdentity
 pub barracuda_agent_memory::ProfileDocument::Soul
@@ -218,7 +218,7 @@ pub fn barracuda_agent_memory::profile::ProfileDocument::fmt(&self, formatter: &
 pub enum barracuda_agent_memory::ProfileError
 pub barracuda_agent_memory::ProfileError::File
 pub barracuda_agent_memory::ProfileError::File::document: barracuda_agent_memory::profile::ProfileDocument
-pub barracuda_agent_memory::ProfileError::File::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::ProfileError::File::source: barracuda_fs::FsError
 pub barracuda_agent_memory::ProfileError::InvalidUtf8
 pub barracuda_agent_memory::ProfileError::InvalidUtf8::document: barracuda_agent_memory::profile::ProfileDocument
 pub barracuda_agent_memory::ProfileError::TooLarge
@@ -233,16 +233,16 @@ pub fn barracuda_agent_memory::long_term_memory::StoreOutcome::item(&self) -> &b
 pub enum barracuda_agent_memory::TranscriptDeleteError
 pub barracuda_agent_memory::TranscriptDeleteError::Delete
 pub barracuda_agent_memory::TranscriptDeleteError::Delete::path: alloc::string::String
-pub barracuda_agent_memory::TranscriptDeleteError::Delete::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::TranscriptDeleteError::Delete::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::TranscriptInitError
 pub barracuda_agent_memory::TranscriptInitError::Unreadable
 pub barracuda_agent_memory::TranscriptInitError::Unreadable::path: alloc::string::String
-pub barracuda_agent_memory::TranscriptInitError::Unreadable::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::TranscriptInitError::Unreadable::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::TranscriptListError
 pub barracuda_agent_memory::TranscriptListError::InvalidFilename(alloc::string::String)
 pub barracuda_agent_memory::TranscriptListError::List
 pub barracuda_agent_memory::TranscriptListError::List::path: alloc::string::String
-pub barracuda_agent_memory::TranscriptListError::List::source: barracuda_fs::fs::FsError
+pub barracuda_agent_memory::TranscriptListError::List::source: barracuda_fs::FsError
 pub enum barracuda_agent_memory::TurnError
 pub barracuda_agent_memory::TurnError::AlreadyOpen
 pub barracuda_agent_memory::TurnError::Inactive
@@ -252,18 +252,18 @@ impl barracuda_agent_memory::transcript_store::AssistantHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::AssistantHandle<'_>::append(&mut self, fragment: barracuda_agent_memory::transcript_store::AssistantFragment<'_>)
 impl core::ops::drop::Drop for barracuda_agent_memory::transcript_store::AssistantHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::AssistantHandle<'_>::drop(&mut self)
-pub struct barracuda_agent_memory::LongTermMemory<F: barracuda_fs::fs::FileSystem + 'static>
-impl<F: barracuda_fs::fs::FileSystem + 'static> barracuda_agent_memory::long_term_memory::LongTermMemory<F>
+pub struct barracuda_agent_memory::LongTermMemory<F: barracuda_fs::FileSystem + 'static>
+impl<F: barracuda_fs::FileSystem + 'static> barracuda_agent_memory::long_term_memory::LongTermMemory<F>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::catalog(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::forget(&self, id: &barracuda_agent_memory::long_term_memory::MemoryId) -> core::result::Result<(), barracuda_agent_memory::long_term_memory::LongTermError>
-pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<barracuda_fs::fs::FsError>
+pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::last_persist_error(&self) -> core::option::Option<barracuda_fs::FsError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::list(&self) -> alloc::vec::Vec<barracuda_agent_memory::long_term_memory::MemoryItem>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::new(filesystem: alloc::sync::Arc<F>, dir: &str, id_prefix: &str) -> core::result::Result<Self, barracuda_agent_memory::long_term_memory::LongTermInitError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::recall(&self, labels: &[alloc::string::String], query: core::option::Option<&str>, limit: usize) -> alloc::vec::Vec<barracuda_agent_memory::long_term_memory::MemoryItem>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::store(&self, draft: barracuda_agent_memory::long_term_memory::MemoryDraft) -> barracuda_agent_memory::long_term_memory::StoreOutcome
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::update(&self, id: &barracuda_agent_memory::long_term_memory::MemoryId, patch: barracuda_agent_memory::long_term_memory::MemoryPatch) -> core::result::Result<barracuda_agent_memory::long_term_memory::MemoryItem, barracuda_agent_memory::long_term_memory::LongTermError>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::version(&self) -> u64
-impl<F: barracuda_fs::fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::long_term_memory::LongTermMemory<F>
+impl<F: barracuda_fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::long_term_memory::LongTermMemory<F>
 pub fn barracuda_agent_memory::long_term_memory::LongTermMemory<F>::clone(&self) -> Self
 pub struct barracuda_agent_memory::MemoryDraft
 pub barracuda_agent_memory::MemoryDraft::content: alloc::string::String
@@ -298,8 +298,8 @@ pub struct barracuda_agent_memory::ProfileSnapshot
 pub barracuda_agent_memory::ProfileSnapshot::assistant_identity: core::option::Option<alloc::string::String>
 pub barracuda_agent_memory::ProfileSnapshot::soul: core::option::Option<alloc::string::String>
 pub barracuda_agent_memory::ProfileSnapshot::user_profile: core::option::Option<alloc::string::String>
-pub struct barracuda_agent_memory::ProfileStore<F: barracuda_fs::fs::FileSystem + 'static>
-impl<F: barracuda_fs::fs::FileSystem + 'static> barracuda_agent_memory::profile::ProfileStore<F>
+pub struct barracuda_agent_memory::ProfileStore<F: barracuda_fs::FileSystem + 'static>
+impl<F: barracuda_fs::FileSystem + 'static> barracuda_agent_memory::profile::ProfileStore<F>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::clear(&self, document: barracuda_agent_memory::profile::ProfileDocument) -> core::result::Result<(), barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::dir(&self) -> &str
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::ensure_default(&self, document: barracuda_agent_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<bool, barracuda_agent_memory::profile::ProfileError>
@@ -308,26 +308,26 @@ pub fn barracuda_agent_memory::profile::ProfileStore<F>::path(&self, document: b
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::read(&self, document: barracuda_agent_memory::profile::ProfileDocument) -> core::result::Result<core::option::Option<alloc::string::String>, barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::replace(&self, document: barracuda_agent_memory::profile::ProfileDocument, content: impl core::convert::AsRef<str>) -> core::result::Result<(), barracuda_agent_memory::profile::ProfileError>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::snapshot(&self) -> core::result::Result<barracuda_agent_memory::profile::ProfileSnapshot, barracuda_agent_memory::profile::ProfileError>
-impl<F: barracuda_fs::fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::profile::ProfileStore<F>
+impl<F: barracuda_fs::FileSystem + 'static> core::clone::Clone for barracuda_agent_memory::profile::ProfileStore<F>
 pub fn barracuda_agent_memory::profile::ProfileStore<F>::clone(&self) -> Self
 pub struct barracuda_agent_memory::ToolHandle<'a>
 impl barracuda_agent_memory::transcript_store::ToolHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::ToolHandle<'_>::append(&mut self, fragment: &str)
 impl core::ops::drop::Drop for barracuda_agent_memory::transcript_store::ToolHandle<'_>
 pub fn barracuda_agent_memory::transcript_store::ToolHandle<'_>::drop(&mut self)
-pub struct barracuda_agent_memory::TranscriptStore<F: barracuda_fs::fs::FileSystem>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::TranscriptStore<F>
+pub struct barracuda_agent_memory::TranscriptStore<F: barracuda_fs::FileSystem>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::delete(filesystem: &F, transcript_id: u32, dir: &str) -> core::result::Result<(), barracuda_agent_memory::transcript_store::TranscriptDeleteError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::list_persisted_ids(filesystem: &F, dir: &str) -> core::result::Result<alloc::vec::Vec<u32>, barracuda_agent_memory::transcript_store::TranscriptListError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::new(filesystem: alloc::sync::Arc<F>, transcript_id: u32, dir: &str) -> core::result::Result<Self, barracuda_agent_memory::transcript_store::TranscriptInitError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> core::ops::drop::Drop for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> core::ops::drop::Drop for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::drop(&mut self)
 pub struct barracuda_agent_memory::Turn
 pub barracuda_agent_memory::Turn::id: core::option::Option<barracuda_agent_memory::transcript_store::TurnId>
@@ -370,7 +370,7 @@ pub trait barracuda_agent_memory::Transcript
 pub fn barracuda_agent_memory::Transcript::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::Transcript::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::Transcript::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>
-impl<F: barracuda_fs::fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
+impl<F: barracuda_fs::FileSystem> barracuda_agent_memory::transcript_store::Transcript for barracuda_agent_memory::transcript_store::TranscriptStore<F>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::open_turn(&self) -> core::result::Result<barracuda_agent_memory::transcript_store::TurnHandle, barracuda_agent_memory::transcript_store::TurnError>
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turn_version(&self) -> u64
 pub fn barracuda_agent_memory::transcript_store::TranscriptStore<F>::turns(&self) -> alloc::sync::Arc<alloc::vec::Vec<barracuda_agent_memory::transcript_store::Turn>>

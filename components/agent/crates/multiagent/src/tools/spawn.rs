@@ -14,7 +14,7 @@ use barracuda_agent_tool::{
 };
 use serde::Deserialize;
 
-use barracuda_agent::internal::AgentKind;
+use barracuda_agent::AgentKind;
 use barracuda_agent::Message;
 
 use super::super::model::{SubagentTimeout, TranscriptText};

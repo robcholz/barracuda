@@ -26,9 +26,9 @@ use futures_lite::StreamExt as _;
 use serde::Deserialize;
 use serde_json::json;
 
-use barracuda_agent::internal::ApprovalDecision;
+use barracuda_agent::ApprovalDecision;
 use barracuda_agent::Message;
-use barracuda_agent::{internal::SharedApiManager, ApiPurpose};
+use barracuda_agent::{ApiPurpose, SharedApiManager};
 
 use super::{ApprovalFuture, ApprovalResolver, ApprovalResolverError};
 

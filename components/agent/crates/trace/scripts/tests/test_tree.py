@@ -8,10 +8,10 @@ from barracuda_trace import build_forest, render_tree
 SPEC_EXAMPLE = """\
 TRACE 2100 enter <span=1 parent=none task=main span-name=session target=barracuda_agent_runtime::orchestrator> <context=run system=agent-system session=session-1>
 TRACE 2105 enter <span=2 parent=1 task=main span-name=turn target=barracuda_agent_runtime::orchestrator> <context=run turn=7> message_id=m1 cause=message
-TRACE 2110 enter <span=3 parent=2 task=main span-name=agent target=barracuda_agent_runtime::agent::registry> <context=run agent=agent-1> kind=conversation depth=0
+TRACE 2110 enter <span=3 parent=2 task=main span-name=agent target=barracuda_agent::manager> <context=run agent=agent-1> kind=conversation depth=0
 TRACE 2112 enter <span=4 parent=3 task=main span-name=iteration_loop target=barracuda_agent_runtime::iteration_loop> <context=run iteration=iteration-0>
-TRACE 2120 enter <span=5 parent=4 task=main span-name=agent target=barracuda_agent_runtime::agent::registry> <context=run agent=agent-2> kind=tool depth=1
-TRACE 2121 event <span=5 task=main event-name=spawned target=barracuda_agent_runtime::agent::registry> parent_agent=agent-1 child_agent=agent-2
+TRACE 2120 enter <span=5 parent=4 task=main span-name=agent target=barracuda_agent::manager> <context=run agent=agent-2> kind=tool depth=1
+TRACE 2121 event <span=5 task=main event-name=spawned target=barracuda_agent::manager> parent_agent=agent-1 child_agent=agent-2
 TRACE 2130 exit <span=5 task=main>
 TRACE 2150 event <span=4 task=main event-name=completion target=barracuda_agent_runtime::iteration_loop> status=done 👋 Hello!
 TRACE 2152 exit <span=4 task=main>

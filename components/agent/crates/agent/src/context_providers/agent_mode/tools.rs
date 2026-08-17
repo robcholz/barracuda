@@ -2,7 +2,7 @@
 
 use alloc::{borrow::ToOwned, string::String};
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
 use barracuda_agent_tool::{
     tool_metadata, EmptyArgs, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
@@ -10,7 +10,7 @@ use barracuda_agent_tool::{
 use serde::Deserialize;
 
 use super::{store_mode, AgentMode};
-use crate::base_agent::{AgentEffect, AgentEffectEmitter};
+use crate::engine::{AgentEffect, AgentEffectEmitter};
 
 const DEFAULT_CANCEL_MESSAGE: &str = "Planning cancelled.";
 
@@ -136,18 +136,16 @@ mod tests {
     use futures_lite::StreamExt as _;
 
     use super::{AgentEffect, AgentMode};
-    use crate::base_agent::{
-        agent_effect_channel, AgentEffectEmitter, AgentStorage, ContextProvider,
-    };
     use crate::context_providers::agent_mode::{load_mode, AgentModeContextProvider};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{agent_effect_channel, AgentEffectEmitter, AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
 
     fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation {
         ToolInvocation::try_new(Some("call-test"), name, arguments_json).expect("valid invocation")
     }
 
     fn storage(mode: AgentMode) -> AgentStorage {
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let (effects, _inbox) = agent_effect_channel();
         let provider = AgentModeContextProvider::new(effects);
         let storage = AgentStorage::new(&state, provider.id());

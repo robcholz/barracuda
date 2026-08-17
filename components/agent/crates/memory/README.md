@@ -8,12 +8,12 @@ editable global profile documents (`soul.md`, `identity.md`, `user.md`), and
 **long-term memory** (durable facts). These stores know nothing about prompt
 assembly, summarization, token budgets, or agent tools. Assembling an LLM
 context window is the *agent layer's* job, built on top of the stores via
-context providers in `barracuda-agent-runtime`.
+context providers in `barracuda-agent`.
 
 The crate only defines the `Compactor` **seam** — the contract for folding an
 aged window of messages into a shorter summary. It carries no LLM dependency;
 the ready-made LLM-backed compactor (`LlmCompactor`) and the rolling-summary
-provider that drives it both live in `barracuda_agent_runtime` (the layer that owns the LLM
+provider that drives it both live in `barracuda_agent` (the layer that owns the LLM
 client). The store is never asked to compact.
 
 As a core crate it depends only on the `barracuda-fs` `FileSystem` persistence
@@ -32,7 +32,7 @@ fully host-testable.
 | `TurnHandle` | The non-generic RAII scope returned by `open_turn()`. It opens role-specific child handles and commits plus persists the turn on drop. |
 | `UserHandle` / `AssistantHandle` / `ToolHandle` | Nested message scopes. Their only mutation is `append()`; dropping one finishes its message. |
 | `Compactor` / `CompactError` | The summarization seam: fold an aged message window into a shorter summary. Driven by the agent layer, **not** the store. |
-| `ProfileStore` and friends | Editable global profile documents: `Soul`, assistant identity, and user profile. Pure whole-file storage over `FileSystem`; projected into context by `barracuda-agent-runtime`. |
+| `ProfileStore` and friends | Editable global profile documents: `Soul`, assistant identity, and user profile. Pure whole-file storage over `FileSystem`; projected into context by `barracuda-agent`. |
 | `LongTermMemory` and friends | Durable per-agent / global fact storage. |
 
 ### How a turn flows
@@ -48,7 +48,7 @@ fully host-testable.
    store keeps everything.
 4. Persistence is automatic at turn drop; no explicit finish or checkpoint call.
 
-**Compaction is not the store's concern.** In `barracuda-agent-runtime`, a
+**Compaction is not the store's concern.** In `barracuda-agent`, a
 `RollingSummaryContextProvider` reads aged turns via `turns()`,
 summarizes them through an injected `Compactor`, and a
 `RecentMessagesContextProvider` renders the verbatim tail. The two coordinate

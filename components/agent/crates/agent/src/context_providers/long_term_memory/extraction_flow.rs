@@ -215,8 +215,8 @@ mod tests {
     use barracuda_fs::MemFs;
     use futures_lite::future::block_on;
 
-    use crate::base_agent::{AgentStorage, ContextProvider};
-    use crate::{AgentKind, BaseAgentState};
+    use crate::engine::{AgentStorage, ContextProvider};
+    use crate::{AgentEngineState, AgentKind};
 
     use super::super::extraction::{
         ExtractError, ExtractFuture, ExtractionInput, Extractor, MemoryOp,
@@ -332,7 +332,7 @@ mod tests {
         ]));
         let mut provider = provider(recorder.clone());
         let transcript = transcript();
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let state = DurableState::new(AgentEngineState::new(&AgentKind::from_static("worker")));
         let storage = AgentStorage::new(&state, provider.id());
         assert!(block_on(provider.prepare(&storage, &transcript)).is_ok());
 

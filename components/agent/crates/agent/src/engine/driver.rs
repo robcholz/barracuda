@@ -23,14 +23,14 @@ use super::iteration_loop::{
     LlmStep, ToolAuthorization, ToolPermission, ToolPermissionPolicy, ToolPermissionRequest,
 };
 use super::stream::{
-    AgentCompletion, AgentError, AgentInputRequest, AgentIterationEvent, AgentOutcome,
-    AgentSubmitError, ApprovalOutcome, BaseAgentEvent, BaseAgentStream, RunControl,
+    AgentCompletion, AgentEngineEvent, AgentEngineStream, AgentError, AgentInputRequest,
+    AgentIterationEvent, AgentOutcome, AgentSubmitError, ApprovalOutcome, RunControl,
 };
-use super::{BaseAgentState, TurnLifecycle};
+use super::{AgentEngineState, TurnLifecycle};
 
-/// All construction-time dependencies for one fully assembled BaseAgent.
-pub(crate) struct BaseAgentConfig {
-    pub(crate) state: DurableState<BaseAgentState>,
+/// All construction-time dependencies for one fully assembled AgentEngine.
+pub(crate) struct AgentEngineConfig {
+    pub(crate) state: DurableState<AgentEngineState>,
     pub(crate) transcript: Box<dyn Transcript>,
     pub(crate) agent_instruction: Block<'static>,
     pub(crate) inherited_context: Vec<Block<'static>>,
@@ -70,7 +70,7 @@ struct ContextProviderEntry {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum BaseAgentBuildError {
+pub(crate) enum AgentEngineBuildError {
     #[error("context provider id must not be empty")]
     InvalidContextProviderId,
     #[error("context provider id already exists: {0}")]
@@ -81,8 +81,8 @@ pub(crate) enum BaseAgentBuildError {
 
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
-pub(crate) struct BaseAgent<H: TcpConnect + Dns + 'static> {
-    state: DurableState<BaseAgentState>,
+pub(crate) struct AgentEngine<H: TcpConnect + Dns + 'static> {
+    state: DurableState<AgentEngineState>,
     llm: ModelApi<'static, H>,
     api_manager: SharedApiManager,
     api_purpose: ApiPurpose,
@@ -99,21 +99,21 @@ pub(crate) struct BaseAgent<H: TcpConnect + Dns + 'static> {
     context_providers: Vec<ContextProviderEntry>,
 }
 
-impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
+impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
     pub(crate) fn build(
-        config: BaseAgentConfig,
+        config: AgentEngineConfig,
         llm: ModelApi<'static, H>,
-    ) -> Result<Self, BaseAgentBuildError> {
+    ) -> Result<Self, AgentEngineBuildError> {
         let mut tools = config.tools;
         let mut context_providers = Vec::with_capacity(config.context_providers.len());
         let mut provider_ids = BTreeSet::new();
         for provider in config.context_providers {
             let id = provider.id();
             if id.is_empty() {
-                return Err(BaseAgentBuildError::InvalidContextProviderId);
+                return Err(AgentEngineBuildError::InvalidContextProviderId);
             }
             if !provider_ids.insert(id) {
-                return Err(BaseAgentBuildError::DuplicateContextProviderId(id.into()));
+                return Err(AgentEngineBuildError::DuplicateContextProviderId(id.into()));
             }
             let storage = super::AgentStorage::new(&config.state, id);
             if let Some(group) = provider.tools(&storage) {
@@ -151,18 +151,18 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
     pub(crate) fn submit(
         &mut self,
         message: Message,
-    ) -> Result<BaseAgentStream<'_>, AgentSubmitError> {
+    ) -> Result<AgentEngineStream<'_>, AgentSubmitError> {
         self.begin(message)?;
 
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         let stream = self.run_stream(control.clone());
-        Ok(BaseAgentStream::new(stream, control))
+        Ok(AgentEngineStream::new(stream, control))
     }
 
     fn run_stream(
         &mut self,
         control: RunControl,
-    ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + '_ {
+    ) -> impl futures_core::Stream<Item = Result<AgentEngineEvent, AgentError>> + '_ {
         ActiveRunGuard::new(self).into_stream(control)
     }
 
@@ -187,7 +187,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
         &mut self,
         result: Result<IterationCompletion, AgentError>,
         control: &RunControl,
-    ) -> Result<Option<BaseAgentEvent>, AgentError> {
+    ) -> Result<Option<AgentEngineEvent>, AgentError> {
         Ok(match result? {
             IterationCompletion::Response(text) => {
                 if self.apply_continuations(control)? {
@@ -195,7 +195,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
                 }
                 self.commit_active_turn()?;
                 self.stop(StopReason::Completed);
-                Some(BaseAgentEvent::Finished(AgentOutcome::Completed(
+                Some(AgentEngineEvent::Finished(AgentOutcome::Completed(
                     AgentCompletion::Streamed(text),
                 )))
             }
@@ -206,24 +206,24 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
                 if control.take_interrupt() {
                     self.abandon_open_task();
                     self.stop(StopReason::Interrupted);
-                    return Ok(Some(BaseAgentEvent::Finished(AgentOutcome::Interrupted)));
+                    return Ok(Some(AgentEngineEvent::Finished(AgentOutcome::Interrupted)));
                 }
                 None
             }
             IterationCompletion::Interrupted => {
                 self.abandon_open_task();
                 self.stop(StopReason::Interrupted);
-                Some(BaseAgentEvent::Finished(AgentOutcome::Interrupted))
+                Some(AgentEngineEvent::Finished(AgentOutcome::Interrupted))
             }
             IterationCompletion::Cancelled => {
                 self.abandon_open_task();
                 self.stop(StopReason::Cancelled);
-                Some(BaseAgentEvent::Finished(AgentOutcome::Cancelled))
+                Some(AgentEngineEvent::Finished(AgentOutcome::Cancelled))
             }
         })
     }
 
-    fn reduce_agent_effects(&mut self) -> Result<Option<BaseAgentEvent>, AgentError> {
+    fn reduce_agent_effects(&mut self) -> Result<Option<AgentEngineEvent>, AgentError> {
         let mut effects = self.effect_inbox.drain();
         if effects.len() > 1 {
             let count = effects.len();
@@ -237,7 +237,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
             .transpose()
     }
 
-    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<BaseAgentEvent, AgentError> {
+    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<AgentEngineEvent, AgentError> {
         let message = match effect {
             AgentEffect::Finish { final_message } => {
                 self.finish_effect_assistant(&final_message)?;
@@ -252,7 +252,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
                 message
             }
         };
-        Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
+        Ok(AgentEngineEvent::Finished(AgentOutcome::Completed(
             AgentCompletion::EffectOutput(message),
         )))
     }
@@ -340,7 +340,7 @@ struct AssistantDraft {
     response: Option<String>,
 }
 
-/// BaseAgent's consuming half of an iteration.
+/// AgentEngine's consuming half of an iteration.
 ///
 /// It is deliberately the only place that knows both transcript semantics and
 /// owner-facing progress semantics: each stream part is incorporated into the
@@ -465,8 +465,8 @@ impl<'a> IterationConsumer<'a> {
     }
 }
 
-impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
-    pub(crate) fn state(&self) -> &DurableState<BaseAgentState> {
+impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
+    pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
         &self.state
     }
 
@@ -489,12 +489,12 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
     }
 }
 
-struct BaseAgentPermissionPolicy<'a> {
+struct EnginePermissionPolicy<'a> {
     policy: &'a dyn PermissionPolicy,
     control: &'a RunControl,
 }
 
-impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
+impl ToolPermissionPolicy for EnginePermissionPolicy<'_> {
     fn authorize<'a>(&'a self, request: ToolPermissionRequest<'_>) -> ToolAuthorization<'a> {
         match self
             .policy
@@ -527,24 +527,24 @@ impl ToolPermissionPolicy for BaseAgentPermissionPolicy<'_> {
     }
 }
 
-/// Restores BaseAgent's stopped-state invariant if its borrowing stream is
+/// Restores AgentEngine's stopped-state invariant if its borrowing stream is
 /// dropped before producing a terminal event or error.
 struct ActiveRunGuard<'a, H: TcpConnect + Dns + 'static> {
-    agent: &'a mut BaseAgent<H>,
+    agent: &'a mut AgentEngine<H>,
 }
 
 impl<'a, H> ActiveRunGuard<'a, H>
 where
     H: TcpConnect + Dns + 'static,
 {
-    fn new(agent: &'a mut BaseAgent<H>) -> Self {
+    fn new(agent: &'a mut AgentEngine<H>) -> Self {
         Self { agent }
     }
 
     fn into_stream(
         self,
         control: RunControl,
-    ) -> impl futures_core::Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a {
+    ) -> impl futures_core::Stream<Item = Result<AgentEngineEvent, AgentError>> + 'a {
         yield_stream(|yielder| async move {
             'agent_run: loop {
                 if !matches!(self.agent.run_state, RunState::Running) {
@@ -557,7 +557,7 @@ where
                     self.agent.abandon_open_task();
                     self.agent.stop(StopReason::Interrupted);
                     yielder
-                        .yield_one(Ok(BaseAgentEvent::Finished(AgentOutcome::Interrupted)))
+                        .yield_one(Ok(AgentEngineEvent::Finished(AgentOutcome::Interrupted)))
                         .await;
                     break;
                 }
@@ -645,7 +645,7 @@ where
                         Ok(consumer) => consumer,
                         Err(error) => break 'run_iteration Err(error),
                     };
-                    let permission = BaseAgentPermissionPolicy {
+                    let permission = EnginePermissionPolicy {
                         policy: self.agent.permission_policy.as_ref(),
                         control: &control,
                     };
@@ -664,7 +664,7 @@ where
                     );
 
                     yielder
-                        .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                        .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                             AgentIterationEvent::Started(iteration_id),
                         ))))
                         .await;
@@ -684,7 +684,7 @@ where
                             IterationLoopEvent::Iteration(IterationEvent::Reasoning(part)) => {
                                 let part = consumer.consume_reasoning(part);
                                 yielder
-                                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                    .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                                         AgentIterationEvent::Reasoning(part),
                                     ))))
                                     .await;
@@ -693,7 +693,7 @@ where
                                 match consumer.consume_output(part) {
                                     Ok(part) => {
                                         yielder
-                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                            .yield_one(Ok(AgentEngineEvent::Iteration(
                                                 StreamPart::Delta(AgentIterationEvent::Output(
                                                     part,
                                                 )),
@@ -709,7 +709,7 @@ where
                             #[cfg(feature = "cache_profile")]
                             IterationLoopEvent::Iteration(IterationEvent::Usage(usage)) => {
                                 yielder
-                                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                                    .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                                         AgentIterationEvent::Usage(usage),
                                     ))))
                                     .await;
@@ -719,7 +719,7 @@ where
                             )) => {
                                 for event in consumer.finish_content() {
                                     yielder
-                                        .yield_one(Ok(BaseAgentEvent::Iteration(
+                                        .yield_one(Ok(AgentEngineEvent::Iteration(
                                             StreamPart::Delta(event),
                                         )))
                                         .await;
@@ -750,7 +750,7 @@ where
                                             .get_mut()
                                             .remove_inflight_toolcall(&call.id);
                                         yielder
-                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                            .yield_one(Ok(AgentEngineEvent::Iteration(
                                                 StreamPart::Delta(AgentIterationEvent::ToolResult(
                                                     StreamPart::Delta((call, output)),
                                                 )),
@@ -764,7 +764,7 @@ where
                                         }
                                         for event in consumer.finish_content() {
                                             yielder
-                                                .yield_one(Ok(BaseAgentEvent::Iteration(
+                                                .yield_one(Ok(AgentEngineEvent::Iteration(
                                                     StreamPart::Delta(event),
                                                 )))
                                                 .await;
@@ -775,7 +775,7 @@ where
                                         }
                                         tool_results_ended = true;
                                         yielder
-                                            .yield_one(Ok(BaseAgentEvent::Iteration(
+                                            .yield_one(Ok(AgentEngineEvent::Iteration(
                                                 StreamPart::Delta(AgentIterationEvent::ToolResult(
                                                     StreamPart::End,
                                                 )),
@@ -786,7 +786,7 @@ where
                             }
                             IterationLoopEvent::Detached(handle) => {
                                 yielder
-                                    .yield_one(Ok(BaseAgentEvent::Detached(handle)))
+                                    .yield_one(Ok(AgentEngineEvent::Detached(handle)))
                                     .await;
                             }
                             IterationLoopEvent::ApprovalRequired {
@@ -795,7 +795,7 @@ where
                                 reason,
                             } => {
                                 yielder
-                                    .yield_one(Ok(BaseAgentEvent::InputRequired(
+                                    .yield_one(Ok(AgentEngineEvent::InputRequired(
                                         AgentInputRequest::Approval {
                                             tool_call_id,
                                             tool_call,
@@ -817,12 +817,12 @@ where
 
                     for event in consumer.finish_content() {
                         yielder
-                            .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(event))))
+                            .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(event))))
                             .await;
                     }
                     if !tool_results_ended {
                         yielder
-                            .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                            .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                                 AgentIterationEvent::ToolResult(StreamPart::End),
                             ))))
                             .await;
@@ -831,11 +831,11 @@ where
                 };
 
                 yielder
-                    .yield_one(Ok(BaseAgentEvent::Iteration(StreamPart::End)))
+                    .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::End)))
                     .await;
 
                 match self.agent.reduce_iteration(result, &control) {
-                    Ok(Some(event @ BaseAgentEvent::Finished(_))) => {
+                    Ok(Some(event @ AgentEngineEvent::Finished(_))) => {
                         yielder.yield_one(Ok(event)).await;
                         break;
                     }

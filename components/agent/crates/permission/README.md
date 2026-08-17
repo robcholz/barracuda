@@ -39,7 +39,7 @@ Re-exported from the crate root:
 | `RiskClass` | `Safe < Low < Moderate < High`, ordered so policies can threshold on it. |
 | `PermissionDecision` | The verdict: `Allow`, `Ask { reason }`, or `Deny { reason }`. |
 | `PermissionPolicy` | The policy trait — pure classification, no side effects. Object-safe, so a chain holds `Box<dyn PermissionPolicy>`. |
-| `PermissionRequest` | One action to evaluate. Agent identity is not carried (no built-in policy keys on it); add it back as borrowed primitives if a policy needs the acting principal, keeping this crate below `barracuda-agent-runtime`. |
+| `PermissionRequest` | One action to evaluate. Agent identity is not carried (no built-in policy keys on it); add it back as borrowed primitives if a policy needs the acting principal, keeping this crate below `barracuda-agent`. |
 | `AllowAll` | The permissive base: allows everything. |
 | `AskAtOrAbove` | Asks for approval at or above a risk threshold; allows the rest. |
 | `PolicyChain` | Composes policies, **most-restrictive-wins**: any `Deny` short-circuits, else any `Ask`, else `Allow`. Empty chain allows everything. |
@@ -47,8 +47,8 @@ Re-exported from the crate root:
 
 ### Design notes
 
-- **The crate sits below `barracuda-agent-runtime`.** A `PermissionRequest` carries the acting
-  agent as borrowed primitives (`u64` + `&str`) rather than `barracuda-agent-runtime`'s
+- **The crate sits below `barracuda-agent`.** A `PermissionRequest` carries the acting
+  agent as borrowed primitives (`u64` + `&str`) rather than `barracuda-agent`'s
   `AgentId` / `AgentKind`, so the dependency stays one-directional.
 - **Signatures scope approvals.** `Action::signature()` is `verb` or
   `verb:resource`; a grant recorded under it applies to *that* verb-on-resource,

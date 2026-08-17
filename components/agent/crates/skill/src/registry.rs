@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use barracuda_fs::{FileSystem, FsError};
 
-use super::skill::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
+use super::document::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
 use super::skill_set::SkillSet;
 
 pub type SkillRegistryVersion = u32;

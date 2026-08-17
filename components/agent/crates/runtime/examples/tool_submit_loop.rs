@@ -102,7 +102,7 @@ async fn run() -> anyhow::Result<()> {
 
     let (runtime, service) = AgentRuntime::<MemFs, ScriptedStack>::with_tool_groups(
         MemFs::new(),
-        barracuda_agent_runtime::AgentPersistenceConfig {
+        barracuda_agent_runtime::RuntimeStorageConfig {
             persistence_root: "/mem".to_string(),
             skill_roots: Vec::new(),
         },

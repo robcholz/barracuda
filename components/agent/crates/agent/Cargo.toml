@@ -96,6 +96,7 @@ barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]
+unreachable_pub = "deny"
 unsafe_code = "forbid"
 
 [lints.clippy]

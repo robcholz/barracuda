@@ -68,7 +68,7 @@ mod tests {
     use barracuda_agent_persistence::{DurableStateCodec, StateSlice};
 
     use super::{SessionManagerState, SessionPersistentState};
-    use barracuda_agent::internal::{AgentId, ReasoningEffort};
+    use barracuda_agent::{AgentId, ReasoningEffort};
 
     #[test]
     fn manager_state_uses_named_fields() {

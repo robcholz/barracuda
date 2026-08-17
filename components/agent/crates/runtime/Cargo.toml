@@ -70,3 +70,6 @@ barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
 tempdir = "0.3"
 static_cell = "2"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unreachable_pub = "deny"

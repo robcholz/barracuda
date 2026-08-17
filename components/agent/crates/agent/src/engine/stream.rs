@@ -62,8 +62,8 @@ pub enum AgentError {
     StateInvariant,
 }
 
-/// One event produced by the single-task BaseAgent execution core.
-pub(crate) enum BaseAgentEvent {
+/// One event produced by the single-task AgentEngine execution core.
+pub(crate) enum AgentEngineEvent {
     Iteration(StreamPart<AgentIterationEvent>),
     Detached(ToolDetachHandle),
     InputRequired(AgentInputRequest),
@@ -273,15 +273,15 @@ impl RunControl {
     }
 }
 
-/// The unique mutable capability for one submitted BaseAgent task.
-pub(crate) struct BaseAgentStream<'a> {
-    stream: Pin<Box<dyn Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a>>,
+/// The unique mutable capability for one submitted AgentEngine task.
+pub(crate) struct AgentEngineStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = Result<AgentEngineEvent, AgentError>> + 'a>>,
     control: RunControl,
 }
 
-impl<'a> BaseAgentStream<'a> {
+impl<'a> AgentEngineStream<'a> {
     pub(super) fn new(
-        stream: impl Stream<Item = Result<BaseAgentEvent, AgentError>> + 'a,
+        stream: impl Stream<Item = Result<AgentEngineEvent, AgentError>> + 'a,
         control: RunControl,
     ) -> Self {
         Self {
@@ -315,15 +315,15 @@ impl<'a> BaseAgentStream<'a> {
     }
 }
 
-impl Stream for BaseAgentStream<'_> {
-    type Item = Result<BaseAgentEvent, AgentError>;
+impl Stream for AgentEngineStream<'_> {
+    type Item = Result<AgentEngineEvent, AgentError>;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().stream.as_mut().poll_next(context)
     }
 }
 
-impl Drop for BaseAgentStream<'_> {
+impl Drop for AgentEngineStream<'_> {
     fn drop(&mut self) {
         self.control.cancel();
     }
@@ -343,24 +343,24 @@ mod tests {
 
     #[test]
     fn progress_is_a_real_poll_boundary() {
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         let phase = Rc::new(Cell::new(0));
         let producer_phase = Rc::clone(&phase);
         let progress = async_stream::stream! {
-            yield Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+            yield Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                 AgentIterationEvent::Started(IterationId::new(0)),
             )));
             future::yield_now().await;
             producer_phase.set(1);
-            yield Ok(BaseAgentEvent::Finished(AgentOutcome::Cancelled));
+            yield Ok(AgentEngineEvent::Finished(AgentOutcome::Cancelled));
             producer_phase.set(2);
         };
-        let mut stream = BaseAgentStream::new(progress, control);
+        let mut stream = AgentEngineStream::new(progress, control);
 
         block_on(async {
             assert!(matches!(
                 stream.next().await,
-                Some(Ok(BaseAgentEvent::Iteration(StreamPart::Delta(
+                Some(Ok(AgentEngineEvent::Iteration(StreamPart::Delta(
                     AgentIterationEvent::Started(iteration),
                 ))))
                 if iteration == IterationId::new(0)
@@ -373,7 +373,7 @@ mod tests {
 
             assert!(matches!(
                 next.await,
-                Some(Ok(BaseAgentEvent::Finished(AgentOutcome::Cancelled)))
+                Some(Ok(AgentEngineEvent::Finished(AgentOutcome::Cancelled)))
             ));
             assert_eq!(phase.get(), 1, "the next poll resumes the producer once");
 
@@ -384,11 +384,11 @@ mod tests {
 
     #[test]
     fn approval_is_resolved_through_the_stream_handle() {
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         let driver_control = control.clone();
         let progress = async_stream::stream! {
             driver_control.begin_approval(ToolCallId::new(0));
-            yield Ok(BaseAgentEvent::InputRequired(AgentInputRequest::Approval {
+            yield Ok(AgentEngineEvent::InputRequired(AgentInputRequest::Approval {
                 tool_call_id: ToolCallId::new(0),
                 tool_call: ToolCall::default(),
                 reason: "run tool".to_owned(),
@@ -403,14 +403,14 @@ mod tests {
                 ApprovalOutcome::Interrupted => AgentOutcome::Interrupted,
                 ApprovalOutcome::Cancelled => AgentOutcome::Cancelled,
             };
-            yield Ok(BaseAgentEvent::Finished(terminal));
+            yield Ok(AgentEngineEvent::Finished(terminal));
         };
-        let mut stream = BaseAgentStream::new(progress, control);
+        let mut stream = AgentEngineStream::new(progress, control);
 
         block_on(async {
             assert!(matches!(
                 stream.next().await,
-                Some(Ok(BaseAgentEvent::InputRequired(
+                Some(Ok(AgentEngineEvent::InputRequired(
                     AgentInputRequest::Approval { .. }
                 )))
             ));
@@ -419,7 +419,7 @@ mod tests {
                 .expect("the visible approval is active");
             assert!(matches!(
                 stream.next().await,
-                Some(Ok(BaseAgentEvent::Finished(AgentOutcome::Completed(
+                Some(Ok(AgentEngineEvent::Finished(AgentOutcome::Completed(
                     AgentCompletion::EffectOutput(message)
                 ))))
                 if message == "approved"
@@ -430,11 +430,11 @@ mod tests {
 
     #[test]
     fn execution_error_is_an_err_item_followed_by_stream_end() {
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         let events = async_stream::stream! {
             yield Err(AgentError::StateInvariant);
         };
-        let mut stream = BaseAgentStream::new(events, control);
+        let mut stream = AgentEngineStream::new(events, control);
 
         block_on(async {
             assert!(matches!(
@@ -447,7 +447,7 @@ mod tests {
 
     #[test]
     fn mismatched_approval_does_not_consume_the_waiting_request() {
-        let control = BaseAgentStream::control();
+        let control = AgentEngineStream::control();
         control.begin_approval(ToolCallId::new(0));
 
         assert_eq!(

@@ -10,7 +10,7 @@
 //! This type is **pure storage**. It does not know how facts are produced
 //! (manual tool calls vs. LLM extraction), it does not know about memory tiers
 //! (global vs. per-agent), and it never calls an LLM. Those policies live one
-//! layer up in `barracuda_agent_runtime`; here we only persist, dedup, retrieve, and reclaim.
+//! layer up in `barracuda_agent`; here we only persist, dedup, retrieve, and reclaim.
 //!
 //! # Storage layout
 //!
@@ -58,7 +58,7 @@ const DEFAULT_COMPACT_DEAD_THRESHOLD: u32 = 32;
 ///
 /// Minted by the store at first [`store`](LongTermMemory::store) as
 /// `{id_prefix}{seq}` (e.g. `g-7`, `a-3`) and stable across updates. The prefix
-/// is opaque to this crate — the `barracuda_agent_runtime` provider uses it to route an id back
+/// is opaque to this crate — the `barracuda_agent` provider uses it to route an id back
 /// to the tier (global vs. agent) that owns it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]

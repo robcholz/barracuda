@@ -10,8 +10,8 @@ use core::task::{Context, Poll};
 use barracuda_agent_tool::ToolGroup;
 use futures_channel::oneshot;
 
-use barracuda_agent::internal::{AgentId, AgentKind};
 use barracuda_agent::Message;
+use barracuda_agent::{AgentId, AgentKind};
 
 use super::effect::{
     DispatchOutcome, EffectId, InterruptOutcome, MultiagentEffect, MultiagentEffectResult,

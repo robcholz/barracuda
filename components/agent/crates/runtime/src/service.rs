@@ -17,20 +17,17 @@ use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
 use barracuda_net::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
-use barracuda_agent::{
-    internal::{AgentManagerError, SharedApiManager},
-    AgentCreateError, ApiPurpose,
-};
+use barracuda_agent::{AgentCreateError, AgentManagerError, ApiPurpose, SharedApiManager};
 use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
     SessionPersistence, SessionStream,
 };
 
-use super::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
+use crate::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
 
-/// What can go wrong while building an [`AgentRuntime`](crate::AgentRuntime) and [`AgentService`].
+/// What can go wrong while building an [`AgentRuntime`](crate::AgentRuntime) and [`RuntimeService`].
 #[derive(Debug, thiserror::Error)]
-pub enum AgentRuntimeBuildError {
+pub enum RuntimeBuildError {
     #[error("persistence directory is required")]
     MissingPersistenceDir,
     #[error("failed to load long-term memory: {0}")]
@@ -47,7 +44,7 @@ pub enum AgentRuntimeBuildError {
     AgentReconciliation(#[from] AgentCreateError),
 }
 
-impl From<AgentManagerError> for AgentRuntimeBuildError {
+impl From<AgentManagerError> for RuntimeBuildError {
     fn from(error: AgentManagerError) -> Self {
         match error {
             AgentManagerError::MissingPersistenceDir => Self::MissingPersistenceDir,
@@ -61,7 +58,7 @@ impl From<AgentManagerError> for AgentRuntimeBuildError {
 /// Cloneable control handle for the process-level agent service.
 ///
 /// The framework never starts a thread or chooses an executor. The application
-/// must spawn the matching [`AgentService`] future on Embassy (or any other
+/// must spawn the matching [`RuntimeService`] future on Embassy (or any other
 /// executor) and then use this handle from tasks on that executor.
 #[derive(Clone)]
 pub(crate) struct RuntimeControl {
@@ -73,7 +70,7 @@ pub(crate) struct RuntimeControl {
 ///
 /// Dropping this future stops the runtime. Dropping every `RuntimeControl`
 /// handle closes its command channel, which lets the service shut down cleanly.
-pub struct AgentService<Filesystem, Http>
+pub struct RuntimeService<Filesystem, Http>
 where
     Filesystem: FileSystem + 'static,
     Http: TcpConnect + Dns + 'static,
@@ -85,32 +82,32 @@ where
 mod tests {
     use core::error::Error as _;
 
-    use super::AgentRuntimeBuildError;
-    use barracuda_agent::{internal::AgentManagerError, AgentCreateError};
+    use super::RuntimeBuildError;
+    use barracuda_agent::{AgentCreateError, AgentManagerError};
 
     #[test]
     fn reconciliation_failure_preserves_typed_source() {
-        let error = AgentRuntimeBuildError::from(AgentManagerError::AgentReconciliation(
+        let error = RuntimeBuildError::from(AgentManagerError::AgentReconciliation(
             AgentCreateError::UnknownKind("worker".into()),
         ));
 
         assert!(error.source().is_some());
         assert!(matches!(
             error,
-            AgentRuntimeBuildError::AgentReconciliation(AgentCreateError::UnknownKind(kind))
+            RuntimeBuildError::AgentReconciliation(AgentCreateError::UnknownKind(kind))
                 if kind == "worker"
         ));
     }
 }
 
-impl<Filesystem, Http> Unpin for AgentService<Filesystem, Http>
+impl<Filesystem, Http> Unpin for RuntimeService<Filesystem, Http>
 where
     Filesystem: FileSystem + 'static,
     Http: TcpConnect + Dns + 'static,
 {
 }
 
-impl<Filesystem, Http> Future for AgentService<Filesystem, Http>
+impl<Filesystem, Http> Future for RuntimeService<Filesystem, Http>
 where
     Filesystem: FileSystem + 'static,
     Http: TcpConnect + Dns + 'static,
@@ -132,7 +129,7 @@ impl RuntimeControl {
         persistence_dir: String,
         skill_roots: Vec<String>,
         llm_factory: ModelApiFactory<Http>,
-    ) -> Result<(Self, AgentService<Filesystem, Http>), AgentRuntimeBuildError>
+    ) -> Result<(Self, RuntimeService<Filesystem, Http>), RuntimeBuildError>
     where
         Filesystem: FileSystem + 'static,
         Http: TcpConnect + Dns + 'static,
@@ -154,7 +151,7 @@ impl RuntimeControl {
                 commands,
                 api_manager,
             },
-            AgentService { worker },
+            RuntimeService { worker },
         ))
     }
 

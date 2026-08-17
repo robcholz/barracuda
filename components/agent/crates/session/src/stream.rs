@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use super::approval::ApprovalResolverError;
 use super::control::SessionCommand;
-use barracuda_agent::internal::{AgentApprovalError, AgentCreateError, AgentError, IterationId};
+use barracuda_agent::{AgentApprovalError, AgentCreateError, AgentError, IterationId};
 
 barracuda_runtime_utils::define_prefixed_id!(InputRequestId, "input-", "input request");
 barracuda_runtime_utils::define_prefixed_id!(TurnId, "turn-", "turn");

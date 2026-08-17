@@ -5,12 +5,12 @@ use core::task::{Context, Poll};
 use barracuda_net::{Dns, TcpConnect};
 use futures_core::Stream;
 
-use barracuda_agent::internal::{
+use barracuda_agent::Message;
+use barracuda_agent::{
     Agent, AgentApprovalError, AgentDispatchError, AgentError, AgentEvent, AgentHandle, AgentId,
     AgentStream, AgentStreamItem, ApprovalDecision, ReasoningEffort, ReasoningEffortHandle,
     ToolCallId,
 };
-use barracuda_agent::Message;
 
 pub(super) type AgentSlots<Http> = BTreeMap<AgentId, AgentSlot<Http>>;
 

@@ -1,18 +1,18 @@
 //! Profile context provider: project editable profile documents into context.
 //!
-//! The store lives in `barracuda-agent-memory`; this provider is the agent-runtime layer that
+//! The store lives in `barracuda-agent-memory`; this provider is the agent layer that
 //! maps documents to `BlockKind`s and exposes profile-specific tools. Per-agent
 //! read/write projection is owned by the baked tool blacklist.
 
 use alloc::boxed::Box;
 
-use crate::base_agent::AgentStorage;
+use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{ProfileDocument, ProfileError, ProfileStore};
 use barracuda_agent_tool::{Tool, ToolGroup};
 use barracuda_fs::FileSystem;
 
-use crate::base_agent::{ContextProvider, ContextProviderResult};
+use crate::engine::{ContextProvider, ContextProviderResult};
 
 use self::tools::{ProfileClearTool, ProfileReadTool, ProfileReplaceTool};
 

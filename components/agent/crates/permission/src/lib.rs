@@ -1,7 +1,7 @@
 #![no_std]
 //! `barracuda-agent-permission` — the tool-permission policy layer.
 //!
-//! A pure, `barracuda-agent-runtime`-independent crate that answers one question: *may this tool
+//! A pure, independent of the agent execution crate crate that answers one question: *may this tool
 //! call run?* It models a call as an [`Action`] (verb + optional [`Resource`] +
 //! [`RiskClass`]), evaluates it through a [`PermissionPolicy`] into a
 //! [`PermissionDecision`] (`Allow` / `Ask` / `Deny`), and — for the `Ask` path —
@@ -9,9 +9,9 @@
 //! without asking twice (and cannot loop).
 //!
 //! Layering: this crate sits *below* `barracuda-agent-runtime`. It deliberately does not
-//! reference `barracuda-agent-runtime` identity types (`AgentId` / `AgentKind`); a
+//! reference `barracuda-agent` identity types (`AgentId` / `AgentKind`); a
 //! [`PermissionRequest`] carries the acting agent as borrowed primitives, so the
-//! dependency stays one-directional (`barracuda-agent-runtime` → `barracuda-agent-permission`).
+//! dependency stays one-directional (`barracuda-agent` → `barracuda-agent-permission`).
 //!
 //! # Example
 //!
