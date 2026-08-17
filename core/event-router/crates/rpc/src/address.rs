@@ -1,10 +1,10 @@
-use alloc::boxed::Box;
+use alloc::string::String;
 use core::borrow::Borrow;
 use core::fmt;
 
 /// A validated RPC group name.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RpcGroup(Box<str>);
+pub struct RpcGroup(String);
 
 impl RpcGroup {
     pub(crate) fn from_validated(value: &str) -> Self {
@@ -37,7 +37,7 @@ impl AsRef<str> for RpcGroup {
 
 /// A validated RPC address in `group.method` form.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RpcAddress(Box<str>);
+pub struct RpcAddress(String);
 
 impl RpcAddress {
     pub(crate) fn validate(value: &str) -> Result<(), RpcAddressError> {
@@ -98,7 +98,7 @@ impl AsRef<str> for RpcAddress {
 pub enum RpcGroupError {
     /// The value is not a valid RPC group identifier.
     #[error("invalid RPC group: {0}")]
-    InvalidFormat(Box<str>),
+    InvalidFormat(String),
 }
 
 /// Failure returned while parsing an [`RpcAddress`].
@@ -107,7 +107,7 @@ pub enum RpcGroupError {
 pub enum RpcAddressError {
     /// The value is not in validated `group.method` form.
     #[error("invalid RPC address: {0}")]
-    InvalidFormat(Box<str>),
+    InvalidFormat(String),
 }
 
 #[cfg(test)]
