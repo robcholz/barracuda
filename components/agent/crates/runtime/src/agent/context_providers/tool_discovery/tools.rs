@@ -94,7 +94,9 @@ mod tests {
     use futures_lite::StreamExt as _;
 
     use crate::agent::base_agent::{AgentStorage, ContextProvider};
-    use crate::agent::context_providers::resume::{loaded_tool_groups, ResumeContextProvider};
+    use crate::agent::context_providers::tool_discovery::{
+        loaded_tool_groups, ToolDiscoveryContextProvider,
+    };
     use crate::agent::{AgentKind, BaseAgentState};
 
     #[test]
@@ -105,7 +107,7 @@ mod tests {
             .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");
         let discovery = tool_set.discovery();
-        let provider = ResumeContextProvider::new(&state.get(), discovery.clone());
+        let provider = ToolDiscoveryContextProvider::new(discovery.clone());
         let storage = AgentStorage::new(&state, provider.id());
         tool_set
             .add_group(

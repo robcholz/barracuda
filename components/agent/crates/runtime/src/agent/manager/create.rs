@@ -16,6 +16,7 @@ use crate::agent::base_agent::{
 use crate::agent::context_providers::{
     AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
     ReasoningEffortContextProvider, ResumeContextProvider, SkillContextProvider,
+    ToolDiscoveryContextProvider,
 };
 use crate::agent::tools::internal_tools;
 use crate::agent::{Agent, AgentKind, BaseAgentState, ReasoningEffort, ReasoningEffortHandle};
@@ -186,7 +187,8 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
-        let resume_provider = ResumeContextProvider::new(&state.get(), tools.discovery());
+        let resume_provider = ResumeContextProvider::new(&state.get());
+        let tool_discovery_provider = ToolDiscoveryContextProvider::new(tools.discovery());
 
         // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
@@ -216,15 +218,14 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         };
         // AgentManager is the only configured-agent assembly point. BaseAgent sees
         // one generic, immutable provider set; concrete mode, memory, and skill
-        // semantics do not leak into its runtime protocol. ResumeContextProvider
-        // is the boundary that contributes resume context and exposes the pure
-        // discovery group implemented alongside the resume provider.
+        // semantics do not leak into its runtime protocol.
         let (reasoning_effort_provider, reasoning_effort_handle) =
             ReasoningEffortContextProvider::new(reasoning_effort);
         let context_providers: Vec<Box<dyn ContextProvider>> = vec![
             Box::new(AgentModeContextProvider::new(effect_emitter)),
             Box::new(reasoning_effort_provider),
             Box::new(resume_provider),
+            Box::new(tool_discovery_provider),
             Box::new(conversation_history),
             Box::new(SkillContextProvider::new(skill_set)),
             Box::new(profile_provider),

@@ -13,6 +13,7 @@ mod profile;
 mod reasoning_effort;
 mod resume;
 mod skill;
+mod tool_discovery;
 
 pub(in crate::agent) use agent_mode::AgentModeContextProvider;
 pub(in crate::agent) use conversation_history::ConversationHistoryContextProvider;
@@ -22,3 +23,4 @@ pub use reasoning_effort::ReasoningEffort;
 pub(crate) use reasoning_effort::{ReasoningEffortContextProvider, ReasoningEffortHandle};
 pub(in crate::agent) use resume::ResumeContextProvider;
 pub(in crate::agent) use skill::SkillContextProvider;
+pub(in crate::agent) use tool_discovery::ToolDiscoveryContextProvider;
