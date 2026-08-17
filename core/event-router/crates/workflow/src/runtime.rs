@@ -241,15 +241,6 @@ impl WorkflowRuntimeView {
         self.shared.definitions()
     }
 
-    #[cfg(test)]
-    pub(crate) fn matching_ids(&self, event_id: &EventId) -> Vec<WorkflowId> {
-        self.shared
-            .matching_plans(event_id)
-            .into_iter()
-            .map(|plan| plan.id)
-            .collect()
-    }
-
     /// Returns current Workflow execution counters and the latest failure.
     #[must_use]
     pub fn info(&self) -> WorkflowInfo {
@@ -323,30 +314,6 @@ impl WorkflowRuntime {
     pub fn stop(&mut self) {
         self.running.clear();
         self.shared.reset_run_state();
-    }
-
-    #[cfg(test)]
-    /// Loads one definition without affecting already-running executions.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WorkflowLoadError::DuplicateId`] when the ID is already
-    /// loaded.
-    pub(crate) fn load(&mut self, definition: WorkflowDefinition) -> Result<(), WorkflowLoadError> {
-        self.shared.load(definition)
-    }
-
-    #[cfg(test)]
-    /// Removes one definition without cancelling already-running executions.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WorkflowUnloadError::NotFound`] when the ID is not loaded.
-    pub(crate) fn unload(
-        &mut self,
-        workflow_id: &WorkflowId,
-    ) -> Result<WorkflowDefinition, WorkflowUnloadError> {
-        self.shared.unload(workflow_id)
     }
 
     fn poll_running(&mut self, context: &mut Context<'_>) -> Poll<()> {
@@ -622,18 +589,14 @@ mod tests {
 
     use super::WorkflowRuntime;
     use crate::{
-        EmitError, EmitRejection, Event, EventEmitter, EventId, Rule, WorkflowDefinition,
-        WorkflowId, WorkflowLoadError, WorkflowUnloadError,
+        EmitError, EmitRejection, Event, EventEmitter, Rule, WorkflowDefinition, WorkflowId,
+        WorkflowLoadError, WorkflowUnloadError,
     };
     use barracuda_rpc::{
         RpcAddress, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcStream, Streaming, Unary,
     };
 
     use super::InternalEmit;
-
-    fn event_id(value: &str) -> EventId {
-        EventId::try_from(value).expect("valid test Event ID")
-    }
 
     fn rule(value: &str) -> Rule {
         Rule::try_from(value).expect("valid test Rule")
@@ -662,24 +625,25 @@ mod tests {
     }
 
     #[test]
-    fn runtime_matches_loaded_workflows_in_load_order() {
-        let mut runtime = WorkflowRuntime::new();
+    fn runtime_view_preserves_loaded_workflow_order() {
+        let runtime = WorkflowRuntime::new();
         let view = runtime.view();
-        runtime
+        let control = runtime.control();
+        control
             .load(definition(
                 "broad",
                 "gateway.*",
                 &["adapter.broad", "agent.run"],
             ))
             .expect("load broad Workflow");
-        runtime
+        control
             .load(definition(
                 "exact",
                 "gateway.message.received",
                 &["adapter.exact"],
             ))
             .expect("load exact Workflow");
-        runtime
+        control
             .load(definition(
                 "scheduler",
                 "scheduler.*",
@@ -687,31 +651,28 @@ mod tests {
             ))
             .expect("load scheduler Workflow");
 
-        let matched = view.matching_ids(&event_id("gateway.message.received"));
-        let matched: alloc::vec::Vec<_> = matched.iter().map(WorkflowId::as_str).collect();
-        assert_eq!(matched, ["broad", "exact"]);
-        assert_eq!(view.definitions().len(), 3);
+        let definitions = view.definitions();
+        let ids: alloc::vec::Vec<_> = definitions.iter().map(|item| item.id().as_str()).collect();
+        assert_eq!(ids, ["broad", "exact", "scheduler"]);
     }
 
     #[test]
-    fn runtime_rejects_duplicate_ids_and_unload_affects_future_matches() {
-        let mut runtime = WorkflowRuntime::new();
-        runtime
+    fn runtime_control_rejects_duplicate_ids_and_missing_unloads() {
+        let runtime = WorkflowRuntime::new();
+        let control = runtime.control();
+        control
             .load(definition("gateway", "gateway.*", &["adapter.gateway"]))
             .expect("load Workflow");
 
-        let duplicate = runtime.load(definition("gateway", "scheduler.*", &["adapter.scheduler"]));
+        let duplicate = control.load(definition("gateway", "scheduler.*", &["adapter.scheduler"]));
         assert!(matches!(duplicate, Err(WorkflowLoadError::DuplicateId(_))));
 
-        runtime
+        control
             .unload(&WorkflowId::try_from("gateway").expect("valid Workflow ID"))
             .expect("unload Workflow");
-        assert!(runtime
-            .view()
-            .matching_ids(&event_id("gateway.message.received"))
-            .is_empty());
+        assert!(runtime.view().definitions().is_empty());
         assert!(matches!(
-            runtime.unload(&WorkflowId::try_from("gateway").expect("valid Workflow ID")),
+            control.unload(&WorkflowId::try_from("gateway").expect("valid Workflow ID")),
             Err(WorkflowUnloadError::NotFound(_))
         ));
     }
@@ -837,6 +798,7 @@ mod tests {
         let mut runtime = WorkflowRuntime::new();
         let view = runtime.view();
         runtime
+            .control()
             .load(definition(
                 "increment",
                 RuntimeEvent::ID,
@@ -907,9 +869,11 @@ mod tests {
 
         let mut runtime = WorkflowRuntime::new();
         runtime
+            .control()
             .load(definition("alpha", "runtime.*", &[RecordAlpha::ADDRESS]))
             .expect("load alpha Workflow");
         runtime
+            .control()
             .load(definition("beta", RuntimeEvent::ID, &[RecordBeta::ADDRESS]))
             .expect("load beta Workflow");
         register_runtime(&runtime, &registry);
@@ -960,6 +924,7 @@ mod tests {
 
         let mut runtime = WorkflowRuntime::new();
         runtime
+            .control()
             .load(definition("reject", RuntimeEvent::ID, &[Reject::ADDRESS]))
             .expect("load rejecting Workflow");
         register_runtime(&runtime, &registry);
@@ -1059,6 +1024,7 @@ mod tests {
 
         let mut runtime = WorkflowRuntime::new();
         runtime
+            .control()
             .load(definition(
                 "stream",
                 ByteEvent::ID,
@@ -1103,8 +1069,9 @@ mod tests {
 
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, FRAME_SIZE, 1>::new()));
         let registry = RpcRegistry::new(lanes);
-        let mut runtime = WorkflowRuntime::new();
+        let runtime = WorkflowRuntime::new();
         runtime
+            .control()
             .load(definition("waiting", RuntimeEvent::ID, &[Record::ADDRESS]))
             .expect("load Workflow");
         register_runtime(&runtime, &registry);
