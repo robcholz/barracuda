@@ -14,7 +14,7 @@ use crate::config::ApiPurpose;
 use crate::context_providers::{
     AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
     ReasoningEffortContextProvider, ResumeContextProvider, SkillContextProvider,
-    ToolDiscoveryContextProvider,
+    TodoContextProvider, ToolDiscoveryContextProvider,
 };
 use crate::engine::{
     agent_effect_channel, AgentEngine, AgentEngineBuildError, AgentEngineConfig, ContextProvider,
@@ -225,6 +225,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let context_providers: Vec<Box<dyn ContextProvider>> = vec![
             Box::new(AgentModeContextProvider::new(effect_emitter)),
             Box::new(reasoning_effort_provider),
+            Box::new(TodoContextProvider::new()),
             Box::new(resume_provider),
             Box::new(tool_discovery_provider),
             Box::new(conversation_history),

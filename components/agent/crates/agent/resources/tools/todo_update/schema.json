@@ -1,0 +1,35 @@
+{
+  "type": "function",
+  "function": {
+    "name": "todo_update",
+    "description": "Replace the agent's complete execution checklist. Send the full list in intended order on every call. Use it for non-trivial multi-step work, keep at most one item in_progress, and update statuses as work advances.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "todos": {
+          "type": "array",
+          "description": "The complete updated checklist. An empty array clears it.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "string",
+                "trimmedNonEmpty": true,
+                "description": "A concise, actionable task description."
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "in_progress", "completed"],
+                "description": "The task's current execution status."
+              }
+            },
+            "required": ["content", "status"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["todos"],
+      "additionalProperties": false
+    }
+  }
+}

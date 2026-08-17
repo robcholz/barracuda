@@ -1,6 +1,7 @@
 {
   "tool_blacklist": [
     "plan",
+    "todo",
     "profile_replace",
     "profile_clear"
   ]

@@ -114,11 +114,21 @@ pub fn root_kind() -> &'static AgentKind {
 include!(concat!(env!("OUT_DIR"), "/manifests.rs"));
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
     #[test]
     fn baked_root_kind_is_a_catalog_entry() {
         assert!(find(root_kind()).is_some());
+    }
+
+    #[test]
+    fn todo_tools_belong_to_the_root_agent() {
+        let root = find(root_kind()).expect("root manifest");
+        let worker = find(&AgentKind::from_static("worker")).expect("worker manifest");
+
+        assert!(!root.runtime().tool_blacklist().contains(&"todo"));
+        assert!(worker.runtime().tool_blacklist().contains(&"todo"));
     }
 }

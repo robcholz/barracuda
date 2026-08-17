@@ -13,6 +13,7 @@ mod profile;
 mod reasoning_effort;
 mod resume;
 mod skill;
+mod todo;
 mod tool_discovery;
 
 pub(crate) use agent_mode::AgentModeContextProvider;
@@ -24,4 +25,5 @@ pub(crate) use reasoning_effort::ReasoningEffortContextProvider;
 pub use reasoning_effort::ReasoningEffortHandle;
 pub(crate) use resume::ResumeContextProvider;
 pub(crate) use skill::SkillContextProvider;
+pub(crate) use todo::TodoContextProvider;
 pub(crate) use tool_discovery::ToolDiscoveryContextProvider;
