@@ -11,7 +11,6 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::validate;
-use crate::{AgentStorageError, ToolContext};
 
 pub type ToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'a>>;
 pub type ToolCompletionFuture = Pin<Box<dyn Future<Output = ToolResult<ToolOutput>> + 'static>>;
@@ -108,9 +107,7 @@ mod invocation_tests {
     use alloc::string::String;
     use core::cell::Cell;
 
-    use super::{
-        Tool, ToolContext, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
-    };
+    use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
     use futures_lite::future::block_on;
     use serde::Deserialize;
 
@@ -140,7 +137,7 @@ mod invocation_tests {
     impl ToolHandler for BusinessHandler {
         type Args = BusinessArgs;
 
-        fn invoke<'a>(&'a self, _context: ToolContext, arguments: Self::Args) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, arguments: Self::Args) -> ToolFuture<'a> {
             self.invoked.set(true);
             Box::pin(async move {
                 Ok(ToolOutput {
@@ -182,7 +179,7 @@ mod invocation_tests {
             ToolError::ArgumentsSchema(_)
         ));
 
-        let error = block_on(tool.invoke(ToolContext::stateless(), &invalid))
+        let error = block_on(tool.invoke(&invalid))
             .err()
             .ok_or("expected error")?;
 
@@ -191,7 +188,7 @@ mod invocation_tests {
 
         let blank =
             ToolInvocation::try_new(None, "example", r#"{"name":"  \t\n","enabled":true}"#)?;
-        let error = block_on(tool.invoke(ToolContext::stateless(), &blank))
+        let error = block_on(tool.invoke(&blank))
             .err()
             .ok_or("expected error")?;
         assert!(matches!(error.error, ToolError::ArgumentsSchema(_)));
@@ -207,7 +204,7 @@ mod invocation_tests {
         });
         let valid = ToolInvocation::try_new(None, "example", r#"{"name":"lamp","enabled":true}"#)?;
 
-        let output = block_on(tool.invoke(ToolContext::stateless(), &valid))?;
+        let output = block_on(tool.invoke(&valid))?;
 
         assert!(invoked.get());
         assert_eq!(output.content, "lamp");
@@ -234,8 +231,6 @@ pub enum ToolError {
     ArgumentsSchema(#[from] json_validator::ValidationError),
     #[error("tool invocation rejected: {0}")]
     InvokeRejected(String),
-    #[error(transparent)]
-    AgentStorage(#[from] AgentStorageError),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -267,12 +262,6 @@ impl From<ToolError> for ToolInvokeError {
     }
 }
 
-impl From<AgentStorageError> for ToolInvokeError {
-    fn from(error: AgentStorageError) -> Self {
-        Self::new(ToolError::AgentStorage(error))
-    }
-}
-
 pub trait ToolSpec {
     fn name(&self) -> &str;
 
@@ -296,7 +285,7 @@ pub trait ToolSpec {
 pub trait ToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> ToolFuture<'a>;
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a>;
 }
 
 /// A tool whose accepted and completed settlements become available at
@@ -304,53 +293,37 @@ pub trait ToolHandler: ToolSpec {
 pub trait DetachedToolHandler: ToolSpec {
     type Args: DeserializeOwned;
 
-    fn invoke<'a>(&'a self, context: ToolContext, args: Self::Args) -> DetachedToolFuture<'a>;
+    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a>;
 }
 
 trait ErasedToolHandler: ToolSpec {
-    fn invoke_erased<'a>(
-        &'a self,
-        context: ToolContext,
-        call: &'a ToolInvocation,
-    ) -> ToolFuture<'a>;
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a>;
 }
 
 impl<Handler> ErasedToolHandler for Handler
 where
     Handler: ToolHandler,
 {
-    fn invoke_erased<'a>(
-        &'a self,
-        context: ToolContext,
-        call: &'a ToolInvocation,
-    ) -> ToolFuture<'a> {
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> ToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(context, args).await
+            self.invoke(args).await
         })
     }
 }
 
 trait ErasedDetachedToolHandler: ToolSpec {
-    fn invoke_erased<'a>(
-        &'a self,
-        context: ToolContext,
-        call: &'a ToolInvocation,
-    ) -> DetachedToolFuture<'a>;
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a>;
 }
 
 impl<Handler> ErasedDetachedToolHandler for Handler
 where
     Handler: DetachedToolHandler,
 {
-    fn invoke_erased<'a>(
-        &'a self,
-        context: ToolContext,
-        call: &'a ToolInvocation,
-    ) -> DetachedToolFuture<'a> {
+    fn invoke_erased<'a>(&'a self, call: &'a ToolInvocation) -> DetachedToolFuture<'a> {
         Box::pin(async move {
             let args = call.arguments::<Handler::Args>()?;
-            self.invoke(context, args).await
+            self.invoke(args).await
         })
     }
 }
@@ -492,14 +465,10 @@ impl Tool {
         }
     }
 
-    pub(crate) async fn invoke<'a>(
-        &'a self,
-        context: ToolContext,
-        call: &'a ToolInvocation,
-    ) -> ToolResult<ToolOutput> {
+    pub(crate) async fn invoke<'a>(&'a self, call: &'a ToolInvocation) -> ToolResult<ToolOutput> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Handler(handler) => handler.invoke_erased(context, call).await,
+            ToolInner::Handler(handler) => handler.invoke_erased(call).await,
             ToolInner::Detached(_) => Err(ToolError::InvokeRejected(
                 "dynamically detached tool requires detached execution".to_owned(),
             )
@@ -513,12 +482,11 @@ impl Tool {
 
     pub(crate) async fn invoke_detached<'a>(
         &'a self,
-        context: ToolContext,
         call: &'a ToolInvocation,
     ) -> ToolResult<DetachedTool> {
         self.validate_arguments(call)?;
         match self.inner.as_ref() {
-            ToolInner::Detached(handler) => handler.invoke_erased(context, call).await,
+            ToolInner::Detached(handler) => handler.invoke_erased(call).await,
             ToolInner::Handler(_) => Err(ToolError::InvokeRejected(
                 "tool does not support dynamic detached execution".to_owned(),
             )

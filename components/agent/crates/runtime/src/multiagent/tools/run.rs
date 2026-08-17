@@ -31,11 +31,7 @@ impl ToolSpec for RunSubagentTool {
 impl ToolHandler for RunSubagentTool {
     type Args = SpawnArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let request = SpawnRequest::from_args(args, &self.policy, "subagent_run")?;
             let (child, result) = self

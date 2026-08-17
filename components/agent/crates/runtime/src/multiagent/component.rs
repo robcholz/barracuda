@@ -925,7 +925,7 @@ mod tests {
     use futures_lite::future;
 
     fn timeout() -> SubagentTimeout {
-        SubagentTimeout::from_millis(60_000).expect("test timeout is non-zero")
+        SubagentTimeout::new(core::num::NonZeroU32::new(60_000).expect("test timeout is non-zero"))
     }
 
     fn take_spawn_effect(multiagent: &mut Multiagent) -> (EffectId, SubagentSpec) {

@@ -2,6 +2,7 @@
 
 use alloc::sync::Arc;
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::signal::Signal;
@@ -75,7 +76,15 @@ impl ReasoningEffortContextProvider {
 }
 
 impl ContextProvider for ReasoningEffortContextProvider {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+    fn id(&self) -> &'static str {
+        "reasoning_effort"
+    }
+
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
         if let Some(effort) = self.updates.try_take() {
             self.effort = effort;
         }
@@ -87,14 +96,18 @@ impl ContextProvider for ReasoningEffortContextProvider {
 #[cfg(test)]
 mod tests {
     use barracuda_agent_context::{BlockKind, Context};
+    use barracuda_agent_persistence::DurableState;
 
     use super::{ReasoningEffort, ReasoningEffortContextProvider};
-    use crate::agent::base_agent::ContextProvider;
+    use crate::agent::base_agent::{AgentStorage, ContextProvider};
+    use crate::agent::{AgentKind, BaseAgentState};
 
     fn render(provider: &mut ReasoningEffortContextProvider, context: &mut Context) -> String {
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let storage = AgentStorage::new(&state, provider.id());
         let history = {
             let mut sink = context.sink();
-            assert!(provider.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(&storage, &mut sink).is_ok());
             sink.into_history()
         };
         context.request(&history).system().to_owned()

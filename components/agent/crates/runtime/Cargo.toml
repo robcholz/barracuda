@@ -90,8 +90,6 @@ async-stream = "0.3"
 barracuda-fs = { path = "../../../../shared/fs", features = [
     "diskfs",
 ] }
-# Never-compacts `NoopCompactor` shared from barracuda-agent-memory (tests only).
-barracuda-agent-memory = { path = "../memory", features = ["compactor-stub"] }
 # `block_on` for tests (smol family; replaces the removed `barracuda_runtime_utils::block_on`).
 futures-lite = "2"
 barracuda-net = { path = "../../../../shared/net", features = ["testing"] }

@@ -1,3 +1,5 @@
+use alloc::{string::String, vec::Vec};
+
 use barracuda_agent_memory::{MemoryDraft, Transcript, Turn, TurnId};
 use barracuda_fs::FileSystem;
 use serde_json::Value;
@@ -208,11 +210,13 @@ mod tests {
     use std::sync::{Arc, Mutex, MutexGuard};
 
     use barracuda_agent_memory::{LongTermMemory, TranscriptStore};
+    use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::ToolError;
     use barracuda_fs::MemFs;
     use futures_lite::future::block_on;
 
-    use crate::agent::base_agent::ContextProvider;
+    use crate::agent::base_agent::{AgentStorage, ContextProvider};
+    use crate::agent::{AgentKind, BaseAgentState};
 
     use super::super::extraction::{
         ExtractError, ExtractFuture, ExtractionInput, Extractor, MemoryOp,
@@ -328,20 +332,22 @@ mod tests {
         ]));
         let mut provider = provider(recorder.clone());
         let transcript = transcript();
-        assert!(block_on(provider.prepare(&transcript)).is_ok());
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let storage = AgentStorage::new(&state, provider.id());
+        assert!(block_on(provider.prepare(&storage, &transcript)).is_ok());
 
         for sequence in 0..8 {
             commit_turn(&transcript, &format!("first-{sequence:02}"));
         }
-        assert!(block_on(provider.prepare(&transcript)).is_ok());
+        assert!(block_on(provider.prepare(&storage, &transcript)).is_ok());
         for _ in 0..4 {
-            assert!(block_on(provider.prepare(&transcript)).is_ok());
+            assert!(block_on(provider.prepare(&storage, &transcript)).is_ok());
         }
         assert_eq!(recorder.calls().len(), 1);
 
         for sequence in 0..8 {
             commit_turn(&transcript, &format!("second-{sequence:02}"));
-            assert!(block_on(provider.prepare(&transcript)).is_ok());
+            assert!(block_on(provider.prepare(&storage, &transcript)).is_ok());
         }
 
         let calls = recorder.calls();
@@ -382,4 +388,3 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
-use alloc::{string::String, vec::Vec};

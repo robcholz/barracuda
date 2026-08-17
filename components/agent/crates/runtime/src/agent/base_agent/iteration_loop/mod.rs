@@ -11,12 +11,12 @@
 mod run;
 mod types;
 
+use alloc::{boxed::Box, string::String};
+
 use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_agent_permission::Action;
-use barracuda_agent_tool::runtime::AgentStorageScope;
-
 use barracuda_model_api::{ModelApi, RetryPolicy};
 use barracuda_net::{Dns, TcpConnect};
 
@@ -91,6 +91,4 @@ pub(crate) struct IterationLoop<'a, H: TcpConnect + Dns + 'static, P> {
     pub permission: &'a P,
     /// Retry policy applied to this iteration's LLM call (see [`RetryPolicy`]).
     pub retry: RetryPolicy,
-    pub agent_storage: AgentStorageScope,
 }
-use alloc::{boxed::Box, string::String};

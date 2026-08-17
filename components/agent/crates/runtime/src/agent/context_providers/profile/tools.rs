@@ -6,14 +6,14 @@ use core::str::FromStr;
 use barracuda_agent_memory::{ProfileDocument, ProfileStore};
 use barracuda_agent_permission::{Action, Resource, RiskClass};
 use barracuda_agent_tool::{
-    tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
-    ToolInvokeError, ToolOutput, ToolSpec,
+    tool_metadata, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
+    ToolSpec,
 };
 use barracuda_fs::FileSystem;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-struct DocumentArgs {
+pub(super) struct DocumentArgs {
     document: String,
 }
 
@@ -23,31 +23,13 @@ struct DocumentField {
 }
 
 #[derive(Deserialize)]
-struct ReplaceArgs {
+pub(super) struct ReplaceArgs {
     document: String,
     content: String,
 }
 
-/// Build the profile tools. Agent manifests may blacklist individual mutation
-/// tools while retaining `profile_read`.
-pub(crate) fn profile_tools<F: FileSystem + 'static>(store: ProfileStore<F>) -> ToolGroup {
-    ToolGroup::new(
-        "profile",
-        true,
-        [
-            Tool::new(ProfileReadTool {
-                store: store.clone(),
-            }),
-            Tool::new(ProfileReplaceTool {
-                store: store.clone(),
-            }),
-            Tool::new(ProfileClearTool { store }),
-        ],
-    )
-}
-
-struct ProfileReadTool<F: FileSystem + 'static> {
-    store: ProfileStore<F>,
+pub(super) struct ProfileReadTool<F: FileSystem + 'static> {
+    pub(super) store: ProfileStore<F>,
 }
 
 impl<F: FileSystem + 'static> ToolSpec for ProfileReadTool<F> {
@@ -65,11 +47,7 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileReadTool<F> {
 impl<F: FileSystem + 'static> ToolHandler for ProfileReadTool<F> {
     type Args = DocumentArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.read(document) {
@@ -94,8 +72,8 @@ impl<F: FileSystem + 'static> ToolHandler for ProfileReadTool<F> {
     }
 }
 
-struct ProfileReplaceTool<F: FileSystem + 'static> {
-    store: ProfileStore<F>,
+pub(super) struct ProfileReplaceTool<F: FileSystem + 'static> {
+    pub(super) store: ProfileStore<F>,
 }
 
 impl<F: FileSystem + 'static> ToolSpec for ProfileReplaceTool<F> {
@@ -109,11 +87,7 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileReplaceTool<F> {
 impl<F: FileSystem + 'static> ToolHandler for ProfileReplaceTool<F> {
     type Args = ReplaceArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.replace(document, &args.content) {
@@ -130,8 +104,8 @@ impl<F: FileSystem + 'static> ToolHandler for ProfileReplaceTool<F> {
     }
 }
 
-struct ProfileClearTool<F: FileSystem + 'static> {
-    store: ProfileStore<F>,
+pub(super) struct ProfileClearTool<F: FileSystem + 'static> {
+    pub(super) store: ProfileStore<F>,
 }
 
 impl<F: FileSystem + 'static> ToolSpec for ProfileClearTool<F> {
@@ -145,11 +119,7 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileClearTool<F> {
 impl<F: FileSystem + 'static> ToolHandler for ProfileClearTool<F> {
     type Args = DocumentArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
             match self.store.clear(document) {

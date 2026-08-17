@@ -7,11 +7,12 @@
 use alloc::sync::Arc;
 use core::cell::{RefCell, RefMut};
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_skill::SkillSet;
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_tool::{Tool, ToolGroup};
 
-use self::tools::skill_tools;
+use self::tools::{ListSkillTool, ReadSkillTool, ReloadSkillsTool};
 use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 
 mod tools;
@@ -29,15 +30,37 @@ impl SkillContextProvider {
 }
 
 impl ContextProvider for SkillContextProvider {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+    fn id(&self) -> &'static str {
+        "skill"
+    }
+
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
         let mut skills = lock_skill_set(&self.skills);
         let rendered = skills.catalog_context();
         output.block(Block::new(BlockKind::SkillList, rendered));
         Ok(())
     }
 
-    fn tools(&self) -> Option<ToolGroup> {
-        Some(skill_tools(Arc::clone(&self.skills)))
+    fn tools(&self, _storage: &AgentStorage) -> Option<ToolGroup> {
+        Some(ToolGroup::new(
+            self.id(),
+            true,
+            [
+                Tool::new(ListSkillTool {
+                    skills: Arc::clone(&self.skills),
+                }),
+                Tool::new(ReadSkillTool {
+                    skills: Arc::clone(&self.skills),
+                }),
+                Tool::new(ReloadSkillsTool {
+                    skills: Arc::clone(&self.skills),
+                }),
+            ],
+        ))
     }
 }
 

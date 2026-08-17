@@ -1,28 +1,25 @@
 //! Agent-mode provider: state, context projection, and lifecycle behavior.
 //!
 //! BaseAgent only drives the generic provider, effect, and task-lifecycle
-//! protocols; mode is stored in the Agent's shared durable state. Turn
-//! boundaries preserve that mode; the plan tools own explicit transitions.
+//! protocols. The provider and its tools share the `plan` provider object;
+//! turn boundaries preserve that mode and the plan tools own transitions.
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
-use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::ToolGroup;
-use serde::{Deserialize, Serialize};
+use barracuda_agent_tool::{Tool, ToolGroup};
+use serde_json::json;
 use strum::IntoStaticStr;
 
+use self::tools::{EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool};
 use crate::agent::base_agent::AgentEffectEmitter;
 use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
-use crate::agent::BaseAgentState;
-
-use self::tools::plan_tools;
 
 mod tools;
 
 const MODE_POLICY: &str = prompt!("plan_mode/instructions.md");
 
 /// The context mode applied to the next model request.
-#[derive(Clone, Copy, Debug, Deserialize, IntoStaticStr, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Copy, Debug, IntoStaticStr, PartialEq, Eq)]
 #[strum(serialize_all = "snake_case")]
 pub(in crate::agent) enum AgentMode {
     Normal,
@@ -31,28 +28,67 @@ pub(in crate::agent) enum AgentMode {
 
 /// Projects the shared Agent mode and provides all mode-specific tools.
 pub(crate) struct AgentModeContextProvider {
-    state: DurableState<BaseAgentState>,
     effects: AgentEffectEmitter,
 }
 
 impl AgentModeContextProvider {
-    pub(crate) fn new(state: DurableState<BaseAgentState>, effects: AgentEffectEmitter) -> Self {
-        Self { state, effects }
+    pub(crate) fn new(effects: AgentEffectEmitter) -> Self {
+        Self { effects }
     }
 }
 
 impl ContextProvider for AgentModeContextProvider {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
-        let mode: &'static str = self.state.get().mode().into();
+    fn id(&self) -> &'static str {
+        "plan"
+    }
+
+    fn contribute(
+        &mut self,
+        storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
+        let mode: &'static str = load_mode(storage).into();
         output
             .block(Block::new(BlockKind::ModePolicy, MODE_POLICY))
             .reminder(BlockKind::ActiveMode, Some(mode));
         Ok(())
     }
 
-    fn tools(&self) -> Option<ToolGroup> {
-        Some(plan_tools(self.state.clone(), self.effects.clone()))
+    fn tools(&self, storage: &AgentStorage) -> Option<ToolGroup> {
+        Some(ToolGroup::new(
+            self.id(),
+            true,
+            [
+                Tool::new(EnterPlanModeTool {
+                    storage: storage.clone(),
+                }),
+                Tool::new(RequestClarificationTool {
+                    effects: self.effects.clone(),
+                }),
+                Tool::new(ExitPlanModeTool {
+                    effects: self.effects.clone(),
+                    storage: storage.clone(),
+                }),
+            ],
+        ))
     }
+}
+
+fn load_mode(storage: &AgentStorage) -> AgentMode {
+    match storage
+        .load()
+        .as_ref()
+        .and_then(|object| object.get("mode"))
+        .and_then(|mode| mode.as_str())
+    {
+        Some("plan") => AgentMode::Plan,
+        _ => AgentMode::Normal,
+    }
+}
+
+fn store_mode(storage: &AgentStorage, mode: AgentMode) {
+    let mode: &'static str = mode.into();
+    storage.store(json!({ "mode": mode }));
 }
 
 #[cfg(test)]
@@ -61,25 +97,28 @@ mod tests {
     use barracuda_agent_persistence::DurableState;
     use serde_json::Value;
 
-    use super::{AgentMode, AgentModeContextProvider};
-    use crate::agent::base_agent::agent_effect_channel;
+    use super::{store_mode, AgentMode, AgentModeContextProvider};
+    use crate::agent::base_agent::{agent_effect_channel, AgentStorage};
     use crate::agent::base_agent::{ContextProvider, TurnLifecycle};
     use crate::agent::{AgentKind, BaseAgentState};
 
-    fn provider(mode: AgentMode) -> AgentModeContextProvider {
+    fn provider(mode: AgentMode) -> (AgentModeContextProvider, AgentStorage) {
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
-        state.get_mut().set_mode(mode);
         let (effects, _inbox) = agent_effect_channel();
-        AgentModeContextProvider::new(state, effects)
+        let provider = AgentModeContextProvider::new(effects);
+        let storage = AgentStorage::new(&state, provider.id());
+        store_mode(&storage, mode);
+        (provider, storage)
     }
 
     fn render(
         provider: &mut AgentModeContextProvider,
+        storage: &AgentStorage,
         context: &mut Context,
     ) -> (String, Vec<Value>) {
         let history = {
             let mut sink = context.sink();
-            assert!(provider.contribute(&mut sink).is_ok());
+            assert!(provider.contribute(storage, &mut sink).is_ok());
             sink.into_history()
         };
         let request = context.request(&history);
@@ -88,9 +127,9 @@ mod tests {
 
     #[test]
     fn plan_mode_projects_static_policy_and_plan_reminder() {
-        let mut provider = provider(AgentMode::Plan);
+        let (mut provider, storage) = provider(AgentMode::Plan);
         let mut context = Context::new();
-        let (system, reminders) = render(&mut provider, &mut context);
+        let (system, reminders) = render(&mut provider, &storage, &mut context);
 
         assert!(system.contains("Do not implement"));
         assert_eq!(reminder_content(&reminders), Some("plan"));
@@ -98,23 +137,23 @@ mod tests {
 
     #[test]
     fn ended_clarification_turn_preserves_plan_mode() {
-        let mut provider = provider(AgentMode::Plan);
-        provider.on_turn_lifecycle(TurnLifecycle::Ended);
+        let (mut provider, storage) = provider(AgentMode::Plan);
+        provider.on_turn_lifecycle(&storage, TurnLifecycle::Ended);
 
         let mut context = Context::new();
-        let (_, reminders) = render(&mut provider, &mut context);
+        let (_, reminders) = render(&mut provider, &storage, &mut context);
         assert_eq!(reminder_content(&reminders), Some("plan"));
     }
 
     #[test]
     fn mode_switch_changes_only_active_mode_reminder() {
-        let mut provider = provider(AgentMode::Normal);
+        let (mut provider, storage) = provider(AgentMode::Normal);
         let mut context = Context::new();
-        let (normal_system, normal_reminders) = render(&mut provider, &mut context);
+        let (normal_system, normal_reminders) = render(&mut provider, &storage, &mut context);
         let version = context.version();
 
-        provider.state.get_mut().set_mode(AgentMode::Plan);
-        let (plan_system, plan_reminders) = render(&mut provider, &mut context);
+        store_mode(&storage, AgentMode::Plan);
+        let (plan_system, plan_reminders) = render(&mut provider, &storage, &mut context);
 
         assert_eq!(normal_system, plan_system);
         assert_eq!(context.version(), version);

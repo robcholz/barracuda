@@ -6,9 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-use barracuda_agent_tool::runtime::{agent_runner, AgentStorageScope};
 use barracuda_agent_tool::{
-    ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolSetHandle,
+    ToolDetachHandle, ToolInvocation, ToolJoinHandle, ToolOutput, ToolRunner, ToolSetHandle,
 };
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
@@ -61,7 +60,6 @@ enum ToolBatchUpdate {
 
 struct ToolPhase<'a> {
     tools: &'a ToolSetHandle<'a>,
-    agent_storage: AgentStorageScope,
     joined: Option<ToolJoinHandle>,
     detached: VecDeque<ToolDetachHandle>,
     pending: VecDeque<PendingApproval<'a>>,
@@ -221,12 +219,7 @@ where
                 ))
                 .await;
 
-            let mut tools = ToolPhase::new(
-                tool_calls,
-                step.tools,
-                loop_.permission,
-                loop_.agent_storage,
-            )?;
+            let mut tools = ToolPhase::new(tool_calls, step.tools, loop_.permission)?;
             while let Some(event) = tools.next(loop_.control).await? {
                 let terminal = matches!(
                     event,
@@ -247,7 +240,6 @@ impl<'a> ToolPhase<'a> {
         tool_calls: Vec<ToolCall>,
         tools: &'a ToolSetHandle<'a>,
         permission: &'a P,
-        agent_storage: AgentStorageScope,
     ) -> Result<Self, IterationLoopError>
     where
         P: ToolPermissionPolicy,
@@ -340,11 +332,10 @@ impl<'a> ToolPhase<'a> {
                 }),
             }
         }
-        let (joined, detached) = dispatch_scheduled_calls(tools, &agent_storage, allowed);
+        let (joined, detached) = dispatch_scheduled_calls(tools, allowed);
 
         Ok(Self {
             tools,
-            agent_storage,
             joined,
             detached: detached.into_iter().collect(),
             pending,
@@ -453,11 +444,8 @@ impl<'a> ToolPhase<'a> {
                         .ok_or(IterationLoopError::IncompleteToolBatch)?;
                     match decision {
                         ToolPermission::Allow => {
-                            let (joined, detached) = dispatch_scheduled_calls(
-                                self.tools,
-                                &self.agent_storage,
-                                vec![waiting.call],
-                            );
+                            let (joined, detached) =
+                                dispatch_scheduled_calls(self.tools, vec![waiting.call]);
                             self.merge_joined(joined);
                             self.detached.extend(detached);
                         }
@@ -515,7 +503,6 @@ impl<'a> ToolPhase<'a> {
 
 fn dispatch_scheduled_calls(
     tools: &ToolSetHandle<'_>,
-    agent_storage: &AgentStorageScope,
     calls: Vec<ScheduledCall>,
 ) -> (Option<ToolJoinHandle>, Option<ToolDetachHandle>) {
     if calls.is_empty() {
@@ -525,7 +512,7 @@ fn dispatch_scheduled_calls(
         .into_iter()
         .map(|call| call.invocation)
         .collect::<Vec<_>>();
-    let (joined, detached) = agent_runner(tools, agent_storage.clone()).run(calls);
+    let (joined, detached) = ToolRunner::new(tools).run(calls);
     (Some(joined), detached)
 }
 
@@ -608,11 +595,7 @@ mod tests {
     impl ToolHandler for CountingTool {
         type Args = barracuda_agent_tool::EmptyArgs;
 
-        fn invoke<'a>(
-            &'a self,
-            _context: barracuda_agent_tool::ToolContext,
-            _args: Self::Args,
-        ) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             Box::pin(async move {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 Ok(ToolOutput {
@@ -696,13 +679,7 @@ mod tests {
             checks: Cell::new(0),
             ids: RefCell::new(Vec::new()),
         };
-        let mut phase = ToolPhase::new(
-            tool_calls,
-            &tools,
-            &permission,
-            AgentStorageScope::unavailable(),
-        )
-        .expect("phase prepares");
+        let mut phase = ToolPhase::new(tool_calls, &tools, &permission).expect("phase prepares");
 
         let events = block_on(async {
             let mut events = Vec::new();
@@ -778,14 +755,9 @@ mod tests {
             },
         ];
 
-        let error = ToolPhase::new(
-            tool_calls,
-            &tools,
-            &AllowAll,
-            AgentStorageScope::unavailable(),
-        )
-        .err()
-        .expect("duplicate ids fail the iteration");
+        let error = ToolPhase::new(tool_calls, &tools, &AllowAll)
+            .err()
+            .expect("duplicate ids fail the iteration");
         assert!(matches!(
             error,
             IterationLoopError::DuplicateProviderToolCallId(id) if id == "duplicate"

@@ -14,7 +14,7 @@ mod reasoning_effort;
 mod resume;
 mod skill;
 
-pub(in crate::agent) use agent_mode::{AgentMode, AgentModeContextProvider};
+pub(in crate::agent) use agent_mode::AgentModeContextProvider;
 pub(in crate::agent) use conversation_history::ConversationHistoryContextProvider;
 pub(in crate::agent) use long_term_memory::LongTermMemoryContextProvider;
 pub(in crate::agent) use profile::ProfileContextProvider;

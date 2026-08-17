@@ -34,7 +34,6 @@ fully host-testable.
 | `Compactor` / `CompactError` | The summarization seam: fold an aged message window into a shorter summary. Driven by the agent layer, **not** the store. |
 | `ProfileStore` and friends | Editable global profile documents: `Soul`, assistant identity, and user profile. Pure whole-file storage over `FileSystem`; projected into context by `barracuda-agent-runtime`. |
 | `LongTermMemory` and friends | Durable per-agent / global fact storage. |
-| `NoopCompactor` | *(feature `compactor-stub`)* A never-compacts stub for host CLIs and tests. |
 
 ### How a turn flows
 
@@ -61,7 +60,6 @@ future concern — not the store's.
 
 | Feature | Default | Effect |
 |---|---|---|
-| `compactor-stub` | no | Adds `NoopCompactor` (host-only convenience). |
 
 ## Example
 

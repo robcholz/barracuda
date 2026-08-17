@@ -1,6 +1,5 @@
 use alloc::borrow::ToOwned;
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -9,7 +8,7 @@ use core::cell::RefCell;
 use barracuda_agent_permission::Action;
 use serde::Serialize;
 
-use super::registry::{ToolGroup, ToolGroupId, ToolProjection, ToolRegistry, ToolRegistryVersion};
+use super::registry::{ToolGroup, ToolProjection, ToolRegistry, ToolRegistryVersion};
 use super::tool::{Tool, ToolError, ToolInvocation, ToolResult};
 
 pub type ToolName = String;
@@ -80,7 +79,7 @@ struct ToolSetState {
 struct ToolSetEntryState {
     source: ToolSource,
     state: ToolState,
-    group_id: ToolGroupId,
+    group_id: Option<String>,
     default_visibility: bool,
 }
 
@@ -237,7 +236,7 @@ impl ToolSet {
                     } else {
                         ToolState::Disabled
                     },
-                    group_id: group_id.clone(),
+                    group_id: Some(group_id.clone()),
                     default_visibility,
                 },
             );
@@ -356,7 +355,13 @@ impl ToolSet {
             .state
             .tools
             .iter()
-            .filter(|(_, entry)| entry.is_loadable() && pending.contains(&entry.group_id))
+            .filter(|(_, entry)| {
+                entry.is_loadable()
+                    && entry
+                        .group_id
+                        .as_ref()
+                        .is_some_and(|group_id| pending.contains(group_id))
+            })
             .map(|(name, _)| name.clone())
             .collect();
         for name in to_enable {
@@ -386,29 +391,6 @@ impl ToolSet {
             }
         }
         self.should_rebuild_temporary_tool = true;
-    }
-
-    pub fn loaded_groups(&self) -> Vec<String> {
-        self.state
-            .tools
-            .values()
-            .filter(|entry| !entry.default_visibility && entry.state == ToolState::Enabled)
-            .map(|entry| entry.group_id.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    #[doc(hidden)]
-    pub fn resume_detail(mut loaded_groups: Vec<String>) -> Option<String> {
-        loaded_groups.sort_unstable();
-        loaded_groups.dedup();
-        (!loaded_groups.is_empty()).then(|| {
-            format!(
-                "previously loaded tool groups: {}",
-                loaded_groups.join(", ")
-            )
-        })
     }
 
     pub fn begin(&mut self) -> Result<ToolSetHandle<'_>, ToolSetError> {
@@ -485,7 +467,7 @@ impl ToolSet {
                 ToolSetEntryState {
                     source: ToolSource::Registry,
                     state,
-                    group_id: entry.group_id,
+                    group_id: Some(entry.group_id),
                     default_visibility: entry.default_visibility,
                 },
             );
@@ -557,11 +539,14 @@ impl ToolSet {
             if !entry.is_loadable() {
                 continue;
             }
+            let Some(group_id) = entry.group_id.as_ref() else {
+                continue;
+            };
             let Some(tool) = self.tools.get(name) else {
                 continue;
             };
             groups
-                .entry(entry.group_id.clone())
+                .entry(group_id.clone())
                 .or_default()
                 .push(ToolCatalogEntry {
                     name: name.clone(),
@@ -673,11 +658,6 @@ pub struct ToolSetHandle<'a> {
     cache: &'a ToolSetCache,
 }
 
-pub(crate) struct RunnableTool {
-    pub(crate) tool: Tool,
-    pub(crate) group_id: ToolGroupId,
-}
-
 impl<'a> ToolSetHandle<'a> {
     /// Schemas for tools present in the default, immutable tool surface.
     pub fn static_schemas(&self) -> &str {
@@ -745,7 +725,7 @@ impl<'a> ToolSetHandle<'a> {
         }
     }
 
-    pub(crate) fn runnable_tool(&self, call: &ToolInvocation) -> ToolResult<RunnableTool> {
+    pub(crate) fn runnable_tool(&self, call: &ToolInvocation) -> ToolResult<Tool> {
         match (self.tools.get(call.name()), self.states.get(call.name())) {
             (Some(tool), Some(entry))
                 if matches!(
@@ -753,10 +733,7 @@ impl<'a> ToolSetHandle<'a> {
                     ToolState::Enabled | ToolState::TemporarilyEnabled
                 ) =>
             {
-                Ok(RunnableTool {
-                    tool: tool.clone(),
-                    group_id: entry.group_id.clone(),
-                })
+                Ok(tool.clone())
             }
             (_, Some(entry)) if entry.state == ToolState::TemporarilyDisabled => {
                 Err(ToolError::InvokeRejected(unavailable_message(call.name())).into())

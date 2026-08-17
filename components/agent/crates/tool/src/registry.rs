@@ -69,16 +69,16 @@ impl DurableStateCodec for ToolRegistryState {
 
 impl ToolRegistryInner {
     fn register_group(&mut self, group: ToolGroup) {
-        let default_visibility = group.default_visibility;
-        let mut names = Vec::with_capacity(group.tools.len());
+        let (id, default_visibility, group_tools) = group.into_parts();
+        let mut names = Vec::with_capacity(group_tools.len());
 
-        for tool in group.tools {
+        for tool in group_tools {
             let name = tool.name().to_owned();
             self.tools.insert(name.clone(), tool);
             names.push(name);
         }
         self.groups.insert(
-            group.id,
+            id,
             ToolGroupEntry {
                 default_visibility,
                 tools: names,
@@ -131,12 +131,10 @@ impl ToolRegistryInner {
             if state.overrides.get(name).copied() == Some(false) {
                 continue;
             }
-            let Some((group_id, default_visibility)) = group_of
+            let (group_id, default_visibility) = group_of
                 .get(name)
                 .map(|(group_id, visibility)| ((*group_id).clone(), *visibility))
-            else {
-                continue;
-            };
+                .unwrap_or_default();
             tools.push(ToolProjectionEntry {
                 name: name.clone(),
                 group_id,

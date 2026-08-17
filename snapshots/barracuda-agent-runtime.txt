@@ -11,6 +11,8 @@ pub barracuda_agent_runtime::AgentApprovalError::ToolCallMismatch::received: bar
 pub enum barracuda_agent_runtime::AgentCreateError
 pub barracuda_agent_runtime::AgentCreateError::AgentAlreadyExists(barracuda_agent_runtime::AgentId)
 pub barracuda_agent_runtime::AgentCreateError::AgentNotFound(barracuda_agent_runtime::AgentId)
+pub barracuda_agent_runtime::AgentCreateError::DuplicateContextProviderId(alloc::string::String)
+pub barracuda_agent_runtime::AgentCreateError::InvalidContextProviderId
 pub barracuda_agent_runtime::AgentCreateError::InvalidInstanceId(barracuda_agent_persistence::InvalidInstanceId)
 pub barracuda_agent_runtime::AgentCreateError::InvalidPersistedAgentId(alloc::string::String)
 pub barracuda_agent_runtime::AgentCreateError::LongTerm(barracuda_agent_memory::long_term_memory::LongTermInitError)

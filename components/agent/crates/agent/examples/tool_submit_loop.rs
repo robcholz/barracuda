@@ -18,9 +18,7 @@
 
 use barracuda_agent::{
     stream::StreamPart,
-    tools::{
-        EmptyArgs, Tool, ToolContext, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec,
-    },
+    tools::{EmptyArgs, Tool, ToolFuture, ToolGroup, ToolHandler, ToolOutput, ToolSpec},
     AgentSystem, ApiPurpose, BackendKind, IterationEvent, Message, ModelApiConfig, ModelApiFactory,
     SessionEvent, SessionPersistence, TurnEvent,
 };
@@ -56,7 +54,7 @@ impl ToolSpec for TimeNowTool {
 impl ToolHandler for TimeNowTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(&'a self, _context: ToolContext, _args: Self::Args) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async {
             Ok(ToolOutput {
                 content: "2026-06-29T17:00:00Z".into(),

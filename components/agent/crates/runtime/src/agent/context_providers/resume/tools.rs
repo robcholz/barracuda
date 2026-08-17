@@ -1,52 +1,33 @@
 //! The `tool_discovery` group: search hidden groups and load one for the next turn.
 
-use alloc::string::String;
+use alloc::{borrow::ToOwned, string::String, string::ToString};
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
-use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolDiscoveryHandle, ToolFuture, ToolGroup, ToolHandler,
-    ToolInvocation, ToolOutput, ToolSpec,
+    tool_metadata, EmptyArgs, ToolDiscoveryHandle, ToolFuture, ToolHandler, ToolInvocation,
+    ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::agent::BaseAgentState;
+use super::record_loaded_tool_group;
 
 #[derive(Deserialize)]
-struct LoadArgs {
+pub(super) struct LoadArgs {
     group_id: String,
-}
-
-/// Build the always-visible discovery group over a [`ToolSet`](barracuda_agent_tool::ToolSet)
-/// bridge. All other registered groups remain hidden until `tool_load` reveals
-/// one for the next turn.
-pub(super) fn discovery_tools(
-    discovery: ToolDiscoveryHandle,
-    state: DurableState<BaseAgentState>,
-) -> ToolGroup {
-    ToolGroup::new(
-        "tool_discovery",
-        true,
-        [
-            Tool::new(ToolSearchTool {
-                discovery: discovery.clone(),
-            }),
-            Tool::new(ToolLoadTool { discovery, state }),
-        ],
-    )
 }
 
 /// Reads the owning [`ToolSet`](barracuda_agent_tool::ToolSet)'s loadable catalog and
 /// returns it — group ids, tool names, and short descriptions, never schemas.
-struct ToolSearchTool {
-    discovery: ToolDiscoveryHandle,
+pub(super) struct ToolSearchTool {
+    pub(super) discovery: ToolDiscoveryHandle,
 }
 
 /// Queues a group to be enabled when ToolSet begins the next iteration.
-struct ToolLoadTool {
-    discovery: ToolDiscoveryHandle,
-    state: DurableState<BaseAgentState>,
+pub(super) struct ToolLoadTool {
+    pub(super) discovery: ToolDiscoveryHandle,
+    pub(super) storage: AgentStorage,
 }
 
 impl ToolSpec for ToolLoadTool {
@@ -60,18 +41,12 @@ impl ToolSpec for ToolLoadTool {
 impl ToolHandler for ToolLoadTool {
     type Args = LoadArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let group_id = args.group_id.trim().to_owned();
             let loaded = self.discovery.request_load(group_id.clone());
             if loaded {
-                self.state
-                    .get_mut()
-                    .record_loaded_tool_group(group_id.clone());
+                record_loaded_tool_group(&self.storage, group_id.clone());
             }
             Ok(ToolOutput {
                 content: json!({
@@ -97,11 +72,7 @@ impl ToolSpec for ToolSearchTool {
 impl ToolHandler for ToolSearchTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        _args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             Ok(ToolOutput {
                 content: json!({ "tool_groups": self.discovery.catalog() }).to_string(),
@@ -116,38 +87,47 @@ impl ToolHandler for ToolSearchTool {
 mod tests {
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::{
-        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
+        Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolRunner, ToolSet,
+        ToolSpec,
     };
     use futures_lite::future::block_on;
+    use futures_lite::StreamExt as _;
 
-    use super::ToolLoadTool;
+    use crate::agent::base_agent::{AgentStorage, ContextProvider};
+    use crate::agent::context_providers::resume::{loaded_tool_groups, ResumeContextProvider};
     use crate::agent::{AgentKind, BaseAgentState};
 
     #[test]
-    fn successful_load_is_recorded_in_agent_state() {
+    fn successful_load_is_recorded_in_the_discovery_provider_object() {
         let mut tool_set = ToolSet::empty();
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
         tool_set
             .add_group(ToolGroup::new("hidden", false, [Tool::new(HiddenTool)]))
             .expect("hidden group registers");
         let discovery = tool_set.discovery();
-        {
-            let _initial_tools = tool_set.begin().expect("tool set begins");
-        }
-        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
-        let tool = ToolLoadTool {
-            discovery,
-            state: state.clone(),
-        };
+        let provider = ResumeContextProvider::new(&state.get(), discovery.clone());
+        let storage = AgentStorage::new(&state, provider.id());
+        tool_set
+            .add_group(
+                provider
+                    .tools(&storage)
+                    .expect("provider exposes discovery tools"),
+            )
+            .expect("discovery group registers");
+        let tools = tool_set.begin().expect("tool set begins");
         let call =
             ToolInvocation::try_new(Some("call-test"), "tool_load", r#"{"group_id":"hidden"}"#)
                 .expect("valid invocation");
 
-        let args = call.arguments().expect("valid load args");
-        let output = block_on(tool.invoke(barracuda_agent_tool::ToolContext::stateless(), args))
-            .expect("load succeeds");
+        let (joined, detached) = ToolRunner::new(&tools).run(vec![call]);
+        assert!(detached.is_none());
+        let output = block_on(joined.collect::<Vec<_>>())
+            .pop()
+            .expect("load result")
+            .1;
 
         assert!(output.ok);
-        assert!(state.get().loaded_tool_groups().contains("hidden"));
+        assert_eq!(loaded_tool_groups(&storage), vec!["hidden".to_owned()]);
     }
 
     struct HiddenTool;
@@ -171,11 +151,7 @@ mod tests {
     impl ToolHandler for HiddenTool {
         type Args = barracuda_agent_tool::EmptyArgs;
 
-        fn invoke<'a>(
-            &'a self,
-            _context: barracuda_agent_tool::ToolContext,
-            _args: Self::Args,
-        ) -> ToolFuture<'a> {
+        fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
             alloc::boxed::Box::pin(async {
                 Ok(ToolOutput {
                     content: "ok".to_owned(),
@@ -185,4 +161,3 @@ mod tests {
         }
     }
 }
-use alloc::{borrow::ToOwned, string::ToString};

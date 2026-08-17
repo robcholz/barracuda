@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 use barracuda_agent_memory::{
     LongTermInitError, TranscriptDeleteError, TranscriptInitError, TranscriptListError,
 };
@@ -48,6 +50,12 @@ pub enum AgentCreateError {
     /// The agent's local tools could not be added to the tool set.
     #[error("failed to assemble agent tools: {0}")]
     Tools(#[from] ToolSetError),
+    /// A context provider did not declare a usable identity.
+    #[error("context provider id must not be empty")]
+    InvalidContextProviderId,
+    /// Two context providers declared the same identity.
+    #[error("context provider id already exists: {0}")]
+    DuplicateContextProviderId(String),
     /// The transcript store for this placement could not be opened.
     #[error("failed to open transcript: {0}")]
     Transcript(#[from] TranscriptInitError),
@@ -61,4 +69,3 @@ pub enum AgentCreateError {
     #[error("failed to load long-term memory: {0}")]
     LongTerm(#[from] LongTermInitError),
 }
-use alloc::string::String;

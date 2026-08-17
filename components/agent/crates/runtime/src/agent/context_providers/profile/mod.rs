@@ -4,14 +4,17 @@
 //! maps documents to `BlockKind`s and exposes profile-specific tools. Per-agent
 //! read/write projection is owned by the baked tool blacklist.
 
+use alloc::boxed::Box;
+
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{ProfileDocument, ProfileError, ProfileStore};
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_tool::{Tool, ToolGroup};
 use barracuda_fs::FileSystem;
 
 use crate::agent::base_agent::{ContextProvider, ContextProviderResult};
 
-use self::tools::profile_tools;
+use self::tools::{ProfileClearTool, ProfileReadTool, ProfileReplaceTool};
 
 mod tools;
 
@@ -66,7 +69,15 @@ impl<F: FileSystem + 'static> ProfileContextProvider<F> {
 }
 
 impl<F: FileSystem + 'static> ContextProvider for ProfileContextProvider<F> {
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+    fn id(&self) -> &'static str {
+        "profile"
+    }
+
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
         for document in ProfileDocument::all() {
             self.contribute_document(document, output).map_err(
                 |error| -> Box<dyn core::error::Error + Send + Sync> { Box::new(error) },
@@ -75,8 +86,21 @@ impl<F: FileSystem + 'static> ContextProvider for ProfileContextProvider<F> {
         Ok(())
     }
 
-    fn tools(&self) -> Option<ToolGroup> {
-        Some(profile_tools(self.store.clone()))
+    fn tools(&self, _storage: &AgentStorage) -> Option<ToolGroup> {
+        Some(ToolGroup::new(
+            self.id(),
+            true,
+            [
+                Tool::new(ProfileReadTool {
+                    store: self.store.clone(),
+                }),
+                Tool::new(ProfileReplaceTool {
+                    store: self.store.clone(),
+                }),
+                Tool::new(ProfileClearTool {
+                    store: self.store.clone(),
+                }),
+            ],
+        ))
     }
 }
-use alloc::boxed::Box;

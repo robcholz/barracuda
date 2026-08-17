@@ -385,22 +385,6 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
 }
 
 #[test]
-fn loaded_groups_reports_only_explicitly_loaded_hidden_groups() -> Result<()> {
-    let registry = registry()?;
-    registry.register_group(ToolGroup::new("hidden", false, [Tool::new(EchoTool)]))?;
-    registry.start_all()?;
-    let mut tool_set = registry.tool_set();
-
-    let _ = tool_set.begin()?;
-    assert!(tool_set.loaded_groups().is_empty());
-    assert!(tool_set.discovery().request_load("hidden"));
-    assert!(tool_set.loaded_groups().is_empty());
-    let _ = tool_set.begin()?;
-    assert_eq!(tool_set.loaded_groups(), vec!["hidden"]);
-    Ok(())
-}
-
-#[test]
 fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
     let persistence = persistence()?;
     let registry = ToolRegistry::new(Arc::clone(&persistence))?;
@@ -460,11 +444,7 @@ impl ToolSpec for EchoTool {
 impl ToolHandler for EchoTool {
     type Args = serde_json::Value;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             Ok(ToolOutput {
                 content: serde_json::to_string(&args)
@@ -496,11 +476,7 @@ impl ToolSpec for OtherTool {
 impl ToolHandler for OtherTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        _args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             Ok(ToolOutput {
                 content: "other".into(),
@@ -517,7 +493,7 @@ fn invocation(name: &'static str, arguments_json: &'static str) -> Result<ToolIn
 fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<ToolOutput> {
     let call = ToolInvocation::try_new(call.id(), call.name(), call.arguments_json())
         .map_err(|error| anyhow!("{error:?}"))?;
-    let (mut join, detached) = ToolRunner::stateless(handle).run(vec![call]);
+    let (mut join, detached) = ToolRunner::new(handle).run(vec![call]);
     if detached.is_some() {
         return Err(anyhow!("test helper does not accept detached tools"));
     }

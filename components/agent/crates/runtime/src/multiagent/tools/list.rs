@@ -25,11 +25,7 @@ impl ToolSpec for ListSubagentsTool {
 impl ToolHandler for ListSubagentsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        _args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             Ok(ToolOutput {
                 content: serde_json::json!({ "subagents": self.control.list() }).to_string(),

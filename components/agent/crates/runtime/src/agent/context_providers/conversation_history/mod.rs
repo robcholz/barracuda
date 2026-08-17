@@ -10,6 +10,9 @@
 
 mod llm_compactor;
 
+use alloc::{boxed::Box, string::ToString, vec::Vec};
+
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
 use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use barracuda_model_api::ModelApiFactory;
@@ -214,7 +217,15 @@ fn is_uncovered(turn: &Turn, covered_through: Option<TurnId>) -> bool {
 }
 
 impl ContextProvider for ConversationHistoryContextProvider {
-    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
+    fn id(&self) -> &'static str {
+        "conversation_history"
+    }
+
+    fn prepare<'a>(
+        &'a mut self,
+        _storage: &'a AgentStorage,
+        transcript: &'a dyn Transcript,
+    ) -> ContextProviderFuture<'a> {
         Box::pin(async move {
             self.prepare_projection(transcript)
                 .await
@@ -222,7 +233,11 @@ impl ContextProvider for ConversationHistoryContextProvider {
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
         // The transcript is only borrowed during `prepare`, which the production
         // lifecycle always runs first and which caches the summary + verbatim
         // tail. `contribute` therefore just emits that cached projection.
@@ -272,11 +287,14 @@ mod tests {
 
     use barracuda_agent_context::Context;
     use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
+    use barracuda_agent_persistence::DurableState;
     use barracuda_fs::MemFs;
     use futures_lite::future::block_on;
     use serde_json::{json, Value};
 
     use super::{CompactionPolicy, ContextProvider, ConversationHistoryContextProvider};
+    use crate::agent::base_agent::AgentStorage;
+    use crate::agent::{AgentKind, BaseAgentState};
 
     struct WindowEchoCompactor;
 
@@ -324,11 +342,13 @@ mod tests {
             Box::new(WindowEchoCompactor),
             CompactionPolicy::new(0, 1, usize::MAX),
         );
-        assert!(block_on(provider.prepare(&transcript as &dyn Transcript)).is_ok());
+        let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
+        let storage = AgentStorage::new(&state, provider.id());
+        assert!(block_on(provider.prepare(&storage, &transcript as &dyn Transcript)).is_ok());
 
         let mut context = Context::new();
         let mut sink = context.sink();
-        assert!(provider.contribute(&mut sink).is_ok());
+        assert!(provider.contribute(&storage, &mut sink).is_ok());
         let rendered = sink.into_history();
 
         assert_eq!(provider.covered_through, Some(expected_covered_through));
@@ -347,4 +367,3 @@ mod tests {
         assert_eq!(rendered_text.matches("open-four").count(), 1);
     }
 }
-use alloc::{boxed::Box, string::ToString, vec::Vec};

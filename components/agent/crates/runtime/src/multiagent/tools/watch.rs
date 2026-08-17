@@ -31,11 +31,7 @@ impl ToolSpec for WatchSubagentTool {
 impl ToolHandler for WatchSubagentTool {
     type Args = AgentArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let target = required_agent_id(args.agent)?;
             match self.control.get(target) {

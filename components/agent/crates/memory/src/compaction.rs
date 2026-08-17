@@ -93,23 +93,6 @@ pub trait Compactor {
     fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a>;
 }
 
-/// A [`Compactor`] that never compacts: every call yields an empty segment.
-///
-/// For wiring where summarization is undesired or irrelevant — host CLIs that
-/// keep the full transcript, and tests that need a memory without an LLM. Behind
-/// the `compactor-stub` feature so it is never built into firmware unless
-/// explicitly opted in.
-#[cfg(feature = "compactor-stub")]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoopCompactor;
-
-#[cfg(feature = "compactor-stub")]
-impl Compactor for NoopCompactor {
-    fn compact<'a>(&'a self, _window: &'a [Value]) -> CompactFuture<'a> {
-        Box::pin(async { Ok(Vec::new()) })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use core::error::Error as _;

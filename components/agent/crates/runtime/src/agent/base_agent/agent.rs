@@ -1,10 +1,9 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeSet, string::String, sync::Arc, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind, Context};
 use barracuda_agent_memory::{AssistantFragment, AssistantHandle, Transcript, TurnHandle};
 use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::runtime::AgentStorageScope;
 use barracuda_agent_tool::ToolSet;
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_net::{Dns, TcpConnect};
@@ -42,7 +41,6 @@ pub(in crate::agent) struct BaseAgentConfig {
     pub(in crate::agent) effect_inbox: AgentEffectInbox,
     pub(in crate::agent) permission_policy: Arc<dyn PermissionPolicy>,
     pub(in crate::agent) retry_policy: RetryPolicy,
-    pub(in crate::agent) agent_storage: AgentStorageScope,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +64,21 @@ enum IterationCompletion {
     Cancelled,
 }
 
+struct ContextProviderEntry {
+    provider: Box<dyn ContextProvider>,
+    storage: super::AgentStorage,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(in crate::agent) enum BaseAgentBuildError {
+    #[error("context provider id must not be empty")]
+    InvalidContextProviderId,
+    #[error("context provider id already exists: {0}")]
+    DuplicateContextProviderId(String),
+    #[error(transparent)]
+    Tools(#[from] barracuda_agent_tool::ToolSetError),
+}
+
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
 pub(crate) struct BaseAgent<H: TcpConnect + Dns + 'static> {
@@ -83,20 +96,30 @@ pub(crate) struct BaseAgent<H: TcpConnect + Dns + 'static> {
     context: Context,
     run_state: RunState,
     iteration_id_allocator: IterationIdAllocator,
-    context_providers: Vec<Box<dyn ContextProvider>>,
-    agent_storage: AgentStorageScope,
+    context_providers: Vec<ContextProviderEntry>,
 }
 
 impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
     pub(in crate::agent) fn build(
         config: BaseAgentConfig,
         llm: ModelApi<'static, H>,
-    ) -> Result<Self, barracuda_agent_tool::ToolSetError> {
+    ) -> Result<Self, BaseAgentBuildError> {
         let mut tools = config.tools;
-        for provider in &config.context_providers {
-            if let Some(group) = provider.tools() {
+        let mut context_providers = Vec::with_capacity(config.context_providers.len());
+        let mut provider_ids = BTreeSet::new();
+        for provider in config.context_providers {
+            let id = provider.id();
+            if id.is_empty() {
+                return Err(BaseAgentBuildError::InvalidContextProviderId);
+            }
+            if !provider_ids.insert(id) {
+                return Err(BaseAgentBuildError::DuplicateContextProviderId(id.into()));
+            }
+            let storage = super::AgentStorage::new(&config.state, id);
+            if let Some(group) = provider.tools(&storage) {
                 tools.add_group(group)?;
             }
+            context_providers.push(ContextProviderEntry { provider, storage });
         }
 
         let mut context = Context::new();
@@ -119,8 +142,7 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
             context,
             run_state: RunState::Stopped(StopReason::Ready),
             iteration_id_allocator: IterationIdAllocator::new(),
-            context_providers: config.context_providers,
-            agent_storage: config.agent_storage,
+            context_providers,
         })
     }
 
@@ -273,9 +295,10 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
     }
 
     async fn prepare_provider_context(&mut self) -> Result<(), AgentError> {
-        for provider in &mut self.context_providers {
-            provider
-                .prepare(self.transcript.as_ref())
+        for entry in &mut self.context_providers {
+            entry
+                .provider
+                .prepare(&entry.storage, self.transcript.as_ref())
                 .await
                 .map_err(AgentError::ContextProvider)?;
         }
@@ -284,9 +307,10 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
 
     fn render_provider_context(&mut self) -> Result<Vec<serde_json::Value>, AgentError> {
         let mut sink = self.context.sink();
-        for provider in &mut self.context_providers {
-            provider
-                .contribute(&mut sink)
+        for entry in &mut self.context_providers {
+            entry
+                .provider
+                .contribute(&entry.storage, &mut sink)
                 .map_err(AgentError::ContextProvider)?;
         }
         Ok(sink.into_history())
@@ -452,8 +476,10 @@ impl<H: TcpConnect + Dns + 'static> BaseAgent<H> {
 
     fn stop(&mut self, reason: StopReason) {
         self.run_state = RunState::Stopped(reason);
-        for provider in &mut self.context_providers {
-            provider.on_turn_lifecycle(TurnLifecycle::Ended);
+        for entry in &mut self.context_providers {
+            entry
+                .provider
+                .on_turn_lifecycle(&entry.storage, TurnLifecycle::Ended);
         }
     }
 
@@ -629,7 +655,6 @@ where
                             control: &control,
                             permission: &permission,
                             retry: self.agent.retry_policy,
-                            agent_storage: self.agent.agent_storage.clone(),
                         }
                         .run(step),
                     );

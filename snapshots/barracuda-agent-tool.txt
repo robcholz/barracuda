@@ -5,15 +5,7 @@ pub use barracuda_agent_tool::RiskClass
 pub macro barracuda_agent_tool::tool_metadata!
 pub macro barracuda_agent_tool::tool_schemas!
 pub macro barracuda_agent_tool::tool_validator!
-pub enum barracuda_agent_tool::AgentStorageError
-pub barracuda_agent_tool::AgentStorageError::Backend(alloc::string::String)
-pub barracuda_agent_tool::AgentStorageError::Decode(alloc::string::String)
-pub barracuda_agent_tool::AgentStorageError::Encode(alloc::string::String)
-pub barracuda_agent_tool::AgentStorageError::Unavailable
-impl core::convert::From<barracuda_agent_tool::AgentStorageError> for barracuda_agent_tool::ToolInvokeError
-pub fn barracuda_agent_tool::ToolInvokeError::from(error: barracuda_agent_tool::AgentStorageError) -> Self
 pub enum barracuda_agent_tool::ToolError
-pub barracuda_agent_tool::ToolError::AgentStorage(barracuda_agent_tool::AgentStorageError)
 pub barracuda_agent_tool::ToolError::ArgumentsSchema(json_validator::ValidationError)
 pub barracuda_agent_tool::ToolError::InvalidArguments(alloc::string::String)
 pub barracuda_agent_tool::ToolError::InvalidArgumentsJson(alloc::string::String)
@@ -24,8 +16,8 @@ pub fn barracuda_agent_tool::ToolInvokeError::from(error: barracuda_agent_tool::
 pub enum barracuda_agent_tool::ToolRegistryError
 pub barracuda_agent_tool::ToolRegistryError::AlreadyExists(barracuda_agent_tool::ToolName)
 pub barracuda_agent_tool::ToolRegistryError::AmbiguousName(alloc::string::String)
-pub barracuda_agent_tool::ToolRegistryError::GroupAlreadyExists(barracuda_agent_tool::ToolGroupId)
-pub barracuda_agent_tool::ToolRegistryError::InvalidGroup(barracuda_agent_tool::ToolGroupId)
+pub barracuda_agent_tool::ToolRegistryError::GroupAlreadyExists(alloc::string::String)
+pub barracuda_agent_tool::ToolRegistryError::InvalidGroup(alloc::string::String)
 pub barracuda_agent_tool::ToolRegistryError::InvalidTool(barracuda_agent_tool::ToolName)
 pub barracuda_agent_tool::ToolRegistryError::NotFound(barracuda_agent_tool::ToolName)
 pub enum barracuda_agent_tool::ToolSetError
@@ -35,11 +27,6 @@ pub barracuda_agent_tool::ToolSetError::GroupAlreadyExists(alloc::string::String
 pub barracuda_agent_tool::ToolSetError::InvalidGroup(alloc::string::String)
 pub barracuda_agent_tool::ToolSetError::InvalidTool(barracuda_agent_tool::ToolName)
 pub barracuda_agent_tool::ToolSetError::NotFound(barracuda_agent_tool::ToolName)
-pub struct barracuda_agent_tool::AgentStorage
-impl barracuda_agent_tool::AgentStorage
-pub fn barracuda_agent_tool::AgentStorage::clear(&self) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError>
-pub fn barracuda_agent_tool::AgentStorage::load<T>(&self) -> core::result::Result<core::option::Option<T>, barracuda_agent_tool::AgentStorageError> where T: serde_core::de::DeserializeOwned
-pub fn barracuda_agent_tool::AgentStorage::store<T>(&self, value: &T) -> core::result::Result<(), barracuda_agent_tool::AgentStorageError> where T: serde_core::ser::Serialize
 pub struct barracuda_agent_tool::DetachedTool
 impl barracuda_agent_tool::DetachedTool
 pub fn barracuda_agent_tool::DetachedTool::new(accepted: barracuda_agent_tool::ToolOutput, completion: barracuda_agent_tool::ToolCompletionFuture) -> Self
@@ -60,10 +47,6 @@ pub barracuda_agent_tool::ToolCatalogEntry::description: alloc::string::String
 pub barracuda_agent_tool::ToolCatalogEntry::name: barracuda_agent_tool::ToolName
 pub struct barracuda_agent_tool::ToolConfig
 pub barracuda_agent_tool::ToolConfig::detached: bool
-pub struct barracuda_agent_tool::ToolContext
-pub barracuda_agent_tool::ToolContext::agent_storage: barracuda_agent_tool::AgentStorage
-impl barracuda_agent_tool::ToolContext
-pub fn barracuda_agent_tool::ToolContext::stateless() -> Self
 pub struct barracuda_agent_tool::ToolDetachHandle
 impl futures_core::stream::Stream for barracuda_agent_tool::ToolDetachHandle
 pub type barracuda_agent_tool::ToolDetachHandle::Item = (barracuda_agent_tool::ToolInvocation, barracuda_agent_tool::ToolOutput)
@@ -75,7 +58,7 @@ pub fn barracuda_agent_tool::ToolDiscoveryHandle::request_load(&self, group_id: 
 pub struct barracuda_agent_tool::ToolGroup
 impl barracuda_agent_tool::ToolGroup
 pub fn barracuda_agent_tool::ToolGroup::id(&self) -> &str
-pub fn barracuda_agent_tool::ToolGroup::new(id: impl core::convert::Into<barracuda_agent_tool::ToolGroupId>, default_visibility: bool, tools: impl core::iter::traits::collect::IntoIterator<Item = barracuda_agent_tool::Tool>) -> Self
+pub fn barracuda_agent_tool::ToolGroup::new(id: impl core::convert::Into<alloc::string::String>, default_visibility: bool, tools: impl core::iter::traits::collect::IntoIterator<Item = barracuda_agent_tool::Tool>) -> Self
 pub struct barracuda_agent_tool::ToolGroupCatalog
 pub barracuda_agent_tool::ToolGroupCatalog::id: alloc::string::String
 pub barracuda_agent_tool::ToolGroupCatalog::tools: alloc::vec::Vec<barracuda_agent_tool::ToolCatalogEntry>
@@ -91,8 +74,6 @@ pub struct barracuda_agent_tool::ToolInvokeError
 pub barracuda_agent_tool::ToolInvokeError::error: barracuda_agent_tool::ToolError
 impl barracuda_agent_tool::ToolInvokeError
 pub fn barracuda_agent_tool::ToolInvokeError::new(error: barracuda_agent_tool::ToolError) -> Self
-impl core::convert::From<barracuda_agent_tool::AgentStorageError> for barracuda_agent_tool::ToolInvokeError
-pub fn barracuda_agent_tool::ToolInvokeError::from(error: barracuda_agent_tool::AgentStorageError) -> Self
 impl core::convert::From<barracuda_agent_tool::ToolError> for barracuda_agent_tool::ToolInvokeError
 pub fn barracuda_agent_tool::ToolInvokeError::from(error: barracuda_agent_tool::ToolError) -> Self
 impl core::error::Error for barracuda_agent_tool::ToolInvokeError
@@ -123,8 +104,8 @@ impl core::fmt::Debug for barracuda_agent_tool::ToolRegistry
 pub fn barracuda_agent_tool::ToolRegistry::fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct barracuda_agent_tool::ToolRunner<'a>
 impl<'a> barracuda_agent_tool::ToolRunner<'a>
+pub fn barracuda_agent_tool::ToolRunner<'a>::new(tools: &'a barracuda_agent_tool::ToolSetHandle<'a>) -> Self
 pub fn barracuda_agent_tool::ToolRunner<'a>::run(&self, calls: alloc::vec::Vec<barracuda_agent_tool::ToolInvocation>) -> (barracuda_agent_tool::ToolJoinHandle, core::option::Option<barracuda_agent_tool::ToolDetachHandle>)
-pub fn barracuda_agent_tool::ToolRunner<'a>::stateless(tools: &'a barracuda_agent_tool::ToolSetHandle<'a>) -> Self
 pub struct barracuda_agent_tool::ToolSet
 impl barracuda_agent_tool::ToolSet
 pub fn barracuda_agent_tool::ToolSet::add_group(&mut self, group: barracuda_agent_tool::ToolGroup) -> core::result::Result<(), barracuda_agent_tool::ToolSetError>
@@ -134,7 +115,6 @@ pub fn barracuda_agent_tool::ToolSet::disable_tool(&mut self, name: barracuda_ag
 pub fn barracuda_agent_tool::ToolSet::discovery(&self) -> barracuda_agent_tool::ToolDiscoveryHandle
 pub fn barracuda_agent_tool::ToolSet::empty() -> Self
 pub fn barracuda_agent_tool::ToolSet::enable_tool(&mut self, name: barracuda_agent_tool::ToolName) -> core::result::Result<(), barracuda_agent_tool::ToolSetError>
-pub fn barracuda_agent_tool::ToolSet::loaded_groups(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn barracuda_agent_tool::ToolSet::temporarily_disable_tool(&mut self, name: barracuda_agent_tool::ToolName) -> core::result::Result<(), barracuda_agent_tool::ToolSetError>
 pub fn barracuda_agent_tool::ToolSet::temporarily_enable_tool(&mut self, name: barracuda_agent_tool::ToolName) -> core::result::Result<(), barracuda_agent_tool::ToolSetError>
 pub struct barracuda_agent_tool::ToolSetHandle<'a>
@@ -146,10 +126,10 @@ pub fn barracuda_agent_tool::ToolSetHandle<'a>::static_context(&self) -> &str
 pub fn barracuda_agent_tool::ToolSetHandle<'a>::static_schemas(&self) -> &str
 pub trait barracuda_agent_tool::DetachedToolHandler: barracuda_agent_tool::ToolSpec
 pub type barracuda_agent_tool::DetachedToolHandler::Args: serde_core::de::DeserializeOwned
-pub fn barracuda_agent_tool::DetachedToolHandler::invoke<'a>(&'a self, context: barracuda_agent_tool::ToolContext, args: Self::Args) -> barracuda_agent_tool::DetachedToolFuture<'a>
+pub fn barracuda_agent_tool::DetachedToolHandler::invoke<'a>(&'a self, args: Self::Args) -> barracuda_agent_tool::DetachedToolFuture<'a>
 pub trait barracuda_agent_tool::ToolHandler: barracuda_agent_tool::ToolSpec
 pub type barracuda_agent_tool::ToolHandler::Args: serde_core::de::DeserializeOwned
-pub fn barracuda_agent_tool::ToolHandler::invoke<'a>(&'a self, context: barracuda_agent_tool::ToolContext, args: Self::Args) -> barracuda_agent_tool::ToolFuture<'a>
+pub fn barracuda_agent_tool::ToolHandler::invoke<'a>(&'a self, args: Self::Args) -> barracuda_agent_tool::ToolFuture<'a>
 pub trait barracuda_agent_tool::ToolSpec
 pub fn barracuda_agent_tool::ToolSpec::arguments_validator(&self) -> &'static json_validator::Validator
 pub fn barracuda_agent_tool::ToolSpec::classify(&self, _call: &barracuda_agent_tool::ToolInvocation) -> barracuda_agent_permission::action::Action
@@ -160,7 +140,6 @@ pub fn barracuda_agent_tool::ToolSpec::usage(&self) -> core::option::Option<&str
 pub type barracuda_agent_tool::DetachedToolFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = barracuda_agent_tool::ToolResult<barracuda_agent_tool::DetachedTool>> + 'a)>>
 pub type barracuda_agent_tool::ToolCompletionFuture = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = barracuda_agent_tool::ToolResult<barracuda_agent_tool::ToolOutput>> + 'static)>>
 pub type barracuda_agent_tool::ToolFuture<'a> = core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = barracuda_agent_tool::ToolResult<barracuda_agent_tool::ToolOutput>> + 'a)>>
-pub type barracuda_agent_tool::ToolGroupId = alloc::string::String
 pub type barracuda_agent_tool::ToolName = alloc::string::String
 pub type barracuda_agent_tool::ToolRegistryVersion = u64
 pub type barracuda_agent_tool::ToolResult<T> = core::result::Result<T, barracuda_agent_tool::ToolInvokeError>

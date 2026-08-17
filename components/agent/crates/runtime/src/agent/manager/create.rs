@@ -11,7 +11,7 @@ use barracuda_net::{Dns, TcpConnect};
 
 use crate::agent::baked;
 use crate::agent::base_agent::{
-    agent_effect_channel, agent_storage_scope, BaseAgent, BaseAgentConfig, ContextProvider,
+    agent_effect_channel, BaseAgent, BaseAgentBuildError, BaseAgentConfig, ContextProvider,
 };
 use crate::agent::context_providers::{
     AgentModeContextProvider, ConversationHistoryContextProvider, ProfileContextProvider,
@@ -175,7 +175,6 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let runtime = manifest.runtime();
         let skill_set = Arc::clone(&self.skill_registry).skill_set();
         let state = DurableState::new(recovery_state.unwrap_or_else(|| BaseAgentState::new(kind)));
-        let agent_storage = agent_storage_scope(&state);
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.
@@ -187,7 +186,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         for extension in extension_tools {
             tools.add_group(extension)?;
         }
-        let resume_provider = ResumeContextProvider::new(state.clone(), tools.discovery());
+        let resume_provider = ResumeContextProvider::new(&state.get(), tools.discovery());
 
         // Only `BaseAgent` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
@@ -223,7 +222,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let (reasoning_effort_provider, reasoning_effort_handle) =
             ReasoningEffortContextProvider::new(reasoning_effort);
         let context_providers: Vec<Box<dyn ContextProvider>> = vec![
-            Box::new(AgentModeContextProvider::new(state.clone(), effect_emitter)),
+            Box::new(AgentModeContextProvider::new(effect_emitter)),
             Box::new(reasoning_effort_provider),
             Box::new(resume_provider),
             Box::new(conversation_history),
@@ -251,9 +250,19 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
             inherited_context,
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
-            agent_storage,
         };
-        let base = BaseAgent::<Http>::build(base_config, self.llm_factory.create())?;
+        let base =
+            BaseAgent::<Http>::build(base_config, self.llm_factory.create()).map_err(|error| {
+                match error {
+                    BaseAgentBuildError::InvalidContextProviderId => {
+                        AgentCreateError::InvalidContextProviderId
+                    }
+                    BaseAgentBuildError::DuplicateContextProviderId(id) => {
+                        AgentCreateError::DuplicateContextProviderId(id)
+                    }
+                    BaseAgentBuildError::Tools(error) => AgentCreateError::Tools(error),
+                }
+            })?;
         let agent = Agent::new(base);
 
         log::info!("Agent {id} ({}) created", kind.as_str());

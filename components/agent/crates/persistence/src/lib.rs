@@ -191,11 +191,6 @@ impl<T> DurableState<T> {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn generation(&self) -> PartGeneration {
-        self.borrow().generation
-    }
-
     pub fn get(&self) -> impl Deref<Target = T> + '_ {
         StateGuard(self.borrow())
     }
@@ -337,7 +332,7 @@ mod tests {
 
         let value = state.get().value;
         assert_eq!(value, 2);
-        assert_eq!(state.generation(), 1);
+        assert_eq!(state.borrow().generation, 1);
     }
 
     #[test]

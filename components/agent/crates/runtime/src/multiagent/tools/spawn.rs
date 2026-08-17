@@ -42,11 +42,7 @@ impl ToolSpec for SpawnSubagentTool {
 impl DetachedToolHandler for SpawnSubagentTool {
     type Args = SpawnArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> DetachedToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> DetachedToolFuture<'a> {
         Box::pin(async move { self.invoke_inner(args).await })
     }
 }

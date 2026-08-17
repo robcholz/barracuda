@@ -8,10 +8,6 @@ description = "Agent memory subsystem: conversation tape and compaction"
 [lib]
 crate-type = ["rlib"]
 
-[features]
-# `NoopCompactor`: a never-compacts stub for host-target CLIs and tests.
-compactor-stub = []
-
 [dependencies]
 # Core crate: depends only on the inbound trait crate. The concrete `FileSystem` and
 # `Compactor` (e.g. `barracuda_agent_runtime::LlmCompactor`) are passed in by the caller, so

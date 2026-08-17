@@ -27,11 +27,7 @@ impl ToolSpec for DeleteSubagentTool {
 impl ToolHandler for DeleteSubagentTool {
     type Args = AgentArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let target = required_agent_id(args.agent)?;
             if self.control.get(target).is_none() {

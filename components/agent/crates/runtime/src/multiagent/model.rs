@@ -53,11 +53,6 @@ impl SubagentTimeout {
         Self(milliseconds)
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_millis(milliseconds: u32) -> Option<Self> {
-        NonZeroU32::new(milliseconds).map(Self)
-    }
-
     pub(crate) const fn millis(self) -> u32 {
         self.0.get()
     }

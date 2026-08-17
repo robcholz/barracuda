@@ -1,27 +1,27 @@
 //! The `plan` tool group owned by [`AgentModeContextProvider`](super::AgentModeContextProvider).
 
+use alloc::{borrow::ToOwned, string::String};
+
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_permission::{Action, RiskClass};
-use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::{
-    tool_metadata, EmptyArgs, Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolSpec,
+    tool_metadata, EmptyArgs, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec,
 };
 use serde::Deserialize;
 
-use super::AgentMode;
+use super::{store_mode, AgentMode};
 use crate::agent::base_agent::{AgentEffect, AgentEffectEmitter};
-use crate::agent::BaseAgentState;
 
 const DEFAULT_CANCEL_MESSAGE: &str = "Planning cancelled.";
 
 #[derive(Deserialize)]
-struct ClarifyArgs {
+pub(super) struct ClarifyArgs {
     question: String,
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "outcome", rename_all = "lowercase")]
-enum ExitArgs {
+pub(super) enum ExitArgs {
     Execute {
         plan: String,
         #[serde(rename = "message")]
@@ -32,27 +32,8 @@ enum ExitArgs {
     },
 }
 
-pub(super) fn plan_tools(
-    state: DurableState<BaseAgentState>,
-    effects: AgentEffectEmitter,
-) -> ToolGroup {
-    ToolGroup::new(
-        "plan",
-        true,
-        [
-            Tool::new(EnterPlanModeTool {
-                state: state.clone(),
-            }),
-            Tool::new(RequestClarificationTool {
-                effects: effects.clone(),
-            }),
-            Tool::new(ExitPlanModeTool { state, effects }),
-        ],
-    )
-}
-
-struct EnterPlanModeTool {
-    state: DurableState<BaseAgentState>,
+pub(super) struct EnterPlanModeTool {
+    pub(super) storage: AgentStorage,
 }
 
 impl ToolSpec for EnterPlanModeTool {
@@ -66,20 +47,16 @@ impl ToolSpec for EnterPlanModeTool {
 impl ToolHandler for EnterPlanModeTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        _args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            self.state.get_mut().set_mode(AgentMode::Plan);
+            store_mode(&self.storage, AgentMode::Plan);
             Ok(success("Plan Mode entered."))
         })
     }
 }
 
-struct RequestClarificationTool {
-    effects: AgentEffectEmitter,
+pub(super) struct RequestClarificationTool {
+    pub(super) effects: AgentEffectEmitter,
 }
 
 impl ToolSpec for RequestClarificationTool {
@@ -93,11 +70,7 @@ impl ToolSpec for RequestClarificationTool {
 impl ToolHandler for RequestClarificationTool {
     type Args = ClarifyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let question = args.question.trim().to_owned();
             self.effects.emit(AgentEffect::Yield { message: question });
@@ -106,9 +79,9 @@ impl ToolHandler for RequestClarificationTool {
     }
 }
 
-struct ExitPlanModeTool {
-    state: DurableState<BaseAgentState>,
-    effects: AgentEffectEmitter,
+pub(super) struct ExitPlanModeTool {
+    pub(super) effects: AgentEffectEmitter,
+    pub(super) storage: AgentStorage,
 }
 
 impl ToolSpec for ExitPlanModeTool {
@@ -122,11 +95,7 @@ impl ToolSpec for ExitPlanModeTool {
 impl ToolHandler for ExitPlanModeTool {
     type Args = ExitArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let output = match args {
                 ExitArgs::Execute {
@@ -145,7 +114,7 @@ impl ToolHandler for ExitPlanModeTool {
                     "Plan Mode cancelled."
                 }
             };
-            self.state.get_mut().set_mode(AgentMode::Normal);
+            store_mode(&self.storage, AgentMode::Normal);
             Ok(success(output))
         })
     }
@@ -162,69 +131,80 @@ fn success(output: &str) -> ToolOutput {
 #[allow(clippy::expect_used)]
 mod tests {
     use barracuda_agent_persistence::DurableState;
-    use barracuda_agent_tool::{ToolHandler, ToolInvocation};
+    use barracuda_agent_tool::{ToolInvocation, ToolOutput, ToolRunner, ToolSet};
     use futures_lite::future::block_on;
+    use futures_lite::StreamExt as _;
 
-    use super::{
-        AgentEffect, AgentMode, EnterPlanModeTool, ExitPlanModeTool, RequestClarificationTool,
+    use super::{AgentEffect, AgentMode};
+    use crate::agent::base_agent::{
+        agent_effect_channel, AgentEffectEmitter, AgentStorage, ContextProvider,
     };
-    use crate::agent::base_agent::agent_effect_channel;
+    use crate::agent::context_providers::agent_mode::{load_mode, AgentModeContextProvider};
     use crate::agent::{AgentKind, BaseAgentState};
 
     fn invocation<'a>(name: &'a str, arguments_json: &'a str) -> ToolInvocation {
         ToolInvocation::try_new(Some("call-test"), name, arguments_json).expect("valid invocation")
     }
 
-    fn state(mode: AgentMode) -> DurableState<BaseAgentState> {
+    fn storage(mode: AgentMode) -> AgentStorage {
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
-        state.get_mut().set_mode(mode);
-        state
+        let (effects, _inbox) = agent_effect_channel();
+        let provider = AgentModeContextProvider::new(effects);
+        let storage = AgentStorage::new(&state, provider.id());
+        super::store_mode(&storage, mode);
+        storage
+    }
+
+    fn run(
+        effects: AgentEffectEmitter,
+        storage: AgentStorage,
+        invocation: ToolInvocation,
+    ) -> ToolOutput {
+        let provider = AgentModeContextProvider::new(effects.clone());
+        let mut tools = ToolSet::empty();
+        tools
+            .add_group(provider.tools(&storage).expect("plan tools exist"))
+            .expect("plan tools register");
+        let tools = tools.begin().expect("tool set begins");
+        let (joined, detached) = ToolRunner::new(&tools).run(vec![invocation]);
+        assert!(detached.is_none());
+        block_on(joined.collect::<Vec<_>>())
+            .pop()
+            .expect("tool result")
+            .1
     }
 
     #[test]
     fn enter_and_execute_exit_mutate_agent_mode() {
-        let state = state(AgentMode::Normal);
-        block_on(
-            EnterPlanModeTool {
-                state: state.clone(),
-            }
-            .invoke(
-                barracuda_agent_tool::ToolContext::stateless(),
-                barracuda_agent_tool::EmptyArgs {},
-            ),
-        )
-        .expect("enter succeeds");
-        assert_eq!(state.get().mode(), AgentMode::Plan);
-
+        let storage = storage(AgentMode::Normal);
         let (effects, _inbox) = agent_effect_channel();
-        block_on(
-            ExitPlanModeTool {
-                state: state.clone(),
-                effects,
-            }
-            .invoke(
-                barracuda_agent_tool::ToolContext::stateless(),
-                invocation("plan_exit", r#"{"outcome":"execute","plan":"ship it"}"#)
-                    .arguments()
-                    .expect("valid exit args"),
-            ),
-        )
-        .expect("exit succeeds");
-        assert_eq!(state.get().mode(), AgentMode::Normal);
+        let output = run(
+            effects.clone(),
+            storage.clone(),
+            invocation("plan_enter", "{}"),
+        );
+        assert!(output.ok);
+        assert_eq!(load_mode(&storage), AgentMode::Plan);
+
+        let output = run(
+            effects,
+            storage.clone(),
+            invocation("plan_exit", r#"{"outcome":"execute","plan":"ship it"}"#),
+        );
+        assert!(output.ok);
+        assert_eq!(load_mode(&storage), AgentMode::Normal);
     }
 
     #[test]
     fn clarification_emits_generic_yield() {
+        let storage = storage(AgentMode::Plan);
         let (effects, mut inbox) = agent_effect_channel();
-        block_on(
-            RequestClarificationTool { effects }.invoke(
-                barracuda_agent_tool::ToolContext::stateless(),
-                invocation("plan_clarify", r#"{"question":"Which board?"}"#)
-                    .arguments()
-                    .expect("valid clarification args"),
-            ),
-        )
-        .expect("clarification succeeds");
+        let output = run(
+            effects,
+            storage,
+            invocation("plan_clarify", r#"{"question":"Which board?"}"#),
+        );
+        assert!(output.ok);
 
         let drained = inbox.drain();
         assert_eq!(
@@ -237,26 +217,18 @@ mod tests {
 
     #[test]
     fn cancel_exit_resets_mode_and_emits_generic_yield() {
-        let state = state(AgentMode::Plan);
+        let storage = storage(AgentMode::Plan);
         let (effects, mut inbox) = agent_effect_channel();
-        block_on(
-            ExitPlanModeTool {
-                state: state.clone(),
-                effects,
-            }
-            .invoke(
-                barracuda_agent_tool::ToolContext::stateless(),
-                invocation(
-                    "plan_exit",
-                    r#"{"outcome":"cancel","message":"No changes made."}"#,
-                )
-                .arguments()
-                .expect("valid exit args"),
+        let output = run(
+            effects,
+            storage.clone(),
+            invocation(
+                "plan_exit",
+                r#"{"outcome":"cancel","message":"No changes made."}"#,
             ),
-        )
-        .expect("cancel succeeds");
-
-        assert_eq!(state.get().mode(), AgentMode::Normal);
+        );
+        assert!(output.ok);
+        assert_eq!(load_mode(&storage), AgentMode::Normal);
         let drained = inbox.drain();
         assert_eq!(
             drained,
@@ -266,4 +238,3 @@ mod tests {
         );
     }
 }
-use alloc::{borrow::ToOwned, string::String};

@@ -36,11 +36,7 @@ impl ToolSpec for EndConversationTool {
 impl ToolHandler for EndConversationTool {
     type Args = EndConversationArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let final_message = args.final_message.trim();
             self.effects.emit(AgentEffect::Finish {
@@ -57,10 +53,11 @@ impl ToolHandler for EndConversationTool {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use barracuda_agent_tool::{ToolHandler, ToolInvocation};
+    use barracuda_agent_tool::{ToolInvocation, ToolRunner, ToolSet};
     use futures_lite::future::block_on;
+    use futures_lite::StreamExt as _;
 
-    use super::{AgentEffect, EndConversationTool};
+    use super::{internal_tools, AgentEffect};
     use crate::agent::base_agent::agent_effect_channel;
 
     #[test]
@@ -72,13 +69,18 @@ mod tests {
             r#"{"final_message":"Done."}"#,
         )
         .expect("valid invocation");
-
-        let args = call.arguments().expect("valid conversation args");
-        block_on(
-            EndConversationTool { effects }
-                .invoke(barracuda_agent_tool::ToolContext::stateless(), args),
-        )
-        .expect("conversation_end succeeds");
+        let mut tools = ToolSet::empty();
+        tools
+            .add_group(internal_tools(effects))
+            .expect("internal tools register");
+        let tools = tools.begin().expect("tool set begins");
+        let (joined, detached) = ToolRunner::new(&tools).run(vec![call]);
+        assert!(detached.is_none());
+        let output = block_on(joined.collect::<Vec<_>>())
+            .pop()
+            .expect("tool result")
+            .1;
+        assert!(output.ok);
 
         let emitted = inbox.drain();
         assert_eq!(

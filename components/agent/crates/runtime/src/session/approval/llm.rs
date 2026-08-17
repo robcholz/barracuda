@@ -135,11 +135,7 @@ impl ToolSpec for ResolvePermissionReplyTool {
 impl ToolHandler for ResolvePermissionReplyTool {
     type Args = ResolutionArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let resolution = match args.decision {
                 ResolutionDecision::Yes => ApprovalDecision::Approved,
@@ -210,7 +206,7 @@ where
         return Err(ApprovalResolverError::MalformedToolCall);
     };
 
-    let runner = ToolRunner::stateless(&tools);
+    let runner = ToolRunner::new(&tools);
     let call = ToolInvocation::try_new(
         Some(&tool_call.id),
         &tool_call.name,

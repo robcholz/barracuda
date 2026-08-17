@@ -77,7 +77,7 @@ impl ExtractionTools {
 
         {
             let tools = self.tools.begin().map_err(extraction_runtime_error)?;
-            let runner = ToolRunner::stateless(&tools);
+            let runner = ToolRunner::new(&tools);
             for invocation in invocations {
                 let (mut joined, detached) = runner.run(vec![invocation]);
                 if detached.is_some() {
@@ -157,36 +157,8 @@ fn extraction_accepted() -> ToolOutput {
     }
 }
 
-pub(crate) fn memory_tools<F: FileSystem + 'static>(stores: MemoryStores<F>) -> ToolGroup {
-    ToolGroup::new(
-        "memory",
-        true,
-        [
-            Tool::new(MemoryStoreTool {
-                target: StoreTarget {
-                    stores: stores.clone(),
-                },
-            }),
-            Tool::new(MemoryRecallTool {
-                stores: stores.clone(),
-            }),
-            Tool::new(MemoryListTool {
-                stores: stores.clone(),
-            }),
-            Tool::new(MemoryUpdateTool {
-                target: StoreTarget {
-                    stores: stores.clone(),
-                },
-            }),
-            Tool::new(MemoryForgetTool {
-                target: StoreTarget { stores },
-            }),
-        ],
-    )
-}
-
-struct StoreTarget<F: FileSystem + 'static> {
-    stores: MemoryStores<F>,
+pub(super) struct StoreTarget<F: FileSystem + 'static> {
+    pub(super) stores: MemoryStores<F>,
 }
 
 impl<F: FileSystem + 'static> MemoryMutationTarget for StoreTarget<F> {
@@ -238,8 +210,8 @@ impl<F: FileSystem + 'static> MemoryMutationTarget for StoreTarget<F> {
     }
 }
 
-struct MemoryStoreTool<T> {
-    target: T,
+pub(super) struct MemoryStoreTool<T> {
+    pub(super) target: T,
 }
 
 impl<T: MemoryMutationTarget> ToolSpec for MemoryStoreTool<T> {
@@ -249,17 +221,13 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryStoreTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryStoreTool<T> {
     type Args = StoreArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move { Ok(self.target.store(args)) })
     }
 }
 
-struct MemoryRecallTool<F: FileSystem + 'static> {
-    stores: MemoryStores<F>,
+pub(super) struct MemoryRecallTool<F: FileSystem + 'static> {
+    pub(super) stores: MemoryStores<F>,
 }
 
 impl<F: FileSystem + 'static> ToolSpec for MemoryRecallTool<F> {
@@ -269,11 +237,7 @@ impl<F: FileSystem + 'static> ToolSpec for MemoryRecallTool<F> {
 impl<F: FileSystem + 'static> ToolHandler for MemoryRecallTool<F> {
     type Args = RecallArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let labels = trimmed_strings(args.labels);
             let query = optional_trimmed(args.query);
@@ -288,8 +252,8 @@ impl<F: FileSystem + 'static> ToolHandler for MemoryRecallTool<F> {
     }
 }
 
-struct MemoryListTool<F: FileSystem + 'static> {
-    stores: MemoryStores<F>,
+pub(super) struct MemoryListTool<F: FileSystem + 'static> {
+    pub(super) stores: MemoryStores<F>,
 }
 
 impl<F: FileSystem + 'static> ToolSpec for MemoryListTool<F> {
@@ -299,11 +263,7 @@ impl<F: FileSystem + 'static> ToolSpec for MemoryListTool<F> {
 impl<F: FileSystem + 'static> ToolHandler for MemoryListTool<F> {
     type Args = ListArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let limit = limit_or_default(args.limit);
             let mut items = self.stores.list();
@@ -316,8 +276,8 @@ impl<F: FileSystem + 'static> ToolHandler for MemoryListTool<F> {
     }
 }
 
-struct MemoryUpdateTool<T> {
-    target: T,
+pub(super) struct MemoryUpdateTool<T> {
+    pub(super) target: T,
 }
 
 impl<T: MemoryMutationTarget> ToolSpec for MemoryUpdateTool<T> {
@@ -327,17 +287,13 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryUpdateTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryUpdateTool<T> {
     type Args = UpdateArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move { Ok(self.target.update(args)) })
     }
 }
 
-struct MemoryForgetTool<T> {
-    target: T,
+pub(super) struct MemoryForgetTool<T> {
+    pub(super) target: T,
 }
 
 impl<T: MemoryMutationTarget> ToolSpec for MemoryForgetTool<T> {
@@ -347,11 +303,7 @@ impl<T: MemoryMutationTarget> ToolSpec for MemoryForgetTool<T> {
 impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryForgetTool<T> {
     type Args = IdArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move { Ok(self.target.forget(args)) })
     }
 }
@@ -399,11 +351,37 @@ mod tests {
             };
             let mut tools = ToolSet::empty();
             tools
-                .add_group(memory_tools(stores.clone()))
+                .add_group(ToolGroup::new(
+                    "memory",
+                    true,
+                    [
+                        Tool::new(MemoryStoreTool {
+                            target: StoreTarget {
+                                stores: stores.clone(),
+                            },
+                        }),
+                        Tool::new(MemoryRecallTool {
+                            stores: stores.clone(),
+                        }),
+                        Tool::new(MemoryListTool {
+                            stores: stores.clone(),
+                        }),
+                        Tool::new(MemoryUpdateTool {
+                            target: StoreTarget {
+                                stores: stores.clone(),
+                            },
+                        }),
+                        Tool::new(MemoryForgetTool {
+                            target: StoreTarget {
+                                stores: stores.clone(),
+                            },
+                        }),
+                    ],
+                ))
                 .expect("memory tools register");
 
             let handle = tools.begin().expect("memory tools begin");
-            let runner = ToolRunner::stateless(&handle);
+            let runner = ToolRunner::new(&handle);
             let store = ToolInvocation::try_new(
                 Some("store"),
                 "memory_store",

@@ -5,7 +5,7 @@ use serde::Deserialize;
 const DEFAULT_RECALL_LIMIT: usize = 20;
 
 #[derive(Deserialize)]
-pub(super) struct StoreArgs {
+pub(in crate::agent::context_providers::long_term_memory) struct StoreArgs {
     pub(super) content: String,
     #[serde(default)]
     pub(super) tags: Vec<String>,
@@ -14,7 +14,7 @@ pub(super) struct StoreArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct RecallArgs {
+pub(in crate::agent::context_providers::long_term_memory) struct RecallArgs {
     #[serde(default)]
     pub(super) labels: Vec<String>,
     pub(super) query: Option<String>,
@@ -22,12 +22,12 @@ pub(super) struct RecallArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct ListArgs {
+pub(in crate::agent::context_providers::long_term_memory) struct ListArgs {
     pub(super) limit: Option<usize>,
 }
 
 #[derive(Deserialize)]
-pub(super) struct UpdateArgs {
+pub(in crate::agent::context_providers::long_term_memory) struct UpdateArgs {
     pub(super) id: String,
     pub(super) content: Option<String>,
     pub(super) tags: Option<Vec<String>>,
@@ -35,7 +35,7 @@ pub(super) struct UpdateArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct IdArgs {
+pub(in crate::agent::context_providers::long_term_memory) struct IdArgs {
     pub(super) id: String,
 }
 

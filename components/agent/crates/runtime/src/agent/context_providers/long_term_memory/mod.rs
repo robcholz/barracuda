@@ -5,9 +5,10 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc};
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
-use barracuda_agent_tool::ToolGroup;
+use barracuda_agent_tool::{Tool, ToolGroup};
 use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_net::{Dns, TcpConnect};
@@ -23,7 +24,10 @@ mod tier;
 
 use self::llm_extractor::LlmExtractor;
 use self::stores::{agent_store, global_store, MemoryStores};
-use self::tools::memory_tools;
+use self::tools::{
+    MemoryForgetTool, MemoryListTool, MemoryRecallTool, MemoryStoreTool, MemoryUpdateTool,
+    StoreTarget,
+};
 mod tools;
 use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
@@ -131,7 +135,15 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
 }
 
 impl<F: FileSystem + 'static> ContextProvider for LongTermMemoryContextProvider<F> {
-    fn prepare<'a>(&'a mut self, transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
+    fn id(&self) -> &'static str {
+        "memory"
+    }
+
+    fn prepare<'a>(
+        &'a mut self,
+        _storage: &'a AgentStorage,
+        transcript: &'a dyn Transcript,
+    ) -> ContextProviderFuture<'a> {
         Box::pin(async move {
             // Pull, not push: reading the transcript here is where this provider
             // decides whether new conversation warrants extraction.
@@ -141,7 +153,11 @@ impl<F: FileSystem + 'static> ContextProvider for LongTermMemoryContextProvider<
         })
     }
 
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult {
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
         // Borrow the cached strings into the blocks; `Context::with` copies them
         // only on a real change, so an unchanged catalog allocates nothing here.
         output.block(Block::new(
@@ -155,8 +171,34 @@ impl<F: FileSystem + 'static> ContextProvider for LongTermMemoryContextProvider<
         Ok(())
     }
 
-    fn tools(&self) -> Option<ToolGroup> {
-        Some(memory_tools(self.stores.clone()))
+    fn tools(&self, _storage: &AgentStorage) -> Option<ToolGroup> {
+        Some(ToolGroup::new(
+            self.id(),
+            true,
+            [
+                Tool::new(MemoryStoreTool {
+                    target: StoreTarget {
+                        stores: self.stores.clone(),
+                    },
+                }),
+                Tool::new(MemoryRecallTool {
+                    stores: self.stores.clone(),
+                }),
+                Tool::new(MemoryListTool {
+                    stores: self.stores.clone(),
+                }),
+                Tool::new(MemoryUpdateTool {
+                    target: StoreTarget {
+                        stores: self.stores.clone(),
+                    },
+                }),
+                Tool::new(MemoryForgetTool {
+                    target: StoreTarget {
+                        stores: self.stores.clone(),
+                    },
+                }),
+            ],
+        ))
     }
 }
 

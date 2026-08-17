@@ -5,10 +5,13 @@
 //! [`prepare`](ContextProvider::prepare), project request context, and may expose
 //! one provider-owned tool group.
 
+use alloc::boxed::Box;
+
 use core::error::Error;
 use core::future::Future;
 use core::pin::Pin;
 
+use crate::agent::base_agent::AgentStorage;
 use barracuda_agent_context::ContextSink;
 use barracuda_agent_memory::Transcript;
 use barracuda_agent_tool::ToolGroup;
@@ -38,28 +41,40 @@ pub(in crate::agent) type ContextProviderFuture<'a> =
 /// or ephemeral reminder; each provider emits the correct item into the sink and
 /// `barracuda-agent-context` owns placement, ordering, and render caches.
 pub(in crate::agent) trait ContextProvider {
+    /// Stable identity used as this provider's durable storage namespace.
+    fn id(&self) -> &'static str;
+
     /// Refresh any async state needed for the next contribution.
     ///
     /// Called at the beginning of an LLM iteration before
     /// [`contribute`](Self::contribute).
     /// The default is a no-op for purely synchronous projectors.
-    fn prepare<'a>(&'a mut self, _transcript: &'a dyn Transcript) -> ContextProviderFuture<'a> {
+    fn prepare<'a>(
+        &'a mut self,
+        _storage: &'a AgentStorage,
+        _transcript: &'a dyn Transcript,
+    ) -> ContextProviderFuture<'a> {
         Box::pin(async { Ok(()) })
     }
 
     /// Project this source into the request context for the current iteration.
-    fn contribute(&mut self, output: &mut ContextSink<'_>) -> ContextProviderResult;
+    fn contribute(
+        &mut self,
+        _storage: &AgentStorage,
+        _output: &mut ContextSink<'_>,
+    ) -> ContextProviderResult {
+        Ok(())
+    }
 
     /// The model-callable tools this provider provides.
     ///
     /// Added into the agent's tool set when the provider is registered. Tool names
     /// must be globally unique across the agent's tools (a clash is rejected at
     /// registration). The default provides no tools.
-    fn tools(&self) -> Option<ToolGroup> {
+    fn tools(&self, _storage: &AgentStorage) -> Option<ToolGroup> {
         None
     }
 
     /// Observe a turn-lifecycle transition.
-    fn on_turn_lifecycle(&mut self, _lifecycle: TurnLifecycle) {}
+    fn on_turn_lifecycle(&mut self, _storage: &AgentStorage, _lifecycle: TurnLifecycle) {}
 }
-use alloc::boxed::Box;

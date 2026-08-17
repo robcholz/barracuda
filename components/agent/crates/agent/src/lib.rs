@@ -37,9 +37,9 @@ use barracuda_net::{Dns, TcpConnect};
 /// Types needed to define tools accepted by [`AgentSystem::with_tool_groups`].
 pub mod tools {
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, AgentStorage, AgentStorageError, EmptyArgs, Resource, RiskClass,
-        Tool, ToolConfig, ToolContext, ToolError, ToolFuture, ToolGroup, ToolHandler,
-        ToolInvocation, ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
+        tool_metadata, Action, EmptyArgs, Resource, RiskClass, Tool, ToolConfig, ToolError,
+        ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
+        ToolResult, ToolSpec,
     };
 }
 

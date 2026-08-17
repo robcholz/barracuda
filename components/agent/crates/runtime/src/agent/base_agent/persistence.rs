@@ -1,23 +1,22 @@
-//! Durable state owned by one BaseAgent and its stateful components.
+//! Durable state owned by one BaseAgent.
+//!
+//! Context-provider state is opaque here and lives directly under
+//! `context_provider_states.<context-provider-id>`.
 
 use alloc::{
     borrow::{Cow, ToOwned},
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeMap,
     string::String,
-    sync::Arc,
     vec::Vec,
 };
 
 use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, SchemaVersion, StateBlob, StateSlice,
 };
-use barracuda_agent_tool::runtime::{AgentStorageBackend, AgentStorageScope};
-use barracuda_agent_tool::{AgentStorageError, ToolGroupId};
 use barracuda_model_api::ToolCall;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::agent::context_providers::AgentMode;
 use crate::agent::AgentKind;
 
 /// Complete currently implemented BaseAgent recovery DTO.
@@ -27,48 +26,23 @@ use crate::agent::AgentKind;
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub(in crate::agent) struct BaseAgentState {
     kind: String,
-    mode: AgentMode,
-    loaded_tool_groups: BTreeSet<String>,
     /// Calls checkpointed before execution and retained until their results
     /// have been recorded in the transcript.
     inflight_toolcalls: Vec<ToolCall>,
-    toolcall_states: BTreeMap<ToolGroupId, ToolCallState>,
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-struct ToolCallState {
-    object: Value,
+    context_provider_states: BTreeMap<String, Value>,
 }
 
 impl BaseAgentState {
     pub(in crate::agent) fn new(kind: &AgentKind) -> Self {
         Self {
             kind: kind.as_str().to_owned(),
-            mode: AgentMode::Normal,
-            loaded_tool_groups: BTreeSet::new(),
             inflight_toolcalls: Vec::new(),
-            toolcall_states: BTreeMap::new(),
+            context_provider_states: BTreeMap::new(),
         }
     }
 
     pub(crate) fn kind(&self) -> AgentKind {
         AgentKind::new(self.kind.clone())
-    }
-
-    pub(in crate::agent) fn mode(&self) -> AgentMode {
-        self.mode
-    }
-
-    pub(in crate::agent) fn set_mode(&mut self, mode: AgentMode) {
-        self.mode = mode;
-    }
-
-    pub(in crate::agent) fn loaded_tool_groups(&self) -> &BTreeSet<String> {
-        &self.loaded_tool_groups
-    }
-
-    pub(in crate::agent) fn record_loaded_tool_group(&mut self, group_id: String) {
-        self.loaded_tool_groups.insert(group_id);
     }
 
     pub(in crate::agent) fn inflight_toolcalls(&self) -> &[ToolCall] {
@@ -88,39 +62,36 @@ impl BaseAgentState {
     }
 }
 
-pub(in crate::agent) fn agent_storage_scope(
-    state: &DurableState<BaseAgentState>,
-) -> AgentStorageScope {
-    AgentStorageScope::new(Arc::new(AgentToolStorage {
-        state: state.clone(),
-    }))
-}
-
-struct AgentToolStorage {
+#[derive(Clone)]
+pub(in crate::agent) struct AgentStorage {
     state: DurableState<BaseAgentState>,
+    provider_id: &'static str,
 }
 
-impl AgentStorageBackend for AgentToolStorage {
-    fn load(&self, group: &str) -> Result<Option<Value>, AgentStorageError> {
-        Ok(self
-            .state
-            .get()
-            .toolcall_states
-            .get(group)
-            .map(|state| state.object.clone()))
+impl AgentStorage {
+    pub(in crate::agent) fn new(
+        state: &DurableState<BaseAgentState>,
+        provider_id: &'static str,
+    ) -> Self {
+        Self {
+            state: state.clone(),
+            provider_id,
+        }
     }
 
-    fn store(&self, group: &str, object: Value) -> Result<(), AgentStorageError> {
+    pub(in crate::agent) fn load(&self) -> Option<Value> {
+        self.state
+            .get()
+            .context_provider_states
+            .get(self.provider_id)
+            .cloned()
+    }
+
+    pub(in crate::agent) fn store(&self, object: Value) {
         self.state
             .get_mut()
-            .toolcall_states
-            .insert(group.into(), ToolCallState { object });
-        Ok(())
-    }
-
-    fn clear(&self, group: &str) -> Result<(), AgentStorageError> {
-        self.state.get_mut().toolcall_states.remove(group);
-        Ok(())
+            .context_provider_states
+            .insert(self.provider_id.into(), object);
     }
 }
 
@@ -149,19 +120,15 @@ impl DurableStateCodec for BaseAgentState {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{AgentToolStorage, BaseAgentState};
-    use crate::agent::context_providers::AgentMode;
+    use super::{AgentStorage, BaseAgentState};
     use crate::agent::AgentKind;
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_persistence::{DurableStateCodec, StateSlice};
-    use barracuda_agent_tool::runtime::AgentStorageBackend;
     use barracuda_model_api::ToolCall;
 
     #[test]
     fn state_codec_round_trip_preserves_agent_state() {
         let mut state = BaseAgentState::new(&AgentKind::from_static("worker"));
-        state.set_mode(AgentMode::Plan);
-        state.record_loaded_tool_group("memory".to_owned());
         state.record_inflight_toolcalls(vec![ToolCall {
             id: "call-1".to_owned(),
             name: "profile_read".to_owned(),
@@ -184,22 +151,21 @@ mod tests {
     }
 
     #[test]
-    fn toolcall_state_is_stored_under_its_group_object() {
+    fn context_provider_state_is_stored_directly_under_its_namespace() {
         let state = DurableState::new(BaseAgentState::new(&AgentKind::from_static("worker")));
-        let storage = AgentToolStorage {
+        let storage = AgentStorage {
             state: state.clone(),
+            provider_id: "todo",
         };
 
-        assert!(storage
-            .store("todo", serde_json::json!({ "items": ["one"] }))
-            .is_ok());
+        storage.store(serde_json::json!({ "items": ["one"] }));
 
         let state = state.get();
         let encoded = state.encode_state().expect("state encodes");
         let encoded: serde_json::Value =
             serde_json::from_slice(&encoded.bytes).expect("state is JSON");
         assert_eq!(
-            encoded.pointer("/toolcall_states/todo/object/items/0"),
+            encoded.pointer("/context_provider_states/todo/items/0"),
             Some(&serde_json::Value::String("one".into()))
         );
     }

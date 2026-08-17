@@ -23,11 +23,7 @@ impl ToolSpec for ListSpawnableAgentsTool {
 impl ToolHandler for ListSpawnableAgentsTool {
     type Args = EmptyArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        _args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let kinds: Vec<serde_json::Value> = self
                 .policy

@@ -36,11 +36,7 @@ impl ToolSpec for FollowupSubagentTool {
 impl ToolHandler for FollowupSubagentTool {
     type Args = FollowupArgs;
 
-    fn invoke<'a>(
-        &'a self,
-        _context: barracuda_agent_tool::ToolContext,
-        args: Self::Args,
-    ) -> ToolFuture<'a> {
+    fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         Box::pin(async move {
             let target = required_agent_id(args.agent)?;
             let message = Message::text(args.message.trim().to_owned());
