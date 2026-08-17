@@ -526,6 +526,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-event-router"
+version = "0.1.0"
+dependencies = [
+ "barracuda-fs",
+ "barracuda-router",
+ "barracuda-rpc",
+ "barracuda-workflow",
+ "futures-lite",
+ "futures-util",
+ "static_cell",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-fs"
 version = "0.1.0"
 dependencies = [
@@ -592,6 +607,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-router"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "futures-lite",
+ "static_cell",
+ "thiserror 2.0.18",
+ "tokio",
+ "zerocopy",
+]
+
+[[package]]
+name = "barracuda-rpc"
+version = "0.1.0"
+dependencies = [
+ "futures-core",
+ "futures-lite",
+ "futures-util",
+ "getset",
+ "static_cell",
+ "thiserror 2.0.18",
+ "tokio",
+ "zerocopy",
+]
+
+[[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
@@ -608,6 +649,20 @@ name = "barracuda-vm"
 version = "0.1.0"
 dependencies = [
  "barracuda-lua",
+]
+
+[[package]]
+name = "barracuda-workflow"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "futures-core",
+ "futures-lite",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zerocopy",
 ]
 
 [[package]]

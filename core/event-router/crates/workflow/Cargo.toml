@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-workflow"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>", "Finn(Ziheng) Sheng <robcholz00@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+description = "Event ingress and Workflow runtime for Barracuda"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-rpc = { path = "../rpc" }
+futures-core = { version = "0.3", default-features = false }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = "2"
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+futures-lite = "2"
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "async-await-macro"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

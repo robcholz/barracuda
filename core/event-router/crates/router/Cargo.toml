@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-router"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>", "Finn(Ziheng) Sheng <robcholz00@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+description = "Cooperative Component router for Barracuda"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-rpc = { path = "../rpc" }
+thiserror = "2"
+
+[dev-dependencies]
+futures-lite = "2"
+static_cell = "2.1.1"
+tokio = { version = "1", default-features = false, features = ["macros", "rt"] }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"
