@@ -541,6 +541,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-event-router-profile"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-profile",
+ "barracuda-router",
+ "barracuda-rpc",
+ "futures-lite",
+ "static_cell",
+]
+
+[[package]]
 name = "barracuda-fs"
 version = "0.1.0"
 dependencies = [
