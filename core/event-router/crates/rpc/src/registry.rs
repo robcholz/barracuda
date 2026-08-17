@@ -388,26 +388,23 @@ impl RegistryCore {
         Ok(registration)
     }
 
-    fn prepare_typed_call(
-        self: &Rc<Self>,
-        caller: &RpcClient,
-        address: &RpcAddress,
-        expected: &RpcMethodDescriptor,
-    ) -> RpcResult<PreparedCalls> {
-        let endpoint = self
-            .endpoints
-            .borrow()
-            .get(address)
-            .cloned()
-            .ok_or_else(|| RpcError::NotFound(address.clone()))?;
-        if &endpoint.descriptor != expected {
+    fn prepare_typed_call<M>(self: &Rc<Self>, caller: &RpcClient) -> RpcResult<PreparedCalls>
+    where
+        M: RpcMethod,
+    {
+        RpcMethodDescriptor::validate_method::<M>()?;
+        let endpoint = self.endpoints.borrow().get(M::ADDRESS).cloned();
+        let Some(endpoint) = endpoint else {
+            return Err(RpcError::NotFound(RpcAddress::try_from(M::ADDRESS)?));
+        };
+        if !endpoint.descriptor.is_method::<M>() {
             return Err(RpcError::SignatureMismatch {
-                address: address.clone(),
-                expected: expected.method_type_name(),
+                address: endpoint.descriptor.address().clone(),
+                expected: type_name::<M>(),
                 registered: endpoint.descriptor.method_type_name(),
             });
         }
-        self.prepare_resolved_call(caller, address, endpoint)
+        self.prepare_resolved_call(caller, endpoint)
     }
 
     fn prepare_payload_call(
@@ -421,17 +418,16 @@ impl RegistryCore {
             .get(address)
             .cloned()
             .ok_or_else(|| RpcError::NotFound(address.clone()))?;
-        self.prepare_resolved_call(caller, address, endpoint)
+        self.prepare_resolved_call(caller, endpoint)
     }
 
     fn prepare_resolved_call(
         self: &Rc<Self>,
         caller: &RpcClient,
-        address: &RpcAddress,
         endpoint: EndpointEntry,
     ) -> RpcResult<PreparedCalls> {
         if caller.caller_endpoint_id == Some(endpoint.endpoint_id) {
-            return Err(RpcError::DirectSelfCall(address.clone()));
+            return Err(RpcError::DirectSelfCall(endpoint.lifecycle.address.clone()));
         }
 
         let call_id = RpcCallId::new(self.take_call_id()?);
@@ -677,10 +673,8 @@ impl RpcClient {
     where
         M: RpcMethod,
     {
-        let descriptor = RpcMethodDescriptor::for_method::<M>()?;
-        let address = descriptor.address().clone();
         let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
-        let prepared = registry.prepare_typed_call(self, &address, &descriptor)?;
+        let prepared = registry.prepare_typed_call::<M>(self)?;
         Ok(super::typed::make_typed_call::<M>(prepared, input))
     }
 

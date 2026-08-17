@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use core::borrow::Borrow;
 use core::fmt;
 
 /// A validated RPC group name.
@@ -39,15 +40,7 @@ impl AsRef<str> for RpcGroup {
 pub struct RpcAddress(Box<str>);
 
 impl RpcAddress {
-    pub(crate) fn group(&self) -> &str {
-        self.0.split_once('.').map_or("", |(group, _method)| group)
-    }
-}
-
-impl TryFrom<&str> for RpcAddress {
-    type Error = RpcAddressError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    pub(crate) fn validate(value: &str) -> Result<(), RpcAddressError> {
         let mut segments = value.split('.');
         let group = segments.next();
         let method = segments.next();
@@ -57,6 +50,19 @@ impl TryFrom<&str> for RpcAddress {
         {
             return Err(RpcAddressError::InvalidFormat(value.into()));
         }
+        Ok(())
+    }
+
+    pub(crate) fn group(&self) -> &str {
+        self.0.split_once('.').map_or("", |(group, _method)| group)
+    }
+}
+
+impl TryFrom<&str> for RpcAddress {
+    type Error = RpcAddressError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::validate(value)?;
         Ok(Self(value.into()))
     }
 }
@@ -66,6 +72,12 @@ fn is_valid_segment(segment: &str) -> bool {
         && segment
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+impl Borrow<str> for RpcAddress {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Display for RpcAddress {

@@ -266,7 +266,7 @@ pub(crate) struct RpcMethodDescriptor {
 }
 
 impl RpcMethodDescriptor {
-    pub(crate) fn for_method<M>() -> RpcResult<Self>
+    pub(crate) fn validate_method<M>() -> RpcResult<()>
     where
         M: RpcMethod,
     {
@@ -284,6 +284,22 @@ impl RpcMethodDescriptor {
                 "RPC method error alignment exceeds lane frame alignment"
             );
         }
+        RpcAddress::validate(M::ADDRESS)?;
+        Ok(())
+    }
+
+    pub(crate) fn is_method<M>(&self) -> bool
+    where
+        M: RpcMethod,
+    {
+        self.method_type_id == TypeId::of::<M>()
+    }
+
+    pub(crate) fn for_method<M>() -> RpcResult<Self>
+    where
+        M: RpcMethod,
+    {
+        Self::validate_method::<M>()?;
         let address = RpcAddress::try_from(M::ADDRESS)?;
         Ok(Self {
             address,
