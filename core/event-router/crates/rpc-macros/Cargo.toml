@@ -1,0 +1,18 @@
+[package]
+name = "barracuda-rpc-macros"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>", "Finn(Ziheng) Sheng <robcholz00@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+description = "Attribute macros for Barracuda's typed RPC runtime"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

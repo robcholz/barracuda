@@ -19,14 +19,19 @@ extern crate alloc;
 mod address;
 mod context;
 mod frame;
+mod json;
 mod lane;
 mod payload;
 mod registry;
 mod typed;
 
 pub use address::{RpcAddress, RpcAddressError, RpcGroup, RpcGroupError};
+/// Marks an `impl RpcMethod` block as reachable through
+/// [`RpcClient::call_json`], filling [`RpcMethod::json_codec`].
+pub use barracuda_rpc_macros::rpc_json;
 pub use context::{RpcCallId, RpcContext, RpcEndpointId};
 pub use frame::RpcFrame;
+pub use json::JsonCodec;
 pub use lane::RpcLaneStorage;
 pub use payload::{
     RpcMulticastBranch, RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter,

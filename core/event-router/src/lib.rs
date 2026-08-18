@@ -23,11 +23,12 @@ pub use barracuda_router::{
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    RpcAddress, RpcAddressError, RpcCallId, RpcClient, RpcContext, RpcEndpointId, RpcError,
-    RpcFrame, RpcGroup, RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput,
-    RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage, RpcMethod, RpcMulticastBranch,
-    RpcOutputMode, RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter,
-    RpcRegistration, RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming, Unary,
+    rpc_json, JsonCodec, RpcAddress, RpcAddressError, RpcCallId, RpcClient, RpcContext,
+    RpcEndpointId, RpcError, RpcFrame, RpcGroup, RpcGroupError, RpcHandler, RpcHandlerFuture,
+    RpcHandlerInput, RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage, RpcMethod,
+    RpcMulticastBranch, RpcOutputMode, RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame,
+    RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming,
+    Unary,
 };
 pub use barracuda_workflow::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode, Rule,

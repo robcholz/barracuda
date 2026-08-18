@@ -12,6 +12,7 @@ use getset::{CopyGetters, Getters};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use super::frame::{write_frame, write_method_error_frame, FramedReader, RpcFrame};
+use super::json::JsonCodec;
 use super::lane::{LaneReader, LaneWriter, LANE_FRAME_ALIGNMENT};
 use super::payload::{
     attach_input_driver, make_payload_call, RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter,
@@ -260,6 +261,18 @@ pub trait RpcMethod: 'static {
 
     /// Response-side cardinality.
     type Output: RpcOutputMode<Self::Response, Self::Error>;
+
+    /// Runtime JSON transcoder for [`RpcClient::call_json`](crate::RpcClient::call_json).
+    ///
+    /// Defaults to `None`, leaving the method reachable only through the typed
+    /// [`call`](crate::RpcClient::call). Annotating the `impl` with `#[rpc_json]`
+    /// overrides this to return [`JsonCodec::of::<Self>`], which
+    /// [`RpcRegistry::register`](crate::RpcRegistry::register) captures beside
+    /// the endpoint. Overriding it by hand requires the same `serde` bounds as
+    /// [`JsonCodec::of`].
+    fn json_codec() -> Option<JsonCodec> {
+        None
+    }
 }
 
 /// Runtime descriptor used to reject client/handler mismatches before IO.

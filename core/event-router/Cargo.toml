@@ -29,8 +29,11 @@ thiserror = "2"
 barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
 futures-lite = "2"
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 static_cell = "2.1.1"
 tokio = { version = "1", default-features = false, features = ["macros", "rt"] }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [lints.rust]
 unsafe_code = "forbid"
