@@ -131,8 +131,11 @@ async fn run() -> RpcResult<()> {
     // A value that does not fit the request is a hard RpcError.
     match client.call_json(&address, &json!({ "session": 7 })).await {
         Ok(value) => println!("call_json bad: unexpected {value}"),
-        Err(RpcError::JsonRequestInvalid { message_type }) => {
-            println!("call_json bad: rejected ({message_type})");
+        Err(RpcError::JsonRequestInvalid {
+            message_type,
+            message,
+        }) => {
+            println!("call_json bad: rejected ({message_type}: {message})");
         }
         Err(error) => println!("call_json bad: {error}"),
     }

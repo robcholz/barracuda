@@ -51,6 +51,10 @@ pub fn bake_all(out_dir: &Path) -> io::Result<()> {
 /// ```ignore
 /// barracuda_rpc_schema::register!(SetLevelRequest);
 /// ```
+///
+/// The schema is baked with LLM-friendly settings: subschemas are inlined
+/// (no `$ref`/`$defs`), `Option` fields use a nullable type array instead of
+/// `anyOf`, and the meta-`$schema` key is omitted.
 #[macro_export]
 macro_rules! register {
     ($ty:ty) => {
@@ -58,8 +62,13 @@ macro_rules! register {
             $crate::SchemaEntry {
                 name: ::core::stringify!($ty),
                 json: || {
-                    $crate::serde_json::to_string_pretty(&$crate::schemars::schema_for!($ty))
-                        .expect("serialize JSON schema")
+                    let mut settings = $crate::schemars::gen::SchemaSettings::draft2019_09();
+                    settings.inline_subschemas = true;
+                    settings.option_nullable = true;
+                    settings.meta_schema = None;
+                    let mut generator = $crate::schemars::gen::SchemaGenerator::new(settings);
+                    let schema = generator.root_schema_for::<$ty>();
+                    $crate::serde_json::to_string_pretty(&schema).expect("serialize JSON schema")
                 },
             }
         }
@@ -94,6 +103,9 @@ mod tests {
         assert!(baked.contains("\"session\""), "{baked}");
         assert!(baked.contains("\"level\""), "{baked}");
         assert!(baked.contains("\"type\": \"object\""), "{baked}");
+        assert!(!baked.contains("$defs"), "{baked}");
+        assert!(!baked.contains("$ref"), "{baked}");
+        assert!(!baked.contains("$schema"), "{baked}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

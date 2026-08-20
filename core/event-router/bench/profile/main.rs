@@ -3,6 +3,9 @@
 //! Run one scenario per process so retained memory and allocation totals stay
 //! attributable to that workload.
 
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 use core::cell::Cell;
 use core::future::Future;
 use core::pin::Pin;

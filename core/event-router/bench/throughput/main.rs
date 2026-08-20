@@ -5,6 +5,8 @@
 
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
+#![allow(clippy::arithmetic_side_effects)]
+#![allow(clippy::too_many_arguments)]
 
 use core::cell::{Cell, RefCell};
 use core::future::{pending, Future};

@@ -16,12 +16,13 @@
 
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::any::type_name;
 use core::marker::PhantomData;
 
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
@@ -100,11 +101,11 @@ where
     Method::Error: Serialize,
 {
     fn encode_request(&self, value: &Value) -> RpcResult<Vec<u8>> {
-        let request: Method::Request = serde_json::from_value(value.clone()).map_err(|_error| {
-            RpcError::JsonRequestInvalid {
+        let request: Method::Request =
+            Deserialize::deserialize(value).map_err(|error| RpcError::JsonRequestInvalid {
                 message_type: type_name::<Method::Request>(),
-            }
-        })?;
+                message: error.to_string(),
+            })?;
         Ok(request.as_bytes().to_vec())
     }
 

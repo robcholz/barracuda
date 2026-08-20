@@ -949,10 +949,12 @@ pub enum RpcError {
     #[error("RPC endpoint is not JSON-callable: {0}")]
     NotJsonCallable(RpcAddress),
     /// A JSON request value did not match the endpoint's request message.
-    #[error("invalid JSON request for {message_type}")]
+    #[error("invalid JSON request for {message_type}: {message}")]
     JsonRequestInvalid {
         /// Rust request type that rejected the JSON value.
         message_type: &'static str,
+        /// Serde error detail describing why the value was rejected.
+        message: alloc::string::String,
     },
     /// A response or method-error frame could not be encoded as JSON.
     #[error("RPC frame for {message_type} could not be encoded as JSON")]
