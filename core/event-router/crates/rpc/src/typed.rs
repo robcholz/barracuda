@@ -273,6 +273,18 @@ pub trait RpcMethod: 'static {
     fn json_codec() -> Option<JsonCodec> {
         None
     }
+
+    /// Static JSON Schema for this method's request, for agent tool-use.
+    ///
+    /// Defaults to `None`. `#[rpc_json]` fills it from a schema baked at build
+    /// time by the `barracuda-rpc-schema` pipeline: when the consuming crate's
+    /// `build.rs` runs the bake and sets the `rpc_schema_baked` cfg, the
+    /// generated file is embedded with [`include_str!`] and returned here.
+    /// Without that pipeline the method stays JSON-callable but reports no
+    /// schema.
+    fn schema() -> Option<&'static str> {
+        None
+    }
 }
 
 /// Runtime descriptor used to reject client/handler mismatches before IO.

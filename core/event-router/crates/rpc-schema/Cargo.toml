@@ -1,0 +1,15 @@
+[package]
+name = "barracuda-rpc-schema"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>", "Finn(Ziheng) Sheng <robcholz00@gmail.com>"]
+version = "0.1.0"
+edition = "2021"
+description = "Host-side JSON Schema bake pipeline for Barracuda RPC methods"
+
+[dependencies]
+inventory = "0.3"
+schemars = "0.8"
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
