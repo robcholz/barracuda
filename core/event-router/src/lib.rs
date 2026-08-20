@@ -30,6 +30,11 @@ pub use barracuda_rpc::{
     RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming,
     Unary,
 };
+/// Host-side JSON Schema bake pipeline, surfaced through the facade for
+/// `build.rs` and wire crates. Requires the `schema` feature and never ships to
+/// the device.
+#[cfg(feature = "schema")]
+pub use barracuda_rpc_schema::{bake_all, register, SchemaEntry};
 pub use barracuda_workflow::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode, Rule,
     RuleError, WorkflowClient, WorkflowControlError, WorkflowControlRejection, WorkflowDefinition,

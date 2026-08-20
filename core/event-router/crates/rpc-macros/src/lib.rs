@@ -5,8 +5,32 @@
 //! `RpcMethod::schema`.
 
 use proc_macro::TokenStream;
-use quote::quote;
+use proc_macro_crate::{crate_name, FoundCrate};
+use quote::{format_ident, quote};
 use syn::{parse_macro_input, parse_quote, ImplItem, LitStr, Type};
+
+/// Resolves the path to the RPC crate's public items as the caller sees them.
+///
+/// End users depend only on `barracuda-event-router` (the facade, which
+/// re-exports `JsonCodec`); framework-internal crates depend on `barracuda-rpc`
+/// directly. Preferring the facade keeps the expansion working without a direct
+/// `barracuda-rpc` dependency.
+fn rpc_crate() -> proc_macro2::TokenStream {
+    for package in ["barracuda-event-router", "barracuda-rpc"] {
+        match crate_name(package) {
+            Ok(FoundCrate::Itself) => {
+                let ident = format_ident!("{}", package.replace('-', "_"));
+                return quote!(::#ident);
+            }
+            Ok(FoundCrate::Name(name)) => {
+                let ident = format_ident!("{name}");
+                return quote!(::#ident);
+            }
+            Err(_) => {}
+        }
+    }
+    quote!(::barracuda_rpc)
+}
 
 /// Makes a typed RPC method reachable through `RpcClient::call_json` and gives
 /// it a build-time schema.
@@ -21,15 +45,18 @@ use syn::{parse_macro_input, parse_quote, ImplItem, LitStr, Type};
 ///   `barracuda_rpc_schema::bake_all`), returns the request schema embedded from
 ///   `$OUT_DIR/<Request>.json`; otherwise `None`.
 ///
-/// The expansion references `::barracuda_rpc`, so the annotated crate must
-/// depend on `barracuda-rpc` directly.
+/// The expansion resolves the RPC crate through `barracuda-event-router` (the
+/// facade) when present, falling back to `barracuda-rpc`, so an end-user crate
+/// that depends only on the facade does not need a direct `barracuda-rpc`
+/// dependency.
 #[proc_macro_attribute]
 pub fn rpc_json(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as syn::ItemImpl);
+    let rpc = rpc_crate();
 
     let json_codec: ImplItem = parse_quote! {
-        fn json_codec() -> ::core::option::Option<::barracuda_rpc::JsonCodec> {
-            ::core::option::Option::Some(::barracuda_rpc::JsonCodec::of::<Self>())
+        fn json_codec() -> ::core::option::Option<#rpc::JsonCodec> {
+            ::core::option::Option::Some(#rpc::JsonCodec::of::<Self>())
         }
     };
     input.items.push(json_codec);

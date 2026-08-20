@@ -22,8 +22,14 @@ harness = false
 barracuda-fs = { path = "../../shared/fs" }
 barracuda-router = { path = "crates/router" }
 barracuda-rpc = { path = "crates/rpc" }
+barracuda-rpc-schema = { path = "crates/rpc-schema", optional = true }
 barracuda-workflow = { path = "crates/workflow" }
 thiserror = "2"
+
+[features]
+# Host-only: re-exports the JSON Schema bake pipeline (schemars) for `build.rs`
+# and wire crates. Off by default so the device build stays no_std.
+schema = ["dep:barracuda-rpc-schema"]
 
 [dev-dependencies]
 barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }

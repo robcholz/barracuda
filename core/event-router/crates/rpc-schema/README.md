@@ -4,6 +4,10 @@ Host-side JSON Schema bake pipeline for `#[rpc_json]` RPC methods. `schemars`
 runs on the host (from a `build.rs`); only the resulting `&'static str` is baked
 into the firmware, which stays `no_std` and schemars-free.
 
+This crate is internal. Consumers reach it through the facade:
+`barracuda_event_router::{register, bake_all, SchemaEntry}`, enabled with the
+facade's `schema` feature (host-only). The examples below use the facade path.
+
 ## Why a `build.rs` needs three crates
 
 A `build.rs` cannot run `schemars` on types defined in **its own crate**, so the
@@ -29,7 +33,7 @@ pieces:
 pub struct SetLevelRequest { pub session: u32, pub level: u32 }
 
 #[cfg(feature = "schema")]
-barracuda_rpc_schema::register!(SetLevelRequest);
+barracuda_event_router::register!(SetLevelRequest);
 ```
 
 **methods crate `build.rs`** — a thin shim, no baking logic:
@@ -40,7 +44,7 @@ use my_wire_crate as _;
 
 fn main() {
     let out = std::env::var_os("OUT_DIR").unwrap();
-    barracuda_rpc_schema::bake_all(std::path::Path::new(&out)).unwrap();
+    barracuda_event_router::bake_all(std::path::Path::new(&out)).unwrap();
     println!("cargo:rustc-cfg=rpc_schema_baked");
 }
 ```
