@@ -3,6 +3,9 @@
 ## Layout
 
 - `components/` contains event-router components; a component may own multiple crates.
+- Every Event Router Component integration documents its emitted Events, provided
+  RPCs, wire contracts, errors, and lifecycle in that component's
+  `docs/component.md`.
 - `shared/` contains crates shared across components and applications.
 - `components/agent/bench/` contains agent measurement and profiling workloads.
 - `core/event-router/bench/profile/` contains Event Router heap/allocation
