@@ -307,7 +307,7 @@ pub trait RpcMethod: 'static {
 
 /// Runtime descriptor used to reject client/handler mismatches before IO.
 #[derive(Clone, CopyGetters, Debug, Getters, PartialEq, Eq)]
-pub(crate) struct RpcMethodDescriptor {
+pub struct RpcMethodDescriptor {
     #[getset(get = "pub(crate)")]
     address: RpcAddress,
     method_type_id: TypeId,
@@ -315,11 +315,13 @@ pub(crate) struct RpcMethodDescriptor {
     method_type_name: &'static str,
     #[getset(get_copy = "pub(crate)")]
     request_frame_size: usize,
-    #[getset(get_copy = "pub(crate)")]
+    /// Fixed-layout type identity of the request message.
+    #[getset(get_copy = "pub")]
     request_type_id: TypeId,
     #[getset(get_copy = "pub(crate)")]
     request_type_name: &'static str,
-    #[getset(get_copy = "pub(crate)")]
+    /// Fixed-layout type identity of the response message.
+    #[getset(get_copy = "pub")]
     response_type_id: TypeId,
     #[getset(get_copy = "pub(crate)")]
     response_type_name: &'static str,

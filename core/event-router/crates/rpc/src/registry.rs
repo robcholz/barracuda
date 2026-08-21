@@ -9,7 +9,7 @@ use core::marker::PhantomData;
 use core::mem::size_of;
 use core::pin::Pin;
 
-use getset::CopyGetters;
+use getset::{CopyGetters, Getters};
 use serde_json::Value;
 use smallvec::{smallvec, SmallVec};
 
@@ -622,22 +622,15 @@ struct EndpointEntry {
 /// Returned by [`RpcClient::method_info`]. It exposes type identity and frame
 /// size for signature checks and, for dynamic methods, the JSON codec and
 /// wire tables.
-#[derive(Clone)]
+#[derive(Clone, Getters)]
 pub struct RpcMethodInfo {
+    /// Read-only view of the registered method's signature descriptor.
+    #[getset(get = "pub")]
     descriptor: RpcMethodDescriptor,
     dynamic: Option<Dynamic>,
 }
 
 impl RpcMethodInfo {
-    /// Reports whether this method's response is the identical fixed-layout type
-    /// that `next` accepts as its request — the precondition for passing this
-    /// method's response frames through as `next`'s request frames without
-    /// transformation.
-    #[must_use]
-    pub fn links_to(&self, next: &RpcMethodInfo) -> bool {
-        self.descriptor.response_type_id() == next.descriptor.request_type_id()
-    }
-
     /// Returns this method's fixed request frame size in bytes.
     #[must_use]
     pub fn request_frame_size(&self) -> usize {

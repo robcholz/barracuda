@@ -46,6 +46,7 @@ pub use registry::{RpcClient, RpcError, RpcMethodInfo, RpcRegistration, RpcRegis
 pub use registry::{RpcEndpoint, RpcRegistryApi};
 pub use typed::{
     RpcCardinality, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
-    RpcMessage, RpcMethod, RpcOutputMode, RpcStream, RpcUnaryCall, Streaming, Unary,
+    RpcMessage, RpcMethod, RpcMethodDescriptor, RpcOutputMode, RpcStream, RpcUnaryCall, Streaming,
+    Unary,
 };
 pub use wire::{RpcWire, WireField, WireSupport};

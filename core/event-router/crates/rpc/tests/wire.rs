@@ -163,7 +163,7 @@ fn write_field_rejects_oversize_and_unknown_fields() {
 }
 
 #[test]
-fn direct_link_type_identity_is_checked_by_method_info() {
+fn method_info_exposes_signature_type_identity() {
     let registry = registry();
     register(&registry);
     let client = registry.client();
@@ -175,7 +175,13 @@ fn direct_link_type_identity_is_checked_by_method_info() {
         .expect("consume info");
 
     // Produce -> Produce would be a valid Direct link (Response == Request).
-    assert!(produce.links_to(&produce));
+    assert_eq!(
+        produce.descriptor().response_type_id(),
+        produce.descriptor().request_type_id()
+    );
     // Produce's Reply response is not Consume's Deliver request.
-    assert!(!produce.links_to(&consume));
+    assert_ne!(
+        produce.descriptor().response_type_id(),
+        consume.descriptor().request_type_id()
+    );
 }
