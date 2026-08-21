@@ -1,6 +1,6 @@
 ---
 name: write-example
-description: Write or edit runnable examples in this repo (Event Router and lower-level rpc/router/workflow crates). Use when creating, fixing, or reviewing an example.
+description: Write or edit runnable examples for any crate in this repo. Use when creating, fixing, or reviewing an example.
 ---
 
 # Runnable Examples
@@ -11,45 +11,38 @@ throwaway snippets.
 
 ## Where an example lives
 
-- Single-file example: `examples/*.rs` inside a crate, which Cargo discovers
-  automatically. Depend only on the crate's public surface. Event Router
-  examples depend on `barracuda-event-router` and stay out of internal crates.
-- Standalone example crate: `core/event-router/example-crates/*`. Use one when
-  the example needs its own `Cargo.toml`, `build.rs`, or feature wiring; the
-  schema bake demo is the model. Add the directory to the workspace `members`
-  glob, set `publish = false`, and use relative `path` deps with
-  `workspace = true` for shared deps.
+- Single-file example: `examples/*.rs` inside the crate it demonstrates, which
+  Cargo discovers automatically. Depend only on that crate's public API.
+- Standalone example crate: a workspace member for an example that needs its own
+  `Cargo.toml`, `build.rs`, or feature wiring. `core/event-router/example-crates/`
+  is the existing model: add the directory to the workspace `members` glob, set
+  `publish = false`, and use relative `path` deps with `workspace = true` for
+  shared deps.
 
 ## What makes a good example
 
 - One example, one usage. State what it demonstrates in the file's doc comment.
 - Verify the result with `assert!` / `assert_eq!`; the example is its own test.
-- Drive the router explicitly: `poll_fn` with `Pin::new(&mut router).poll`, or
-  `block_on`. A `run` future that returns `Ok(())` terminates the router, so
-  long-lived components stay on `pending()`.
-- Facade examples inherit the crate's deny-level clippy lints. Write code that
-  avoids `unwrap`, `expect`, `panic`, slice indexing, and `+`/`-` arithmetic;
-  use `?`, `saturating_*`, and destructuring instead.
+- Drive async work explicitly. A long-lived service future stays pending; a
+  future that returns signals completion.
+- Examples inherit the crate's lints. This repo commonly denies `unwrap`,
+  `expect`, `panic`, slice indexing, and `+`/`-` arithmetic in `[lints.clippy]`,
+  so use `?`, `saturating_*`, and destructuring.
+- Follow [.agents/docs/codestyle.md](.agents/docs/codestyle.md) for the Rust API
+  surface (getset, From/TryFrom).
 
-## State: observe or not
+## Observable state
 
-- To observe a component result from `main`, share `Rc<Cell<T>>` for `Copy`
-  values or `Rc<RefCell<T>>` otherwise. `register_rpc` handlers are `'static`
-  and `run` futures are boxed, so capture owned `Rc` clones by value.
-- To skip observation, keep plain fields on the component and mutate them
-  through `&mut self` in `run`; `main` drives until the router terminates.
-- Components exchange data through RPC (`RunContext::rpc()`), not shared state.
-
-## Messages
-
-For a fixed-layout message, prefer `#[rpc_message]` (adds serde + zerocopy +
-`RpcWire`) together with `#[repr(C)]` and any `Clone`/`Copy`/`Debug` needed.
-Enums receive the same set without `RpcWire`.
+- To read a result back from the example's driver, share `Rc<Cell<T>>` for
+  `Copy` values or `Rc<RefCell<T>>` otherwise, and capture owned `Rc` clones by
+  value in `'static` closures and futures.
+- To skip readback, keep plain fields and mutate them through `&mut self`; the
+  driver stops when the future completes.
 
 ## Keep in sync
 
 When adding or removing an example, update the crate's `examples/README.md`
-table and the usage guide's Examples list in the same change.
+table and any usage guide's Examples list in the same change.
 
-In-repo voice: `core/event-router/examples/*.rs` and
-`core/event-router/example-crates/*`.
+In-repo voice: `core/event-router/examples/` and
+`core/event-router/example-crates/`.

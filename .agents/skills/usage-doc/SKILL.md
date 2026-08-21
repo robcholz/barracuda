@@ -1,12 +1,12 @@
 ---
 name: usage-doc
-description: Write or edit usage guides (usage.md) for Event Router and its crates. Use when creating, reviewing, or revising a how-to guide for callers.
+description: Write or edit usage guides (usage.md) for any crate in this repo. Use when creating, reviewing, or revising a caller-facing how-to guide.
 ---
 
 # Usage Guides
 
-Usage guides are how-tos for callers. They tell the reader what to write and
-what happens, in plain positive sentences.
+Usage guides are how-tos for a crate's callers. They tell the reader what to
+write and what happens, in plain positive sentences.
 
 ## Voice
 
@@ -15,17 +15,17 @@ what happens, in plain positive sentences.
   with a positive statement of what to do.
 - State what the API does and what the reader writes. Use negation only for a
   real boundary, and give the reason.
-- Describe outcomes in conceptual terms. Keep `include_str!`, macro internals,
-  and crate names out of prose where possible.
+- Describe outcomes in conceptual terms. Keep implementation internals and
+  crate-internal names out of prose where possible.
 - Code blocks carry the primary instruction. Keep them minimal, complete, and
   matching the real public API.
 
 ## Structure
 
-Quick start first, then one numbered section per caller action (define a DTO,
-declare a method, register a component, call RPCs, emit events and load
-workflows, bake schemas), then an Examples list and the cardinality rules.
-Adapt to the API rather than forcing the template.
+Quick start first, then one numbered section per caller action, then an
+Examples list and any constraints. Adapt to the crate rather than forcing a
+template. `core/event-router/docs/usage.md` is the in-repo reference for voice
+and shape.
 
 ## Keep in sync
 
@@ -34,6 +34,8 @@ Adapt to the API rather than forcing the template.
 - The Examples list names what actually exists; add and remove entries as
   examples land.
 - Link the design docs for rationale and the examples for runnable versions.
+- Follow [.agents/docs/codestyle.md](.agents/docs/codestyle.md) for API surface
+  references.
 
 In-repo voice: `core/event-router/docs/usage.md`. The `design-doc` skill holds
 the shared "positive, no why-vs-why-not" writing rules.
