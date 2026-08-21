@@ -209,15 +209,18 @@ pub struct WorkflowJsonRequest {
     bytes: Vec<u8>,
 }
 
-impl WorkflowJsonRequest {
-    /// Wraps one complete JSON document read from persistent storage.
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, WorkflowControlRejection> {
+impl TryFrom<Vec<u8>> for WorkflowJsonRequest {
+    type Error = WorkflowControlRejection;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         if bytes.is_empty() {
             return Err(WorkflowControlRejection::InvalidJson);
         }
         Ok(Self { bytes })
     }
+}
 
+impl WorkflowJsonRequest {
     /// Collects and validates all request frames through EOF.
     pub async fn accept<const M: usize>(
         mut frames: RpcStream<RpcFrame<WorkflowJsonFrame<M>>>,
@@ -233,7 +236,7 @@ impl WorkflowJsonRequest {
             };
             bytes.extend_from_slice(data);
         }
-        Ok(Self::from_bytes(bytes))
+        Ok(bytes.try_into())
     }
 
     /// Returns the original JSON bytes for durable storage.
@@ -367,7 +370,7 @@ mod tests {
 
     #[test]
     fn workflow_json_uses_the_documented_match_and_step_shape() {
-        let request = WorkflowJsonRequest::from_bytes(
+        let request = WorkflowJsonRequest::try_from(
             br#"{
                 "id":"gateway-to-agent",
                 "match":{"event":"gateway.*"},
@@ -393,7 +396,7 @@ mod tests {
 
     #[test]
     fn workflow_json_rejects_invalid_json_and_empty_steps() {
-        let malformed = WorkflowJsonRequest::from_bytes(b"{".to_vec())
+        let malformed = WorkflowJsonRequest::try_from(b"{".to_vec())
             .expect("non-empty malformed request")
             .definition();
         assert!(matches!(
@@ -401,7 +404,7 @@ mod tests {
             Err(WorkflowControlRejection::InvalidJson)
         ));
 
-        let empty_steps = WorkflowJsonRequest::from_bytes(
+        let empty_steps = WorkflowJsonRequest::try_from(
             br#"{"id":"empty","match":{"event":"gateway.*"},"steps":[]}"#.to_vec(),
         )
         .expect("non-empty JSON")

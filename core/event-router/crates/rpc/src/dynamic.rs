@@ -6,6 +6,8 @@
 //! endpoint, so [`RpcMethod::dynamic`](crate::RpcMethod::dynamic) returns one
 //! [`Dynamic`] rather than three separate hooks.
 
+use getset::{CopyGetters, Getters};
+
 use super::json::JsonCodec;
 use super::wire::WireSupport;
 
@@ -14,10 +16,16 @@ use super::wire::WireSupport;
 /// Built by `#[rpc_dynamic]` through [`Dynamic::new`] and returned from
 /// [`RpcMethod::dynamic`](crate::RpcMethod::dynamic). Cloning is cheap: the
 /// codec shares an `Rc`, and the wire tables and schema are `'static`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Getters, CopyGetters)]
 pub struct Dynamic {
+    /// The JSON transcoder.
+    #[getset(get = "pub")]
     json: JsonCodec,
+    /// The wire-level field tables.
+    #[getset(get = "pub")]
     wire: WireSupport,
+    /// The baked request schema, when the schema pipeline ran.
+    #[getset(get_copy = "pub")]
     schema: Option<&'static str>,
 }
 
@@ -29,23 +37,5 @@ impl Dynamic {
     #[must_use]
     pub fn new(json: JsonCodec, wire: WireSupport, schema: Option<&'static str>) -> Self {
         Self { json, wire, schema }
-    }
-
-    /// Returns the JSON transcoder.
-    #[must_use]
-    pub fn json(&self) -> &JsonCodec {
-        &self.json
-    }
-
-    /// Returns the wire-level field tables.
-    #[must_use]
-    pub fn wire(&self) -> &WireSupport {
-        &self.wire
-    }
-
-    /// Returns the baked request schema, when the schema pipeline ran.
-    #[must_use]
-    pub fn schema(&self) -> Option<&'static str> {
-        self.schema
     }
 }

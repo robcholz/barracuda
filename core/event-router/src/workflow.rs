@@ -198,7 +198,7 @@ where
         })?;
         let path = workflow_path(directory, &workflow_id);
         let request =
-            WorkflowJsonRequest::from_bytes(filesystem.read(&path)?).map_err(|rejection| {
+            WorkflowJsonRequest::try_from(filesystem.read(&path)?).map_err(|rejection| {
                 EventRouterCreateError::InvalidPersistedWorkflow {
                     path: path.clone(),
                     rejection,
