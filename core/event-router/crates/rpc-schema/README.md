@@ -1,6 +1,6 @@
 # barracuda-rpc-schema
 
-Host-side JSON Schema bake pipeline for `#[rpc_json]` RPC methods. `schemars`
+Host-side JSON Schema bake pipeline for `#[rpc_dynamic]` RPC methods. `schemars`
 runs on the host (from a `build.rs`); only the resulting `&'static str` is baked
 into the firmware, which stays `no_std` and schemars-free.
 
@@ -17,7 +17,7 @@ pieces:
 | Crate | Holds | schemars |
 | --- | --- | --- |
 | **wire** | request DTOs; `#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]` + `register!(RequestType)` (feature-gated) | optional dep behind a `schema` feature |
-| **methods** | `impl RpcMethod` + `#[rpc_json]`; the bake `build.rs`; build-depends on `wire` (`features = ["schema"]`) and this crate | none on the device |
+| **methods** | `impl RpcMethod` + `#[rpc_dynamic]`; the bake `build.rs`; build-depends on `wire` (`features = ["schema"]`) and this crate | none on the device |
 | **barracuda-rpc-schema** (this crate) | `SchemaEntry`, `register!`, `bake_all` | yes (host lib) |
 
 ## Wiring
@@ -49,9 +49,17 @@ fn main() {
 }
 ```
 
-`#[rpc_json]` then embeds `$OUT_DIR/<Request>.json` via `include_str!` when
-`rpc_schema_baked` is set, and `RpcMethod::schema()` returns that `&'static str`.
-Without the pipeline the method stays JSON-callable and `schema()` is `None`.
+`#[rpc_dynamic]` then embeds `$OUT_DIR/<Request>.json` via `include_str!` when
+`rpc_schema_baked` is set, and `RpcMethod::dynamic().and_then(|d| d.schema())`
+returns that `&'static str`. Without the pipeline the method stays JSON-callable
+and the schema is `None`.
 
 Because `schemars` derives the schema from the Rust type (honoring `serde`
 attributes), the baked schema cannot drift from what `call_json` accepts.
+
+A runnable end-to-end version lives under
+`core/event-router/example-crates/`:
+
+```console
+cargo run -p barracuda-event-router-schema-demo
+```

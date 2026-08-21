@@ -1,4 +1,4 @@
-//! Usage: host Components, call their RPCs, and manage their lifecycle.
+//! Usage: host Components, call their typed RPCs, and manage their lifecycle.
 
 use std::cell::Cell;
 use std::future::{pending, poll_fn, Future};
@@ -11,18 +11,25 @@ use barracuda_event_router::{
     RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
 };
 use static_cell::ConstStaticCell;
+use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 const FRAME_SIZE: usize = 256;
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<2, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
+struct Number {
+    value: u32,
+}
+
 struct Increment;
 
 impl RpcMethod for Increment {
     const ADDRESS: &'static str = "counter.increment";
-    type Request = [u8; 4];
-    type Response = [u8; 4];
+    type Request = Number;
+    type Response = Number;
     type Error = ();
     type Input = Unary;
     type Output = Unary;
@@ -30,7 +37,7 @@ impl RpcMethod for Increment {
 
 #[derive(Default)]
 struct ReviewState {
-    response: Cell<Option<u32>>,
+    response: Cell<Option<Number>>,
     service_unregistered: Cell<bool>,
     caller_unregistered: Cell<bool>,
 }
@@ -41,9 +48,10 @@ struct CounterService {
 
 impl Component<FRAME_SIZE> for CounterService {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Increment, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            let value = u32::from_le_bytes(*request.view()?);
-            Ok(Ok(value.saturating_add(1).to_le_bytes()))
+        context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
+            Ok(Ok(Number {
+                value: request.view()?.value.saturating_add(1),
+            }))
         })
     }
 
@@ -70,12 +78,10 @@ impl Component<FRAME_SIZE> for StartupCaller {
         Box::pin(async move {
             let response = context
                 .rpc()
-                .call::<Increment>(41_u32.to_le_bytes())?
+                .call::<Increment>(Number { value: 41 })?
                 .await?
                 .map_err(|_method_error| RpcError::InvalidFrameState)?;
-            self.state
-                .response
-                .set(Some(u32::from_le_bytes(*response.view()?)));
+            self.state.response.set(Some(*response.view()?));
             pending().await
         })
     }
@@ -111,7 +117,7 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     })
     .await?;
 
-    assert_eq!(state.response.get(), Some(42));
+    assert_eq!(state.response.get(), Some(Number { value: 42 }));
 
     event_router.unload(caller)?;
     event_router.unload(service)?;

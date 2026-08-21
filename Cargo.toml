@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "core/*",
     "core/event-router/crates/*",
+    "core/event-router/example-crates/*",
     "components/agent/crates/*",
     "components/agent/bench/crates/*",
     "components/message-gateway/crates/*",

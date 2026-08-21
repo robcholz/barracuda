@@ -565,6 +565,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-event-router-schema-demo"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-event-router-schema-wire",
+ "serde_json",
+ "static_cell",
+ "tokio",
+]
+
+[[package]]
+name = "barracuda-event-router-schema-wire"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "barracuda-rpc-schema",
+ "schemars",
+ "serde",
+ "zerocopy",
+]
+
+[[package]]
 name = "barracuda-fs"
 version = "0.1.0"
 dependencies = [

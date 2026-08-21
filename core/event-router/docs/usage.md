@@ -166,13 +166,18 @@ The baked schema is then available through the method's `Dynamic` surface
 
 ## Examples
 
-- `examples/components` — component registration and lifecycle.
-- `examples/events` — workflow loading, events, and durable state.
-- `examples/rpc_json` — `#[rpc_dynamic]` and `call_json`.
+- `examples/components` — Component registration, typed RPCs, and lifecycle.
+- `examples/events` — single-step Workflow loading, events, and durable state.
+- `examples/rpc_json` — `#[rpc_dynamic]` and `call_json` through the Event Router.
+- `examples/workflow` — a multi-step Workflow with a `$previous.output` mapping link.
+- `examples/persistence` — durable restore and `WorkflowClient::unload`.
+- `examples/streaming` — a streaming Event into a streaming Workflow step.
+- `examples/workflow_failure` — Method errors and `WorkflowInfo` failure counters.
+- `example-crates/schema-demo` — the `build.rs` JSON Schema bake pipeline
+  (`cargo run -p barracuda-event-router-schema-demo`).
 - Lower-level examples under `crates/{rpc,router,workflow}/examples/`.
 
 ## Cardinality rules
 
 Workflow edges support `Unary → Unary`, `Unary → Streaming`, and
 `Streaming → Streaming`. `Streaming → Unary` is rejected.
-
