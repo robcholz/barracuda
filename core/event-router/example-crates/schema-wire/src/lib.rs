@@ -7,18 +7,9 @@
 #![cfg_attr(not(feature = "schema"), no_std)]
 
 #[repr(C)]
+#[barracuda_rpc::rpc_message]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[derive(
-    Clone,
-    Copy,
-    serde::Serialize,
-    serde::Deserialize,
-    zerocopy::Immutable,
-    zerocopy::IntoBytes,
-    zerocopy::KnownLayout,
-    zerocopy::TryFromBytes,
-    barracuda_rpc::RpcWire,
-)]
+#[derive(Clone, Copy)]
 pub struct SetLevelRequest {
     pub session: u32,
     pub level: u32,

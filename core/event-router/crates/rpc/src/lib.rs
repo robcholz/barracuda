@@ -31,6 +31,8 @@ pub use address::{RpcAddress, RpcAddressError, RpcGroup, RpcGroupError};
 /// Marks an `impl RpcMethod` block as runtime-dynamic, filling
 /// [`RpcMethod::dynamic`] with a JSON codec, wire tables, and schema.
 pub use barracuda_rpc_macros::rpc_dynamic;
+/// Bundles the standard derive set for a fixed-layout RPC message.
+pub use barracuda_rpc_macros::rpc_message;
 /// Derives [`RpcWire`], the per-field byte-region table for a message struct.
 pub use barracuda_rpc_macros::RpcWire;
 pub use context::{RpcCallId, RpcContext, RpcEndpointId};

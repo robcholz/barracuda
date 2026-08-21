@@ -10,7 +10,7 @@ use proc_macro::TokenStream;
 use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
 use serde_derive_internals::{ast, Ctxt, Derive};
-use syn::{parse_macro_input, parse_quote, DeriveInput, ImplItem, LitStr, Type};
+use syn::{parse_macro_input, parse_quote, Data, DeriveInput, Fields, ImplItem, LitStr, Type};
 
 /// Resolves the path to the RPC crate's public items as the caller sees them.
 ///
@@ -92,6 +92,75 @@ pub fn rpc_dynamic(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     input.items.push(dynamic);
     quote!(#input).into()
+}
+
+/// Bundles the standard derive set for a fixed-layout RPC message.
+///
+/// This is an attribute macro rather than a derive because a
+/// `proc_macro_derive` cannot inject additional `#[derive(...)]` attributes
+/// that the compiler will expand. Applying `#[rpc_message]` to a struct or enum
+/// is shorthand for:
+///
+/// ```ignore
+/// #[derive(
+///     serde::Serialize,
+///     serde::Deserialize,
+///     zerocopy::Immutable,
+///     zerocopy::IntoBytes,
+///     zerocopy::KnownLayout,
+///     zerocopy::TryFromBytes,
+///     RpcWire, // named-field structs only
+/// )]
+/// ```
+///
+/// The consuming crate must depend on `serde` and `zerocopy` directly, and on
+/// either `barracuda-event-router` or `barracuda-rpc`. Keep `#[repr(C)]`
+/// (structs) or an explicit `#[repr(...)]` (enums) on the item; this macro only
+/// adds derives.
+#[proc_macro_attribute]
+pub fn rpc_message(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    let rpc = {
+        let mut ident = format_ident!("barracuda_rpc");
+        for package in ["barracuda-event-router", "barracuda-rpc"] {
+            match crate_name(package) {
+                Ok(FoundCrate::Itself) => {
+                    ident = format_ident!("{}", package.replace('-', "_"));
+                    break;
+                }
+                Ok(FoundCrate::Name(name)) => {
+                    ident = format_ident!("{name}");
+                    break;
+                }
+                Err(_) => {}
+            }
+        }
+        ident
+    };
+
+    let named_struct = match &input.data {
+        Data::Struct(data) => matches!(&data.fields, Fields::Named(_)),
+        _ => false,
+    };
+    let wire = if named_struct {
+        quote!(#rpc::RpcWire)
+    } else {
+        quote!()
+    };
+
+    quote! {
+        #[derive(
+            serde::Serialize,
+            serde::Deserialize,
+            zerocopy::Immutable,
+            zerocopy::IntoBytes,
+            zerocopy::KnownLayout,
+            zerocopy::TryFromBytes,
+            #wire
+        )]
+        #input
+    }
+    .into()
 }
 
 /// Derives [`RpcWire`], the per-field byte-region table for a message struct.
