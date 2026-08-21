@@ -1,8 +1,10 @@
 # Event Router Usage
 
-This guide is for callers: component authors who register RPC methods, emit
-events, and load workflows. For the architecture and rationale, see
-[`design.md`](design.md).
+The Event Router runs a set of Components on a fixed-capacity, full-duplex,
+`no_std` cooperative runtime, and drives durable Workflows that chain RPC calls
+when an Event arrives. This guide covers the caller side: defining messages and
+methods, registering a Component, making calls, emitting Events, and loading
+Workflows. The internals live in [`design.md`](design.md).
 
 ## Quick start
 
@@ -10,13 +12,19 @@ events, and load workflows. For the architecture and rationale, see
 let lanes = Box::leak(Box::new(RpcLaneStorage::<N, M, Q>::new()));
 let filesystem = Box::leak(Box::new(MemFs::new()));
 let mut router = EventRouter::new(lanes, filesystem, "workflows")?;
+
 router.load(Box::new(MyComponent))?;
-// drive `router` from the cooperative executor
+// Poll `router` from the cooperative executor.
 ```
 
-`N` is the lane count, `M` the frame size in bytes, and `Q` the waiter count.
+`N` is the number of RPC lanes, `M` the frame size in bytes, and `Q` the
+number of waiters per lane.
 
 ## 1. Define a message DTO
+
+A message is a fixed-layout type. The serde derives describe its JSON shape, the
+zerocopy derives describe its wire bytes, and `RpcWire` records the byte region
+of each field so Workflow links can copy individual fields.
 
 ```rust
 #[repr(C)]
@@ -31,9 +39,20 @@ struct SetLevelRequest {
 }
 ```
 
-The serde derives define the JSON shape; the zerocopy derives define the wire
-bytes; `RpcWire` generates the field table used by mapping links (its field
-names follow serde, so `rename`/`rename_all` are honored).
+For the common case, `#[rpc_message]` writes that whole derive list for you:
+
+```rust
+#[repr(C)]
+#[rpc_message]
+#[derive(Clone, Copy, Debug)]
+struct SetLevelRequest {
+    session: u32,
+    level: u32,
+}
+```
+
+The macro includes `RpcWire` for named-field structs and leaves it off enums.
+Keep `serde` and `zerocopy` as dependencies of the crate.
 
 ## 2. Declare an RPC method
 
@@ -51,9 +70,9 @@ impl RpcMethod for SetLevel {
 }
 ```
 
-`Input`/`Output` are `Unary` or `Streaming`. Add `#[rpc_dynamic]` when the
-method should be callable through JSON and addressable by field name in
-workflow mapping links.
+`Input` and `Output` are `Unary` or `Streaming`. Annotate the impl with
+`#[rpc_dynamic]` to make the method reachable through JSON and field-name
+Workflow links.
 
 ## 3. Register a component
 
@@ -61,8 +80,7 @@ workflow mapping links.
 impl Component<M> for MyComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<SetLevel, _>(|_context, request: RpcFrame<SetLevelRequest>| async move {
-            // return Ok(Ok(())) or Ok(Err(SetLevelError::...))
-            Ok(Ok(()))
+            Ok(Ok(())) // or Ok(Err(SetLevelError::...))
         })?;
         Ok(())
     }
@@ -70,8 +88,8 @@ impl Component<M> for MyComponent {
 }
 ```
 
-Handlers receive `RpcContext` (call lineage, nested client) and an
-`RpcFrame<Request>`; stream inputs use `RpcStream<RpcFrame<Request>>`.
+A handler receives the call's `RpcContext` and an `RpcFrame<Request>`. Streaming
+inputs arrive as an `RpcStream<RpcFrame<Request>>`.
 
 ## 4. Call RPCs
 
@@ -79,7 +97,7 @@ Handlers receive `RpcContext` (call lineage, nested client) and an
 // Typed
 let outcome = client.call::<SetLevel>(SetLevelRequest { session: 7, level: 2 })?.await?;
 
-// JSON (requires #[rpc_dynamic])
+// JSON (available on #[rpc_dynamic] methods)
 let value = client
     .call_json(&RpcAddress::try_from(SetLevel::ADDRESS)?, &serde_json::json!({
         "session": 7, "level": 2
@@ -91,9 +109,9 @@ let value = client
 let (writer, reader) = client.call_payload(&address)?;
 ```
 
-## 5. Events and workflows
+## 5. Events and Workflows
 
-### Emit an event
+### Emit an Event
 
 ```rust
 struct GatewayMessage;
@@ -109,7 +127,7 @@ EventEmitter::<M>::new(context.rpc().clone())
     .await?;
 ```
 
-### Load a workflow
+### Load a Workflow
 
 ```rust
 let client = WorkflowClient::<M>::new(context.rpc().clone());
@@ -123,21 +141,22 @@ client.load(r#"{
 }"#).await?;
 ```
 
-Step 0 is the ingress: the event payload becomes its request. Later steps are
-linked by `arguments`:
+Step 0 is the ingress step: the Event payload becomes its request. Each later
+step describes how to build its request from the previous response, based on
+`arguments`:
 
 | `arguments` | Link |
 | --- | --- |
-| absent | `Direct` — previous response passed byte-for-byte (types must match). |
-| present, no `$` | `Literal` — request built from the literal arguments alone. |
-| present, with `$` | `Mapping` — literal arguments plus wire-copied fields. |
+| omitted | `Direct` — the previous response passes through byte-for-byte. |
+| present, literals only | `Literal` — the request comes entirely from the arguments. |
+| present, with a `$` reference | `Mapping` — literals plus fields copied from the previous response. |
 
-References use `$previous.output.<field>` with a single top-level serde field
-name. In a mapping, the destination DTO field written by a `$` reference should
-carry `#[serde(default)]` (or a placeholder in the literal arguments), because
-the literal JSON does not include it.
+A reference looks like `$previous.output.<field>` and names a single top-level
+serde field. For a `Mapping` link, give the destination field `#[serde(default)]`
+or a placeholder in the literal arguments, so the JSON codec can fill it from
+the reference.
 
-### Unload
+### Unload a Workflow
 
 ```rust
 client.unload(&WorkflowId::try_from("demo")?).await?;
@@ -145,29 +164,31 @@ client.unload(&WorkflowId::try_from("demo")?).await?;
 
 ## 6. Bake JSON Schemas
 
-Add a `build.rs` that runs the host-side bake and enables the cfg:
+The `schema` feature exposes the host-side bake pipeline through the facade.
+Add a `build.rs` that writes each registered schema into `OUT_DIR` and enables
+the `rpc_schema_baked` cfg:
 
 ```rust
 fn main() {
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-    barracuda_rpc_schema::bake_all(&out).unwrap();
+    barracuda_event_router::bake_all(&out).unwrap();
     println!("cargo:rustc-cfg=rpc_schema_baked");
 }
 ```
 
-Register each request DTO:
+Register each request DTO in the wire crate:
 
 ```rust
-barracuda_rpc_schema::register!(SetLevelRequest);
+barracuda_event_router::register!(SetLevelRequest);
 ```
 
-The baked schema is then available through the method's `Dynamic` surface
-(`#[rpc_dynamic]`). Enable the facade re-export with the `schema` feature.
+`#[rpc_dynamic]` then embeds the baked schema beside the method. A runnable
+version lives in `example-crates/schema-demo`.
 
 ## Examples
 
 - `examples/components` — Component registration, typed RPCs, and lifecycle.
-- `examples/events` — single-step Workflow loading, events, and durable state.
+- `examples/events` — single-step Workflow loading, Events, and durable state.
 - `examples/rpc_json` — `#[rpc_dynamic]` and `call_json` through the Event Router.
 - `examples/workflow` — a multi-step Workflow with a `$previous.output` mapping link.
 - `examples/persistence` — durable restore and `WorkflowClient::unload`.
@@ -177,7 +198,7 @@ The baked schema is then available through the method's `Dynamic` surface
   (`cargo run -p barracuda-event-router-schema-demo`).
 - Lower-level examples under `crates/{rpc,router,workflow}/examples/`.
 
-## Cardinality rules
+## Cardinality
 
 Workflow edges support `Unary → Unary`, `Unary → Streaming`, and
-`Streaming → Streaming`. `Streaming → Unary` is rejected.
+`Streaming → Streaming`.
