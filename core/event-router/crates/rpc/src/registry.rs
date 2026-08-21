@@ -15,13 +15,15 @@ use smallvec::{smallvec, SmallVec};
 
 use super::address::{RpcAddress, RpcAddressError, RpcGroup};
 use super::context::{RpcCallId, RpcContext, RpcEndpointId};
+use super::dynamic::Dynamic;
 use super::json::{envelope, JsonCodec};
 use super::lane::{LaneAcquireSet, LaneIoSet, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
 use super::payload::{RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter};
 use super::typed::{
-    HandlerAdapter, RpcHandler, RpcInputMode, RpcMessage, RpcMethod, RpcMethodDescriptor,
-    RpcOutputMode,
+    HandlerAdapter, RpcCardinality, RpcHandler, RpcInputMode, RpcMessage, RpcMethod,
+    RpcMethodDescriptor, RpcOutputMode,
 };
+use super::wire::WireSupport;
 
 /// Request or response side of one full-duplex RPC lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,7 +56,7 @@ pub struct RpcEndpoint<const M: usize> {
     address: RpcAddress,
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
-    json: Option<JsonCodec>,
+    dynamic: Option<Dynamic>,
 }
 
 impl<const M: usize> RpcEndpoint<M> {
@@ -82,7 +84,7 @@ impl<const M: usize> RpcEndpoint<M> {
             address: descriptor.address().clone(),
             handler: Rc::new(HandlerAdapter::<Method, H>::new(handler)),
             descriptor,
-            json: Method::json_codec(),
+            dynamic: Method::dynamic(),
         })
     }
 }
@@ -353,7 +355,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
             endpoint.address,
             endpoint.handler,
             endpoint.descriptor,
-            endpoint.json,
+            endpoint.dynamic,
         )
     }
 
@@ -372,7 +374,7 @@ impl RegistryCore {
         address: RpcAddress,
         handler: Rc<dyn ErasedRpcHandler>,
         descriptor: RpcMethodDescriptor,
-        json: Option<JsonCodec>,
+        dynamic: Option<Dynamic>,
     ) -> RpcResult<RpcRegistration> {
         if self.endpoints.borrow().contains_key(&address) {
             return Err(RpcError::AlreadyRegistered(address));
@@ -393,7 +395,7 @@ impl RegistryCore {
                 handler,
                 descriptor,
                 lifecycle,
-                json,
+                dynamic,
             },
         );
         Ok(registration)
@@ -404,9 +406,23 @@ impl RegistryCore {
             .borrow()
             .get(address)
             .ok_or_else(|| RpcError::NotFound(address.clone()))?
-            .json
-            .clone()
+            .dynamic
+            .as_ref()
+            .map(|dynamic| dynamic.json().clone())
             .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))
+    }
+
+    fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
+        let entry = self
+            .endpoints
+            .borrow()
+            .get(address)
+            .cloned()
+            .ok_or_else(|| RpcError::NotFound(address.clone()))?;
+        Ok(RpcMethodInfo {
+            descriptor: entry.descriptor,
+            dynamic: entry.dynamic,
+        })
     }
 
     fn prepare_typed_call<M>(self: &Rc<Self>, caller: &RpcClient) -> RpcResult<PreparedCalls>
@@ -597,7 +613,68 @@ struct EndpointEntry {
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
     lifecycle: Rc<EndpointLifecycle>,
-    json: Option<JsonCodec>,
+    dynamic: Option<Dynamic>,
+}
+
+/// Read-only projection of one registered method, for cross-crate link checks.
+///
+/// Returned by [`RpcClient::method_info`]. It exposes exactly what a workflow
+/// planner needs to classify and validate a link — type identity between
+/// adjacent methods and, for dynamic methods, the JSON codec and wire tables —
+/// without leaking the internal descriptor or `TypeId`s.
+#[derive(Clone)]
+pub struct RpcMethodInfo {
+    descriptor: RpcMethodDescriptor,
+    dynamic: Option<Dynamic>,
+}
+
+impl RpcMethodInfo {
+    /// Reports whether this method's response is the identical fixed-layout type
+    /// that `next` accepts as its request — the soundness condition for a
+    /// `Link::Direct` byte-for-byte passthrough.
+    #[must_use]
+    pub fn links_to(&self, next: &RpcMethodInfo) -> bool {
+        self.descriptor.response_type_id() == next.descriptor.request_type_id()
+    }
+
+    /// Returns this method's fixed request frame size in bytes.
+    #[must_use]
+    pub fn request_frame_size(&self) -> usize {
+        self.descriptor.request_frame_size()
+    }
+
+    /// Returns this method's request cardinality.
+    #[must_use]
+    pub fn input_mode(&self) -> RpcCardinality {
+        RpcCardinality::from_type_id(self.descriptor.input_mode_type_id())
+    }
+
+    /// Returns this method's response cardinality.
+    #[must_use]
+    pub fn output_mode(&self) -> RpcCardinality {
+        RpcCardinality::from_type_id(self.descriptor.output_mode_type_id())
+    }
+
+    /// Returns this method's wire field tables, when it is runtime-dynamic.
+    #[must_use]
+    pub fn wire(&self) -> Option<&WireSupport> {
+        self.dynamic.as_ref().map(Dynamic::wire)
+    }
+
+    /// Encodes a JSON request value into this method's fixed request bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::NotJsonCallable`] when the method is not dynamic, or
+    /// [`RpcError::JsonRequestInvalid`] when the value does not match the
+    /// request message.
+    pub fn encode_request(&self, address: &RpcAddress, value: &Value) -> RpcResult<Vec<u8>> {
+        self.dynamic
+            .as_ref()
+            .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))?
+            .json()
+            .encode_request(value)
+    }
 }
 
 struct EndpointLifecycle {
@@ -727,7 +804,7 @@ impl RpcClient {
     /// Calls the typed endpoint at `address` with a JSON payload.
     ///
     /// The endpoint must be registered as JSON-callable (its method's `impl`
-    /// carries `#[rpc_json]`). The captured [`JsonCodec`] transcodes the request
+    /// carries `#[rpc_dynamic]`). The captured [`JsonCodec`] transcodes the request
     /// value into the method's fixed `Request` wire bytes, so the bytes on the
     /// lane are identical to a typed [`call`](Self::call) and the ordinary
     /// handler serves them — no JSON travels the router. The single response or
@@ -759,6 +836,22 @@ impl RpcClient {
             Some(Err(frame)) => Ok(envelope(false, codec.decode_error(frame.as_ref())?)),
             None => Err(RpcError::MissingUnaryFrame),
         }
+    }
+
+    /// Returns a read-only projection of the method registered at `address`.
+    ///
+    /// Workflow planning uses it to classify and validate a link before IO:
+    /// [`RpcMethodInfo::links_to`] checks type identity for a Direct edge, and
+    /// [`RpcMethodInfo::wire`]/[`RpcMethodInfo::encode_request`] drive a Mapping
+    /// or Literal edge.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone, or
+    /// [`RpcError::NotFound`] when no endpoint owns `address`.
+    pub fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        registry.method_info(address)
     }
 
     /// Starts a wire-level multicast with one shared request direction.
@@ -961,6 +1054,28 @@ pub enum RpcError {
     JsonResponseInvalid {
         /// Rust message type that failed to serialize.
         message_type: &'static str,
+    },
+    /// A wire field name did not exist in the method's request or response table.
+    #[error("unknown wire field: {field}")]
+    WireFieldUnknown {
+        /// Requested field name.
+        field: alloc::string::String,
+    },
+    /// A frame was shorter than a wire field's recorded byte region.
+    #[error("wire field {field} region falls outside the frame")]
+    WireFieldRegion {
+        /// Field whose region exceeded the frame.
+        field: alloc::string::String,
+    },
+    /// Wire content exceeded the destination field's capacity.
+    #[error("wire field {field} content {size} exceeds capacity {capacity}")]
+    WireFieldTooLarge {
+        /// Destination field name.
+        field: alloc::string::String,
+        /// Provided content length.
+        size: usize,
+        /// Destination field capacity.
+        capacity: usize,
     },
 }
 

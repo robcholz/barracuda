@@ -1,7 +1,7 @@
 //! Runtime JSON calls to a typed RPC method, through the Event Router facade.
 //!
 //! Everything comes from `barracuda_event_router`: a method is registered
-//! exactly as any typed RPC, `#[rpc_json]` opts it into
+//! exactly as any typed RPC, `#[rpc_dynamic]` opts it into
 //! [`RpcClient::call_json`], and callers reach it by a runtime address string.
 //! The bytes on the lane are the real `Request` struct — no JSON travels the
 //! router.
@@ -10,8 +10,8 @@ use core::cell::Cell;
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    rpc_json, RpcAddress, RpcContext, RpcError, RpcFrame, RpcHandler, RpcLaneStorage, RpcMethod,
-    RpcRegistry, RpcResult, Unary,
+    rpc_dynamic, RpcAddress, RpcContext, RpcError, RpcFrame, RpcHandler, RpcLaneStorage, RpcMethod,
+    RpcRegistry, RpcResult, RpcWire, Unary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -33,6 +33,7 @@ static RPC_LANES: ConstStaticCell<RpcLaneStorage<2, 64, 2>> =
     KnownLayout,
     PartialEq,
     Eq,
+    RpcWire,
     TryFromBytes,
 )]
 struct SetLevelRequest {
@@ -61,7 +62,7 @@ enum SetLevelError {
 
 struct SetPermissionLevel;
 
-#[rpc_json]
+#[rpc_dynamic]
 impl RpcMethod for SetPermissionLevel {
     const ADDRESS: &'static str = "session.set_permission_level";
     type Request = SetLevelRequest;

@@ -9,13 +9,15 @@ use core::task::{Context, Poll};
 
 use futures_core::Stream;
 use serde::Deserialize;
+use serde_json::Value;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use barracuda_rpc::{
     RpcClient, RpcError, RpcFrame, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
 };
 
-use crate::{Rule, WorkflowDefinition, WorkflowId};
+use crate::definition::WorkflowDefinitionError;
+use crate::{Rule, WorkflowDefinition, WorkflowId, WorkflowStep};
 
 /// Receiver-side rejection returned by a Workflow control RPC.
 #[repr(u8)]
@@ -39,6 +41,8 @@ pub enum WorkflowControlRejection {
     NotFound,
     /// The persistence operation failed.
     Persistence,
+    /// A step's link arguments were malformed or placed on the ingress step.
+    InvalidArguments,
 }
 
 /// Failure returned by [`WorkflowClient`].
@@ -269,6 +273,8 @@ struct WorkflowMatchDocument {
 #[serde(deny_unknown_fields)]
 struct WorkflowStepDocument {
     call: String,
+    #[serde(default)]
+    arguments: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -289,12 +295,18 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .steps
             .into_iter()
             .map(|step| {
-                barracuda_rpc::RpcAddress::try_from(step.call.as_str())
-                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)
+                let address = barracuda_rpc::RpcAddress::try_from(step.call.as_str())
+                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
+                Ok(WorkflowStep::new(address, step.arguments))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        WorkflowDefinition::new(id, event, steps)
-            .map_err(|_error| WorkflowControlRejection::EmptySteps)
+        WorkflowDefinition::new(id, event, steps).map_err(|error| match error {
+            WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
+            WorkflowDefinitionError::FirstStepHasArguments
+            | WorkflowDefinitionError::InvalidReference(_) => {
+                WorkflowControlRejection::InvalidArguments
+            }
+        })
     }
 }
 
@@ -369,7 +381,7 @@ mod tests {
             definition
                 .steps()
                 .iter()
-                .map(AsRef::as_ref)
+                .map(|step| step.address().as_ref())
                 .collect::<Vec<_>>(),
             ["adapter.gateway", "agent.run"]
         );

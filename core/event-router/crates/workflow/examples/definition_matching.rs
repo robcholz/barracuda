@@ -1,7 +1,9 @@
 //! Build Workflow definitions and match an Event in definition load order.
 
 use barracuda_rpc::RpcAddress;
-use barracuda_workflow::{EventId, Rule, WorkflowDefinition, WorkflowDefinitionError, WorkflowId};
+use barracuda_workflow::{
+    EventId, Rule, WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowStep,
+};
 
 fn definition(
     id: &str,
@@ -10,8 +12,8 @@ fn definition(
 ) -> Result<WorkflowDefinition, Box<dyn core::error::Error>> {
     let steps = steps
         .iter()
-        .map(|address| RpcAddress::try_from(*address))
-        .collect::<Result<Vec<_>, _>>()?;
+        .map(|address| Ok(WorkflowStep::new(RpcAddress::try_from(*address)?, None)))
+        .collect::<Result<Vec<_>, Box<dyn core::error::Error>>>()?;
     Ok(WorkflowDefinition::new(
         WorkflowId::try_from(id)?,
         Rule::try_from(event)?,
@@ -52,14 +54,14 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
         matched
             .first()
             .and_then(|workflow| workflow.steps().first())
-            .map(AsRef::<str>::as_ref),
+            .map(|step| step.address().as_ref()),
         Some("message.normalize")
     );
     assert_eq!(
         matched
             .get(1)
             .and_then(|workflow| workflow.steps().first())
-            .map(AsRef::<str>::as_ref),
+            .map(|step| step.address().as_ref()),
         Some("audit.record")
     );
 

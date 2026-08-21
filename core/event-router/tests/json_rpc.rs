@@ -2,8 +2,8 @@
 #![allow(missing_docs)]
 
 use barracuda_event_router::{
-    rpc_json, RpcAddress, RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
-    RpcResult, Unary,
+    rpc_dynamic, RpcAddress, RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
+    RpcResult, RpcWire, Unary,
 };
 use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ fn registry<const N: usize, const M: usize, const Q: usize>() -> RpcRegistry<N, 
     KnownLayout,
     PartialEq,
     Eq,
+    RpcWire,
     TryFromBytes,
 )]
 struct SetLevelRequest {
@@ -55,7 +56,7 @@ enum SetLevelError {
 
 struct SetPermissionLevel;
 
-#[rpc_json]
+#[rpc_dynamic]
 impl RpcMethod for SetPermissionLevel {
     const ADDRESS: &'static str = "session.set_permission_level";
     type Request = SetLevelRequest;
@@ -65,7 +66,7 @@ impl RpcMethod for SetPermissionLevel {
     type Output = Unary;
 }
 
-// Not annotated with `#[rpc_json]`: typed calls work, `call_json` does not.
+// Not annotated with `#[rpc_dynamic]`: typed calls work, `call_json` does not.
 struct CloseSession;
 
 impl RpcMethod for CloseSession {
@@ -161,7 +162,7 @@ fn call_json_rejects_a_mismatched_request() {
 }
 
 #[test]
-fn call_json_refuses_a_method_without_rpc_json() {
+fn call_json_refuses_a_method_without_rpc_dynamic() {
     let registry = permission_registry();
     let address = RpcAddress::try_from(CloseSession::ADDRESS).expect("valid address");
     let client = registry.client();

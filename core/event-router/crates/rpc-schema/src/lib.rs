@@ -1,4 +1,4 @@
-//! Host-side JSON Schema bake pipeline for `#[rpc_json]` RPC methods.
+//! Host-side JSON Schema bake pipeline for `#[rpc_dynamic]` RPC methods.
 //!
 //! This crate runs on the host — from a `build.rs` or a host tool — never on the
 //! device. A request type opts in with [`register!`], which submits a
@@ -8,7 +8,7 @@
 //! cannot drift from the wire contract).
 //!
 //! A consuming crate's `build.rs` imports this crate and calls [`bake_all`] into
-//! `OUT_DIR`, then sets the `rpc_schema_baked` cfg; `#[rpc_json]` embeds the
+//! `OUT_DIR`, then sets the `rpc_schema_baked` cfg; `#[rpc_dynamic]` embeds the
 //! baked file with `include_str!`. `schemars` is a build-dependency only, so
 //! nothing here reaches the firmware.
 
@@ -46,7 +46,7 @@ pub fn bake_all(out_dir: &Path) -> io::Result<()> {
 /// Registers a request type for baking.
 ///
 /// The type must derive [`schemars::JsonSchema`]. Invoke it with a bare type
-/// name so the baked file matches the `type Request` name `#[rpc_json]` embeds:
+/// name so the baked file matches the `type Request` name `#[rpc_dynamic]` embeds:
 ///
 /// ```ignore
 /// barracuda_rpc_schema::register!(SetLevelRequest);

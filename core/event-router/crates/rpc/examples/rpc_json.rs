@@ -1,6 +1,6 @@
 //! Category: runtime JSON calls to existing typed RPC methods.
 //!
-//! `#[rpc_json]` makes a typed method reachable through
+//! `#[rpc_dynamic]` makes a typed method reachable through
 //! [`RpcClient::call_json`], which addresses it by a runtime string and moves
 //! the same fixed-layout bytes a typed [`RpcClient::call`] would. The handler is
 //! an ordinary typed handler and never sees JSON.
@@ -9,8 +9,8 @@ use core::cell::Cell;
 use std::rc::Rc;
 
 use barracuda_rpc::{
-    rpc_json, RpcAddress, RpcContext, RpcError, RpcFrame, RpcHandler, RpcLaneStorage, RpcMethod,
-    RpcRegistry, RpcResult, Unary,
+    rpc_dynamic, RpcAddress, RpcContext, RpcError, RpcFrame, RpcHandler, RpcLaneStorage, RpcMethod,
+    RpcRegistry, RpcResult, RpcWire, Unary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -33,6 +33,7 @@ static RPC_LANES: ConstStaticCell<RpcLaneStorage<2, 64, 2>> =
     KnownLayout,
     PartialEq,
     Eq,
+    RpcWire,
     TryFromBytes,
 )]
 struct AddRequest {
@@ -51,6 +52,7 @@ struct AddRequest {
     KnownLayout,
     PartialEq,
     Eq,
+    RpcWire,
     TryFromBytes,
 )]
 struct AddResponse {
@@ -75,10 +77,10 @@ enum AddError {
     Overflow,
 }
 
-// A JSON-callable method: `#[rpc_json]` is the only line that opts it in.
+// A JSON-callable method: `#[rpc_dynamic]` is the only line that opts it in.
 struct CounterAdd;
 
-#[rpc_json]
+#[rpc_dynamic]
 impl RpcMethod for CounterAdd {
     const ADDRESS: &'static str = "counter.add";
     type Request = AddRequest;
@@ -162,7 +164,7 @@ async fn run() -> RpcResult<()> {
         Err(error) => println!("call_json bad:   rejected ({error})"),
     }
 
-    // (e) A method without `#[rpc_json]` is not JSON-callable.
+    // (e) A method without `#[rpc_dynamic]` is not JSON-callable.
     match client.call_json(&reset, &json!({ "amount": 0 })).await {
         Ok(value) => println!("call_json reset: unexpected {value}"),
         Err(RpcError::NotJsonCallable(address)) => {

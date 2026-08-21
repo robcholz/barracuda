@@ -1,0 +1,277 @@
+# RPC Design
+
+This document covers the `barracuda-rpc` crate: the wire layer, the dynamic
+modality, JSON calls, the schema bake, and the Link concepts that consume the
+wire tables. It is written for maintainers; callers should read the Event
+Router usage guide.
+
+## Architecture
+
+```text
+Domain types (String / SessionId / ModelApiConfig)   — no serde, no wire commitment
+        ↕ o2o + TryFrom (validation hand-written)
+RPC DTO — the boundary contract (FixedString<N> / WireU32 / repr enums)
+        ↙                       ↘                     ↘
+fixed-layout bytes          JSON (serde)          JSON Schema (schemars)
+typed RPC inside            dynamic call_json     agent discovery
+```
+
+The RPC DTO is the boundary contract between domain types and the wire. Each
+DTO field has an explicit wire type and capacity, the layout is explicit and
+padding-free, and the DTO is used directly as `RpcMethod::Request` /
+`RpcMethod::Response`. Three encodings are derived from one DTO: fixed-layout
+bytes via `zerocopy`, JSON via `serde`, and JSON Schema via `schemars`. No
+per-component JSON DTO, codec, or registration exists.
+
+Domain types never derive `serde` and do not commit to a wire shape. The
+conversion between domain types and DTOs lives outside this crate (adapter
+code with `o2o`/`TryFrom`).
+
+## Model
+
+`RpcMethod` declares an address, the `Request`/`Response`/`Error` message
+types, and the request/response cardinality markers (`Unary` or `Streaming`).
+Messages are `RpcMessage`s: fixed-layout Zerocopy types. Endpoints live in a
+task-local registry over fixed-capacity full-duplex lanes; the registry is
+shared with clients and does not require handlers or futures to be `Send`.
+
+The `RpcMethodDescriptor` is built at registration and retained with the
+endpoint: address, frame sizes, type IDs, and cardinality descriptors. It is
+the runtime record of the method's layout and the basis of link validation.
+
+## Call paths
+
+The client exposes one unified wire-level call; the typed and JSON entry
+points are wrappers over it. The layers, bottom to top:
+
+```text
+call::<M> / multicast<T, Mode>     ── zerocopy typed wrappers
+call_json                          ── JSON wrapper (serde at the boundary)
+                  │
+                  ▼
+call_payload / multicast_payload   ── the unified wire call
+                  │
+                  ▼
+fixed-layout frames on full-duplex lanes   ── the frame convention
+```
+
+### Frame convention
+
+Every RPC message is a fixed-layout frame on a full-duplex lane. The request
+direction is a stream of request frames, closed by the writer. The response
+direction is a stream of response frames, optionally terminated by one
+method-error frame; a terminal method error ends the response stream.
+Cardinality (`Unary`/`Streaming`) is declared by the method's `Input`/`Output`
+markers and governs how many frames the typed layer exchanges; the wire layer
+itself does not enforce it. The outer `RpcResult` reports transport/runtime
+failures; the inner typed `Result<Response, Error>` reports business outcomes
+carried by the method-error frame.
+
+### Wire call — the shared primitive
+
+`RpcClient::call_payload(address)` returns `(RpcPayloadWriter,
+RpcPayloadReader)`: asynchronous full-duplex frame IO over the lane. The
+caller writes request frames and reads response/method-error frames; frames
+remain borrowed from the lane until dropped. There is no compile-time
+signature or cardinality checking — each written frame must match the
+registered method's request wire layout.
+
+`RpcClient::multicast_payload(addresses)` is the same call fanned out: one
+shared request direction written by the caller, one independent
+`RpcMulticastBranch` per target for responses and errors.
+
+Both `call::<M>` and `call_json` are built on this primitive.
+
+### Typed wrapper — native Rust
+
+`RpcClient::call::<M>()` selects the method's input and output shape through
+`M`; callers do not choose between separate unary and streaming entry
+points. Request encoding and response decoding are zerocopy (`as_bytes` in,
+`RpcFrame<T>` views out). It returns a self-driving `RpcUnaryCall` (unary) or
+`RpcStream` (streaming) that advances request encoding, handler execution,
+and response decoding together.
+
+`RpcClient::multicast<T, Mode>()` encodes one typed request stream shared by
+every target; responses stay wire-level because multicast targets may
+declare different response/error/output contracts.
+
+### JSON wrapper
+
+`RpcClient::call_json(address, &Value)` transcodes at the call boundary only.
+The captured `JsonCodec` deserializes the JSON value into the method's
+`Request` struct and takes its byte image; those exact bytes go over the
+lane through `call_payload`, so the handler serves an ordinary typed frame
+identical to a typed call. The single response or method-error frame is then
+transcoded back to JSON. See the dynamic modality section for the envelope.
+
+A *Mapper RPC* is an `RpcMethod` whose `Request` is the previous RPC's
+`Response` and whose `Response` is the next RPC's `Request`; its handler
+converts between the two types. It participates as an ordinary typed RPC and
+links via `Link::Direct`.
+
+## Invariants
+
+- **Frames are the only thing that moves.** Every RPC message is a
+  fixed-layout Zerocopy type; JSON is a modality layered on top and never
+  travels over a lane.
+- **The type is the single source of truth.** `serde` defines semantics,
+  `zerocopy` defines bytes, and derives generate wire metadata. No
+  hand-written layout tables.
+- **One frame-flow model.** Frame flow between calls is defined by the
+  methods' cardinality modes, independent of whether a method is
+  "runtime-dynamic".
+- **Wire names equal JSON names.** A field's wire name is the JSON key
+  `serde_json` itself computes, enforced at compile time, so a Mapping link
+  and a `call_json` caller always agree on names.
+
+## Wire layer
+
+`#[derive(RpcWire)]` on a message struct emits a compile-time table mapping
+each field's **serde JSON name** to its byte region (`offset_of!` /
+`size_of!`). Names are computed with `serde_derive_internals` — the same code
+serde's own derives use — so `#[serde(rename)]` / `#[serde(rename_all)]` /
+`#[serde(skip)]` are honored automatically, and a field whose serialize and
+deserialize names differ is a compile error: the table can never disagree
+with the JSON surface. Structs only; `()` exposes an empty table.
+
+`WireSupport` bundles a method's request-write and response-read tables:
+
+- `read_response_field(frame, name)` — the field's full byte region as a
+  zero-copy borrow.
+- `write_request_field(frame, name, content)` — bounded copy;
+  `content.len() <= field size`; the remaining bytes of the region are left
+  untouched (no implicit zero-padding).
+- `request_field_size` / `response_field_size` — lookup for planning.
+
+The framework treats every region as opaque bytes; it never interprets a
+field's contents. Length prefixes, encodings, and endianness are the
+caller's responsibility. Because no padding is implied, a byte-copy link is
+sound exactly when the source and target regions have equal size.
+
+## Dynamic modality
+
+`#[rpc_dynamic]` marks an `impl RpcMethod` block as runtime-dynamic and
+bundles three capabilities into one `Dynamic` captured beside the endpoint at
+registration:
+
+1. `JsonCodec` — JSON ↔ fixed-layout frame transcoding (`call_json`).
+2. `WireSupport` — field-level wire access (mapping links).
+3. `schema` — the baked request JSON Schema, when the schema pipeline ran.
+
+`RpcMethod::dynamic() -> Option<Dynamic>` is the single accessor; wire
+support always comes with JSON support, so they are never configured
+separately.
+
+Being "dynamic" changes the modality (the method can be addressed by JSON
+field names); it does not define frame flow or cardinality. Every method's
+`Input`/`Output` modes are descriptor metadata regardless of `#[rpc_dynamic]`.
+
+### call_json
+
+`call_json` transcodes the JSON value into the method's request struct and
+moves the struct's byte image over the lane — the same fixed-layout bytes a
+typed call would send. Response and error frames are viewed in place and
+transcoded back to JSON. A runtime address cannot recover a Rust type, so
+the transcoder is captured while the concrete method type is still known and
+stored beside the endpoint; transcoding uses the two hardened derives
+(`serde` for values, `zerocopy` for bytes), not reflection over field
+offsets. Results use an envelope:
+
+```json
+{ "ok": true,  "value": { ... } }     // response frame
+{ "ok": false, "error": "Denied" }    // terminal method-error frame
+```
+
+A method with no `Dynamic` is rejected with `NotJsonCallable`; a request
+that fails serde validation reports `JsonRequestInvalid` with the message
+type and serde detail.
+
+## JSON Schema bake
+
+Schemas are generated on the host at build time, not at runtime: `schemars`
+constructs schemas at runtime (not const) and the firmware is `no_std`. The
+wire table is `const` from the derive, but schema generation is an algorithm
+that must run once, so it runs on the build machine and the result is
+embedded. The pipeline (`barracuda-rpc-schema`) runs from a `build.rs`:
+
+1. Each request type opts in with `register!(Type)` into an `inventory`
+   collection.
+2. `bake_all(OUT_DIR)` walks the collection and writes one `<Type>.json` per
+   registered DTO.
+3. `#[rpc_dynamic]` embeds the file with `include_str!` when the
+   `rpc_schema_baked` cfg is set.
+
+The bake uses LLM-friendly settings, because the schemas are for agents:
+inline subschemas (no `$ref`/`$defs`), nullable type arrays for `Option`, and
+no meta-`$schema`.
+
+## Links (workflow)
+
+Workflow steps call RPCs linearly, so each step's output feeds the next
+step's input. The link between two adjacent steps is implicit in the step
+JSON and never named in the document:
+
+| Step JSON | Link | Meaning |
+| --- | --- | --- |
+| no `arguments` | `Direct` | Previous response passes through byte-for-byte. |
+| `arguments`, no `$` | `Literal` | Request built solely from literal arguments. |
+| `arguments` with `$` | `Mapping` | Literal arguments plus wire-copied references. |
+
+A `Direct` edge is valid exactly when the previous `Response` is the
+identical fixed-layout type as the next `Request` (TypeId identity, checked
+at validation). Mapper RPCs are typed RPCs whose request/response bridge two
+types; they link via `Direct` and are not a separate link kind.
+
+A `Mapping` edge's arguments use the grammar `$previous.output.<field>`.
+The field is mandatory and a single top-level name; a bare `$previous.output`
+is rejected — whole-frame passthrough is `Link::Direct`, not a mapping
+reference — and nested paths are rejected. Building the next request is a
+two-pass pipeline:
+
+1. Referenced keys are stripped from the arguments, and the literals are
+   transcoded (serde → the next method's request bytes). The referenced
+   fields must therefore deserialize when absent — `#[serde(default)]` or
+   `Option` — a DTO contract for any request type that a workflow may call.
+2. For each reference, `read_response_field` on the previous response's
+   region and `write_request_field` into the next request's region,
+   wire-to-wire, zero-copy, until all references are processed.
+
+Field copying is byte-level over opaque regions; the workflow author owns
+the encoding contract of the types involved.
+
+Validation (`validate_links`) runs at execution setup — the closest point to
+load time that has a client — and aborts before any downstream RPC is
+invoked: `Direct` edges must be type-identical; `Mapping` edges must resolve
+every reference to an existing field on both sides; `Literal`/`Mapping`
+targets must be runtime-dynamic.
+
+Cardinality: only unary→unary, streaming→streaming, and unary→streaming
+links are valid; streaming→unary is rejected. `validate_links` checks both
+sides of every edge against `RpcMethodInfo::input_mode` /
+`RpcMethodInfo::output_mode`.
+
+## Status
+
+Implemented (working tree, uncommitted):
+
+- `RpcWire` derive with compile-time-enforced serde name sync; `WireSupport`
+  read/write and field sizes.
+- `#[rpc_dynamic]` → `Dynamic { json, wire, schema }`; single `dynamic()`
+  API.
+- `call_json` (serde → bytes → lane → serde back) with the
+  `{ ok, value | error }` envelope.
+- Schema bake pipeline (`rpc-schema`: `register!`, `bake_all`, LLM-friendly
+  settings).
+- `output_mode` in `RpcMethodDescriptor`; `RpcMethodInfo::input_mode` /
+  `output_mode` (`RpcCardinality`); link cardinality validation (only u→u,
+  s→s, u→s; streaming→unary rejected).
+- Link classification (`Direct`/`Literal`/`Mapping`), two-pass
+  `build_and_forward`, `validate_links` at execution setup.
+
+Agreed design, not yet implemented:
+
+- Load-time link validation as the primary gate, with execution-time
+  validation kept as a backstop.
+- Streaming support for `Mapping`/`Literal` edges (they are unary today).
+- Reserved reference grammar: `$previous.input`, `$previous.error`, and
+  absolute step selectors.

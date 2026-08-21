@@ -2,7 +2,8 @@
 #![allow(missing_docs)]
 
 use barracuda_rpc::{
-    rpc_json, RpcAddress, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcResult, Unary,
+    rpc_dynamic, RpcAddress, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcResult, RpcWire,
+    Unary,
 };
 use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,7 @@ fn registry<const N: usize, const M: usize, const Q: usize>() -> RpcRegistry<N, 
     KnownLayout,
     PartialEq,
     Eq,
+    RpcWire,
     TryFromBytes,
 )]
 struct SetLevelRequest {
@@ -55,7 +57,7 @@ enum SetLevelError {
 
 struct SetLevel;
 
-#[rpc_json]
+#[rpc_dynamic]
 impl RpcMethod for SetLevel {
     const ADDRESS: &'static str = "session.set_level";
     type Request = SetLevelRequest;

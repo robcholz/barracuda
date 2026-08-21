@@ -9,7 +9,7 @@
 //!
 //! A runtime address cannot recover a Rust type, so the transcoder is captured
 //! while the concrete method type is still known — at
-//! [`RpcMethod::json_codec`], which `#[rpc_json]` fills — and stored beside the
+//! [`RpcMethod::dynamic`], which `#[rpc_dynamic]` fills — and stored beside the
 //! endpoint. Transcoding reuses two hardened derives instead of reflecting field
 //! offsets: `serde` maps the value to and from the concrete struct, and
 //! `zerocopy` maps the struct to and from its wire bytes.
@@ -34,15 +34,15 @@ use super::{RpcError, RpcResult};
 /// Built by [`JsonCodec::of`] where the concrete method type is known, then
 /// stored beside the endpoint so [`RpcClient::call_json`](crate::RpcClient::call_json)
 /// can transcode with only a runtime address. Methods normally obtain one
-/// through `#[rpc_json]`, which overrides [`RpcMethod::json_codec`].
+/// through `#[rpc_dynamic]`, which fills [`RpcMethod::dynamic`].
 #[derive(Clone)]
 pub struct JsonCodec(Rc<dyn ErasedJsonCodec>);
 
 impl JsonCodec {
     /// Builds the transcoder for method `M`.
     ///
-    /// `#[rpc_json]` emits this call; write it by hand only to fill
-    /// [`RpcMethod::json_codec`] without the attribute.
+    /// `#[rpc_dynamic]` emits this call; write it by hand only to fill
+    /// [`RpcMethod::dynamic`] without the attribute.
     #[must_use]
     pub fn of<M>() -> Self
     where

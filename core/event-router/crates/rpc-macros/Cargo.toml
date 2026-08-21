@@ -12,6 +12,10 @@ proc-macro = true
 proc-macro-crate = "3"
 proc-macro2 = "1"
 quote = "1"
+# serde's own attribute parser, so RpcWire JSON names can never drift from
+# what `serde_json` produces. Internal API: pin exactly to the serde version
+# locked in this workspace (serde 1.0.228 -> serde_derive_internals 0.29.1).
+serde_derive_internals = "=0.29.1"
 syn = { version = "2", features = ["full"] }
 
 [lints.rust]

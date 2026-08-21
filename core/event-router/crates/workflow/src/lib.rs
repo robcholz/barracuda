@@ -10,13 +10,15 @@ mod control;
 mod definition;
 mod event;
 mod ingress;
+mod link;
 mod rule;
 mod runtime;
 
 pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
-    WorkflowUnloadError,
+    WorkflowStep, WorkflowUnloadError,
 };
+pub use link::LinkError;
 pub use event::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode,
 };

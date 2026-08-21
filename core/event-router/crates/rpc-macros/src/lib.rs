@@ -1,20 +1,23 @@
-//! Attribute macros for `barracuda-rpc`.
+//! Attribute and derive macros for `barracuda-rpc`.
 //!
-//! [`macro@rpc_json`] marks an `impl RpcMethod` block as reachable through
-//! `RpcClient::call_json` and, when a schema is baked, exposes it through
-//! `RpcMethod::schema`.
+//! [`macro@rpc_dynamic`] marks an `impl RpcMethod` block as runtime-dynamic —
+//! reachable through `RpcClient::call_json`, wire-patchable through its
+//! [`WireSupport`], and (when a schema is baked) described by
+//! `RpcMethod::dynamic`. [`macro@RpcWire`] derives the field→region table each
+//! message struct exposes for wire-level field access.
 
 use proc_macro::TokenStream;
 use proc_macro_crate::{crate_name, FoundCrate};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, parse_quote, ImplItem, LitStr, Type};
+use serde_derive_internals::{ast, Ctxt, Derive};
+use syn::{parse_macro_input, parse_quote, DeriveInput, ImplItem, LitStr, Type};
 
 /// Resolves the path to the RPC crate's public items as the caller sees them.
 ///
 /// End users depend only on `barracuda-event-router` (the facade, which
-/// re-exports `JsonCodec`); framework-internal crates depend on `barracuda-rpc`
-/// directly. Preferring the facade keeps the expansion working without a direct
-/// `barracuda-rpc` dependency.
+/// re-exports the RPC surface); framework-internal crates depend on
+/// `barracuda-rpc` directly. Preferring the facade keeps the expansion working
+/// without a direct `barracuda-rpc` dependency.
 fn rpc_crate() -> proc_macro2::TokenStream {
     for package in ["barracuda-event-router", "barracuda-rpc"] {
         match crate_name(package) {
@@ -32,64 +35,149 @@ fn rpc_crate() -> proc_macro2::TokenStream {
     quote!(::barracuda_rpc)
 }
 
-/// Makes a typed RPC method reachable through `RpcClient::call_json` and gives
-/// it a build-time schema.
+/// Makes a typed RPC method reachable through the runtime-dynamic surface.
 ///
 /// Apply it to an `impl RpcMethod for Method` block. It re-emits the block and
-/// appends two hook overrides:
+/// appends one hook override:
 ///
-/// - `json_codec` — returns `JsonCodec::of::<Self>()`, so `RpcRegistry::register`
-///   captures the transcoder. The `Request` must implement `Deserialize` and the
-///   `Response`/`Error` must implement `Serialize`.
-/// - `schema` — under the `rpc_schema_baked` cfg (set by a `build.rs` that runs
-///   `barracuda_rpc_schema::bake_all`), returns the request schema embedded from
-///   `$OUT_DIR/<Request>.json`; otherwise `None`.
+/// - `dynamic` — returns `Some(Dynamic::new(json, wire, schema))`:
+///   - `json` is `JsonCodec::of::<Self>()`, so `RpcClient::call_json` can
+///     transcode. The `Request` must implement `Deserialize` and the
+///     `Response`/`Error` must implement `Serialize`.
+///   - `wire` is `WireSupport::of::<Self>()`, so links can read and write
+///     individual fields. Both `Request` and `Response` must implement
+///     [`macro@RpcWire`] (`()` already does).
+///   - `schema` — under the `rpc_schema_baked` cfg (set by a `build.rs` that
+///     runs `barracuda_rpc_schema::bake_all`), the request schema embedded from
+///     `$OUT_DIR/<Request>.json`; otherwise `None`.
 ///
 /// The expansion resolves the RPC crate through `barracuda-event-router` (the
 /// facade) when present, falling back to `barracuda-rpc`, so an end-user crate
 /// that depends only on the facade does not need a direct `barracuda-rpc`
 /// dependency.
 #[proc_macro_attribute]
-pub fn rpc_json(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn rpc_dynamic(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as syn::ItemImpl);
     let rpc = rpc_crate();
 
-    let json_codec: ImplItem = parse_quote! {
-        fn json_codec() -> ::core::option::Option<#rpc::JsonCodec> {
-            ::core::option::Option::Some(#rpc::JsonCodec::of::<Self>())
-        }
-    };
-    input.items.push(json_codec);
-
-    match request_type_name(&input) {
-        Some(name) => {
-            let file = LitStr::new(&format!("{name}.json"), proc_macro2::Span::call_site());
-            let schema: ImplItem = parse_quote! {
-                #[allow(unexpected_cfgs)]
-                fn schema() -> ::core::option::Option<&'static str> {
-                    #[cfg(rpc_schema_baked)]
-                    const SCHEMA: ::core::option::Option<&'static str> =
-                        ::core::option::Option::Some(::core::include_str!(::core::concat!(
-                            ::core::env!("OUT_DIR"),
-                            "/",
-                            #file
-                        )));
-                    #[cfg(not(rpc_schema_baked))]
-                    const SCHEMA: ::core::option::Option<&'static str> =
-                        ::core::option::Option::None;
-                    SCHEMA
-                }
-            };
-            input.items.push(schema);
-            quote!(#input).into()
-        }
-        None => syn::Error::new_spanned(
+    let Some(name) = request_type_name(&input) else {
+        return syn::Error::new_spanned(
             &input,
-            "#[rpc_json] requires an `impl RpcMethod` block with a `type Request = ...;` item",
+            "#[rpc_dynamic] requires an `impl RpcMethod` block with a `type Request = ...;` item",
         )
         .to_compile_error()
-        .into(),
+        .into();
+    };
+
+    let file = LitStr::new(&format!("{name}.json"), proc_macro2::Span::call_site());
+    let dynamic: ImplItem = parse_quote! {
+        #[allow(unexpected_cfgs)]
+        fn dynamic() -> ::core::option::Option<#rpc::Dynamic> {
+            #[cfg(rpc_schema_baked)]
+            const SCHEMA: ::core::option::Option<&'static str> =
+                ::core::option::Option::Some(::core::include_str!(::core::concat!(
+                    ::core::env!("OUT_DIR"),
+                    "/",
+                    #file
+                )));
+            #[cfg(not(rpc_schema_baked))]
+            const SCHEMA: ::core::option::Option<&'static str> =
+                ::core::option::Option::None;
+            ::core::option::Option::Some(#rpc::Dynamic::new(
+                #rpc::JsonCodec::of::<Self>(),
+                #rpc::WireSupport::of::<Self>(),
+                SCHEMA,
+            ))
+        }
+    };
+    input.items.push(dynamic);
+    quote!(#input).into()
+}
+
+/// Derives [`RpcWire`], the per-field byte-region table for a message struct.
+///
+/// The derive walks the struct's named fields and emits a `const FIELDS` slice
+/// mapping each field's JSON name to its `(offset, size)` byte region. Field
+/// names honor `#[serde(rename = "...")]` and the container's
+/// `#[serde(rename_all = "...")]`, so a link resolving `$previous.output.<name>`
+/// matches the JSON name the codec produces. Offsets come from
+/// [`core::mem::offset_of!`] and sizes from [`core::mem::size_of`]; both are
+/// `const`, so field lookup carries no per-call layout cost.
+///
+/// Only `struct`s with named fields are supported. `()` has a provided
+/// implementation with no fields. Each field's wire name is the JSON name
+/// `serde_json` itself computes; a field whose serialize and deserialize names
+/// differ (split `#[serde(rename(serialize = ..., deserialize = ...))]`) is
+/// rejected, so the table can never disagree with the JSON surface.
+#[proc_macro_derive(RpcWire)]
+pub fn derive_rpc_wire(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+    let rpc = rpc_crate();
+    let name = &input.ident;
+    let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
+
+    // Parse serde attributes with serde's own internals so JSON names are
+    // computed by the same code `serde_json` uses — no hand-rolled rename
+    // logic that could drift from serde's behavior.
+    let cx = Ctxt::new();
+    let Some(container) = ast::Container::from_ast(&cx, &input, Derive::Serialize) else {
+        return syn::Error::new_spanned(&input, "#[derive(RpcWire)] supports only structs")
+            .to_compile_error()
+            .into();
+    };
+    if let Err(error) = cx.check() {
+        return error.to_compile_error().into();
     }
+    let ast::Data::Struct(style, fields) = &container.data else {
+        return syn::Error::new_spanned(&input, "#[derive(RpcWire)] supports only structs")
+            .to_compile_error()
+            .into();
+    };
+    if !matches!(style, ast::Style::Struct) {
+        return syn::Error::new_spanned(
+            &input,
+            "#[derive(RpcWire)] requires a struct with named fields",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    let mut entries = Vec::new();
+    for field in fields {
+        // Fields serde cannot address through JSON are not addressable by a
+        // Mapping link either.
+        if field.attrs.skip_serializing() || field.attrs.skip_deserializing() {
+            continue;
+        }
+        let syn::Member::Named(ident) = &field.member else {
+            continue;
+        };
+        let ty = field.ty;
+        let serialize_name = field.attrs.name().serialize_name();
+        if serialize_name != field.attrs.name().deserialize_name() {
+            return syn::Error::new_spanned(
+                field.original,
+                "RpcWire requires a field's serialize and deserialize JSON names to match",
+            )
+            .to_compile_error()
+            .into();
+        }
+        let json_name = LitStr::new(serialize_name, ident.span());
+        entries.push(quote! {
+            #rpc::WireField::new(
+                #json_name,
+                ::core::mem::offset_of!(Self, #ident),
+                ::core::mem::size_of::<#ty>(),
+            )
+        });
+    }
+
+    quote! {
+        impl #impl_generics #rpc::RpcWire for #name #ty_generics #where_clause {
+            const FIELDS: &'static [#rpc::WireField] = &[#(#entries),*];
+        }
+    }
+    .into()
 }
 
 /// Extracts the final path segment of the `type Request = ...;` associated type.
