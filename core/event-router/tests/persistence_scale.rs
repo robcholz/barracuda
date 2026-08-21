@@ -10,10 +10,22 @@ use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EventRouter, FileSystem, MemFs, RegisterContext,
-    RpcLaneStorage, RunContext, UnregisterContext, WorkflowClient, WorkflowControlError,
+    RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
+    WorkflowControlError,
 };
 
 const FRAME_CAPACITY: usize = 64;
+
+struct Sink;
+
+impl RpcMethod for Sink {
+    const ADDRESS: &'static str = "scale.sink";
+    type Request = [u8; 8];
+    type Response = [u8; 8];
+    type Error = ();
+    type Input = Unary;
+    type Output = Unary;
+}
 
 #[derive(Default)]
 struct LoadState {
@@ -30,9 +42,14 @@ struct CatalogLoader {
 impl Component<FRAME_CAPACITY> for CatalogLoader {
     fn register(
         &mut self,
-        _context: &mut RegisterContext<'_, FRAME_CAPACITY>,
+        context: &mut RegisterContext<'_, FRAME_CAPACITY>,
     ) -> ComponentResult<()> {
-        Ok(())
+        // Stub endpoint so load-time link validation can resolve the steps
+        // the catalog persists. Response mirrors Request so chained Direct
+        // links of the same method stay type-identical.
+        context.register_rpc::<Sink, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
+            Ok(Ok(*request.view()?))
+        })
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_CAPACITY>) -> ComponentFuture<'a> {

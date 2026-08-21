@@ -1,8 +1,9 @@
 # RPC Design
 
-This document covers the `barracuda-rpc` crate: the call model, the wire
-layer, the dynamic modality, JSON calls, and the schema bake. It is written
-for maintainers; callers should read the Event Router usage guide.
+This document covers the `barracuda-rpc` crate: the call model and nested
+calls, the registry lifecycle, the wire layer, the dynamic modality, JSON
+calls, and the schema bake. It is written for maintainers; callers should
+read the Event Router usage guide.
 
 ## Architecture
 
@@ -42,6 +43,20 @@ The `RpcMethodDescriptor` is built at registration and retained with the
 endpoint: address, frame sizes, type IDs, and the input/output cardinality
 types. It is the runtime record of the method's layout and the basis of
 signature and cardinality queries.
+
+## Call context
+
+Every invocation carries an `RpcContext` into its handler: a call ID, the
+root call ID shared by the whole nested chain, the immediate parent call ID,
+the caller endpoint (when the call is nested), and a client bound to the
+current endpoint. Handlers use that client to start nested calls, and the
+lineage identifies where each call sits in the chain.
+
+Lane acquisition distinguishes root from nested calls. A root call waits
+until the required lanes are free; a nested call fails with
+`NestedLaneExhausted` instead of waiting, so a handler that holds every lane
+cannot deadlock on its own child call. A handler calling itself directly is
+rejected (`DirectSelfCall`).
 
 ## Call paths
 
@@ -99,8 +114,10 @@ points. Request encoding and response decoding are zerocopy (`as_bytes` in,
 and response decoding together.
 
 `RpcClient::multicast<T, Mode>()` encodes one typed request stream shared by
-every target; responses stay wire-level because multicast targets may
-declare different response/error/output contracts.
+every target; every target must register the same request type and request
+cardinality (`MulticastInputMismatch` otherwise). Responses stay wire-level
+because multicast targets may declare different response/error/output
+contracts.
 
 ### JSON wrapper
 
@@ -110,6 +127,21 @@ The captured `JsonCodec` deserializes the JSON value into the method's
 lane through `call_payload`, so the handler serves an ordinary typed frame
 identical to a typed call. The single response or method-error frame is then
 transcoded back to JSON. See the dynamic modality section for the envelope.
+
+## Registry and endpoint lifecycle
+
+Endpoints are registered through the object-safe `RpcRegistryApi`, which keeps
+the frame capacity `M` on the trait so typed registration retains its
+compile-time checks. Registration returns an `RpcRegistration` token that
+owns the address: `unregister` removes the endpoint; `revoke` also prevents
+in-flight prepared calls from polling the handler, which reports
+`EndpointRevoked`. Using a token that no longer owns the address is rejected
+(`StaleRegistration`).
+
+Registration enforces the lane contract at compile time: the fixed request,
+response, and error messages must fit the lane frame capacity and align with
+the lane frames. The registry exposes sorted snapshots of groups and
+addresses (`groups`, `rpcs`) for discovery.
 
 ## Invariants
 

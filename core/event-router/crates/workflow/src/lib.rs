@@ -23,7 +23,9 @@ pub use event::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode,
 };
 pub use rule::{Rule, RuleError};
-pub use runtime::{WorkflowExecutionError, WorkflowFailure, WorkflowInfo};
+pub use runtime::{
+    validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo,
+};
 
 /// Runtime integration surface used by Event Router's Component adapter.
 pub mod integration {

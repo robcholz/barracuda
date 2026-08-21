@@ -20,7 +20,8 @@ use getset::Getters;
 use serde_json::Value;
 
 use super::{
-    EventId, WorkflowDefinition, WorkflowId, WorkflowLoadError, WorkflowStep, WorkflowUnloadError,
+    EventId, WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
+    WorkflowStep, WorkflowUnloadError,
 };
 
 type WorkflowDriver = Pin<Box<dyn Future<Output = Result<(), WorkflowExecutionError>> + 'static>>;
@@ -444,41 +445,36 @@ impl WorkflowExecution {
             let (writer, reader) = client.call_payload(step.address())?;
             // Grammar was validated at load time; an error here is unexpected.
             let kind = classify(step.arguments()).map_err(|_error| RpcError::InvalidFrameState)?;
-            let driver: WorkflowDriver = match kind {
-                LinkKind::Direct => {
-                    Box::pin(forward_responses(source, writer, source_step, destination_step))
-                }
-                LinkKind::Literal { arguments } => Box::pin(build_and_forward(
-                    source,
-                    writer,
-                    MapStep {
-                        prev_info: prev_info.clone(),
-                        this_info: this_info.clone(),
+            let transform = match kind {
+                LinkKind::Direct => LinkTransform::Direct,
+                LinkKind::Literal { arguments } => LinkTransform::Literal(Box::new(
+                    LiteralTransform {
+                        info: this_info.clone(),
                         address: step.address().clone(),
                         arguments,
-                        references: Vec::new(),
-                        source_step,
                         destination_step,
                     },
                 )),
                 LinkKind::Mapping {
                     arguments,
                     references,
-                } => Box::pin(build_and_forward(
-                    source,
-                    writer,
-                    MapStep {
-                        prev_info: prev_info.clone(),
-                        this_info: this_info.clone(),
-                        address: step.address().clone(),
-                        arguments,
-                        references,
-                        source_step,
-                        destination_step,
-                    },
-                )),
+                } => LinkTransform::Mapping(Box::new(MappingTransform {
+                    prev_info: prev_info.clone(),
+                    this_info: this_info.clone(),
+                    address: step.address().clone(),
+                    arguments,
+                    references,
+                    source_step,
+                    destination_step,
+                })),
             };
-            drivers.push_back(driver);
+            drivers.push_back(Box::pin(drive(
+                source,
+                writer,
+                source_step,
+                destination_step,
+                transform,
+            )));
             source = reader;
             source_step = destination_step;
             prev_info = this_info;
@@ -514,66 +510,154 @@ impl WorkflowExecution {
     }
 }
 
-async fn forward_responses(
+/// The per-frame request transform of one link — the link kind.
+///
+/// Frame flow is the driver's concern; a transform only produces the request
+/// bytes for one response frame. `Direct` is a byte-for-byte passthrough,
+/// `Literal` a constant request from the arguments, and `Mapping` literal
+/// arguments plus wire-copied reference fields.
+enum LinkTransform {
+    /// Byte-for-byte passthrough of the response frame.
+    Direct,
+    /// Constant request built solely from the literal arguments.
+    Literal(Box<LiteralTransform>),
+    /// Literal arguments plus wire-copied reference fields.
+    Mapping(Box<MappingTransform>),
+}
+
+/// Everything a literal transform needs to assemble its constant request.
+struct LiteralTransform {
+    /// Destination method projection.
+    info: RpcMethodInfo,
+    /// Destination address.
+    address: RpcAddress,
+    /// Literal arguments object.
+    arguments: Value,
+    /// Destination step index.
+    destination_step: usize,
+}
+
+/// Everything a mapping transform needs to assemble one request.
+struct MappingTransform {
+    /// Source method projection.
+    prev_info: RpcMethodInfo,
+    /// Destination method projection.
+    this_info: RpcMethodInfo,
+    /// Destination address.
+    address: RpcAddress,
+    /// Literal arguments object (references removed).
+    arguments: Value,
+    /// Fields copied out of the source response.
+    references: Vec<FieldRef>,
+    /// Source step index.
+    source_step: usize,
+    /// Destination step index.
+    destination_step: usize,
+}
+
+impl LinkTransform {
+    /// Produces this step's request bytes for one source response frame.
+    fn apply(&mut self, frame: &[u8], request: &mut [u8]) -> Result<usize, WorkflowExecutionError> {
+        match self {
+            LinkTransform::Direct => {
+                let size = frame.len();
+                request
+                    .get_mut(..size)
+                    .ok_or_else(|| step_error(0, RpcError::InvalidFrameState))?
+                    .copy_from_slice(frame);
+                Ok(size)
+            }
+            LinkTransform::Literal(step) => {
+                let encoded = step
+                    .info
+                    .encode_request(&step.address, &step.arguments)
+                    .map_err(|source| step_error(step.destination_step, source))?;
+                copy_request(request, &encoded)
+            }
+            LinkTransform::Mapping(step) => {
+                let mut encoded = step
+                    .this_info
+                    .encode_request(&step.address, &step.arguments)
+                    .map_err(|source| step_error(step.destination_step, source))?;
+                for field in &step.references {
+                    let source_wire = step.prev_info.wire().ok_or_else(|| {
+                        step_error(step.source_step, RpcError::NotJsonCallable(step.address.clone()))
+                    })?;
+                    let dest_wire = step.this_info.wire().ok_or_else(|| {
+                        step_error(
+                            step.destination_step,
+                            RpcError::NotJsonCallable(step.address.clone()),
+                        )
+                    })?;
+                    let value = source_wire
+                        .read_response_field(frame, &field.source_field)
+                        .map_err(|source| step_error(step.source_step, source))?;
+                    dest_wire
+                        .write_request_field(&mut encoded, &field.dest_field, value)
+                        .map_err(|source| step_error(step.destination_step, source))?;
+                }
+                copy_request(request, &encoded)
+            }
+        }
+    }
+}
+
+fn copy_request(request: &mut [u8], encoded: &[u8]) -> Result<usize, WorkflowExecutionError> {
+    let size = encoded.len();
+    request
+        .get_mut(..size)
+        .ok_or_else(|| step_error(0, RpcError::InvalidFrameState))?
+        .copy_from_slice(encoded);
+    Ok(size)
+}
+
+fn step_error(step: usize, source: RpcError) -> WorkflowExecutionError {
+    WorkflowExecutionError::Rpc { step, source }
+}
+
+/// Drives one link between two steps.
+///
+/// Frame flow is this layer's concern: every response frame of the source
+/// step is read, transformed by the link kind, and written to the destination
+/// step; source EOF closes the destination. Unary and streaming sources flow
+/// through the same loop — cardinality rules are enforced by link validation,
+/// not here.
+async fn drive(
     mut source: RpcPayloadReader,
     mut destination: RpcPayloadWriter,
     source_step: usize,
     destination_step: usize,
+    mut transform: LinkTransform,
 ) -> Result<(), WorkflowExecutionError> {
     while let Some(outcome) = source
         .read()
         .await
-        .map_err(|source| WorkflowExecutionError::Rpc {
-            step: source_step,
-            source,
-        })?
+        .map_err(|source| step_error(source_step, source))?
     {
         let frame = outcome
             .map_err(|_method_error| WorkflowExecutionError::Method { step: source_step })?;
-        let response_size = frame.as_ref().len();
-        let mut request =
-            destination
-                .reserve()
-                .await
-                .map_err(|source| WorkflowExecutionError::Rpc {
-                    step: destination_step,
-                    source,
-                })?;
-        let request_size = request.as_mut().len();
-        if request_size != response_size {
+        let mut reservation = destination
+            .reserve()
+            .await
+            .map_err(|source| step_error(destination_step, source))?;
+        let request_size = transform.apply(frame.as_ref(), reservation.as_mut())?;
+        drop(frame);
+        if request_size != reservation.as_mut().len() {
             return Err(WorkflowExecutionError::InputFrameSizeMismatch {
                 from_step: source_step,
                 to_step: destination_step,
-                response_size,
-                request_size,
+                response_size: request_size,
+                request_size: reservation.as_mut().len(),
             });
         }
-        request.as_mut().copy_from_slice(frame.as_ref());
-        request
-            .commit(response_size)
-            .map_err(|source| WorkflowExecutionError::Rpc {
-                step: destination_step,
-                source,
-            })?;
+        reservation
+            .commit(request_size)
+            .map_err(|source| step_error(destination_step, source))?;
     }
     destination
         .close()
         .await
-        .map_err(|source| WorkflowExecutionError::Rpc {
-            step: destination_step,
-            source,
-        })
-}
-
-/// Everything one mapping or literal step needs to assemble its request.
-struct MapStep {
-    prev_info: RpcMethodInfo,
-    this_info: RpcMethodInfo,
-    address: RpcAddress,
-    arguments: Value,
-    references: Vec<FieldRef>,
-    source_step: usize,
-    destination_step: usize,
+        .map_err(|source| step_error(destination_step, source))
 }
 
 /// Validates every step link against the resolved method projections.
@@ -606,16 +690,20 @@ fn validate_links(
         }
         match kind {
             LinkKind::Direct => {
-                if !prev.links_to(this) {
+                if prev.descriptor().response_type_id() != this.descriptor().request_type_id() {
                     return Err(WorkflowExecutionError::LinkTypeMismatch { from_step, to_step });
                 }
             }
-            LinkKind::Literal { .. } => {
+            LinkKind::Literal { arguments } => {
                 if this.wire().is_none() {
                     return Err(not_dynamic(to_step, step.address().clone()));
                 }
+                validate_arguments(this, step, to_step, &arguments)?;
             }
-            LinkKind::Mapping { references, .. } => {
+            LinkKind::Mapping {
+                arguments,
+                references,
+            } => {
                 let prev_wire = prev
                     .wire()
                     .ok_or_else(|| not_dynamic(from_step, prev_step.address().clone()))?;
@@ -640,10 +728,57 @@ fn validate_links(
                         });
                     }
                 }
+                validate_arguments(this, step, to_step, &arguments)?;
             }
         }
     }
     Ok(())
+}
+
+/// Dry-runs the literal arguments through the destination's JSON codec so a
+/// request that cannot be assembled is rejected before any IO.
+fn validate_arguments(
+    this: &RpcMethodInfo,
+    step: &WorkflowStep,
+    to_step: usize,
+    arguments: &Value,
+) -> Result<(), WorkflowExecutionError> {
+    this.encode_request(step.address(), arguments)
+        .map_err(|source| WorkflowExecutionError::Rpc {
+            step: to_step,
+            source,
+        })?;
+    Ok(())
+}
+
+/// Validates every step link of `definition` against the methods currently
+/// registered with `client`.
+///
+/// This is the primary gate for `workflow.load`: addresses must resolve,
+/// Direct edges must be type-identical, Mapping/Literal targets must be
+/// runtime-dynamic, references must resolve with the source no larger than
+/// the destination, cardinality combos must be valid, and the literal
+/// arguments must transcode into the request. It shares its rule set with
+/// the per-execution validation, which remains as a backstop for startup
+/// restore and dynamic registry changes.
+///
+/// # Errors
+///
+/// Returns [`WorkflowControlRejection::UnknownMethod`] when a step addresses
+/// an unregistered method, or [`WorkflowControlRejection::InvalidLink`] when
+/// any link rule is violated.
+pub fn validate_definition(
+    client: &RpcClient,
+    definition: &WorkflowDefinition,
+) -> Result<(), WorkflowControlRejection> {
+    let mut infos = Vec::with_capacity(definition.steps().len());
+    for step in definition.steps() {
+        let info = client
+            .method_info(step.address())
+            .map_err(|_error| WorkflowControlRejection::UnknownMethod)?;
+        infos.push(info);
+    }
+    validate_links(definition.steps(), &infos).map_err(|_error| WorkflowControlRejection::InvalidLink)
 }
 
 fn internal_error(step: usize) -> WorkflowExecutionError {
@@ -675,78 +810,6 @@ async fn report_link_error(
 ) -> Result<(), WorkflowExecutionError> {
     while let Ok(Some(_outcome)) = source.read().await {}
     Err(error)
-}
-
-/// Builds one request from literal arguments plus wire-copied reference fields.
-///
-/// A mapping or literal edge is unary: it consumes exactly one previous
-/// response, transcodes the literal arguments into the fixed request bytes,
-/// patches each `$previous.output.<field>` reference wire-to-wire, and delivers
-/// the single assembled request.
-async fn build_and_forward(
-    mut source: RpcPayloadReader,
-    mut destination: RpcPayloadWriter,
-    step: MapStep,
-) -> Result<(), WorkflowExecutionError> {
-    let source_step = step.source_step;
-    let destination_step = step.destination_step;
-    let source_rpc = |source: RpcError| WorkflowExecutionError::Rpc {
-        step: source_step,
-        source,
-    };
-    let destination_rpc = |source: RpcError| WorkflowExecutionError::Rpc {
-        step: destination_step,
-        source,
-    };
-
-    // Consume the single previous response frame that feeds this step.
-    let Some(outcome) = source.read().await.map_err(source_rpc)? else {
-        return Err(WorkflowExecutionError::MissingResponse { step: source_step });
-    };
-    let frame = outcome.map_err(|_method_error| WorkflowExecutionError::Method { step: source_step })?;
-
-    // Base request from the literal arguments, then patch referenced fields.
-    let mut request = step
-        .this_info
-        .encode_request(&step.address, &step.arguments)
-        .map_err(destination_rpc)?;
-    for field in &step.references {
-        let source_wire = step
-            .prev_info
-            .wire()
-            .ok_or_else(|| source_rpc(RpcError::NotJsonCallable(step.address.clone())))?;
-        let dest_wire = step
-            .this_info
-            .wire()
-            .ok_or_else(|| destination_rpc(RpcError::NotJsonCallable(step.address.clone())))?;
-        let value = source_wire
-            .read_response_field(frame.as_ref(), &field.source_field)
-            .map_err(source_rpc)?;
-        dest_wire
-            .write_request_field(&mut request, &field.dest_field, value)
-            .map_err(destination_rpc)?;
-    }
-    drop(frame);
-
-    // Deliver the assembled request as this step's single request frame.
-    let mut reservation = destination.reserve().await.map_err(destination_rpc)?;
-    let request_size = reservation.as_mut().len();
-    if request_size != request.len() {
-        return Err(WorkflowExecutionError::InputFrameSizeMismatch {
-            from_step: source_step,
-            to_step: destination_step,
-            response_size: request.len(),
-            request_size,
-        });
-    }
-    reservation.as_mut().copy_from_slice(&request);
-    reservation.commit(request.len()).map_err(destination_rpc)?;
-
-    // A unary previous response has no further frames; drain defensively.
-    while let Some(extra) = source.read().await.map_err(source_rpc)? {
-        extra.map_err(|_method_error| WorkflowExecutionError::Method { step: source_step })?;
-    }
-    destination.close().await.map_err(destination_rpc)
 }
 
 async fn drain_final_response(
@@ -1371,6 +1434,7 @@ mod link_tests {
     use alloc::boxed::Box;
     use alloc::rc::Rc;
     use alloc::vec;
+    use alloc::vec::Vec;
     use core::cell::RefCell;
     use core::future::{poll_fn, Future};
     use core::pin::Pin;
@@ -1388,8 +1452,8 @@ mod link_tests {
 
     use super::{InternalEmit, WorkflowRuntime};
     use crate::{
-        Event, EventEmitter, Rule, WorkflowDefinition, WorkflowExecutionError, WorkflowId,
-        WorkflowStep,
+        validate_definition, Event, EventEmitter, Rule, WorkflowControlRejection, WorkflowDefinition,
+        WorkflowExecutionError, WorkflowId, WorkflowStep,
     };
 
     #[repr(C)]
@@ -1495,6 +1559,7 @@ mod link_tests {
     // identity but must be rejected on cardinality (streaming → unary).
     struct StreamSource;
 
+    #[rpc_dynamic]
     impl RpcMethod for StreamSource {
         const ADDRESS: &'static str = "linktest.stream-source";
         type Request = Seed;
@@ -1512,6 +1577,19 @@ mod link_tests {
         type Response = ();
         type Error = ();
         type Input = Unary;
+        type Output = Unary;
+    }
+
+    // Streaming-input consumer of mapping requests.
+    struct ConsumeStream;
+
+    #[rpc_dynamic]
+    impl RpcMethod for ConsumeStream {
+        const ADDRESS: &'static str = "linktest.consume-stream";
+        type Request = Deliver;
+        type Response = ();
+        type Error = ();
+        type Input = Streaming;
         type Output = Unary;
     }
 
@@ -1677,6 +1755,220 @@ mod link_tests {
     }
 
     #[test]
+    fn validate_definition_rejects_unresolvable_and_invalid_links_at_load_time() {
+        const FRAME_SIZE: usize = 256;
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        registry
+            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+                let seed = *request.view()?;
+                Ok(Ok(Reply { token: seed.n }))
+            })
+            .expect("register produce");
+        registry
+            .register::<Consume, _>(|_context, _request: RpcFrame<Deliver>| async move {
+                Ok(Ok(()))
+            })
+            .expect("register consume");
+        registry
+            .register::<ConsumeSeed, _>(|_context, _request: RpcFrame<Seed>| async move {
+                Ok(Ok(()))
+            })
+            .expect("register consume-seed");
+        let client = registry.client();
+
+        let valid = WorkflowDefinition::new(
+            WorkflowId::try_from("valid").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(Produce::ADDRESS), None),
+                WorkflowStep::new(
+                    address(Consume::ADDRESS),
+                    Some(json!({ "extra": 5, "token": "$previous.output.token" })),
+                ),
+            ],
+        )
+        .expect("valid Workflow");
+        validate_definition(&client, &valid).expect("valid links pass");
+
+        let unknown = WorkflowDefinition::new(
+            WorkflowId::try_from("unknown").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(Produce::ADDRESS), None),
+                WorkflowStep::new(address("linktest.missing"), None),
+            ],
+        )
+        .expect("valid Workflow");
+        assert_eq!(
+            validate_definition(&client, &unknown),
+            Err(WorkflowControlRejection::UnknownMethod)
+        );
+
+        let mismatched = WorkflowDefinition::new(
+            WorkflowId::try_from("mismatched").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(Produce::ADDRESS), None),
+                WorkflowStep::new(address(ConsumeSeed::ADDRESS), None),
+            ],
+        )
+        .expect("valid Workflow");
+        assert_eq!(
+            validate_definition(&client, &mismatched),
+            Err(WorkflowControlRejection::InvalidLink)
+        );
+
+        let bad_arguments = WorkflowDefinition::new(
+            WorkflowId::try_from("bad-arguments").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(Produce::ADDRESS), None),
+                WorkflowStep::new(
+                    address(Consume::ADDRESS),
+                    Some(json!({ "extra": "not-a-number" })),
+                ),
+            ],
+        )
+        .expect("valid Workflow");
+        assert_eq!(
+            validate_definition(&client, &bad_arguments),
+            Err(WorkflowControlRejection::InvalidLink)
+        );
+    }
+
+    #[test]
+    fn mapping_link_streams_each_response_frame_through_the_transform() {
+        const FRAME_SIZE: usize = 256;
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let collected = Rc::new(RefCell::new(Vec::new()));
+
+        registry
+            .register::<StreamSource, _>(|_context, request: RpcFrame<Seed>| async move {
+                let seed = *request.view()?;
+                Ok(RpcStream::new(stream::iter([
+                    Ok(Ok(Reply { token: seed.n })),
+                    Ok(Ok(Reply { token: seed.n.saturating_add(1) })),
+                ])))
+            })
+            .expect("register stream source");
+        let handler_collected = Rc::clone(&collected);
+        registry
+            .register::<ConsumeStream, _>(
+                move |_context, mut requests: RpcStream<RpcFrame<Deliver>>| {
+                    let collected = Rc::clone(&handler_collected);
+                    async move {
+                        while let Some(request) = requests.next().await {
+                            collected.borrow_mut().push(*request?.view()?);
+                        }
+                        Ok(Ok(()))
+                    }
+                },
+            )
+            .expect("register consume stream");
+
+        let mut runtime = WorkflowRuntime::new();
+        let definition = WorkflowDefinition::new(
+            WorkflowId::try_from("mapping-stream").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(StreamSource::ADDRESS), None),
+                WorkflowStep::new(
+                    address(ConsumeStream::ADDRESS),
+                    Some(json!({ "extra": 5, "token": "$previous.output.token" })),
+                ),
+            ],
+        )
+        .expect("valid mapping Workflow");
+        runtime.control().load(definition).expect("load Workflow");
+        registry
+            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .expect("register ingress");
+        runtime.start(registry.client());
+
+        let collected_probe = Rc::clone(&collected);
+        drive_until_settled(&mut runtime, &registry, Seed { n: 41 }, move || {
+            collected_probe.borrow().len() == 2
+        });
+
+        assert_eq!(
+            collected.take().as_slice(),
+            &[
+                Deliver { token: 41, extra: 5 },
+                Deliver { token: 42, extra: 5 },
+            ]
+        );
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 1);
+        assert_eq!(info.failed_count, 0);
+    }
+
+    #[test]
+    fn mapping_link_feeds_a_unary_response_into_a_streaming_request() {
+        const FRAME_SIZE: usize = 256;
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let collected = Rc::new(RefCell::new(Vec::new()));
+
+        registry
+            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+                let seed = *request.view()?;
+                Ok(Ok(Reply { token: seed.n }))
+            })
+            .expect("register produce");
+        let handler_collected = Rc::clone(&collected);
+        registry
+            .register::<ConsumeStream, _>(
+                move |_context, mut requests: RpcStream<RpcFrame<Deliver>>| {
+                    let collected = Rc::clone(&handler_collected);
+                    async move {
+                        while let Some(request) = requests.next().await {
+                            collected.borrow_mut().push(*request?.view()?);
+                        }
+                        Ok(Ok(()))
+                    }
+                },
+            )
+            .expect("register consume stream");
+
+        let mut runtime = WorkflowRuntime::new();
+        let definition = WorkflowDefinition::new(
+            WorkflowId::try_from("mapping-u-to-s").expect("valid Workflow ID"),
+            Rule::try_from(SeedEvent::ID).expect("valid rule"),
+            vec![
+                WorkflowStep::new(address(Produce::ADDRESS), None),
+                WorkflowStep::new(
+                    address(ConsumeStream::ADDRESS),
+                    Some(json!({ "extra": 7, "token": "$previous.output.token" })),
+                ),
+            ],
+        )
+        .expect("valid mapping Workflow");
+        runtime.control().load(definition).expect("load Workflow");
+        registry
+            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .expect("register ingress");
+        runtime.start(registry.client());
+
+        let collected_probe = Rc::clone(&collected);
+        drive_until_settled(&mut runtime, &registry, Seed { n: 9 }, move || {
+            collected_probe.borrow().len() == 1
+        });
+
+        assert_eq!(
+            collected.take().as_slice(),
+            &[Deliver { token: 9, extra: 7 }]
+        );
+        let info = runtime.view().info();
+        assert_eq!(info.completed_count, 1);
+        assert_eq!(info.failed_count, 0);
+    }
+
+    #[test]
     fn streaming_response_into_unary_request_is_rejected_before_io() {
         const FRAME_SIZE: usize = 256;
 
@@ -1740,4 +2032,3 @@ mod link_tests {
         ));
     }
 }
-

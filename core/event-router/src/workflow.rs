@@ -11,11 +11,12 @@ use barracuda_fs::{FileSystem, FsError};
 use barracuda_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
+use barracuda_rpc::RpcContext;
 use barracuda_workflow::integration::{
     InternalEmit, WorkflowJsonRequest, WorkflowLoad, WorkflowRuntime, WorkflowRuntimeControl,
     WorkflowRuntimeView, WorkflowUnload,
 };
-use barracuda_workflow::{WorkflowControlRejection, WorkflowId};
+use barracuda_workflow::{validate_definition, WorkflowControlRejection, WorkflowId};
 
 use crate::EventRouterCreateError;
 
@@ -69,7 +70,7 @@ where
         let load_index = Rc::clone(&self.index);
         let load_filesystem = self.filesystem;
         let load_directory = self.directory.clone();
-        context.register_rpc::<WorkflowLoad<M>, _>(move |_context, frames| {
+        context.register_rpc::<WorkflowLoad<M>, _>(move |context: RpcContext, frames| {
             let control = load_control.clone();
             let index = Rc::clone(&load_index);
             let directory = load_directory.clone();
@@ -82,6 +83,11 @@ where
                     Ok(definition) => definition,
                     Err(rejection) => return Ok(Err(rejection)),
                 };
+                // Primary gate: reject workflows whose steps cannot be
+                // resolved and linked before anything is persisted.
+                if let Err(rejection) = validate_definition(context.client(), &definition) {
+                    return Ok(Err(rejection));
+                }
                 if control.contains(definition.id()) {
                     return Ok(Err(WorkflowControlRejection::DuplicateId));
                 }

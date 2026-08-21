@@ -32,16 +32,17 @@ use a `Direct` link, and nested paths are rejected.
 
 ## Unified frame-flow model
 
-Frame flow is orthogonal to the link kind, to whether methods are
-runtime-dynamic, and to the call modality (typed vs `call_json`): the driver
-moves frames and never distinguishes how a value was produced. It is defined
-by the source method's `Output` mode and the destination method's `Input`
-mode:
+Frame flow is one layer; the link kind (the per-frame transform) is another
+layer on top of it. The driver reads every response frame of the source
+step, applies the link's transform, and writes the produced request frames to
+the destination step, with source EOF closing the destination — for every
+link kind and every valid cardinality combination. Cardinality rules are
+enforced by link validation, not by the driver.
 
 | prev Output → this Input | Behavior |
 | --- | --- |
-| `Unary → Unary` | Read 1 frame → transform → write 1 frame → EOF |
-| `Unary → Streaming` | Read 1 frame → transform → write 1 frame → EOF (destination sees a stream of length 1) |
+| `Unary → Unary` | Source emits 1 frame → transform → write 1 frame → EOF |
+| `Unary → Streaming` | Same; destination sees a stream of length 1 |
 | `Streaming → Streaming` | Loop: read frame → transform → write; source EOF propagates to destination EOF (record-preserving, backpressure via lane reservation) |
 | `Streaming → Unary` | **Invalid** — rejected at link validation for every link kind |
 
@@ -50,9 +51,14 @@ The **transform** is the link's per-frame function:
 - `Direct`: identity — bytes copied verbatim (frame sizes must match).
 - `Mapping`: encode the literal arguments into the request frame, then patch
   each `$previous.output.<field>` reference wire-to-wire.
-- `Literal`: encode the arguments once; the previous response is drained (not
-  consumed) so its producer completes. The transform is constant (identical
-  for every frame); today the driver applies it once per edge.
+- `Literal`: encode the arguments; the transform is constant (identical for
+  every frame), so a streaming source produces one identical request per
+  frame.
+
+Field copies are byte-level over opaque regions; the workflow author owns the
+encoding contract of the types involved, including any length relationship
+between copied regions (a source may be narrower than its destination, whose
+tail keeps its prior value).
 
 ### Why `Streaming → Unary` is invalid
 
@@ -66,32 +72,40 @@ consumer that needs one value must be fed by a producer that emits one.
 Every execution resolves each step's method projection and validates every
 link before any downstream RPC is invoked:
 
-- `Direct`: response type identity (`links_to`).
+- `Direct`: response type identity (source response and destination request
+  are the same fixed-layout type).
 - `Literal`/`Mapping`: target must be runtime-dynamic; mapping references must
   resolve on both sides with `source_size <= dest_size`.
 - Cardinality: `Streaming → Unary` rejected for every link kind.
 
-Validation currently runs at execution setup (the closest point with a client);
-load-time validation is the agreed target, with execution-time checks remaining
-as a backstop for startup restore and dynamic registration changes.
+Validation runs at two points with the same rule set:
+
+- **Load time (primary gate).** `workflow.load` resolves every step against the
+  registry and validates all links — including a dry-run of the literal
+  arguments through the destination's JSON codec — before anything is
+  persisted. A workflow whose steps cannot be resolved or linked is rejected
+  with `UnknownMethod` / `InvalidLink` and never enters the catalog.
+- **Execution setup (backstop).** Every matched execution re-validates against
+  the current registry before any downstream RPC, covering startup restore
+  (no registry at restore time) and dynamic registration changes.
+
+Load-time validation ordering constraint: a workflow can only reference
+methods registered before it is loaded.
 
 ## Status
 
 Implemented:
 
 - Link classification (`Direct` / `Literal` / `Mapping`), `$previous.output`
-  grammar, wire-to-wire field mapping (unary edges).
+  grammar, wire-to-wire field mapping.
+- One frame-flow driver for every link kind: read → per-frame transform →
+  write, source EOF closes the destination (u→u, u→s, and record-preserving
+  s→s).
 - Link validation at execution setup (Direct type identity; mapping field
-  existence and `source_size <= dest_size`).
+  existence and `source_size <= dest_size`; literal arguments dry-run).
 - Cardinality validation: `Streaming → Unary` rejected for every link kind
   (`RpcMethodInfo::input_mode` / `output_mode`).
-
-Agreed design, not yet implemented:
-
-- Driver-level `Streaming → Streaming` loop applying the per-frame transform
-  (Mapping/Literal edges are unary today).
-- Setup-time "arguments match request" validation (today literal arguments
-  are transcoded at runtime; a mismatch surfaces as `JsonRequestInvalid`
-  during execution).
-- Load-time link validation.
-
+- Load-time validation as the primary gate (`workflow.load` resolves steps
+  against the registry, validates links and literal arguments, and rejects
+  with `UnknownMethod` / `InvalidLink` before persistence); execution setup
+  re-validates as the backstop.

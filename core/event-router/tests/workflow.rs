@@ -76,11 +76,25 @@ struct ControlState {
 struct WorkflowInstaller {
     json: &'static [&'static str],
     state: Rc<ControlState>,
+    register_stubs: bool,
 }
 
 impl Component<FRAME_SIZE> for WorkflowInstaller {
-    fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        Ok(())
+    fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
+        if !self.register_stubs {
+            return Ok(());
+        }
+        // Stub endpoints so load-time link validation can resolve the steps
+        // these workflows persist.
+        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
+            Ok(Ok(*request.view()?))
+        })?;
+        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
+            Ok(Ok(()))
+        })?;
+        context.register_rpc::<Audit, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
+            Ok(Ok(()))
+        })
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -107,8 +121,15 @@ struct WorkflowUninstaller {
 }
 
 impl Component<FRAME_SIZE> for WorkflowUninstaller {
-    fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        Ok(())
+    fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
+        // Stub endpoints so load-time link validation can resolve the steps
+        // this workflow loads.
+        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
+            Ok(Ok(*request.view()?))
+        })?;
+        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
+            Ok(Ok(()))
+        })
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -144,6 +165,7 @@ fn streaming_load_persists_order_and_recovers_it_after_restart() {
         .load(Box::new(WorkflowInstaller {
             json: BOTH_WORKFLOWS,
             state: Rc::clone(&state),
+            register_stubs: true,
         }))
         .expect("load installer Component");
 
@@ -205,6 +227,7 @@ fn invalid_and_duplicate_workflow_json_are_rejected_without_corrupting_the_catal
         .load(Box::new(WorkflowInstaller {
             json: INVALID_WORKFLOW,
             state: Rc::clone(&invalid_state),
+            register_stubs: true,
         }))
         .expect("load invalid installer Component");
     drive_until(&mut event_router, |_router| invalid_state.done.get());
@@ -221,6 +244,8 @@ fn invalid_and_duplicate_workflow_json_are_rejected_without_corrupting_the_catal
         .load(Box::new(WorkflowInstaller {
             json: DUPLICATE_ALPHA,
             state: Rc::clone(&duplicate_state),
+            // The first installer already registered the stub endpoints.
+            register_stubs: false,
         }))
         .expect("load duplicate installer Component");
     drive_until(&mut event_router, |_router| duplicate_state.done.get());

@@ -36,10 +36,11 @@ pub use barracuda_rpc::{
 #[cfg(feature = "schema")]
 pub use barracuda_rpc_schema::{bake_all, register, SchemaEntry};
 pub use barracuda_workflow::{
-    EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode, Rule,
-    RuleError, WorkflowClient, WorkflowControlError, WorkflowControlRejection, WorkflowDefinition,
-    WorkflowDefinitionError, WorkflowExecutionError, WorkflowFailure, WorkflowId, WorkflowIdError,
-    WorkflowInfo, WorkflowLoadError, WorkflowUnloadError,
+    validate_definition, EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError,
+    EventInputMode, Rule, RuleError, WorkflowClient, WorkflowControlError,
+    WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError,
+    WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError,
+    WorkflowUnloadError,
 };
 
 /// Failure while constructing Event Router and restoring durable Workflows.

@@ -43,6 +43,10 @@ pub enum WorkflowControlRejection {
     Persistence,
     /// A step's link arguments were malformed or placed on the ingress step.
     InvalidArguments,
+    /// A step addressed a method that is not registered.
+    UnknownMethod,
+    /// A step's link violated a validation rule.
+    InvalidLink,
 }
 
 /// Failure returned by [`WorkflowClient`].
