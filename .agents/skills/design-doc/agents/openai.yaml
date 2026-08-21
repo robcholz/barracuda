@@ -1,0 +1,6 @@
+interface:
+  display_name: "Design Doc Alignment"
+  short_description: "Write design docs and keep them aligned with code"
+  default_prompt: "Use $design-doc to write or review a component design doc and audit the crate against it."
+policy:
+  allow_implicit_invocation: true
