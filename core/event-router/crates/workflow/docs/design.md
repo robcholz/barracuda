@@ -32,9 +32,11 @@ use a `Direct` link, and nested paths are rejected.
 
 ## Unified frame-flow model
 
-Frame flow is orthogonal to the link kind and to whether methods are
-runtime-dynamic. It is defined by the source method's `Output` mode and the
-destination method's `Input` mode:
+Frame flow is orthogonal to the link kind, to whether methods are
+runtime-dynamic, and to the call modality (typed vs `call_json`): the driver
+moves frames and never distinguishes how a value was produced. It is defined
+by the source method's `Output` mode and the destination method's `Input`
+mode:
 
 | prev Output → this Input | Behavior |
 | --- | --- |
@@ -49,8 +51,8 @@ The **transform** is the link's per-frame function:
 - `Mapping`: encode the literal arguments into the request frame, then patch
   each `$previous.output.<field>` reference wire-to-wire.
 - `Literal`: encode the arguments once; the previous response is drained (not
-  consumed) so its producer completes. The transform is constant: it always
-  produces exactly one request frame.
+  consumed) so its producer completes. The transform is constant (identical
+  for every frame); today the driver applies it once per edge.
 
 ### Why `Streaming → Unary` is invalid
 
@@ -75,20 +77,21 @@ as a backstop for startup restore and dynamic registration changes.
 
 ## Status
 
-Implemented (working tree, uncommitted):
+Implemented:
 
 - Link classification (`Direct` / `Literal` / `Mapping`), `$previous.output`
   grammar, wire-to-wire field mapping (unary edges).
 - Link validation at execution setup (Direct type identity; mapping field
   existence and `source_size <= dest_size`).
+- Cardinality validation: `Streaming → Unary` rejected for every link kind
+  (`RpcMethodInfo::input_mode` / `output_mode`).
 
 Agreed design, not yet implemented:
 
-- `Streaming → Unary` rejection at validation (needs `output_mode` in the
-  method descriptor).
-- `Streaming → Streaming` per-frame mapping loop.
-- "Arguments match request" validation (literal arguments must encode into the
-  request; mapping target fields therefore need `#[serde(default)]` or a
-  placeholder in the literal JSON).
+- Driver-level `Streaming → Streaming` loop applying the per-frame transform
+  (Mapping/Literal edges are unary today).
+- Setup-time "arguments match request" validation (today literal arguments
+  are transcoded at runtime; a mismatch surfaces as `JsonRequestInvalid`
+  during execution).
 - Load-time link validation.
 

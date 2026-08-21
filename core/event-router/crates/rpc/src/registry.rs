@@ -616,12 +616,12 @@ struct EndpointEntry {
     dynamic: Option<Dynamic>,
 }
 
-/// Read-only projection of one registered method, for cross-crate link checks.
+/// Read-only projection of one registered method's signature and dynamic
+/// surface.
 ///
-/// Returned by [`RpcClient::method_info`]. It exposes exactly what a workflow
-/// planner needs to classify and validate a link — type identity between
-/// adjacent methods and, for dynamic methods, the JSON codec and wire tables —
-/// without leaking the internal descriptor or `TypeId`s.
+/// Returned by [`RpcClient::method_info`]. It exposes type identity and frame
+/// size for signature checks and, for dynamic methods, the JSON codec and
+/// wire tables.
 #[derive(Clone)]
 pub struct RpcMethodInfo {
     descriptor: RpcMethodDescriptor,
@@ -630,8 +630,9 @@ pub struct RpcMethodInfo {
 
 impl RpcMethodInfo {
     /// Reports whether this method's response is the identical fixed-layout type
-    /// that `next` accepts as its request — the soundness condition for a
-    /// `Link::Direct` byte-for-byte passthrough.
+    /// that `next` accepts as its request — the precondition for passing this
+    /// method's response frames through as `next`'s request frames without
+    /// transformation.
     #[must_use]
     pub fn links_to(&self, next: &RpcMethodInfo) -> bool {
         self.descriptor.response_type_id() == next.descriptor.request_type_id()
@@ -838,12 +839,9 @@ impl RpcClient {
         }
     }
 
-    /// Returns a read-only projection of the method registered at `address`.
-    ///
-    /// Workflow planning uses it to classify and validate a link before IO:
-    /// [`RpcMethodInfo::links_to`] checks type identity for a Direct edge, and
-    /// [`RpcMethodInfo::wire`]/[`RpcMethodInfo::encode_request`] drive a Mapping
-    /// or Literal edge.
+    /// Returns a read-only projection of the method registered at `address`:
+    /// signature identity checks, cardinality, and the JSON codec and wire
+    /// tables when the method is dynamic.
     ///
     /// # Errors
     ///

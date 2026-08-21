@@ -1,11 +1,9 @@
 //! Field-level wire access over fixed-layout typed RPC frames.
 //!
-//! A [`Link::Mapping`](crate) step assembles the next method's request by
-//! copying individual fields out of the previous method's response frame. Both
-//! operations work on the raw fixed-layout bytes: [`WireField`] names a byte
-//! region by its JSON field name, [`RpcWire`] is the per-struct table of those
-//! regions (emitted by `#[derive(RpcWire)]`), and [`WireSupport`] bundles a
-//! method's request-write and response-read tables.
+//! [`WireField`] names a byte region by its JSON field name, [`RpcWire`] is
+//! the per-struct table of those regions (emitted by `#[derive(RpcWire)]`),
+//! and [`WireSupport`] bundles a method's request-write and response-read
+//! tables.
 //!
 //! The framework treats every region as opaque bytes. It never interprets a
 //! field's contents: length prefixes, encodings, and multi-field logical values
@@ -62,8 +60,7 @@ impl WireField {
 /// Compile-time field→region table for one fixed-layout message struct.
 ///
 /// Derive it with `#[derive(RpcWire)]`. Message structs that carry no
-/// addressable fields — notably `()` — expose an empty table and can never be a
-/// Mapping source or target.
+/// addressable fields — notably `()` — expose an empty table.
 pub trait RpcWire: RpcMessage {
     /// The struct's named fields, in declaration order.
     const FIELDS: &'static [WireField];
@@ -76,9 +73,8 @@ impl RpcWire for () {
 /// A method's request-write and response-read field tables.
 ///
 /// Built by [`WireSupport::of`] where the concrete method type is known, then
-/// stored beside the endpoint through [`RpcMethod::dynamic`]. A Mapping link
-/// reads fields from the source method's response table and writes them into
-/// the destination method's request table.
+/// stored beside the endpoint through [`RpcMethod::dynamic`]. Callers read
+/// fields from the response table and write them into the request table.
 #[derive(Clone, Copy, Debug)]
 pub struct WireSupport {
     request: &'static [WireField],

@@ -1,9 +1,8 @@
 # RPC Design
 
-This document covers the `barracuda-rpc` crate: the wire layer, the dynamic
-modality, JSON calls, the schema bake, and the Link concepts that consume the
-wire tables. It is written for maintainers; callers should read the Event
-Router usage guide.
+This document covers the `barracuda-rpc` crate: the call model, the wire
+layer, the dynamic modality, JSON calls, and the schema bake. It is written
+for maintainers; callers should read the Event Router usage guide.
 
 ## Architecture
 
@@ -36,8 +35,9 @@ task-local registry over fixed-capacity full-duplex lanes; the registry is
 shared with clients and does not require handlers or futures to be `Send`.
 
 The `RpcMethodDescriptor` is built at registration and retained with the
-endpoint: address, frame sizes, type IDs, and cardinality descriptors. It is
-the runtime record of the method's layout and the basis of link validation.
+endpoint: address, frame sizes, type IDs, and the input/output cardinality
+types. It is the runtime record of the method's layout and the basis of
+signature and cardinality queries.
 
 ## Call paths
 
@@ -104,11 +104,6 @@ lane through `call_payload`, so the handler serves an ordinary typed frame
 identical to a typed call. The single response or method-error frame is then
 transcoded back to JSON. See the dynamic modality section for the envelope.
 
-A *Mapper RPC* is an `RpcMethod` whose `Request` is the previous RPC's
-`Response` and whose `Response` is the next RPC's `Request`; its handler
-converts between the two types. It participates as an ordinary typed RPC and
-links via `Link::Direct`.
-
 ## Invariants
 
 - **Frames are the only thing that moves.** Every RPC message is a
@@ -119,10 +114,10 @@ links via `Link::Direct`.
   hand-written layout tables.
 - **One frame-flow model.** Frame flow between calls is defined by the
   methods' cardinality modes, independent of whether a method is
-  "runtime-dynamic".
+  "runtime-dynamic" and of the calling wrapper (typed, wire, or JSON).
 - **Wire names equal JSON names.** A field's wire name is the JSON key
-  `serde_json` itself computes, enforced at compile time, so a Mapping link
-  and a `call_json` caller always agree on names.
+  `serde_json` itself computes, enforced at compile time, so wire-level field
+  access and `call_json` always agree on names.
 
 ## Wire layer
 
@@ -145,8 +140,9 @@ with the JSON surface. Structs only; `()` exposes an empty table.
 
 The framework treats every region as opaque bytes; it never interprets a
 field's contents. Length prefixes, encodings, and endianness are the
-caller's responsibility. Because no padding is implied, a byte-copy link is
-sound exactly when the source and target regions have equal size.
+caller's responsibility. Because no padding is implied, copying one field
+region into another is sound exactly when the source and target regions have
+equal size.
 
 ## Dynamic modality
 
@@ -155,7 +151,7 @@ bundles three capabilities into one `Dynamic` captured beside the endpoint at
 registration:
 
 1. `JsonCodec` — JSON ↔ fixed-layout frame transcoding (`call_json`).
-2. `WireSupport` — field-level wire access (mapping links).
+2. `WireSupport` — field-level wire access.
 3. `schema` — the baked request JSON Schema, when the schema pipeline ran.
 
 `RpcMethod::dynamic() -> Option<Dynamic>` is the single accessor; wire
@@ -205,54 +201,9 @@ The bake uses LLM-friendly settings, because the schemas are for agents:
 inline subschemas (no `$ref`/`$defs`), nullable type arrays for `Option`, and
 no meta-`$schema`.
 
-## Links (workflow)
-
-Workflow steps call RPCs linearly, so each step's output feeds the next
-step's input. The link between two adjacent steps is implicit in the step
-JSON and never named in the document:
-
-| Step JSON | Link | Meaning |
-| --- | --- | --- |
-| no `arguments` | `Direct` | Previous response passes through byte-for-byte. |
-| `arguments`, no `$` | `Literal` | Request built solely from literal arguments. |
-| `arguments` with `$` | `Mapping` | Literal arguments plus wire-copied references. |
-
-A `Direct` edge is valid exactly when the previous `Response` is the
-identical fixed-layout type as the next `Request` (TypeId identity, checked
-at validation). Mapper RPCs are typed RPCs whose request/response bridge two
-types; they link via `Direct` and are not a separate link kind.
-
-A `Mapping` edge's arguments use the grammar `$previous.output.<field>`.
-The field is mandatory and a single top-level name; a bare `$previous.output`
-is rejected — whole-frame passthrough is `Link::Direct`, not a mapping
-reference — and nested paths are rejected. Building the next request is a
-two-pass pipeline:
-
-1. Referenced keys are stripped from the arguments, and the literals are
-   transcoded (serde → the next method's request bytes). The referenced
-   fields must therefore deserialize when absent — `#[serde(default)]` or
-   `Option` — a DTO contract for any request type that a workflow may call.
-2. For each reference, `read_response_field` on the previous response's
-   region and `write_request_field` into the next request's region,
-   wire-to-wire, zero-copy, until all references are processed.
-
-Field copying is byte-level over opaque regions; the workflow author owns
-the encoding contract of the types involved.
-
-Validation (`validate_links`) runs at execution setup — the closest point to
-load time that has a client — and aborts before any downstream RPC is
-invoked: `Direct` edges must be type-identical; `Mapping` edges must resolve
-every reference to an existing field on both sides; `Literal`/`Mapping`
-targets must be runtime-dynamic.
-
-Cardinality: only unary→unary, streaming→streaming, and unary→streaming
-links are valid; streaming→unary is rejected. `validate_links` checks both
-sides of every edge against `RpcMethodInfo::input_mode` /
-`RpcMethodInfo::output_mode`.
-
 ## Status
 
-Implemented (working tree, uncommitted):
+Implemented:
 
 - `RpcWire` derive with compile-time-enforced serde name sync; `WireSupport`
   read/write and field sizes.
@@ -263,15 +214,4 @@ Implemented (working tree, uncommitted):
 - Schema bake pipeline (`rpc-schema`: `register!`, `bake_all`, LLM-friendly
   settings).
 - `output_mode` in `RpcMethodDescriptor`; `RpcMethodInfo::input_mode` /
-  `output_mode` (`RpcCardinality`); link cardinality validation (only u→u,
-  s→s, u→s; streaming→unary rejected).
-- Link classification (`Direct`/`Literal`/`Mapping`), two-pass
-  `build_and_forward`, `validate_links` at execution setup.
-
-Agreed design, not yet implemented:
-
-- Load-time link validation as the primary gate, with execution-time
-  validation kept as a backstop.
-- Streaming support for `Mapping`/`Literal` edges (they are unary today).
-- Reserved reference grammar: `$previous.input`, `$previous.error`, and
-  absolute step selectors.
+  `output_mode` (`RpcCardinality`).
