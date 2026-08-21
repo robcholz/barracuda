@@ -19,12 +19,16 @@ The RPC DTO is the boundary contract between domain types and the wire. Each
 DTO field has an explicit wire type and capacity, the layout is explicit and
 padding-free, and the DTO is used directly as `RpcMethod::Request` /
 `RpcMethod::Response`. Three encodings are derived from one DTO: fixed-layout
-bytes via `zerocopy`, JSON via `serde`, and JSON Schema via `schemars`. No
-per-component JSON DTO, codec, or registration exists.
+bytes via `zerocopy`, JSON via `serde`, and JSON Schema via `schemars`, so the
+JSON surface and the wire layout are two views of the same type and cannot
+drift. The cost of one DTO serving all encodings is that it must satisfy both
+constraints at once: every field is a bounded fixed-layout type
+(`FixedString<N>`, `WireU32`), so capacity and layout are decided explicitly
+at the boundary rather than discovered at runtime.
 
-Domain types never derive `serde` and do not commit to a wire shape. The
-conversion between domain types and DTOs lives outside this crate (adapter
-code with `o2o`/`TryFrom`).
+Domain types are wire-agnostic: they carry no serde derives and no wire
+layout. The conversion between domain types and DTOs lives outside this crate
+(adapter code with `o2o`/`TryFrom`).
 
 ## Model
 
@@ -57,10 +61,13 @@ fixed-layout frames on full-duplex lanes   ── the frame convention
 
 ### Frame convention
 
-Every RPC message is a fixed-layout frame on a full-duplex lane. The request
-direction is a stream of request frames, closed by the writer. The response
-direction is a stream of response frames, optionally terminated by one
-method-error frame; a terminal method error ends the response stream.
+Every RPC message is a fixed-layout frame on a full-duplex lane. Fixed layouts
+keep frame IO zero-copy and allocation-free, which matters on `no_std`
+firmware; the tradeoff is that changing a field's size or name is a
+coordinated change on both ends, so wire shapes evolve deliberately. The
+request direction is a stream of request frames, closed by the writer. The
+response direction is a stream of response frames, optionally terminated by
+one method-error frame; a terminal method error ends the response stream.
 Cardinality (`Unary`/`Streaming`) is declared by the method's `Input`/`Output`
 markers and governs how many frames the typed layer exchanges; the wire layer
 itself does not enforce it. The outer `RpcResult` reports transport/runtime
@@ -123,11 +130,11 @@ transcoded back to JSON. See the dynamic modality section for the envelope.
 
 `#[derive(RpcWire)]` on a message struct emits a compile-time table mapping
 each field's **serde JSON name** to its byte region (`offset_of!` /
-`size_of!`). Names are computed with `serde_derive_internals` — the same code
-serde's own derives use — so `#[serde(rename)]` / `#[serde(rename_all)]` /
-`#[serde(skip)]` are honored automatically, and a field whose serialize and
-deserialize names differ is a compile error: the table can never disagree
-with the JSON surface. Structs only; `()` exposes an empty table.
+`size_of!`). Names come from serde's own naming derivation, so
+`#[serde(rename)]` / `#[serde(rename_all)]` / `#[serde(skip)]` are honored
+automatically, and a field whose serialize and deserialize names differ is a
+compile error: the table can never disagree with the JSON surface. Structs
+only; `()` exposes an empty table.
 
 `WireSupport` bundles a method's request-write and response-read tables:
 
@@ -140,9 +147,9 @@ with the JSON surface. Structs only; `()` exposes an empty table.
 
 The framework treats every region as opaque bytes; it never interprets a
 field's contents. Length prefixes, encodings, and endianness are the
-caller's responsibility. Because no padding is implied, copying one field
-region into another is sound exactly when the source and target regions have
-equal size.
+caller's responsibility, including the relationship between copied regions:
+a bounded copy may be shorter than its destination, whose remaining bytes
+keep their prior value.
 
 ## Dynamic modality
 
@@ -194,24 +201,8 @@ embedded. The pipeline (`barracuda-rpc-schema`) runs from a `build.rs`:
    collection.
 2. `bake_all(OUT_DIR)` walks the collection and writes one `<Type>.json` per
    registered DTO.
-3. `#[rpc_dynamic]` embeds the file with `include_str!` when the
-   `rpc_schema_baked` cfg is set.
+3. `#[rpc_dynamic]` bakes the file into the firmware image at build time.
 
 The bake uses LLM-friendly settings, because the schemas are for agents:
 inline subschemas (no `$ref`/`$defs`), nullable type arrays for `Option`, and
 no meta-`$schema`.
-
-## Status
-
-Implemented:
-
-- `RpcWire` derive with compile-time-enforced serde name sync; `WireSupport`
-  read/write and field sizes.
-- `#[rpc_dynamic]` → `Dynamic { json, wire, schema }`; single `dynamic()`
-  API.
-- `call_json` (serde → bytes → lane → serde back) with the
-  `{ ok, value | error }` envelope.
-- Schema bake pipeline (`rpc-schema`: `register!`, `bake_all`, LLM-friendly
-  settings).
-- `output_mode` in `RpcMethodDescriptor`; `RpcMethodInfo::input_mode` /
-  `output_mode` (`RpcCardinality`).
