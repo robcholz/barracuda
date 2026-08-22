@@ -751,6 +751,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-scheduler-component"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-time-component",
+ "embassy-futures",
+ "embassy-sync",
+ "embassy-time",
+ "futures-lite",
+ "getset",
+ "serde",
+ "serde_json",
+ "static_cell",
+ "thiserror 2.0.18",
+ "time",
+ "zerocopy",
+]
+
+[[package]]
 name = "barracuda-time-component"
 version = "0.1.0"
 dependencies = [

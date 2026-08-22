@@ -9,6 +9,7 @@ members = [
     "components/message-gateway/crates/*",
     "components/gateway-agent-adapter",
     "components/time/crates/*",
+    "components/scheduler",
     "components/vm",
     "shared/*",
     "apps/*",
