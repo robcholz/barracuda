@@ -3,7 +3,7 @@ use core::cell::RefCell;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventEmitter, RegisterContext,
-    RpcClient, RunContext, UnregisterContext,
+    RpcClient, RunContext, Topic, UnregisterContext,
 };
 use barracuda_time_component::now::{Now, TimeNowRequest};
 use embassy_futures::select::{Either, select};
@@ -105,8 +105,10 @@ impl<const M: usize> Component<M> for SchedulerComponent {
                     let Some(occurrence) = occurrence else {
                         break;
                     };
+                    let topic = Topic::try_from(occurrence.id().as_str())
+                        .map_err(ComponentError::lifecycle)?;
                     emitter
-                        .emit::<SchedulerTriggered>(Triggered::new(occurrence))
+                        .emit_to::<SchedulerTriggered>(&topic, Triggered::new(occurrence))
                         .await
                         .map_err(ComponentError::lifecycle)?;
                     self.control

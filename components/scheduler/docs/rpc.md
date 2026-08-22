@@ -6,7 +6,10 @@ to `time.now` to validate the requested trigger against the authoritative RTC;
 callers never provide the current time or a Unix timestamp. Schedules are not
 persisted across Component or process restart.
 
-Schedule IDs contain 1–31 ASCII letters, digits, `_`, `-`, or `.`.
+Schedule IDs contain 1–16 ASCII letters, digits, `_`, `-`, or `.`. The
+Scheduler uses the ID unchanged as the Topic of each `scheduler.triggered`
+Event. Its established RPC storage slot remains fixed at 32 bytes, preserving
+the existing wire layout.
 
 ## `scheduler.schedule`
 

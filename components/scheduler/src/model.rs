@@ -7,8 +7,9 @@ use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 use crate::schedule::ScheduleError;
 
 /// Maximum UTF-8 byte length of a schedule identifier.
-pub const SCHEDULE_ID_MAX_BYTES: usize = 31;
-const SCHEDULE_ID_CAPACITY: usize = SCHEDULE_ID_MAX_BYTES + 1;
+pub const SCHEDULE_ID_MAX_BYTES: usize = 16;
+// Keep the established scheduler RPC layout while reserving one NUL byte.
+const SCHEDULE_ID_CAPACITY: usize = 32;
 
 /// Stable fixed-capacity schedule identifier.
 #[repr(transparent)]

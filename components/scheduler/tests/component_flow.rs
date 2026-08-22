@@ -23,7 +23,7 @@ use serde_json::json;
 const FRAME_SIZE: usize = 256;
 const WORKFLOW: &str = r#"{
     "id":"scheduler-test",
-    "match":{"event":"scheduler.triggered"},
+    "match":{"event":"scheduler.triggered","topic":"typed-time-flow"},
     "steps":[{"call":"scheduler-test.record"}]
 }"#;
 
