@@ -2,8 +2,29 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use core::pin::Pin;
 
 use futures_core::Stream;
+use serde::{Deserialize, Serialize};
 
 use crate::StreamError;
+
+/// Presentation role of an outbound text message.
+///
+/// Lets clients that support secondary or system content render it distinctly
+/// from the primary reply. Providers that do not distinguish roles render every
+/// kind as ordinary text. This is an IM-level presentation hint, not agent
+/// internals: senders map their own content onto these generic roles.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageKind {
+    /// The primary, user-visible reply.
+    #[default]
+    Reply,
+    /// Secondary reasoning or "thinking" text.
+    Reasoning,
+    /// A tool-execution notice.
+    Tool,
+    /// Any other secondary or system notice (for example usage metadata).
+    Notice,
+}
 
 /// Asynchronous append-only chunks for one text message.
 pub type TextStream = Pin<Box<dyn Stream<Item = Result<String, StreamError>> + 'static>>;
@@ -46,6 +67,7 @@ pub struct SendMessageRequest {
     pub target: MessageTarget,
     pub body: TextBody,
     pub reply_to: Option<String>,
+    pub kind: MessageKind,
 }
 
 impl SendMessageRequest {
@@ -54,6 +76,7 @@ impl SendMessageRequest {
             target,
             body: TextBody::Complete(text.into()),
             reply_to: None,
+            kind: MessageKind::Reply,
         }
     }
 
@@ -62,7 +85,15 @@ impl SendMessageRequest {
             target,
             body: TextBody::Stream(stream),
             reply_to: None,
+            kind: MessageKind::Reply,
         }
+    }
+
+    /// Sets the presentation role for this message.
+    #[must_use]
+    pub fn with_kind(mut self, kind: MessageKind) -> Self {
+        self.kind = kind;
+        self
     }
 }
 

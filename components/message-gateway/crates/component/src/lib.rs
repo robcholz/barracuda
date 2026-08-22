@@ -10,7 +10,9 @@ pub mod component;
 pub mod gateway_message_received;
 /// Outbound Gateway send RPC.
 pub mod gateway_send;
+/// Outbound Gateway media-send RPC.
+pub mod gateway_send_media;
 /// Gateway provider routing identity.
 pub mod route;
-/// Variable-length Gateway framing errors.
+/// Shared fixed-layout Gateway wire values.
 pub mod wire;

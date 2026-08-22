@@ -1,48 +1,24 @@
 # Message Gateway Component
 
-The Message Gateway integration is an Event Router `Component`. It normalizes
-transport ingress into an Event and exposes outbound delivery as an RPC. It
-does not know which Workflow or Agent consumes a message.
+The Message Gateway integration is an Event Router `Component`. Concrete IM
+providers connect directly through `MessageChannel` and `GatewayIngress`.
+Gateway contracts remain independent from Workflows, Agents, and adapters.
 
-Concrete IM providers (Telegram, WeChat, BlueBubbles, Web, and future
-providers) integrate directly through `MessageChannel` and `GatewayIngress`.
-They do not use an Adapter RPC.
+The Component provides:
 
-## Emits
+- `gateway.send` for outbound text.
+- `gateway.send_media` for outbound files, images, audio, and video.
+- `gateway.message.received` for normalized inbound text messages.
 
-### `gateway.message.received`
+Both outbound RPCs use the same `GatewayRoute` and return the same
+`GatewaySendReceipt`. Their reusable public handlers live beside their
+`RpcMethod` definitions. `component.rs` contains registration and lifecycle
+state.
 
-- Cardinality: streaming
-- Message type: `GatewayEventFrame` (64-byte frames, owned by this crate)
-- Logical payload: UTF-8 JSON encoded `GatewayInboundMessage`
-- Acceptance: `GatewayIngress::publish` only acknowledges queueing. Event
-  Router acceptance happens later inside the Component run loop.
+Read the caller-facing documents:
 
-`GatewayInboundMessage` carries the channel, conversation and optional thread
-route, the provider message ID, and text.
-
-## RPC
-
-### `gateway.send`
-
-- Input: streaming `GatewaySendRequestFrame` values containing one JSON
-  `GatewayOutboundMessage`
-- Output: unary `()` after the selected `MessageChannel` accepts the send
-- Method error: `GatewaySendError`
-  - `GatewaySendError::InvalidRequest`: malformed frame stream or JSON
-  - `GatewaySendError::Delivery`: unknown channel or provider send failure
-
-The outbound message carries the original route, response text, and an
-optional message ID to reply to.
-
-The Event and RPC are Gateway-owned contracts. They do not reference Agent or
-any Adapter; protocol conversion belongs to a separate Adapter Component.
-`gateway_send_handler` is public and lives beside `GatewaySend`; `component.rs`
-only registers it and owns lifecycle state.
-
-## Lifecycle and backpressure
-
-`GatewayComponent::new` returns a cloneable `GatewayIngress` handle. Producers
-await the bounded ingress queue, so overload applies backpressure before Event
-Router lane capacity is consumed. Dropping every ingress handle leaves the
-Component idle until it is unloaded. Event Router owns RPC unregistration.
+- [`rpc.md`](rpc.md) — RPC addresses, request/response contracts, and every
+  method error.
+- [`event.md`](event.md) — Event payload, cardinality, and exact emit timing.
+- [`usage.md`](usage.md) — loading the Component, publishing ingress, and
+  making typed calls.
