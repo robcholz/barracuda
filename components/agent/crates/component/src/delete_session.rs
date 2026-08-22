@@ -1,59 +1,18 @@
 use alloc::rc::Rc;
 
-use barracuda_agent_runtime::{AgentRuntime, SessionDeleteError, SessionId};
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, Unary};
+use barracuda_agent_runtime::{AgentRuntime, SessionDeleteError};
+use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
 use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use crate::dto::SessionIdDto;
+use crate::convert;
 
-/// Request corresponding to `AgentRuntime::delete_session`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct DeleteSessionRequest {
-    session: SessionIdDto,
-}
-
-impl From<SessionId> for DeleteSessionRequest {
-    fn from(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-}
-
-impl DeleteSessionRequest {
-    /// Creates a delete request for `session`.
-    #[must_use]
-    pub fn new(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-
-    pub(crate) fn session(self) -> SessionId {
-        self.session.into()
-    }
-}
-
-/// Failure returned by `agent.delete_session`.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub enum DeleteSessionError {
-    /// The requested session does not exist.
-    SessionNotFound,
-    /// Deletion of this session is already in progress.
-    AlreadyDeleting,
-    /// The Agent runtime worker stopped.
-    WorkerStopped,
-    /// Persistent state could not be deleted.
-    Storage,
-}
+pub use crate::dto::{DeleteSessionError, DeleteSessionRequest};
 
 /// RPC corresponding to `AgentRuntime::delete_session`.
 pub struct DeleteSession;
 
+#[rpc_dynamic]
 impl RpcMethod for DeleteSession {
     const ADDRESS: &'static str = "agent.delete_session";
     type Request = DeleteSessionRequest;
@@ -74,7 +33,8 @@ where
     move |_context, request: RpcFrame<DeleteSessionRequest>| {
         let runtime = Rc::clone(&runtime);
         async move {
-            let result = match runtime.delete_session(request.view()?.session()).await {
+            let session = convert::session_from_wire(request.view()?.session);
+            let result = match runtime.delete_session(session).await {
                 Ok(()) => Ok(()),
                 Err(SessionDeleteError::SessionNotFound(_)) => {
                     Err(DeleteSessionError::SessionNotFound)

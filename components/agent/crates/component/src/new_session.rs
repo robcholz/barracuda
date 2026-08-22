@@ -1,100 +1,18 @@
 use alloc::rc::Rc;
 
-use barracuda_agent_runtime::{
-    AgentRuntime, RuntimeError, SessionCreateError, SessionId, SessionPersistence,
-};
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, Unary};
+use barracuda_agent_runtime::{AgentRuntime, RuntimeError, SessionCreateError};
+use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
 use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use crate::dto::SessionIdDto;
+use crate::convert;
 
-/// Request corresponding to `AgentRuntime::new_session`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct NewSessionRequest {
-    persistence: SessionPersistenceDto,
-}
-
-impl NewSessionRequest {
-    /// Creates a request from the Agent domain type.
-    #[must_use]
-    pub fn new(persistence: SessionPersistence) -> Self {
-        Self {
-            persistence: persistence.into(),
-        }
-    }
-
-    pub(crate) fn persistence(self) -> SessionPersistence {
-        self.persistence.into()
-    }
-}
-
-/// Response corresponding to `AgentRuntime::new_session`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct NewSessionResponse {
-    session: SessionIdDto,
-}
-
-impl From<SessionId> for NewSessionResponse {
-    fn from(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-}
-
-impl NewSessionResponse {
-    /// Returns the Agent domain Session id.
-    #[must_use]
-    pub fn session(self) -> SessionId {
-        self.session.into()
-    }
-}
-
-/// Component DTO for [`SessionPersistence`].
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub enum SessionPersistenceDto {
-    /// Preserve the session across runtime restarts.
-    Persistent,
-    /// Keep the session only for the current process.
-    Ephemeral,
-}
-
-impl From<SessionPersistence> for SessionPersistenceDto {
-    fn from(value: SessionPersistence) -> Self {
-        match value {
-            SessionPersistence::Persistent => Self::Persistent,
-            SessionPersistence::Ephemeral => Self::Ephemeral,
-        }
-    }
-}
-
-impl From<SessionPersistenceDto> for SessionPersistence {
-    fn from(value: SessionPersistenceDto) -> Self {
-        match value {
-            SessionPersistenceDto::Persistent => Self::Persistent,
-            SessionPersistenceDto::Ephemeral => Self::Ephemeral,
-        }
-    }
-}
-
-/// Failure returned by `agent.new_session`.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub enum NewSessionError {
-    /// The Agent runtime worker stopped.
-    WorkerStopped,
-    /// Persistent session state could not be initialized.
-    Persistence,
-}
+pub use crate::dto::{NewSessionError, NewSessionRequest, NewSessionResponse};
 
 /// RPC corresponding to `AgentRuntime::new_session`.
 pub struct NewSession;
 
+#[rpc_dynamic]
 impl RpcMethod for NewSession {
     const ADDRESS: &'static str = "agent.new_session";
     type Request = NewSessionRequest;
@@ -115,9 +33,11 @@ where
     move |_context, request: RpcFrame<NewSessionRequest>| {
         let runtime = Rc::clone(&runtime);
         async move {
-            let persistence = request.view()?.persistence();
+            let persistence = convert::persistence_from_wire(request.view()?.persistence);
             let response = match runtime.new_session(persistence).await {
-                Ok(session) => Ok(NewSessionResponse::from(session)),
+                Ok(session) => Ok(NewSessionResponse {
+                    session: convert::session_to_wire(session),
+                }),
                 Err(RuntimeError::SessionCreate(SessionCreateError::WorkerStopped)) => {
                     Err(NewSessionError::WorkerStopped)
                 }

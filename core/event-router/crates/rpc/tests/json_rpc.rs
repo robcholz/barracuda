@@ -1,13 +1,16 @@
 #![allow(clippy::expect_used)]
+#![allow(clippy::type_complexity)]
 #![allow(missing_docs)]
 
 use barracuda_rpc::{
-    rpc_dynamic, RpcAddress, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcResult, RpcWire,
-    Unary,
+    rpc_dynamic, RpcAddress, RpcContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
+    RpcResult, RpcStream, RpcWire, Streaming, Unary,
 };
 use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cell::Cell;
+use std::rc::Rc;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 fn registry<const N: usize, const M: usize, const Q: usize>() -> RpcRegistry<N, M, Q> {
@@ -97,6 +100,83 @@ fn call_json_transcodes_a_structured_request_and_void_response() {
             .expect("call_json succeeds");
         // Response is `()`, so the value is JSON null.
         assert_eq!(response, json!({ "ok": true, "value": Value::Null }));
+    });
+}
+
+// Streaming input mirrors a typed streaming call: every JSON value becomes one
+// request frame.
+#[repr(C)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Immutable,
+    IntoBytes,
+    KnownLayout,
+    PartialEq,
+    Eq,
+    RpcWire,
+    TryFromBytes,
+)]
+struct AppendRequest {
+    id: u32,
+}
+
+struct Append;
+
+#[rpc_dynamic]
+impl RpcMethod for Append {
+    const ADDRESS: &'static str = "session.append";
+    type Request = AppendRequest;
+    type Response = ();
+    type Error = ();
+    type Input = Streaming;
+    type Output = Unary;
+}
+
+fn append_handler(count: Rc<Cell<u32>>) -> impl Fn(
+    RpcContext,
+    RpcStream<RpcFrame<AppendRequest>>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = RpcResult<Result<(), ()>>> + 'static>,
+> {
+    move |_context, mut frames| {
+        let count = Rc::clone(&count);
+        Box::pin(async move {
+            while let Some(frame) = frames.next().await {
+                count.set(count.get().saturating_add(1));
+                let _ = *frame?.view()?;
+            }
+            Ok(Ok(()))
+        })
+    }
+}
+
+#[test]
+fn call_json_stream_writes_every_json_value_as_one_request_frame() {
+    let registry = registry::<1, 16, 1>();
+    let count = Rc::new(Cell::new(0));
+    registry
+        .register::<Append, _>(append_handler(Rc::clone(&count)))
+        .expect("register endpoint");
+    let address = RpcAddress::try_from(Append::ADDRESS).expect("valid address");
+    let client = registry.client();
+
+    block_on(async {
+        let mut responses = client
+            .call_json_stream(
+                &address,
+                [json!({ "id": 1 }), json!({ "id": 2 }), json!({ "id": 3 })],
+            )
+            .expect("call_json_stream opens");
+        let mut values = Vec::new();
+        while let Some(item) = responses.next().await {
+            values.push(item.expect("transport ok"));
+        }
+        assert_eq!(values, vec![Ok(Value::Null)]);
+        assert_eq!(count.get(), 3);
     });
 }
 

@@ -16,12 +16,12 @@ use smallvec::{smallvec, SmallVec};
 use super::address::{RpcAddress, RpcAddressError, RpcGroup};
 use super::context::{RpcCallId, RpcContext, RpcEndpointId};
 use super::dynamic::Dynamic;
-use super::json::{envelope, JsonCodec};
+use super::json::{envelope, JsonCallDriver, JsonCodec};
 use super::lane::{LaneAcquireSet, LaneIoSet, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
 use super::payload::{RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter};
 use super::typed::{
     HandlerAdapter, RpcCardinality, RpcHandler, RpcInputMode, RpcMessage, RpcMethod,
-    RpcMethodDescriptor, RpcOutputMode,
+    RpcMethodDescriptor, RpcOutputMode, RpcStream,
 };
 use super::wire::WireSupport;
 
@@ -830,6 +830,44 @@ impl RpcClient {
             Some(Err(frame)) => Ok(envelope(false, codec.decode_error(frame.as_ref())?)),
             None => Err(RpcError::MissingUnaryFrame),
         }
+    }
+
+    /// Calls a JSON-callable endpoint frame for frame, mirroring a typed call.
+    ///
+    /// Every JSON value in `inputs` is transcoded into one request frame and
+    /// written before the request direction closes, exactly like a typed
+    /// streaming input. Each response or method-error frame is then transcoded
+    /// back to a JSON value, so streaming inputs and outputs work the same way
+    /// they do in a typed call. The stream yields `Ok(Ok(response))`,
+    /// `Ok(Err(error))`, or a transport `Err`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::NotJsonCallable`] when the endpoint has no codec,
+    /// [`RpcError::JsonRequestInvalid`] when an input value does not match the
+    /// request message, or any transport error surfaced while opening the call.
+    pub fn call_json_stream(
+        &self,
+        address: &RpcAddress,
+        inputs: impl IntoIterator<Item = Value> + 'static,
+    ) -> RpcResult<RpcStream<Result<Value, Value>>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        let codec = registry.json_codec(address)?;
+        drop(registry);
+
+        let mut blobs = Vec::new();
+        for value in inputs {
+            blobs.push(codec.encode_request(&value)?);
+        }
+        let (writer, reader) = self.call_payload(address)?;
+        let input: RpcFuture<'static> = Box::pin(async move {
+            let mut writer = writer;
+            for blob in blobs {
+                writer.write_all(&blob).await?;
+            }
+            writer.close().await
+        });
+        Ok(RpcStream::new(JsonCallDriver::new(input, reader, codec)))
     }
 
     /// Returns a read-only projection of the method registered at `address`:

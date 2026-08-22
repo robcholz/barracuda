@@ -10,17 +10,18 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_component::link_api::{frames_from_link_api_request, LinkApi, LinkApiRequest};
+use barracuda_agent_component::dto::{
+    ApiPurposeDto, BackendKindDto, FixedStr, SessionIdDto, SessionPersistenceDto,
+};
+use barracuda_agent_component::link_api::{LinkApi, LinkApiRequest};
 use barracuda_agent_component::list_sessions::ListSessions;
 use barracuda_agent_component::new_session::{NewSession, NewSessionRequest};
 use barracuda_agent_component::open_session::{
-    open_session_response_from_frames, OpenSession, OpenSessionRequest, OpenSessionResponse,
-    OpenSessionResponseFrame, SessionEventDto,
+    OpenSession, OpenSessionRequest, OpenSessionResponse, SessionEventDto,
 };
 use barracuda_agent_component::session;
 use barracuda_agent_runtime::{
-    AgentRuntime, ApiPurpose, BackendKind, Message, ModelApiConfig, ModelApiFactory,
-    RuntimeStorageConfig, SessionPersistence,
+    AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionId,
 };
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, MemFs,
@@ -43,12 +44,12 @@ struct SessionApiClient {
     result: Rc<ResultState>,
 }
 
-impl Component<128> for SessionApiClient {
-    fn register(&mut self, _context: &mut RegisterContext<'_, 128>) -> ComponentResult<()> {
+impl Component<512> for SessionApiClient {
+    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
         Ok(())
     }
 
-    fn run<'a>(&'a mut self, context: RunContext<128>) -> ComponentFuture<'a> {
+    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
         Box::pin(async move {
             run_session_api(context, Rc::clone(&self.result))
                 .await
@@ -63,77 +64,69 @@ impl Component<128> for SessionApiClient {
 }
 
 async fn run_session_api(
-    context: RunContext<128>,
+    context: RunContext<512>,
     result: Rc<ResultState>,
 ) -> Result<(), RpcError> {
     let client = context.rpc();
     *result.stage.borrow_mut() = "link_api";
-    let link = LinkApiRequest::new(
-        ModelApiConfig::new(
-            BackendKind::OpenAiCompatible,
-            "test-key",
-            "test-model",
-            "http://example.invalid",
-        ),
-        ApiPurpose::RootAgent,
-        true,
-    );
-    let link_frames = RpcStream::new(futures_lite::stream::iter(
-        frames_from_link_api_request(&link)
-            .map_err(|_error| RpcError::InvalidFrameState)?
-            .into_iter()
-            .map(Ok),
-    ));
-    success(client.call::<LinkApi>(link_frames)?.await?)?;
+    let link = LinkApiRequest {
+        backend: BackendKindDto::OpenAiCompatible,
+        api_key: FixedStr::new("test-key").map_err(|_| RpcError::InvalidFrameState)?,
+        model: FixedStr::new("test-model").map_err(|_| RpcError::InvalidFrameState)?,
+        base_url: FixedStr::new("http://example.invalid")
+            .map_err(|_| RpcError::InvalidFrameState)?,
+        timeout_ms: 1,
+        max_tokens: 1,
+        image_max_bytes: 1,
+        purpose: ApiPurposeDto::RootAgent,
+        default: true,
+    };
+    success(client.call::<LinkApi>(link)?.await?)?;
 
     *result.stage.borrow_mut() = "new_session";
     let session = success(
         client
-            .call::<NewSession>(NewSessionRequest::new(SessionPersistence::Ephemeral))?
+            .call::<NewSession>(NewSessionRequest {
+                persistence: SessionPersistenceDto::Ephemeral,
+            })?
             .await?,
     )?
     .view()?
-    .session();
+    .session;
+    let session = SessionId::new(session.get());
 
     *result.stage.borrow_mut() = "list_sessions";
     let mut sessions = client.call::<ListSessions>(())?;
     while let Some(item) = sessions.next().await {
-        result
-            .sessions
-            .borrow_mut()
-            .push(success(item?)?.view()?.session().0);
+        let frame = success(item?)?;
+        let response = frame.view()?;
+        for session in response.sessions.iter().take(response.count as usize) {
+            result.sessions.borrow_mut().push(session.get());
+        }
     }
 
     *result.stage.borrow_mut() = "open_session";
-    let mut events = client.call::<OpenSession>(OpenSessionRequest::new(session))?;
+    let mut events = client.call::<OpenSession>(OpenSessionRequest {
+        session: SessionIdDto::new(session.0),
+    })?;
     *result.stage.borrow_mut() = "append";
-    let append = session::append::AppendRequest::new(session, Message::text("hello"));
-    let append_frames = RpcStream::new(futures_lite::stream::iter(
-        session::append::frames_from_append_request(&append)
-            .map_err(|_error| RpcError::InvalidFrameState)?
-            .into_iter()
-            .map(Ok),
-    ));
+    let append = session::append::AppendRequestFrame {
+        session: SessionIdDto::new(session.0),
+        text: FixedStr::new("hello").map_err(|_error| RpcError::InvalidFrameState)?,
+    };
+    let append_stream = RpcStream::new(futures_lite::stream::iter([Ok(append)]));
     *result.stage.borrow_mut() = "events";
-    let mut event_frames = Vec::<OpenSessionResponseFrame>::new();
-    loop {
-        let item = events.next().await.ok_or(RpcError::InvalidFrameState)?;
-        let frame = match item? {
-            Ok(frame) => *frame.view()?,
-            Err(error) => panic!("open session method error: {:?}", error.view()?),
-        };
-        let end = frame.is_end();
-        event_frames.push(frame);
-        if end {
-            let opened = open_session_response_from_frames(event_frames.drain(..))
-                .unwrap_or_else(|error| panic!("invalid Opened frames: {error}"));
-            assert!(matches!(opened, OpenSessionResponse::Opened { .. }));
-            break;
-        }
-    }
+    let item = events.next().await.ok_or(RpcError::InvalidFrameState)?;
+    let frame = match item? {
+        Ok(frame) => *frame.view()?,
+        Err(error) => panic!("open session method error: {:?}", error.view()?),
+    };
+    let response: OpenSessionResponse = serde_json::from_str(frame.json.as_str())
+        .unwrap_or_else(|error| panic!("invalid Opened JSON: {error}"));
+    assert!(matches!(response, OpenSessionResponse::Opened { .. }));
     success(
         client
-            .call::<session::append::Append>(append_frames)?
+            .call::<session::append::Append>(append_stream)?
             .await?,
     )?;
 
@@ -146,17 +139,13 @@ async fn run_session_api(
             Ok(frame) => *frame.view()?,
             Err(error) => panic!("open session method error: {:?}", error.view()?),
         };
-        let end = frame.is_end();
-        event_frames.push(frame);
-        if !end {
-            continue;
-        }
-        let event = open_session_response_from_frames(event_frames.drain(..))
-            .unwrap_or_else(|error| panic!("invalid Session event frames: {error}"));
-        match event {
+        let response: OpenSessionResponse = serde_json::from_str(frame.json.as_str())
+            .unwrap_or_else(|error| panic!("invalid event JSON: {error}"));
+        match response {
             OpenSessionResponse::Event {
                 event:
-                    SessionEventDto::OutputDelta { text } | SessionEventDto::EffectOutputDelta { text },
+                    SessionEventDto::OutputDelta { text }
+                    | SessionEventDto::EffectOutputDelta { text },
                 ..
             } => {
                 result.output.borrow_mut().push_str(&text);
@@ -172,7 +161,9 @@ async fn run_session_api(
     *result.stage.borrow_mut() = "close";
     success(
         client
-            .call::<session::close::Close>(session::close::CloseRequest::new(session))?
+            .call::<session::close::Close>(session::close::CloseRequest {
+                session: SessionIdDto::new(session.0),
+            })?
             .await?,
     )?;
     *result.stage.borrow_mut() = "done";
@@ -205,10 +196,10 @@ data: [DONE]
         .expect("build Agent runtime");
 
         let result = Rc::new(ResultState::default());
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 128, 8>::new()));
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
         let filesystem = Box::leak(Box::new(MemFs::new()));
         let mut router =
-            EventRouter::new(lanes, filesystem, "workflows").expect("build Event Router");
+            EventRouter::<8, 512, 8>::new(lanes, filesystem, "workflows").expect("build Event Router");
         router
             .load(Box::new(AgentComponent::new(runtime, service)))
             .expect("load Agent Component");
@@ -226,7 +217,7 @@ data: [DONE]
 }
 
 async fn drive_until(
-    router: &mut EventRouter<8, 128, 8>,
+    router: &mut EventRouter<8, 512, 8>,
     result: &ResultState,
     ready: impl Fn() -> bool,
 ) {

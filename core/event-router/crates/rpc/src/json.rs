@@ -20,12 +20,17 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::any::type_name;
 use core::marker::PhantomData;
+use core::pin::Pin;
+use core::task::{Context, Poll};
 
+use futures_core::Stream;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
+use super::payload::RpcPayloadReader;
+use super::registry::RpcFuture;
 use super::typed::RpcMethod;
 use super::{RpcError, RpcResult};
 
@@ -70,6 +75,105 @@ impl JsonCodec {
 impl core::fmt::Debug for JsonCodec {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.debug_struct("JsonCodec").finish_non_exhaustive()
+    }
+}
+
+/// Drives one JSON-coded RPC call, mirroring a typed call frame for frame.
+///
+/// The boxed `input` future writes every request frame (one per JSON input
+/// value) and closes the request direction. Each response or method-error frame
+/// is then transcoded to a JSON value, so streaming inputs and outputs work the
+/// same way they do in a typed call.
+pub(crate) struct JsonCallDriver {
+    input: Option<RpcFuture<'static>>,
+    reader: RpcPayloadReader,
+    codec: JsonCodec,
+    response_eof: bool,
+    finished: bool,
+}
+
+impl JsonCallDriver {
+    pub(crate) fn new(
+        input: RpcFuture<'static>,
+        reader: RpcPayloadReader,
+        codec: JsonCodec,
+    ) -> Self {
+        Self {
+            input: Some(input),
+            reader,
+            codec,
+            response_eof: false,
+            finished: false,
+        }
+    }
+}
+
+impl Unpin for JsonCallDriver {}
+
+impl Stream for JsonCallDriver {
+    type Item = RpcResult<Result<Value, Value>>;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        if this.finished {
+            return Poll::Ready(None);
+        }
+
+        let mut request_reader_closed = false;
+        if let Some(input) = this.input.as_mut() {
+            match input.as_mut().poll(context) {
+                Poll::Ready(Ok(())) => this.input = None,
+                Poll::Ready(Err(RpcError::FrameReaderClosed)) => {
+                    this.input = None;
+                    request_reader_closed = true;
+                }
+                Poll::Ready(Err(error)) => {
+                    this.input = None;
+                    this.finished = true;
+                    return Poll::Ready(Some(Err(error)));
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        if !this.response_eof {
+            match this.reader.poll_read(context) {
+                Poll::Ready(Ok(Some(Ok(payload)))) => {
+                    return Poll::Ready(Some(
+                        this.codec.decode_response(payload.as_ref()).map(Ok),
+                    ));
+                }
+                Poll::Ready(Ok(Some(Err(payload)))) => {
+                    this.input = None;
+                    this.response_eof = true;
+                    return Poll::Ready(Some(
+                        this.codec.decode_error(payload.as_ref()).map(Err),
+                    ));
+                }
+                Poll::Ready(Ok(None)) => {
+                    this.input = None;
+                    this.response_eof = true;
+                }
+                Poll::Ready(Err(error)) => {
+                    this.input = None;
+                    this.finished = true;
+                    return Poll::Ready(Some(Err(error)));
+                }
+                Poll::Pending => {}
+            }
+        }
+
+        if request_reader_closed && !this.response_eof {
+            this.finished = true;
+            return Poll::Ready(Some(Err(RpcError::FrameReaderClosed)));
+        }
+
+        if this.input.is_none() && this.response_eof {
+            this.finished = true;
+            Poll::Ready(None)
+        } else {
+            Poll::Pending
+        }
     }
 }
 

@@ -1,0 +1,34 @@
+[package]
+name = "barracuda-host"
+version = "0.1.0"
+edition = "2021"
+description = "Host composition that assembles Event Router and loads framework Components"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-agent-component = { path = "../../components/agent/crates/component" }
+barracuda-agent-runtime = { path = "../../components/agent/crates/runtime" }
+barracuda-event-router = { path = "../../core/event-router" }
+barracuda-gateway-agent-adapter = { path = "../../components/gateway-agent-adapter" }
+barracuda-message-gateway-component = { path = "../../components/message-gateway/crates/component" }
+barracuda-net = { path = "../../shared/net" }
+gateway = { path = "../../components/message-gateway/crates/gateway" }
+
+[dev-dependencies]
+static_cell = "2.1.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

@@ -6,9 +6,11 @@ extern crate alloc;
 
 /// Component lifecycle and RPC registration.
 pub mod component;
+mod convert;
+/// Fixed-layout RPC messages.
+pub mod dto;
 /// `AgentRuntime::delete_session` RPC.
 pub mod delete_session;
-mod dto;
 /// `AgentRuntime::link_api` RPC.
 pub mod link_api;
 /// `AgentRuntime::list_sessions` RPC.
@@ -19,5 +21,3 @@ pub mod new_session;
 pub mod open_session;
 /// RPCs backed by an open `SessionControl`.
 pub mod session;
-/// Variable-length Agent RPC framing errors and helpers.
-pub mod wire;

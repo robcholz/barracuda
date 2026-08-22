@@ -1,4 +1,4 @@
-use alloc::{collections::VecDeque, format, rc::Rc, string::String, vec::Vec};
+use alloc::{format, rc::Rc, string::String};
 
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestId, InputRequestKind, IterationEvent,
@@ -6,47 +6,25 @@ use barracuda_agent_runtime::{
     SessionEvent, SessionId, ToolCall, ToolOutput, TurnEvent, TurnId, TurnOrigin,
 };
 use barracuda_event_router::{
-    RpcError, RpcFrame, RpcHandler, RpcMethod, RpcStream, Streaming, Unary,
+    rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
 };
 use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
-use futures_lite::{stream, StreamExt};
+use futures_lite::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use crate::{
-    dto::SessionIdDto, session::SessionRegistry, wire::read_payload, wire::write_payload,
-    wire::AgentWireError,
-};
+use crate::convert;
+use crate::dto::FixedStr;
+use crate::session::SessionRegistry;
 
-const FRAME_PAYLOAD_SIZE: usize = 125;
-
-/// Request corresponding to `AgentRuntime::open_session`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct OpenSessionRequest {
-    session: SessionIdDto,
-}
-
-impl OpenSessionRequest {
-    /// Creates an open request for `session`.
-    #[must_use]
-    pub fn new(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-
-    pub(crate) fn session(self) -> SessionId {
-        self.session.into()
-    }
-}
+pub use crate::dto::{OpenSessionRequest, OpenSessionResponseFrame};
 
 /// Logical item returned by the `agent.open_session` stream.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OpenSessionResponse {
-    /// Confirms that the control handle and event stream were opened.
+    /// Confirms that the control handle and event stream opened.
     Opened {
         /// Opened session.
         session: SessionId,
@@ -58,15 +36,6 @@ pub enum OpenSessionResponse {
         /// Transport-stable event representation.
         event: SessionEventDto,
     },
-}
-
-impl OpenSessionResponse {
-    pub(crate) fn from_event(session: SessionId, event: SessionEvent) -> Self {
-        Self::Event {
-            session,
-            event: event.into(),
-        }
-    }
 }
 
 /// Transport-stable representation of an Agent `SessionEvent`.
@@ -238,47 +207,13 @@ impl From<SessionCloseReason> for SessionCloseReasonDto {
     }
 }
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-enum FrameEnd {
-    More,
-    End,
-}
-
-/// One frame of a variable-length [`OpenSessionResponse`].
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct OpenSessionResponseFrame {
-    length: u16,
-    end: FrameEnd,
-    payload: [u8; FRAME_PAYLOAD_SIZE],
-}
-
-impl OpenSessionResponseFrame {
-    fn new(bytes: &[u8], end: FrameEnd) -> Result<Self, AgentWireError> {
-        let mut payload = [0; FRAME_PAYLOAD_SIZE];
-        let length = write_payload(&mut payload, bytes)?;
-        Ok(Self {
-            length,
-            end,
-            payload,
-        })
-    }
-
-    fn bytes(&self) -> Result<&[u8], AgentWireError> {
-        read_payload(&self.payload, self.length)
-    }
-
-    /// Returns whether this frame ends one logical event.
-    #[must_use]
-    pub fn is_end(&self) -> bool {
-        self.end == FrameEnd::End
-    }
-}
-
 /// Failure returned by `agent.open_session`.
 #[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Immutable, IntoBytes, KnownLayout,
+    TryFromBytes,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum OpenSessionError {
     /// The requested session does not exist.
     SessionNotFound,
@@ -286,13 +221,14 @@ pub enum OpenSessionError {
     AlreadyOpen,
     /// The Agent runtime worker stopped.
     WorkerStopped,
-    /// A session event could not be encoded.
+    /// A session event could not be encoded into one frame.
     InvalidEvent,
 }
 
 /// RPC corresponding to `AgentRuntime::open_session`.
 pub struct OpenSession;
 
+#[rpc_dynamic]
 impl RpcMethod for OpenSession {
     const ADDRESS: &'static str = "agent.open_session";
     type Request = OpenSessionRequest;
@@ -315,7 +251,7 @@ where
         let runtime = Rc::clone(&runtime);
         let registry = registry.clone();
         async move {
-            let session = request.view()?.session();
+            let session = convert::session_from_wire(request.view()?.session);
             let (control, events) = match runtime.open_session(session).await {
                 Ok(opened) => opened,
                 Err(error) => {
@@ -324,72 +260,72 @@ where
             };
             registry.insert(session, control);
             let opened = OpenSessionResponse::Opened { session };
-            let pending = frames_from_open_session_response(&opened)
-                .map_err(|_error| RpcError::InvalidFrameState)?
-                .into();
-            Ok(open_session_stream(OpenStreamState {
-                session,
-                events,
-                registry,
-                pending,
-                finish_after_pending: false,
-            }))
+            let opened_frame = match encode_response(session, &opened) {
+                Ok(frame) => frame,
+                Err(_error) => {
+                    return Ok(RpcStream::new(stream::once(Ok(Err(
+                        OpenSessionError::InvalidEvent,
+                    )))))
+                }
+            };
+            let events = open_session_stream(events, registry, session);
+            Ok(RpcStream::new(stream::iter([Ok(Ok(opened_frame))]).chain(events)))
         }
     }
 }
 
-struct OpenStreamState {
-    session: SessionId,
+fn open_session_stream(
     events: barracuda_agent_runtime::SessionStream,
     registry: SessionRegistry,
-    pending: VecDeque<OpenSessionResponseFrame>,
-    finish_after_pending: bool,
-}
-
-fn open_session_stream(
-    state: OpenStreamState,
-) -> RpcStream<Result<OpenSessionResponseFrame, OpenSessionError>> {
-    RpcStream::new(stream::unfold(state, |mut state| async move {
-        if let Some(frame) = state.pending.pop_front() {
-            return Some((Ok(Ok(frame)), state));
-        }
-        if state.finish_after_pending {
-            return None;
-        }
-        match state.events.next().await {
-            Some(Ok(event)) => {
-                let terminal = matches!(&event, SessionEvent::Closed(_));
-                let response = OpenSessionResponse::from_event(state.session, event);
-                match frames_from_open_session_response(&response) {
-                    Ok(frames) => {
-                        state.pending = frames.into();
-                        state.finish_after_pending = terminal;
-                        if terminal {
-                            state.registry.remove(state.session);
-                        }
-                        state
-                            .pending
-                            .pop_front()
-                            .map(|frame| (Ok(Ok(frame)), state))
+    session: SessionId,
+) -> impl Stream<Item = RpcResult<Result<OpenSessionResponseFrame, OpenSessionError>>> {
+    stream::unfold(
+        (events, registry, session, false),
+        |(mut events, registry, session, terminal)| async move {
+            if terminal {
+                return None;
+            }
+            match events.next().await {
+                Some(Ok(event)) => {
+                    let terminal = matches!(&event, SessionEvent::Closed(_));
+                    if terminal {
+                        registry.remove(session);
                     }
-                    Err(_error) => {
-                        state.registry.remove(state.session);
-                        state.finish_after_pending = true;
-                        Some((Ok(Err(OpenSessionError::InvalidEvent)), state))
+                    let response = OpenSessionResponse::Event {
+                        session,
+                        event: event.into(),
+                    };
+                    match encode_response(session, &response) {
+                        Ok(frame) => Some((Ok(Ok(frame)), (events, registry, session, terminal))),
+                        Err(_error) => Some((
+                            Ok(Err(OpenSessionError::InvalidEvent)),
+                            (events, registry, session, terminal),
+                        )),
                     }
                 }
+                Some(Err(_error)) => {
+                    registry.remove(session);
+                    Some((
+                        Ok(Err(OpenSessionError::WorkerStopped)),
+                        (events, registry, session, true),
+                    ))
+                }
+                None => None,
             }
-            Some(Err(_error)) => {
-                state.registry.remove(state.session);
-                state.finish_after_pending = true;
-                Some((Ok(Err(OpenSessionError::WorkerStopped)), state))
-            }
-            None => {
-                state.registry.remove(state.session);
-                None
-            }
-        }
-    }))
+        },
+    )
+}
+
+fn encode_response(
+    session: SessionId,
+    response: &OpenSessionResponse,
+) -> Result<OpenSessionResponseFrame, OpenSessionError> {
+    let json = serde_json::to_string(response).map_err(|_error| OpenSessionError::InvalidEvent)?;
+    let json = FixedStr::new(&json).map_err(|_error| OpenSessionError::InvalidEvent)?;
+    Ok(OpenSessionResponseFrame {
+        session: convert::session_to_wire(session),
+        json,
+    })
 }
 
 fn map_open_error(error: RuntimeError) -> OpenSessionError {
@@ -405,43 +341,4 @@ fn map_open_error(error: RuntimeError) -> OpenSessionError {
         }
         _ => OpenSessionError::WorkerStopped,
     }
-}
-
-/// Encodes one logical open-session response into frames.
-pub fn frames_from_open_session_response(
-    response: &OpenSessionResponse,
-) -> Result<Vec<OpenSessionResponseFrame>, AgentWireError> {
-    let bytes = serde_json::to_vec(response)?;
-    let chunk_count = bytes.chunks(FRAME_PAYLOAD_SIZE).count();
-    bytes
-        .chunks(FRAME_PAYLOAD_SIZE)
-        .enumerate()
-        .map(|(index, chunk)| {
-            let end = if index.saturating_add(1) == chunk_count {
-                FrameEnd::End
-            } else {
-                FrameEnd::More
-            };
-            OpenSessionResponseFrame::new(chunk, end)
-        })
-        .collect()
-}
-
-/// Decodes one logical open-session response from its complete frame sequence.
-pub fn open_session_response_from_frames(
-    frames: impl IntoIterator<Item = OpenSessionResponseFrame>,
-) -> Result<OpenSessionResponse, AgentWireError> {
-    let mut bytes = Vec::new();
-    let mut ended = false;
-    for frame in frames {
-        if ended {
-            return Err(AgentWireError::InvalidFrame);
-        }
-        bytes.extend_from_slice(frame.bytes()?);
-        ended = frame.is_end();
-    }
-    if !ended {
-        return Err(AgentWireError::InvalidFrame);
-    }
-    Ok(serde_json::from_slice(&bytes)?)
 }

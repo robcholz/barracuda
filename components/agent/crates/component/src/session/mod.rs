@@ -3,7 +3,9 @@
 use alloc::{collections::BTreeMap, rc::Rc};
 use core::cell::RefCell;
 
-use barracuda_agent_runtime::{SessionControl, SessionControlError, SessionId};
+use barracuda_agent_runtime::{SessionControl, SessionId};
+
+pub use crate::dto::SessionRpcError;
 
 /// `SessionControl::append` RPC.
 pub mod append;
@@ -19,8 +21,6 @@ pub mod respond;
 pub mod set_permission_level;
 /// `SessionControl::set_reasoning_effort` RPC.
 pub mod set_reasoning_effort;
-
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 /// Shared registry of controls established by `agent.open_session`.
 #[derive(Clone, Default)]
@@ -46,34 +46,5 @@ impl SessionRegistry {
     /// Removes every cached session control.
     pub fn clear(&self) {
         self.0.borrow_mut().clear();
-    }
-}
-
-/// Error shared by RPCs backed by an open `SessionControl`.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub enum SessionRpcError {
-    /// `agent.open_session` has not established a control handle.
-    SessionNotOpen,
-    /// The session lease is closed.
-    SessionClosed,
-    /// The active turn is not awaiting caller input.
-    NotAwaitingInput,
-    /// The response targets a different input request.
-    InputRequestMismatch,
-    /// The Agent runtime worker stopped.
-    WorkerStopped,
-    /// A variable-length request was malformed.
-    InvalidRequest,
-}
-
-impl From<SessionControlError> for SessionRpcError {
-    fn from(error: SessionControlError) -> Self {
-        match error {
-            SessionControlError::SessionClosed(_) => Self::SessionClosed,
-            SessionControlError::NotAwaitingInput(_) => Self::NotAwaitingInput,
-            SessionControlError::InputRequestMismatch { .. } => Self::InputRequestMismatch,
-            SessionControlError::WorkerStopped => Self::WorkerStopped,
-        }
     }
 }

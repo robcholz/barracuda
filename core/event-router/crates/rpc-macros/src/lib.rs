@@ -60,7 +60,7 @@ pub fn rpc_dynamic(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as syn::ItemImpl);
     let rpc = rpc_crate();
 
-    let Some(name) = request_type_name(&input) else {
+    let Some(request_type) = request_type_name(&input) else {
         return syn::Error::new_spanned(
             &input,
             "#[rpc_dynamic] requires an `impl RpcMethod` block with a `type Request = ...;` item",
@@ -69,25 +69,40 @@ pub fn rpc_dynamic(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     };
 
-    let file = LitStr::new(&format!("{name}.json"), proc_macro2::Span::call_site());
-    let dynamic: ImplItem = parse_quote! {
-        #[allow(unexpected_cfgs)]
-        fn dynamic() -> ::core::option::Option<#rpc::Dynamic> {
-            #[cfg(rpc_schema_baked)]
-            const SCHEMA: ::core::option::Option<&'static str> =
-                ::core::option::Option::Some(::core::include_str!(::core::concat!(
-                    ::core::env!("OUT_DIR"),
-                    "/",
-                    #file
-                )));
-            #[cfg(not(rpc_schema_baked))]
-            const SCHEMA: ::core::option::Option<&'static str> =
-                ::core::option::Option::None;
-            ::core::option::Option::Some(#rpc::Dynamic::new(
-                #rpc::JsonCodec::of::<Self>(),
-                #rpc::WireSupport::of::<Self>(),
-                SCHEMA,
-            ))
+    let dynamic: ImplItem = if request_type.is_unit {
+        parse_quote! {
+            fn dynamic() -> ::core::option::Option<#rpc::Dynamic> {
+                ::core::option::Option::Some(#rpc::Dynamic::new(
+                    #rpc::JsonCodec::of::<Self>(),
+                    #rpc::WireSupport::of::<Self>(),
+                    ::core::option::Option::None,
+                ))
+            }
+        }
+    } else {
+        let file = LitStr::new(
+            &format!("{}.json", request_type.schema_name),
+            proc_macro2::Span::call_site(),
+        );
+        parse_quote! {
+            #[allow(unexpected_cfgs)]
+            fn dynamic() -> ::core::option::Option<#rpc::Dynamic> {
+                #[cfg(rpc_schema_baked)]
+                const SCHEMA: ::core::option::Option<&'static str> =
+                    ::core::option::Option::Some(::core::include_str!(::core::concat!(
+                        ::core::env!("OUT_DIR"),
+                        "/",
+                        #file
+                    )));
+                #[cfg(not(rpc_schema_baked))]
+                const SCHEMA: ::core::option::Option<&'static str> =
+                    ::core::option::Option::None;
+                ::core::option::Option::Some(#rpc::Dynamic::new(
+                    #rpc::JsonCodec::of::<Self>(),
+                    #rpc::WireSupport::of::<Self>(),
+                    SCHEMA,
+                ))
+            }
         }
     };
     input.items.push(dynamic);
@@ -249,8 +264,17 @@ pub fn derive_rpc_wire(item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// Extracts the final path segment of the `type Request = ...;` associated type.
-fn request_type_name(input: &syn::ItemImpl) -> Option<String> {
+/// How the macro classifies the `type Request = ...;` associated type.
+struct RequestType {
+    /// Final path segment of the request type, used for the baked schema file.
+    schema_name: String,
+    /// The request is the unit type `()`, which has no schema to bake.
+    is_unit: bool,
+}
+
+/// Classifies the `type Request = ...;` associated type of an `impl RpcMethod`
+/// block.
+fn request_type_name(input: &syn::ItemImpl) -> Option<RequestType> {
     input.items.iter().find_map(|item| {
         let ImplItem::Type(assoc) = item else {
             return None;
@@ -258,9 +282,16 @@ fn request_type_name(input: &syn::ItemImpl) -> Option<String> {
         if assoc.ident != "Request" {
             return None;
         }
-        let Type::Path(path) = &assoc.ty else {
-            return None;
-        };
-        path.path.segments.last().map(|s| s.ident.to_string())
+        match &assoc.ty {
+            Type::Path(path) => path.path.segments.last().map(|segment| RequestType {
+                schema_name: segment.ident.to_string(),
+                is_unit: false,
+            }),
+            Type::Tuple(tuple) if tuple.elems.is_empty() => Some(RequestType {
+                schema_name: String::from("()"),
+                is_unit: true,
+            }),
+            _ => None,
+        }
     })
 }

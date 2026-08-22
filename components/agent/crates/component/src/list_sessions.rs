@@ -1,40 +1,23 @@
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 
-use barracuda_agent_runtime::{AgentRuntime, SessionId};
-use barracuda_event_router::{RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming, Unary};
+use barracuda_agent_runtime::AgentRuntime;
+use barracuda_event_router::{
+    rpc_dynamic, RpcHandler, RpcMethod, RpcStream, Streaming, Unary,
+};
 use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
 use futures_lite::stream;
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use crate::dto::SessionIdDto;
+use crate::convert;
+use crate::dto::{SessionIdDto, MAX_SESSIONS_PER_LIST_ITEM};
 
-/// One response item from `AgentRuntime::list_sessions`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct ListSessionsResponse {
-    session: SessionIdDto,
-}
-
-impl From<SessionId> for ListSessionsResponse {
-    fn from(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-}
-
-impl ListSessionsResponse {
-    /// Returns the Agent domain Session id.
-    #[must_use]
-    pub fn session(self) -> SessionId {
-        self.session.into()
-    }
-}
+pub use crate::dto::ListSessionsResponse;
 
 /// RPC corresponding to `AgentRuntime::list_sessions`.
 pub struct ListSessions;
 
+#[rpc_dynamic]
 impl RpcMethod for ListSessions {
     const ADDRESS: &'static str = "agent.list_sessions";
     type Request = ();
@@ -55,12 +38,25 @@ where
     move |_context, _request| {
         let runtime = Rc::clone(&runtime);
         async move {
-            let responses = runtime
-                .list_sessions()
-                .await
-                .into_iter()
-                .map(|session| RpcResult::Ok(Ok(ListSessionsResponse::from(session))));
-            Ok(RpcStream::new(stream::iter(responses)))
+            let sessions = runtime.list_sessions().await;
+            let mut items = Vec::new();
+            for chunk in sessions.chunks(MAX_SESSIONS_PER_LIST_ITEM) {
+                let mut item = [SessionIdDto::new(0); MAX_SESSIONS_PER_LIST_ITEM];
+                for (slot, session) in item.iter_mut().zip(chunk) {
+                    *slot = convert::session_to_wire(*session);
+                }
+                items.push(Ok(Ok(ListSessionsResponse {
+                    count: u32::try_from(chunk.len()).unwrap_or(u32::MAX),
+                    sessions: item,
+                })));
+            }
+            if items.is_empty() {
+                items.push(Ok(Ok(ListSessionsResponse {
+                    count: 0,
+                    sessions: [SessionIdDto::new(0); MAX_SESSIONS_PER_LIST_ITEM],
+                })));
+            }
+            Ok(RpcStream::new(stream::iter(items)))
         }
     }
 }

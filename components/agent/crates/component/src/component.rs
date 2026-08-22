@@ -61,12 +61,12 @@ where
         context
             .register_rpc::<DeleteSession, _>(delete_session_handler(Rc::clone(&self.runtime)))?;
 
-        context.register_rpc::<session::append::Append, _>(session::append::append_handler(
-            self.sessions.clone(),
-        ))?;
-        context.register_rpc::<session::respond::Respond, _>(session::respond::respond_handler(
-            self.sessions.clone(),
-        ))?;
+        context.register_rpc::<session::append::Append, _>(
+            session::append::append_handler(self.sessions.clone()),
+        )?;
+        context.register_rpc::<session::respond::Respond, _>(
+            session::respond::respond_handler(self.sessions.clone()),
+        )?;
         context.register_rpc::<session::set_reasoning_effort::SetReasoningEffort, _>(
             session::set_reasoning_effort::set_reasoning_effort_handler(self.sessions.clone()),
         )?;

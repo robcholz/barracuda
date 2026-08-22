@@ -1,35 +1,15 @@
-use barracuda_agent_runtime::SessionId;
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, Unary};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
+use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
 
-use crate::dto::SessionIdDto;
+use crate::convert;
 
 use super::{SessionRegistry, SessionRpcError};
 
-/// Request corresponding to `SessionControl::close`.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct CloseRequest {
-    session: SessionIdDto,
-}
-
-impl CloseRequest {
-    /// Creates a close request for `session`.
-    #[must_use]
-    pub fn new(session: SessionId) -> Self {
-        Self {
-            session: session.into(),
-        }
-    }
-
-    pub(crate) fn session(self) -> SessionId {
-        self.session.into()
-    }
-}
+pub use crate::dto::CloseRequest;
 
 /// RPC corresponding to `SessionControl::close`.
 pub struct Close;
 
+#[rpc_dynamic]
 impl RpcMethod for Close {
     const ADDRESS: &'static str = "session.close";
     type Request = CloseRequest;
@@ -44,11 +24,11 @@ pub fn close_handler(registry: SessionRegistry) -> impl RpcHandler<Close> {
     move |_context, request: RpcFrame<CloseRequest>| {
         let registry = registry.clone();
         async move {
-            let session = request.view()?.session();
+            let session = convert::session_from_wire(request.view()?.session);
             let Some(control) = registry.get(session) else {
                 return Ok(Err(SessionRpcError::SessionNotOpen));
             };
-            let result = control.close().await.map_err(Into::into);
+            let result = control.close().await.map_err(convert::session_error_from_control);
             if result.is_ok() {
                 registry.remove(session);
             }

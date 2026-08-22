@@ -4,7 +4,7 @@ use barracuda_agent_component::delete_session::{
     delete_session_handler, DeleteSession, DeleteSessionError, DeleteSessionRequest,
 };
 use barracuda_agent_component::link_api::{
-    link_api_handler, LinkApi, LinkApiError, LinkApiRequestFrame,
+    link_api_handler, LinkApi, LinkApiError, LinkApiRequest,
 };
 use barracuda_agent_component::list_sessions::{
     list_sessions_handler, ListSessions, ListSessionsResponse,
@@ -47,7 +47,7 @@ fn runtime_rpcs_are_exposed_at_the_component_root() {
     let _ = open_session_handler::<MemFs, ScriptedStack>;
     let _ = delete_session_handler::<MemFs, ScriptedStack>;
     assert_eq!(LinkApi::ADDRESS, "agent.link_api");
-    assert_method::<LinkApi, LinkApiRequestFrame, (), LinkApiError, Streaming, Unary>();
+    assert_method::<LinkApi, LinkApiRequest, (), LinkApiError, Unary, Unary>();
 
     assert_eq!(NewSession::ADDRESS, "agent.new_session");
     assert_method::<NewSession, NewSessionRequest, NewSessionResponse, NewSessionError, Unary, Unary>(
