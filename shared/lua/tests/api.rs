@@ -2,6 +2,26 @@ use barracuda_lua::{
     Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Result, Table, UserData,
     UserDataHandle, UserDataMethods, Variadic,
 };
+
+#[test]
+fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let sandboxed: bool = lua
+        .load(
+            "return _G == _ENV and package == nil and io == nil and os == nil \
+             and debug == nil and load == nil and loadfile == nil and dofile == nil \
+             and collectgarbage == nil and warn == nil and print == nil \
+             and getmetatable == nil and setmetatable == nil \
+             and rawget == nil and rawset == nil and rawlen == nil and rawequal == nil \
+             and not pcall(require, '_G') and not pcall(require, 'package') \
+             and type(require) == 'function' and type(pcall) == 'function' \
+             and type(tostring) == 'function' and type(select) == 'function'",
+        )
+        .eval()?;
+
+    assert!(sandboxed);
+    Ok(())
+}
 use core::{
     cell::Cell,
     future::{Future, pending},
@@ -147,24 +167,18 @@ fn registers_a_lazy_require_only_library() -> Result<()> {
         Ok(())
     })?;
 
-    let before: (bool, bool, bool) = lua
-        .load(
-            "return native == nil, package.loaded.native == nil, \
-             type(package.preload.native) == 'function'",
-        )
-        .eval()?;
-    assert_eq!(before, (true, true, true));
+    let before: (bool, bool) = lua.load("return native == nil, package == nil").eval()?;
+    assert_eq!(before, (true, true));
 
-    let result: (bool, bool, String, i64) = futures_lite::future::block_on(
+    let result: (bool, String, i64) = futures_lite::future::block_on(
         lua.load(
             "local first = require('native'); \
              local second = require('native'); \
-             return first == second, package.loaded.native == first, \
-                    first.name, first.double(first.add(20, 1))",
+             return first == second, first.name, first.double(first.add(20, 1))",
         )
         .eval_async(),
     )?;
-    assert_eq!(result, (true, true, "barracuda".into(), 42));
+    assert_eq!(result, (true, "barracuda".into(), 42));
     Ok(())
 }
 
@@ -333,7 +347,7 @@ fn exposes_typed_rust_userdata_with_methods_and_drop() -> Result<()> {
     assert_eq!(result, (10, 15, "counter:15".into()));
     assert!(!dropped.get());
 
-    lua.load("collectgarbage('collect')").exec()?;
+    drop(lua);
     assert!(dropped.get());
     Ok(())
 }
@@ -983,15 +997,6 @@ fn userdata_checks_self_type_equality_and_runtime_borrows() -> Result<()> {
         assert_eq!(error.kind(), ErrorKind::Runtime);
     }
 
-    for source in [
-        "local c = counter(1); getmetatable(c).__eq()",
-        "local c = counter(1); getmetatable(c).__close()",
-    ] {
-        let error = lua.load(source).exec().unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Runtime);
-    }
-    lua.load("local c = counter(1); getmetatable(c).__gc()")
-        .exec()?;
     Ok(())
 }
 

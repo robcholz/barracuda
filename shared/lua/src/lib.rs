@@ -1,9 +1,10 @@
 //! A small `no_std` Lua 5.4 wrapper built on the project's `lunka` fork.
 //!
-//! The public surface is deliberately narrow: register require-only libraries,
-//! bind sync or async Rust functions, exchange typed tables and functions, expose
-//! Rust userdata, and evaluate chunks. Async execution is executor-neutral and
-//! only requires polling the returned future.
+//! `Lua::new()` always creates an allowlist sandbox; there is no full-library or
+//! unsandboxed construction mode. The public surface is deliberately narrow:
+//! register require-only libraries, bind sync or async Rust functions, exchange
+//! typed tables and functions, expose Rust userdata, and evaluate chunks. Async
+//! execution is executor-neutral and only requires polling the returned future.
 //!
 //! ```
 //! use barracuda_lua::{Lua, Result};

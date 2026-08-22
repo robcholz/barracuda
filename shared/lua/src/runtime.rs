@@ -9,13 +9,14 @@ use core::{
 };
 
 use lunka::Thread;
-use lunka::cdef::auxlib::luaL_loadbufferx;
+use lunka::cdef::auxlib::{LOADED_TABLE, PRELOAD_TABLE, luaL_loadbufferx, luaL_ref};
 use lunka::cdef::stdlibs::{luaopen_base, luaopen_package};
 use lunka::cdef::{
-    DEFAULT_EXTRA_SPACE, lua_CFunction, lua_KContext, lua_State, lua_getextraspace, lua_getfield,
-    lua_getglobal, lua_gettop, lua_newthread, lua_pop, lua_pushcclosure, lua_pushlightuserdata,
-    lua_pushlstring, lua_pushvalue, lua_remove, lua_resetthread, lua_resume, lua_setfield,
-    lua_setglobal, lua_settop, lua_tolstring, lua_touserdata, lua_xmove,
+    DEFAULT_EXTRA_SPACE, REGISTRY_GLOBALS, REGISTRY_INDEX, lua_CFunction, lua_KContext, lua_State,
+    lua_createtable, lua_getextraspace, lua_getfield, lua_getglobal, lua_gettop, lua_newthread,
+    lua_pop, lua_pushcclosure, lua_pushlightuserdata, lua_pushlstring, lua_pushnil, lua_pushvalue,
+    lua_rawgeti, lua_rawseti, lua_remove, lua_resetthread, lua_resume, lua_setfield, lua_settop,
+    lua_setupvalue, lua_tolstring, lua_touserdata, lua_xmove,
 };
 
 use crate::{
@@ -40,9 +41,65 @@ pub(crate) struct Task {
 static ASYNC_MARKER: u8 = 0xA5;
 static ERROR_MARKER: u8 = 0xE1;
 
+const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 13] = [
+    c"assert",
+    c"error",
+    c"ipairs",
+    c"next",
+    c"pairs",
+    c"pcall",
+    c"require",
+    c"select",
+    c"tonumber",
+    c"tostring",
+    c"type",
+    c"xpcall",
+    c"_VERSION",
+];
+
 pub struct Lua {
     raw: lunka::Lua,
     state: Rc<State>,
+    environment: c_int,
+}
+
+unsafe fn retain_preload_searcher(state: *mut lua_State) {
+    unsafe {
+        lua_getglobal(state, c"package".as_ptr());
+        lua_getfield(state, -1, c"searchers".as_ptr());
+        lua_createtable(state, 1, 0);
+        lua_rawgeti(state, -2, 1);
+        lua_rawseti(state, -2, 1);
+        lua_setfield(state, -3, c"searchers".as_ptr());
+        lua_pop(state, 2);
+    }
+}
+
+unsafe fn create_environment(state: *mut lua_State) -> c_int {
+    unsafe {
+        lua_createtable(state, 0, 14);
+        for name in ENVIRONMENT_GLOBALS {
+            lua_getglobal(state, name.as_ptr());
+            lua_setfield(state, -2, name.as_ptr());
+        }
+        lua_pushvalue(state, -1);
+        lua_setfield(state, -2, c"_G".as_ptr());
+        luaL_ref(state, REGISTRY_INDEX)
+    }
+}
+
+unsafe fn discard_bootstrap_environment(state: *mut lua_State, environment: c_int) {
+    unsafe {
+        lua_getfield(state, REGISTRY_INDEX, LOADED_TABLE.as_ptr());
+        lua_pushnil(state);
+        lua_setfield(state, -2, c"_G".as_ptr());
+        lua_pushnil(state);
+        lua_setfield(state, -2, c"package".as_ptr());
+        lua_pop(state, 1);
+
+        lua_rawgeti(state, REGISTRY_INDEX, environment.into());
+        lua_rawseti(state, REGISTRY_INDEX, REGISTRY_GLOBALS);
+    }
 }
 
 pub(crate) struct State {
@@ -104,6 +161,11 @@ impl Lua {
             lunka::cdef::auxlib::luaL_requiref(state, c"package".as_ptr(), luaopen_package, 1);
             lua_pop(state, 1);
         }
+        let environment = unsafe {
+            retain_preload_searcher(state);
+            create_environment(state)
+        };
+        unsafe { discard_bootstrap_environment(state, environment) };
         let shared = Rc::new(State {
             main: Cell::new(state),
             callbacks: RefCell::new(Vec::new()),
@@ -112,7 +174,11 @@ impl Lua {
             let slot = lua_getextraspace(state, DEFAULT_EXTRA_SPACE).cast::<*const State>();
             slot.write(Rc::as_ptr(&shared));
         }
-        Ok(Self { raw, state: shared })
+        Ok(Self {
+            raw,
+            state: shared,
+            environment,
+        })
     }
 
     pub fn register<A, R, F>(&mut self, name: &str, function: F) -> Result<()>
@@ -123,9 +189,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_sync(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_async<A, R, F, Fut>(&mut self, name: &str, function: F) -> Result<()>
@@ -137,9 +201,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_async(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_with<A, R, F>(&mut self, name: &str, function: F) -> Result<()>
@@ -150,9 +212,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_sync_with(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_async_with<A, R, F, Fut>(&mut self, name: &str, function: F) -> Result<()>
@@ -164,16 +224,19 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_async_with(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn set<V: IntoLua>(&mut self, name: &str, value: V) -> Result<()> {
         let name = lua_name(name)?;
-        value.push_to_lua(&mut self.raw)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        let initial_top = self.raw.top();
+        self.push_environment();
+        let result = value.push_to_lua(&mut self.raw);
+        if result.is_ok() {
+            unsafe { lua_setfield(self.raw.as_ptr(), -2, name.as_ptr()) };
+        }
+        unsafe { lua_settop(self.raw.as_ptr(), initial_top) };
+        result
     }
 
     pub fn register_lib<F>(&mut self, name: &str, configure: F) -> Result<()>
@@ -197,8 +260,7 @@ impl Lua {
 
         let state = self.raw.as_ptr();
         unsafe {
-            lua_getglobal(state, c"package".as_ptr());
-            lua_getfield(state, -1, c"preload".as_ptr());
+            lua_getfield(state, REGISTRY_INDEX, PRELOAD_TABLE.as_ptr());
             lua_pushvalue(state, table_index);
             lua_pushcclosure(state, preload_loader as lua_CFunction, 1);
             lua_setfield(state, -2, name.as_ptr());
@@ -301,6 +363,25 @@ impl Lua {
 
     fn push_callback(&mut self, index: usize) -> Result<()> {
         self.state.push_callback(&mut self.raw, index)
+    }
+
+    fn push_environment(&mut self) {
+        unsafe {
+            lua_rawgeti(self.raw.as_ptr(), REGISTRY_INDEX, self.environment.into());
+        }
+    }
+
+    fn set_environment_callback(&mut self, name: &CString, index: usize) -> Result<()> {
+        let initial_top = self.raw.top();
+        self.push_environment();
+        let result = self.push_callback(index);
+        if result.is_ok() {
+            unsafe { lua_setfield(self.raw.as_ptr(), -2, name.as_ptr()) };
+        } else {
+            self.state.truncate_callbacks(index);
+        }
+        unsafe { lua_settop(self.raw.as_ptr(), initial_top) };
+        result
     }
 
     fn start<R: FromLuaMulti>(&mut self, code: &[u8]) -> Execution<'_, R> {
@@ -493,6 +574,11 @@ impl<R> ExecutionState<R> {
             let error = unsafe { take_lua_error(state, ErrorKind::Load) };
             unsafe { lua_settop(state, main_top) };
             return Self::failed(main_top, error, convert);
+        }
+
+        lua.push_environment();
+        if unsafe { lua_setupvalue(state, -2, 1) }.is_null() {
+            unsafe { lua_pop(state, 1) };
         }
 
         let coroutine = unsafe { lua_newthread(state) };
@@ -822,8 +908,8 @@ mod tests {
     use lunka::{
         Thread,
         cdef::{
-            DEFAULT_EXTRA_SPACE, lua_CFunction, lua_State, lua_getextraspace, lua_pushcclosure,
-            lua_setglobal, lua_settop,
+            DEFAULT_EXTRA_SPACE, lua_CFunction, lua_State, lua_getextraspace, lua_pop,
+            lua_pushcclosure, lua_setfield, lua_settop,
         },
     };
 
@@ -843,9 +929,11 @@ mod tests {
     #[test]
     fn execution_rejects_unmanaged_lua_yields() {
         let mut lua = super::Lua::new().unwrap();
+        lua.push_environment();
         unsafe {
             lua_pushcclosure(lua.raw.as_ptr(), raw_yield as lua_CFunction, 0);
-            lua_setglobal(lua.raw.as_ptr(), c"raw_yield".as_ptr());
+            lua_setfield(lua.raw.as_ptr(), -2, c"raw_yield".as_ptr());
+            lua_pop(lua.raw.as_ptr(), 1);
         }
         let mut execution = lua.load("raw_yield()").exec_async();
         let result = Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop()));
@@ -857,9 +945,11 @@ mod tests {
     #[test]
     fn function_call_rejects_unmanaged_lua_yields() {
         let mut lua = super::Lua::new().unwrap();
+        lua.push_environment();
         unsafe {
             lua_pushcclosure(lua.raw.as_ptr(), raw_yield as lua_CFunction, 0);
-            lua_setglobal(lua.raw.as_ptr(), c"raw_yield".as_ptr());
+            lua_setfield(lua.raw.as_ptr(), -2, c"raw_yield".as_ptr());
+            lua_pop(lua.raw.as_ptr(), 1);
         }
         let callback: crate::Function = lua
             .load("return function() raw_yield() end")
