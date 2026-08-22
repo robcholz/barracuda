@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-time-wire"
+version = "0.1.0"
+edition = "2024"
+description = "Wire DTOs and request schema registration for the Barracuda Time Component"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+schema = ["dep:barracuda-rpc-schema", "dep:schemars"]
+
+[dependencies]
+barracuda-rpc = { path = "../../../../core/event-router/crates/rpc" }
+barracuda-rpc-schema = { path = "../../../../core/event-router/crates/rpc-schema", optional = true }
+getset = "0.1"
+schemars = { version = "0.8", optional = true }
+serde = { version = "1", default-features = false, features = ["derive"] }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

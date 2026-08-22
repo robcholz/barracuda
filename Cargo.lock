@@ -751,6 +751,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-time-component"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-net",
+ "barracuda-time-wire",
+ "embassy-sync",
+ "embassy-time",
+ "futures-lite",
+ "getset",
+ "serde_json",
+ "sntpc",
+ "static_cell",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
+name = "barracuda-time-wire"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "barracuda-rpc-schema",
+ "getset",
+ "schemars",
+ "serde",
+ "zerocopy",
+]
+
+[[package]]
 name = "barracuda-vm"
 version = "0.1.0"
 dependencies = [
@@ -3220,6 +3250,15 @@ name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
+
+[[package]]
+name = "sntpc"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "294278b134cd7d06d7f22eca970aebe38707864c080f66547f9ad26327534af3"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "socket2"

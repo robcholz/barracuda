@@ -17,4 +17,4 @@ mod tokio_stack;
 #[cfg(feature = "tokio")]
 pub use tokio_stack::TokioStack;
 
-pub use embedded_nal_async::{Dns, TcpConnect};
+pub use embedded_nal_async::{AddrType, ConnectedUdp, Dns, TcpConnect, UdpStack, UnconnectedUdp};
