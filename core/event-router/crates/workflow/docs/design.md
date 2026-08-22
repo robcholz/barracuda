@@ -12,6 +12,28 @@ the previous step's response through its **link**. Workflows are loaded through
 the durable `workflow.load` control RPC or restored from disk at startup; a
 persistence `index` file is authoritative on restart.
 
+## Event matching
+
+Every Event has a stable type-level Event ID and may carry one concrete
+`Topic`. A Workflow always matches its `match.event` glob. When
+`match.topic` is present, the Event must also carry that exact Topic; when it
+is absent, the Workflow accepts the Event regardless of whether the producer
+supplied a Topic. Every matching Workflow receives the Event.
+
+Topics contain 1–16 ASCII letters, digits, `_`, `-`, or `.`. The same concrete
+Topic type is used by the Event and Workflow definition, so a configured Topic
+is always an exact selector. Omitting `match.topic` selects every Topic for the
+matched Event ID.
+
+`internal.emit` remains a single streaming ingress RPC. Its frame order is:
+
+1. required Event header;
+2. optional fixed Topic metadata frame;
+3. one or more opaque payload frames per Event message.
+
+The receiver validates and removes Topic metadata before forwarding payload
+bytes to matched Workflow ingress steps.
+
 ## Links
 
 A **link** is the edge contract between two consecutive steps: how the previous

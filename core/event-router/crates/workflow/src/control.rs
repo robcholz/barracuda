@@ -17,7 +17,7 @@ use barracuda_rpc::{
 };
 
 use crate::definition::WorkflowDefinitionError;
-use crate::{Rule, WorkflowDefinition, WorkflowId, WorkflowStep};
+use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
 
 /// Receiver-side rejection returned by a Workflow control RPC.
 #[repr(u8)]
@@ -47,6 +47,8 @@ pub enum WorkflowControlRejection {
     UnknownMethod,
     /// A step's link violated a validation rule.
     InvalidLink,
+    /// The JSON contained an invalid Event topic.
+    InvalidTopic,
 }
 
 /// Failure returned by [`WorkflowClient`].
@@ -274,6 +276,8 @@ struct WorkflowDocument {
 #[serde(deny_unknown_fields)]
 struct WorkflowMatchDocument {
     event: String,
+    #[serde(default)]
+    topic: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -298,6 +302,12 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)?;
         let event = Rule::try_from(document.matcher.event)
             .map_err(|_error| WorkflowControlRejection::InvalidRule)?;
+        let topic = document
+            .matcher
+            .topic
+            .map(Topic::try_from)
+            .transpose()
+            .map_err(|_error| WorkflowControlRejection::InvalidTopic)?;
         let steps = document
             .steps
             .into_iter()
@@ -307,7 +317,11 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
                 Ok(WorkflowStep::new(address, step.arguments))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        WorkflowDefinition::new(id, event, steps).map_err(|error| match error {
+        let definition = match topic {
+            Some(topic) => WorkflowDefinition::with_topic(id, event, topic, steps),
+            None => WorkflowDefinition::new(id, event, steps),
+        };
+        definition.map_err(|error| match error {
             WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
             WorkflowDefinitionError::FirstStepHasArguments
             | WorkflowDefinitionError::InvalidReference(_) => {
@@ -384,6 +398,7 @@ mod tests {
 
         assert_eq!(definition.id().as_str(), "gateway-to-agent");
         assert_eq!(definition.event().as_str(), "gateway.*");
+        assert!(definition.topic().is_none());
         assert_eq!(
             definition
                 .steps()
@@ -392,6 +407,47 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["adapter.gateway", "agent.run"]
         );
+    }
+
+    #[test]
+    fn workflow_json_accepts_an_optional_exact_topic() {
+        let request = WorkflowJsonRequest::try_from(
+            br#"{
+                "id":"morning-alarm",
+                "match":{"event":"scheduler.triggered","topic":"morning"},
+                "steps":[{"call":"alarm.ring"}]
+            }"#
+            .to_vec(),
+        )
+        .expect("non-empty JSON");
+
+        let definition = request.definition().expect("valid Workflow JSON");
+        assert_eq!(
+            definition.topic().map(crate::Topic::as_str),
+            Some("morning")
+        );
+
+        let invalid = WorkflowJsonRequest::try_from(
+            br#"{"id":"bad","match":{"event":"scheduler.triggered","topic":"topic-name-is-over-16"},"steps":[{"call":"alarm.ring"}]}"#
+                .to_vec(),
+        )
+        .expect("non-empty JSON")
+        .definition();
+        assert!(matches!(
+            invalid,
+            Err(WorkflowControlRejection::InvalidTopic)
+        ));
+
+        let wildcard = WorkflowJsonRequest::try_from(
+            br#"{"id":"wildcard","match":{"event":"scheduler.triggered","topic":"*"},"steps":[{"call":"alarm.ring"}]}"#
+                .to_vec(),
+        )
+        .expect("non-empty JSON")
+        .definition();
+        assert!(matches!(
+            wildcard,
+            Err(WorkflowControlRejection::InvalidTopic)
+        ));
     }
 
     #[test]

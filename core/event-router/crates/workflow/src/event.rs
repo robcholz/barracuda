@@ -11,7 +11,7 @@ use barracuda_rpc::{
     RpcClient, RpcError, RpcInputMode, RpcMessage, RpcResult, RpcStream, Streaming, Unary,
 };
 
-use super::ingress;
+use super::{ingress, Topic};
 
 /// A validated identifier for one Event type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -188,6 +188,10 @@ pub enum EmitRejection {
     InvalidUnaryMessageCount,
     /// Matched Workflow inputs are unavailable or incompatible.
     DownstreamUnavailable,
+    /// Topic metadata is missing or not a valid fixed C string.
+    InvalidTopic,
+    /// The fixed Topic metadata does not fit in the Router frame.
+    TopicTooLong,
     /// Error code is not recognized by the ingress protocol.
     Unknown,
 }
@@ -260,7 +264,22 @@ impl<const M: usize> EventEmitter<M> {
     where
         E: Event,
     {
-        ingress::emit::<E, M>(&self.rpc, input).await
+        ingress::emit::<E, M>(&self.rpc, None, input).await
+    }
+
+    /// Emits one typed Event with a topic used by optional Workflow filtering.
+    ///
+    /// Workflows without `match.topic` still receive this Event. Workflows with
+    /// `match.topic` receive it only when their exact topic matches `topic`.
+    pub async fn emit_to<E>(
+        &self,
+        topic: &Topic,
+        input: <E::Input as RpcInputMode<E::Message>>::ClientInput,
+    ) -> Result<(), EmitError>
+    where
+        E: Event,
+    {
+        ingress::emit::<E, M>(&self.rpc, Some(topic), input).await
     }
 }
 

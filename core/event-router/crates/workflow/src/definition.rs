@@ -9,7 +9,7 @@ use getset::Getters;
 use serde_json::Value;
 
 use super::link::{classify, LinkError};
-use super::Rule;
+use super::{Rule, Topic};
 
 /// Stable identifier of one Workflow definition.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -114,6 +114,7 @@ pub struct WorkflowDefinition {
     /// Event ID rule that starts this Workflow.
     #[getset(get = "pub")]
     event: Rule,
+    topic: Option<Topic>,
     steps: Vec<WorkflowStep>,
 }
 
@@ -136,6 +137,25 @@ impl WorkflowDefinition {
         event: Rule,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
+        Self::from_parts(id, event, None, steps)
+    }
+
+    /// Creates a Workflow whose Event match also requires a matching topic.
+    pub fn with_topic(
+        id: WorkflowId,
+        event: Rule,
+        topic: Topic,
+        steps: Vec<WorkflowStep>,
+    ) -> Result<Self, WorkflowDefinitionError> {
+        Self::from_parts(id, event, Some(topic), steps)
+    }
+
+    fn from_parts(
+        id: WorkflowId,
+        event: Rule,
+        topic: Option<Topic>,
+        steps: Vec<WorkflowStep>,
+    ) -> Result<Self, WorkflowDefinitionError> {
         let Some((first, rest)) = steps.split_first() else {
             return Err(WorkflowDefinitionError::EmptySteps);
         };
@@ -145,7 +165,18 @@ impl WorkflowDefinition {
         for step in rest {
             classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference)?;
         }
-        Ok(Self { id, event, steps })
+        Ok(Self {
+            id,
+            event,
+            topic,
+            steps,
+        })
+    }
+
+    /// Returns the optional Event topic rule.
+    #[must_use]
+    pub fn topic(&self) -> Option<&Topic> {
+        self.topic.as_ref()
     }
 
     /// Returns the ordered RPC call flow.

@@ -20,7 +20,7 @@ use getset::Getters;
 use serde_json::Value;
 
 use super::{
-    EventId, WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
+    EventId, Topic, WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
     WorkflowStep, WorkflowUnloadError,
 };
 
@@ -162,12 +162,17 @@ impl RuntimeShared {
         Ok(state.definitions.remove(index))
     }
 
-    fn matching_plans(&self, event_id: &EventId) -> Vec<WorkflowPlan> {
+    fn matching_plans(&self, event_id: &EventId, topic: Option<&Topic>) -> Vec<WorkflowPlan> {
         self.state
             .borrow()
             .definitions
             .iter()
-            .filter(|definition| definition.event().matches(event_id))
+            .filter(|definition| {
+                definition.event().matches(event_id)
+                    && definition
+                        .topic()
+                        .is_none_or(|required| topic == Some(required))
+            })
             .map(|definition| WorkflowPlan {
                 id: definition.id().clone(),
                 steps: definition.steps().to_vec(),
@@ -867,7 +872,7 @@ async fn handle_emit<const M: usize>(
         Ok(request) => request,
         Err(rejection) => return Ok(Err(rejection)),
     };
-    let plans = shared.matching_plans(request.header().event_id());
+    let plans = shared.matching_plans(request.header().event_id(), request.header().topic());
     if plans.is_empty() {
         return request.discard().await;
     }
@@ -924,8 +929,8 @@ mod tests {
 
     use super::WorkflowRuntime;
     use crate::{
-        EmitError, EmitRejection, Event, EventEmitter, Rule, WorkflowDefinition, WorkflowId,
-        WorkflowLoadError, WorkflowStep, WorkflowUnloadError,
+        EmitError, EmitRejection, Event, EventEmitter, EventId, Rule, Topic, WorkflowDefinition,
+        WorkflowId, WorkflowLoadError, WorkflowStep, WorkflowUnloadError,
     };
     use barracuda_rpc::{
         RpcAddress, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcStream, Streaming, Unary,
@@ -1013,6 +1018,37 @@ mod tests {
             control.unload(&WorkflowId::try_from("gateway").expect("valid Workflow ID")),
             Err(WorkflowUnloadError::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn runtime_matches_event_and_optional_topic_together() {
+        let runtime = WorkflowRuntime::new();
+        let control = runtime.control();
+        control
+            .load(definition("broad", "scheduler.triggered", &["alarm.all"]))
+            .expect("load topic-independent Workflow");
+        control
+            .load(
+                WorkflowDefinition::with_topic(
+                    WorkflowId::try_from("morning").expect("valid Workflow ID"),
+                    rule("scheduler.triggered"),
+                    Topic::try_from("morning.weekday").expect("valid topic"),
+                    alloc::vec![WorkflowStep::new(address("alarm.morning"), None)],
+                )
+                .expect("valid topic Workflow"),
+            )
+            .expect("load topic Workflow");
+
+        let event = EventId::try_from("scheduler.triggered").expect("valid Event ID");
+        let morning = Topic::try_from("morning.weekday").expect("valid topic");
+        let night = Topic::try_from("night.weekday").expect("valid topic");
+
+        assert_eq!(runtime.shared.matching_plans(&event, None).len(), 1);
+        assert_eq!(
+            runtime.shared.matching_plans(&event, Some(&morning)).len(),
+            2
+        );
+        assert_eq!(runtime.shared.matching_plans(&event, Some(&night)).len(), 1);
     }
 
     struct RuntimeEvent;
@@ -1137,16 +1173,24 @@ mod tests {
         let view = runtime.view();
         runtime
             .control()
-            .load(definition(
-                "increment",
-                RuntimeEvent::ID,
-                &[AddOne::ADDRESS, Record::ADDRESS],
-            ))
+            .load(
+                WorkflowDefinition::with_topic(
+                    WorkflowId::try_from("increment").expect("valid Workflow ID"),
+                    rule(RuntimeEvent::ID),
+                    Topic::try_from("runtime-1").expect("valid topic"),
+                    alloc::vec![
+                        WorkflowStep::new(address(AddOne::ADDRESS), None),
+                        WorkflowStep::new(address(Record::ADDRESS), None),
+                    ],
+                )
+                .expect("valid topic Workflow"),
+            )
             .expect("load Workflow");
         register_runtime(&runtime, &registry);
         runtime.start(registry.client());
         let emitter = EventEmitter::<FRAME_SIZE>::new(registry.client());
-        let mut emit = Box::pin(emitter.emit::<RuntimeEvent>(41_u32.to_le_bytes()));
+        let topic = Topic::try_from("runtime-1").expect("valid topic");
+        let mut emit = Box::pin(emitter.emit_to::<RuntimeEvent>(&topic, 41_u32.to_le_bytes()));
         let mut emit_complete = false;
         let mut polls_after_delivery = 0usize;
         block_on(poll_fn(|context| {

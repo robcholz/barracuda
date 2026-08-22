@@ -127,6 +127,16 @@ EventEmitter::<M>::new(context.rpc().clone())
     .await?;
 ```
 
+An Event may also carry a Topic. Topics contain 1–16 ASCII letters, digits,
+`_`, `-`, or `.`:
+
+```rust
+let topic = Topic::try_from("gateway-1")?;
+EventEmitter::<M>::new(context.rpc().clone())
+    .emit_to::<GatewayMessage>(&topic, [1, 2, 3, 4])
+    .await?;
+```
+
 ### Load a Workflow
 
 ```rust
@@ -140,6 +150,27 @@ client.load(r#"{
     ]
 }"#).await?;
 ```
+
+`match.topic` is an optional exact selector within the 16-byte bound:
+
+```json
+{
+  "id": "gateway-1-demo",
+  "match": {
+    "event": "gateway.message.received",
+    "topic": "gateway-1"
+  },
+  "steps": [
+    { "call": "integration.add-one" }
+  ]
+}
+```
+
+Matching is `event AND exact topic` when `topic` is present. Without `topic`,
+the Workflow keeps the previous behavior and accepts every matching Event ID,
+including Events emitted with a Topic. An Event emitted without a Topic cannot
+match a Workflow that requires one. `*` is rejected in a Topic; omitting the
+field already expresses the wildcard behavior. All matching Workflows fan out.
 
 Step 0 is the ingress step: the Event payload becomes its request. Each later
 step describes how to build its request from the previous response, based on

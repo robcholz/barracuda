@@ -13,6 +13,7 @@ mod ingress;
 mod link;
 mod rule;
 mod runtime;
+mod topic;
 
 pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
@@ -26,6 +27,7 @@ pub use rule::{Rule, RuleError};
 pub use runtime::{
     validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo,
 };
+pub use topic::{TOPIC_MAX_BYTES, Topic, TopicError};
 
 /// Runtime integration surface used by Event Router's Component adapter.
 pub mod integration {

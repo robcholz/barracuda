@@ -39,9 +39,9 @@ pub use barracuda_rpc_schema::{bake_all, register, SchemaEntry};
 pub use barracuda_workflow::{
     validate_definition, EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError,
     EventInputMode, Rule, RuleError, WorkflowClient, WorkflowControlError,
-    WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError,
-    WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError,
-    WorkflowUnloadError,
+    Topic, TopicError, WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError,
+    WorkflowExecutionError, WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo,
+    WorkflowLoadError, WorkflowUnloadError, TOPIC_MAX_BYTES,
 };
 
 /// Failure while constructing Event Router and restoring durable Workflows.
