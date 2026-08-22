@@ -1,0 +1,6 @@
+interface:
+  display_name: "Event Router Component Integration"
+  short_description: "Add an Event Router Component with RPC/event contracts"
+  default_prompt: "Use $component-integration to add a new Event Router Component with its crate layout, RPC/event docs, and wire or mapping crates."
+policy:
+  allow_implicit_invocation: true
