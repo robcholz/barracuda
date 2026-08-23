@@ -24,7 +24,7 @@ barracuda-router = { path = "crates/router" }
 barracuda-rpc = { path = "crates/rpc" }
 barracuda-rpc-schema = { path = "crates/rpc-schema", optional = true }
 barracuda-workflow = { path = "crates/workflow" }
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 
 [features]
 # Host-only: re-exports the JSON Schema bake pipeline (schemars) for `build.rs`

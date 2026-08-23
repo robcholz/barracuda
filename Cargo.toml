@@ -1,21 +1,25 @@
 [workspace]
 resolver = "2"
 members = [
-    "core/*",
+    "core/event-router",
+    "core/plugin-manager",
+    "core/system",
     "core/event-router/crates/*",
     "core/event-router/example-crates/*",
-    "components/agent/crates/*",
-    "components/agent/bench/crates/*",
-    "components/message-gateway/crates/*",
-    "components/gateway-agent-adapter",
-    "components/time/crates/*",
-    "components/scheduler",
-    "components/vm",
+    "plugins/agent/crates/*",
+    "plugins/agent/bench/crates/*",
+    "plugins/message-gateway/crates/*",
+    "plugins/gateway-agent/crates/*",
+    "plugins/time/crates/*",
+    "plugins/scheduler/crates/*",
+    "plugins/vm/crates/*",
+    "plugins/webserver/crates/*",
+    "packages/*",
     "shared/*",
-    "apps/*",
+    "apps/barracuda-cli",
 ]
 default-members = [
-    "components/agent/crates/agent",
+    "plugins/agent/crates/agent",
     "shared/fs",
 ]
 

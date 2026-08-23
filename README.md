@@ -2,16 +2,61 @@
 
 ## Layout
 
-- `components/` contains event-router components; a component may own multiple crates.
-- Every Event Router Component integration documents its emitted Events, provided
-  RPCs, wire contracts, errors, and lifecycle in that component's
-  `docs/component.md`.
-- `shared/` contains crates shared across components and applications.
-- `components/agent/bench/` contains agent measurement and profiling workloads.
+- `plugins/` contains every system-managed Plugin together with its private
+  Component and support crates under that Plugin's `crates/` directory.
+- Every Event Router Component integration documents its emitted Events,
+  provided RPCs, wire contracts, errors, and lifecycle under its owning
+  Plugin's `docs/` directory.
+- `shared/` contains crates shared across Plugins and applications.
+- `plugins/agent/bench/` contains agent measurement and profiling workloads.
 - `core/event-router/bench/profile/` contains Event Router heap/allocation
   profiling workloads.
 - `core/event-router/bench/throughput/` contains the Event Router bytes/s
   throughput benchmark and its uv-driven regression pipeline.
+
+## System composition
+
+Barracuda separates portable system behavior from runtime implementations and
+physical hardware composition:
+
+- **Platforms** provide implementations of the runtime environment and its
+  low-level capabilities, such as executors, networking, storage, and HAL
+  access.
+- **Drivers** implement concrete peripheral capabilities, such as displays,
+  audio devices, cameras, and sensors, behind the traits consumed by the rest
+  of the system.
+- **Boards** are the hardware composition matrix. A Board selects the exact
+  Drivers, buses, pins, and configuration present on one physical product.
+  Different Boards may use different peripherals and wiring even when they use
+  the same Platform.
+- **System** is the `no_std` aggregation layer. It receives low-level platform
+  capabilities, constructs the fixed Plugin set, registers every Plugin in
+  dependency order, and then starts the complete set. System never selects a
+  concrete executor, filesystem, network stack, or listener, and it does not
+  construct a Plugin's component-specific services.
+- **Plugins** own and load their Components, component-specific runtime
+  resources, and other Plugin-scoped resources. Built-in Plugins establish
+  their own defaults instead of receiving an assembled component dependency
+  bundle from Host. Components and higher-level crates depend on traits and
+  portable services, not on a particular Platform, Driver, or Board.
+
+```text
+Platform implementations       Peripheral Drivers
+            \                       /
+             +---- Board matrix ---+
+                        |
+                     System
+                        |
+          Plugins [Components + resources]
+```
+
+Cross-platform services remain single portable implementations. For example,
+`WebServer` is built on picoserve and is shared by Tokio- and Embassy-based
+systems. Plugins register endpoints during their lifecycle; the outer
+Board/Platform wiring supplies the executor, network stack, listener, and
+sockets that drive that same server. Platform selection must not be encoded as
+separate `WebServer` implementations or scattered `cfg` branches in portable
+system code.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:
@@ -51,12 +96,12 @@ Visualization
 The command uses `barracuda-agent-trace`'s canonical Python exporter. Its synthetic Chrome
 process/thread mapping (including `run.system`, session grouping, and the
 `unattributed` fallback) is documented in
-[`components/agent/crates/trace/scripts/README.md`](components/agent/crates/trace/scripts/README.md).
+[`plugins/agent/crates/trace/scripts/README.md`](plugins/agent/crates/trace/scripts/README.md).
 
 ### Context Visualization
 
 ```bash
-uv run --script components/agent/crates/context/scripts/context_viewer.py
+uv run --script plugins/agent/crates/context/scripts/context_viewer.py
 ```
 
 ## Embassy integration

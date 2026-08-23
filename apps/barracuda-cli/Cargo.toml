@@ -10,26 +10,24 @@ name = "barracuda"
 path = "src/main.rs"
 
 [dependencies]
-barracuda-agent-runtime = { path = "../../components/agent/crates/runtime", default-features = false, features=["cache_profile", "multiagent", "intrusive-observability"] }
-barracuda-model-api = { path = "../../components/agent/crates/model-api", features = ["mbedtls-host"] }
+web = { path = "../../plugins/message-gateway/crates/web" }
+barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
+barracuda-event-router = { path = "../../core/event-router" }
+barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
 barracuda-net = { path = "../../shared/net", features = ["tokio"] }
-barracuda-fs = { path = "../../shared/fs", features = ["diskfs"] }
-barracuda-agent-trace = { path = "../../components/agent/crates/trace" }
+barracuda-plugin-manager = { path = "../../core/plugin-manager" }
+barracuda-system = { path = "../../core/system", features = ["tokio"] }
 anyhow = "1"
-dotenvy = "0.15"
-tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
-futures-lite = "2"
+tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
+ekv = { version = "1", features = ["std"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 anstyle = "1"
 rustyline = { version = "18.0.1", default-features = false }
 strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
 thiserror = "2"
-static_cell = "2"
-rand_core = "0.10.1"
-tracing = { version = "0.1", default-features = false, features = ["std"] }
-embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-
-[dev-dependencies]
-barracuda-net = { path = "../../shared/net", features = ["testing"] }
-tempdir = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

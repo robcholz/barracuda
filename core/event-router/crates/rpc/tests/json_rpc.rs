@@ -136,12 +136,13 @@ impl RpcMethod for Append {
     type Output = Unary;
 }
 
-fn append_handler(count: Rc<Cell<u32>>) -> impl Fn(
+fn append_handler(
+    count: Rc<Cell<u32>>,
+) -> impl Fn(
     RpcContext,
     RpcStream<RpcFrame<AppendRequest>>,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = RpcResult<Result<(), ()>>> + 'static>,
-> {
+)
+    -> std::pin::Pin<Box<dyn std::future::Future<Output = RpcResult<Result<(), ()>>> + 'static>> {
     move |_context, mut frames| {
         let count = Rc::clone(&count);
         Box::pin(async move {

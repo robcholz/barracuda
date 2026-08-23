@@ -94,7 +94,9 @@ fn register(registry: &RpcRegistry<2, 64, 2>) {
 #[test]
 fn derive_honors_serde_rename_all_and_field_rename() {
     // rename_all = camelCase turns `session_id` into `sessionId`.
-    assert!(Reply::FIELDS.iter().any(|field| field.name() == "sessionId"));
+    assert!(Reply::FIELDS
+        .iter()
+        .any(|field| field.name() == "sessionId"));
     // field-level rename wins over the container convention.
     assert!(Deliver::FIELDS
         .iter()

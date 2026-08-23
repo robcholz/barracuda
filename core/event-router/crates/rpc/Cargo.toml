@@ -15,7 +15,7 @@ getset = "0.1.7"
 serde = { version = "1", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 smallvec = { version = "1", default-features = false }
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]

@@ -19,15 +19,13 @@ pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
     WorkflowStep, WorkflowUnloadError,
 };
-pub use link::LinkError;
 pub use event::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode,
 };
+pub use link::LinkError;
 pub use rule::{Rule, RuleError};
-pub use runtime::{
-    validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo,
-};
-pub use topic::{TOPIC_MAX_BYTES, Topic, TopicError};
+pub use runtime::{validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo};
+pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 
 /// Runtime integration surface used by Event Router's Component adapter.
 pub mod integration {

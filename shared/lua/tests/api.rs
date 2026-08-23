@@ -1,6 +1,6 @@
 use barracuda_lua::{
-    Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Result, Table, UserData,
-    UserDataHandle, UserDataMethods, Variadic,
+    Environment, Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Package, Result, Table,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
 
 #[test]
@@ -20,6 +20,154 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
         .eval()?;
 
     assert!(sandboxed);
+    Ok(())
+}
+
+struct FlagPackage {
+    name: &'static str,
+}
+
+impl Package for FlagPackage {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        lua.register_lib(self.name, |package| package.set("installed", true))
+    }
+}
+
+const TEST_IO_INSTALL: &str = r##"
+local io = require("io")
+local emit = io.__emit
+io.__emit = nil
+function io.print(...)
+    local line = ""
+    for index = 1, select("#", ...) do
+        if index > 1 then
+            line = line .. "\t"
+        end
+        line = line .. tostring(select(index, ...))
+    end
+    emit(line)
+end
+"##;
+
+struct TestIo {
+    input: async_channel::Receiver<String>,
+    output: async_channel::Sender<String>,
+}
+
+impl Package for TestIo {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        let input = self.input.clone();
+        let output = self.output.clone();
+        lua.register_lib("io", move |package| {
+            package.register_async("input", move |(): ()| {
+                let input = input.clone();
+                async move { Some(Ok(input.recv().await.ok())) }
+            })?;
+            package.register_async("__emit", move |line: String| {
+                let output = output.clone();
+                async move {
+                    let _ = output.send(line).await;
+                    None::<Result<()>>
+                }
+            })
+        })?;
+        lua.load(TEST_IO_INSTALL).exec()
+    }
+}
+
+struct TestInput(async_channel::Sender<String>);
+
+impl TestInput {
+    async fn send(&self, value: impl Into<String>) -> Result<()> {
+        self.0
+            .send(value.into())
+            .await
+            .map_err(|_| Error::runtime("Lua input is closed"))
+    }
+
+    fn close(&self) {
+        self.0.close();
+    }
+}
+
+struct TestOutput(async_channel::Receiver<String>);
+
+impl TestOutput {
+    async fn next(&mut self) -> Option<String> {
+        self.0.recv().await.ok()
+    }
+}
+
+fn install_test_io(lua: &mut Lua) -> Result<(TestInput, TestOutput)> {
+    let (input_sender, input_receiver) = async_channel::bounded(16);
+    let (output_sender, output_receiver) = async_channel::bounded(16);
+    let io = TestIo {
+        input: input_receiver,
+        output: output_sender,
+    };
+    Environment::new().with_package(io).install(lua)?;
+    Ok((TestInput(input_sender), TestOutput(output_receiver)))
+}
+
+#[test]
+fn environment_composes_external_packages_in_a_chain() -> Result<()> {
+    let environment = Environment::new()
+        .with_package(FlagPackage { name: "first" })
+        .with_package(FlagPackage { name: "second" });
+    let mut lua = Lua::new()?;
+
+    environment.install(&mut lua)?;
+
+    assert!(
+        lua.load(
+            "local first = require('first') \
+             local second = require('second') \
+             return first.installed and second.installed",
+        )
+        .eval::<bool>()?
+    );
+    Ok(())
+}
+
+#[test]
+fn execution_environment_is_injected_after_sandbox_creation() -> Result<()> {
+    let mut lua = Lua::new()?;
+    assert!(
+        lua.load("return input == nil and print == nil and not pcall(require, 'io')")
+            .eval::<bool>()?
+    );
+
+    let (input, mut output) = install_test_io(&mut lua)?;
+    assert!(
+        lua.load(
+            "local io = require('io') \
+             return _G.io == nil \
+                 and input == nil \
+                 and print == nil \
+                 and io == require('io') \
+                 and io.__emit == nil \
+                 and type(io.input) == 'function' \
+                 and type(io.print) == 'function' \
+                 and io.read == nil \
+                 and io.write == nil",
+        )
+        .eval::<bool>()?
+    );
+
+    let completion = lua.run(
+        "local io = require('io'); \
+         local value = io.input(); \
+         io.print('received', value)",
+    );
+    futures_lite::future::block_on(input.send("message"))?;
+    input.close();
+    futures_lite::future::block_on(completion)?;
+
+    assert_eq!(
+        futures_lite::future::block_on(output.next()),
+        Some("received\tmessage".into())
+    );
+    assert_eq!(futures_lite::future::block_on(output.next()), None);
     Ok(())
 }
 use core::{
@@ -592,14 +740,26 @@ fn exec_variants_and_completed_execution_are_well_defined() -> Result<()> {
         .as_mut()
         .poll(&mut Context::from_waker(Waker::noop()));
     assert!(matches!(second, Poll::Ready(Err(error)) if error.kind() == ErrorKind::Runtime));
+
+    let lua = Lua::new()?;
+    let mut execution = lua.run("return 7");
+    assert!(matches!(
+        Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(error)) if error.kind() == ErrorKind::Runtime
+    ));
     Ok(())
 }
 
 #[test]
 fn lua_exposes_input_output_and_execution_as_separate_flows() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, execution) =
-        lua.run("local name = input(); print('hello', name); return 'ignored top-level value'")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); local name = io.input(); io.print('hello', name); return 'ignored top-level value'");
 
     futures_lite::future::block_on(input.send("agent"))?;
     input.close();
@@ -615,9 +775,10 @@ fn lua_exposes_input_output_and_execution_as_separate_flows() -> Result<()> {
 
 #[test]
 fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, mut execution) =
-        lua.run("local first = input(); print(first); local eof = input(); print(eof == nil)")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let mut execution =
+        lua.run("local io = require('io'); local first = io.input(); io.print(first); local eof = io.input(); io.print(eof == nil)");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
@@ -642,9 +803,10 @@ fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
 
 #[test]
 fn execution_errors_do_not_discard_buffered_output() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, execution) =
-        lua.run("print('before failure'); error('script failed')")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); io.print('before failure'); error('script failed')");
 
     let error = futures_lite::future::block_on(execution).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Runtime);
@@ -663,8 +825,10 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
     lua.register_lib("native", |lib| {
         lib.register_async("double", |value: i64| async move { Some(Ok(value * 2)) })
     })?;
-    let (_input, mut output, execution) =
-        lua.run("local native = require('native'); print(native.double(21))")?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run(
+        "local io = require('io'); local native = require('native'); io.print(native.double(21))",
+    );
 
     futures_lite::future::block_on(execution)?;
     assert_eq!(
@@ -676,8 +840,10 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
 
 #[test]
 fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, output, execution) = lua.run("print('ignored'); print('also ignored')")?;
+    let mut lua = Lua::new()?;
+    let (_input, output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); io.print('ignored'); io.print('also ignored')");
     drop(output);
 
     futures_lite::future::block_on(execution)?;
@@ -686,8 +852,9 @@ fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
 
 #[test]
 fn dropping_execution_closes_both_data_flows() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, execution) = lua.run("input()")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run("local io = require('io'); io.input()");
     drop(execution);
 
     let send_error = futures_lite::future::block_on(input.send("late")).unwrap_err();
@@ -698,8 +865,9 @@ fn dropping_execution_closes_both_data_flows() -> Result<()> {
 
 #[test]
 fn lua_defers_script_load_errors_to_execution() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, execution) = lua.run("this is not lua")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run("this is not lua");
 
     let error = futures_lite::future::block_on(execution).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Load);
@@ -709,8 +877,10 @@ fn lua_defers_script_load_errors_to_execution() -> Result<()> {
 
 #[test]
 fn full_output_buffer_yields_until_the_host_consumes_a_message() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, mut execution) = lua.run("for value = 1, 17 do print(value) end")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let mut execution =
+        lua.run("local io = require('io'); for value = 1, 17 do io.print(value) end");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),

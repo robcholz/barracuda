@@ -2,8 +2,8 @@
 #![allow(missing_docs)]
 
 use barracuda_event_router::{
-    rpc_dynamic, RpcAddress, RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
-    RpcResult, RpcWire, Unary,
+    rpc_dynamic, RpcAddress, RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod,
+    RpcRegistry, RpcResult, RpcWire, Unary,
 };
 use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};

@@ -3,8 +3,9 @@
 //! `Lua::new()` always creates an allowlist sandbox; there is no full-library or
 //! unsandboxed construction mode. The public surface is deliberately narrow:
 //! register require-only libraries, bind sync or async Rust functions, exchange
-//! typed tables and functions, expose Rust userdata, and evaluate chunks. Async
-//! execution is executor-neutral and only requires polling the returned future.
+//! typed tables and functions, expose Rust userdata, compose external capability packages with an [`Environment`],
+//! and evaluate chunks. Environment installation is explicit and separate from
+//! execution. Async execution is executor-neutral.
 //!
 //! ```
 //! use barracuda_lua::{Lua, Result};
@@ -31,6 +32,7 @@
 extern crate alloc;
 
 mod convert;
+mod environment;
 mod error;
 #[allow(unsafe_code)]
 mod object;
@@ -41,9 +43,10 @@ mod runtime;
 mod userdata;
 
 pub use convert::{FromLua, FromLuaMulti, IntoLua, IntoLuaMulti, Variadic};
+pub use environment::{Environment, Package};
 pub use error::{Error, ErrorKind, Result};
 pub use object::{Context, Function, FunctionCall, RegistryKey, Table};
-pub use run::{LuaExecution, LuaInput, LuaOutput};
+pub use run::LuaExecution;
 pub use runtime::{Chunk, Execution, Library, Lua};
 pub use userdata::{
     MetaMethod, UserData, UserDataHandle, UserDataMethods, UserDataRef, UserDataRefMut,

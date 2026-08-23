@@ -1,3 +1,0 @@
-pub mod barracuda_net
-pub use barracuda_net::Dns
-pub use barracuda_net::TcpConnect

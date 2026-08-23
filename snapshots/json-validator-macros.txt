@@ -1,2 +1,0 @@
-pub mod json_validator_macros
-pub proc macro json_validator_macros::validator!()

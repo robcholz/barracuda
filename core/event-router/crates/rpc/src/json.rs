@@ -139,16 +139,12 @@ impl Stream for JsonCallDriver {
         if !this.response_eof {
             match this.reader.poll_read(context) {
                 Poll::Ready(Ok(Some(Ok(payload)))) => {
-                    return Poll::Ready(Some(
-                        this.codec.decode_response(payload.as_ref()).map(Ok),
-                    ));
+                    return Poll::Ready(Some(this.codec.decode_response(payload.as_ref()).map(Ok)));
                 }
                 Poll::Ready(Ok(Some(Err(payload)))) => {
                     this.input = None;
                     this.response_eof = true;
-                    return Poll::Ready(Some(
-                        this.codec.decode_error(payload.as_ref()).map(Err),
-                    ));
+                    return Poll::Ready(Some(this.codec.decode_error(payload.as_ref()).map(Err)));
                 }
                 Poll::Ready(Ok(None)) => {
                     this.input = None;

@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-scheduler-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin that owns the RTC-authoritative Scheduler Component"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-scheduler-component = { path = "../component" }
+barracuda-time-plugin = { path = "../../../time/crates/plugin" }
+
+[dev-dependencies]
+barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+ekv = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

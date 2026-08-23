@@ -86,9 +86,7 @@ pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError>
     let Some(arguments) = arguments else {
         return Ok(LinkKind::Direct);
     };
-    let object = arguments
-        .as_object()
-        .ok_or(LinkError::ArgumentsNotObject)?;
+    let object = arguments.as_object().ok_or(LinkError::ArgumentsNotObject)?;
 
     let mut literal = Map::new();
     let mut references = Vec::new();

@@ -1,0 +1,26 @@
+[package]
+name = "barracuda-vm-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Plugin that owns the Lua VM Component"
+
+[dependencies]
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-vm-component = { path = "../component", features = ["vendored"] }
+
+[dev-dependencies]
+barracuda-event-router = { path = "../../../../core/event-router" }
+ekv = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

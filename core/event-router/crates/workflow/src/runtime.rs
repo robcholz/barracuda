@@ -61,9 +61,7 @@ pub enum WorkflowExecutionError {
     },
     /// A `Link::Direct` edge joined two steps whose response and request types
     /// are not the identical fixed-layout type.
-    #[error(
-        "Workflow step {from_step} response type does not match step {to_step} request type"
-    )]
+    #[error("Workflow step {from_step} response type does not match step {to_step} request type")]
     LinkTypeMismatch {
         /// Step producing the response.
         from_step: usize,
@@ -445,21 +443,24 @@ impl WorkflowExecution {
 
         for index in 1..plan.steps.len() {
             let step = plan.steps.get(index).ok_or(RpcError::InvalidFrameState)?;
-            let this_info = infos.get(index).cloned().ok_or(RpcError::InvalidFrameState)?;
+            let this_info = infos
+                .get(index)
+                .cloned()
+                .ok_or(RpcError::InvalidFrameState)?;
             let destination_step = index;
             let (writer, reader) = client.call_payload(step.address())?;
             // Grammar was validated at load time; an error here is unexpected.
             let kind = classify(step.arguments()).map_err(|_error| RpcError::InvalidFrameState)?;
             let transform = match kind {
                 LinkKind::Direct => LinkTransform::Direct,
-                LinkKind::Literal { arguments } => LinkTransform::Literal(Box::new(
-                    LiteralTransform {
+                LinkKind::Literal { arguments } => {
+                    LinkTransform::Literal(Box::new(LiteralTransform {
                         info: this_info.clone(),
                         address: step.address().clone(),
                         arguments,
                         destination_step,
-                    },
-                )),
+                    }))
+                }
                 LinkKind::Mapping {
                     arguments,
                     references,
@@ -586,7 +587,10 @@ impl LinkTransform {
                     .map_err(|source| step_error(step.destination_step, source))?;
                 for field in &step.references {
                     let source_wire = step.prev_info.wire().ok_or_else(|| {
-                        step_error(step.source_step, RpcError::NotJsonCallable(step.address.clone()))
+                        step_error(
+                            step.source_step,
+                            RpcError::NotJsonCallable(step.address.clone()),
+                        )
                     })?;
                     let dest_wire = step.this_info.wire().ok_or_else(|| {
                         step_error(
@@ -684,8 +688,7 @@ fn validate_links(
         let this = infos.get(index).ok_or(internal_error(to_step))?;
         let prev_step = steps.get(from_step).ok_or(internal_error(to_step))?;
         let step = steps.get(index).ok_or(internal_error(to_step))?;
-        let kind =
-            classify(step.arguments()).map_err(|_error| internal_error(to_step))?;
+        let kind = classify(step.arguments()).map_err(|_error| internal_error(to_step))?;
         // Only unary→unary, streaming→streaming, and unary→streaming links are
         // valid; a streaming response feeding a unary request is rejected.
         if prev.output_mode() == RpcCardinality::Streaming
@@ -783,7 +786,8 @@ pub fn validate_definition(
             .map_err(|_error| WorkflowControlRejection::UnknownMethod)?;
         infos.push(info);
     }
-    validate_links(definition.steps(), &infos).map_err(|_error| WorkflowControlRejection::InvalidLink)
+    validate_links(definition.steps(), &infos)
+        .map_err(|_error| WorkflowControlRejection::InvalidLink)
 }
 
 fn internal_error(step: usize) -> WorkflowExecutionError {
@@ -1496,8 +1500,8 @@ mod link_tests {
 
     use super::{InternalEmit, WorkflowRuntime};
     use crate::{
-        validate_definition, Event, EventEmitter, Rule, WorkflowControlRejection, WorkflowDefinition,
-        WorkflowExecutionError, WorkflowId, WorkflowStep,
+        validate_definition, Event, EventEmitter, Rule, WorkflowControlRejection,
+        WorkflowDefinition, WorkflowExecutionError, WorkflowId, WorkflowStep,
     };
 
     #[repr(C)]
@@ -1729,7 +1733,13 @@ mod link_tests {
             recorded_probe.borrow().is_some()
         });
 
-        assert_eq!(recorded.take(), Some(Deliver { token: 41, extra: 5 }));
+        assert_eq!(
+            recorded.take(),
+            Some(Deliver {
+                token: 41,
+                extra: 5
+            })
+        );
         let info = runtime.view().info();
         assert_eq!(info.completed_count, 1);
         assert_eq!(info.failed_count, 0);
@@ -1811,14 +1821,14 @@ mod link_tests {
             })
             .expect("register produce");
         registry
-            .register::<Consume, _>(|_context, _request: RpcFrame<Deliver>| async move {
-                Ok(Ok(()))
-            })
+            .register::<Consume, _>(
+                |_context, _request: RpcFrame<Deliver>| async move { Ok(Ok(())) },
+            )
             .expect("register consume");
         registry
-            .register::<ConsumeSeed, _>(|_context, _request: RpcFrame<Seed>| async move {
-                Ok(Ok(()))
-            })
+            .register::<ConsumeSeed, _>(
+                |_context, _request: RpcFrame<Seed>| async move { Ok(Ok(())) },
+            )
             .expect("register consume-seed");
         let client = registry.client();
 
@@ -1895,7 +1905,9 @@ mod link_tests {
                 let seed = *request.view()?;
                 Ok(RpcStream::new(stream::iter([
                     Ok(Ok(Reply { token: seed.n })),
-                    Ok(Ok(Reply { token: seed.n.saturating_add(1) })),
+                    Ok(Ok(Reply {
+                        token: seed.n.saturating_add(1),
+                    })),
                 ])))
             })
             .expect("register stream source");
@@ -1941,8 +1953,14 @@ mod link_tests {
         assert_eq!(
             collected.take().as_slice(),
             &[
-                Deliver { token: 41, extra: 5 },
-                Deliver { token: 42, extra: 5 },
+                Deliver {
+                    token: 41,
+                    extra: 5
+                },
+                Deliver {
+                    token: 42,
+                    extra: 5
+                },
             ]
         );
         let info = runtime.view().info();
@@ -2023,7 +2041,9 @@ mod link_tests {
         registry
             .register::<StreamSource, _>(|_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
-                Ok(RpcStream::new(stream::iter([Ok(Ok(Reply { token: seed.n }))])))
+                Ok(RpcStream::new(stream::iter([Ok(Ok(Reply {
+                    token: seed.n,
+                }))])))
             })
             .expect("register stream source");
         let handler_touched = Rc::clone(&touched);
@@ -2061,7 +2081,10 @@ mod link_tests {
             runtime_probe.info().failed_count == 1
         });
 
-        assert!(!*touched.borrow(), "cardinality-mismatched step must never be invoked");
+        assert!(
+            !*touched.borrow(),
+            "cardinality-mismatched step must never be invoked"
+        );
         let failure = runtime
             .view()
             .info()

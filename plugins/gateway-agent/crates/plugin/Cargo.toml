@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-gateway-agent-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Plugin that owns the Gateway-Agent Bridge Component"
+
+[dependencies]
+barracuda-gateway-agent-component = { path = "../component" }
+barracuda-message-gateway-plugin = { path = "../../../message-gateway/crates/plugin" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+
+[dev-dependencies]
+barracuda-event-router = { path = "../../../../core/event-router" }
+ekv = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

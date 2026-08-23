@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-plugin-manager"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>"]
+version = "0.1.0"
+edition = "2021"
+description = "Plugin management and scoped persistent storage for Barracuda"
+readme = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-event-router = { path = "../event-router" }
+ekv = { version = "1.0.0", default-features = false, features = ["crc"] }
+embassy-sync-06 = { package = "embassy-sync", version = "0.6.0", default-features = false }
+getset = "0.1.7"
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+ekv = { version = "1.0.0", features = ["std", "crc"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

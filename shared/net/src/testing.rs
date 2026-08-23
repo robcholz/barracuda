@@ -9,7 +9,7 @@ use core::task::Poll;
 
 use embedded_io::{Error, ErrorKind, ErrorType};
 use embedded_io_async::{Read, Write};
-use embedded_nal_async::{AddrType, Dns, TcpConnect};
+use embedded_nal_async::{AddrType, ConnectedUdp, Dns, TcpConnect, UdpStack, UnconnectedUdp};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScriptError(pub ErrorKind);
@@ -290,6 +290,67 @@ impl TcpConnect for NeverStack {
         &'a self,
         _remote: SocketAddr,
     ) -> Result<Self::Connection<'a>, Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+}
+
+impl UdpStack for NeverStack {
+    type Error = ScriptError;
+    type Connected = NeverUdp;
+    type UniquelyBound = NeverUdp;
+    type MultiplyBound = NeverUdp;
+
+    async fn connect_from(
+        &self,
+        _local: SocketAddr,
+        _remote: SocketAddr,
+    ) -> Result<(SocketAddr, Self::Connected), Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+
+    async fn bind_single(
+        &self,
+        _local: SocketAddr,
+    ) -> Result<(SocketAddr, Self::UniquelyBound), Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+
+    async fn bind_multiple(&self, _local: SocketAddr) -> Result<Self::MultiplyBound, Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+}
+
+/// UDP socket used by [`NeverStack`].
+pub struct NeverUdp;
+
+impl ConnectedUdp for NeverUdp {
+    type Error = ScriptError;
+
+    async fn send(&mut self, _data: &[u8]) -> Result<(), Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+
+    async fn receive_into(&mut self, _buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+}
+
+impl UnconnectedUdp for NeverUdp {
+    type Error = ScriptError;
+
+    async fn send(
+        &mut self,
+        _local: SocketAddr,
+        _remote: SocketAddr,
+        _data: &[u8],
+    ) -> Result<(), Self::Error> {
+        Err(ScriptError(ErrorKind::NotConnected))
+    }
+
+    async fn receive_into(
+        &mut self,
+        _buffer: &mut [u8],
+    ) -> Result<(usize, SocketAddr, SocketAddr), Self::Error> {
         Err(ScriptError(ErrorKind::NotConnected))
     }
 }
