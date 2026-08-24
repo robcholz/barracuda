@@ -2,7 +2,6 @@ use alloc::{collections::BTreeSet, vec::Vec};
 
 use barracuda_agent_memory::TranscriptStore;
 use barracuda_agent_persistence::{DurableState, InstanceId};
-use embedded_nal_async::{Dns, TcpConnect};
 
 use super::AgentId;
 use crate::AgentEngineState;
@@ -16,11 +15,7 @@ fn agent_instance(id: AgentId) -> Result<InstanceId, AgentCreateError> {
     InstanceId::new(id.to_wire()).map_err(AgentCreateError::from)
 }
 
-impl<Tcp, Resolver> AgentManager<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl AgentManager {
     /// Delete transcript files whose owning Agent record no longer exists.
     pub(super) async fn purge_dead(&self) -> Result<(), AgentCreateError> {
         let agents = self

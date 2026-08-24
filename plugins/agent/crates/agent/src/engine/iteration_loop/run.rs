@@ -15,7 +15,6 @@ use barracuda_model_api::{ChatRequest, ChatStreamEvent, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::try_yield_stream;
 use barracuda_runtime_utils::Cancel;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
@@ -90,10 +89,8 @@ fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
     );
 }
 
-impl<'a, Tcp, Resolver, P> IterationLoop<'a, Tcp, Resolver, P>
+impl<'a, P> IterationLoop<'a, P>
 where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
     P: ToolPermissionPolicy + 'a,
 {
     /// Run one LLM/tool iteration as a directly polled stream.
@@ -771,13 +768,13 @@ mod tests {
         let init = format!(
             "{:?}",
             IterationLoopError::ChatInit(ChatError::Api(ModelApiError::Transport(
-                NetError::ConnectionAborted,
+                NetError::Cancelled,
             )))
         );
         let stream = format!(
             "{:?}",
             IterationLoopError::ChatStream(ChatError::Api(ModelApiError::Transport(
-                NetError::ConnectionAborted,
+                NetError::Cancelled,
             )))
         );
 
@@ -785,7 +782,7 @@ mod tests {
         assert!(stream.starts_with("ChatStream("), "{stream}");
         assert!(!init.contains('\n'), "{init}");
         assert!(!stream.contains('\n'), "{stream}");
-        for expected in ["Transport(", "ConnectionAborted"] {
+        for expected in ["Transport(", "Cancelled"] {
             assert!(init.contains(expected), "missing `{expected}` in {init}");
             assert!(
                 stream.contains(expected),

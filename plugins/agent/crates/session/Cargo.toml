@@ -18,7 +18,6 @@ barracuda-agent-persistence = { path = "../persistence" }
 barracuda-agent-tool = { path = "../tool" }
 barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-model-api = { path = "../model-api" }
-embedded-nal-async = "0.9"
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 async-channel = { version = "2", default-features = false }
 embassy-time.workspace = true

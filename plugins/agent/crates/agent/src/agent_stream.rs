@@ -5,7 +5,6 @@ use core::task::{Context, Poll};
 
 use async_channel::{Receiver, Sender};
 use barracuda_model_api::ToolCall;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_core::Stream;
 
 use crate::engine::AgentError;
@@ -146,28 +145,26 @@ impl AgentHandle {
 ///
 /// The final item returns the Agent to its authoritative slot.
 #[allow(clippy::large_enum_variant)]
-pub enum AgentStreamItem<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+pub enum AgentStreamItem {
     Event(Result<AgentEvent, AgentError>),
-    Returned(Agent<Tcp, Resolver>),
+    Returned(Agent),
 }
 
 /// Owned event stream for one physical Agent checkout.
-pub struct AgentStream<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
-    stream: Pin<Box<dyn Stream<Item = AgentStreamItem<Tcp, Resolver>>>>,
+pub struct AgentStream {
+    stream: Pin<Box<dyn Stream<Item = AgentStreamItem>>>,
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentStream<Tcp, Resolver> {
-    pub(super) fn new(
-        stream: impl Stream<Item = AgentStreamItem<Tcp, Resolver>> + 'static,
-    ) -> Self {
+impl AgentStream {
+    pub(super) fn new(stream: impl Stream<Item = AgentStreamItem> + 'static) -> Self {
         Self {
             stream: Box::pin(stream),
         }
     }
 }
 
-impl<Tcp: TcpConnect, Resolver: Dns> Stream for AgentStream<Tcp, Resolver> {
-    type Item = AgentStreamItem<Tcp, Resolver>;
+impl Stream for AgentStream {
+    type Item = AgentStreamItem;
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().stream.as_mut().poll_next(context)

@@ -2,7 +2,6 @@ use alloc::rc::Rc;
 
 use barracuda_agent_runtime::{AgentRuntime, SessionDeleteError};
 use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
-use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::convert;
 
@@ -22,12 +21,8 @@ impl RpcMethod for DeleteSession {
 }
 
 /// Builds the reusable handler for [`DeleteSession`].
-pub fn delete_session_handler<Tcp, Resolver>(
-    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
-) -> impl RpcHandler<DeleteSession>
+pub fn delete_session_handler(runtime: Rc<AgentRuntime>) -> impl RpcHandler<DeleteSession>
 where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
 {
     move |_context, request: RpcFrame<DeleteSessionRequest>| {
         let runtime = Rc::clone(&runtime);

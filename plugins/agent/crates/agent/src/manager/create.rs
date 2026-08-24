@@ -6,7 +6,6 @@ use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
 use barracuda_model_api::RetryPolicy;
-use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::baked;
 use crate::config::ApiPurpose;
@@ -44,7 +43,7 @@ struct AgentEnvironment {
     state: Option<DurableState<AgentEngineState>>,
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resolver> {
+impl AgentManager {
     pub fn resume_from(
         &self,
         id: AgentId,
@@ -52,7 +51,7 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.get().kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
@@ -83,7 +82,7 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -145,7 +144,7 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
@@ -183,14 +182,13 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
 
         // Only `AgentEngine` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
-        let conversation_history =
-            ConversationHistoryContextProvider::with_llm_compaction::<Tcp, Resolver>(
-                Arc::clone(&self.api_manager),
-                self.llm_factory.clone(),
-                COMPACTION_TRIGGER_TOKENS,
-                COMPACTION_KEEP_RECENT_TOKENS,
-                COMPACTION_SEGMENT_TOKEN_BUDGET,
-            );
+        let conversation_history = ConversationHistoryContextProvider::with_llm_compaction(
+            Arc::clone(&self.api_manager),
+            self.llm_factory.clone(),
+            COMPACTION_TRIGGER_TOKENS,
+            COMPACTION_KEEP_RECENT_TOKENS,
+            COMPACTION_SEGMENT_TOKEN_BUDGET,
+        );
         let profile_provider = ProfileContextProvider::new(self.profile_store.clone());
         let provider = match self.long_term.provider(kind.as_str()) {
             Ok(provider) => provider,
@@ -245,15 +243,17 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
-        let engine = AgentEngine::<Tcp, Resolver>::build(engine_config, self.llm_factory.create())
-            .map_err(|error| match error {
-                AgentEngineBuildError::InvalidContextProviderId => {
-                    AgentCreateError::InvalidContextProviderId
+        let engine =
+            AgentEngine::build(engine_config, self.llm_factory.create()).map_err(|error| {
+                match error {
+                    AgentEngineBuildError::InvalidContextProviderId => {
+                        AgentCreateError::InvalidContextProviderId
+                    }
+                    AgentEngineBuildError::DuplicateContextProviderId(id) => {
+                        AgentCreateError::DuplicateContextProviderId(id)
+                    }
+                    AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
                 }
-                AgentEngineBuildError::DuplicateContextProviderId(id) => {
-                    AgentCreateError::DuplicateContextProviderId(id)
-                }
-                AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
             })?;
         let agent = Agent::new(engine);
 

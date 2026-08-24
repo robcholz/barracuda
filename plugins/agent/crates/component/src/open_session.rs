@@ -8,7 +8,6 @@ use barracuda_agent_runtime::{
 use barracuda_event_router::{
     rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
 };
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -328,13 +327,11 @@ impl RpcMethod for OpenSession {
 }
 
 /// Builds the reusable handler for [`OpenSession`].
-pub fn open_session_handler<Tcp, Resolver>(
-    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
+pub fn open_session_handler(
+    runtime: Rc<AgentRuntime>,
     registry: SessionRegistry,
 ) -> impl RpcHandler<OpenSession>
 where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
 {
     move |_context, request: RpcFrame<OpenSessionRequest>| {
         let runtime = Rc::clone(&runtime);

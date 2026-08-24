@@ -14,10 +14,11 @@ use barracuda_model_api::ModelApi;
 use barracuda_platform_test::{memory_vfs, NeverStack};
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 use futures_lite::future::block_on;
+use http_client::Client;
 
 barracuda_profile::install_dhat_allocator!();
 
-type ProfileAgentRuntime = AgentRuntime<NeverStack, NeverStack>;
+type ProfileAgentRuntime = AgentRuntime;
 static NETWORK: NeverStack = NeverStack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,7 +83,11 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 
 fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, Box<dyn std::error::Error>> {
     let profile = HeapProfile::start(output_file);
-    let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, &NETWORK, 1024, 1024));
+    let llm_factory = ModelApiFactory::new(|| {
+        ModelApi::new(Client::from_network_with_buffer_sizes(
+            &NETWORK, &NETWORK, 1024, 1024,
+        ))
+    });
     let (runtime, service) = ProfileAgentRuntime::new(
         block_on(memory_vfs())?,
         RuntimeStorageConfig {

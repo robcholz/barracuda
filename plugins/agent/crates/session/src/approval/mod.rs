@@ -39,7 +39,7 @@ pub(super) trait ApprovalResolver {
     ) -> Result<ApprovalDecision, ApprovalResolverError>;
 }
 
-pub(super) type SharedApprovalResolver<Tcp, Resolver> = Rc<LlmApprovalResolver<Tcp, Resolver>>;
+pub(super) type SharedApprovalResolver = Rc<LlmApprovalResolver>;
 
 struct ApprovalRequest {
     agent: AgentId,

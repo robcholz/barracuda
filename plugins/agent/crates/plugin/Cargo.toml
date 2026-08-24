@@ -7,15 +7,13 @@ description = "Barracuda Plugin that owns the Agent Component"
 [features]
 default = []
 std = ["barracuda-agent-runtime/std"]
-mbedtls-host = ["std", "barracuda-model-api/mbedtls-host"]
 
 [dependencies]
 barracuda-agent-component = { path = "../component" }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
-embassy-net.workspace = true
-static_cell = "2"
+http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }

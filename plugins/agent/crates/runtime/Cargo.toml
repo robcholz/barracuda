@@ -36,11 +36,10 @@ barracuda-agent-session = { path = "../session", default-features = false }
 barracuda-agent-memory = { path = "../memory" }
 barracuda-agent-skill = { path = "../skill" }
 barracuda-model-api = { path = "../model-api" }
-embedded-nal-async = "0.9"
 barracuda-agent-persistence = { path = "../persistence" }
 barracuda-agent-tool = { path = "../tool" }
-# Filesystem traits remain platform-neutral. HTTP uses the official
-# embedded-nal-async contracts; time is provided globally by `embassy-time`.
+# Filesystem traits remain platform-neutral. HTTP is injected through the
+# shared client facade; time is provided globally by `embassy-time`.
 barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 async-channel = { version = "2", default-features = false }
@@ -51,6 +50,7 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
 [dev-dependencies]
+http-client = { path = "../../../../shared/http-client" }
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
 anyhow = "1"
 barracuda-agent-trace = { path = "../trace" }

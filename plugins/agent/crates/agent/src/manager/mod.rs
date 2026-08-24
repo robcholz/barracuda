@@ -17,7 +17,6 @@ use barracuda_agent_skill::SkillRegistry;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 
 use self::long_term::LongTermDeps;
 pub use create::PersistenceConfig;
@@ -32,12 +31,12 @@ crate::define_id_allocator!(
 );
 
 /// Shared assembly dependencies for independently-built agents.
-pub struct AgentManager<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+pub struct AgentManager {
     filesystem: ScopedVfs,
     persistence: SharedPersistence,
     api_manager: SharedApiManager,
     tool_registry: Arc<ToolRegistry>,
-    llm_factory: ModelApiFactory<Tcp, Resolver>,
+    llm_factory: ModelApiFactory,
     transcript_dir: String,
     long_term: LongTermDeps,
     profile_store: ProfileStore,

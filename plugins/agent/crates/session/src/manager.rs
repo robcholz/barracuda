@@ -18,7 +18,6 @@ use barracuda_agent_persistence::{
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
 use barracuda_agent::SharedApiManager;
@@ -34,7 +33,7 @@ use super::state::{
 };
 use super::{SessionEvent, SessionStream};
 
-pub(super) type SharedAgentManager<Tcp, Resolver> = Rc<AgentManager<Tcp, Resolver>>;
+pub(super) type SharedAgentManager = Rc<AgentManager>;
 
 barracuda_runtime_utils::define_prefixed_id!(SessionId, "session-", "session");
 
@@ -86,24 +85,16 @@ pub enum SessionDeleteError {
     InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
-struct LiveActor<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+struct LiveActor {
     commands: Sender<SessionCommand>,
-    actor: SessionActor<Tcp, Resolver>,
+    actor: SessionActor,
     span: tracing::Span,
 }
 
-struct SessionEntry<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+struct SessionEntry {
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    actor: Option<LiveActor<Tcp, Resolver>>,
+    actor: Option<LiveActor>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -125,24 +116,16 @@ pub enum SessionManagerInitError {
 /// Session-owned metadata stays in `SessionPersistentState`; Agent records and
 /// transcripts remain canonical in `AgentManager`. A live `SessionActor`
 /// coordinates both without exposing either store to the worker loop.
-pub struct SessionManager<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+pub struct SessionManager {
     persistence: SharedPersistence,
     state: DurableState<SessionManagerState>,
-    agent_manager: SharedAgentManager<Tcp, Resolver>,
-    approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
-    sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>>,
+    agent_manager: SharedAgentManager,
+    approval_resolver: SharedApprovalResolver,
+    sessions: BTreeMap<SessionId, SessionEntry>,
     actor_poll_queue: VecDeque<SessionId>,
 }
 
-impl<Tcp, Resolver> SessionManager<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl SessionManager {
     pub async fn new(
         filesystem: ScopedVfs,
         tool_registry: Arc<ToolRegistry>,
@@ -150,7 +133,7 @@ where
         persistence_dir: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        llm_factory: ModelApiFactory,
     ) -> Result<Self, SessionManagerInitError> {
         let state = {
             let entry = persistence.singleton::<SessionManagerState>(SESSION_MANAGER_STATE_NAME)?;
@@ -170,11 +153,10 @@ where
             )
             .await?,
         );
-        let approval_resolver: SharedApprovalResolver<Tcp, Resolver> = Rc::new(
-            LlmApprovalResolver::<Tcp, Resolver>::new(api_manager, llm_factory),
-        );
+        let approval_resolver: SharedApprovalResolver =
+            Rc::new(LlmApprovalResolver::new(api_manager, llm_factory));
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>> = BTreeMap::new();
+        let mut sessions: BTreeMap<SessionId, SessionEntry> = BTreeMap::new();
         for instance in states.list().await? {
             let session = SessionId::from_wire(instance.as_str())?;
             let persisted = states

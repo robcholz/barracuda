@@ -5,7 +5,6 @@ use barracuda_agent_runtime::{AgentRuntime, RuntimeService};
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::delete_session::{delete_session_handler, DeleteSession};
 use crate::list_sessions::{list_sessions_handler, ListSessions};
@@ -14,36 +13,22 @@ use crate::open_session::{open_session_handler, OpenSession};
 use crate::session;
 
 /// Event Router Component exposing the existing Agent runtime API.
-pub struct AgentComponent<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
-    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
-    service: Option<RuntimeService<Tcp, Resolver>>,
+pub struct AgentComponent {
+    runtime: Rc<AgentRuntime>,
+    service: Option<RuntimeService>,
     sessions: session::SessionRegistry,
 }
 
-impl<Tcp, Resolver> AgentComponent<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl AgentComponent {
     /// Creates a Component around the two values returned by `AgentRuntime::new`.
     #[must_use]
-    pub fn new(
-        runtime: AgentRuntime<Tcp, Resolver>,
-        service: RuntimeService<Tcp, Resolver>,
-    ) -> Self {
+    pub fn new(runtime: AgentRuntime, service: RuntimeService) -> Self {
         Self::from_shared(Rc::new(runtime), service)
     }
 
     /// Creates a Component sharing an Agent runtime with another adapter.
     #[must_use]
-    pub fn from_shared(
-        runtime: Rc<AgentRuntime<Tcp, Resolver>>,
-        service: RuntimeService<Tcp, Resolver>,
-    ) -> Self {
+    pub fn from_shared(runtime: Rc<AgentRuntime>, service: RuntimeService) -> Self {
         Self {
             runtime,
             service: Some(service),
@@ -52,11 +37,7 @@ where
     }
 }
 
-impl<Tcp, Resolver, const M: usize> Component<M> for AgentComponent<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl<const M: usize> Component<M> for AgentComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<NewSession, _>(new_session_handler(Rc::clone(&self.runtime)))?;
         context.register_rpc::<ListSessions, _>(list_sessions_handler(Rc::clone(&self.runtime)))?;

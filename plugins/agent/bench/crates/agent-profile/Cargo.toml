@@ -18,4 +18,5 @@ barracuda-agent-skill = { path = "../../../crates/skill", features = ["std"] }
 barracuda-model-api = { path = "../../../crates/model-api" }
 barracuda-platform-test = { path = "../../../../../platforms/test" }
 barracuda-profile = { path = "../../../../../shared/profile", features = ["dhat-heap"] }
+http-client = { path = "../../../../../shared/http-client" }
 futures-lite = "2"

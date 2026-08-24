@@ -4,7 +4,6 @@ use core::cell::RefCell;
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory};
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::config::SharedApiManager;
 use crate::context_providers::LongTermMemoryContextProvider;
@@ -51,17 +50,14 @@ impl AgentMemoryStores {
 }
 
 impl LongTermDeps {
-    pub(super) async fn from_root<Tcp, Resolver>(
+    pub(super) async fn from_root(
         filesystem: ScopedVfs,
         long_term_dir: &str,
         kinds: impl IntoIterator<Item = &'static str>,
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        llm_factory: ModelApiFactory,
     ) -> Result<Self, LongTermInitError>
-    where
-        Tcp: TcpConnect + 'static,
-        Resolver: Dns + 'static,
-    {
+where {
         let global_dir = join_storage_path(long_term_dir, GLOBAL_LONG_TERM_DIR);
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         let global =
@@ -74,10 +70,7 @@ impl LongTermDeps {
         Ok(Self {
             global,
             agent_stores,
-            build_provider: LongTermMemoryContextProvider::llm_builder::<Tcp, Resolver>(
-                api_manager,
-                llm_factory,
-            ),
+            build_provider: LongTermMemoryContextProvider::llm_builder(api_manager, llm_factory),
         })
     }
 

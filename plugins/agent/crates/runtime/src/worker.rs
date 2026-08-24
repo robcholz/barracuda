@@ -10,7 +10,6 @@ use barracuda_agent_persistence::{PersistenceError, SharedPersistence};
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
@@ -42,30 +41,22 @@ pub(super) enum RuntimeCommand {
     Stop,
 }
 
-pub(super) struct RuntimeWorkerInit<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+pub(super) struct RuntimeWorkerInit {
     pub(super) filesystem: ScopedVfs,
     pub(super) tool_registry: Arc<ToolRegistry>,
     pub(super) persistence: SharedPersistence,
     pub(super) persistence_dir: String,
     pub(super) skill_roots: Vec<String>,
     pub(super) api_manager: SharedApiManager,
-    pub(super) llm_factory: ModelApiFactory<Tcp, Resolver>,
+    pub(super) llm_factory: ModelApiFactory,
     pub(super) commands: Receiver<RuntimeCommand>,
 }
 
-pub(super) struct RuntimeWorker<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+pub(super) struct RuntimeWorker {
     persistence: Option<SharedPersistence>,
     persistence_task: Option<PersistenceTask>,
     maintenance_task: Option<MaintenanceTask>,
-    session_manager: SessionManager<Tcp, Resolver>,
+    session_manager: SessionManager,
     commands: Pin<Box<Receiver<RuntimeCommand>>>,
     stopping: bool,
     next_task: WorkerTask,
@@ -75,14 +66,8 @@ type PersistenceTask =
     Pin<Box<dyn Future<Output = (SharedPersistence, Result<(), PersistenceError>)>>>;
 type MaintenanceTask = Pin<Box<dyn Future<Output = Result<(), AgentCreateError>>>>;
 
-impl<Tcp, Resolver> RuntimeWorker<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
-    pub(super) async fn new(
-        init: RuntimeWorkerInit<Tcp, Resolver>,
-    ) -> Result<Self, RuntimeBuildError> {
+impl RuntimeWorker {
+    pub(super) async fn new(init: RuntimeWorkerInit) -> Result<Self, RuntimeBuildError> {
         let RuntimeWorkerInit {
             filesystem,
             tool_registry,
@@ -200,18 +185,9 @@ where
     }
 }
 
-impl<Tcp, Resolver> Unpin for RuntimeWorker<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
-}
+impl Unpin for RuntimeWorker {}
 
-impl<Tcp, Resolver> Future for RuntimeWorker<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl Future for RuntimeWorker {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {

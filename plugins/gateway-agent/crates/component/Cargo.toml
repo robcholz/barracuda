@@ -21,6 +21,7 @@ barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 gateway = { path = "../../../imessage-gateway/crates/gateway" }
+http-client = { path = "../../../../shared/http-client" }
 static_cell = "2"
 
 [lints.rust]

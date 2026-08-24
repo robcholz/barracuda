@@ -18,7 +18,6 @@ use core::pin::Pin;
 
 use barracuda_agent_permission::Action;
 use barracuda_model_api::{ModelApi, RetryPolicy};
-use embedded_nal_async::{Dns, TcpConnect};
 
 use super::stream::RunControl;
 
@@ -85,8 +84,8 @@ impl ToolPermissionPolicy for barracuda_agent_permission::AllowAll {
 /// Generic over the TCP and DNS transports so the LLM call stays statically
 /// dispatched. The loop borrows the agent's [`ModelApi`] mutably for exactly one
 /// `chat` round, so it is consumed by [`run`](Self::run).
-pub(crate) struct IterationLoop<'a, Tcp: TcpConnect + 'static, Resolver: Dns + 'static, P> {
-    pub llm: &'a mut ModelApi<'static, Tcp, Resolver>,
+pub(crate) struct IterationLoop<'a, P> {
+    pub llm: &'a mut ModelApi<'static>,
     pub control: &'a RunControl,
     pub permission: &'a P,
     /// Retry policy applied to this iteration's LLM call (see [`RetryPolicy`]).

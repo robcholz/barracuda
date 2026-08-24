@@ -8,7 +8,6 @@ use barracuda_agent_tool::ToolSet;
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
@@ -81,9 +80,9 @@ pub(crate) enum AgentEngineBuildError {
 
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
-pub(crate) struct AgentEngine<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+pub(crate) struct AgentEngine {
     state: DurableState<AgentEngineState>,
-    llm: ModelApi<'static, Tcp, Resolver>,
+    llm: ModelApi<'static>,
     api_manager: SharedApiManager,
     api_purpose: ApiPurpose,
     retry_policy: RetryPolicy,
@@ -99,10 +98,10 @@ pub(crate) struct AgentEngine<Tcp: TcpConnect + 'static, Resolver: Dns + 'static
     context_providers: Vec<ContextProviderEntry>,
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentEngine<Tcp, Resolver> {
+impl AgentEngine {
     pub(crate) fn build(
         config: AgentEngineConfig,
-        llm: ModelApi<'static, Tcp, Resolver>,
+        llm: ModelApi<'static>,
     ) -> Result<Self, AgentEngineBuildError> {
         let mut tools = config.tools;
         let mut context_providers = Vec::with_capacity(config.context_providers.len());
@@ -472,7 +471,7 @@ impl<'a> IterationConsumer<'a> {
     }
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentEngine<Tcp, Resolver> {
+impl AgentEngine {
     pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
         &self.state
     }
@@ -536,16 +535,12 @@ impl ToolPermissionPolicy for EnginePermissionPolicy<'_> {
 
 /// Restores AgentEngine's stopped-state invariant if its borrowing stream is
 /// dropped before producing a terminal event or error.
-struct ActiveRunGuard<'a, Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
-    agent: &'a mut AgentEngine<Tcp, Resolver>,
+struct ActiveRunGuard<'a> {
+    agent: &'a mut AgentEngine,
 }
 
-impl<'a, Tcp, Resolver> ActiveRunGuard<'a, Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
-    fn new(agent: &'a mut AgentEngine<Tcp, Resolver>) -> Self {
+impl<'a> ActiveRunGuard<'a> {
+    fn new(agent: &'a mut AgentEngine) -> Self {
         Self { agent }
     }
 
@@ -859,9 +854,7 @@ where
     }
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Drop
-    for ActiveRunGuard<'_, Tcp, Resolver>
-{
+impl Drop for ActiveRunGuard<'_> {
     fn drop(&mut self) {
         if self.agent.is_stopped() {
             return;

@@ -14,7 +14,6 @@ use barracuda_agent_skill::SkillError;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
 use barracuda_agent::{AgentCreateError, AgentManagerError, ApiPurpose, SharedApiManager};
@@ -71,13 +70,8 @@ pub(crate) struct RuntimeControl {
 ///
 /// Dropping this future stops the runtime. Dropping every `RuntimeControl`
 /// handle closes its command channel, which lets the service shut down cleanly.
-pub struct RuntimeService<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+pub struct RuntimeService {
     future: Pin<Box<dyn Future<Output = ()>>>,
-    marker: core::marker::PhantomData<fn() -> (Tcp, Resolver)>,
 }
 
 #[cfg(test)]
@@ -102,18 +96,9 @@ mod tests {
     }
 }
 
-impl<Tcp, Resolver> Unpin for RuntimeService<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
-}
+impl Unpin for RuntimeService {}
 
-impl<Tcp, Resolver> Future for RuntimeService<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl Future for RuntimeService {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
@@ -124,22 +109,18 @@ where
 impl RuntimeControl {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
-    pub(crate) fn new<Tcp, Resolver>(
+    pub(crate) fn new(
         filesystem: ScopedVfs,
         storage: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        llm_factory: ModelApiFactory,
         tool_groups: Vec<ToolGroup>,
         tool_lifecycle: Arc<ToolLifecycle>,
-    ) -> (Self, RuntimeService<Tcp, Resolver>)
-    where
-        Tcp: TcpConnect + 'static,
-        Resolver: Dns + 'static,
-    {
+    ) -> (Self, RuntimeService) {
         let (commands, command_rx) = async_channel::unbounded();
         let api_manager = SharedApiManager::default();
         let worker_api_manager = Arc::clone(&api_manager);
         let future = Box::pin(async move {
-            let initialized: Result<RuntimeWorker<Tcp, Resolver>, RuntimeError> = async {
+            let initialized: Result<RuntimeWorker, RuntimeError> = async {
                 let persistence: SharedPersistence = Arc::new(
                     Persistence::new(filesystem.clone(), storage.persistence_root.clone()).await?,
                 );
@@ -175,10 +156,7 @@ impl RuntimeControl {
                 commands,
                 api_manager,
             },
-            RuntimeService {
-                future,
-                marker: core::marker::PhantomData,
-            },
+            RuntimeService { future },
         )
     }
 

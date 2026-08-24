@@ -32,7 +32,6 @@ json-validator = { path = "../../../../shared/json-validator" }
 barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 barracuda-model-api = { path = "../model-api" }
-embedded-nal-async = "0.9"
 embassy-time.workspace = true
 embassy-sync.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
@@ -84,6 +83,7 @@ proc-macro2 = "1"
 barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
 
 [dev-dependencies]
+http-client = { path = "../../../../shared/http-client" }
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
 # Host-only mounted VFS helpers for tests.

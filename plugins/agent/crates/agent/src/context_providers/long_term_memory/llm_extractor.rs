@@ -12,7 +12,6 @@ use serde_json::json;
 
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
-use embedded_nal_async::{Dns, TcpConnect};
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
@@ -36,16 +35,16 @@ const EXTRACT_TRANSCRIPT_HEADER: &str = "CONVERSATION:";
 /// `Arc<dyn Extractor>`, while [`ModelApi::chat`] needs `&mut self`, so
 /// calls borrow the client exclusively without holding a mutex while the future
 /// is running.
-pub(super) struct LlmExtractor<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
-    api: SharedAsyncLlm<Tcp, Resolver>,
+pub(super) struct LlmExtractor {
+    api: SharedAsyncLlm,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
     api_manager: SharedApiManager,
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> LlmExtractor<Tcp, Resolver> {
+impl LlmExtractor {
     /// Build an extractor with its own unconfigured LLM client.
-    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory<Tcp, Resolver>) -> Self {
+    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory) -> Self {
         Self {
             api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
@@ -55,13 +54,13 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> LlmExtractor<Tcp, Resol
     /// A ready-to-inject [`Extractor`] using `api_manager`.
     pub(super) fn shared(
         api_manager: SharedApiManager,
-        llm_factory: &ModelApiFactory<Tcp, Resolver>,
+        llm_factory: &ModelApiFactory,
     ) -> Arc<dyn Extractor> {
         Arc::new(Self::new(api_manager, llm_factory))
     }
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Extractor for LlmExtractor<Tcp, Resolver> {
+impl Extractor for LlmExtractor {
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
         Box::pin(async move {
             let mut extraction_tools = ExtractionTools::new().map_err(ExtractError::from)?;

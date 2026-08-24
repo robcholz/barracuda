@@ -2,7 +2,6 @@ use alloc::rc::Rc;
 
 use barracuda_agent_runtime::{AgentRuntime, RuntimeError, SessionCreateError};
 use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
-use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::convert;
 
@@ -22,12 +21,8 @@ impl RpcMethod for NewSession {
 }
 
 /// Builds the reusable handler for [`NewSession`].
-pub fn new_session_handler<Tcp, Resolver>(
-    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
-) -> impl RpcHandler<NewSession>
+pub fn new_session_handler(runtime: Rc<AgentRuntime>) -> impl RpcHandler<NewSession>
 where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
 {
     move |_context, request: RpcFrame<NewSessionRequest>| {
         let runtime = Rc::clone(&runtime);

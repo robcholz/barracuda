@@ -24,6 +24,7 @@ use gateway::{
     ChannelFuture, MessageChannel, MessageGateway, SendMessageRequest, SendReceipt,
     SendStreamField, SendStreamFrame, SendStreamRequest,
 };
+use http_client::Client;
 use static_cell::StaticCell;
 
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
@@ -75,8 +76,12 @@ fn inbound_event_flows_through_exactly_two_workflow_steps_into_gateway_stream() 
         );
         let network: &'static ScriptedStack =
             NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[sse])]));
-        let factory = ModelApiFactory::new(move || ModelApi::new(network, network, 4096, 1024));
-        let (runtime, service) = AgentRuntime::<ScriptedStack, ScriptedStack>::new(
+        let factory = ModelApiFactory::new(move || {
+            ModelApi::new(Client::from_network_with_buffer_sizes(
+                network, network, 4096, 1024,
+            ))
+        });
+        let (runtime, service) = AgentRuntime::new(
             memory_vfs().await.expect("memory VFS mounts"),
             RuntimeStorageConfig {
                 persistence_root: "/agent".into(),

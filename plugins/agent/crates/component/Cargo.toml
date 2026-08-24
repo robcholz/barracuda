@@ -11,7 +11,6 @@ crate-type = ["rlib"]
 barracuda-agent-runtime = { path = "../runtime" }
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-vfs = { path = "../../../../shared/vfs" }
-embedded-nal-async = "0.9"
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
@@ -19,6 +18,7 @@ thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
+http-client = { path = "../../../../shared/http-client" }
 barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

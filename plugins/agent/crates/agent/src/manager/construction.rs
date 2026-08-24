@@ -9,7 +9,6 @@ use barracuda_agent_skill::SkillRegistry;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
-use embedded_nal_async::{Dns, TcpConnect};
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillError};
 
@@ -18,7 +17,7 @@ use super::layout::AgentManagerLayout;
 use super::long_term::LongTermDeps;
 use super::AgentManager;
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resolver> {
+impl AgentManager {
     /// The manager owns the memory layout below `persistence_dir`: transcripts,
     /// editable profile documents, and long-term memory. All durable stores
     /// explicitly share the supplied filesystem instance.
@@ -34,7 +33,7 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
         memory_directory: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        llm_factory: ModelApiFactory,
     ) -> Result<Self, AgentManagerError> {
         let span = tracing::info_span!("agent.manager");
         let _enter = span.enter();
@@ -45,7 +44,7 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resol
         }
         let layout = AgentManagerLayout::new(memory_directory);
 
-        let long_term = match LongTermDeps::from_root::<Tcp, Resolver>(
+        let long_term = match LongTermDeps::from_root(
             filesystem.clone(),
             &layout.long_term_dir,
             crate::baked::entries()

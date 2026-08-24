@@ -14,28 +14,12 @@ use barracuda_model_api::ModelApi;
 use barracuda_plugin_manager::{
     Plugin, PluginContext, PluginError, PluginFilesystem, PluginRequirements, PluginResult,
 };
-use embassy_net::dns::DnsSocket;
-use embassy_net::tcp::client::{TcpClient, TcpClientState};
-use embassy_net::Stack;
-use static_cell::StaticCell;
+use http_client::ClientFactory;
 
 pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
 pub use barracuda_model_api::{BackendKind, InitError};
 
 const PERSISTENCE_ROOT: &str = "/";
-const HTTP_HEADER_BYTES: usize = 16 * 1024;
-const HTTP_READ_BYTES: usize = 8 * 1024;
-const HTTP_CONNECTIONS: usize = 4;
-const HTTP_TX_BYTES: usize = 4 * 1024;
-const HTTP_RX_BYTES: usize = 4 * 1024;
-
-type AgentTcpClient = TcpClient<'static, HTTP_CONNECTIONS, HTTP_TX_BYTES, HTTP_RX_BYTES>;
-type AgentDnsResolver = DnsSocket<'static>;
-
-static HTTP_TCP_STATE: StaticCell<TcpClientState<HTTP_CONNECTIONS, HTTP_TX_BYTES, HTTP_RX_BYTES>> =
-    StaticCell::new();
-static HTTP_TCP_CLIENT: StaticCell<AgentTcpClient> = StaticCell::new();
-static HTTP_DNS_RESOLVER: StaticCell<AgentDnsResolver> = StaticCell::new();
 /// Stable identity of the Agent Plugin.
 pub const PLUGIN_ID: &str = "agent";
 
@@ -74,14 +58,14 @@ impl AgentSetApi {
 
 /// Plugin that constructs and owns the Agent runtime and Component.
 pub struct AgentPlugin {
-    stack: Stack<'static>,
+    http: ClientFactory,
 }
 
 impl AgentPlugin {
-    /// Creates the Plugin with its IP construction input.
+    /// Creates the Plugin with the System-owned HTTP client factory.
     #[must_use]
-    pub const fn new(stack: Stack<'static>) -> Self {
-        Self { stack }
+    pub const fn new(http: ClientFactory) -> Self {
+        Self { http }
     }
 }
 
@@ -98,32 +82,8 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         let filesystem = context.filesystem()?.clone();
-        let tcp_state = HTTP_TCP_STATE
-            .try_init(TcpClientState::new())
-            .ok_or_else(|| PluginError::registration(AgentNetworkAlreadyInitialized))?;
-        let tcp: &'static AgentTcpClient = HTTP_TCP_CLIENT
-            .try_init(TcpClient::new(self.stack, tcp_state))
-            .ok_or_else(|| PluginError::registration(AgentNetworkAlreadyInitialized))?;
-        let resolver: &'static AgentDnsResolver = HTTP_DNS_RESOLVER
-            .try_init(DnsSocket::new(self.stack))
-            .ok_or_else(|| PluginError::registration(AgentNetworkAlreadyInitialized))?;
-        #[cfg(feature = "mbedtls-host")]
-        let host_tls = barracuda_model_api::HostTls::from_system_certificates()
-            .map_err(PluginError::registration)?;
-        #[cfg(feature = "mbedtls-host")]
-        let model_api_factory = ModelApiFactory::new(move || {
-            ModelApi::new_with_tls(
-                tcp,
-                resolver,
-                host_tls.config(),
-                HTTP_HEADER_BYTES,
-                HTTP_READ_BYTES,
-            )
-        });
-        #[cfg(not(feature = "mbedtls-host"))]
-        let model_api_factory = ModelApiFactory::new(move || {
-            ModelApi::new(tcp, resolver, HTTP_HEADER_BYTES, HTTP_READ_BYTES)
-        });
+        let http = self.http.clone();
+        let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http.create()));
         let storage = RuntimeStorageConfig {
             persistence_root: PERSISTENCE_ROOT.into(),
             skill_roots: Vec::new(),
@@ -143,17 +103,6 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
     }
 }
 
-#[derive(Debug)]
-struct AgentNetworkAlreadyInitialized;
-
-impl core::fmt::Display for AgentNetworkAlreadyInitialized {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("Agent HTTP resources are already initialized")
-    }
-}
-
-impl core::error::Error for AgentNetworkAlreadyInitialized {}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -165,6 +114,8 @@ mod tests {
     };
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
+
+    use http_client::ClientFactory;
 
     use super::AgentPlugin;
 
@@ -185,7 +136,7 @@ mod tests {
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("agent").expect("valid Plugin ID");
 
-            let plugin = AgentPlugin::new(never_embassy_stack());
+            let plugin = AgentPlugin::new(ClientFactory::plaintext(never_embassy_stack()));
             assert_eq!(Plugin::<512>::id(&plugin), "agent");
 
             manager

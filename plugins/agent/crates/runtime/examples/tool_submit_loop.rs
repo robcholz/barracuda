@@ -26,6 +26,7 @@ use barracuda_agent_trace::{LevelFilter, LogOutput, TracingConfig};
 use barracuda_model_api::ModelApi;
 use barracuda_platform_test::{memory_vfs, ScriptStep, ScriptedStack};
 use futures_lite::StreamExt;
+use http_client::Client;
 use static_cell::StaticCell;
 
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
@@ -97,9 +98,13 @@ async fn run() -> anyhow::Result<()> {
     let sse = format!("data: {event}\n\ndata: [DONE]\n\n");
     let network: &'static ScriptedStack =
         NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[sse.as_str()])]));
-    let llm_factory = ModelApiFactory::new(move || ModelApi::new(network, network, 4096, 1024));
+    let llm_factory = ModelApiFactory::new(move || {
+        ModelApi::new(Client::from_network_with_buffer_sizes(
+            network, network, 4096, 1024,
+        ))
+    });
 
-    let (runtime, service) = AgentRuntime::<ScriptedStack, ScriptedStack>::with_tool_groups(
+    let (runtime, service) = AgentRuntime::with_tool_groups(
         memory_vfs().await?,
         barracuda_agent_runtime::RuntimeStorageConfig {
             persistence_root: "/mem".to_string(),

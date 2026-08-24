@@ -14,10 +14,7 @@ mod service;
 mod worker;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
-use core::{
-    cell::{Cell, RefCell},
-    marker::PhantomData,
-};
+use core::cell::{Cell, RefCell};
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
@@ -38,7 +35,6 @@ use barracuda_model_api::InitError;
 pub use barracuda_model_api::ProviderUsage;
 pub use barracuda_model_api::{BackendKind, ModelApiConfig, ModelApiFactory};
 use barracuda_vfs::{FsError, ScopedVfs};
-use embedded_nal_async::{Dns, TcpConnect};
 use service::RuntimeControl;
 pub use service::{RuntimeBuildError, RuntimeService};
 
@@ -100,12 +96,6 @@ pub enum RuntimeError {
 
 /// A ready-to-drive agent runtime.
 ///
-/// The `Filesystem`/`Tcp`/`Resolver` parameters record which concrete backends the
-/// service worker owns. The backend-erased [`AgentRuntime`] handle retains
-/// the actual filesystem instance; this marker only preserves the public
-/// `AgentRuntime` type relationship.
-type BackendMarker<Tcp, Resolver> = PhantomData<fn() -> (Tcp, Resolver)>;
-
 #[derive(Default)]
 pub(crate) struct ToolLifecycle {
     loaded: RefCell<Option<Arc<ToolRegistry>>>,
@@ -130,21 +120,12 @@ impl ToolLifecycle {
     }
 }
 
-pub struct AgentRuntime<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+pub struct AgentRuntime {
     tool_lifecycle: Arc<ToolLifecycle>,
     control: RuntimeControl,
-    _marker: BackendMarker<Tcp, Resolver>,
 }
 
-impl<Tcp, Resolver> AgentRuntime<Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'static,
-    Resolver: Dns + 'static,
-{
+impl AgentRuntime {
     /// Build an agent runtime with an empty tool registry.
     ///
     /// The returned service future must be spawned by the application. The
@@ -156,8 +137,8 @@ where
     pub fn new(
         filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
-    ) -> RuntimeResult<(Self, RuntimeService<Tcp, Resolver>)> {
+        llm_factory: ModelApiFactory,
+    ) -> RuntimeResult<(Self, RuntimeService)> {
         Self::with_tool_groups(
             filesystem,
             persistence,
@@ -179,11 +160,11 @@ where
     pub fn with_tool_groups(
         filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        llm_factory: ModelApiFactory,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> RuntimeResult<(Self, RuntimeService<Tcp, Resolver>)> {
+    ) -> RuntimeResult<(Self, RuntimeService)> {
         let tool_lifecycle = Arc::new(ToolLifecycle::default());
-        let (control, service) = RuntimeControl::new::<Tcp, Resolver>(
+        let (control, service) = RuntimeControl::new(
             filesystem,
             persistence,
             llm_factory,
@@ -195,7 +176,6 @@ where
             Self {
                 control,
                 tool_lifecycle,
-                _marker: PhantomData,
             },
             service,
         ))
