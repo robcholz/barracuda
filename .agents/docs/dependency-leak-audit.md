@@ -26,16 +26,17 @@ choice.
 | --- | --- | --- | --- |
 | P0 | Board -> Platform | Target passes the complete selected `Board` into Platform initialization; concrete Platforms inspect chip identity and native Board layout | Target validates compatibility and constructs the two selected axes; Platform consumes only Platform-owned inputs |
 | P0 | Platform -> System | Platform exposes `ip_stack` and `partitions`, while System still expects the former `network`, `filesystem`, and `database_region` shape | System consumes `TargetResources`, mounts storage from partitions, and routes Board HAL capabilities independently |
-| P0 | reqwless -> Agent | `Tcp`, `Resolver`, and `ModelApiFactory` spread from model-api through Agent, Runtime, Session, and Component APIs | model-api owns reqwless transport state; Agent consumes model-domain operations |
+| Resolved | HTTP construction -> Agent | System constructs `ClientFactory` from Platform IP/TLS; Agent Plugin creates facade `Client` values and no Agent domain type retains TCP/DNS parameters | Keep transport construction at System/Plugin composition; deeper Agent layers consume model-domain operations |
 | P1 | global filesystem -> Agent | Agent Plugin obtains the complete System filesystem and retains its concrete type throughout the Agent graph | System supplies the existing scoped or rooted filesystem view required by Agent; concrete storage types stop at construction boundaries |
 | P1 | physical flash -> System type | `PluginManager<M, DatabaseRegion>` makes the physical `NorFlash` type part of the public `System` type | Plugin Manager owns its database implementation and exposes only `PluginStorage` to Plugins; System hides the retained database type from its caller |
-| P1 | duplicate HTTP integration | `shared/http-client` and Agent model-api independently wrap reqwless with different request, response, buffering, and streaming models | Concrete protocol owners use one reqwless integration policy; adapters remain private to their owner |
+| Resolved | duplicate HTTP integration | `shared/http-client` owns the sole reqwless implementation, including buffered and streaming responses; model-api is a protocol-only adapter | Keep reqwless imports inside `shared/http-client`; adapters remain domain-specific |
+| Resolved | Host trust-store discovery -> shared TLS | macOS and Linux Platforms now own their CA paths, `SSL_CERT_FILE`, filesystem access, and Host RNG; `shared/tls` accepts prepared PEM/DER inputs only | Keep OS certificate discovery in concrete Platform crates |
 | P1 | channel HTTP construction | Telegram, Wechat, and BlueBubbles accept an HTTP abstraction, but no production composition constructs these Plugins | Selected composition constructs enabled channel Providers with the concrete HTTP implementation |
 | P2 | Embassy Stack -> WebServer and Time | WebServer owns TCP accept loops; Time owns DNS, UDP, and SNTP behavior | These protocol owners may use Embassy directly internally; the Stack does not continue into their business consumers |
 
 ## Current composition break
 
-`PlatformResources` contains `ip_stack` and `partitions`. System now consumes
+`PlatformResources` contains `ip_stack`, `tls`, and `partitions`. System now consumes
 the complete `TargetResources`, preserves Board HAL ownership, and assigns the
 `filesystem`, `database`, and `web-assets` partitions after validating their
 access disciplines.
@@ -97,8 +98,8 @@ Barracuda already uses the relevant ecosystem implementations:
 - picoserve implements the HTTP server.
 
 Barracuda does not need a second general network framework. Thin glue is
-appropriate where these concrete APIs meet, but it remains private to the
-protocol owner and is not promoted into a new `NetworkServices`, client handle,
+appropriate where these concrete APIs meet. The one shared HTTP contract lives
+in `shared/http-client`; it is not promoted into a broad `NetworkServices`,
 listener framework, or System registry.
 
 WebServer and Time are protocol owners. Their internal use of Embassy sockets
@@ -107,33 +108,20 @@ as a direct construction input.
 
 ### Duplicate HTTP paths
 
-The message-channel Providers use `shared/http-client`, whose public response
-model buffers the complete body. Agent model-api owns a separate reqwless
-transport because model streaming must retain and incrementally read an HTTP
-response. The two paths duplicate HTTP construction and error translation but
-do not provide equivalent behavior.
-
-A shared public HTTP abstraction must not be introduced merely to merge these
-files. Reqwless-specific allocation, connection reuse, TLS, and buffering stay
-inside the concrete owners. Common code is extracted only after the owners have
-the same proven contract.
+The duplicate paths are resolved. `shared/http-client` supports both buffered
+responses and true incremental response streaming. It owns reqwless-specific
+allocation, connection reuse, request and response streaming, TLS handoff, and
+transport error classification. Agent model-api maps this neutral stream into
+provider events; channel Providers continue to use the object-safe buffered
+surface. There is no second reqwless client implementation.
 
 ## Agent
 
-Agent is the largest active leak. Production networking types currently occur
-across six Agent crates and 36 source files:
-
-- `barracuda-model-api`;
-- `barracuda-agent`;
-- `barracuda-agent-session`;
-- `barracuda-agent-runtime`;
-- `barracuda-agent-component`;
-- `barracuda-agent-plugin`.
-
-`ModelApiFactory<Tcp, Resolver>` exists to create independent reqwless clients
-with borrowed transport state and reusable buffers. That is a reqwless resource
-management concern, but it appears in Agent managers, context providers,
-approval handling, runtime workers, sessions, Components, and stream types.
+The Agent transport leak is resolved. `ModelApiFactory` is a non-generic domain
+factory that creates `ModelApi` from an injected `http_client::Client`.
+`ModelApi`, Agent managers, context providers, approval handling, runtime
+workers, sessions, Components, and streams retain no TCP, DNS, TLS, reqwless,
+or HTTP-buffer types.
 
 The containment pattern already exists in Event Router: construction accepts a
 generic filesystem, installs an owner-private Component, and returns an
@@ -197,8 +185,9 @@ ip_stack use inside protocol owners:
 System composition
     +-- WebServer implementation -> picoserve + Embassy TCP
     +-- Time implementation      -> SNTP + Embassy DNS/UDP
-    +-- model-api implementation -> reqwless transport
-    +-- channel implementation   -> reqwless transport
+    +-- shared/http-client -> reqwless transport
+            +-- model-api protocol adapter
+            +-- channel Providers
 ~~~
 
 The concrete IP stack appears at System composition and inside protocol-owner
@@ -210,18 +199,18 @@ or unrelated Plugin APIs.
 1. **Restore Target -> System composition.** Make System consume the current
    `TargetResources`, assign partition roles, construct storage, and restore the
    focused System build.
-2. **Contain Agent transport.** Stop exposing `Tcp`, `Resolver`, reqwless, and
-   `ModelApiFactory` beyond model-api. Apply the Event Router construction
-   pattern to Runtime, Session, Component, and stream types.
+2. **Contained Agent transport (complete).** System builds `ClientFactory` from
+   Platform IP/TLS, Agent Plugin injects facade clients into model-api, and
+   Runtime, Session, Component, and stream types carry no transport parameters.
 3. **Contain Agent storage.** Construct existing rooted/scoped storage at the
    System or Agent owner boundary and remove the complete System filesystem from
    Plugin lookup.
 4. **Restore Platform/Board independence.** Move compatibility checks to Target,
    remove Board dependencies from Platform crates, and make Platform own IP
    construction and runner lifecycle.
-5. **Resolve duplicate HTTP integration and channel composition.** Keep reqwless
-   details private, remove unused duplicate public surface, and construct each
-   selected channel in production composition.
+5. **Complete channel composition.** The duplicate HTTP integration is resolved:
+   reqwless details are private to `shared/http-client`. Construct each selected
+   channel in production composition.
 
 Each migration step restores one boundary and its tests before beginning the
 next. New general-purpose capability, network, storage, or transport
@@ -237,8 +226,8 @@ The migration is complete when all of the following hold:
 - Platform crates do not depend on `barracuda-board` or parse selected Board
   configuration;
 - selected Target composition is the only compatibility owner;
-- Agent crates outside model-api contain no `TcpConnect`, `Dns`, reqwless, or
-  `ModelApiFactory` types;
+- Agent production crates contain no `TcpConnect`, `Dns`, reqwless, or
+  transport-parameterized `ModelApiFactory` types;
 - Agent Plugin obtains no complete filesystem through a runtime registry;
 - reqwless imports occur only in concrete HTTP implementation modules;
 - Gateway and Agent RPC contracts contain only their domain data;

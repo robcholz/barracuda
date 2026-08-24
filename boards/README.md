@@ -30,6 +30,23 @@ validates `board.yml` bindings against them and projects the selected region
 into `embedded-storage`/Embassy capabilities. Do not add a generic Barracuda
 partition table or a converter that emits vendor tables.
 
-The application build independently selects a Board with `BARRACUDA_BOARD`
-and a Platform with `BARRACUDA_PLATFORM`. Platform YAML remains beside its
-implementation at `platforms/<name>/platform.yml`.
+Select a concrete Board once, then use the ordinary build command:
+
+```bash
+cargo board select
+cargo build
+```
+
+`cargo board select` opens a colored, fuzzy-searchable list and defaults to the
+currently selected Board. It validates the complete bundle before writing the
+ignored workspace-local `.barracuda/selected-board` file. Scripts may pass an
+explicit name as `cargo board select <board-name>`. Every active Board consumer
+watches and reads the state file, so changing the selection invalidates the
+relevant generated build output. A build with no selection stops with the
+command needed to select one; it never guesses a Board from the Rust target.
+
+`boards/selected` does not inspect the target OS or architecture. Platform
+selection remains independent in `platforms/selected`; the Rust target chooses
+the Platform, and Target composition rejects incompatible Board/Platform pairs.
+Platform YAML remains beside its implementation at
+`platforms/<name>/platform.yml`.

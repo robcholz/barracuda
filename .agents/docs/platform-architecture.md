@@ -16,7 +16,7 @@ HAL    = Board matrix + peripheral Drivers
 
 - **Platform** is an execution platform family: ESP, STM32, nRF, CH, Linux,
   macOS, or an equivalent environment. It provides platform mechanisms such as
-  an IP stack and partitions. It does not describe a Board's concrete
+  an IP stack, TLS, and partitions. It does not describe a Board's concrete
   peripherals, wiring, or product hardware matrix.
 - **Board** is one concrete hardware combination. Its matrix describes the
   chip, buses, pins, clocks, attached peripherals, fixed wiring, and native
@@ -83,7 +83,7 @@ The returned shape preserves ownership:
 
 ~~~rust,ignore
 TargetResources {
-    platform: PlatformResources { ip_stack, partitions },
+    platform: PlatformResources { ip_stack, tls, partitions },
     board_hal: BoardHalResources { /* semantic capabilities */ },
 }
 ~~~
@@ -99,11 +99,13 @@ platform-level services. Concrete Board peripherals do not become Platform
 fields or Platform associated types.
 
 Platform resources have stable, exact shapes. The current common contract
-exposes one Embassy IP stack and one partitions collection:
+exposes one Embassy IP stack, one TLS client capability, and one partitions
+collection:
 
 ~~~rust,ignore
-pub struct PlatformResources<Partitions> {
+pub struct PlatformResources<Tls, Partitions> {
     pub ip_stack: embassy_net::Stack<'static>,
+    pub tls: Tls,
     pub partitions: Partitions,
 }
 ~~~
@@ -112,7 +114,8 @@ This is architectural guidance rather than a frozen Rust signature. The
 invariant is that partitions remain a collection. Business roles never become
 fields such as filesystem_partition, web_assets_partition, or
 database_partition. The IP capability likewise remains `ip_stack` rather than
-web_network or database_network.
+web_network or database_network. TLS remains an independent `tls` capability;
+it is not hidden inside `ip_stack` or reconstructed by an HTTP consumer.
 
 Adding a Plugin, peripheral, filesystem, database, or application subsystem
 does not modify the Platform API or PlatformResources shape.
@@ -138,6 +141,24 @@ used to construct a HAL; it does not implement or select a Platform.
 Board configuration identifies concrete hardware and the native names required
 to construct it. It does not contain mounted filesystems, database objects,
 Plugin instances, or application services.
+
+Board selection is an explicit persistent step:
+
+~~~bash
+cargo board select
+cargo build
+~~~
+
+The selection command presents a colored fuzzy-searchable list, validates the
+chosen Board bundle, and records its name in workspace-local ignored state. It
+also accepts an explicit Board name for automation. The ordinary Cargo build
+reads that state; it does not require an environment variable or a Board-aware
+build wrapper.
+`boards/selected` must not inspect `target_os` or `target_arch`, and the outer
+Target composition must not infer a default Board or activate a Board feature
+from them. A missing selection is a build error that points back to the select
+command. This keeps target policy out of Board parsing and code generation
+while preserving Board and Platform as independent inputs.
 
 ## Peripheral Drivers and HAL
 
@@ -277,6 +298,56 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
+## TLS and HTTP clients
+
+TLS is a Platform capability because each Platform owns its randomness,
+trust-root source, TLS engine initialization, and process or firmware lifetime.
+Host Platforms load the system certificate bundle. Device Platforms construct
+the same semantic capability from Platform RNG state and provisioned DER trust
+roots. A Plugin must not load Host certificates, initialize a TLS backend, or
+select a TLS implementation through a Host-only feature.
+
+`shared/tls` owns only TLS mechanisms: the `ClientTls` contract and constructors
+that accept caller-supplied RNG and DER/PEM roots. It must not inspect
+environment variables, read certificate files, or contain operating-system CA
+paths. Those policies live in each concrete Host Platform.
+
+HTTP is a shared software service above the Platform boundary:
+
+~~~text
+PlatformResources { ip_stack, tls }
+                 |
+                 v
+System composition
+                 |
+                 v
+shared/http-client
+        +-- ClientFactory (composition only)
+        +-- Client request facade (consumer API)
+        +-- buffered execute
+        +-- streaming execute
+                 |
+                 +----> Agent model protocol adapter
+                 +----> message-channel Providers
+~~~
+
+`shared/http-client` is the workspace's only reqwless integration. It owns URL
+and header validation, connection reuse, request-body streaming, response-body
+streaming, buffering, and transport error classification. Protocol crates may
+adapt its domain-neutral request and response values, but they do not create a
+second reqwless transport implementation.
+
+System combines the Platform's `ip_stack` and `tls` capabilities into one
+`http_client::ClientFactory`. Construction code may clone that factory;
+business components receive only `http_client::Client` and use its fluent
+`get`/`post`/`request` facade. TCP, DNS, TLS configuration, reqwless types, and
+buffer sizes must not parameterize Plugin or domain APIs.
+
+Each `ClientFactory::create()` result independently owns connection reuse and
+request serialization while all results share the Platform network pool. Thus
+“one shared HTTP client” means one facade, implementation, and construction
+policy, not one mandatory TCP connection for unrelated concurrent protocols.
+
 Embassy is the common task, timer, and lifecycle model used by Barracuda on
 embedded, macOS, and Linux Platforms. The operating-system Platforms may use
 native facilities behind their implementations, while System and Plugins retain
@@ -358,9 +429,9 @@ plugins/
 Dependencies flow toward semantic consumers:
 
 ~~~text
-peripheral Drivers + Board matrix -> HAL capabilities --+
-                                                         |
-Platform -------------------------> Platform resources --+-> System -> Plugins
+peripheral Drivers + Board matrix -> HAL capabilities -------------------+
+                                                                         |
+Platform -> Platform resources { IP, TLS, partitions } ------------------+-> System -> Plugins
 ~~~
 
 Platform crates do not own peripheral Driver implementations or Board
@@ -404,3 +475,5 @@ Before changing target-sensitive code, verify:
     System or a Plugin?
 12. Does the application obtain the complete selected Target from the target
     composition crate without performing the wiring itself?
+13. Does Platform initialize TLS from Platform-owned randomness and trust
+    roots, while all HTTP consumers use `shared/http-client`?

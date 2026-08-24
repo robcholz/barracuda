@@ -60,6 +60,29 @@ Platform selection must not be encoded as separate `WebServer`
 implementations, scattered `cfg` branches, or a different application executor
 in portable system code.
 
+## Select and build a Board
+
+Board selection is a persistent workspace action, separate from compilation:
+
+```bash
+cargo board select
+cargo build
+```
+
+The first command opens a colored Board list. Use the arrow keys to move, type
+to fuzzy-search, and press Enter to select. It validates the Board bundle and
+records the selection in ignored local state at
+`.barracuda/selected-board`. The second command is the ordinary Cargo build;
+no `BARRACUDA_BOARD` environment variable or custom build wrapper is required.
+The Rust target independently selects the Platform, and compilation rejects an
+incompatible Board/Platform pair.
+
+Automation can bypass the prompt with `cargo board select <board-name>`.
+
+Available Board names are the directory names under `boards/configs/`.
+Cross-compilation continues to use Cargo's normal `--target` and `-p`
+arguments; selecting a Board does not rewrite Cargo's target configuration.
+
 The memory profiler is an executable workload rather than a throughput
 benchmark:
 
@@ -132,19 +155,19 @@ through its HAL; it does not implement a framework-specific timer trait. The
 host CLI and host tests enable Embassy's `std` driver and a generic timer queue,
 so they exercise the same timing code as firmware.
 
-Each `ModelApi` exclusively owns one long-lived reqwless client, its persistent
-`HttpResource`, and reusable HTTP buffers. `ModelApiFactory` is only the
+Each `ModelApi` owns one client from `shared/http-client`, including its
+persistent connection and reusable HTTP buffers. `ModelApiFactory` is only the
 application construction policy: one call creates one independent client, so
 the application decides how many agent clients exist. Sequential requests on
 one `ModelApi` reuse its TCP/TLS connection; a request never reconstructs its
-client.
+client. Model API contains only the LLM-specific request, response, and stream
+adapter; reqwless integration lives exclusively in `shared/http-client`.
 
-For portable no_std HTTPS, enable `barracuda-model-api/embedded-tls` and construct `ModelApi`
-with `TlsVerify::Certificate`; the application provides the static TLS buffers,
-random seed, and DER CA certificate. Platforms with mbedTLS can instead enable
-`barracuda-model-api/mbedtls`. The host CLI uses `barracuda-model-api/mbedtls-host`, a Tokio TCP/DNS
-HAL, and a PEM CA bundle, but its HTTP request path is still the same reqwless
-client.
+TLS is initialized by the selected Platform and returned beside `ip_stack` in
+`PlatformResources`. Linux and macOS load the Host certificate bundle; device
+Platforms initialize the same capability from their RNG and DER trust roots.
+System passes that capability into Agent construction. No Plugin loads system
+certificates or selects a Host-only TLS feature.
 
 Host tests and `barracuda-cli` remain normal `std` consumers. The former C ABI and
 prebuilt static archives are no longer part of this workspace.
