@@ -23,6 +23,7 @@ struct Resolved {
 }
 
 /// One independent virtual-filesystem mount namespace.
+#[derive(Clone)]
 pub struct Vfs {
     mounts: Vec<Mount>,
 }
@@ -31,6 +32,12 @@ impl Vfs {
     /// Creates an empty namespace with no implicit fallback filesystem.
     pub const fn new() -> Self {
         Self { mounts: Vec::new() }
+    }
+
+    /// Creates a mount-management-free view rooted beneath `root`.
+    pub fn scoped(&self, root: &str) -> Result<crate::ScopedVfs, FsError> {
+        let root = normalize(root)?;
+        Ok(crate::ScopedVfs::new(self.clone(), root))
     }
 
     /// Mounts a backend root at `mount_point`.

@@ -181,3 +181,53 @@ fn mount_cannot_be_removed_while_a_file_is_open() {
         );
     });
 }
+
+#[test]
+fn scoped_vfs_provides_complete_persistence_operations() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        let scope = vfs.scoped("/plugins/agent").unwrap();
+
+        scope.create_dir_all("/sessions").await.unwrap();
+        scope.write("/sessions/index", b"old").await.unwrap();
+        scope
+            .write_atomic("/sessions/index", b"first")
+            .await
+            .unwrap();
+        scope.append("/sessions/index", b"-second").await.unwrap();
+
+        assert!(scope.exists("/sessions/index").await.unwrap());
+        assert_eq!(scope.len("/sessions/index").await.unwrap(), 12);
+        assert_eq!(
+            scope.read_at("/sessions/index", 6, 6).await.unwrap(),
+            b"second"
+        );
+        assert_eq!(scope.list_dir("/sessions").await.unwrap(), ["index"]);
+
+        scope.remove("/sessions/index").await.unwrap();
+        scope.remove("/sessions/index").await.unwrap();
+        assert!(!scope.exists("/sessions/index").await.unwrap());
+    });
+}
+
+#[test]
+fn scoped_vfs_accepts_paths_relative_to_its_private_root() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        let scope = vfs.scoped("/plugins/agent").unwrap();
+
+        scope
+            .write_atomic("skills/demo/SKILL.md", b"demo")
+            .await
+            .unwrap();
+
+        assert_eq!(scope.read("/skills/demo/SKILL.md").await.unwrap(), b"demo");
+        assert_eq!(scope.list_dir("skills/demo").await.unwrap(), ["SKILL.md"]);
+        assert_eq!(
+            vfs.read("/plugins/agent/skills/demo/SKILL.md")
+                .await
+                .unwrap(),
+            b"demo"
+        );
+    });
+}

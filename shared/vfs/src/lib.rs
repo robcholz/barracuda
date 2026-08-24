@@ -8,6 +8,7 @@ mod backend;
 mod error;
 mod global;
 mod path;
+mod scoped;
 mod types;
 mod vfs;
 
@@ -18,5 +19,6 @@ pub use global::{
     create, create_dir_all, metadata, mount, mount_scoped, open, open_with, read, read_dir,
     remove_dir, remove_file, rename, unmount, write,
 };
+pub use scoped::ScopedVfs;
 pub use types::{DirEntry, FileType, Metadata, MountOptions, OpenOptions, ReadDir};
 pub use vfs::Vfs;

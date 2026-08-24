@@ -1,7 +1,7 @@
 //! LittleFS backend integration behavior.
 
 use barracuda_vfs::{MountOptions, OpenOptions, SeekFrom, Vfs};
-use barracuda_vfs_littlefs::{LittleFs, PartitionStorage};
+use barracuda_vfs_littlefs::{mount_or_format_partition, LittleFs, PartitionStorage};
 use embedded_io_async::{Read, Seek, Write};
 use embedded_storage::nor_flash::{ErrorType, NorFlash, NorFlashErrorKind, ReadNorFlash};
 use typenum::{U1, U16};
@@ -139,5 +139,25 @@ fn littlefs_backend_supports_namespace_mutations_and_append() {
         vfs.remove_file("/data/logs/archive/run").await.unwrap();
         vfs.remove_dir("/data/logs/archive").await.unwrap();
         vfs.remove_dir("/data/logs").await.unwrap();
+    });
+}
+
+#[test]
+fn generic_partition_entry_mounts_the_complete_supported_region() {
+    embassy_futures::block_on(async {
+        let backend = mount_or_format_partition(MemoryFlash::new()).unwrap();
+        let mut vfs = Vfs::new();
+        vfs.mount("/", backend, MountOptions::read_write())
+            .await
+            .unwrap();
+
+        vfs.write("/state", b"mounted from a generic NOR partition")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            vfs.read("/state").await.unwrap(),
+            b"mounted from a generic NOR partition"
+        );
     });
 }

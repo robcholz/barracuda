@@ -16,7 +16,10 @@ use barracuda_vfs::{
     SeekFrom, VfsBackend,
 };
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
-use generic_array::ArrayLength;
+use generic_array::{
+    typenum::{U128, U8},
+    ArrayLength,
+};
 use littlefs2::driver::Storage;
 use littlefs2::fs::Filesystem;
 use littlefs2::path::PathBuf;
@@ -26,6 +29,61 @@ use spin::Mutex;
 pub struct PartitionStorage<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: usize> {
     flash: Flash,
     marker: PhantomData<(CacheSize, LookaheadSize)>,
+}
+
+/// Mounts or formats a synchronous NOR partition using the largest supported
+/// LittleFS geometry that fits it.
+///
+/// `littlefs2` represents the block count as a Rust associated constant while
+/// [`ReadNorFlash::capacity`] is a runtime value. This entry point performs the
+/// type erasure once, inside the backend crate, so Platform and System do not
+/// need Board-specific LittleFS types. The currently supported geometries
+/// cover the native filesystem regions of the standard, ESP32-C6, and STM32F4
+/// targets. A partition whose erase-block count lies between two supported
+/// geometries uses the lower geometry; the unused tail remains outside the
+/// filesystem rather than being addressed with an invalid compile-time size.
+///
+/// # Errors
+///
+/// Returns [`FsError::InvalidInput`] when the partition is not an exact number
+/// of erase blocks or contains fewer than two erase blocks.
+/// Returns [`FsError::Io`] when the partition cannot be mounted or formatted.
+pub fn mount_or_format_partition<Flash>(flash: Flash) -> Result<Backend, FsError>
+where
+    Flash: NorFlash + Send + 'static,
+{
+    let capacity = flash.capacity();
+    let block_count = capacity
+        .checked_div(Flash::ERASE_SIZE)
+        .filter(|count| *count > 0 && count.saturating_mul(Flash::ERASE_SIZE) == capacity)
+        .ok_or(FsError::InvalidInput)?;
+
+    macro_rules! mount_geometry {
+        ($blocks:expr) => {{
+            let storage = PartitionStorage::<Flash, U128, U8, $blocks>::new(flash)?;
+            LittleFs::mount_or_format(storage).map(LittleFs::into_backend)
+        }};
+    }
+
+    match block_count {
+        0..2 => Err(FsError::InvalidInput),
+        2..4 => mount_geometry!(2),
+        4..8 => mount_geometry!(4),
+        8..16 => mount_geometry!(8),
+        16..32 => mount_geometry!(16),
+        32..64 => mount_geometry!(32),
+        64..128 => mount_geometry!(64),
+        128..256 => mount_geometry!(128),
+        256..384 => mount_geometry!(256),
+        384..512 => mount_geometry!(384),
+        512..768 => mount_geometry!(512),
+        768..1_024 => mount_geometry!(768),
+        1_024..1_536 => mount_geometry!(1_024),
+        1_536..2_048 => mount_geometry!(1_536),
+        2_048..3_072 => mount_geometry!(2_048),
+        3_072..4_096 => mount_geometry!(3_072),
+        _ => mount_geometry!(4_096),
+    }
 }
 
 impl<Flash, CacheSize, LookaheadSize, const BLOCK_COUNT: usize>
