@@ -15,15 +15,18 @@ permissions:
   contents: read
 
 jobs:
-  rust:
-    name: Rust (host)
+  # The complete codebase, built and tested on the Linux host Target. Board and
+  # Platform are selected explicitly: the architecture forbids inferring a Board
+  # from the target, and this keeps the selection visible rather than relying on
+  # the host Platform default.
+  host:
+    name: Host (linux) — build & test
     runs-on: ubuntu-latest
+    env:
+      BARRACUDA_PLATFORM: linux
     steps:
       - uses: actions/checkout@v4
 
-      # The toolchain channel is pinned by rust-toolchain.toml (stable). Device
-      # firmware (xtensa) is built separately with `cargo +esp` and is out of
-      # scope for host CI.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -32,14 +35,10 @@ jobs:
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
-      # Formatting does not depend on a selected Board.
       - name: Check formatting
         run: cargo fmt --all --check
 
-      # Building any crate in the Board/Platform composition graph requires a
-      # selected Board. `local-linux` is the host Board; the Platform defaults
-      # to `linux` for the host target automatically.
-      - name: Select host Board
+      - name: Select Linux host Board
         run: cargo board select local-linux
 
       - name: Clippy
@@ -47,6 +46,44 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # The full codebase is too large to build for every Platform, so the non-host
+  # Platforms are only compiled for their own target to prove they build. Each
+  # Platform crate is built alone ("without the full thing"), with its Board
+  # selected explicitly so its build script reads the right native layout.
+  platform-build:
+    name: Platform build (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: esp32c6
+            board: esp32c6-devkitc-1
+            target: riscv32imac-unknown-none-elf
+            features: ""
+          - platform: stm32
+            board: stm32f429zi-nucleo
+            target: thumbv7em-none-eabihf
+            features: "--features stm32f429zi"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Select ${{ matrix.platform }} Board
+        run: cargo board select ${{ matrix.board }}
+
+      - name: Build ${{ matrix.platform }} Platform
+        run: cargo build -p barracuda-platform-${{ matrix.platform }} ${{ matrix.features }} --target ${{ matrix.target }}
 
   python:
     name: Python tooling
