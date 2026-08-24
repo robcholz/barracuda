@@ -11,8 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
     let board_name = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("riscv32") {
-        read_selected_board(&root)?
-            .ok_or("no Board selected; run `cargo board select` first")?
+        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?
     } else {
         "esp32c6-devkitc-1".into()
     };

@@ -122,8 +122,7 @@ where
                 .as_ref()
                 .and_then(|current| boards.iter().position(|board| board == current));
             let Some(index) = selector(&boards, default)? else {
-                writeln!(output, "Board selection cancelled.")
-                    .map_err(CommandError::Output)?;
+                writeln!(output, "Board selection cancelled.").map_err(CommandError::Output)?;
                 return Ok(());
             };
             let name = boards
@@ -161,12 +160,10 @@ fn discover_boards(workspace_root: &Path) -> Result<Vec<String>, CommandError> {
             path: catalog.clone(),
             source,
         })?;
-        let file_type = entry
-            .file_type()
-            .map_err(|source| CommandError::Catalog {
-                path: entry.path(),
-                source,
-            })?;
+        let file_type = entry.file_type().map_err(|source| CommandError::Catalog {
+            path: entry.path(),
+            source,
+        })?;
         if !file_type.is_dir() {
             continue;
         }
@@ -258,19 +255,11 @@ mod tests {
             .expect("non-Board file");
         let mut output = Vec::new();
 
-        run_with_selector(
-            ["select"],
-            root.path(),
-            &mut output,
-            |boards, default| {
-                assert_eq!(
-                    boards,
-                    ["esp32c6-devkitc-1", "stm32f429zi-nucleo"]
-                );
-                assert_eq!(default, None);
-                Ok(Some(1))
-            },
-        )
+        run_with_selector(["select"], root.path(), &mut output, |boards, default| {
+            assert_eq!(boards, ["esp32c6-devkitc-1", "stm32f429zi-nucleo"]);
+            assert_eq!(default, None);
+            Ok(Some(1))
+        })
         .expect("interactive selection");
 
         assert_eq!(
@@ -353,12 +342,9 @@ mod tests {
         write_selected_board(root.path(), "local-macos").expect("current Board");
         let mut output = Vec::new();
 
-        run_with_selector(
-            ["select"],
-            root.path(),
-            &mut output,
-            |_boards, _default| Ok(None),
-        )
+        run_with_selector(["select"], root.path(), &mut output, |_boards, _default| {
+            Ok(None)
+        })
         .expect("cancel selection");
 
         assert_eq!(

@@ -58,14 +58,14 @@ class Summary:
     def to_dict(self) -> dict[str, object]:
         return {
             **self.configuration_dict(),
-            "sample_count": self.sample_count,
-            "median_ingress_bytes_per_second": self.median_ingress_bytes_per_second,
-            "q1_ingress_bytes_per_second": self.q1_ingress_bytes_per_second,
-            "q3_ingress_bytes_per_second": self.q3_ingress_bytes_per_second,
-            "coefficient_of_variation": self.coefficient_of_variation,
-            "median_routed_bytes_per_second": self.median_routed_bytes_per_second,
-            "median_events_per_second": self.median_events_per_second,
-            "relative_to_partition_best": self.relative_to_partition_best,
+            'sample_count': self.sample_count,
+            'median_ingress_bytes_per_second': self.median_ingress_bytes_per_second,
+            'q1_ingress_bytes_per_second': self.q1_ingress_bytes_per_second,
+            'q3_ingress_bytes_per_second': self.q3_ingress_bytes_per_second,
+            'coefficient_of_variation': self.coefficient_of_variation,
+            'median_routed_bytes_per_second': self.median_routed_bytes_per_second,
+            'median_events_per_second': self.median_events_per_second,
+            'relative_to_partition_best': self.relative_to_partition_best,
         }
 
 
@@ -80,77 +80,79 @@ class Comparison:
     def to_dict(self) -> dict[str, object]:
         return {
             **asdict(self.configuration),
-            "baseline_bytes_per_second": self.baseline_bytes_per_second,
-            "current_bytes_per_second": self.current_bytes_per_second,
-            "ratio": self.ratio,
-            "regression": self.regression,
+            'baseline_bytes_per_second': self.baseline_bytes_per_second,
+            'current_bytes_per_second': self.current_bytes_per_second,
+            'ratio': self.ratio,
+            'regression': self.regression,
         }
 
 
 REQUIRED_COLUMNS = {
-    "scenario",
-    "n",
-    "m",
-    "q",
-    "payload",
-    "fanout",
-    "sink_yields",
-    "events",
-    "sample",
-    "elapsed_ns",
-    "ingress_bytes_per_second",
-    "routed_bytes_per_second",
-    "events_per_second",
-    "checksum",
+    'scenario',
+    'n',
+    'm',
+    'q',
+    'payload',
+    'fanout',
+    'sink_yields',
+    'events',
+    'sample',
+    'elapsed_ns',
+    'ingress_bytes_per_second',
+    'routed_bytes_per_second',
+    'events_per_second',
+    'checksum',
 }
 
 
 def load_samples(paths: Iterable[Path]) -> list[Sample]:
     samples: list[Sample] = []
     for path in paths:
-        with path.open(newline="", encoding="utf-8") as handle:
+        with path.open(newline='', encoding='utf-8') as handle:
             reader = csv.DictReader(handle)
             columns = set(reader.fieldnames or ())
             missing = REQUIRED_COLUMNS - columns
             if missing:
-                raise ValueError(f"{path} is missing CSV columns: {sorted(missing)}")
+                raise ValueError(f'{path} is missing CSV columns: {sorted(missing)}')
             for line, row in enumerate(reader, start=2):
                 try:
                     configuration = Configuration(
-                        scenario=row["scenario"],
-                        n=int(row["n"]),
-                        m=int(row["m"]),
-                        q=int(row["q"]),
-                        payload=int(row["payload"]),
-                        fanout=int(row["fanout"]),
-                        sink_yields=int(row["sink_yields"]),
-                        events=int(row["events"]),
+                        scenario=row['scenario'],
+                        n=int(row['n']),
+                        m=int(row['m']),
+                        q=int(row['q']),
+                        payload=int(row['payload']),
+                        fanout=int(row['fanout']),
+                        sink_yields=int(row['sink_yields']),
+                        events=int(row['events']),
                     )
                     samples.append(
                         Sample(
                             configuration=configuration,
-                            sample=int(row["sample"]),
-                            elapsed_ns=int(row["elapsed_ns"]),
+                            sample=int(row['sample']),
+                            elapsed_ns=int(row['elapsed_ns']),
                             ingress_bytes_per_second=float(
-                                row["ingress_bytes_per_second"]
+                                row['ingress_bytes_per_second']
                             ),
                             routed_bytes_per_second=float(
-                                row["routed_bytes_per_second"]
+                                row['routed_bytes_per_second']
                             ),
-                            events_per_second=float(row["events_per_second"]),
-                            checksum=int(row["checksum"]),
+                            events_per_second=float(row['events_per_second']),
+                            checksum=int(row['checksum']),
                         )
                     )
                 except (KeyError, TypeError, ValueError) as error:
-                    raise ValueError(f"invalid sample at {path}:{line}: {error}") from error
+                    raise ValueError(
+                        f'invalid sample at {path}:{line}: {error}'
+                    ) from error
     if not samples:
-        raise ValueError("no benchmark samples found")
+        raise ValueError('no benchmark samples found')
     return samples
 
 
 def aggregate(samples: Sequence[Sample], *, expected_samples: int) -> list[Summary]:
     if expected_samples <= 0:
-        raise ValueError("expected_samples must be positive")
+        raise ValueError('expected_samples must be positive')
     grouped: dict[Configuration, list[Sample]] = defaultdict(list)
     for sample in samples:
         grouped[sample.configuration].append(sample)
@@ -159,18 +161,18 @@ def aggregate(samples: Sequence[Sample], *, expected_samples: int) -> list[Summa
     for configuration, group in sorted(grouped.items()):
         indices = [sample.sample for sample in group]
         if len(indices) != len(set(indices)):
-            raise ValueError(f"duplicate sample index for {configuration}")
+            raise ValueError(f'duplicate sample index for {configuration}')
         if len(group) != expected_samples:
             raise ValueError(
-                f"expected {expected_samples} samples for {configuration}, got {len(group)}"
+                f'expected {expected_samples} samples for {configuration}, got {len(group)}'
             )
         if set(indices) != set(range(expected_samples)):
             raise ValueError(
-                f"sample indices for {configuration} must be 0..{expected_samples - 1}"
+                f'sample indices for {configuration} must be 0..{expected_samples - 1}'
             )
         checksums = {sample.checksum for sample in group}
         if len(checksums) != 1:
-            raise ValueError(f"checksum drift for {configuration}: {sorted(checksums)}")
+            raise ValueError(f'checksum drift for {configuration}: {sorted(checksums)}')
 
         ingress = [sample.ingress_bytes_per_second for sample in group]
         routed = [sample.routed_bytes_per_second for sample in group]
@@ -178,7 +180,7 @@ def aggregate(samples: Sequence[Sample], *, expected_samples: int) -> list[Summa
         if len(ingress) == 1:
             q1 = q3 = ingress[0]
         else:
-            q1, _, q3 = statistics.quantiles(ingress, n=4, method="inclusive")
+            q1, _, q3 = statistics.quantiles(ingress, n=4, method='inclusive')
         mean = statistics.fmean(ingress)
         cv = statistics.pstdev(ingress) / mean if mean else math.inf
         summaries.append(
@@ -215,10 +217,10 @@ def compare_to_baseline(
     minimum_ratio: float,
 ) -> list[Comparison]:
     if not 0 < minimum_ratio <= 1:
-        raise ValueError("minimum_ratio must be in (0, 1]")
-    baseline_configs = baseline.get("configurations")
+        raise ValueError('minimum_ratio must be in (0, 1]')
+    baseline_configs = baseline.get('configurations')
     if not isinstance(baseline_configs, list):
-        raise ValueError("baseline has no configurations list")
+        raise ValueError('baseline has no configurations list')
 
     by_configuration: dict[Configuration, float] = {}
     for item in baseline_configs:
@@ -226,17 +228,17 @@ def compare_to_baseline(
             continue
         try:
             configuration = Configuration(
-                scenario=str(item["scenario"]),
-                n=int(item["n"]),
-                m=int(item["m"]),
-                q=int(item["q"]),
-                payload=int(item["payload"]),
-                fanout=int(item["fanout"]),
-                sink_yields=int(item["sink_yields"]),
-                events=int(item["events"]),
+                scenario=str(item['scenario']),
+                n=int(item['n']),
+                m=int(item['m']),
+                q=int(item['q']),
+                payload=int(item['payload']),
+                fanout=int(item['fanout']),
+                sink_yields=int(item['sink_yields']),
+                events=int(item['events']),
             )
             by_configuration[configuration] = float(
-                item["median_ingress_bytes_per_second"]
+                item['median_ingress_bytes_per_second']
             )
         except (KeyError, TypeError, ValueError):
             continue
@@ -267,15 +269,15 @@ def write_outputs(
 ) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     payload = {
-        "metadata": metadata,
-        "configurations": [summary.to_dict() for summary in summaries],
-        "comparisons": [comparison.to_dict() for comparison in comparisons],
+        'metadata': metadata,
+        'configurations': [summary.to_dict() for summary in summaries],
+        'comparisons': [comparison.to_dict() for comparison in comparisons],
     }
-    (output_dir / "summary.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    (output_dir / 'summary.json').write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
     )
-    (output_dir / "report.md").write_text(
-        render_markdown(summaries, metadata, comparisons), encoding="utf-8"
+    (output_dir / 'report.md').write_text(
+        render_markdown(summaries, metadata, comparisons), encoding='utf-8'
     )
 
 
@@ -285,21 +287,21 @@ def render_markdown(
     comparisons: Sequence[Comparison],
 ) -> str:
     lines = [
-        "# Event Router throughput report",
-        "",
-        f"- Commit: `{metadata.get('head', 'unknown')}`",
-        f"- Source diff SHA-256: `{metadata.get('diff_sha256', 'unknown')}`",
-        f"- Generated: `{metadata.get('timestamp_utc', 'unknown')}`",
-        "- Throughput counts original event payload bytes per wall-clock second.",
-        "",
-        "| Scenario | N | M | Q | Payload | Fan-out | Yields | Median | IQR | Relative | CV |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        '# Event Router throughput report',
+        '',
+        f'- Commit: `{metadata.get("head", "unknown")}`',
+        f'- Source diff SHA-256: `{metadata.get("diff_sha256", "unknown")}`',
+        f'- Generated: `{metadata.get("timestamp_utc", "unknown")}`',
+        '- Throughput counts original event payload bytes per wall-clock second.',
+        '',
+        '| Scenario | N | M | Q | Payload | Fan-out | Yields | Median | IQR | Relative | CV |',
+        '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|',
     ]
     for summary in summaries:
         configuration = summary.configuration
         lines.append(
-            "| {scenario} | {n} | {m} | {q} | {payload} | {fanout} | "
-            "{yields} | {median} B/s | {q1}–{q3} | {relative:.1%} | {cv:.1%} |".format(
+            '| {scenario} | {n} | {m} | {q} | {payload} | {fanout} | '
+            '{yields} | {median} B/s | {q1}–{q3} | {relative:.1%} | {cv:.1%} |'.format(
                 scenario=configuration.scenario,
                 n=configuration.n,
                 m=configuration.m,
@@ -318,33 +320,33 @@ def render_markdown(
         regressions = sum(comparison.regression for comparison in comparisons)
         lines.extend(
             [
-                "",
-                "## Baseline comparison",
-                "",
-                f"Matched configurations: {len(comparisons)}; regressions: {regressions}.",
-                "",
+                '',
+                '## Baseline comparison',
+                '',
+                f'Matched configurations: {len(comparisons)}; regressions: {regressions}.',
+                '',
             ]
         )
-    return "\n".join(lines) + "\n"
+    return '\n'.join(lines) + '\n'
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("inputs", nargs="+", type=Path)
-    parser.add_argument("--output-dir", required=True, type=Path)
-    parser.add_argument("--samples", required=True, type=int)
-    parser.add_argument("--metadata", type=Path)
-    parser.add_argument("--baseline", type=Path)
-    parser.add_argument("--minimum-ratio", type=float, default=0.9)
+    parser.add_argument('inputs', nargs='+', type=Path)
+    parser.add_argument('--output-dir', required=True, type=Path)
+    parser.add_argument('--samples', required=True, type=int)
+    parser.add_argument('--metadata', type=Path)
+    parser.add_argument('--baseline', type=Path)
+    parser.add_argument('--minimum-ratio', type=float, default=0.9)
     args = parser.parse_args()
 
     metadata = {}
     if args.metadata:
-        metadata = json.loads(args.metadata.read_text(encoding="utf-8"))
+        metadata = json.loads(args.metadata.read_text(encoding='utf-8'))
     summaries = aggregate(load_samples(args.inputs), expected_samples=args.samples)
     comparisons: list[Comparison] = []
     if args.baseline:
-        baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
+        baseline = json.loads(args.baseline.read_text(encoding='utf-8'))
         comparisons = compare_to_baseline(
             summaries, baseline, minimum_ratio=args.minimum_ratio
         )
@@ -352,5 +354,5 @@ def main() -> int:
     return 2 if any(comparison.regression for comparison in comparisons) else 0
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     raise SystemExit(main())

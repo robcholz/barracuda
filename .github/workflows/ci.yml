@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The toolchain channel is pinned by rust-toolchain.toml (stable). Device
+      # firmware (xtensa) is built separately with `cargo +esp` and is out of
+      # scope for host CI.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Formatting does not depend on a selected Board.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      # Building any crate in the Board/Platform composition graph requires a
+      # selected Board. `local-linux` is the host Board; the Platform defaults
+      # to `linux` for the host target automatically.
+      - name: Select host Board
+        run: cargo board select local-linux
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets
+
+      - name: Test
+        run: cargo test --workspace
+
+  python:
+    name: Python tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync workspace
+        run: uv sync --all-packages --all-groups
+
+      - name: Check formatting (ruff)
+        run: uv run ruff format --check .
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Test barracuda-trace
+        working-directory: plugins/agent/crates/trace
+        run: uv run --package barracuda-trace pytest
+
+      - name: Test llm-tape
+        working-directory: plugins/agent/tools/llm-tape
+        run: uv run --package llm-tape pytest
+
+      - name: Test serial-log
+        working-directory: plugins/agent/crates/trace/scripts/serial_log
+        run: uv run --package serial-log pytest
