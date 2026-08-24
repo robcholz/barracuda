@@ -22,7 +22,7 @@ pub mod set_permission_level;
 /// `SessionControl::set_reasoning_effort` RPC.
 pub mod set_reasoning_effort;
 
-/// Shared registry of controls established by `agent.open_session`.
+/// Shared registry of controls established by `session.open`.
 #[derive(Clone, Default)]
 pub struct SessionRegistry(Rc<RefCell<BTreeMap<SessionId, SessionControl>>>);
 

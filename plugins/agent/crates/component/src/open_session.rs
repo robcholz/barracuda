@@ -20,7 +20,7 @@ use crate::session::SessionRegistry;
 
 pub use crate::dto::{OpenSessionRequest, OpenSessionResponseFrame};
 
-/// Logical item returned by the `agent.open_session` stream.
+/// Logical item returned by the `session.open` stream.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OpenSessionResponse {
@@ -207,7 +207,7 @@ impl From<SessionCloseReason> for SessionCloseReasonDto {
     }
 }
 
-/// Failure returned by `agent.open_session`.
+/// Failure returned by `session.open`.
 #[repr(u8)]
 #[derive(
     Clone,
@@ -239,7 +239,7 @@ pub struct OpenSession;
 
 #[rpc_dynamic]
 impl RpcMethod for OpenSession {
-    const ADDRESS: &'static str = "agent.open_session";
+    const ADDRESS: &'static str = "session.open";
     type Request = OpenSessionRequest;
     type Response = OpenSessionResponseFrame;
     type Error = OpenSessionError;

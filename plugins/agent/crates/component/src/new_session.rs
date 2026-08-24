@@ -14,7 +14,7 @@ pub struct NewSession;
 
 #[rpc_dynamic]
 impl RpcMethod for NewSession {
-    const ADDRESS: &'static str = "agent.new_session";
+    const ADDRESS: &'static str = "session.new";
     type Request = NewSessionRequest;
     type Response = NewSessionResponse;
     type Error = NewSessionError;

@@ -14,7 +14,7 @@ pub struct DeleteSession;
 
 #[rpc_dynamic]
 impl RpcMethod for DeleteSession {
-    const ADDRESS: &'static str = "agent.delete_session";
+    const ADDRESS: &'static str = "session.delete";
     type Request = DeleteSessionRequest;
     type Response = ();
     type Error = DeleteSessionError;

@@ -28,7 +28,7 @@ outbound pump, not by this RPC.
 
 ## Consumes
 
-- `agent.open_session` — the outbound pump opens the bound session once and
+- `session.open` — the outbound pump opens the bound session once and
   reads its `SessionEventDto` stream for the Component's lifetime.
 - `session.append` — used by `bridge.handle` to enqueue inbound text.
 - `gateway.send` — used by the outbound pump to deliver each mapped message.

@@ -17,7 +17,7 @@ pub struct ListSessions;
 
 #[rpc_dynamic]
 impl RpcMethod for ListSessions {
-    const ADDRESS: &'static str = "agent.list_sessions";
+    const ADDRESS: &'static str = "session.list";
     type Request = ();
     type Response = ListSessionsResponse;
     type Error = ();

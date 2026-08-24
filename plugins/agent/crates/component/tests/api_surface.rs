@@ -43,14 +43,14 @@ fn runtime_rpcs_are_exposed_at_the_component_root() {
     let _ = list_sessions_handler::<MemFs, ScriptedStack>;
     let _ = open_session_handler::<MemFs, ScriptedStack>;
     let _ = delete_session_handler::<MemFs, ScriptedStack>;
-    assert_eq!(NewSession::ADDRESS, "agent.new_session");
+    assert_eq!(NewSession::ADDRESS, "session.new");
     assert_method::<NewSession, NewSessionRequest, NewSessionResponse, NewSessionError, Unary, Unary>(
     );
 
-    assert_eq!(ListSessions::ADDRESS, "agent.list_sessions");
+    assert_eq!(ListSessions::ADDRESS, "session.list");
     assert_method::<ListSessions, (), ListSessionsResponse, (), Unary, Streaming>();
 
-    assert_eq!(OpenSession::ADDRESS, "agent.open_session");
+    assert_eq!(OpenSession::ADDRESS, "session.open");
     assert_method::<
         OpenSession,
         OpenSessionRequest,
@@ -60,7 +60,7 @@ fn runtime_rpcs_are_exposed_at_the_component_root() {
         Streaming,
     >();
 
-    assert_eq!(DeleteSession::ADDRESS, "agent.delete_session");
+    assert_eq!(DeleteSession::ADDRESS, "session.delete");
     assert_method::<DeleteSession, DeleteSessionRequest, (), DeleteSessionError, Unary, Unary>();
 }
 

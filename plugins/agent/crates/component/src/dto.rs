@@ -249,7 +249,7 @@ pub enum ReasoningEffortDto {
     Ultra,
 }
 
-/// Request corresponding to `agent.new_session`.
+/// Request corresponding to `session.new`.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -258,7 +258,7 @@ pub struct NewSessionRequest {
     pub persistence: SessionPersistenceDto,
 }
 
-/// Response corresponding to `agent.new_session`.
+/// Response corresponding to `session.new`.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,7 +267,7 @@ pub struct NewSessionResponse {
     pub session: SessionIdDto,
 }
 
-/// Failure returned by `agent.new_session`.
+/// Failure returned by `session.new`.
 #[repr(u8)]
 #[derive(
     Clone,
@@ -290,7 +290,7 @@ pub enum NewSessionError {
     Persistence,
 }
 
-/// Request corresponding to `agent.delete_session`.
+/// Request corresponding to `session.delete`.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -299,7 +299,7 @@ pub struct DeleteSessionRequest {
     pub session: SessionIdDto,
 }
 
-/// Failure returned by `agent.delete_session`.
+/// Failure returned by `session.delete`.
 #[repr(u8)]
 #[derive(
     Clone,
@@ -392,7 +392,7 @@ pub struct SetReasoningEffortRequest {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SessionRpcError {
-    /// `agent.open_session` has not established a control handle.
+    /// `session.open` has not established a control handle.
     SessionNotOpen,
     /// The session lease is closed.
     SessionClosed,
@@ -406,10 +406,10 @@ pub enum SessionRpcError {
     InvalidRequest,
 }
 
-/// Maximum session identifiers carried by one `agent.list_sessions` item.
+/// Maximum session identifiers carried by one `session.list` item.
 pub(crate) const MAX_SESSIONS_PER_LIST_ITEM: usize = 4;
 
-/// One streamed item from `agent.list_sessions`.
+/// One streamed item from `session.list`.
 ///
 /// Carries up to [`MAX_SESSIONS_PER_LIST_ITEM`] session identifiers; `count`
 /// records how many are valid. Unused slots serialize as zero identifiers.
@@ -423,7 +423,7 @@ pub struct ListSessionsResponse {
     pub sessions: [SessionIdDto; MAX_SESSIONS_PER_LIST_ITEM],
 }
 
-/// Request corresponding to `agent.open_session`.
+/// Request corresponding to `session.open`.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -460,7 +460,7 @@ pub struct RespondRequestFrame {
     pub text: FixedStr<MESSAGE_TEXT_CAPACITY>,
 }
 
-/// One streamed event from `agent.open_session`.
+/// One streamed event from `session.open`.
 ///
 /// `session` is the typed session identifier; `json` carries one complete
 /// logical event as a JSON document.

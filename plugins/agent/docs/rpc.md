@@ -10,15 +10,15 @@ Streaming RPCs carry unbounded text and are not dynamic.
 
 | Address | Input | Output | Method error | Dynamic |
 | --- | --- | --- | --- | --- |
-| `agent.new_session` | unary `NewSessionRequest` | unary `NewSessionResponse` | `NewSessionError` | yes |
-| `agent.delete_session` | unary `DeleteSessionRequest` | unary `()` | `DeleteSessionError` | yes |
+| `session.new` | unary `NewSessionRequest` | unary `NewSessionResponse` | `NewSessionError` | yes |
+| `session.delete` | unary `DeleteSessionRequest` | unary `()` | `DeleteSessionError` | yes |
 | `session.set_reasoning_effort` | unary `SetReasoningEffortRequest` | unary `()` | `SessionRpcError` | yes |
 | `session.set_permission_level` | unary `SetPermissionLevelRequest` | unary `()` | `SessionRpcError` | yes |
 | `session.interrupt` | unary `InterruptRequest` | unary `()` | `SessionRpcError` | yes |
 | `session.cancel` | unary `CancelRequest` | unary `()` | `SessionRpcError` | yes |
 | `session.close` | unary `CloseRequest` | unary `()` | `SessionRpcError` | yes |
-| `agent.list_sessions` | unary `()` | streaming `ListSessionsResponse` | `()` | yes |
-| `agent.open_session` | unary `OpenSessionRequest` | streaming `OpenSessionResponseFrame` | `OpenSessionError` | yes |
+| `session.list` | unary `()` | streaming `ListSessionsResponse` | `()` | yes |
+| `session.open` | unary `OpenSessionRequest` | streaming `OpenSessionResponseFrame` | `OpenSessionError` | yes |
 | `session.append` | streaming `AppendRequestFrame` | unary `()` | `SessionRpcError` | yes |
 | `session.respond` | streaming `RespondRequestFrame` | unary `()` | `SessionRpcError` | yes |
 
@@ -29,18 +29,18 @@ that serializes as a JSON string — never as a byte array.
 
 ## Request and response shapes
 
-### `agent.new_session`
+### `session.new`
 
 `NewSessionRequest` carries `persistence` (`"persistent"` or `"ephemeral"`).
 `NewSessionResponse` returns the created `session` identifier (`"session-N"`).
 
-### `agent.list_sessions`
+### `session.list`
 
 The response streams `ListSessionsResponse` items, each carrying up to four
 session identifiers in a `sessions` array plus a `count`. Unused slots
 serialize as `"session-0"`; callers should read only the first `count` entries.
 
-### `agent.open_session`
+### `session.open`
 
 `OpenSessionRequest` carries the `session` identifier. The response is a
 streaming sequence of `OpenSessionResponseFrame` values, one per event. Each
