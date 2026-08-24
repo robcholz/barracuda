@@ -249,6 +249,12 @@ pub enum RunErrorKind {
     UnexpectedYield = 8,
     /// A printed message could not be represented by the output protocol.
     OutputEncoding = 9,
+    /// The VM Plugin has not started its Embassy runtime.
+    RuntimeUnavailable = 10,
+    /// All VM Embassy task slots are occupied.
+    Busy = 11,
+    /// The fixed Lua heap assigned to this execution was exhausted.
+    LuaMemory = 12,
 }
 
 /// Fixed-capacity NUL-terminated UTF-8 diagnostic attached to [`RunError`].
@@ -326,7 +332,7 @@ pub struct RunError {
 }
 
 impl RunError {
-    fn new(kind: RunErrorKind, diagnostic: &str) -> Self {
+    pub(crate) fn new(kind: RunErrorKind, diagnostic: &str) -> Self {
         Self {
             kind,
             diagnostic: VmErrorText::from_lossy(diagnostic),
@@ -354,26 +360,52 @@ impl RpcMethod for Run {
 /// Builds the reusable `vm.run` handler.
 pub fn run_handler(limits: VmLimits, builtin_packages: BuiltinPackages) -> impl RpcHandler<Run> {
     move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| async move {
-        let stream = try_yield_stream(move |yielder| async move {
-            drive_run(yielder, requests, limits, builtin_packages).await
-        });
+        let stream = run_stream(requests, limits, builtin_packages, None, None);
         Ok(RpcStream::new(stream))
     }
 }
 
-type RunItem = Result<RunResponseFrame, RunError>;
+pub(crate) type RunItem = Result<RunResponseFrame, RunError>;
+
+pub(crate) fn run_stream(
+    requests: RpcStream<RpcFrame<RunRequestFrame>>,
+    limits: VmLimits,
+    builtin_packages: BuiltinPackages,
+    yield_signal: Option<crate::runtime::VmYieldSignal>,
+    memory: Option<crate::memory::VmMemoryLease>,
+) -> impl futures_core::Stream<Item = RpcResult<RunItem>> + 'static {
+    try_yield_stream(move |yielder| async move {
+        drive_run(
+            yielder,
+            requests,
+            limits,
+            builtin_packages,
+            yield_signal,
+            memory,
+        )
+        .await
+    })
+}
 
 async fn drive_run(
     yielder: Yielder<RunItem>,
     mut requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    yield_signal: Option<crate::runtime::VmYieldSignal>,
+    memory: Option<crate::memory::VmMemoryLease>,
 ) -> RpcResult<()> {
     let source = match collect_source(&mut requests, limits).await? {
         Ok(source) => source,
         Err(error) => return emit_error(&yielder, error).await,
     };
-    let mut lua = match create_lua() {
+    let lua = match memory.as_ref() {
+        // `memory` is a function parameter, so it outlives the local Lua state
+        // and the LuaExecution that consumes it below.
+        Some(memory) => unsafe { memory.create_lua() },
+        None => create_lua(),
+    };
+    let mut lua = match lua {
         Ok(lua) => lua,
         Err(error) => return emit_error(&yielder, factory_error(&error)).await,
     };
@@ -387,6 +419,18 @@ async fn drive_run(
             .await;
         }
     };
+    if let Some(yield_signal) = yield_signal
+        && let Err(error) =
+            lua.set_instruction_hook(limits.instruction_hook_interval(), move || {
+                yield_signal.mark();
+            })
+    {
+        return emit_error(
+            &yielder,
+            RunError::new(RunErrorKind::VmConfigure, error.message()),
+        )
+        .await;
+    }
     let mut execution = lua.run(&source);
     drive_started(
         &yielder,
@@ -738,10 +782,13 @@ fn decode_text(bytes: &[u8]) -> Result<&str, FrameTextError> {
 }
 
 fn factory_error(error: &LuaError) -> RunError {
-    let kind = if error.kind() == LuaErrorKind::Create {
-        RunErrorKind::VmCreate
-    } else {
-        RunErrorKind::VmConfigure
+    let kind = match error.kind() {
+        LuaErrorKind::Create => RunErrorKind::VmCreate,
+        LuaErrorKind::Memory => RunErrorKind::LuaMemory,
+        LuaErrorKind::Load
+        | LuaErrorKind::Runtime
+        | LuaErrorKind::Conversion
+        | LuaErrorKind::UnexpectedYield => RunErrorKind::VmConfigure,
     };
     RunError::new(kind, error.message())
 }
@@ -749,6 +796,7 @@ fn factory_error(error: &LuaError) -> RunError {
 fn execution_error(error: &LuaError) -> RunError {
     let kind = match error.kind() {
         LuaErrorKind::Load => RunErrorKind::LuaLoad,
+        LuaErrorKind::Memory => RunErrorKind::LuaMemory,
         LuaErrorKind::UnexpectedYield => RunErrorKind::UnexpectedYield,
         LuaErrorKind::Create | LuaErrorKind::Runtime | LuaErrorKind::Conversion => {
             RunErrorKind::LuaRuntime

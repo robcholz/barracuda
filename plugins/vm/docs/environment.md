@@ -126,17 +126,51 @@ replace a function's `_ENV`, mutate protected metatables, and interfere with VM
 execution hooks. A future traceback API should expose only formatted diagnostic
 text rather than the `debug` table.
 
+## Cooperative instruction yielding
+
+Normal `VmPlugin` executions run in a statically allocated Embassy task pool.
+Lua's count hook yields after each configured instruction interval; the hook
+does not run a timer and does not expose one to Lua. After observing that
+yield, the VM executor task performs `Timer::after_millis(100).await` and then
+resumes polling the same Lua execution. The default interval is 10,000
+instructions and the pool supports four concurrent executions.
+
+`VmComponent::new` remains a direct, inline construction path for tests and
+special embedding. It does not install the task-owned instruction scheduler.
+Normal system composition uses `VmPlugin`, `VmRuntime`, and
+`VmComponent::with_runtime`.
+
+## Lua memory pool
+
+`VmRuntime` preallocates four reusable allocator slots, matching the four
+Embassy VM task slots. Each slot uses an `embedded_alloc::TlsfHeap` with a
+default 64 KiB backing buffer. Starting one execution leases one slot and
+passes that external Rust allocator to Lua through `Lua::new_with_allocator`.
+Lua allocation, reallocation, garbage collection, and state destruction all
+use that allocator; dropping the Lua state returns the allocator slot to the
+pool.
+
+Exceeding the fixed per-execution Lua heap terminates the execution with
+`RunErrorKind::LuaMemory`. `VmRuntime::with_memory_bytes` can replace the
+default per-slot capacity when constructing the runtime.
+
+The Lua heap limit does not include Rust-side RPC source/input/output buffers,
+native callback objects, or Embassy task storage. `VmComponent::new`, the
+direct inline construction path, continues to use Lua's normal Rust global
+allocator; normal Plugin composition uses the bounded pool.
+
+Dropping an RPC response stream is observed by its VM task. For CPU-bound Lua,
+cleanup happens at an instruction-hook boundary or after the current 100 ms
+task delay.
+
 ## Resource limits not yet implemented
 
-The current environment is a capability sandbox, not yet a complete resource
-sandbox. It does not currently enforce:
+The current environment is a capability sandbox with a bounded Lua heap. It
+does not currently enforce:
 
-- a Lua heap or total allocation limit;
 - an instruction or CPU-time budget;
 - a wall-clock deadline;
-- periodic preemption of CPU-bound Lua code.
 
-Cancellation is cooperative. It is observed at wrapper-managed yield points,
-including `io.input`, `io.print` backpressure, and asynchronous
-native functions. A pure Lua infinite loop that never reaches such a point
-cannot currently be cancelled with bounded latency.
+Instruction yielding is scheduling, not a hard budget: a looping script is
+periodically suspended and resumed but is not automatically terminated. The
+VM still has no total-instruction ceiling, CPU quota, or wall-clock timeout.

@@ -13,16 +13,19 @@ unary JSON operation.
 
 ## Plugin setup
 
-`VmPlugin::register` fixes the built-in package installation plan before any
-Plugin starts. `VmPlugin::start` passes that plan to the Component. The
-Component then creates a fresh Lua state and fresh package instances for every
-RPC call. Host does not assemble or replace this configuration.
+`VmPlugin::register` fixes the built-in package installation plan and loads the
+Component before any Plugin startup hook runs. `VmPlugin::start` then gives the
+Component runtime the System-owned Embassy spawner. The Component creates a
+fresh Lua state and fresh package instances for every RPC call. Host does not
+assemble or replace this configuration.
 
 ```rust,ignore
-use barracuda_vm_component::{BuiltinPackages, VmComponent};
+use barracuda_vm_component::{BuiltinPackages, VmComponent, VmRuntime};
 
-let component = VmComponent::new(BuiltinPackages::all());
-// event_router.load(Box::new(component))?;
+let runtime = VmRuntime::new()?;
+let component = VmComponent::with_runtime(BuiltinPackages::all(), runtime.clone());
+context.event_router.load(component)?;
+runtime.start(system_spawner)?;
 ```
 
 Direct Component construction is intended for tests and embedding. Normal
@@ -79,7 +82,14 @@ UTF-8 character boundaries.
 source completion terminates the call with `InvalidProtocol`.
 
 The default limits are 65,536 source bytes and 4,096 bytes per logical input
-message. A host can replace both with `VmLimits::new`.
+message. The default instruction-hook interval is 10,000 instructions. A host
+can replace the byte limits with `VmLimits::new` and the interval with
+`VmLimits::with_instruction_hook_interval`.
+
+Normal Plugin execution also leases one of four reusable TLSF allocator slots.
+Each slot provides a fixed 65,536-byte Lua heap by default. The size can be
+changed for all four slots with `VmRuntime::with_memory_bytes`; exhaustion is a
+terminal `LuaMemory` method error.
 
 ## Response and completion
 
@@ -96,8 +106,13 @@ The response stream is also the execution handle:
 - an outer `RpcError` is transport failure, not a Lua or protocol error.
 
 Dropping the response stream cancels the RPC and drops its `LuaExecution`.
-Cancellation is cooperative: sandbox policy must arrange periodic Lua yield
-points if CPU-bound or looping scripts need bounded cancellation latency.
+Normal Plugin executions install a Lua count hook. Every configured number of
+instructions, the hook yields back to the owning Embassy task. The task waits
+100 ms asynchronously and then polls Lua again. This makes a pure Lua loop
+cooperative without exposing or injecting a timer into Lua.
+
+The Embassy task pool has four static slots. Four VM calls can execute
+concurrently; a call made while all slots are occupied fails with `Busy`.
 
 ## Method errors
 
@@ -113,6 +128,9 @@ points if CPU-bound or looping scripts need bounded cancellation latency.
 | `LuaRuntime` | Lua or a native binding failed while executing. |
 | `UnexpectedYield` | Lua yielded outside the wrapper's async protocol. |
 | `OutputEncoding` | Printed text could not be represented by the frame format. |
+| `RuntimeUnavailable` | The VM Plugin's Embassy runtime has not started. |
+| `Busy` | All four VM execution task slots are occupied. |
+| `LuaMemory` | The execution exhausted its fixed Lua allocator slot. |
 
 Diagnostics are bounded and may be UTF-8-truncated. Callers must branch on
 `RunErrorKind`, not diagnostic text.

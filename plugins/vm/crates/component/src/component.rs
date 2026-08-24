@@ -8,18 +8,22 @@ use barracuda_lua::Lua;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use getset::CopyGetters;
 
+use crate::VmRuntime;
 use crate::run::{Run, run_handler};
+use crate::runtime::task_run_handler;
 
 /// Default maximum Lua source size accepted by one `vm.run` call.
 pub const DEFAULT_MAX_SOURCE_BYTES: usize = 65_536;
 /// Default maximum size of one logical `io.input()` message.
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 4_096;
+/// Default instruction interval between cooperative executor yields.
+pub const DEFAULT_INSTRUCTION_HOOK_INTERVAL: u32 = 10_000;
 
 pub(crate) fn create_lua() -> barracuda_lua::Result<Lua> {
     Lua::new()
 }
 
-/// Per-call allocation limits enforced by the `vm.run` protocol.
+/// Per-call protocol and execution limits enforced by `vm.run`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
 pub struct VmLimits {
     /// Maximum UTF-8 byte length of the complete Lua source.
@@ -28,6 +32,9 @@ pub struct VmLimits {
     /// Maximum UTF-8 byte length of one complete `io.input()` message.
     #[getset(get_copy = "pub")]
     max_input_bytes: usize,
+    /// Lua instruction count between cooperative executor yields.
+    #[getset(get_copy = "pub")]
+    instruction_hook_interval: u32,
 }
 
 impl VmLimits {
@@ -37,7 +44,15 @@ impl VmLimits {
         Self {
             max_source_bytes,
             max_input_bytes,
+            instruction_hook_interval: DEFAULT_INSTRUCTION_HOOK_INTERVAL,
         }
+    }
+
+    /// Replaces the instruction interval between cooperative VM yields.
+    #[must_use]
+    pub const fn with_instruction_hook_interval(mut self, instruction_hook_interval: u32) -> Self {
+        self.instruction_hook_interval = instruction_hook_interval;
+        self
     }
 }
 
@@ -51,22 +66,48 @@ impl Default for VmLimits {
 pub struct VmComponent {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    runtime: Option<VmRuntime>,
 }
 
 impl VmComponent {
     /// Creates the Component from the package plan prepared by the VM Plugin.
     #[must_use]
-    pub const fn new(builtin_packages: BuiltinPackages) -> Self {
+    pub fn new(builtin_packages: BuiltinPackages) -> Self {
         Self {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
+            runtime: None,
         }
+    }
+
+    /// Creates the Component with execution dispatched onto the VM Embassy task pool.
+    #[must_use]
+    pub fn with_runtime(builtin_packages: BuiltinPackages, runtime: VmRuntime) -> Self {
+        Self {
+            limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
+            builtin_packages,
+            runtime: Some(runtime),
+        }
+    }
+
+    /// Replaces the limits used by this Component.
+    #[must_use]
+    pub fn with_limits(mut self, limits: VmLimits) -> Self {
+        self.limits = limits;
+        self
     }
 }
 
 impl<const M: usize> Component<M> for VmComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Run, _>(run_handler(self.limits, self.builtin_packages))
+        match &self.runtime {
+            Some(runtime) => context.register_rpc::<Run, _>(task_run_handler(
+                runtime.clone(),
+                self.limits,
+                self.builtin_packages,
+            )),
+            None => context.register_rpc::<Run, _>(run_handler(self.limits, self.builtin_packages)),
+        }
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {

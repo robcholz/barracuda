@@ -171,12 +171,72 @@ fn execution_environment_is_injected_after_sandbox_creation() -> Result<()> {
     Ok(())
 }
 use core::{
+    alloc::{GlobalAlloc, Layout},
     cell::Cell,
     future::{Future, pending},
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+use std::alloc::System;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingAllocator {
+    allocations: AtomicUsize,
+    deallocations: AtomicUsize,
+}
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.allocations.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        self.deallocations.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.dealloc(pointer, layout) };
+    }
+}
+
+static LUA_ALLOCATOR: CountingAllocator = CountingAllocator {
+    allocations: AtomicUsize::new(0),
+    deallocations: AtomicUsize::new(0),
+};
+
+#[test]
+fn instruction_hook_yields_cpu_bound_lua_back_to_the_executor() -> Result<()> {
+    let hook_calls = Rc::new(Cell::new(0_u32));
+    let mut lua = Lua::new()?;
+    lua.set_instruction_hook(100, {
+        let hook_calls = Rc::clone(&hook_calls);
+        move || {
+            hook_calls.set(hook_calls.get().saturating_add(1));
+        }
+    })?;
+
+    let total = futures_lite::future::block_on(
+        lua.load("local n=0; for i=1,10000 do n=n+i end; return n")
+            .eval_async::<i64>(),
+    )?;
+
+    assert_eq!(total, 50_005_000);
+    assert_ne!(hook_calls.get(), 0);
+    Ok(())
+}
+
+#[test]
+fn lua_uses_the_external_rust_allocator() -> Result<()> {
+    let allocations_before = LUA_ALLOCATOR.allocations.load(Ordering::Relaxed);
+    let deallocations_before = LUA_ALLOCATOR.deallocations.load(Ordering::Relaxed);
+    let mut lua = unsafe { Lua::new_with_allocator(&raw const LUA_ALLOCATOR) }?;
+
+    assert_eq!(lua.load("return 42").eval::<i64>()?, 42);
+    drop(lua);
+
+    assert!(LUA_ALLOCATOR.allocations.load(Ordering::Relaxed) > allocations_before);
+    assert!(LUA_ALLOCATOR.deallocations.load(Ordering::Relaxed) > deallocations_before);
+    Ok(())
+}
 
 #[test]
 fn binds_sync_rust_function_with_mlua_shaped_api() -> Result<()> {
