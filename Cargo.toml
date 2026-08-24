@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "boards/api",
     "boards/config",
+    "boards/tool",
     "composition/*",
     "core/event-router",
     "core/plugin-manager",
@@ -27,8 +28,7 @@ members = [
     "apps/barracuda-cli",
 ]
 default-members = [
-    "plugins/agent/crates/agent",
-    "shared/vfs",
+    "apps/barracuda-cli",
 ]
 
 [workspace.dependencies]

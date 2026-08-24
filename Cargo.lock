@@ -311,12 +311,12 @@ dependencies = [
  "barracuda-vfs",
  "embassy-sync 0.7.2",
  "embassy-time",
- "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
  "futures-util",
  "getset",
+ "http-client",
  "json-validator",
  "log",
  "proc-macro2",
@@ -338,8 +338,8 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-vfs",
  "embassy-time",
- "embedded-nal-async",
  "futures-lite",
+ "http-client",
  "serde",
  "serde_json",
  "static_cell",
@@ -425,10 +425,9 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
- "embassy-net",
  "embassy-time",
  "futures-lite",
- "static_cell",
+ "http-client",
 ]
 
 [[package]]
@@ -442,6 +441,7 @@ dependencies = [
  "barracuda-profile",
  "embassy-time",
  "futures-lite",
+ "http-client",
 ]
 
 [[package]]
@@ -462,10 +462,10 @@ dependencies = [
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "embassy-time",
- "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
+ "http-client",
  "json-validator",
  "log",
  "serde_json",
@@ -491,7 +491,6 @@ dependencies = [
  "barracuda-runtime-utils",
  "barracuda-vfs",
  "embassy-time",
- "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
@@ -557,6 +556,7 @@ name = "barracuda-board-config"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "yaml-peg",
 ]
@@ -577,6 +577,16 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "embassy-executor",
+]
+
+[[package]]
+name = "barracuda-board-tool"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "dialoguer",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -679,6 +689,7 @@ dependencies = [
  "embassy-time",
  "futures-lite",
  "gateway",
+ "http-client",
  "serde_json",
  "static_cell",
  "thiserror 2.0.18",
@@ -799,19 +810,13 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "base64 0.22.1",
- "critical-section",
  "embassy-futures",
  "embassy-time",
  "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "embedded-nal-async",
  "eventsource-stream",
  "futures-core",
  "futures-lite",
- "getrandom 0.4.3",
- "mbedtls-rs",
- "ouroboros",
- "reqwless",
+ "http-client",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -835,6 +840,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-platform",
+ "barracuda-tls",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
  "embassy-net",
@@ -851,6 +857,8 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-platform",
+ "barracuda-tls",
+ "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-net",
@@ -858,6 +866,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-storage",
+ "getrandom 0.4.3",
  "heapless 0.9.3",
  "rand 0.9.5",
  "serde",
@@ -875,6 +884,8 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-platform",
+ "barracuda-tls",
+ "critical-section",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-net",
@@ -882,6 +893,7 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-storage",
+ "getrandom 0.4.3",
  "heapless 0.9.3",
  "rand 0.9.5",
  "serde",
@@ -913,6 +925,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-platform",
+ "barracuda-tls",
  "cortex-m-rt",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",
@@ -1077,6 +1090,7 @@ dependencies = [
  "barracuda-scheduler-plugin",
  "barracuda-target-api",
  "barracuda-time-plugin",
+ "barracuda-tls",
  "barracuda-vfs",
  "barracuda-vfs-littlefs",
  "barracuda-vm-plugin",
@@ -1087,6 +1101,7 @@ dependencies = [
  "embassy-time",
  "embedded-storage",
  "futures-lite",
+ "http-client",
  "thiserror 2.0.18",
 ]
 
@@ -1146,6 +1161,16 @@ dependencies = [
  "schemars",
  "serde",
  "zerocopy",
+]
+
+[[package]]
+name = "barracuda-tls"
+version = "0.1.0"
+dependencies = [
+ "http-client",
+ "mbedtls-rs",
+ "rand_core 0.10.1",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1658,6 +1683,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "console"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fe5f465a4f6fee88fad41b85d990f84c835335e85b5d9e6e63e0d06d28cba7c"
+dependencies = [
+ "encode_unicode",
+ "libc",
+ "unicode-width",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "const-default"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2099,6 +2136,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thousands",
+]
+
+[[package]]
+name = "dialoguer"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25f104b501bf2364e78d0d3974cbc774f738f5865306ed128e1e0d7499c0ad96"
+dependencies = [
+ "console",
+ "fuzzy-matcher",
+ "shell-words",
 ]
 
 [[package]]
@@ -2628,6 +2676,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "encode_unicode"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34aa73646ffb006b8f5147f3dc182bd4bcb190227ce861fc4a4844bf8e3cb2c0"
+
+[[package]]
 name = "enumset"
 version = "1.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3096,6 +3150,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fuzzy-matcher"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
+dependencies = [
+ "thread_local",
+]
+
+[[package]]
 name = "gateway"
 version = "0.1.0"
 dependencies = [
@@ -3427,6 +3490,8 @@ name = "http-client"
 version = "0.1.0"
 dependencies = [
  "barracuda-platform-test",
+ "barracuda-runtime-utils",
+ "embassy-net",
  "embassy-sync 0.7.2",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
@@ -4864,6 +4929,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc6fe69c597f9c37bfeeeeeb33da3530379845f10be461a66d16d03eca2ded77"
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5225,6 +5296,15 @@ name = "thousands"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bf63baf9f5039dadc247375c29eb13706706cfde997d0330d05aa63a77d8820"
+
+[[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "time"
