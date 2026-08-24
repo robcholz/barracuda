@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-vfs-fat"
+version = "0.1.0"
+edition = "2021"
+description = "FAT backend for the Barracuda VFS"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-vfs = { path = "../vfs" }
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+hadris-fat = { version = "2.1", default-features = false, features = ["alloc", "async", "read", "write", "lfn"] }
+hadris-io = { version = "2.1", default-features = false, features = ["alloc", "async"] }
+embassy-sync = { workspace = true }
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+embassy-futures = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

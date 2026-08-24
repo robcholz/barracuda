@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-vfs"
+version = "0.1.0"
+edition = "2021"
+description = "Asynchronous no_std virtual filesystem and mount namespace for Barracuda"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+embassy-sync = { workspace = true }
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
