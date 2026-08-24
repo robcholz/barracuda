@@ -7,7 +7,7 @@ description = "Barracuda system composition root that registers the fixed Plugin
 [features]
 default = []
 tokio = [
-    "barracuda-agent-plugin/std",
+    "barracuda-agent-plugin/mbedtls-host",
 ]
 
 [lib]

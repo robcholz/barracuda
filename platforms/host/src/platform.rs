@@ -8,10 +8,7 @@ use embassy_embedded_hal::flash::partition::Partition;
 use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 
-use crate::{
-    model_api, DiskFs, FileNorFlash, FileNorFlashError, HostLayout, HostLayoutError, HostTlsError,
-    TokioStack,
-};
+use crate::{DiskFs, FileNorFlash, FileNorFlashError, HostLayout, HostLayoutError, TokioStack};
 
 /// Host paths baked from `platforms/host/platform.yml`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -82,15 +79,7 @@ impl HostPlatform {
     pub async fn initialize_with_settings(
         board: &'static Board,
         settings: &HostSettings,
-    ) -> Result<
-        PlatformResources<
-            TokioStack,
-            DiskFs,
-            HostDatabaseRegion,
-            barracuda_model_api::ModelApiFactory<TokioStack>,
-        >,
-        HostPlatformError,
-    > {
+    ) -> Result<PlatformResources<TokioStack, DiskFs, HostDatabaseRegion>, HostPlatformError> {
         Self::initialize_with_layout_and_network(
             board,
             settings,
@@ -110,15 +99,7 @@ impl HostPlatform {
         board: &'static Board,
         settings: &HostSettings,
         layout: &HostLayout,
-    ) -> Result<
-        PlatformResources<
-            TokioStack,
-            DiskFs,
-            HostDatabaseRegion,
-            barracuda_model_api::ModelApiFactory<TokioStack>,
-        >,
-        HostPlatformError,
-    > {
+    ) -> Result<PlatformResources<TokioStack, DiskFs, HostDatabaseRegion>, HostPlatformError> {
         Self::initialize_with_layout_and_network(
             board,
             settings,
@@ -133,21 +114,12 @@ impl HostPlatform {
         settings: &HostSettings,
         layout: &HostLayout,
         network: &'static TokioStack,
-    ) -> Result<
-        PlatformResources<
-            TokioStack,
-            DiskFs,
-            HostDatabaseRegion,
-            barracuda_model_api::ModelApiFactory<TokioStack>,
-        >,
-        HostPlatformError,
-    > {
+    ) -> Result<PlatformResources<TokioStack, DiskFs, HostDatabaseRegion>, HostPlatformError> {
         if board.hardware().chip() != "host" {
             return Err(HostPlatformError::IncompatibleChip {
                 chip: board.hardware().chip(),
             });
         }
-        let model_api_factory = model_api::factory(network).await?;
         let state_directory = Path::new(settings.state_directory());
         let flash_path = state_directory.join(settings.flash_image());
         let physical_flash = FileNorFlash::open(flash_path, layout.capacity()).await?;
@@ -168,7 +140,6 @@ impl HostPlatform {
             network,
             filesystem,
             database_region,
-            model_api_factory,
         })
     }
 }
@@ -177,7 +148,6 @@ impl Platform for HostPlatform {
     type Network = TokioStack;
     type FileSystem = DiskFs;
     type DatabaseRegion = HostDatabaseRegion;
-    type ModelApiFactory = barracuda_model_api::ModelApiFactory<TokioStack>;
     type Error = HostPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
@@ -213,7 +183,4 @@ pub enum HostPlatformError {
     /// Board binding or Host-native layout is invalid.
     #[error(transparent)]
     Layout(#[from] HostLayoutError),
-    /// Host TLS and native trust-store initialization failed.
-    #[error(transparent)]
-    Tls(#[from] HostTlsError),
 }

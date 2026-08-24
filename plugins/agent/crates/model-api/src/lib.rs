@@ -58,6 +58,8 @@
 )]
 
 extern crate alloc;
+#[cfg(feature = "mbedtls-host")]
+extern crate std;
 
 // Implementation modules are private: the public surface is the curated
 // re-exports below. The backend registry, media-prep pipeline, prompt helpers,
@@ -66,6 +68,8 @@ mod backends;
 mod chat_stream;
 mod client;
 mod errors;
+#[cfg(feature = "mbedtls-host")]
+mod host_tls;
 mod media;
 mod retry;
 mod transport;
@@ -76,6 +80,8 @@ pub use barracuda_runtime_utils::stream;
 pub use chat_stream::ChatStream;
 pub use client::{ModelApi, ModelApiFactory};
 pub use errors::{ChatError, ChatJsonError, InferMediaError, InitError, ModelApiError};
+#[cfg(feature = "mbedtls-host")]
+pub use host_tls::{HostTls, HostTlsError};
 #[cfg(feature = "mbedtls-host")]
 pub use mbedtls_rs::Tls;
 #[cfg(feature = "mbedtls")]

@@ -13,7 +13,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_agent_plugin::{AgentPlugin, ModelApiFactory};
+use barracuda_agent_plugin::AgentPlugin;
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
@@ -82,7 +82,7 @@ where
     /// registration or startup fails.
     pub async fn new<Filesystem, Network>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        resources: PlatformResources<Network, Filesystem, DatabaseRegion, ModelApiFactory<Network>>,
+        resources: PlatformResources<Network, Filesystem, DatabaseRegion>,
         workflow_directory: impl Into<String>,
     ) -> Result<Self, SystemCreateError>
     where
@@ -93,13 +93,11 @@ where
             network,
             filesystem,
             database_region,
-            model_api_factory,
         } = resources;
         let mut router = EventRouter::new(lanes, filesystem.clone(), workflow_directory)?;
         let mut plugins = PluginManager::open(database_region).await?;
         plugins.provide_system(Rc::new(filesystem))?;
         plugins.provide_system(Rc::new(network))?;
-        plugins.provide_system(Rc::new(model_api_factory))?;
 
         plugins
             .register(&mut router, WebServerPlugin::<Network>::default())

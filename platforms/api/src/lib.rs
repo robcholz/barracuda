@@ -19,15 +19,13 @@ use embedded_storage_async::nor_flash::NorFlash;
 /// their socket state are normally statically allocated. The Platform has
 /// already validated the Board bindings against its native layout before
 /// returning these handles.
-pub struct PlatformResources<Network: 'static, Filesystem, DatabaseRegion, ModelApiFactory> {
+pub struct PlatformResources<Network: 'static, Filesystem, DatabaseRegion> {
     /// Initialized network handle. Its runner remains owned by a Platform task.
     pub network: &'static Network,
     /// Lightweight filesystem handle for System and Plugin consumers.
     pub filesystem: Filesystem,
     /// Board-isolated NOR region reserved for the system database.
     pub database_region: DatabaseRegion,
-    /// Platform-configured constructor for Model API clients.
-    pub model_api_factory: ModelApiFactory,
 }
 
 /// Result of initializing one statically selected [`Platform`].
@@ -36,7 +34,6 @@ pub type PlatformInitResult<P> = Result<
         <P as Platform>::Network,
         <P as Platform>::FileSystem,
         <P as Platform>::DatabaseRegion,
-        <P as Platform>::ModelApiFactory,
     >,
     <P as Platform>::Error,
 >;
@@ -54,8 +51,6 @@ pub trait Platform: Sized + 'static {
     type FileSystem: FileSystem;
     /// Asynchronous NOR partition reserved for the system database.
     type DatabaseRegion: NorFlash;
-    /// Platform-configured constructor for Model API clients.
-    type ModelApiFactory: 'static;
     /// Platform initialization failure.
     type Error;
 

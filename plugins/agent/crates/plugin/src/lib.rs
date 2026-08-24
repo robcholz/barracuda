@@ -12,6 +12,7 @@ use core::marker::PhantomData;
 use barracuda_agent_component::component::AgentComponent;
 use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
 use barracuda_fs::FileSystem;
+use barracuda_model_api::ModelApi;
 use barracuda_net::{Dns, TcpConnect};
 use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginStartFuture};
 
@@ -19,6 +20,8 @@ pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
 pub use barracuda_model_api::{BackendKind, InitError};
 
 const PERSISTENCE_ROOT: &str = "/agent";
+const HTTP_HEADER_BYTES: usize = 16 * 1024;
+const HTTP_READ_BYTES: usize = 8 * 1024;
 /// Stable identity of the Agent Plugin.
 pub const PLUGIN_ID: &str = "agent";
 
@@ -95,8 +98,24 @@ where
         Box::pin(async move {
             let filesystem = context.require_system::<Filesystem>()?;
             let filesystem = filesystem.as_ref().clone();
-            let model_api_factory = context.require_system::<ModelApiFactory<Network>>()?;
-            let model_api_factory = model_api_factory.as_ref().clone();
+            let network = context.require_system::<&'static Network>()?;
+            let network = *network;
+            #[cfg(feature = "mbedtls-host")]
+            let host_tls = barracuda_model_api::HostTls::from_system_certificates()
+                .map_err(PluginError::registration)?;
+            #[cfg(feature = "mbedtls-host")]
+            let model_api_factory = ModelApiFactory::new(move || {
+                ModelApi::new_with_tls(
+                    network,
+                    host_tls.config(),
+                    HTTP_HEADER_BYTES,
+                    HTTP_READ_BYTES,
+                )
+            });
+            #[cfg(not(feature = "mbedtls-host"))]
+            let model_api_factory = ModelApiFactory::new(move || {
+                ModelApi::new(network, HTTP_HEADER_BYTES, HTTP_READ_BYTES)
+            });
             let storage = RuntimeStorageConfig {
                 persistence_root: PERSISTENCE_ROOT.into(),
                 skill_roots: Vec::new(),
@@ -123,7 +142,6 @@ mod tests {
     use alloc::rc::Rc;
 
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_model_api::{ModelApi, ModelApiFactory};
     use barracuda_platform_test::{memory_partition, MemFs, NeverStack};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
@@ -148,11 +166,6 @@ mod tests {
         manager
             .provide_system(Rc::new(&NETWORK))
             .expect("provide network");
-        manager
-            .provide_system(Rc::new(ModelApiFactory::new(|| {
-                ModelApi::new(&NETWORK, 1024, 1024)
-            })))
-            .expect("provide Model API factory");
         let plugin = AgentPlugin::<MemFs, NeverStack>::default();
         assert_eq!(Plugin::<512>::id(&plugin), "agent");
 
@@ -160,26 +173,5 @@ mod tests {
         block_on(manager.start(&mut router)).expect("start Plugins");
 
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
-    }
-
-    #[test]
-    fn plugin_requires_the_platform_model_api_factory() {
-        let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
-        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<16, 512, 8>::new()));
-        let filesystem = MemFs::new();
-        let mut router =
-            EventRouter::new(lanes, filesystem.clone(), "workflows").expect("create router");
-
-        manager
-            .provide_system(Rc::new(filesystem))
-            .expect("provide filesystem");
-        manager
-            .provide_system(Rc::new(&NETWORK))
-            .expect("provide network");
-        block_on(manager.register(&mut router, AgentPlugin::<MemFs, NeverStack>::default()))
-            .expect("register Agent Plugin");
-
-        assert!(block_on(manager.start(&mut router)).is_err());
     }
 }

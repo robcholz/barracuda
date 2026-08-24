@@ -19,7 +19,6 @@ impl Platform for ExamplePlatform {
     type Network = NeverStack;
     type FileSystem = MemFs;
     type DatabaseRegion = MemoryPartition;
-    type ModelApiFactory = ();
     type Error = Infallible;
 
     async fn initialize(_spawner: Spawner, _board: &'static Board) -> PlatformInitResult<Self> {

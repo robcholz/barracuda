@@ -23,7 +23,6 @@ pub type Resources = PlatformResources<
     <SelectedPlatform as Platform>::Network,
     <SelectedPlatform as Platform>::FileSystem,
     DatabaseRegion,
-    <SelectedPlatform as Platform>::ModelApiFactory,
 >;
 
 /// Initialization error produced by the selected Platform.

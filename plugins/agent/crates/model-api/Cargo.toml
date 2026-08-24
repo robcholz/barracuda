@@ -19,6 +19,7 @@ mbedtls-host = [
     "mbedtls-rs/std",
     "mbedtls-rs/pem-parse",
     "dep:critical-section",
+    "dep:getrandom",
 ]
 
 [dependencies]
@@ -41,6 +42,7 @@ strum = { version = "0.28", default-features = false, features = ["derive"] }
 tracing = { version = "0.1", default-features = false }
 mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
 critical-section = { version = "1", features = ["std"], optional = true }
+getrandom = { version = "0.4", features = ["sys_rng"], optional = true }
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }
