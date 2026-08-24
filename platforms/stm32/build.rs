@@ -14,11 +14,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
-    let board_name = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("arm") {
-        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?
-    } else {
-        "stm32f429zi-nucleo".into()
-    };
+    let board_name =
+        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?;
     let bundle = root.join("boards/configs").join(&board_name);
     let board_path = bundle.join("board.yml");
     println!("cargo:rerun-if-changed={}", board_path.display());

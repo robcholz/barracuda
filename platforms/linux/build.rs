@@ -69,11 +69,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
-    let board_name = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
-        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?
-    } else {
-        "local-linux".into()
-    };
+    let board_name =
+        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?;
     let board_directory = manifest
         .join("../..")
         .join("boards/configs")

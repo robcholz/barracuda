@@ -18,12 +18,17 @@ jobs:
   # The complete codebase, built and tested on the Linux host Target. Board and
   # Platform are selected explicitly: the architecture forbids inferring a Board
   # from the target, and this keeps the selection visible rather than relying on
-  # the host Platform default.
+  # a default. The non-host Platform crates are excluded here — they only build
+  # for their own target and are covered by the platform-build matrix below.
   host:
     name: Host (linux) — build & test
     runs-on: ubuntu-latest
     env:
       BARRACUDA_PLATFORM: linux
+      HOST_EXCLUDES: >-
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-platform-macos
     steps:
       - uses: actions/checkout@v4
 
@@ -42,15 +47,34 @@ jobs:
         run: cargo board select local-linux
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets $HOST_EXCLUDES
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace $HOST_EXCLUDES
+
+      # The non-host Platform crates carry host-runnable tests for their native
+      # layout projection (partition table, linker regions, file layout). They
+      # are excluded from the workspace run above because each build script needs
+      # its own Board selected, so run them here one Board at a time. This is the
+      # host-side coverage; the platform-build matrix proves they cross-compile.
+      - name: Test non-host Platform crates (host side)
+        run: |
+          for entry in \
+            "esp32c6-devkitc-1:barracuda-platform-esp32c6" \
+            "stm32f429zi-nucleo:barracuda-platform-stm32" \
+            "local-macos:barracuda-platform-macos"; do
+            board="${entry%%:*}"; crate="${entry##*:}"
+            echo "== $crate (Board $board) =="
+            cargo board select "$board"
+            cargo test -p "$crate"
+          done
 
   # The full codebase is too large to build for every Platform, so the non-host
   # Platforms are only compiled for their own target to prove they build. Each
   # Platform crate is built alone ("without the full thing"), with its Board
-  # selected explicitly so its build script reads the right native layout.
+  # selected explicitly. The target triple is read from the selected Board
+  # (board.yml `toolchain.target`) rather than hardcoded here, so the Board is
+  # the single source of truth for its toolchain.
   platform-build:
     name: Platform build (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -60,30 +84,28 @@ jobs:
         include:
           - platform: esp32c6
             board: esp32c6-devkitc-1
-            target: riscv32imac-unknown-none-elf
             features: ""
           - platform: stm32
             board: stm32f429zi-nucleo
-            target: thumbv7em-none-eabihf
             features: "--features stm32f429zi"
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.board }}
 
-      - name: Select ${{ matrix.platform }} Board
-        run: cargo board select ${{ matrix.board }}
-
-      - name: Build ${{ matrix.platform }} Platform
-        run: cargo build -p barracuda-platform-${{ matrix.platform }} ${{ matrix.features }} --target ${{ matrix.target }}
+      - name: Build ${{ matrix.platform }} Platform for its Board's target
+        run: |
+          cargo board select ${{ matrix.board }}
+          target="$(cargo board target)"
+          echo "Board ${{ matrix.board }} declares target: $target"
+          rustup target add "$target"
+          cargo build -p barracuda-platform-${{ matrix.platform }} ${{ matrix.features }} --target "$target"
 
   python:
     name: Python tooling

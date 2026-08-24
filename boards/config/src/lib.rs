@@ -93,6 +93,8 @@ pub fn validate_board_name(name: &str) -> Result<(), SelectionError> {
 pub struct BoardDefinition {
     name: String,
     hardware: HardwareDefinition,
+    #[serde(default)]
+    toolchain: Option<ToolchainDefinition>,
     #[serde(rename = "native-layout")]
     native_layout: NativeLayoutDefinition,
 }
@@ -110,6 +112,18 @@ impl BoardDefinition {
         &self.hardware
     }
 
+    /// Returns the cross-compilation toolchain declaration, when the Board has one.
+    ///
+    /// A Board that must be cross-compiled declares the Rust target triple it is
+    /// built for. Host Boards omit this and build for the build host's native
+    /// target. The target is build policy, not a runtime hardware fact, so it is
+    /// consumed by the build driver (for example CI) and never baked into the
+    /// generated runtime Board value.
+    #[must_use]
+    pub const fn toolchain(&self) -> Option<&ToolchainDefinition> {
+        self.toolchain.as_ref()
+    }
+
     /// Returns the Board-bundled native physical layout.
     #[must_use]
     pub const fn native_layout(&self) -> &NativeLayoutDefinition {
@@ -119,6 +133,11 @@ impl BoardDefinition {
     fn validate(&self) -> Result<(), ConfigError> {
         if self.hardware.chip.trim().is_empty() {
             return Err(ConfigError::EmptyChip);
+        }
+        if let Some(toolchain) = &self.toolchain {
+            if toolchain.target.trim().is_empty() {
+                return Err(ConfigError::EmptyToolchainTarget);
+            }
         }
         let artifact = self.native_layout.artifact.trim();
         if artifact.is_empty() {
@@ -151,6 +170,21 @@ impl HardwareDefinition {
     }
 }
 
+/// Toolchain policy a Board carries so the build driver can choose a target.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ToolchainDefinition {
+    target: String,
+}
+
+impl ToolchainDefinition {
+    /// Returns the Rust target triple this Board is cross-compiled for.
+    #[must_use]
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+}
+
 /// A Platform-native layout file stored inside the Board bundle.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -178,6 +212,9 @@ pub enum ConfigError {
     /// A Board must identify its concrete chip or native operating-system runtime.
     #[error("Board hardware chip must not be empty")]
     EmptyChip,
+    /// A Board declared a toolchain section without a target triple.
+    #[error("Board toolchain target must not be empty")]
+    EmptyToolchainTarget,
     /// A Board did not identify its native physical-layout artifact.
     #[error("Board native-layout artifact must not be empty")]
     EmptyNativeLayoutArtifact,

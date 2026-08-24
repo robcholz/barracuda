@@ -10,29 +10,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
-    let board_name = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("riscv32") {
-        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?
-    } else {
-        "esp32c6-devkitc-1".into()
-    };
+    let board_name =
+        read_selected_board(&root)?.ok_or("no Board selected; run `cargo board select` first")?;
     let bundle = root.join("boards/configs").join(&board_name);
     let board_path = bundle.join("board.yml");
     println!("cargo:rerun-if-changed={}", board_path.display());
 
     let board = parse(&fs::read_to_string(board_path)?)?;
-    let table_path = bundle.join(board.native_layout().artifact());
-    println!("cargo:rerun-if-changed={}", table_path.display());
     if board.name() != board_name {
         return Err("Board bundle directory and Board name differ".into());
     }
+
+    let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+
+    // This Platform is an unconditional dependency of the selected-Platform
+    // composition, so its build script runs for every selected Board, not only
+    // for esp32c6 Boards. When the selected Board targets a different chip this
+    // Platform is inactive: emit an empty projection so the crate still compiles
+    // as a dependency, without inspecting the build target or naming a fallback
+    // Board. An esp32c6 build selects an esp32c6 Board and gets the real table.
     if board.hardware().chip() != "esp32c6" {
-        return Err(format!(
-            "ESP32-C6 Platform does not support chip `{}`",
-            board.hardware().chip()
-        )
-        .into());
+        fs::write(output.join("esp32c6_layout.rs"), inactive_layout())?;
+        return Ok(());
     }
 
+    let table_path = bundle.join(board.native_layout().artifact());
+    println!("cargo:rerun-if-changed={}", table_path.display());
     let table = PartitionTable::try_from_str(fs::read_to_string(table_path)?)?;
     table.validate()?;
     for slot in [AppType::Ota_0, AppType::Ota_1] {
@@ -68,9 +71,20 @@ fn main() -> Result<(), Box<dyn Error>> {
         board.hardware().chip()
     ));
 
-    let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     fs::write(output.join("esp32c6_layout.rs"), generated)?;
     Ok(())
+}
+
+/// Projection emitted when the selected Board is not an esp32c6 Board. The
+/// esp32c6 Platform is inactive for that build, so it exposes an empty table.
+fn inactive_layout() -> String {
+    String::from(
+        "const BOARD_ESP32C6_REGIONS: &[Esp32c6Region] = &[];\n\
+         /// Inactive projection: the selected Board targets another chip.\n\
+         pub const BOARD_ESP32C6_PARTITION_TABLE: Esp32c6PartitionTable = Esp32c6PartitionTable::new(\n\
+             \"esp32c6\", 0, BOARD_ESP32C6_REGIONS,\n\
+         );\n",
+    )
 }
 
 fn render_region(partition: &Partition) -> String {

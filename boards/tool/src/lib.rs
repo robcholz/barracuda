@@ -7,12 +7,12 @@ use std::{
 };
 
 use barracuda_board_config::{
-    parse, read_selected_board, validate_board_name, write_selected_board, ConfigError,
-    SelectionError,
+    parse, read_selected_board, validate_board_name, write_selected_board, BoardDefinition,
+    ConfigError, SelectionError,
 };
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
-const USAGE: &str = "usage: cargo board select [board-name]";
+const USAGE: &str = "usage: cargo board <select|target> [board-name]";
 
 /// Failure while selecting a Board bundle.
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +69,9 @@ pub enum CommandError {
     /// The Board catalog contains no selectable bundles.
     #[error("no Board bundles found under `boards/configs`")]
     EmptyCatalog,
+    /// A command needs a Board but none has been selected.
+    #[error("no Board selected; run `cargo board select` first")]
+    NoSelection,
     /// The terminal prompt failed.
     #[error("interactive Board selection failed: {0}")]
     Prompt(#[source] dialoguer::Error),
@@ -131,6 +134,11 @@ where
             select_board(workspace_root, name, output)
         }
         [command, name] if command == "select" => select_board(workspace_root, name, output),
+        [command] if command == "target" => {
+            let name = read_selected_board(workspace_root)?.ok_or(CommandError::NoSelection)?;
+            print_target(workspace_root, &name, output)
+        }
+        [command, name] if command == "target" => print_target(workspace_root, name, output),
         _ => Err(CommandError::Usage),
     }
 }
@@ -182,14 +190,14 @@ fn discover_boards(workspace_root: &Path) -> Result<Vec<String>, CommandError> {
     }
 }
 
-fn select_board<W: Write>(
-    workspace_root: &Path,
-    name: &str,
-    output: &mut W,
-) -> Result<(), CommandError> {
+/// Reads and validates a Board bundle, checking its declared name matches its
+/// directory. Shared by `select` and `target`.
+fn read_board(workspace_root: &Path, name: &str) -> Result<BoardDefinition, CommandError> {
     validate_board_name(name)?;
-    let bundle = workspace_root.join("boards/configs").join(name);
-    let board_path = bundle.join("board.yml");
+    let board_path = workspace_root
+        .join("boards/configs")
+        .join(name)
+        .join("board.yml");
     let yaml = match fs::read_to_string(&board_path) {
         Ok(yaml) => yaml,
         Err(source) if source.kind() == io::ErrorKind::NotFound => {
@@ -211,6 +219,31 @@ fn select_board<W: Write>(
             declared: board.name().to_owned(),
         });
     }
+    Ok(board)
+}
+
+/// Prints the Board's declared cross-compilation target triple, so a build
+/// driver reads the toolchain from the Board itself. A host Board declares no
+/// toolchain and prints nothing (build for the host's native target).
+fn print_target<W: Write>(
+    workspace_root: &Path,
+    name: &str,
+    output: &mut W,
+) -> Result<(), CommandError> {
+    let board = read_board(workspace_root, name)?;
+    match board.toolchain() {
+        Some(toolchain) => writeln!(output, "{}", toolchain.target()).map_err(CommandError::Output),
+        None => Ok(()),
+    }
+}
+
+fn select_board<W: Write>(
+    workspace_root: &Path,
+    name: &str,
+    output: &mut W,
+) -> Result<(), CommandError> {
+    let bundle = workspace_root.join("boards/configs").join(name);
+    let board = read_board(workspace_root, name)?;
     let native_layout = bundle.join(board.native_layout().artifact());
     if !native_layout.is_file() {
         return Err(CommandError::NativeLayoutMissing {
