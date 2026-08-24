@@ -1,13 +1,17 @@
 [package]
-name = "barracuda-board-config"
+name = "barracuda-board-tool"
 version = "0.1.0"
 edition = "2021"
-description = "Build-time YAML loading and validation for Barracuda boards"
+description = "Workspace command for selecting a Barracuda Board"
+
+[[bin]]
+name = "barracuda-board"
+path = "src/main.rs"
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+barracuda-board-config = { path = "../config" }
+dialoguer = { version = "0.12", default-features = false, features = ["fuzzy-select"] }
 thiserror = "2"
-yaml-peg = { version = "1.0.8", features = ["serde"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -4,7 +4,88 @@
 //! generated static description from `barracuda-board` instead of parsing YAML.
 
 use serde::Deserialize;
-use std::path::{Component, Path};
+use std::{
+    fs, io,
+    path::{Component, Path, PathBuf},
+};
+
+/// Workspace-relative file containing the persistently selected Board name.
+pub const SELECTED_BOARD_PATH: &str = ".barracuda/selected-board";
+
+/// Failure while reading or writing the persistent Board selection.
+#[derive(Debug, thiserror::Error)]
+pub enum SelectionError {
+    /// The persisted or requested Board name is unsafe or malformed.
+    #[error("invalid Board name `{name}`")]
+    InvalidName {
+        /// Invalid value.
+        name: String,
+    },
+    /// Local selection state could not be read or written.
+    #[error("failed to access Board selection at `{path}`: {source}")]
+    Io {
+        /// State path that failed.
+        path: PathBuf,
+        /// Underlying filesystem failure.
+        #[source]
+        source: io::Error,
+    },
+}
+
+/// Reads the Board selected for subsequent workspace builds.
+///
+/// # Errors
+///
+/// Returns [`SelectionError`] when the state file cannot be read or contains
+/// an invalid Board name. A missing state file means no Board has been selected.
+pub fn read_selected_board(workspace_root: &Path) -> Result<Option<String>, SelectionError> {
+    let path = workspace_root.join(SELECTED_BOARD_PATH);
+    let selected = match fs::read_to_string(&path) {
+        Ok(selected) => selected,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => return Err(SelectionError::Io { path, source }),
+    };
+    let name = selected.trim_end_matches(['\r', '\n']);
+    validate_board_name(name)?;
+    Ok(Some(name.to_owned()))
+}
+
+/// Persists the Board used by subsequent workspace builds.
+///
+/// # Errors
+///
+/// Returns [`SelectionError`] when `name` is invalid or local state cannot be
+/// created and written.
+pub fn write_selected_board(workspace_root: &Path, name: &str) -> Result<(), SelectionError> {
+    validate_board_name(name)?;
+    let path = workspace_root.join(SELECTED_BOARD_PATH);
+    let parent = path.parent().unwrap_or(workspace_root);
+    fs::create_dir_all(parent).map_err(|source| SelectionError::Io {
+        path: parent.to_owned(),
+        source,
+    })?;
+    fs::write(&path, format!("{name}\n")).map_err(|source| SelectionError::Io { path, source })
+}
+
+/// Validates a Board name before it is used as a bundle-directory component.
+///
+/// # Errors
+///
+/// Returns [`SelectionError::InvalidName`] for empty names or values containing
+/// characters other than ASCII letters, digits, `-`, and `_`.
+pub fn validate_board_name(name: &str) -> Result<(), SelectionError> {
+    if !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        Ok(())
+    } else {
+        Err(SelectionError::InvalidName {
+            name: name.to_owned(),
+        })
+    }
+}
 
 /// Parsed, validated Board definition.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
