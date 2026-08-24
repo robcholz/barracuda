@@ -14,5 +14,6 @@ pub use facade::{MessageChannelRegistration, MessageGateway};
 pub use model::{
     BinaryBody, BinaryStream, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageKind,
     MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
-    SetTypingRequest, TextBody, TextStream,
+    SendStream, SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest,
+    StreamBoundary, TextBody, TextStream,
 };

@@ -4,7 +4,7 @@ use barracuda_agent_memory::{
     LongTermError, LongTermInitError, LongTermMemory, MemoryDraft, MemoryId, MemoryItem,
     MemoryPatch, StoreOutcome,
 };
-use barracuda_fs::FileSystem;
+use barracuda_vfs::ScopedVfs;
 
 use super::tier::classify_tier;
 use super::{MemorySnapshot, MemoryTier};
@@ -19,11 +19,11 @@ pub(super) const AGENT_ID_PREFIX: &str = "a-";
 /// # Errors
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
-pub(super) fn global_store<F: FileSystem + 'static>(
-    filesystem: F,
+pub(super) async fn global_store(
+    filesystem: ScopedVfs,
     dir: &str,
-) -> Result<LongTermMemory<F>, LongTermInitError> {
-    LongTermMemory::new(filesystem, dir, GLOBAL_ID_PREFIX)
+) -> Result<LongTermMemory, LongTermInitError> {
+    LongTermMemory::new(filesystem, dir, GLOBAL_ID_PREFIX).await
 }
 
 /// Build a per-agent long-term store under `dir` (minting `a-` ids).
@@ -31,21 +31,21 @@ pub(super) fn global_store<F: FileSystem + 'static>(
 /// # Errors
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
-pub(super) fn agent_store<F: FileSystem + 'static>(
-    filesystem: F,
+pub(super) async fn agent_store(
+    filesystem: ScopedVfs,
     dir: &str,
-) -> Result<LongTermMemory<F>, LongTermInitError> {
-    LongTermMemory::new(filesystem, dir, AGENT_ID_PREFIX)
+) -> Result<LongTermMemory, LongTermInitError> {
+    LongTermMemory::new(filesystem, dir, AGENT_ID_PREFIX).await
 }
 
 /// The two stores, shared (by cheap clone) between the provider and every memory
 /// tool handler.
-pub(super) struct MemoryStores<F: FileSystem + 'static> {
-    pub(super) global: LongTermMemory<F>,
-    pub(super) agent: LongTermMemory<F>,
+pub(super) struct MemoryStores {
+    pub(super) global: LongTermMemory,
+    pub(super) agent: LongTermMemory,
 }
 
-impl<F: FileSystem + 'static> Clone for MemoryStores<F> {
+impl Clone for MemoryStores {
     fn clone(&self) -> Self {
         Self {
             global: self.global.clone(),
@@ -54,12 +54,12 @@ impl<F: FileSystem + 'static> Clone for MemoryStores<F> {
     }
 }
 
-impl<F: FileSystem + 'static> MemoryStores<F> {
+impl MemoryStores {
     /// Store a draft in the tier determined by its tags.
-    pub(crate) fn store(&self, draft: MemoryDraft) -> StoreOutcome {
+    pub(crate) async fn store(&self, draft: MemoryDraft) -> StoreOutcome {
         match classify_tier(&draft) {
-            MemoryTier::Global => self.global.store(draft),
-            MemoryTier::Agent => self.agent.store(draft),
+            MemoryTier::Global => self.global.store(draft).await,
+            MemoryTier::Agent => self.agent.store(draft).await,
         }
     }
 
@@ -95,20 +95,20 @@ impl<F: FileSystem + 'static> MemoryStores<F> {
     }
 
     /// Apply a patch to the item with `id`, routing by its prefix.
-    pub(crate) fn update(
+    pub(crate) async fn update(
         &self,
         id: &MemoryId,
         patch: MemoryPatch,
     ) -> Result<MemoryItem, LongTermError> {
-        self.store_for(id).update(id, patch)
+        self.store_for(id).update(id, patch).await
     }
 
     /// Forget the item with `id`, routing by its prefix.
-    pub(crate) fn forget(&self, id: &MemoryId) -> Result<(), LongTermError> {
-        self.store_for(id).forget(id)
+    pub(crate) async fn forget(&self, id: &MemoryId) -> Result<(), LongTermError> {
+        self.store_for(id).forget(id).await
     }
 
-    fn store_for(&self, id: &MemoryId) -> &LongTermMemory<F> {
+    fn store_for(&self, id: &MemoryId) -> &LongTermMemory {
         if id.as_str().starts_with(GLOBAL_ID_PREFIX) {
             &self.global
         } else {

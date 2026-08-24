@@ -1,0 +1,5 @@
+name: local-macos
+hardware:
+  chip: macos
+native-layout:
+  artifact: file-layout.yml

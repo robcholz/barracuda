@@ -11,8 +11,8 @@ use barracuda_agent_tool::{
     EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
     ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
 };
-use barracuda_platform_test::MemFs;
-use futures_lite::StreamExt as _;
+use barracuda_platform_test::memory_vfs;
+use futures_lite::{future::block_on, StreamExt as _};
 
 #[test]
 fn local_tool_runs_through_public_tool_surface() -> Result<()> {
@@ -389,13 +389,13 @@ fn blacklisted_hidden_group_is_not_searchable_or_loadable() -> Result<()> {
 #[test]
 fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
     let persistence = persistence()?;
-    let registry = ToolRegistry::new(Arc::clone(&persistence))?;
+    let registry = block_on(ToolRegistry::new(Arc::clone(&persistence)))?;
     registry.register_group(ToolGroup::new("test", true, [Tool::new(EchoTool)]))?;
     registry.disable("echo")?;
-    persistence.maybe_persist()?;
+    block_on(persistence.maybe_persist())?;
     drop(registry);
 
-    let registry = Arc::new(ToolRegistry::new(persistence)?);
+    let registry = Arc::new(block_on(ToolRegistry::new(persistence))?);
     registry.register_group(ToolGroup::new("test", true, [Tool::new(EchoTool)]))?;
     registry.start_all()?;
 
@@ -507,15 +507,16 @@ fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<Too
     })?
 }
 
-fn persistence() -> Result<SharedPersistence<MemFs>> {
-    Ok(Arc::new(Persistence::new(
-        MemFs::new(),
-        "/barracuda-agent-tool-tests",
-    )?))
+fn persistence() -> Result<SharedPersistence> {
+    block_on(async {
+        Ok(Arc::new(
+            Persistence::new(memory_vfs().await?, "/barracuda-agent-tool-tests").await?,
+        ))
+    })
 }
 
 fn registry() -> Result<Arc<ToolRegistry>> {
-    Ok(Arc::new(ToolRegistry::new(persistence()?)?))
+    Ok(Arc::new(block_on(ToolRegistry::new(persistence()?))?))
 }
 
 fn poll_ready<T>(future: impl Future<Output = T>) -> Result<T> {

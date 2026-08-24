@@ -14,14 +14,17 @@ mod service;
 mod worker;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
-use core::marker::PhantomData;
+use core::{
+    cell::{Cell, RefCell},
+    marker::PhantomData,
+};
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
     AgentApprovalError, AgentCreateError, AgentId, ApiPurpose, IterationId, IterationLoopError,
     Message, PermissionLevel, ReasoningEffort, ToolCall, ToolCallId, ToolOutput,
 };
-use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersistence};
+use barracuda_agent_persistence::PersistenceError;
 pub use barracuda_agent_session::{
     ApprovalResolverError, ContextProviderError, InputRequestId, InputRequestKind, IterationEvent,
     OpenSessionError, SessionCloseReason, SessionControl, SessionControlError, SessionCreateError,
@@ -30,12 +33,12 @@ pub use barracuda_agent_session::{
     TurnEventError, TurnId, TurnOrigin,
 };
 use barracuda_agent_tool::{ToolRegistry, ToolRegistryError};
-use barracuda_fs::{FileSystem, FsError};
 use barracuda_model_api::InitError;
 #[cfg(feature = "cache_profile")]
 pub use barracuda_model_api::ProviderUsage;
 pub use barracuda_model_api::{BackendKind, ModelApiConfig, ModelApiFactory};
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::{FsError, ScopedVfs};
+use embedded_nal_async::{Dns, TcpConnect};
 use service::RuntimeControl;
 pub use service::{RuntimeBuildError, RuntimeService};
 
@@ -90,30 +93,57 @@ pub enum RuntimeError {
     /// Runtime state could not be loaded or written.
     #[error(transparent)]
     Persistence(#[from] PersistenceError),
+    /// The asynchronous service has not finished loading durable state.
+    #[error("agent runtime is not ready")]
+    NotReady,
 }
 
 /// A ready-to-drive agent runtime.
 ///
-/// The `Filesystem`/`Http` parameters record which concrete backends the
+/// The `Filesystem`/`Tcp`/`Resolver` parameters record which concrete backends the
 /// service worker owns. The backend-erased [`AgentRuntime`] handle retains
 /// the actual filesystem instance; this marker only preserves the public
 /// `AgentRuntime` type relationship.
-type BackendMarker<Filesystem, Http> = PhantomData<fn() -> (Filesystem, Http)>;
+type BackendMarker<Tcp, Resolver> = PhantomData<fn() -> (Tcp, Resolver)>;
 
-pub struct AgentRuntime<Filesystem, Http>
-where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
-{
-    tools: Arc<ToolRegistry>,
-    control: RuntimeControl,
-    _marker: BackendMarker<Filesystem, Http>,
+#[derive(Default)]
+pub(crate) struct ToolLifecycle {
+    loaded: RefCell<Option<Arc<ToolRegistry>>>,
+    started: Cell<bool>,
 }
 
-impl<Filesystem, Http> AgentRuntime<Filesystem, Http>
+impl ToolLifecycle {
+    fn registry(&self) -> RuntimeResult<Arc<ToolRegistry>> {
+        self.loaded
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(RuntimeError::NotReady)
+    }
+
+    pub(crate) fn install(&self, tools: Arc<ToolRegistry>) -> RuntimeResult<()> {
+        if self.started.get() {
+            tools.start_all()?;
+        }
+        *self.loaded.borrow_mut() = Some(tools);
+        Ok(())
+    }
+}
+
+pub struct AgentRuntime<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    tool_lifecycle: Arc<ToolLifecycle>,
+    control: RuntimeControl,
+    _marker: BackendMarker<Tcp, Resolver>,
+}
+
+impl<Tcp, Resolver> AgentRuntime<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     /// Build an agent runtime with an empty tool registry.
     ///
@@ -124,10 +154,10 @@ where
     ///
     /// Returns [`RuntimeError`] when storage cleanup or runtime construction fails.
     pub fn new(
-        filesystem: Filesystem,
+        filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory<Http>,
-    ) -> RuntimeResult<(Self, RuntimeService<Filesystem, Http>)> {
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> RuntimeResult<(Self, RuntimeService<Tcp, Resolver>)> {
         Self::with_tool_groups(
             filesystem,
             persistence,
@@ -147,32 +177,24 @@ where
     /// Returns [`RuntimeError`] when persistence, tool registration, or runtime
     /// construction fails.
     pub fn with_tool_groups(
-        filesystem: Filesystem,
+        filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory<Http>,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> RuntimeResult<(Self, RuntimeService<Filesystem, Http>)> {
-        let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
-            filesystem.clone(),
-            persistence.persistence_root.clone(),
-        )?);
-        let tools = Arc::new(ToolRegistry::new(Arc::clone(&shared_persistence))?);
-        for group in tool_groups {
-            tools.register_group(group)?;
-        }
-        let (control, service) = RuntimeControl::new::<Filesystem, Http>(
+    ) -> RuntimeResult<(Self, RuntimeService<Tcp, Resolver>)> {
+        let tool_lifecycle = Arc::new(ToolLifecycle::default());
+        let (control, service) = RuntimeControl::new::<Tcp, Resolver>(
             filesystem,
-            Arc::clone(&tools),
-            shared_persistence,
-            persistence.persistence_root,
-            persistence.skill_roots,
+            persistence,
             llm_factory,
-        )?;
+            tool_groups.into_iter().collect(),
+            Arc::clone(&tool_lifecycle),
+        );
 
         Ok((
             Self {
-                tools,
                 control,
+                tool_lifecycle,
                 _marker: PhantomData,
             },
             service,
@@ -185,7 +207,7 @@ where
     ///
     /// Returns [`RuntimeError::Tool`] when the tool is not registered.
     pub fn enable_tool(&self, name: &str) -> RuntimeResult<()> {
-        self.tools.enable(name)?;
+        self.tool_lifecycle.registry()?.enable(name)?;
         Ok(())
     }
 
@@ -195,7 +217,7 @@ where
     ///
     /// Returns [`RuntimeError::Tool`] when the tool is not registered.
     pub fn disable_tool(&self, name: &str) -> RuntimeResult<()> {
-        self.tools.disable(name)?;
+        self.tool_lifecycle.registry()?.disable(name)?;
         Ok(())
     }
 
@@ -205,7 +227,10 @@ where
     ///
     /// Returns [`RuntimeError`] when the tool registry fails to start.
     pub fn start_all(&self) -> RuntimeResult<()> {
-        self.tools.start_all()?;
+        self.tool_lifecycle.started.set(true);
+        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
+            tools.start_all()?;
+        }
         Ok(())
     }
 
@@ -215,7 +240,10 @@ where
     ///
     /// Returns [`RuntimeError`] when the tool registry fails to stop.
     pub fn stop_all(&self) -> RuntimeResult<()> {
-        self.tools.stop_all()?;
+        self.tool_lifecycle.started.set(false);
+        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
+            tools.stop_all()?;
+        }
         Ok(())
     }
 

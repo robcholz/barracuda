@@ -36,12 +36,12 @@ barracuda-agent-session = { path = "../session", default-features = false }
 barracuda-agent-memory = { path = "../memory" }
 barracuda-agent-skill = { path = "../skill" }
 barracuda-model-api = { path = "../model-api" }
-barracuda-net = { path = "../../../../shared/net" }
+embedded-nal-async = "0.9"
 barracuda-agent-persistence = { path = "../persistence" }
 barracuda-agent-tool = { path = "../tool" }
-# Filesystem traits remain platform-neutral. HTTP is concrete reqwless I/O
-# through `barracuda-net`; time is provided globally by `embassy-time`.
-barracuda-fs = { path = "../../../../shared/fs" }
+# Filesystem traits remain platform-neutral. HTTP uses the official
+# embedded-nal-async contracts; time is provided globally by `embassy-time`.
+barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 async-channel = { version = "2", default-features = false }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -60,13 +60,11 @@ barracuda-agent-skill = { path = "../skill", features = ["std"] }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted network doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API.
-barracuda-platform-host = { path = "../../../../platforms/host" }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
 serde_json = "1"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
 # `block_on` for tests (smol family; replaces the removed local spin executor).
 futures-lite = "2"
-barracuda-net = { path = "../../../../shared/net" }
 tempdir = "0.3"
 static_cell = "2"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

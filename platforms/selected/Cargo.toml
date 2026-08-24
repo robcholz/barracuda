@@ -1,25 +1,29 @@
 [package]
-name = "barracuda-target"
+name = "barracuda-platform-selected"
 version = "0.1.0"
 edition = "2021"
-description = "Compile-time selected Barracuda Board and Platform resource factory"
+description = "Compile-time selected Barracuda Platform"
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-board = { path = "../../boards/api" }
 barracuda-platform = { path = "../api" }
-barracuda-platform-host = { path = "../host" }
+barracuda-platform-esp32c6 = { path = "../esp32c6" }
 embassy-executor.workspace = true
 
+[target.'cfg(target_os = "macos")'.dependencies]
+barracuda-platform-macos = { path = "../macos" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+barracuda-platform-linux = { path = "../linux" }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+barracuda-platform-stm32 = { path = "../stm32", features = ["stm32f429zi"] }
+
 [build-dependencies]
-barracuda-board-config = { path = "../../boards/config" }
 serde = { version = "1", features = ["derive"] }
 yaml-peg = { version = "1.0.8", features = ["serde"] }
-
-[dev-dependencies]
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 
 [lints.rust]
 unsafe_code = "forbid"

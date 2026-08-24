@@ -3,6 +3,7 @@
 mod args;
 
 use alloc::borrow::ToOwned;
+use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -11,7 +12,6 @@ use barracuda_agent_tool::{
     tool_metadata, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation,
     ToolInvokeError, ToolOutput, ToolRunner, ToolSet, ToolSpec,
 };
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ToolCall;
 use core::cell::RefCell;
 use futures_util::StreamExt as _;
@@ -107,11 +107,11 @@ fn extraction_runtime_error(error: impl core::fmt::Display) -> ToolInvokeError {
 }
 
 trait MemoryMutationTarget {
-    fn store(&self, args: StoreArgs) -> ToolOutput;
+    fn store<'a>(&'a self, args: StoreArgs) -> ToolFuture<'a>;
 
-    fn update(&self, args: UpdateArgs) -> ToolOutput;
+    fn update<'a>(&'a self, args: UpdateArgs) -> ToolFuture<'a>;
 
-    fn forget(&self, args: IdArgs) -> ToolOutput;
+    fn forget<'a>(&'a self, args: IdArgs) -> ToolFuture<'a>;
 }
 
 struct ExtractionTarget {
@@ -119,34 +119,40 @@ struct ExtractionTarget {
 }
 
 impl MemoryMutationTarget for ExtractionTarget {
-    fn store(&self, args: StoreArgs) -> ToolOutput {
-        self.operations
-            .borrow_mut()
-            .push(MemoryOp::Add(ExtractedItem {
-                content: trimmed(args.content),
-                tags: trimmed_strings(args.tags),
-                keywords: trimmed_strings(args.keywords),
-            }));
-        extraction_accepted()
+    fn store<'a>(&'a self, args: StoreArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            self.operations
+                .borrow_mut()
+                .push(MemoryOp::Add(ExtractedItem {
+                    content: trimmed(args.content),
+                    tags: trimmed_strings(args.tags),
+                    keywords: trimmed_strings(args.keywords),
+                }));
+            Ok(extraction_accepted())
+        })
     }
 
-    fn update(&self, args: UpdateArgs) -> ToolOutput {
-        self.operations.borrow_mut().push(MemoryOp::Update {
-            id: MemoryId::from(trimmed(args.id).as_str()),
-            patch: MemoryPatch {
-                content: optional_trimmed(args.content),
-                tags: optional_trimmed_strings(args.tags),
-                keywords: optional_trimmed_strings(args.keywords),
-            },
-        });
-        extraction_accepted()
+    fn update<'a>(&'a self, args: UpdateArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            self.operations.borrow_mut().push(MemoryOp::Update {
+                id: MemoryId::from(trimmed(args.id).as_str()),
+                patch: MemoryPatch {
+                    content: optional_trimmed(args.content),
+                    tags: optional_trimmed_strings(args.tags),
+                    keywords: optional_trimmed_strings(args.keywords),
+                },
+            });
+            Ok(extraction_accepted())
+        })
     }
 
-    fn forget(&self, args: IdArgs) -> ToolOutput {
-        self.operations.borrow_mut().push(MemoryOp::Forget {
-            id: MemoryId::from(trimmed(args.id).as_str()),
-        });
-        extraction_accepted()
+    fn forget<'a>(&'a self, args: IdArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            self.operations.borrow_mut().push(MemoryOp::Forget {
+                id: MemoryId::from(trimmed(args.id).as_str()),
+            });
+            Ok(extraction_accepted())
+        })
     }
 }
 
@@ -157,56 +163,62 @@ fn extraction_accepted() -> ToolOutput {
     }
 }
 
-pub(super) struct StoreTarget<F: FileSystem + 'static> {
-    pub(super) stores: MemoryStores<F>,
+pub(super) struct StoreTarget {
+    pub(super) stores: MemoryStores,
 }
 
-impl<F: FileSystem + 'static> MemoryMutationTarget for StoreTarget<F> {
-    fn store(&self, args: StoreArgs) -> ToolOutput {
-        let draft = MemoryDraft::new(trimmed(args.content))
-            .with_tags(trimmed_strings(args.tags))
-            .with_keywords(trimmed_strings(args.keywords))
-            .with_source("manual");
-        let content = match self.stores.store(draft) {
-            StoreOutcome::Created(item) => format!("Stored memory {}.", item.id),
-            StoreOutcome::Duplicate(item) => {
-                format!("Already remembered (as {}); nothing changed.", item.id)
-            }
-        };
-        ToolOutput { content, ok: true }
+impl MemoryMutationTarget for StoreTarget {
+    fn store<'a>(&'a self, args: StoreArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let draft = MemoryDraft::new(trimmed(args.content))
+                .with_tags(trimmed_strings(args.tags))
+                .with_keywords(trimmed_strings(args.keywords))
+                .with_source("manual");
+            let content = match self.stores.store(draft).await {
+                StoreOutcome::Created(item) => format!("Stored memory {}.", item.id),
+                StoreOutcome::Duplicate(item) => {
+                    format!("Already remembered (as {}); nothing changed.", item.id)
+                }
+            };
+            Ok(ToolOutput { content, ok: true })
+        })
     }
 
-    fn update(&self, args: UpdateArgs) -> ToolOutput {
-        let id = MemoryId::from(trimmed(args.id).as_str());
-        let patch = MemoryPatch {
-            content: optional_trimmed(args.content),
-            tags: optional_trimmed_strings(args.tags),
-            keywords: optional_trimmed_strings(args.keywords),
-        };
-        match self.stores.update(&id, patch) {
-            Ok(item) => ToolOutput {
-                content: format!("Updated memory {}.", item.id),
-                ok: true,
-            },
-            Err(error) => ToolOutput {
-                content: format!("Could not update {id}: {error}."),
-                ok: false,
-            },
-        }
+    fn update<'a>(&'a self, args: UpdateArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let id = MemoryId::from(trimmed(args.id).as_str());
+            let patch = MemoryPatch {
+                content: optional_trimmed(args.content),
+                tags: optional_trimmed_strings(args.tags),
+                keywords: optional_trimmed_strings(args.keywords),
+            };
+            Ok(match self.stores.update(&id, patch).await {
+                Ok(item) => ToolOutput {
+                    content: format!("Updated memory {}.", item.id),
+                    ok: true,
+                },
+                Err(error) => ToolOutput {
+                    content: format!("Could not update {id}: {error}."),
+                    ok: false,
+                },
+            })
+        })
     }
 
-    fn forget(&self, args: IdArgs) -> ToolOutput {
-        let id = MemoryId::from(trimmed(args.id).as_str());
-        match self.stores.forget(&id) {
-            Ok(()) => ToolOutput {
-                content: format!("Forgot memory {id}."),
-                ok: true,
-            },
-            Err(error) => ToolOutput {
-                content: format!("Could not forget {id}: {error}."),
-                ok: false,
-            },
-        }
+    fn forget<'a>(&'a self, args: IdArgs) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let id = MemoryId::from(trimmed(args.id).as_str());
+            Ok(match self.stores.forget(&id).await {
+                Ok(()) => ToolOutput {
+                    content: format!("Forgot memory {id}."),
+                    ok: true,
+                },
+                Err(error) => ToolOutput {
+                    content: format!("Could not forget {id}: {error}."),
+                    ok: false,
+                },
+            })
+        })
     }
 }
 
@@ -222,19 +234,19 @@ impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryStoreTool<T> {
     type Args = StoreArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
-        alloc::boxed::Box::pin(async move { Ok(self.target.store(args)) })
+        self.target.store(args)
     }
 }
 
-pub(super) struct MemoryRecallTool<F: FileSystem + 'static> {
-    pub(super) stores: MemoryStores<F>,
+pub(super) struct MemoryRecallTool {
+    pub(super) stores: MemoryStores,
 }
 
-impl<F: FileSystem + 'static> ToolSpec for MemoryRecallTool<F> {
+impl ToolSpec for MemoryRecallTool {
     tool_metadata!("memory_recall");
 }
 
-impl<F: FileSystem + 'static> ToolHandler for MemoryRecallTool<F> {
+impl ToolHandler for MemoryRecallTool {
     type Args = RecallArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
@@ -252,15 +264,15 @@ impl<F: FileSystem + 'static> ToolHandler for MemoryRecallTool<F> {
     }
 }
 
-pub(super) struct MemoryListTool<F: FileSystem + 'static> {
-    pub(super) stores: MemoryStores<F>,
+pub(super) struct MemoryListTool {
+    pub(super) stores: MemoryStores,
 }
 
-impl<F: FileSystem + 'static> ToolSpec for MemoryListTool<F> {
+impl ToolSpec for MemoryListTool {
     tool_metadata!("memory_list");
 }
 
-impl<F: FileSystem + 'static> ToolHandler for MemoryListTool<F> {
+impl ToolHandler for MemoryListTool {
     type Args = ListArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
@@ -288,7 +300,7 @@ impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryUpdateTool<T> {
     type Args = UpdateArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
-        alloc::boxed::Box::pin(async move { Ok(self.target.update(args)) })
+        self.target.update(args)
     }
 }
 
@@ -304,7 +316,7 @@ impl<T: MemoryMutationTarget + 'static> ToolHandler for MemoryForgetTool<T> {
     type Args = IdArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
-        alloc::boxed::Box::pin(async move { Ok(self.target.forget(args)) })
+        self.target.forget(args)
     }
 }
 
@@ -333,7 +345,7 @@ fn render_items(header: &str, items: &[MemoryItem]) -> String {
 #[allow(clippy::expect_used)]
 mod tests {
     use barracuda_agent_memory::LongTermMemory;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
 
     use super::*;
@@ -341,11 +353,14 @@ mod tests {
     #[test]
     fn standard_handlers_preserve_live_memory_mutations() {
         block_on(async {
-            let filesystem = MemFs::new();
+            let filesystem = memory_vfs().await.expect("memory VFS mounts");
             let stores = MemoryStores {
                 global: LongTermMemory::new(filesystem.clone(), "/global", "g-")
+                    .await
                     .expect("global store opens"),
-                agent: LongTermMemory::new(filesystem, "/agent", "a-").expect("agent store opens"),
+                agent: LongTermMemory::new(filesystem, "/agent", "a-")
+                    .await
+                    .expect("agent store opens"),
             };
             let mut tools = ToolSet::empty();
             tools

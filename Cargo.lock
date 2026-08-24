@@ -196,6 +196,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-task"
+version = "4.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -281,6 +287,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bare-vfs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e8b435285f9068d2ec4c708f7992521dd84807cdae9724b76b31b1c1479b5212"
+
+[[package]]
 name = "barracuda-agent"
 version = "0.1.0"
 dependencies = [
@@ -293,14 +305,13 @@ dependencies = [
  "barracuda-agent-persistence",
  "barracuda-agent-skill",
  "barracuda-agent-tool",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-vfs",
  "embassy-sync 0.7.2",
  "embassy-time",
+ "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
@@ -323,11 +334,11 @@ version = "0.1.0"
 dependencies = [
  "barracuda-agent-runtime",
  "barracuda-event-router",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
  "barracuda-platform-test",
+ "barracuda-vfs",
  "embassy-time",
+ "embedded-nal-async",
  "futures-lite",
  "serde",
  "serde_json",
@@ -353,10 +364,9 @@ name = "barracuda-agent-memory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-fs",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-vfs",
  "futures-lite",
  "log",
  "serde",
@@ -397,8 +407,9 @@ dependencies = [
 name = "barracuda-agent-persistence"
 version = "0.1.0"
 dependencies = [
- "barracuda-fs",
  "barracuda-platform-test",
+ "barracuda-vfs",
+ "futures-lite",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -411,13 +422,13 @@ dependencies = [
  "barracuda-agent-component",
  "barracuda-agent-runtime",
  "barracuda-event-router",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
+ "embassy-net",
  "embassy-time",
  "futures-lite",
+ "static_cell",
 ]
 
 [[package]]
@@ -426,12 +437,11 @@ version = "0.1.0"
 dependencies = [
  "barracuda-agent-runtime",
  "barracuda-agent-skill",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
  "barracuda-platform-test",
  "barracuda-profile",
  "embassy-time",
+ "futures-lite",
 ]
 
 [[package]]
@@ -447,13 +457,12 @@ dependencies = [
  "barracuda-agent-skill",
  "barracuda-agent-tool",
  "barracuda-agent-trace",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-vfs",
  "embassy-time",
+ "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
@@ -468,16 +477,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-agent-sandbox"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "barracuda-fs",
- "barracuda-platform-test",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "barracuda-agent-session"
 version = "0.1.0"
 dependencies = [
@@ -487,13 +486,12 @@ dependencies = [
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
  "barracuda-agent-tool",
- "barracuda-fs",
  "barracuda-model-api",
- "barracuda-net",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
+ "barracuda-vfs",
  "embassy-time",
+ "embedded-nal-async",
  "futures-channel",
  "futures-core",
  "futures-lite",
@@ -511,9 +509,9 @@ name = "barracuda-agent-skill"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-fs",
- "barracuda-platform-host",
  "barracuda-platform-test",
+ "barracuda-vfs",
+ "futures-lite",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -527,7 +525,6 @@ dependencies = [
  "anyhow",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
- "barracuda-fs",
  "barracuda-platform-test",
  "futures-channel",
  "futures-core",
@@ -565,16 +562,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-board-hal"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board",
+ "embassy-executor",
+]
+
+[[package]]
+name = "barracuda-board-selected"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board",
+ "barracuda-board-config",
+ "barracuda-board-hal",
+ "embassy-executor",
+]
+
+[[package]]
 name = "barracuda-captive-portal-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
  "barracuda-event-router",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
+ "embassy-net",
+ "embedded-io-async 0.7.0",
  "futures-lite",
+ "picoserve",
  "serde",
  "serde_json",
  "tokio",
@@ -609,12 +626,13 @@ dependencies = [
 name = "barracuda-event-router"
 version = "0.1.0"
 dependencies = [
- "barracuda-fs",
  "barracuda-platform-test",
  "barracuda-profile",
  "barracuda-router",
  "barracuda-rpc",
  "barracuda-rpc-schema",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
  "barracuda-workflow",
  "futures-lite",
  "futures-util",
@@ -649,23 +667,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-fs"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "barracuda-gateway-agent-component"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-component",
  "barracuda-agent-runtime",
  "barracuda-event-router",
- "barracuda-fs",
  "barracuda-imessage-gateway-component",
  "barracuda-model-api",
- "barracuda-net",
  "barracuda-platform-test",
  "embassy-time",
  "futures-lite",
@@ -683,7 +692,6 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-gateway-agent-component",
  "barracuda-imessage-gateway-plugin",
- "barracuda-imessage-web-plugin",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
  "futures-lite",
@@ -813,59 +821,88 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-net"
-version = "0.1.0"
-dependencies = [
- "embedded-nal-async",
-]
-
-[[package]]
 name = "barracuda-platform"
 version = "0.1.0"
 dependencies = [
- "barracuda-board",
- "barracuda-fs",
- "barracuda-platform-test",
  "embassy-executor",
- "embedded-storage-async",
+ "embassy-net",
 ]
 
 [[package]]
-name = "barracuda-platform-esp32"
+name = "barracuda-platform-esp32c6"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board",
  "barracuda-board-config",
+ "barracuda-platform",
  "embassy-embedded-hal 0.6.0",
+ "embassy-executor",
+ "embassy-net",
  "embassy-sync 0.8.0",
- "embedded-storage-async",
  "esp-hal",
  "esp-idf-part",
  "esp-storage",
 ]
 
 [[package]]
-name = "barracuda-platform-host"
+name = "barracuda-platform-linux"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-board",
- "barracuda-fs",
- "barracuda-net",
+ "barracuda-board-config",
  "barracuda-platform",
- "barracuda-webserver-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
+ "embassy-net",
+ "embassy-net-driver-channel",
  "embassy-sync 0.7.2",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
- "embedded-storage-async",
- "futures-util",
- "picoserve",
+ "embassy-time",
+ "embedded-storage",
+ "heapless 0.9.3",
+ "rand 0.9.5",
  "serde",
- "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tun",
+ "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-platform-macos"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board",
+ "barracuda-board-config",
+ "barracuda-platform",
+ "embassy-embedded-hal 0.5.0",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-net-driver-channel",
+ "embassy-sync 0.7.2",
+ "embassy-time",
+ "embedded-storage",
+ "heapless 0.9.3",
+ "rand 0.9.5",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tun",
+ "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-platform-selected"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform",
+ "barracuda-platform-esp32c6",
+ "barracuda-platform-linux",
+ "barracuda-platform-macos",
+ "barracuda-platform-stm32",
+ "embassy-executor",
+ "serde",
  "yaml-peg",
 ]
 
@@ -873,9 +910,13 @@ dependencies = [
 name = "barracuda-platform-stm32"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board",
  "barracuda-board-config",
+ "barracuda-platform",
  "cortex-m-rt",
  "embassy-embedded-hal 0.6.0",
+ "embassy-executor",
+ "embassy-net",
  "embassy-stm32",
  "embassy-sync 0.8.0",
  "panic-halt",
@@ -886,12 +927,16 @@ name = "barracuda-platform-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "barracuda-fs",
- "barracuda-net",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
  "embassy-embedded-hal 0.5.0",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-net-driver-channel",
  "embassy-sync 0.7.2",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "embedded-nal-async",
  "embedded-storage-async",
  "thiserror 2.0.18",
 ]
@@ -903,6 +948,9 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-kv",
  "barracuda-platform-test",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "embassy-executor",
  "embedded-storage-async",
  "futures-lite",
  "getset",
@@ -1023,16 +1071,21 @@ dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-model-api",
- "barracuda-net",
  "barracuda-platform",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
  "barracuda-scheduler-plugin",
+ "barracuda-target-api",
  "barracuda-time-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-littlefs",
  "barracuda-vm-plugin",
  "barracuda-webserver-plugin",
+ "embassy-embedded-hal 0.5.0",
+ "embassy-executor",
+ "embassy-net",
  "embassy-time",
- "embedded-storage-async",
+ "embedded-storage",
  "futures-lite",
  "thiserror 2.0.18",
 ]
@@ -1041,22 +1094,24 @@ dependencies = [
 name = "barracuda-target"
 version = "0.1.0"
 dependencies = [
- "barracuda-board",
- "barracuda-board-config",
- "barracuda-platform",
- "barracuda-platform-host",
+ "barracuda-board-selected",
+ "barracuda-platform-selected",
+ "barracuda-target-api",
  "embassy-executor",
- "serde",
- "yaml-peg",
+ "thiserror 2.0.18",
 ]
+
+[[package]]
+name = "barracuda-target-api"
+version = "0.1.0"
 
 [[package]]
 name = "barracuda-time-component"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
- "barracuda-net",
  "barracuda-time-wire",
+ "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
@@ -1073,10 +1128,10 @@ name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
- "barracuda-net",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
  "barracuda-time-component",
+ "embassy-net",
  "embassy-time",
  "futures-lite",
 ]
@@ -1094,6 +1149,57 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-vfs"
+version = "0.1.0"
+dependencies = [
+ "critical-section",
+ "embassy-sync 0.7.2",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "barracuda-vfs-fat"
+version = "0.1.0"
+dependencies = [
+ "barracuda-vfs",
+ "critical-section",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "hadris-fat",
+ "hadris-io",
+]
+
+[[package]]
+name = "barracuda-vfs-littlefs"
+version = "0.1.0"
+dependencies = [
+ "barracuda-vfs",
+ "critical-section",
+ "embassy-futures",
+ "embedded-io-async 0.7.0",
+ "embedded-storage",
+ "generic-array",
+ "littlefs2",
+ "spin 0.10.1",
+ "typenum",
+]
+
+[[package]]
+name = "barracuda-vfs-memfs"
+version = "0.1.0"
+dependencies = [
+ "bare-vfs",
+ "barracuda-vfs",
+ "critical-section",
+ "embassy-futures",
+ "embedded-io-async 0.7.0",
+ "spin 0.10.1",
+]
+
+[[package]]
 name = "barracuda-vm-builtin-packages"
 version = "0.1.0"
 dependencies = [
@@ -1106,11 +1212,17 @@ dependencies = [
 name = "barracuda-vm-component"
 version = "0.1.0"
 dependencies = [
+ "async-channel",
  "barracuda-event-router",
  "barracuda-lua",
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
+ "embedded-alloc",
+ "futures-core",
  "futures-lite",
  "getset",
  "serde",
@@ -1128,7 +1240,11 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
  "futures-lite",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1137,9 +1253,13 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-event-router",
- "barracuda-platform-host",
  "barracuda-platform-test",
  "barracuda-plugin-manager",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "picoserve",
  "thiserror 2.0.18",
@@ -1178,6 +1298,24 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "bindgen"
+version = "0.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+dependencies = [
+ "bitflags 2.13.0",
+ "cexpr",
+ "clang-sys",
+ "itertools",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash 1.1.0",
+ "shlex 1.3.0",
+ "syn 2.0.118",
+]
 
 [[package]]
 name = "bindgen"
@@ -1297,6 +1435,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocking"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a70e4329df6cb94385eed412ec92375c3cdd8a6e502493d1229b6414e4036dfa"
+dependencies = [
+ "async-channel",
+ "async-task",
+ "futures-io",
+ "futures-lite",
+ "piper",
+]
+
+[[package]]
 name = "bluebubbles"
 version = "0.1.0"
 dependencies = [
@@ -1351,6 +1502,20 @@ name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc0e56a716f1e132ff6bf4bdac1c944a3fcdc1cae65f70a4a2a1ac3b401d2d1f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
 
 [[package]]
 name = "byteorder"
@@ -1456,7 +1621,7 @@ checksum = "157a8ba7b480713b56f4c09fd13fc3e0a22a5dfab8097ba61cbc5feef950788a"
 dependencies = [
  "glob",
  "libc",
- "libloading",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -1491,6 +1656,12 @@ checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
 ]
+
+[[package]]
+name = "const-default"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b396d1f76d455557e1218ec8066ae14bba60b4b36ecd55577ba979f5db7ecaa"
 
 [[package]]
 name = "const-oid"
@@ -1867,6 +2038,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delog"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed991f9823b19e8a0380e198dcbb6aa6ac82727b40bfecd2c6cc634f46b7e01c"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "der"
 version = "0.7.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2096,10 +2276,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "embassy-net"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "347bc855bdbdf50ed9c5a1d80e8204badb0ba149b8732dde38e1e9708ed9d313"
+dependencies = [
+ "document-features",
+ "embassy-net-driver",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
+ "heapless 0.9.3",
+ "managed",
+ "smoltcp",
+]
+
+[[package]]
 name = "embassy-net-driver"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524eb3c489760508f71360112bca70f6e53173e6fe48fc5f0efd0f5ab217751d"
+
+[[package]]
+name = "embassy-net-driver-channel"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a07d2eb9f05a6fc876500949856ea1be40773d866d8cb99384f72d0ae4568c16"
+dependencies = [
+ "embassy-futures",
+ "embassy-net-driver",
+ "embassy-sync 0.8.0",
+]
 
 [[package]]
 name = "embassy-stm32"
@@ -2248,6 +2456,17 @@ dependencies = [
  "embassy-time",
  "embassy-usb-driver",
  "portable-atomic",
+]
+
+[[package]]
+name = "embedded-alloc"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2db634e07f552215f7a3572dc0a4d29760c637fcea5a8c18d2cc291f782c216c"
+dependencies = [
+ "const-default",
+ "critical-section",
+ "rlsf",
 ]
 
 [[package]]
@@ -2776,12 +2995,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
+name = "futures"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b147ee9d1f6d097cef9ce628cd2ee62288d963e16fb287bd9286455b241382d"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07bbe89c50d7a535e539b8c17bc0b49bdb77747034daa8087407d655f3f7cc1d"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -2789,6 +3024,17 @@ name = "futures-core"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e3450815272ef58cec6d564423f6e755e25379b217b0bc688e295ba24df6b1d"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baf29c38818342a3b26b5b923639e7b1f4a61fc5e76102d4b1981c6dc7a7579d"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -2838,10 +3084,13 @@ version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "389ca41296e6190b48053de0321d02a77f32f8a5d2461dd38762c0593805c6d6"
 dependencies = [
+ "futures-channel",
  "futures-core",
+ "futures-io",
  "futures-macro",
  "futures-sink",
  "futures-task",
+ "memchr",
  "pin-project-lite",
  "slab",
 ]
@@ -2985,6 +3234,70 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
+
+[[package]]
+name = "hadris-common"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b75f2d1b972ab5baa6aaed686489e56568a7ba35ea34864fcb878b1f4ffc8c1"
+dependencies = [
+ "hadris-fixed",
+ "hadris-io",
+ "hadris-path",
+ "heapless 0.9.3",
+ "zerocopy",
+]
+
+[[package]]
+name = "hadris-fat"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f2e55913aa3102b95e4850117d92a6f8941734e48968418e9694b0e2999d8ca"
+dependencies = [
+ "bitflags 2.13.0",
+ "bytemuck",
+ "chrono",
+ "hadris-common",
+ "hadris-fixed",
+ "hadris-io",
+ "hadris-macros",
+ "hadris-path",
+ "parse-size",
+ "spin 0.12.3",
+]
+
+[[package]]
+name = "hadris-fixed"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e8a21d0ac22512eaffb08f1a5a0c3fdc432d171103e296c3f3a74b62dc219f0"
+
+[[package]]
+name = "hadris-io"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0453cdaf618d562112b9e62957ca5b49ad5d4a10e382a6f68d2e1a75da25f8fa"
+dependencies = [
+ "bytemuck",
+ "cfg-if",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+]
+
+[[package]]
+name = "hadris-macros"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d95245da3cf494f10cd677f0fdba375ffa8eca4990890de3f19742a1ef88b64"
+dependencies = [
+ "proc-macro2",
+]
+
+[[package]]
+name = "hadris-path"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "351b73ecd5556a7f3709fd1d61dff9149e7b7f9aab4e2483400c9b29d35b2afc"
 
 [[package]]
 name = "hash32"
@@ -3269,6 +3582,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ipnet"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a756c3fac73139e83f14c2d742155dd2b78d3ee56597b419a0579b7bdd6dd78"
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3399,6 +3718,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60"
+dependencies = [
+ "cfg-if",
+ "windows-link",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3415,6 +3744,39 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "littlefs2"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "162d215700412b0173e3c8cfde130176fb799beccdd3d8db7cee57be3fb72ada"
+dependencies = [
+ "bitflags 2.13.0",
+ "delog",
+ "generic-array",
+ "heapless 0.9.3",
+ "littlefs2-core",
+ "littlefs2-sys",
+]
+
+[[package]]
+name = "littlefs2-core"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c0f7acafcb6c9dfcbc3c7c54aa7b8e04367d535daeb4be0e7131f93e4587dd2"
+dependencies = [
+ "bitflags 2.13.0",
+]
+
+[[package]]
+name = "littlefs2-sys"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "999d08bb7fae46d63ecb98d2474d28f7af1a6c928a51b4dfe5f1804abf9afc46"
+dependencies = [
+ "bindgen 0.70.1",
+ "cc",
+]
 
 [[package]]
 name = "lock_api"
@@ -3448,6 +3810,12 @@ dependencies = [
  "cc",
  "current_platform",
 ]
+
+[[package]]
+name = "managed"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
 
 [[package]]
 name = "matchit"
@@ -3566,6 +3934,18 @@ name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.13.0",
  "cfg-if",
@@ -3733,6 +4113,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-size"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "487f2ccd1e17ce8c1bfab3a65c89525af41cfad4c8659021a1e9a2aacd73b89b"
+
+[[package]]
 name = "parse_int"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3761,6 +4147,8 @@ checksum = "4aaf10aff74fc2b847b186ae037e91412f5b17a5224ba162a2c1bb41f3f48f86"
 dependencies = [
  "const-sha1",
  "data-encoding",
+ "embassy-net",
+ "embassy-time",
  "embedded-io-async 0.7.0",
  "heapless 0.8.0",
  "lhash",
@@ -3806,6 +4194,17 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "piper"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c835479a4443ded371d6c535cbfd8d31ad92c5d23ae9770a61bc155e4992a3c1"
+dependencies = [
+ "atomic-waker",
+ "fastrand",
+ "futures-io",
+]
 
 [[package]]
 name = "pkcs8"
@@ -4188,6 +4587,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlsf"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07393724337be2ee43a9d86164df4505746874a3fa65913374bc6d6a92314362"
+dependencies = [
+ "cfg-if",
+ "const-default",
+ "libc",
+ "rustversion",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4487,6 +4898,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 
 [[package]]
+name = "smoltcp"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f73d40463bba65efc9adc6370b56df76d563cc46e2482bba58351b4afb7535e"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "cfg-if",
+ "heapless 0.9.3",
+ "managed",
+]
+
+[[package]]
 name = "sntpc"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4519,6 +4943,21 @@ name = "somni-parser"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0f368519fc6c85fc1afdb769fb5a51123f6158013e143656e25a3485a0d401c"
+
+[[package]]
+name = "spin"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "023a211cb3138dbc438680b32560ad89f699977624c9f8dbb95a47d5b4c07dd3"
+
+[[package]]
+name = "spin"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0134f9043ed38b087ac4f7d4af44c79e2c9e5094421fe3164f435ce585953b10"
+dependencies = [
+ "lock_api",
+]
 
 [[package]]
 name = "spki"
@@ -4716,7 +5155,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -4844,6 +5283,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util"
+version = "0.7.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "libc",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "toml_datetime"
 version = "1.1.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4940,6 +5393,27 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "tun"
+version = "0.7.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7904c94104239657089d14bccbf23fd6d363e30639ce49af21ef008a445baf97"
+dependencies = [
+ "bytes",
+ "cfg-if",
+ "futures",
+ "futures-core",
+ "ipnet",
+ "libc",
+ "log",
+ "nix 0.30.1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "windows-sys 0.59.0",
+ "wintun-bindings",
 ]
 
 [[package]]
@@ -5338,6 +5812,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "wintun-bindings"
+version = "0.7.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc4494d02357537af05cf526be7b817a51752b688a78926af57379abd840d911"
+dependencies = [
+ "blocking",
+ "futures",
+ "libloading 0.9.0",
+ "log",
+ "thiserror 2.0.18",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

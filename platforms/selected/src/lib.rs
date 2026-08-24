@@ -1,39 +1,45 @@
-//! Compile-time selected Board and Platform resource factory.
-//!
-//! Applications depend on this crate instead of parsing selection YAML or
-//! importing a concrete Platform crate. The selected Platform remains
-//! statically dispatched.
+//! Independently selected Platform implementation.
 
 #![no_std]
 
-use barracuda_platform::{Platform, PlatformResources};
+use barracuda_platform::{Platform, PlatformInitResult, PlatformResources};
 use embassy_executor::Spawner;
 
 mod selected {
-    include!(concat!(env!("OUT_DIR"), "/selected_target.rs"));
+    include!(concat!(env!("OUT_DIR"), "/selected_platform.rs"));
 }
 
-use selected::{SelectedPlatform, BOARD};
+/// Independently selected concrete Platform.
+pub use selected::SelectedPlatform;
+/// Name of the independently selected Platform.
+pub use selected::PLATFORM_NAME;
 
-/// Database region type produced by the selected Platform.
-pub type DatabaseRegion = <SelectedPlatform as Platform>::DatabaseRegion;
+/// Board/HAL-produced bindings required by the selected Platform.
+pub type Bindings = <SelectedPlatform as Platform>::Bindings;
 
-/// Complete resource bundle produced for the selected target.
-pub type Resources = PlatformResources<
-    <SelectedPlatform as Platform>::Network,
-    <SelectedPlatform as Platform>::FileSystem,
-    DatabaseRegion,
->;
+/// Resource bundle produced only by the selected Platform.
+pub type Resources = PlatformResources<<SelectedPlatform as Platform>::Partitions>;
 
-/// Initialization error produced by the selected Platform.
+/// Initialization error produced only by the selected Platform.
 pub type Error = <SelectedPlatform as Platform>::Error;
 
-/// Prepares and constructs resources for the independently selected Board and Platform.
+/// Prepares the selected Platform runtime.
 ///
 /// # Errors
 ///
-/// Returns the selected Platform's preparation or initialization error.
-pub async fn resources(spawner: Spawner) -> Result<Resources, Error> {
-    SelectedPlatform::prepare()?;
-    SelectedPlatform::initialize(spawner, &BOARD).await
+/// Returns the selected Platform's runtime preparation error.
+pub fn prepare() -> Result<(), Error> {
+    SelectedPlatform::prepare()
+}
+
+/// Constructs only the selected Platform resources.
+///
+/// # Errors
+///
+/// Returns the selected Platform's initialization error.
+pub async fn resources(
+    spawner: Spawner,
+    bindings: Bindings,
+) -> PlatformInitResult<SelectedPlatform> {
+    SelectedPlatform::initialize(spawner, bindings).await
 }

@@ -15,7 +15,6 @@ build-support = ["dep:anyhow"]
 [dependencies]
 anyhow = { version = "1", optional = true }
 barracuda-agent-permission = { path = "../permission" }
-barracuda-fs = { path = "../../../../shared/fs" }
 barracuda-agent-persistence = { path = "../persistence" }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }
@@ -29,7 +28,6 @@ tracing = { version = "0.1", default-features = false }
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }
 anyhow = "1"
-barracuda-fs = { path = "../../../../shared/fs" }
 futures-lite = "2"
 
 [lints.rust]

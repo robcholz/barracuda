@@ -100,8 +100,8 @@ fn status_is_transient(status: StatusCode) -> bool {
     code == STATUS_REQUEST_TIMEOUT || status == Status::TooManyRequests || status.is_server_error()
 }
 
-pub(super) async fn post_json<S: TcpConnect + Dns>(
-    http: &mut NetClient<'_, S>,
+pub(super) async fn post_json<Tcp: TcpConnect, Resolver: Dns>(
+    http: &mut NetClient<'_, Tcp, Resolver>,
     context: &BackendContext,
     body: &str,
 ) -> Result<Response, ModelApiError> {
@@ -120,8 +120,8 @@ pub(super) async fn post_json<S: TcpConnect + Dns>(
     }
 }
 
-pub(super) async fn post_stream<'h, S: TcpConnect + Dns>(
-    http: &'h mut NetClient<'_, S>,
+pub(super) async fn post_stream<'h, Tcp: TcpConnect, Resolver: Dns>(
+    http: &'h mut NetClient<'_, Tcp, Resolver>,
     context: &BackendContext,
     body: String,
     sse: ProviderSse,
@@ -134,7 +134,7 @@ pub(super) async fn post_stream<'h, S: TcpConnect + Dns>(
     let status = match futures_lite::StreamExt::next(&mut stream).await {
         Some(Ok(ResponsePart::Head(status))) => status,
         Some(Ok(ResponsePart::Data(_))) | None => {
-            return Err(ModelApiError::ApiError("HTTP stream ended before response head").into())
+            return Err(ModelApiError::ApiError("HTTP stream ended before response head").into());
         }
         Some(Err(error)) => return Err(ModelApiError::from(error).into()),
     };

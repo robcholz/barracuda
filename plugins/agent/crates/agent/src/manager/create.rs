@@ -1,13 +1,12 @@
-use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
+use alloc::{borrow::ToOwned, boxed::Box, rc::Rc, sync::Arc, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind};
 use barracuda_agent_memory::{Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::RetryPolicy;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::baked;
 use crate::config::ApiPurpose;
@@ -42,12 +41,10 @@ struct AgentEnvironment {
     extension_tools: Vec<ToolGroup>,
     inherited_context: Vec<Block<'static>>,
     reasoning_effort: ReasoningEffort,
-    state: Option<AgentEngineState>,
+    state: Option<DurableState<AgentEngineState>>,
 }
 
-impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
-    AgentManager<Filesystem, Http>
-{
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentManager<Tcp, Resolver> {
     pub fn resume_from(
         &self,
         id: AgentId,
@@ -55,9 +52,9 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
-        let kind = persisted.kind();
+        let kind = persisted.get().kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -86,7 +83,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -110,28 +107,25 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
     fn open_transcript(
         &self,
         id: AgentId,
-        kind: &AgentKind,
+        _kind: &AgentKind,
         persistence: PersistenceConfig,
     ) -> Result<Box<dyn Transcript>, AgentCreateError> {
         match persistence {
-            PersistenceConfig::Persistent => TranscriptStore::<Filesystem>::new(
-                self.filesystem.clone(),
-                id.0,
-                &self.transcript_dir,
-            )
-            .map(|store| Box::new(store) as Box<dyn Transcript>)
-            .map_err(|error| {
-                log::error!(
-                    "Agent {id} ({}) transcript open failed: {error}",
-                    kind.as_str()
-                );
-                tracing::error!(
-                    name: "transcript_open_failed",
-                    agent = %id,
-                    kind = %kind.as_str(),
-                );
-                AgentCreateError::Transcript(error)
-            }),
+            PersistenceConfig::Persistent => {
+                let transcript = self
+                    .transcripts
+                    .borrow_mut()
+                    .entry(id)
+                    .or_insert_with(|| {
+                        Rc::new(TranscriptStore::empty(
+                            self.filesystem.clone(),
+                            id.0,
+                            &self.transcript_dir,
+                        ))
+                    })
+                    .clone();
+                Ok(Box::new(transcript) as Box<dyn Transcript>)
+            }
             PersistenceConfig::InMemory => Ok(Box::new(TransientTranscript::new())),
         }
     }
@@ -151,7 +145,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(Agent<Http>, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {
@@ -172,7 +166,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let runtime = manifest.runtime();
         let skill_set = Arc::clone(&self.skill_registry).skill_set();
         let state =
-            DurableState::new(recovery_state.unwrap_or_else(|| AgentEngineState::new(kind)));
+            recovery_state.unwrap_or_else(|| DurableState::new(AgentEngineState::new(kind)));
         // The per-kind blacklist stays attached to this ToolSet projection so
         // registry refreshes and later local groups follow the same exact-name
         // policy.
@@ -189,13 +183,14 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
 
         // Only `AgentEngine` holds the transcript (as `dyn Transcript`); context
         // providers read it through the `&dyn Transcript` lent to `prepare`.
-        let conversation_history = ConversationHistoryContextProvider::with_llm_compaction::<Http>(
-            Arc::clone(&self.api_manager),
-            self.llm_factory.clone(),
-            COMPACTION_TRIGGER_TOKENS,
-            COMPACTION_KEEP_RECENT_TOKENS,
-            COMPACTION_SEGMENT_TOKEN_BUDGET,
-        );
+        let conversation_history =
+            ConversationHistoryContextProvider::with_llm_compaction::<Tcp, Resolver>(
+                Arc::clone(&self.api_manager),
+                self.llm_factory.clone(),
+                COMPACTION_TRIGGER_TOKENS,
+                COMPACTION_KEEP_RECENT_TOKENS,
+                COMPACTION_SEGMENT_TOKEN_BUDGET,
+            );
         let profile_provider = ProfileContextProvider::new(self.profile_store.clone());
         let provider = match self.long_term.provider(kind.as_str()) {
             Ok(provider) => provider,
@@ -250,8 +245,8 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
             context_providers,
             retry_policy: RetryPolicy::new(runtime.retries()),
         };
-        let engine = AgentEngine::<Http>::build(engine_config, self.llm_factory.create()).map_err(
-            |error| match error {
+        let engine = AgentEngine::<Tcp, Resolver>::build(engine_config, self.llm_factory.create())
+            .map_err(|error| match error {
                 AgentEngineBuildError::InvalidContextProviderId => {
                     AgentCreateError::InvalidContextProviderId
                 }
@@ -259,8 +254,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
                     AgentCreateError::DuplicateContextProviderId(id)
                 }
                 AgentEngineBuildError::Tools(error) => AgentCreateError::Tools(error),
-            },
-        )?;
+            })?;
         let agent = Agent::new(engine);
 
         log::info!("Agent {id} ({}) created", kind.as_str());

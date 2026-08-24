@@ -1,3 +1,4 @@
+use alloc::boxed::Box;
 use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
@@ -7,9 +8,83 @@ use core::future::poll_fn;
 use core::net::{IpAddr, Ipv4Addr, SocketAddr};
 use core::task::Poll;
 
-use barracuda_net::{AddrType, ConnectedUdp, Dns, TcpConnect, UdpStack, UnconnectedUdp};
+use embassy_net::{Config, Ipv4Address, Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
+use embassy_net_driver_channel::{
+    driver::{HardwareAddress, LinkState},
+    Device, State as ChannelState,
+};
 use embedded_io::{Error, ErrorKind, ErrorType};
 use embedded_io_async::{Read, Write};
+use embedded_nal_async::{AddrType, ConnectedUdp, Dns, TcpConnect, UdpStack, UnconnectedUdp};
+
+const EMBASSY_MTU: usize = 1500;
+const EMBASSY_PACKETS: usize = 4;
+const EMBASSY_SOCKETS: usize = 12;
+type LoopbackDevice = Device<'static, EMBASSY_MTU>;
+
+/// In-process Embassy Net stack whose layer-three packets are looped back.
+pub struct LoopbackNetwork {
+    stack: Stack<'static>,
+    network_runner: Runner<'static, LoopbackDevice>,
+    channel_runner: embassy_net_driver_channel::Runner<'static, EMBASSY_MTU>,
+}
+
+impl LoopbackNetwork {
+    /// Returns the common Embassy Net stack handle.
+    #[must_use]
+    pub const fn stack(&self) -> Stack<'static> {
+        self.stack
+    }
+
+    /// Drives both Embassy Net and the in-process packet loopback forever.
+    pub async fn run(mut self) {
+        embassy_futures::join::join(self.network_runner.run(), async move {
+            let mut packet = [0_u8; EMBASSY_MTU];
+            loop {
+                let outgoing = self.channel_runner.tx_buf().await;
+                let length = outgoing.len();
+                packet[..length].copy_from_slice(outgoing);
+                self.channel_runner.tx_done();
+                let incoming = self.channel_runner.rx_buf().await;
+                incoming[..length].copy_from_slice(&packet[..length]);
+                self.channel_runner.rx_done(length);
+            }
+        })
+        .await;
+    }
+}
+
+/// Creates one in-process Embassy Net stack for socket-level tests.
+#[must_use]
+pub fn loopback_network() -> LoopbackNetwork {
+    let state = Box::leak(Box::new(ChannelState::<
+        EMBASSY_MTU,
+        EMBASSY_PACKETS,
+        EMBASSY_PACKETS,
+    >::new()));
+    let (mut channel_runner, device) = embassy_net_driver_channel::new(state, HardwareAddress::Ip);
+    channel_runner.set_link_state(LinkState::Up);
+    let resources = Box::leak(Box::new(StackResources::<EMBASSY_SOCKETS>::new()));
+    let address = Ipv4Address::new(10, 0, 0, 1);
+    let config = Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(address, 24),
+        gateway: None,
+        dns_servers: Default::default(),
+    });
+    let (stack, network_runner) = embassy_net::new(device, config, resources, 1);
+    LoopbackNetwork {
+        stack,
+        network_runner,
+        channel_runner,
+    }
+}
+
+/// Creates a common Embassy Net handle that remains offline.
+#[must_use]
+pub fn never_embassy_stack() -> Stack<'static> {
+    let network = loopback_network();
+    network.stack()
+}
 
 #[derive(Clone, Copy, Debug)]
 /// Error returned by deterministic test network operations.

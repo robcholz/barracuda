@@ -1,47 +1,92 @@
-//! Board/Platform ownership boundary tests.
+//! Platform resource-boundary tests.
 
-use core::{convert::Infallible, future::pending};
+use barracuda_platform::{NamedPartition, PartitionAccess, Partitions, PlatformResources};
 
-use barracuda_board::{Board, Hardware, Storage};
-use barracuda_platform::{Platform, PlatformInitResult};
-use barracuda_platform_test::{MemFs, MemoryPartition, NeverStack};
-use embassy_executor::Spawner;
-
-static BOARD: Board = Board::new(
-    "example",
-    Hardware::new("host"),
-    Storage::new("datafs", None, "ekv"),
-);
-
-struct ExamplePlatform;
-
-impl Platform for ExamplePlatform {
-    type Network = NeverStack;
-    type FileSystem = MemFs;
-    type DatabaseRegion = MemoryPartition;
-    type Error = Infallible;
-
-    async fn initialize(_spawner: Spawner, _board: &'static Board) -> PlatformInitResult<Self> {
-        pending().await
+#[test]
+fn platform_resources_expose_exact_ip_and_partition_capabilities() {
+    fn assert_shape<Partitions>(resources: PlatformResources<Partitions>) {
+        let PlatformResources {
+            ip_stack: _,
+            partitions: _,
+        } = resources;
     }
+
+    let _assert_shape = assert_shape::<()>;
 }
 
 #[test]
-fn board_and_platform_are_independent_inputs() {
-    fn assert_platform<P: Platform>() {}
+fn partitions_are_an_extensible_named_collection() {
+    let mut partitions = Partitions::<u8, 4>::new();
+    partitions
+        .insert(NamedPartition::new(
+            "runtime",
+            PartitionAccess::ReadWrite,
+            1,
+        ))
+        .expect("insert runtime partition");
+    partitions
+        .insert(NamedPartition::new("assets", PartitionAccess::ReadOnly, 2))
+        .expect("insert asset partition");
+    partitions
+        .insert(NamedPartition::new(
+            "future-plugin-region",
+            PartitionAccess::ReadWrite,
+            3,
+        ))
+        .expect("insert arbitrary partition");
 
-    assert_platform::<ExamplePlatform>();
-    assert_eq!(BOARD.storage().database(), "ekv");
+    assert_eq!(partitions.len(), 3);
+    assert_eq!(
+        partitions.get("assets").map(NamedPartition::access),
+        Some(PartitionAccess::ReadOnly)
+    );
+    assert_eq!(
+        partitions
+            .take("future-plugin-region")
+            .map(NamedPartition::into_region),
+        Some(3)
+    );
+    assert!(partitions.get("future-plugin-region").is_none());
 }
 
 #[test]
-fn device_platforms_do_not_export_raw_filesystem_regions() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for relative in ["platforms/esp32/src/lib.rs", "platforms/stm32/src/lib.rs"] {
-        let source = std::fs::read_to_string(root.join(relative))?;
+fn partitions_reject_empty_and_duplicate_native_names() {
+    let mut partitions = Partitions::<u8, 2>::new();
+    assert!(partitions
+        .insert(NamedPartition::new("", PartitionAccess::ReadWrite, 1))
+        .is_err());
+    partitions
+        .insert(NamedPartition::new(
+            "native-name",
+            PartitionAccess::ReadWrite,
+            1,
+        ))
+        .expect("insert first partition");
+    assert!(partitions
+        .insert(NamedPartition::new(
+            "native-name",
+            PartitionAccess::ReadOnly,
+            2,
+        ))
+        .is_err());
+}
+
+#[test]
+fn platform_api_has_no_business_storage_fields() -> Result<(), std::io::Error> {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
+    )?;
+    for forbidden in [
+        "filesystem:",
+        "database_region:",
+        "web_assets",
+        "plugin_partition",
+        "type FileSystem",
+        "type DatabaseRegion",
+    ] {
         assert!(
-            !source.contains("FilesystemFlash") && !source.contains("filesystem_flash"),
-            "{relative} exposes a raw filesystem region instead of a mounted FileSystem"
+            !source.contains(forbidden),
+            "Platform API contains business storage concept `{forbidden}`"
         );
     }
     Ok(())

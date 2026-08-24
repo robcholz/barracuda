@@ -9,14 +9,14 @@ use panic_halt as _;
 #[cfg(target_arch = "arm")]
 #[cortex_m_rt::entry]
 fn main() -> ! {
-    let layout =
-        match barracuda_platform_stm32::board_storage_layout(embassy_stm32::flash::FLASH_BASE) {
+    let table =
+        match barracuda_platform_stm32::board_partition_table(embassy_stm32::flash::FLASH_BASE) {
             Ok(layout) => layout,
             Err(_error) => loop {
                 core::hint::spin_loop();
             },
         };
-    core::hint::black_box(layout.database().size());
+    core::hint::black_box(table.regions().len());
     loop {
         core::hint::spin_loop();
     }

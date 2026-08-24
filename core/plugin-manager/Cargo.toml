@@ -12,12 +12,15 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-event-router = { path = "../event-router" }
 barracuda-kv = { path = "../../shared/kv" }
+barracuda-vfs = { path = "../../shared/vfs" }
+embassy-executor.workspace = true
 embedded-storage-async.workspace = true
 getset = "0.1.7"
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../platforms/test" }
+barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
 futures-lite = "2"
 
 [lints.rust]

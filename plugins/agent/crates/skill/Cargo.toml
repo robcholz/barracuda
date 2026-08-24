@@ -12,18 +12,17 @@ default = []
 std = ["yaml-peg/std"]
 
 [dependencies]
-barracuda-fs = { path = "../../../../shared/fs" }
+barracuda-vfs = { path = "../../../../shared/vfs" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
 yaml-peg = { version = "1.0.8", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
-# `diskfs` reads the data-driven golden fixtures from the checkout; `MemFs` is
-# part of the base interface crate.
-barracuda-platform-host = { path = "../../../../platforms/host" }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+# Host tests copy data-driven fixtures into a mounted in-memory VFS.
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"
+futures-lite = "2"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [lints.rust]

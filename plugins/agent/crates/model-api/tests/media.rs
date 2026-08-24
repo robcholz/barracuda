@@ -5,8 +5,8 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
 
-fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack> {
-    let mut api = ModelApi::new(stack, 4096, 512);
+fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    let mut api = ModelApi::new(stack, stack, 4096, 512);
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

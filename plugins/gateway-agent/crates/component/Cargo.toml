@@ -16,9 +16,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-agent-runtime = { path = "../../../agent/crates/runtime" }
-barracuda-fs = { path = "../../../../shared/fs" }
 barracuda-model-api = { path = "../../../agent/crates/model-api" }
-barracuda-net = { path = "../../../../shared/net" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"

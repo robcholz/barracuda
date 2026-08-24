@@ -3,54 +3,73 @@
 use barracuda_agent_memory::{
     ProfileDocument, ProfileError, ProfileStore, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES,
 };
-use barracuda_fs::FileSystem;
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::memory_vfs;
+use barracuda_vfs::ScopedVfs;
+use futures_lite::future::block_on;
 
 #[test]
 fn missing_document_is_absent() {
-    let store = store();
-    assert_eq!(store.read(ProfileDocument::Soul).unwrap(), None);
+    block_on(async {
+        let store = store().await;
+        assert_eq!(store.read(ProfileDocument::Soul).await.unwrap(), None);
+    });
 }
 
 #[test]
 fn replace_and_read_round_trip() {
-    let store = store();
-    store.replace(ProfileDocument::Soul, "Be concise.").unwrap();
-    assert_eq!(
-        store.read(ProfileDocument::Soul).unwrap(),
-        Some("Be concise.".to_string())
-    );
+    block_on(async {
+        let store = store().await;
+        store
+            .replace(ProfileDocument::Soul, "Be concise.")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.read(ProfileDocument::Soul).await.unwrap(),
+            Some("Be concise.".to_string())
+        );
+    });
 }
 
 #[test]
 fn clear_keeps_file_but_returns_empty_content() {
-    let store = store();
-    store
-        .replace(ProfileDocument::UserProfile, "Use Chinese.")
-        .unwrap();
-    store.clear(ProfileDocument::UserProfile).unwrap();
-    assert_eq!(
-        store.read(ProfileDocument::UserProfile).unwrap(),
-        Some(String::new())
-    );
+    block_on(async {
+        let store = store().await;
+        store
+            .replace(ProfileDocument::UserProfile, "Use Chinese.")
+            .await
+            .unwrap();
+        store.clear(ProfileDocument::UserProfile).await.unwrap();
+        assert_eq!(
+            store.read(ProfileDocument::UserProfile).await.unwrap(),
+            Some(String::new())
+        );
+    });
 }
 
 #[test]
 fn rejects_too_large_document() {
-    let store = store();
-    let content = "x".repeat(DEFAULT_PROFILE_DOCUMENT_MAX_BYTES + 1);
-    let error = store
-        .replace(ProfileDocument::AssistantIdentity, content)
-        .unwrap_err();
-    assert!(matches!(error, ProfileError::TooLarge { .. }));
+    block_on(async {
+        let store = store().await;
+        let content = "x".repeat(DEFAULT_PROFILE_DOCUMENT_MAX_BYTES + 1);
+        let error = store
+            .replace(ProfileDocument::AssistantIdentity, content)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ProfileError::TooLarge { .. }));
+    });
 }
 
 #[test]
 fn invalid_utf8_is_an_error() {
-    let (filesystem, store) = store_with_fs();
-    filesystem.write_atomic("/memory/soul.md", &[0xff]).unwrap();
-    let error = store.read(ProfileDocument::Soul).unwrap_err();
-    assert!(matches!(error, ProfileError::InvalidUtf8 { .. }));
+    block_on(async {
+        let (filesystem, store) = store_with_fs().await;
+        filesystem
+            .write_atomic("/memory/soul.md", &[0xff])
+            .await
+            .unwrap();
+        let error = store.read(ProfileDocument::Soul).await.unwrap_err();
+        assert!(matches!(error, ProfileError::InvalidUtf8 { .. }));
+    });
 }
 
 #[test]
@@ -79,12 +98,12 @@ fn document_ids_use_canonical_labels() {
     assert_eq!(ProfileDocument::UserProfile.to_string(), "user_profile");
 }
 
-fn store() -> ProfileStore<MemFs> {
-    store_with_fs().1
+async fn store() -> ProfileStore {
+    store_with_fs().await.1
 }
 
-fn store_with_fs() -> (MemFs, ProfileStore<MemFs>) {
-    let filesystem = MemFs::new();
+async fn store_with_fs() -> (ScopedVfs, ProfileStore) {
+    let filesystem = memory_vfs().await.unwrap();
     let store = ProfileStore::new(filesystem.clone(), "/memory");
     (filesystem, store)
 }

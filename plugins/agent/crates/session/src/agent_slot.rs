@@ -2,7 +2,7 @@ use alloc::collections::BTreeMap;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_core::Stream;
 
 use barracuda_agent::Message;
@@ -12,7 +12,7 @@ use barracuda_agent::{
     ToolCallId,
 };
 
-pub(super) type AgentSlots<Http> = BTreeMap<AgentId, AgentSlot<Http>>;
+pub(super) type AgentSlots<Tcp, Resolver> = BTreeMap<AgentId, AgentSlot<Tcp, Resolver>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {
@@ -22,8 +22,8 @@ enum InFlightLifecycle {
     Reaping,
 }
 
-struct InFlight<Http: TcpConnect + Dns + 'static> {
-    stream: AgentStream<Http>,
+struct InFlight<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    stream: AgentStream<Tcp, Resolver>,
     control: AgentHandle,
     span: Option<tracing::Span>,
     lifecycle: InFlightLifecycle,
@@ -33,9 +33,9 @@ struct InFlight<Http: TcpConnect + Dns + 'static> {
 // `Agent` is intentionally stored inline in its owning slot. Boxing it only to
 // equalize enum variants adds one allocation to every resident Agent.
 #[allow(clippy::large_enum_variant)]
-enum Execution<Http: TcpConnect + Dns + 'static> {
-    Resident(Agent<Http>),
-    InFlight(InFlight<Http>),
+enum Execution<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    Resident(Agent<Tcp, Resolver>),
+    InFlight(InFlight<Tcp, Resolver>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -55,16 +55,20 @@ pub(super) enum AgentSlotUpdate {
 ///
 /// A resident slot owns the Agent directly. While it is running, the slot owns
 /// the AgentStream and its control capability.
-pub(super) struct AgentSlot<Http: TcpConnect + Dns + 'static> {
-    execution: Option<Execution<Http>>,
+pub(super) struct AgentSlot<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    execution: Option<Execution<Tcp, Resolver>>,
     reasoning_effort: ReasoningEffortHandle,
 }
 
-impl<Http> AgentSlot<Http>
+impl<Tcp, Resolver> AgentSlot<Tcp, Resolver>
 where
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub(super) fn new(agent: Agent<Http>, reasoning_effort: ReasoningEffortHandle) -> Self {
+    pub(super) fn new(
+        agent: Agent<Tcp, Resolver>,
+        reasoning_effort: ReasoningEffortHandle,
+    ) -> Self {
         Self {
             execution: Some(Execution::Resident(agent)),
             reasoning_effort,

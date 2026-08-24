@@ -1,53 +1,60 @@
-# Gateway–Agent Bridge Component
+# Gateway–Agent Component
 
-Drives the Agent from inbound gateway messages and delivers the Agent's turn
-back to the gateway as ordinary IM messages. It keeps IM providers fully
-decoupled from the Agent: nothing agent-specific crosses the gateway boundary.
-Rich content (reasoning, tool results, notices) is carried as generic
-[`gateway::MessageKind`] roles on ordinary `gateway.send` messages.
+The Component is a stateful streaming mapper. It owns no provider and exposes
+one RPC, `gateway_agent.respond`, whose input is exactly the
+`gateway.message.received` Event frame type and whose output is exactly the
+`gateway.send_stream` request frame type.
 
-The Component is constructed with an already-created Agent session identifier
-and the [`GatewayRoute`] its replies are delivered to. The host creates the
-session through the Agent runtime before loading the Component.
+## Workflow
 
-## Provides
+The complete delivery path has two steps:
 
-### `bridge.handle`
+1. `gateway_agent.respond` decodes the inbound message, finds or lazily creates
+   the persistent Agent session for its `GatewayRoute`, appends the user text,
+   and maps that turn's `session.open` events to Gateway stream frames.
+2. `gateway.send_stream` passes those frames to the provider selected by the
+   route prefix.
 
-- Input: streaming `GatewayEventFrame` (the `gateway.message.received` Event
-  message). Registered as the ingress step of the gateway Workflow.
-- Output: unary `()`.
-- Method error: `BridgeHandleError`
-  - `InvalidMessage`: the inbound frames did not decode to a message.
-  - `AppendFailed`: the bound Agent session rejected the appended text.
+```text
+gateway.message.received
+  -> gateway_agent.respond   (stream -> stream)
+  -> gateway.send_stream     (stream -> unary receipt)
+```
 
-The handler decodes the `GatewayInboundMessage`, records its message id as the
-next reply's `reply_to`, and appends the (capacity-fitted) text to the bound
-session via `session.append`. The Agent turn it triggers is observed by the
-outbound pump, not by this RPC.
+Session creation, `session.open`, and `session.append` are private operations
+inside the mapper. They are not Workflow steps.
 
-## Consumes
+## `gateway_agent.respond`
 
-- `session.open` — the outbound pump opens the bound session once and
-  reads its `SessionEventDto` stream for the Component's lifetime.
-- `session.append` — used by `bridge.handle` to enqueue inbound text.
-- `gateway.send` — used by the outbound pump to deliver each mapped message.
+- Input: streaming `GatewayEventFrame`
+- Output: streaming `GatewaySendStreamRequestFrame`
+- Method errors: `InvalidMessage`, `ConversationBusy`, `SessionUnavailable`,
+  `AppendFailed`, and `InvalidEvent`
+
+The first output frames are `Channel`, `Conversation`, optional `Thread`, and
+`ReplyTo`. Remaining frames are emitted as Agent events arrive; the mapper does
+not aggregate a turn before returning it. A dropped consumer releases the
+conversation's in-flight guard.
 
 ## Event mapping
 
-Per Agent turn, session events are mapped onto `gateway.send` messages:
-
-| Session event | Gateway message |
+| Agent event | Gateway stream field |
 | --- | --- |
-| reasoning delta/end | one `reasoning` message per reasoning block |
-| output / effect-output delta/end | one `reply` message per output block (threads `reply_to`) |
-| tool result | one `tool` message: `"<name>: ok\|failed"` |
-| turn/session error | one `notice` message: `"error: …"` |
-| input requested | one `notice` message |
+| reasoning delta/end | `Reasoning` (`More` / `Complete`) |
+| model output delta/end | `Text` (`More` / `Complete`) |
+| effect output delta/end | `EffectResult` (`More` / `Complete`) |
+| tool result | structured `ToolResultStart`, call id, name, arguments, output, status, `ToolResultEnd` |
+| turn/session error | `Notice` |
+| remaining lifecycle/metadata events | `Event` containing the typed event JSON |
 
-## Lifecycle
+Large event values are chunked by the Gateway frame encoder. Plain IM
+providers consume the stream but project only `Text`; rich providers such as
+Web can render every extra frame.
 
-`run` opens the bound session and pumps events until the stream closes, then
-stays pending so the Component remains resident. The inbound handler waits for
-the pump to open the session before appending, so `session.append` always finds
-the session lease.
+## State and concurrency
+
+`GatewayRoute` is the conversation key, including channel and optional thread.
+Each route owns one persistent Agent session and one long-lived
+`session.open` stream. Different routes can run concurrently. A second turn on
+the same route while its first response is still streaming receives
+`ConversationBusy` rather than interleaving events.

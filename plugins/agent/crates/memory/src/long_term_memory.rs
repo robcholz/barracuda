@@ -47,7 +47,7 @@ use core::{
 
 use serde::{Deserialize, Serialize};
 
-use barracuda_fs::{FileSystem, FsError};
+use barracuda_vfs::{FsError, ScopedVfs};
 
 /// Journal filename under the store directory.
 const RECORDS_FILE: &str = "memory_records.jsonl";
@@ -207,14 +207,6 @@ enum Record {
     Del { id: MemoryId },
 }
 
-#[derive(Debug, thiserror::Error)]
-enum LongTermPersistError {
-    #[error("serialize record failed: {0}")]
-    SerializeRecord(#[source] serde_json::Error),
-    #[error("compaction serialize failed: {0}")]
-    CompactSerialize(#[source] serde_json::Error),
-}
-
 /// The lock-protected contents of the store.
 #[derive(Default)]
 struct State {
@@ -237,8 +229,8 @@ struct State {
     last_persist_error: Option<FsError>,
 }
 
-struct Inner<F: FileSystem + 'static> {
-    filesystem: F,
+struct Inner {
+    filesystem: ScopedVfs,
     path: String,
     id_prefix: String,
     state: RefCell<State>,
@@ -254,17 +246,17 @@ struct Inner<F: FileSystem + 'static> {
 /// # Examples
 ///
 /// ```
-/// use barracuda_platform_test::MemFs;
+/// use barracuda_platform_test::memory_vfs;
 /// use barracuda_agent_memory::{LongTermMemory, MemoryDraft, StoreOutcome};
 ///
-/// # let filesystem = std::sync::MemFs::new();
-/// let memory = LongTermMemory::<MemFs>::new(filesystem, "/m", "g-")
-///     .expect("a fresh MemFs has no journal, so the store starts empty");
+/// # futures_lite::future::block_on(async {
+/// let filesystem = memory_vfs().await.unwrap();
+/// let memory = LongTermMemory::new(filesystem, "/m", "g-").await.unwrap();
 ///
 /// // Store a fact tagged `preference`, then recall by that label.
 /// let stored = memory.store(
 ///     MemoryDraft::new("Prefers tea over coffee").with_tags(["preference".into()]),
-/// );
+/// ).await;
 /// assert!(matches!(stored, StoreOutcome::Created(_)));
 ///
 /// let hits = memory.recall(&["preference".to_string()], None, 10);
@@ -273,14 +265,15 @@ struct Inner<F: FileSystem + 'static> {
 ///
 /// // The catalog lists the distinct labels in use.
 /// assert_eq!(memory.catalog(), vec!["preference".to_string()]);
+/// # });
 /// ```
-pub struct LongTermMemory<F: FileSystem + 'static> {
-    inner: Arc<Inner<F>>,
+pub struct LongTermMemory {
+    inner: Arc<Inner>,
 }
 
 // Manual `Clone`: only the `Arc` is cloned, so this is cheap and does not
 // require `F: Clone`.
-impl<F: FileSystem + 'static> Clone for LongTermMemory<F> {
+impl Clone for LongTermMemory {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
@@ -288,7 +281,7 @@ impl<F: FileSystem + 'static> Clone for LongTermMemory<F> {
     }
 }
 
-impl<F: FileSystem + 'static> LongTermMemory<F> {
+impl LongTermMemory {
     /// Build the store, restoring its journal if present. Best-effort creates
     /// `dir`.
     ///
@@ -297,16 +290,21 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// [`LongTermInitError::Unreadable`] when the journal exists but cannot be
     /// read — a genuine I/O failure is never silently mistaken for an empty
     /// store. A *missing* journal is not an error: the store starts empty.
-    pub fn new(filesystem: F, dir: &str, id_prefix: &str) -> Result<Self, LongTermInitError> {
+    pub async fn new(
+        filesystem: ScopedVfs,
+        dir: &str,
+        id_prefix: &str,
+    ) -> Result<Self, LongTermInitError> {
         let path = journal_path(dir);
-        if let Err(error) = filesystem.create_dir_all(dir) {
+        if let Err(error) = filesystem.create_dir_all(dir).await {
             log::warn!("long-term memory {dir}: create dir failed: {error}");
         }
-        let state =
-            load_state(&filesystem, &path).map_err(|source| LongTermInitError::Unreadable {
+        let state = load_state(&filesystem, &path).await.map_err(|source| {
+            LongTermInitError::Unreadable {
                 path: path.clone(),
                 source,
-            })?;
+            }
+        })?;
         Ok(Self {
             inner: Arc::new(Inner {
                 filesystem,
@@ -325,7 +323,7 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// discovering the loss only on the next reboot. Cleared on the next
     /// successful persist.
     pub fn last_persist_error(&self) -> Option<FsError> {
-        self.lock().last_persist_error.clone()
+        self.lock().last_persist_error
     }
 
     /// Store a new fact, or return the existing near-duplicate unchanged.
@@ -333,31 +331,35 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// Dedup is by normalized content (case- and whitespace-insensitive): storing
     /// a fact whose content matches a live item yields
     /// [`StoreOutcome::Duplicate`] and writes nothing.
-    pub fn store(&self, draft: MemoryDraft) -> StoreOutcome {
-        let mut state = self.lock();
-        let key = normalize(&draft.content);
-        if let Some(existing) = state
-            .items
-            .iter()
-            .find(|item| normalize(&item.content) == key)
-        {
-            return StoreOutcome::Duplicate(existing.clone());
-        }
+    pub async fn store(&self, draft: MemoryDraft) -> StoreOutcome {
+        let item = {
+            let mut state = self.lock();
+            let key = normalize(&draft.content);
+            if let Some(existing) = state
+                .items
+                .iter()
+                .find(|item| normalize(&item.content) == key)
+            {
+                return StoreOutcome::Duplicate(existing.clone());
+            }
 
-        let seq = state.next_seq;
-        state.next_seq = seq.saturating_add(1);
-        let item = MemoryItem {
-            id: MemoryId(format!("{}{}", self.inner.id_prefix, seq)),
-            content: draft.content,
-            tags: draft.tags,
-            keywords: draft.keywords,
-            source: draft.source,
-            seq,
+            let seq = state.next_seq;
+            state.next_seq = seq.saturating_add(1);
+            let item = MemoryItem {
+                id: MemoryId(format!("{}{}", self.inner.id_prefix, seq)),
+                content: draft.content,
+                tags: draft.tags,
+                keywords: draft.keywords,
+                source: draft.source,
+                seq,
+            };
+            state.items.push(item.clone());
+            state.catalog_cache = None;
+            state.version = state.version.saturating_add(1);
+            item
         };
-        state.items.push(item.clone());
-        state.catalog_cache = None;
-        state.version = state.version.saturating_add(1);
-        state.last_persist_error = self.append_record(&Record::Put(item.clone())).err();
+        let error = self.append_record(&Record::Put(item.clone())).await.err();
+        self.lock().last_persist_error = error;
         StoreOutcome::Created(item)
     }
 
@@ -398,26 +400,40 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// # Errors
     ///
     /// [`LongTermError::NotFound`] if no live item has that id.
-    pub fn update(&self, id: &MemoryId, patch: MemoryPatch) -> Result<MemoryItem, LongTermError> {
-        let mut state = self.lock();
-        let Some(item) = state.items.iter_mut().find(|item| &item.id == id) else {
-            return Err(LongTermError::NotFound(id.clone()));
+    pub async fn update(
+        &self,
+        id: &MemoryId,
+        patch: MemoryPatch,
+    ) -> Result<MemoryItem, LongTermError> {
+        let (updated, should_compact) = {
+            let mut state = self.lock();
+            let Some(item) = state.items.iter_mut().find(|item| &item.id == id) else {
+                return Err(LongTermError::NotFound(id.clone()));
+            };
+            if let Some(content) = patch.content {
+                item.content = content;
+            }
+            if let Some(tags) = patch.tags {
+                item.tags = tags;
+            }
+            if let Some(keywords) = patch.keywords {
+                item.keywords = keywords;
+            }
+            let updated = item.clone();
+            state.catalog_cache = None;
+            state.version = state.version.saturating_add(1);
+            state.dead = state.dead.saturating_add(1);
+            let should_compact = state.dead >= DEFAULT_COMPACT_DEAD_THRESHOLD;
+            (updated, should_compact)
         };
-        if let Some(content) = patch.content {
-            item.content = content;
+        let error = self
+            .append_record(&Record::Put(updated.clone()))
+            .await
+            .err();
+        self.lock().last_persist_error = error;
+        if should_compact {
+            self.maybe_compact().await;
         }
-        if let Some(tags) = patch.tags {
-            item.tags = tags;
-        }
-        if let Some(keywords) = patch.keywords {
-            item.keywords = keywords;
-        }
-        let updated = item.clone();
-        state.catalog_cache = None;
-        state.version = state.version.saturating_add(1);
-        state.dead = state.dead.saturating_add(1);
-        state.last_persist_error = self.append_record(&Record::Put(updated.clone())).err();
-        self.maybe_compact(&mut state);
         Ok(updated)
     }
 
@@ -426,17 +442,26 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// # Errors
     ///
     /// [`LongTermError::NotFound`] if no live item has that id.
-    pub fn forget(&self, id: &MemoryId) -> Result<(), LongTermError> {
-        let mut state = self.lock();
-        let Some(position) = state.items.iter().position(|item| &item.id == id) else {
-            return Err(LongTermError::NotFound(id.clone()));
+    pub async fn forget(&self, id: &MemoryId) -> Result<(), LongTermError> {
+        let should_compact = {
+            let mut state = self.lock();
+            let Some(position) = state.items.iter().position(|item| &item.id == id) else {
+                return Err(LongTermError::NotFound(id.clone()));
+            };
+            state.items.remove(position);
+            state.catalog_cache = None;
+            state.version = state.version.saturating_add(1);
+            state.dead = state.dead.saturating_add(1);
+            state.dead >= DEFAULT_COMPACT_DEAD_THRESHOLD
         };
-        state.items.remove(position);
-        state.catalog_cache = None;
-        state.version = state.version.saturating_add(1);
-        state.dead = state.dead.saturating_add(1);
-        state.last_persist_error = self.append_record(&Record::Del { id: id.clone() }).err();
-        self.maybe_compact(&mut state);
+        let error = self
+            .append_record(&Record::Del { id: id.clone() })
+            .await
+            .err();
+        self.lock().last_persist_error = error;
+        if should_compact {
+            self.maybe_compact().await;
+        }
         Ok(())
     }
 
@@ -477,44 +502,48 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// [`State::last_persist_error`] rather than silently dropping it. A
     /// serialize failure (a bug — records always serialize) is reported as a
     /// source-preserving [`FsError::Io`].
-    fn append_record(&self, record: &Record) -> Result<(), FsError> {
-        let mut line = serde_json::to_vec(record)
-            .map_err(|error| FsError::io(LongTermPersistError::SerializeRecord(error)))?;
+    async fn append_record(&self, record: &Record) -> Result<(), FsError> {
+        let mut line = serde_json::to_vec(record).map_err(|_error| FsError::Io)?;
         line.push(b'\n');
-        self.inner.filesystem.append(&self.inner.path, &line)
+        self.inner.filesystem.append(&self.inner.path, &line).await
     }
 
     /// Rewrite the journal from the live set when dead lines pass the threshold.
     ///
     /// Records any write failure in [`State::last_persist_error`] and leaves the
     /// dead count untouched so a later mutation retries the rewrite.
-    fn maybe_compact(&self, state: &mut State) {
-        if state.dead < DEFAULT_COMPACT_DEAD_THRESHOLD {
-            return;
-        }
-        let mut buffer = Vec::new();
-        for item in &state.items {
-            match serde_json::to_vec(&Record::Put(item.clone())) {
-                Ok(mut line) => {
-                    line.push(b'\n');
-                    buffer.extend_from_slice(&line);
-                }
-                Err(error) => {
-                    log::warn!(
-                        "long-term memory {}: compaction serialize failed: {error}",
-                        self.inner.path
-                    );
-                    state.last_persist_error =
-                        Some(FsError::io(LongTermPersistError::CompactSerialize(error)));
-                    return;
+    async fn maybe_compact(&self) {
+        let buffer = {
+            let mut state = self.lock();
+            if state.dead < DEFAULT_COMPACT_DEAD_THRESHOLD {
+                return;
+            }
+            let mut buffer = Vec::new();
+            for item in &state.items {
+                match serde_json::to_vec(&Record::Put(item.clone())) {
+                    Ok(mut line) => {
+                        line.push(b'\n');
+                        buffer.extend_from_slice(&line);
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "long-term memory {}: compaction serialize failed: {error}",
+                            self.inner.path
+                        );
+                        state.last_persist_error = Some(FsError::Io);
+                        return;
+                    }
                 }
             }
-        }
-        match self
+            buffer
+        };
+        let result = self
             .inner
             .filesystem
             .write_atomic(&self.inner.path, &buffer)
-        {
+            .await;
+        let mut state = self.lock();
+        match result {
             Ok(()) => {
                 state.dead = 0;
                 state.last_persist_error = None;
@@ -541,9 +570,9 @@ fn journal_path(dir: &str) -> String {
 /// read failure is returned as an error so a genuine I/O fault is not silently
 /// mistaken for an empty store. A torn trailing line (crash mid-append) still
 /// fails to parse and is skipped without aborting the replay.
-fn load_state<F: FileSystem>(filesystem: &F, path: &str) -> Result<State, FsError> {
+async fn load_state(filesystem: &ScopedVfs, path: &str) -> Result<State, FsError> {
     let mut state = State::default();
-    let bytes = match filesystem.read(path) {
+    let bytes = match filesystem.read(path).await {
         Ok(bytes) => bytes,
         Err(FsError::NotFound) => return Ok(state),
         Err(error) => return Err(error),

@@ -10,8 +10,11 @@ use embedded_io::ErrorKind;
 use futures_lite::future::{block_on, poll_once};
 use serde_json::{json, Value};
 
-fn configured<'a>(stack: &'a ScriptedStack, backend: BackendKind) -> ModelApi<'a, ScriptedStack> {
-    let mut api = ModelApi::new(stack, 4096, 512);
+fn configured<'a>(
+    stack: &'a ScriptedStack,
+    backend: BackendKind,
+) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    let mut api = ModelApi::new(stack, stack, 4096, 512);
     api.set_config(ModelApiConfig::new(
         backend,
         "secret",
@@ -31,7 +34,7 @@ fn request_body(stack: &ScriptedStack) -> Value {
 #[test]
 fn chat_requires_configuration() {
     let stack = ScriptedStack::default();
-    let mut api = ModelApi::new(&stack, 4096, 512);
+    let mut api = ModelApi::new(&stack, &stack, 4096, 512);
     let messages = [json!({"role":"user","content":"hello"})];
     let error =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap_err();
@@ -174,7 +177,7 @@ fn timed_out_request_reconnects_before_retry() {
             r#"{"choices":[{"message":{"role":"assistant","content":"recovered"}}]}"#,
         ),
     ]);
-    let mut api = ModelApi::new(&stack, 4096, 512);
+    let mut api = ModelApi::new(&stack, &stack, 4096, 512);
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

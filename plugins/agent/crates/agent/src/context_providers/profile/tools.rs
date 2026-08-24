@@ -9,7 +9,6 @@ use barracuda_agent_tool::{
     tool_metadata, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
     ToolSpec,
 };
-use barracuda_fs::FileSystem;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -28,11 +27,11 @@ pub(super) struct ReplaceArgs {
     content: String,
 }
 
-pub(super) struct ProfileReadTool<F: FileSystem + 'static> {
-    pub(super) store: ProfileStore<F>,
+pub(super) struct ProfileReadTool {
+    pub(super) store: ProfileStore,
 }
 
-impl<F: FileSystem + 'static> ToolSpec for ProfileReadTool<F> {
+impl ToolSpec for ProfileReadTool {
     tool_metadata!("profile_read");
 
     fn concurrent(&self) -> bool {
@@ -44,13 +43,13 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileReadTool<F> {
     }
 }
 
-impl<F: FileSystem + 'static> ToolHandler for ProfileReadTool<F> {
+impl ToolHandler for ProfileReadTool {
     type Args = DocumentArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
-            match self.store.read(document) {
+            match self.store.read(document).await {
                 Ok(Some(content)) => Ok(ToolOutput {
                     content: if content.trim().is_empty() {
                         format!("Profile document {document} is empty.")
@@ -72,11 +71,11 @@ impl<F: FileSystem + 'static> ToolHandler for ProfileReadTool<F> {
     }
 }
 
-pub(super) struct ProfileReplaceTool<F: FileSystem + 'static> {
-    pub(super) store: ProfileStore<F>,
+pub(super) struct ProfileReplaceTool {
+    pub(super) store: ProfileStore,
 }
 
-impl<F: FileSystem + 'static> ToolSpec for ProfileReplaceTool<F> {
+impl ToolSpec for ProfileReplaceTool {
     tool_metadata!("profile_replace");
 
     fn classify(&self, call: &ToolInvocation) -> Action {
@@ -84,13 +83,13 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileReplaceTool<F> {
     }
 }
 
-impl<F: FileSystem + 'static> ToolHandler for ProfileReplaceTool<F> {
+impl ToolHandler for ProfileReplaceTool {
     type Args = ReplaceArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
-            match self.store.replace(document, &args.content) {
+            match self.store.replace(document, &args.content).await {
                 Ok(()) => Ok(ToolOutput {
                     content: format!("Replaced profile document {document}."),
                     ok: true,
@@ -104,11 +103,11 @@ impl<F: FileSystem + 'static> ToolHandler for ProfileReplaceTool<F> {
     }
 }
 
-pub(super) struct ProfileClearTool<F: FileSystem + 'static> {
-    pub(super) store: ProfileStore<F>,
+pub(super) struct ProfileClearTool {
+    pub(super) store: ProfileStore,
 }
 
-impl<F: FileSystem + 'static> ToolSpec for ProfileClearTool<F> {
+impl ToolSpec for ProfileClearTool {
     tool_metadata!("profile_clear");
 
     fn classify(&self, call: &ToolInvocation) -> Action {
@@ -116,13 +115,13 @@ impl<F: FileSystem + 'static> ToolSpec for ProfileClearTool<F> {
     }
 }
 
-impl<F: FileSystem + 'static> ToolHandler for ProfileClearTool<F> {
+impl ToolHandler for ProfileClearTool {
     type Args = DocumentArgs;
 
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let document = parse_document(args.document)?;
-            match self.store.clear(document) {
+            match self.store.clear(document).await {
                 Ok(()) => Ok(ToolOutput {
                     content: format!("Cleared profile document {document}."),
                     ok: true,
@@ -136,11 +135,11 @@ impl<F: FileSystem + 'static> ToolHandler for ProfileClearTool<F> {
     }
 }
 
-fn profile_action<F: FileSystem + 'static>(
+fn profile_action(
     call: &ToolInvocation,
     verb: &str,
     risk: RiskClass,
-    store: &ProfileStore<F>,
+    store: &ProfileStore,
 ) -> Action {
     let action = Action::new(verb, risk);
     let Ok(args) = call.arguments::<DocumentField>() else {

@@ -1,8 +1,7 @@
-//! Selects independent Board and Platform YAML documents for the target facade.
+//! Selects only the Platform implementation.
 
 use std::{env, error::Error, fs, path::PathBuf};
 
-use barracuda_board_config::{parse, render_rust};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -15,29 +14,17 @@ struct PlatformIdentity {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-env-changed=BARRACUDA_BOARD");
     println!("cargo:rerun-if-env-changed=BARRACUDA_PLATFORM");
 
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
-    let board_name = env::var("BARRACUDA_BOARD").unwrap_or_else(|_| "local-host".into());
-    validate_file_stem(&board_name)?;
-    let board_path = root
-        .join("boards/configs")
-        .join(&board_name)
-        .join("board.yml");
-    println!("cargo:rerun-if-changed={}", board_path.display());
-    let board = parse(&fs::read_to_string(&board_path)?)?;
-    if board.name() != board_name {
-        return Err(format!(
-            "Board name `{}` does not match `{board_name}`",
-            board.name()
-        )
-        .into());
-    }
+    let target_os = env::var("CARGO_CFG_TARGET_OS")?;
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
+    let default = default_platform(&target_os, &target_arch)?;
+    let platform_name = env::var("BARRACUDA_PLATFORM").unwrap_or_else(|_| default.into());
+    validate_name(&platform_name)?;
+    validate_target(&platform_name, &target_os, &target_arch)?;
 
-    let platform_name = env::var("BARRACUDA_PLATFORM").unwrap_or_else(|_| "host".into());
-    validate_file_stem(&platform_name)?;
     let platform_path = root
         .join("platforms")
         .join(&platform_name)
@@ -55,24 +42,56 @@ fn main() -> Result<(), Box<dyn Error>> {
     validate_rust_identifier(&platform.crate_name)?;
     validate_rust_identifier(&platform.type_name)?;
 
-    let mut generated = render_rust(&board);
-    generated.push_str(&format!(
-        "\n/// Platform selected by the build configuration.\n\
+    let generated = format!(
+        "/// Name of the independently selected Platform.\n\
+         pub const PLATFORM_NAME: &str = {platform_name:?};\n\n\
+         /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::{}::{};\n",
         platform.crate_name, platform.type_name
-    ));
+    );
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
-    fs::write(output.join("selected_target.rs"), generated)?;
+    fs::write(output.join("selected_platform.rs"), generated)?;
     Ok(())
 }
 
-fn validate_file_stem(value: &str) -> Result<(), Box<dyn Error>> {
+fn default_platform(target_os: &str, target_arch: &str) -> Result<&'static str, Box<dyn Error>> {
+    match (target_os, target_arch) {
+        ("macos", _) => Ok("macos"),
+        ("linux", _) => Ok("linux"),
+        (_, "riscv32") => Ok("esp32c6"),
+        (_, "arm") => Ok("stm32"),
+        _ => Err(format!(
+            "no Barracuda Platform is registered for OS `{target_os}` and architecture `{target_arch}`"
+        )
+        .into()),
+    }
+}
+
+fn validate_target(name: &str, target_os: &str, target_arch: &str) -> Result<(), Box<dyn Error>> {
+    let valid = match name {
+        "macos" => target_os == "macos",
+        "linux" => target_os == "linux",
+        "esp32c6" => target_arch == "riscv32",
+        "stm32" => target_arch == "arm",
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "Platform `{name}` cannot be built for OS `{target_os}` and architecture `{target_arch}`"
+        )
+        .into())
+    }
+}
+
+fn validate_name(value: &str) -> Result<(), Box<dyn Error>> {
     if value.is_empty()
         || !value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
     {
-        return Err(format!("invalid configuration name `{value}`").into());
+        return Err(format!("invalid Platform name `{value}`").into());
     }
     Ok(())
 }

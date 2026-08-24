@@ -1,7 +1,5 @@
 name: esp32c6-devkitc-1
 hardware:
   chip: esp32c6
-storage:
-  filesystem: filesystem
-  web-assets: web-assets
-  database: database
+native-layout:
+  artifact: partitions.csv

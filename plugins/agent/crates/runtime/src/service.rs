@@ -1,6 +1,6 @@
 //! Executor-neutral process runtime ownership and configuration entry point.
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{
     future::Future,
     pin::Pin,
@@ -9,12 +9,12 @@ use core::{
 
 use async_channel::Sender;
 use barracuda_agent_memory::LongTermInitError;
-use barracuda_agent_persistence::{PersistenceError, SharedPersistence};
+use barracuda_agent_persistence::{Persistence, PersistenceError, SharedPersistence};
 use barracuda_agent_skill::SkillError;
 use barracuda_agent_tool::ToolRegistry;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::ScopedVfs;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
 use barracuda_agent::{AgentCreateError, AgentManagerError, ApiPurpose, SharedApiManager};
@@ -24,6 +24,7 @@ use barracuda_agent_session::{
 };
 
 use crate::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
+use crate::{RuntimeError, RuntimeStorageConfig, ToolGroup, ToolLifecycle};
 
 /// What can go wrong while building an [`AgentRuntime`](crate::AgentRuntime) and [`RuntimeService`].
 #[derive(Debug, thiserror::Error)]
@@ -70,12 +71,13 @@ pub(crate) struct RuntimeControl {
 ///
 /// Dropping this future stops the runtime. Dropping every `RuntimeControl`
 /// handle closes its command channel, which lets the service shut down cleanly.
-pub struct RuntimeService<Filesystem, Http>
+pub struct RuntimeService<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    worker: RuntimeWorker<Filesystem, Http>,
+    future: Pin<Box<dyn Future<Output = ()>>>,
+    marker: core::marker::PhantomData<fn() -> (Tcp, Resolver)>,
 }
 
 #[cfg(test)]
@@ -100,59 +102,84 @@ mod tests {
     }
 }
 
-impl<Filesystem, Http> Unpin for RuntimeService<Filesystem, Http>
+impl<Tcp, Resolver> Unpin for RuntimeService<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
 }
 
-impl<Filesystem, Http> Future for RuntimeService<Filesystem, Http>
+impl<Tcp, Resolver> Future for RuntimeService<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.get_mut().worker).poll(context)
+        self.get_mut().future.as_mut().poll(context)
     }
 }
 
 impl RuntimeControl {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
-    pub(crate) fn new<Filesystem, Http>(
-        filesystem: Filesystem,
-        tool_registry: Arc<ToolRegistry>,
-        persistence: SharedPersistence<Filesystem>,
-        persistence_dir: String,
-        skill_roots: Vec<String>,
-        llm_factory: ModelApiFactory<Http>,
-    ) -> Result<(Self, RuntimeService<Filesystem, Http>), RuntimeBuildError>
+    pub(crate) fn new<Tcp, Resolver>(
+        filesystem: ScopedVfs,
+        storage: RuntimeStorageConfig,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        tool_groups: Vec<ToolGroup>,
+        tool_lifecycle: Arc<ToolLifecycle>,
+    ) -> (Self, RuntimeService<Tcp, Resolver>)
     where
-        Filesystem: FileSystem + 'static,
-        Http: TcpConnect + Dns + 'static,
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
     {
         let (commands, command_rx) = async_channel::unbounded();
         let api_manager = SharedApiManager::default();
-        let worker = RuntimeWorker::new(RuntimeWorkerInit {
-            filesystem,
-            tool_registry,
-            persistence,
-            persistence_dir,
-            skill_roots,
-            api_manager: Arc::clone(&api_manager),
-            llm_factory,
-            commands: command_rx,
-        })?;
-        Ok((
+        let worker_api_manager = Arc::clone(&api_manager);
+        let future = Box::pin(async move {
+            let initialized: Result<RuntimeWorker<Tcp, Resolver>, RuntimeError> = async {
+                let persistence: SharedPersistence = Arc::new(
+                    Persistence::new(filesystem.clone(), storage.persistence_root.clone()).await?,
+                );
+                let tools = Arc::new(ToolRegistry::new(Arc::clone(&persistence)).await?);
+                for group in tool_groups {
+                    tools.register_group(group)?;
+                }
+                tool_lifecycle.install(Arc::clone(&tools))?;
+                RuntimeWorker::new(RuntimeWorkerInit {
+                    filesystem,
+                    tool_registry: tools,
+                    persistence,
+                    persistence_dir: storage.persistence_root,
+                    skill_roots: storage.skill_roots,
+                    api_manager: worker_api_manager,
+                    llm_factory,
+                    commands: command_rx,
+                })
+                .await
+                .map_err(RuntimeError::Build)
+            }
+            .await;
+            match initialized {
+                Ok(worker) => worker.await,
+                Err(error) => {
+                    log::error!("agent runtime initialization failed: {error}");
+                    tracing::error!(name: "runtime_initialization_failed", error = %error);
+                }
+            }
+        });
+        (
             Self {
                 commands,
                 api_manager,
             },
-            RuntimeService { worker },
-        ))
+            RuntimeService {
+                future,
+                marker: core::marker::PhantomData,
+            },
+        )
     }
 
     /// Register an LLM API config for a purpose.

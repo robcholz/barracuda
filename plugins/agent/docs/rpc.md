@@ -43,9 +43,14 @@ serialize as `"session-0"`; callers should read only the first `count` entries.
 ### `session.open`
 
 `OpenSessionRequest` carries the `session` identifier. The response is a
-streaming sequence of `OpenSessionResponseFrame` values, one per event. Each
-frame carries the typed `session` identifier and `json`: the complete logical
-event (`OpenSessionResponse`) as a JSON document.
+streaming sequence of typed `OpenSessionResponseFrame` chunks. Each frame
+carries `session`, `value`, and one field: `OpenedMore`, `OpenedComplete`,
+`EventMore`, or `EventComplete`. `OpenSessionResponseDecoder` reconstructs one
+logical `OpenSessionResponse` whenever a complete field arrives.
+
+Logical events are not bounded by one RPC lane. JSON is split on UTF-8
+boundaries across as many frames as required, so large reasoning, tool call,
+tool output, and error events are not dropped by the wire contract.
 
 Events: `opened`, `turn_started`, `input_requested`, `iteration_started`,
 `reasoning_delta`, `reasoning_ended`, `output_delta`, `output_ended`,

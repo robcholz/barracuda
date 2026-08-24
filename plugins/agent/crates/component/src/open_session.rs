@@ -1,4 +1,4 @@
-use alloc::{format, rc::Rc, string::String};
+use alloc::{collections::VecDeque, format, rc::Rc, string::String, vec::Vec};
 
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestId, InputRequestKind, IterationEvent,
@@ -8,8 +8,7 @@ use barracuda_agent_runtime::{
 use barracuda_event_router::{
     rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
 };
-use barracuda_fs::FileSystem;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::{stream, Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -18,7 +17,7 @@ use crate::convert;
 use crate::dto::FixedStr;
 use crate::session::SessionRegistry;
 
-pub use crate::dto::{OpenSessionRequest, OpenSessionResponseFrame};
+pub use crate::dto::{OpenSessionRequest, OpenSessionResponseField, OpenSessionResponseFrame};
 
 /// Logical item returned by the `session.open` stream.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -36,6 +35,87 @@ pub enum OpenSessionResponse {
         /// Transport-stable event representation.
         event: SessionEventDto,
     },
+}
+
+/// Failure while rebuilding one logical `session.open` response from chunks.
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum OpenSessionDecodeError {
+    /// Chunks from different sessions or logical response kinds were interleaved.
+    #[error("session.open chunks are out of order")]
+    InvalidSequence,
+    /// The completed chunk sequence was not a valid logical response.
+    #[error("session.open response JSON is invalid")]
+    InvalidJson,
+}
+
+/// Stateful decoder for the typed, chunked `session.open` response stream.
+#[derive(Default)]
+pub struct OpenSessionResponseDecoder {
+    session: Option<crate::dto::SessionIdDto>,
+    opened: Option<bool>,
+    json: String,
+}
+
+impl OpenSessionResponseDecoder {
+    /// Creates an empty decoder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            session: None,
+            opened: None,
+            json: String::new(),
+        }
+    }
+
+    /// Absorbs one frame and returns a response when its final chunk arrives.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for interleaved sequences or invalid completed JSON.
+    pub fn push(
+        &mut self,
+        frame: OpenSessionResponseFrame,
+    ) -> Result<Option<OpenSessionResponse>, OpenSessionDecodeError> {
+        let (opened, complete) = response_field_parts(frame.field);
+        if self.session.is_some_and(|session| session != frame.session)
+            || self.opened.is_some_and(|current| current != opened)
+        {
+            self.reset();
+            return Err(OpenSessionDecodeError::InvalidSequence);
+        }
+        self.session = Some(frame.session);
+        self.opened = Some(opened);
+        self.json.push_str(frame.value.as_str());
+        if !complete {
+            return Ok(None);
+        }
+
+        let response = match serde_json::from_str(&self.json) {
+            Ok(response) => response,
+            Err(_error) => {
+                self.reset();
+                return Err(OpenSessionDecodeError::InvalidJson);
+            }
+        };
+        let kind_matches = matches!(
+            (&response, opened),
+            (OpenSessionResponse::Opened { .. }, true)
+        ) || matches!(
+            (&response, opened),
+            (OpenSessionResponse::Event { .. }, false)
+        );
+        self.reset();
+        if !kind_matches {
+            return Err(OpenSessionDecodeError::InvalidSequence);
+        }
+        Ok(Some(response))
+    }
+
+    fn reset(&mut self) {
+        self.session = None;
+        self.opened = None;
+        self.json.clear();
+    }
 }
 
 /// Transport-stable representation of an Agent `SessionEvent`.
@@ -248,13 +328,13 @@ impl RpcMethod for OpenSession {
 }
 
 /// Builds the reusable handler for [`OpenSession`].
-pub fn open_session_handler<Filesystem, Http>(
-    runtime: Rc<AgentRuntime<Filesystem, Http>>,
+pub fn open_session_handler<Tcp, Resolver>(
+    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
     registry: SessionRegistry,
 ) -> impl RpcHandler<OpenSession>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     move |_context, request: RpcFrame<OpenSessionRequest>| {
         let runtime = Rc::clone(&runtime);
@@ -264,22 +344,22 @@ where
             let (control, events) = match runtime.open_session(session).await {
                 Ok(opened) => opened,
                 Err(error) => {
-                    return Ok(RpcStream::new(stream::once(Ok(Err(map_open_error(error))))))
+                    return Ok(RpcStream::new(stream::once(Ok(Err(map_open_error(error))))));
                 }
             };
             registry.insert(session, control);
             let opened = OpenSessionResponse::Opened { session };
-            let opened_frame = match encode_response(session, &opened) {
-                Ok(frame) => frame,
+            let opened_frames = match frames_from_open_session_response(session, &opened) {
+                Ok(frames) => frames,
                 Err(_error) => {
                     return Ok(RpcStream::new(stream::once(Ok(Err(
                         OpenSessionError::InvalidEvent,
-                    )))))
+                    )))));
                 }
             };
             let events = open_session_stream(events, registry, session);
             Ok(RpcStream::new(
-                stream::iter([Ok(Ok(opened_frame))]).chain(events),
+                stream::iter(opened_frames.into_iter().map(|frame| Ok(Ok(frame)))).chain(events),
             ))
         }
     }
@@ -291,8 +371,14 @@ fn open_session_stream(
     session: SessionId,
 ) -> impl Stream<Item = RpcResult<Result<OpenSessionResponseFrame, OpenSessionError>>> {
     stream::unfold(
-        (events, registry, session, false),
-        |(mut events, registry, session, terminal)| async move {
+        (events, registry, session, false, VecDeque::new()),
+        |(mut events, registry, session, terminal, mut pending)| async move {
+            if let Some(frame) = pending.pop_front() {
+                return Some((
+                    Ok(Ok(frame)),
+                    (events, registry, session, terminal, pending),
+                ));
+            }
             if terminal {
                 return None;
             }
@@ -306,11 +392,19 @@ fn open_session_stream(
                         session,
                         event: event.into(),
                     };
-                    match encode_response(session, &response) {
-                        Ok(frame) => Some((Ok(Ok(frame)), (events, registry, session, terminal))),
+                    match frames_from_open_session_response(session, &response) {
+                        Ok(frames) => {
+                            pending.extend(frames);
+                            pending.pop_front().map(|frame| {
+                                (
+                                    Ok(Ok(frame)),
+                                    (events, registry, session, terminal, pending),
+                                )
+                            })
+                        }
                         Err(_error) => Some((
                             Ok(Err(OpenSessionError::InvalidEvent)),
-                            (events, registry, session, terminal),
+                            (events, registry, session, terminal, pending),
                         )),
                     }
                 }
@@ -318,7 +412,7 @@ fn open_session_stream(
                     registry.remove(session);
                     Some((
                         Ok(Err(OpenSessionError::WorkerStopped)),
-                        (events, registry, session, true),
+                        (events, registry, session, true, pending),
                     ))
                 }
                 None => None,
@@ -327,16 +421,69 @@ fn open_session_stream(
     )
 }
 
-fn encode_response(
+/// Encodes one logical response into fixed-size typed chunks.
+///
+/// # Errors
+///
+/// Returns [`OpenSessionError::InvalidEvent`] if JSON serialization fails.
+pub fn frames_from_open_session_response(
     session: SessionId,
     response: &OpenSessionResponse,
-) -> Result<OpenSessionResponseFrame, OpenSessionError> {
+) -> Result<Vec<OpenSessionResponseFrame>, OpenSessionError> {
     let json = serde_json::to_string(response).map_err(|_error| OpenSessionError::InvalidEvent)?;
-    let json = FixedStr::new(&json).map_err(|_error| OpenSessionError::InvalidEvent)?;
-    Ok(OpenSessionResponseFrame {
-        session: convert::session_to_wire(session),
-        json,
-    })
+    let opened = matches!(response, OpenSessionResponse::Opened { .. });
+    let chunks = utf8_chunks(&json, FixedStr::<506>::capacity());
+    let last = chunks.len().saturating_sub(1);
+    chunks
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| {
+            let complete = index == last;
+            Ok(OpenSessionResponseFrame {
+                session: convert::session_to_wire(session),
+                value: FixedStr::new(chunk).map_err(|_error| OpenSessionError::InvalidEvent)?,
+                field: response_field(opened, complete),
+                reserved: 0,
+            })
+        })
+        .collect()
+}
+
+const fn response_field(opened: bool, complete: bool) -> OpenSessionResponseField {
+    match (opened, complete) {
+        (true, false) => OpenSessionResponseField::OpenedMore,
+        (true, true) => OpenSessionResponseField::OpenedComplete,
+        (false, false) => OpenSessionResponseField::EventMore,
+        (false, true) => OpenSessionResponseField::EventComplete,
+    }
+}
+
+const fn response_field_parts(field: OpenSessionResponseField) -> (bool, bool) {
+    match field {
+        OpenSessionResponseField::OpenedMore => (true, false),
+        OpenSessionResponseField::OpenedComplete => (true, true),
+        OpenSessionResponseField::EventMore => (false, false),
+        OpenSessionResponseField::EventComplete => (false, true),
+    }
+}
+
+fn utf8_chunks(value: &str, capacity: usize) -> Vec<&str> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < value.len() {
+        let mut end = core::cmp::min(start.saturating_add(capacity), value.len());
+        while !value.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        if end == start {
+            break;
+        }
+        if let Some(chunk) = value.get(start..end) {
+            chunks.push(chunk);
+        }
+        start = end;
+    }
+    chunks
 }
 
 fn map_open_error(error: RuntimeError) -> OpenSessionError {

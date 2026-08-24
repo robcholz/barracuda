@@ -6,7 +6,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use core::fmt;
 
-use barracuda_fs::FsError;
+use barracuda_vfs::FsError;
 use serde::Deserialize;
 use thiserror::Error;
 

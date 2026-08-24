@@ -20,8 +20,8 @@ use barracuda_agent_tool::{
     ToolRunner, ToolSet, ToolSpec,
 };
 use barracuda_model_api::{ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
-use barracuda_net::{Dns, TcpConnect};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::StreamExt as _;
 use serde::Deserialize;
 use serde_json::json;
@@ -49,16 +49,20 @@ enum ResolutionDecision {
     Other,
 }
 
-pub(crate) struct LlmApprovalResolver<Http: TcpConnect + Dns + 'static> {
+pub(crate) struct LlmApprovalResolver<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
     api_manager: SharedApiManager,
-    llm_factory: ModelApiFactory<Http>,
+    llm_factory: ModelApiFactory<Tcp, Resolver>,
 }
 
-impl<Http> LlmApprovalResolver<Http>
+impl<Tcp, Resolver> LlmApprovalResolver<Tcp, Resolver>
 where
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub(crate) fn new(api_manager: SharedApiManager, llm_factory: ModelApiFactory<Http>) -> Self {
+    pub(crate) fn new(
+        api_manager: SharedApiManager,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> Self {
         Self {
             api_manager,
             llm_factory,
@@ -66,9 +70,10 @@ where
     }
 }
 
-impl<Http> ApprovalResolver for LlmApprovalResolver<Http>
+impl<Tcp, Resolver> ApprovalResolver for LlmApprovalResolver<Tcp, Resolver>
 where
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     async fn resolve(
         self: Rc<Self>,
@@ -81,7 +86,7 @@ where
         let cancelled = Arc::new(CancellationFlag::new());
         let task_cancelled = Arc::clone(&cancelled);
         let future: ApprovalFuture = Box::pin(async move {
-            resolve_permission_reply::<Http>(
+            resolve_permission_reply::<Tcp, Resolver>(
                 &api_manager,
                 &llm_factory,
                 &tool_call,
@@ -160,16 +165,17 @@ impl ToolHandler for ResolvePermissionReplyTool {
     }
 }
 
-async fn resolve_permission_reply<Http>(
+async fn resolve_permission_reply<Tcp, Resolver>(
     api_manager: &SharedApiManager,
-    llm_factory: &ModelApiFactory<Http>,
+    llm_factory: &ModelApiFactory<Tcp, Resolver>,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
     cancelled: &CancellationFlag,
 ) -> Result<ApprovalDecision, ApprovalResolverError>
 where
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     let mut llm = llm_factory.create();
     if let Some(config) = api_manager.borrow().get_api(ApiPurpose::RootAgent) {

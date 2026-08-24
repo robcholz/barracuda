@@ -69,32 +69,35 @@ impl Error {
     }
 }
 
-struct ConnectionOwner<'net, S>
+struct ConnectionOwner<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns,
+    Tcp: TcpConnect,
+    Resolver: Dns,
 {
-    client: HttpClient<'net, S, S>,
+    client: HttpClient<'net, Tcp, Resolver>,
     origin: String,
 }
 
 #[self_referencing]
-struct Connected<'net, S>
+struct Connected<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    owner: ConnectionOwner<'net, S>,
+    owner: ConnectionOwner<'net, Tcp, Resolver>,
     #[borrows(mut owner)]
     #[not_covariant]
-    resource: HttpResource<'this, S::Connection<'this>>,
+    resource: HttpResource<'this, Tcp::Connection<'this>>,
 }
 
 /// One reqwless client and, while connected, its persistent HTTP resource.
-pub(crate) struct HttpTransport<'net, S>
+pub(crate) struct HttpTransport<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    disconnected: Option<HttpClient<'net, S, S>>,
-    connected: Option<Connected<'net, S>>,
+    disconnected: Option<HttpClient<'net, Tcp, Resolver>>,
+    connected: Option<Connected<'net, Tcp, Resolver>>,
     connected_origin: Option<String>,
     connection_healthy: Cell<bool>,
     header_buffer: Vec<u8>,
@@ -102,18 +105,20 @@ where
     tls_configured: bool,
 }
 
-impl<'net, S> HttpTransport<'net, S>
+impl<'net, Tcp, Resolver> HttpTransport<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
     #[must_use]
     pub(crate) fn new(
-        network: &'net S,
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
         Self::from_client(
-            HttpClient::new(network, network),
+            HttpClient::new(tcp, resolver),
             header_buffer_size,
             read_buffer_size,
             false,
@@ -121,7 +126,7 @@ where
     }
 
     fn from_client(
-        client: HttpClient<'net, S, S>,
+        client: HttpClient<'net, Tcp, Resolver>,
         header_buffer_size: usize,
         read_buffer_size: usize,
         tls_configured: bool,
@@ -309,19 +314,21 @@ where
 }
 
 #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
-impl<'net, S> HttpTransport<'net, S>
+impl<'net, Tcp, Resolver> HttpTransport<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
     #[must_use]
     pub(crate) fn new_with_tls(
-        network: &'net S,
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
         tls: reqwless::client::TlsConfig<'net>,
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
         Self::from_client(
-            HttpClient::new_with_tls(network, network, tls),
+            HttpClient::new_with_tls(tcp, resolver, tls),
             header_buffer_size,
             read_buffer_size,
             true,

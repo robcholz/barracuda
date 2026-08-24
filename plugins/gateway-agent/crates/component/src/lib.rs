@@ -4,17 +4,13 @@
 //!
 //! This Component keeps the CLI (and any IM provider) fully decoupled from the
 //! Agent: inbound gateway messages drive an Agent turn, and the turn's events
-//! are mapped back onto ordinary IM messages delivered through `gateway.send`.
-//! Nothing agent-specific crosses the gateway boundary; rich content is carried
-//! as generic [`gateway::MessageKind`] roles.
+//! are mapped live onto `gateway.send_stream` primary and extra frames.
 
 extern crate alloc;
 
-/// Bridge lifecycle: inbound `bridge.handle` RPC and the outbound event pump.
+/// Bridge lifecycle and two-step Workflow registration.
 pub mod component;
-/// Inbound `bridge.handle` RPC: append a gateway message to the Agent session.
-pub mod handle;
-/// Outbound mapping: Agent session events to `gateway.send` requests.
-pub mod outbound;
+/// Stateful `gateway_agent.respond` streaming mapper.
+pub mod respond;
 
 pub use component::GatewayAgentBridge;

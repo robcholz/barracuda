@@ -10,7 +10,10 @@ A Workflow is an ordered RPC chain started by an Event. Step 0 is the
 **ingress**: the Event payload becomes its request. Every later step is fed by
 the previous step's response through its **link**. Workflows are loaded through
 the durable `workflow.load` control RPC or restored from disk at startup; a
-persistence `index` file is authoritative on restart.
+single `/system/workflows.json` catalog is authoritative on restart. The
+catalog is a JSON array whose objects are ordered Workflow definitions; load
+appends one object and unload removes one object through an atomic file
+replacement.
 
 ## Event matching
 

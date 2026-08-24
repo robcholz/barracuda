@@ -10,7 +10,7 @@
 //! (when to compact, which window, where the summary goes) lives in the agent
 //! layer's rolling-summary context provider, which drives a `Compactor`. This seam
 //! is defined here only so it stays free of any LLM dependency, exactly like the
-//! crate depends on the `FileSystem` trait and never on its implementation.
+//! crate depends on a scoped VFS namespace and never on its backend.
 
 use alloc::{boxed::Box, vec::Vec};
 use core::{error::Error, future::Future, pin::Pin};

@@ -9,14 +9,13 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter,
-    EventRouterCreateError, FileSystem, RegisterContext, RouterError, RpcFrame, RpcLaneStorage,
-    RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient, WorkflowControlError,
-    WorkflowId,
+    EventRouterCreateError, RegisterContext, RouterError, RpcFrame, RpcLaneStorage, RpcMethod,
+    RunContext, Unary, UnregisterContext, WorkflowClient, WorkflowControlError, WorkflowId,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
+use barracuda_vfs::read;
 
 const FRAME_SIZE: usize = 64;
-const WORKFLOW_DIRECTORY: &str = "workflows";
 
 type TestEventRouter = EventRouter<4, FRAME_SIZE, 4>;
 
@@ -104,9 +103,9 @@ impl Component<FRAME_SIZE> for WorkflowUninstaller {
     }
 }
 
-fn new_router(filesystem: &MemFs) -> Result<TestEventRouter, EventRouterCreateError> {
+async fn new_router() -> Result<TestEventRouter, EventRouterCreateError> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-    EventRouter::new(lanes, filesystem.clone(), WORKFLOW_DIRECTORY)
+    EventRouter::new(lanes).await
 }
 
 async fn drive_until(
@@ -128,26 +127,32 @@ async fn drive_until(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
-    let filesystem = MemFs::new();
+    install_global_memory_vfs().await?;
 
     // Persist: load a Workflow, then reconstruct the Event Router.
     let install_state = Rc::new(ControlState::default());
-    let mut first = new_router(&filesystem)?;
+    let mut first = new_router().await?;
     first.load(Box::new(WorkflowInstaller {
         state: Rc::clone(&install_state),
     }))?;
     drive_until(&mut first, |_router| install_state.done.get()).await?;
     assert!(install_state.error.borrow().is_none());
     assert_eq!(first.workflow_definitions().len(), 1);
+    let catalog: Vec<serde_json::Value> =
+        serde_json::from_slice(&read("/system/workflows.json").await?)?;
+    assert_eq!(catalog.len(), 1);
     assert_eq!(
-        filesystem.read("workflows/persisted-recorder.json")?,
-        WORKFLOW_JSON.as_bytes()
+        catalog
+            .first()
+            .and_then(|workflow| workflow.get("id"))
+            .and_then(serde_json::Value::as_str),
+        Some("persisted-recorder")
     );
 
     let definitions = first.workflow_definitions();
     drop(first);
 
-    let mut second = new_router(&filesystem)?;
+    let mut second = new_router().await?;
     assert_eq!(second.workflow_definitions(), definitions);
 
     // Unload: remove the durable definition and verify a fresh router is empty.
@@ -158,10 +163,10 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     drive_until(&mut second, |_router| uninstall_state.done.get()).await?;
     assert!(uninstall_state.error.borrow().is_none());
     assert!(second.workflow_definitions().is_empty());
-    assert!(!filesystem.exists("workflows/persisted-recorder.json")?);
+    assert_eq!(read("/system/workflows.json").await?, b"[]");
 
     drop(second);
-    let third = new_router(&filesystem)?;
+    let third = new_router().await?;
     assert!(third.workflow_definitions().is_empty());
 
     println!("Workflow persisted across restart and was durably unloaded");

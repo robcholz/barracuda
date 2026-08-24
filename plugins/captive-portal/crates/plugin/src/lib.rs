@@ -9,7 +9,7 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 use barracuda_agent_plugin::{AgentSetApi, ApiPurpose, BackendKind, ModelApiConfig};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginStartFuture};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
@@ -45,22 +45,17 @@ impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
         PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let agent = context.require::<AgentSetApi>(AGENT_PLUGIN_ID)?;
-            let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
-            let registration = webserver
-                .serve_http(SET_API_PATH, SetApiEndpoint::new(agent))
-                .map_err(PluginError::registration)?;
-            context.retain(registration);
-            Ok(())
-        })
+        let agent = context.require::<AgentSetApi>(AGENT_PLUGIN_ID)?;
+        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let registration = webserver
+            .serve_http(SET_API_PATH, SetApiEndpoint::new(agent))
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
+        Ok(())
     }
 }
 

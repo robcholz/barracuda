@@ -1,23 +1,23 @@
 //! `barracuda` — a terminal chat application for the Barracuda agent framework.
 //!
 //! The default mode owns a local System and connects the terminal to its Web
-//! gateway. `connect` keeps the terminal-only mode for an external host.
+//! gateway. `connect` keeps the terminal-only mode for an external endpoint.
 //!
 //! ```text
-//! cargo run -p barracuda-cli                 # start a local host and chat
+//! cargo run -p barracuda-cli                 # start the local native target and chat
 //! cargo run -p barracuda-cli -- connect URL  # terminal client only
 //! ```
 
 mod client;
 mod command;
 mod line_editor;
-mod local_host;
+mod local_native;
 mod protocol;
 
 use anyhow::{anyhow, bail, Result};
 use embassy_executor::Spawner;
 
-const DEFAULT_URL: &str = "ws://127.0.0.1:8787";
+const DEFAULT_URL: &str = "ws://10.42.0.2:8787";
 
 #[derive(Debug, PartialEq, Eq)]
 enum RunMode<'a> {
@@ -53,7 +53,7 @@ fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
 }
 
 async fn run_local(spawner: Spawner) -> Result<()> {
-    let system = local_host::build(spawner).await?;
+    let system = local_native::build(spawner).await?;
     tokio::pin!(system);
 
     tokio::select! {
@@ -70,7 +70,7 @@ mod tests {
     use super::{mode_from_args, RunMode, DEFAULT_URL};
 
     #[test]
-    fn default_and_chat_own_a_local_host() {
+    fn default_and_chat_own_a_local_native_system() {
         assert_eq!(mode_from_args(&[]).expect("default mode"), RunMode::Local);
         assert_eq!(
             mode_from_args(&["chat"]).expect("chat mode"),

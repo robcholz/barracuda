@@ -9,7 +9,7 @@ fn main() -> anyhow::Result<()> {
         200,
         r#"{"choices":[{"message":{"role":"assistant","content":"hello"}}]}"#,
     )]);
-    let mut api = ModelApi::new(&stack, 4096, 512);
+    let mut api = ModelApi::new(&stack, &stack, 4096, 512);
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "key",

@@ -23,10 +23,11 @@ tool-result roles, structured-output config) into each provider's wire format.
 
 ## Networking is injected
 
-The application supplies an `embedded_nal_async::TcpConnect + Dns` stack
-directly to `ModelApi`. Embassy and host applications use the same reqwless HTTP
-code and differ only in their TCP/DNS HAL implementation. Sequential calls on
-one `ModelApi` reuse one reqwless `HttpResource` connection.
+The application supplies independent `embedded_nal_async::TcpConnect` and
+`embedded_nal_async::Dns` implementations directly to `ModelApi`. Embassy and
+host applications use the same reqwless HTTP code and differ only at those
+official transport boundaries. Sequential calls on one `ModelApi` reuse one
+reqwless `HttpResource` connection.
 
 ## Cancellation
 
@@ -69,6 +70,6 @@ Builds a client over the wire-level scripted TCP/DNS stack and runs a chat.
 
 ## Where it fits
 
-A no_std core crate depending on `barracuda-net`, `embassy-time`, `barracuda-runtime-utils`,
+A no_std core crate depending on `embedded-nal-async`, `embassy-time`, `barracuda-runtime-utils`,
 `serde`/`serde_json`, `base64`, and `thiserror`. It is consumed by `barracuda-agent-runtime`
 and the memory-side LLM providers.

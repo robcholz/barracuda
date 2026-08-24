@@ -4,18 +4,24 @@ The Event Router runs a set of Components on a fixed-capacity, full-duplex,
 `no_std` cooperative runtime, and drives durable Workflows that chain RPC calls
 when an Event arrives. This guide covers the caller side: defining messages and
 methods, registering a Component, making calls, emitting Events, and loading
-Workflows. The internals live in [`design.md`](design.md).
+Workflows. The boundary between Event Router Components and owner-managed
+Embassy tasks lives in
+[`execution-ownership.md`](../../../.agents/docs/execution-ownership.md).
 
 ## Quick start
 
 ```rust
 let lanes = Box::leak(Box::new(RpcLaneStorage::<N, M, Q>::new()));
-let filesystem = Box::leak(Box::new(MemFs::new()));
-let mut router = EventRouter::new(lanes, filesystem, "workflows")?;
+let mut router = EventRouter::new(lanes).await?;
 
 router.load(Box::new(MyComponent))?;
 // Poll `router` from the cooperative executor.
 ```
+
+System mounts the process-wide VFS before constructing Event Router. Event
+Router uses that global namespace directly and owns only
+`/system/workflows.json`, which contains the ordered Workflow definitions as
+one JSON array. Other System services may use sibling paths under `/system`.
 
 `N` is the number of RPC lanes, `M` the frame size in bytes, and `Q` the
 number of waiters per lane.

@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};
-use barracuda_platform_host::DiskFs;
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
 use serde_json::Value;
 
 const SKILLS_ROOT: &str = "skills";
@@ -25,16 +26,45 @@ fn update_golden() -> bool {
     std::env::var_os("BARRACUDA_UPDATE_GOLDEN").is_some()
 }
 
-fn registry() -> Arc<FsSkillRegistry<DiskFs>> {
-    let filesystem = DiskFs::rooted(data_dir());
+async fn registry() -> Arc<FsSkillRegistry> {
+    let filesystem = memory_vfs().await.expect("mount memory VFS");
+    for (path, contents) in fixture_files() {
+        filesystem
+            .write_atomic(&path, &contents)
+            .await
+            .expect("copy skill fixture into VFS");
+    }
     Arc::new(
         FsSkillRegistry::new(filesystem)
             .set_root(SKILLS_ROOT)
+            .await
             .expect("scan skills fixtures"),
     )
 }
 
-fn catalog_json(registry: &Arc<FsSkillRegistry<DiskFs>>) -> String {
+fn fixture_files() -> Vec<(String, Vec<u8>)> {
+    fn collect(directory: &Path, relative: &Path, files: &mut Vec<(String, Vec<u8>)>) {
+        for entry in std::fs::read_dir(directory).expect("read fixture directory") {
+            let entry = entry.expect("read fixture entry");
+            let path = entry.path();
+            let relative = relative.join(entry.file_name());
+            if path.is_dir() {
+                collect(&path, &relative, files);
+            } else {
+                files.push((
+                    format!("/{SKILLS_ROOT}/{}", relative.display()),
+                    std::fs::read(path).expect("read skill fixture"),
+                ));
+            }
+        }
+    }
+
+    let mut files = Vec::new();
+    collect(&data_dir().join(SKILLS_ROOT), Path::new(""), &mut files);
+    files
+}
+
+fn catalog_json(registry: &Arc<FsSkillRegistry>) -> String {
     let mut set = registry.skill_set();
     let mut rendered = set.list_skills().to_string();
     rendered.push('\n');
@@ -81,55 +111,68 @@ fn assert_golden(path: &Path, actual: &str, label: &str) {
 
 #[test]
 fn catalog_matches_golden() {
-    let registry = registry();
-    let catalog = catalog_json(&registry);
-    assert_ne!(catalog, "[]\n", "no skills scanned from tests/data/skills");
-    assert_golden(&expected_dir().join("catalog.json"), &catalog, "catalog");
+    block_on(async {
+        let registry = registry().await;
+        let catalog = catalog_json(&registry);
+        assert_ne!(catalog, "[]\n", "no skills scanned from tests/data/skills");
+        assert_golden(&expected_dir().join("catalog.json"), &catalog, "catalog");
+    });
 }
 
 #[test]
 fn documents_match_golden() {
-    let registry = registry();
-    let catalog = catalog_json(&registry);
-    let mut set = registry.skill_set();
-    for id in catalog_ids(&catalog) {
-        let document = set
-            .read_skill(&SkillName::new(id.clone()))
-            .expect("read skill document");
-        assert!(
-            !document.content().contains("\n---\n"),
-            "front-matter not stripped for {id}"
-        );
-        assert_golden(
-            &expected_dir().join(&id).join("document.md"),
-            document.content(),
-            &format!("document for {id}"),
-        );
-    }
+    block_on(async {
+        let registry = registry().await;
+        let catalog = catalog_json(&registry);
+        let mut set = registry.skill_set();
+        for id in catalog_ids(&catalog) {
+            let document = set
+                .read_skill(&SkillName::new(id.clone()))
+                .await
+                .expect("read skill document");
+            assert!(
+                !document.content().contains("\n---\n"),
+                "front-matter not stripped for {id}"
+            );
+            assert_golden(
+                &expected_dir().join(&id).join("document.md"),
+                document.content(),
+                &format!("document for {id}"),
+            );
+        }
+    });
 }
 
 #[test]
 fn skill_set_reads_fixture_documents() {
-    let registry = registry();
-    let catalog = catalog_json(&registry);
-    let first = catalog_ids(&catalog)
-        .into_iter()
-        .next()
-        .expect("at least one fixture skill");
+    block_on(async {
+        let registry = registry().await;
+        let catalog = catalog_json(&registry);
+        let first = catalog_ids(&catalog)
+            .into_iter()
+            .next()
+            .expect("at least one fixture skill");
 
-    let mut set = registry.skill_set();
-    let document = set
-        .read_skill(&SkillName::new(first.clone()))
-        .expect("read skill");
-    assert!(
-        !document.content().is_empty(),
-        "skill instructions are empty for {first}"
-    );
+        let mut set = registry.skill_set();
+        let document = set
+            .read_skill(&SkillName::new(first.clone()))
+            .await
+            .expect("read skill");
+        assert!(
+            !document.content().is_empty(),
+            "skill instructions are empty for {first}"
+        );
+    });
 }
 
 #[test]
 fn reading_unknown_skill_is_not_found() {
-    let registry = registry();
-    let mut set = registry.skill_set();
-    assert!(set.read_skill(&SkillName::new("does-not-exist")).is_err());
+    block_on(async {
+        let registry = registry().await;
+        let mut set = registry.skill_set();
+        assert!(set
+            .read_skill(&SkillName::new("does-not-exist"))
+            .await
+            .is_err());
+    });
 }

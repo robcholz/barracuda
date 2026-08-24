@@ -10,7 +10,7 @@ use core::cell::RefCell;
 use core::error::Error;
 use core::marker::PhantomData;
 
-use barracuda_fs::{FileSystem, FsError};
+use barracuda_vfs::{FsError, ScopedVfs};
 
 use crate::{
     is_valid_key, DurablePartError, DurableState, DurableStateCodec, InstanceId, PartGeneration,
@@ -53,31 +53,32 @@ enum StateAddress {
 }
 
 /// Filesystem-backed registry for typed durable state.
-pub struct Persistence<Filesystem: FileSystem> {
+pub struct Persistence {
     persistence_directory: String,
     entry_types: RefCell<BTreeMap<EntryKey, RegisteredEntryType>>,
     parts: RefCell<BTreeMap<StateAddress, Arc<dyn RegisteredPart>>>,
-    filesystem: Filesystem,
+    removals: RefCell<Vec<(StateAddress, String)>>,
+    filesystem: ScopedVfs,
 }
 
 /// One typed singleton entry.
-pub struct Singleton<'a, Filesystem: FileSystem, T> {
-    persistence: &'a Persistence<Filesystem>,
+pub struct Singleton<'a, T> {
+    persistence: &'a Persistence,
     name: String,
     state: PhantomData<fn() -> T>,
 }
 
 /// One typed collection entry.
-pub struct Collection<'a, Filesystem: FileSystem, T> {
-    persistence: &'a Persistence<Filesystem>,
+pub struct Collection<'a, T> {
+    persistence: &'a Persistence,
     name: String,
     state: PhantomData<fn() -> T>,
 }
 
-impl<Filesystem: FileSystem> Persistence<Filesystem> {
+impl Persistence {
     /// Create a persistence registry rooted at `persistence_directory`.
-    pub fn new(
-        filesystem: Filesystem,
+    pub async fn new(
+        filesystem: ScopedVfs,
         persistence_directory: impl Into<String>,
     ) -> Result<Self, PersistenceError> {
         let persistence_directory = persistence_directory.into();
@@ -87,6 +88,7 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
 
         filesystem
             .create_dir_all(&persistence_directory)
+            .await
             .map_err(|source| {
                 PersistenceError::storage(
                     "create persistence directory",
@@ -99,6 +101,7 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
             persistence_directory,
             entry_types: RefCell::new(BTreeMap::new()),
             parts: RefCell::new(BTreeMap::new()),
+            removals: RefCell::new(Vec::new()),
             filesystem,
         })
     }
@@ -107,7 +110,7 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
     pub fn singleton<T>(
         &self,
         name: impl Into<String>,
-    ) -> Result<Singleton<'_, Filesystem, T>, PersistenceError>
+    ) -> Result<Singleton<'_, T>, PersistenceError>
     where
         T: DurableStateCodec + 'static,
     {
@@ -124,7 +127,7 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
     pub fn collection<T>(
         &self,
         name: impl Into<String>,
-    ) -> Result<Collection<'_, Filesystem, T>, PersistenceError>
+    ) -> Result<Collection<'_, T>, PersistenceError>
     where
         T: DurableStateCodec + 'static,
     {
@@ -138,7 +141,21 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
     }
 
     /// Persist every registered state whose generation changed.
-    pub fn maybe_persist(&self) -> Result<(), PersistenceError> {
+    pub async fn maybe_persist(&self) -> Result<(), PersistenceError> {
+        let removals = core::mem::take(&mut *self.removals.borrow_mut());
+        for (index, (address, path)) in removals.iter().enumerate() {
+            if let Err(source) = self.filesystem.remove(path).await {
+                self.removals
+                    .borrow_mut()
+                    .extend(removals[index..].iter().cloned());
+                return Err(PersistenceError::storage(
+                    "remove state",
+                    path.clone(),
+                    source,
+                ));
+            }
+            self.parts.borrow_mut().remove(address);
+        }
         let parts = {
             let parts = self.parts.borrow();
             parts
@@ -160,6 +177,7 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
                     let file = encode_file(snapshot.schema_version, snapshot.state);
                     self.filesystem
                         .write_atomic(&path, &file)
+                        .await
                         .map_err(|source| PersistenceError::storage("write state", path, source))?;
                     part.mark_persisted(snapshot.generation);
                 }
@@ -206,12 +224,12 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
         }
     }
 
-    fn load_at<T>(&self, address: &StateAddress) -> Result<Option<T>, PersistenceError>
+    async fn load_at<T>(&self, address: &StateAddress) -> Result<Option<T>, PersistenceError>
     where
         T: DurableStateCodec,
     {
         let path = self.state_path(address);
-        let file = match self.filesystem.read(&path) {
+        let file = match self.filesystem.read(&path).await {
             Ok(file) => file,
             Err(FsError::NotFound) => return Ok(None),
             Err(source) => return Err(PersistenceError::storage("read state", path, source)),
@@ -268,19 +286,14 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
 
     fn remove_at(&self, address: &StateAddress) -> Result<(), PersistenceError> {
         let path = self.state_path(address);
-        match self.filesystem.remove(&path) {
-            Ok(()) | Err(FsError::NotFound) => {}
-            Err(source) => {
-                return Err(PersistenceError::storage("remove state", path, source));
-            }
-        }
         self.parts.borrow_mut().remove(address);
+        self.removals.borrow_mut().push((address.clone(), path));
         Ok(())
     }
 
-    fn list_collection(&self, name: &str) -> Result<Vec<InstanceId>, PersistenceError> {
+    async fn list_collection(&self, name: &str) -> Result<Vec<InstanceId>, PersistenceError> {
         let path = self.join_path(name);
-        let entries = match self.filesystem.list_dir(&path) {
+        let entries = match self.filesystem.list_dir(&path).await {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
             Err(source) => {
@@ -335,16 +348,14 @@ impl<Filesystem: FileSystem> Persistence<Filesystem> {
     }
 }
 
-impl<Filesystem, T> Singleton<'_, Filesystem, T>
-where
-    Filesystem: FileSystem,
-    T: DurableStateCodec + 'static,
-{
+impl<T: DurableStateCodec + 'static> Singleton<'_, T> {
     /// Decode the persisted DTO, returning `None` when no state exists.
-    pub fn load(&self) -> Result<Option<T>, PersistenceError> {
-        self.persistence.load_at(&StateAddress::Singleton {
-            name: self.name.clone(),
-        })
+    pub async fn load(&self) -> Result<Option<T>, PersistenceError> {
+        self.persistence
+            .load_at(&StateAddress::Singleton {
+                name: self.name.clone(),
+            })
+            .await
     }
 
     /// Register the runtime owner's state for automatic persistence.
@@ -367,22 +378,20 @@ where
     }
 }
 
-impl<Filesystem, T> Collection<'_, Filesystem, T>
-where
-    Filesystem: FileSystem,
-    T: DurableStateCodec + 'static,
-{
+impl<T: DurableStateCodec + 'static> Collection<'_, T> {
     /// List the persisted instance identifiers.
-    pub fn list(&self) -> Result<Vec<InstanceId>, PersistenceError> {
-        self.persistence.list_collection(&self.name)
+    pub async fn list(&self) -> Result<Vec<InstanceId>, PersistenceError> {
+        self.persistence.list_collection(&self.name).await
     }
 
     /// Decode one persisted DTO, returning `None` when it does not exist.
-    pub fn load(&self, instance_id: &InstanceId) -> Result<Option<T>, PersistenceError> {
-        self.persistence.load_at(&StateAddress::Collection {
-            name: self.name.clone(),
-            instance_id: instance_id.clone(),
-        })
+    pub async fn load(&self, instance_id: &InstanceId) -> Result<Option<T>, PersistenceError> {
+        self.persistence
+            .load_at(&StateAddress::Collection {
+                name: self.name.clone(),
+                instance_id: instance_id.clone(),
+            })
+            .await
     }
 
     /// Register one runtime-owned collection state for automatic persistence.
@@ -592,8 +601,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
-    use barracuda_fs::FileSystem;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
+    use barracuda_vfs::ScopedVfs;
+    use futures_lite::future::block_on;
 
     use super::*;
 
@@ -660,203 +670,250 @@ mod tests {
         InstanceId::new(id).expect("test instance id is valid")
     }
 
-    fn fixture(root: &str) -> (MemFs, Persistence<MemFs>) {
-        let filesystem = MemFs::new();
-        let persistence =
-            Persistence::new(filesystem.clone(), root).expect("persistence initializes");
+    async fn fixture(root: &str) -> (ScopedVfs, Persistence) {
+        let filesystem = memory_vfs().await.expect("memory VFS mounts");
+        let persistence = Persistence::new(filesystem.clone(), root)
+            .await
+            .expect("persistence initializes");
         (filesystem, persistence)
     }
 
     #[test]
     fn singleton_registers_persists_and_loads() {
-        let root = "/barracuda-agent-persistence-singleton";
-        let (filesystem, persistence) = fixture(root);
-        let singleton = persistence
-            .singleton::<TestState>("state")
-            .expect("singleton opens");
-        assert!(singleton
-            .load()
-            .expect("missing state is readable")
-            .is_none());
+        block_on(async {
+            let root = "/barracuda-agent-persistence-singleton";
+            let (filesystem, persistence) = fixture(root).await;
+            let singleton = persistence
+                .singleton::<TestState>("state")
+                .expect("singleton opens");
+            assert!(singleton
+                .load()
+                .await
+                .expect("missing state is readable")
+                .is_none());
 
-        let state = DurableState::new(TestState { value: 1 });
-        singleton.register(&state).expect("state registers");
-        state.get_mut().value = 2;
-        persistence.maybe_persist().expect("dirty state persists");
+            let state = DurableState::new(TestState { value: 1 });
+            singleton.register(&state).expect("state registers");
+            state.get_mut().value = 2;
+            persistence
+                .maybe_persist()
+                .await
+                .expect("dirty state persists");
 
-        let file = filesystem
-            .read(&format!("{root}/state.bin"))
-            .expect("state file exists");
-        assert_eq!(&file[..SCHEMA_VERSION_SIZE], &1_u32.to_le_bytes());
-        assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
+            let file = filesystem
+                .read(&format!("{root}/state.bin"))
+                .await
+                .expect("state file exists");
+            assert_eq!(&file[..SCHEMA_VERSION_SIZE], &1_u32.to_le_bytes());
+            assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
 
-        let restored =
-            Persistence::new(filesystem.clone(), root).expect("persistence reinitializes");
-        let singleton = restored
-            .singleton::<TestState>("state")
-            .expect("singleton reopens");
-        assert_eq!(singleton.load().unwrap().unwrap().value, 2);
+            let restored = Persistence::new(filesystem.clone(), root)
+                .await
+                .expect("persistence reinitializes");
+            let singleton = restored
+                .singleton::<TestState>("state")
+                .expect("singleton reopens");
+            assert_eq!(singleton.load().await.unwrap().unwrap().value, 2);
+        });
     }
 
     #[test]
     fn collection_serves_multiple_instances() {
-        let root = "/barracuda-agent-persistence-collection";
-        let (_filesystem, persistence) = fixture(root);
-        let collection = persistence
-            .collection::<TestState>("sessions")
-            .expect("collection opens");
-        let session_2 = instance_id("session-2");
-        let session_10 = instance_id("session-10");
-        let state_2 = DurableState::new(TestState { value: 2 });
-        let state_10 = DurableState::new(TestState { value: 10 });
-        collection.register(&session_2, &state_2).unwrap();
-        collection.register(&session_10, &state_10).unwrap();
+        block_on(async {
+            let root = "/barracuda-agent-persistence-collection";
+            let (_filesystem, persistence) = fixture(root).await;
+            let collection = persistence
+                .collection::<TestState>("sessions")
+                .expect("collection opens");
+            let session_2 = instance_id("session-2");
+            let session_10 = instance_id("session-10");
+            let state_2 = DurableState::new(TestState { value: 2 });
+            let state_10 = DurableState::new(TestState { value: 10 });
+            collection.register(&session_2, &state_2).unwrap();
+            collection.register(&session_10, &state_10).unwrap();
 
-        assert!(collection.list().unwrap().is_empty());
-        persistence.maybe_persist().unwrap();
-        assert_eq!(
-            collection.list().unwrap(),
-            vec![session_10.clone(), session_2]
-        );
-        assert_eq!(collection.load(&session_10).unwrap().unwrap().value, 10);
+            assert!(collection.list().await.unwrap().is_empty());
+            persistence.maybe_persist().await.unwrap();
+            assert_eq!(
+                collection.list().await.unwrap(),
+                vec![session_10.clone(), session_2]
+            );
+            assert_eq!(
+                collection.load(&session_10).await.unwrap().unwrap().value,
+                10
+            );
+        });
     }
 
     #[test]
     fn registration_is_non_owning() {
-        let root = "/barracuda-agent-persistence-weak-registration";
-        let (filesystem, persistence) = fixture(root);
-        let singleton = persistence.singleton::<TestState>("state").unwrap();
-        let state = DurableState::new(TestState { value: 1 });
-        singleton.register(&state).unwrap();
-        drop(state);
+        block_on(async {
+            let root = "/barracuda-agent-persistence-weak-registration";
+            let (filesystem, persistence) = fixture(root).await;
+            let singleton = persistence.singleton::<TestState>("state").unwrap();
+            let state = DurableState::new(TestState { value: 1 });
+            singleton.register(&state).unwrap();
+            drop(state);
 
-        persistence.maybe_persist().unwrap();
-        assert!(!filesystem
-            .exists(&format!("{root}/state.bin"))
-            .expect("existence check succeeds"));
+            persistence.maybe_persist().await.unwrap();
+            assert!(!filesystem
+                .exists(&format!("{root}/state.bin"))
+                .await
+                .expect("existence check succeeds"));
+        });
     }
 
     #[test]
     fn a_dropped_owner_can_be_replaced_before_cleanup() {
-        let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-reregister");
-        let singleton = persistence.singleton::<TestState>("state").unwrap();
-        let first = DurableState::new(TestState { value: 1 });
-        singleton.register(&first).unwrap();
-        drop(first);
+        block_on(async {
+            let (_filesystem, persistence) =
+                fixture("/barracuda-agent-persistence-reregister").await;
+            let singleton = persistence.singleton::<TestState>("state").unwrap();
+            let first = DurableState::new(TestState { value: 1 });
+            singleton.register(&first).unwrap();
+            drop(first);
 
-        let second = DurableState::new(TestState { value: 2 });
-        singleton.register(&second).unwrap();
-        persistence.maybe_persist().unwrap();
-        assert_eq!(singleton.load().unwrap().unwrap().value, 2);
+            let second = DurableState::new(TestState { value: 2 });
+            singleton.register(&second).unwrap();
+            persistence.maybe_persist().await.unwrap();
+            assert_eq!(singleton.load().await.unwrap().unwrap().value, 2);
+        });
     }
 
     #[test]
     fn duplicate_live_registration_is_rejected() {
-        let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-duplicate");
-        let singleton = persistence.singleton::<TestState>("state").unwrap();
-        let first = DurableState::new(TestState { value: 1 });
-        let second = DurableState::new(TestState { value: 2 });
-        singleton.register(&first).unwrap();
+        block_on(async {
+            let (_filesystem, persistence) =
+                fixture("/barracuda-agent-persistence-duplicate").await;
+            let singleton = persistence.singleton::<TestState>("state").unwrap();
+            let first = DurableState::new(TestState { value: 1 });
+            let second = DurableState::new(TestState { value: 2 });
+            singleton.register(&first).unwrap();
 
-        assert!(matches!(
-            singleton.register(&second),
-            Err(PersistenceError::StateAlreadyRegistered { .. })
-        ));
+            assert!(matches!(
+                singleton.register(&second),
+                Err(PersistenceError::StateAlreadyRegistered { .. })
+            ));
+        });
     }
 
     #[test]
     fn entry_type_is_stable() {
-        let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-type");
-        persistence.singleton::<TestState>("state").unwrap();
-        persistence.singleton::<TestState>("state").unwrap();
-        assert!(matches!(
-            persistence.singleton::<OtherState>("state"),
-            Err(PersistenceError::TypeMismatch { .. })
-        ));
+        block_on(async {
+            let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-type").await;
+            persistence.singleton::<TestState>("state").unwrap();
+            persistence.singleton::<TestState>("state").unwrap();
+            assert!(matches!(
+                persistence.singleton::<OtherState>("state"),
+                Err(PersistenceError::TypeMismatch { .. })
+            ));
+        });
     }
 
     #[test]
     fn singleton_and_collection_names_do_not_collide() {
-        let root = "/barracuda-agent-persistence-peer-entries";
-        let (filesystem, persistence) = fixture(root);
-        let singleton = persistence.singleton::<TestState>("sessions").unwrap();
-        let collection = persistence.collection::<OtherState>("sessions").unwrap();
-        let singleton_state = DurableState::new(TestState { value: 1 });
-        let collection_state = DurableState::new(OtherState);
-        singleton.register(&singleton_state).unwrap();
-        collection
-            .register(&instance_id("session-1"), &collection_state)
-            .unwrap();
-        persistence.maybe_persist().unwrap();
+        block_on(async {
+            let root = "/barracuda-agent-persistence-peer-entries";
+            let (filesystem, persistence) = fixture(root).await;
+            let singleton = persistence.singleton::<TestState>("sessions").unwrap();
+            let collection = persistence.collection::<OtherState>("sessions").unwrap();
+            let singleton_state = DurableState::new(TestState { value: 1 });
+            let collection_state = DurableState::new(OtherState);
+            singleton.register(&singleton_state).unwrap();
+            collection
+                .register(&instance_id("session-1"), &collection_state)
+                .unwrap();
+            persistence.maybe_persist().await.unwrap();
 
-        assert!(filesystem
-            .exists(&format!("{root}/sessions.bin"))
-            .expect("existence check succeeds"));
-        assert!(filesystem
-            .exists(&format!("{root}/sessions/session-1.bin"))
-            .expect("existence check succeeds"));
+            assert!(filesystem
+                .exists(&format!("{root}/sessions.bin"))
+                .await
+                .expect("existence check succeeds"));
+            assert!(filesystem
+                .exists(&format!("{root}/sessions/session-1.bin"))
+                .await
+                .expect("existence check succeeds"));
+        });
     }
 
     #[test]
     fn entry_names_are_identifiers_not_paths() {
-        let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-names");
-        assert!(matches!(
-            persistence.singleton::<TestState>("nested/state"),
-            Err(PersistenceError::InvalidSingleton { .. })
-        ));
-        assert!(matches!(
-            persistence.collection::<TestState>("nested/sessions"),
-            Err(PersistenceError::InvalidCollection { .. })
-        ));
+        block_on(async {
+            let (_filesystem, persistence) = fixture("/barracuda-agent-persistence-names").await;
+            assert!(matches!(
+                persistence.singleton::<TestState>("nested/state"),
+                Err(PersistenceError::InvalidSingleton { .. })
+            ));
+            assert!(matches!(
+                persistence.collection::<TestState>("nested/sessions"),
+                Err(PersistenceError::InvalidCollection { .. })
+            ));
+        });
     }
 
     #[test]
     fn remove_deletes_state_and_registration() {
-        let root = "/barracuda-agent-persistence-remove";
-        let (filesystem, persistence) = fixture(root);
-        let collection = persistence.collection::<TestState>("sessions").unwrap();
-        let id = instance_id("session-1");
-        let state = DurableState::new(TestState { value: 1 });
-        collection.register(&id, &state).unwrap();
-        persistence.maybe_persist().unwrap();
-        collection.remove(&id).unwrap();
-        state.get_mut().value = 2;
-        persistence.maybe_persist().unwrap();
+        block_on(async {
+            let root = "/barracuda-agent-persistence-remove";
+            let (filesystem, persistence) = fixture(root).await;
+            let collection = persistence.collection::<TestState>("sessions").unwrap();
+            let id = instance_id("session-1");
+            let state = DurableState::new(TestState { value: 1 });
+            collection.register(&id, &state).unwrap();
+            persistence.maybe_persist().await.unwrap();
+            collection.remove(&id).unwrap();
+            state.get_mut().value = 2;
+            persistence.maybe_persist().await.unwrap();
 
-        assert!(collection.load(&id).unwrap().is_none());
-        assert!(!filesystem
-            .exists(&format!("{root}/sessions/session-1.bin"))
-            .expect("existence check succeeds"));
+            assert!(collection.load(&id).await.unwrap().is_none());
+            assert!(!filesystem
+                .exists(&format!("{root}/sessions/session-1.bin"))
+                .await
+                .expect("existence check succeeds"));
+        });
     }
 
     #[test]
     fn list_filters_non_state_entries() {
-        let root = "/barracuda-agent-persistence-list";
-        let (filesystem, persistence) = fixture(root);
-        let collection = persistence.collection::<TestState>("sessions").unwrap();
-        filesystem
-            .write_atomic(&format!("{root}/sessions/session-1.bin"), b"state")
-            .unwrap();
-        filesystem
-            .write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored")
-            .unwrap();
-        filesystem
-            .write_atomic(&format!("{root}/sessions/...bin"), b"ignored")
-            .unwrap();
+        block_on(async {
+            let root = "/barracuda-agent-persistence-list";
+            let (filesystem, persistence) = fixture(root).await;
+            let collection = persistence.collection::<TestState>("sessions").unwrap();
+            filesystem
+                .write_atomic(&format!("{root}/sessions/session-1.bin"), b"state")
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic(&format!("{root}/sessions/transcript.jsonl"), b"ignored")
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic(&format!("{root}/sessions/...bin"), b"ignored")
+                .await
+                .unwrap();
 
-        assert_eq!(collection.list().unwrap(), vec![instance_id("session-1")]);
+            assert_eq!(
+                collection.list().await.unwrap(),
+                vec![instance_id("session-1")]
+            );
+        });
     }
 
     #[test]
     fn load_rejects_a_truncated_schema_version() {
-        let root = "/barracuda-agent-persistence-truncated";
-        let path = format!("{root}/state.bin");
-        let (filesystem, persistence) = fixture(root);
-        let singleton = persistence.singleton::<TestState>("state").unwrap();
-        filesystem.write_atomic(&path, &[1, 0, 0]).unwrap();
+        block_on(async {
+            let root = "/barracuda-agent-persistence-truncated";
+            let path = format!("{root}/state.bin");
+            let (filesystem, persistence) = fixture(root).await;
+            let singleton = persistence.singleton::<TestState>("state").unwrap();
+            filesystem.write_atomic(&path, &[1, 0, 0]).await.unwrap();
 
-        let error = singleton.load().expect_err("truncated state is rejected");
-        assert!(matches!(&error, PersistenceError::CorruptState(_)));
-        assert!(error.to_string().contains(&path));
+            let error = singleton
+                .load()
+                .await
+                .expect_err("truncated state is rejected");
+            assert!(matches!(&error, PersistenceError::CorruptState(_)));
+            assert!(error.to_string().contains(&path));
+        });
     }
 }

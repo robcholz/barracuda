@@ -11,7 +11,7 @@ use alloc::{
 };
 use core::fmt;
 
-use barracuda_fs::{FileSystem, FsError};
+use barracuda_vfs::{FsError, ScopedVfs};
 use strum::{EnumString, IntoStaticStr};
 
 /// Filename for the assistant soul/persona document.
@@ -131,15 +131,15 @@ pub struct ProfileSnapshot {
 }
 
 /// Pure storage for the editable profile documents.
-pub struct ProfileStore<F: FileSystem + 'static> {
-    filesystem: F,
+pub struct ProfileStore {
+    filesystem: ScopedVfs,
     /// Directory holding `soul.md`, `identity.md`, and `user.md`.
     dir: String,
     /// Maximum accepted byte length for each profile document.
     max_document_bytes: usize,
 }
 
-impl<F: FileSystem + 'static> Clone for ProfileStore<F> {
+impl Clone for ProfileStore {
     fn clone(&self) -> Self {
         Self {
             filesystem: self.filesystem.clone(),
@@ -149,9 +149,9 @@ impl<F: FileSystem + 'static> Clone for ProfileStore<F> {
     }
 }
 
-impl<F: FileSystem + 'static> ProfileStore<F> {
+impl ProfileStore {
     /// Build a store rooted at `dir` over the selected filesystem backend.
-    pub fn new(filesystem: F, dir: &str) -> Self {
+    pub fn new(filesystem: ScopedVfs, dir: &str) -> Self {
         Self {
             filesystem,
             dir: dir.to_string(),
@@ -170,9 +170,9 @@ impl<F: FileSystem + 'static> ProfileStore<F> {
     }
 
     /// Read one document. Missing files are normal absence, not an error.
-    pub fn read(&self, document: ProfileDocument) -> Result<Option<String>, ProfileError> {
+    pub async fn read(&self, document: ProfileDocument) -> Result<Option<String>, ProfileError> {
         let path = self.path(document);
-        let bytes = match self.filesystem.read(&path) {
+        let bytes = match self.filesystem.read(&path).await {
             Ok(bytes) => bytes,
             Err(FsError::NotFound) => return Ok(None),
             Err(source) => return Err(ProfileError::File { document, source }),
@@ -181,16 +181,16 @@ impl<F: FileSystem + 'static> ProfileStore<F> {
     }
 
     /// Read all canonical profile documents.
-    pub fn snapshot(&self) -> Result<ProfileSnapshot, ProfileError> {
+    pub async fn snapshot(&self) -> Result<ProfileSnapshot, ProfileError> {
         Ok(ProfileSnapshot {
-            soul: self.read(ProfileDocument::Soul)?,
-            assistant_identity: self.read(ProfileDocument::AssistantIdentity)?,
-            user_profile: self.read(ProfileDocument::UserProfile)?,
+            soul: self.read(ProfileDocument::Soul).await?,
+            assistant_identity: self.read(ProfileDocument::AssistantIdentity).await?,
+            user_profile: self.read(ProfileDocument::UserProfile).await?,
         })
     }
 
     /// Atomically replace one document with `content`.
-    pub fn replace(
+    pub async fn replace(
         &self,
         document: ProfileDocument,
         content: impl AsRef<str>,
@@ -200,13 +200,14 @@ impl<F: FileSystem + 'static> ProfileStore<F> {
         let path = self.path(document);
         self.filesystem
             .write_atomic(&path, bytes)
+            .await
             .map_err(|source| ProfileError::File { document, source })
     }
 
     /// Create a document with `content` only when it does not already exist.
     ///
     /// Returns `true` when the document was created.
-    pub fn ensure_default(
+    pub async fn ensure_default(
         &self,
         document: ProfileDocument,
         content: impl AsRef<str>,
@@ -214,18 +215,19 @@ impl<F: FileSystem + 'static> ProfileStore<F> {
         if self
             .filesystem
             .exists(&self.path(document))
+            .await
             .map_err(|source| ProfileError::File { document, source })?
         {
             return Ok(false);
         }
-        self.replace(document, content)?;
+        self.replace(document, content).await?;
         Ok(true)
     }
 
     /// Atomically clear one document. The file remains present but contributes no
     /// context because empty content is semantically absent.
-    pub fn clear(&self, document: ProfileDocument) -> Result<(), ProfileError> {
-        self.replace(document, "")
+    pub async fn clear(&self, document: ProfileDocument) -> Result<(), ProfileError> {
+        self.replace(document, "").await
     }
 
     fn decode(&self, document: ProfileDocument, bytes: Vec<u8>) -> Result<String, ProfileError> {

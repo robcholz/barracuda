@@ -8,13 +8,8 @@ description = "Zero-cost platform initialization contract for Barracuda"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-board = { path = "../../boards/api" }
-barracuda-fs = { path = "../../shared/fs" }
 embassy-executor.workspace = true
-embedded-storage-async.workspace = true
-
-[dev-dependencies]
-barracuda-platform-test = { path = "../test" }
+embassy-net.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

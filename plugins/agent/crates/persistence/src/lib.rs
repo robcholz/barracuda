@@ -24,7 +24,7 @@ use core::ops::{Deref, DerefMut};
 
 type Shared<T> = Arc<RefCell<T>>;
 
-pub type SharedPersistence<Filesystem> = Arc<Persistence<Filesystem>>;
+pub type SharedPersistence = Arc<Persistence>;
 
 pub type SchemaVersion = u32;
 type PartGeneration = u64;

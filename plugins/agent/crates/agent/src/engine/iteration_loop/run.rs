@@ -12,10 +12,10 @@ use barracuda_agent_tool::{
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::{ChatRequest, ChatStreamEvent, ToolCall};
-use barracuda_net::{Dns, TcpConnect};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::try_yield_stream;
 use barracuda_runtime_utils::Cancel;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::{future, StreamExt};
 use tracing::Instrument as _;
 
@@ -90,9 +90,10 @@ fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
     );
 }
 
-impl<'a, H, P> IterationLoop<'a, H, P>
+impl<'a, Tcp, Resolver, P> IterationLoop<'a, Tcp, Resolver, P>
 where
-    H: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
     P: ToolPermissionPolicy + 'a,
 {
     /// Run one LLM/tool iteration as a directly polled stream.

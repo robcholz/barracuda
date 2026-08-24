@@ -4,11 +4,10 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::rc::Rc;
 
 use barracuda_imessage_gateway_plugin::{IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginStartFuture};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginResult};
 use gateway::MessageChannel;
 use http_client::HttpClient;
 use telegram::{Telegram, TelegramConfig};
@@ -38,21 +37,16 @@ impl<const M: usize> Plugin<M> for IMessageTelegramPlugin {
         PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
-            let channel: Rc<dyn MessageChannel> = self.channel.clone();
-            let registration = gateway
-                .register(channel)
-                .map_err(PluginError::registration)?;
-            context.retain(registration);
-            Ok(())
-        })
+        let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
+        let channel: Rc<dyn MessageChannel> = self.channel.clone();
+        let registration = gateway
+            .register(channel)
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
+        Ok(())
     }
 }

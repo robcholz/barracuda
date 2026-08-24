@@ -7,6 +7,15 @@ use crate::{Backend, File, FsError, Metadata, MountOptions, OpenOptions, ReadDir
 
 static GLOBAL: Mutex<CriticalSectionRawMutex, Vfs> = Mutex::new(Vfs::new());
 
+/// Returns a clone of the process-wide mount namespace.
+///
+/// System uses this after completing its mounts to derive restricted views for
+/// consumers. Later global mount-table changes are not reflected in the clone;
+/// mounted backends and their stored data remain shared.
+pub async fn global_namespace() -> Vfs {
+    GLOBAL.lock().await.clone()
+}
+
 /// Mounts a backend root into the process-wide VFS namespace.
 pub async fn mount(
     mount_point: &str,

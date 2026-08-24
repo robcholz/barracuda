@@ -1,7 +1,5 @@
 name: stm32f429zi-nucleo
 hardware:
   chip: stm32f429zi
-storage:
-  filesystem: filesystem
-  web-assets: web_assets
-  database: database
+native-layout:
+  artifact: memory.x

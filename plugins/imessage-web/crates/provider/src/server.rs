@@ -1,8 +1,8 @@
 //! Portable WebSocket endpoint for the [`Web`] channel.
 //!
 //! The IMessage Web Plugin registers [`WebBridge`] with the global `WebServer`
-//! during startup. Socket framing, picoserve, and Platform I/O remain owned by the
-//! cross-platform server.
+//! during registration. Socket framing, picoserve, and Platform I/O remain owned
+//! by the cross-platform server.
 
 use alloc::boxed::Box;
 use alloc::format;

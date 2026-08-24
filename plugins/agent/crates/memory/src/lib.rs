@@ -8,9 +8,8 @@
 //!   `identity.md`, `user.md`).
 //! - [`LongTermMemory`] — the durable fact store.
 //!
-//! As a core crate it depends only on the [`barracuda_fs`] inbound traits — the
-//! [`FileSystem`](barracuda_fs::FileSystem) persistence seam — never on the platform
-//! boundary or on the LLM client (`barracuda-model-api`).
+//! As a core crate it depends only on [`barracuda_vfs::ScopedVfs`], never on a
+//! concrete filesystem backend, Platform, or the LLM client.
 //!
 //! # Compaction is *not* here
 //!
@@ -25,19 +24,18 @@
 //!
 //! # Using the transcript store
 //!
-//! ```no_run
-//! use barracuda_platform_test::MemFs;
+//! ```
+//! use barracuda_platform_test::memory_vfs;
 //! use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-//! use std::sync::Arc;
+//! use futures_lite::future::block_on;
 //!
-//! // A filesystem for persistence. Device applications provide their `FileSystem`;
-//! // here it is the in-memory host double.
-//! let filesystem = MemFs::new();
+//! block_on(async {
+//! let filesystem = memory_vfs().await.unwrap();
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
 //! let transcript_id = 42;
 //! let store = TranscriptStore::new(filesystem, transcript_id, "/data/transcripts")
-//!     .expect("a fresh MemFs has no data log, so the transcript starts empty");
+//!     .await.unwrap();
 //!
 //! // Child handles finish messages; the turn handle commits the record.
 //! let turn = store.open_turn().expect("the store has no active turn");
@@ -55,9 +53,10 @@
 //! // the flat model-facing transcript is its messages flattened.
 //! let turns = store.turns();
 //! let _messages: Vec<_> = turns.iter().flat_map(|t| &t.messages).collect();
-//! drop(turn); // commit + persist
+//! drop(turn); // commit in memory
 //!
-//! // Persistence is automatic at the turn boundary.
+//! store.flush().await.unwrap();
+//! });
 //! ```
 
 #![no_std]

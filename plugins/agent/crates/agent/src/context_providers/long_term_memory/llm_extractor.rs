@@ -11,8 +11,8 @@ use alloc::{boxed::Box, format, string::String, sync::Arc, vec::Vec};
 use serde_json::json;
 
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
-use barracuda_net::{Dns, TcpConnect};
 use barracuda_runtime_utils::Cancel;
+use embedded_nal_async::{Dns, TcpConnect};
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
@@ -36,16 +36,16 @@ const EXTRACT_TRANSCRIPT_HEADER: &str = "CONVERSATION:";
 /// `Arc<dyn Extractor>`, while [`ModelApi::chat`] needs `&mut self`, so
 /// calls borrow the client exclusively without holding a mutex while the future
 /// is running.
-pub(super) struct LlmExtractor<H: TcpConnect + Dns + 'static> {
-    api: SharedAsyncLlm<H>,
+pub(super) struct LlmExtractor<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    api: SharedAsyncLlm<Tcp, Resolver>,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
     api_manager: SharedApiManager,
 }
 
-impl<H: TcpConnect + Dns + 'static> LlmExtractor<H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> LlmExtractor<Tcp, Resolver> {
     /// Build an extractor with its own unconfigured LLM client.
-    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory<H>) -> Self {
+    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory<Tcp, Resolver>) -> Self {
         Self {
             api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
@@ -55,13 +55,13 @@ impl<H: TcpConnect + Dns + 'static> LlmExtractor<H> {
     /// A ready-to-inject [`Extractor`] using `api_manager`.
     pub(super) fn shared(
         api_manager: SharedApiManager,
-        llm_factory: &ModelApiFactory<H>,
+        llm_factory: &ModelApiFactory<Tcp, Resolver>,
     ) -> Arc<dyn Extractor> {
         Arc::new(Self::new(api_manager, llm_factory))
     }
 }
 
-impl<H: TcpConnect + Dns + 'static> Extractor for LlmExtractor<H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Extractor for LlmExtractor<Tcp, Resolver> {
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
         Box::pin(async move {
             let mut extraction_tools = ExtractionTools::new().map_err(ExtractError::from)?;

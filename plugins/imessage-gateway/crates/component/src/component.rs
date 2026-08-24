@@ -14,6 +14,7 @@ use crate::gateway_message_received::{
 };
 use crate::gateway_send::{gateway_send_handler, GatewaySend};
 use crate::gateway_send_media::{gateway_send_media_handler, GatewaySendMedia};
+use crate::gateway_send_stream::{gateway_send_stream_handler, GatewaySendStream};
 
 /// Failure queueing a normalized message for Event emission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
@@ -63,6 +64,9 @@ impl GatewayComponent {
 impl<const M: usize> Component<M> for GatewayComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<GatewaySend, _>(gateway_send_handler(Rc::clone(&self.gateway)))?;
+        context.register_rpc::<GatewaySendStream, _>(gateway_send_stream_handler(Rc::clone(
+            &self.gateway,
+        )))?;
         context.register_rpc::<GatewaySendMedia, _>(gateway_send_media_handler(Rc::clone(
             &self.gateway,
         )))

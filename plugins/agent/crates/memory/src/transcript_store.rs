@@ -34,7 +34,8 @@
 //! The unique [`TurnHandle`] returned by [`open_turn`](TranscriptStore::open_turn)
 //! owns one turn. [`UserHandle`], [`AssistantHandle`], and [`ToolHandle`] append
 //! the role-specific content; dropping a child handle finishes that message.
-//! Dropping the turn commits it and writes it to the injected filesystem.
+//! Dropping the turn commits it to the store's pending queue. [`Transcript::flush`]
+//! performs the async write to the injected VFS.
 //! In-progress content remains visible through [`Transcript::turns`] as the
 //! trailing turn with no id.
 //!
@@ -56,21 +57,19 @@
 //!   `(off, len)` of every record plus `covered_len` and `next_id`, rewritten
 //!   atomically as turns are appended.
 //!
-//! Ephemeral transcripts use the same code path with their own [`MemFs`]
-//! instance. Persistence behavior therefore comes entirely from the injected
-//! filesystem instead of a separate store mode.
-//!
-//! [`MemFs`]: barracuda_platform_test::MemFs
+//! Ephemeral transcripts use the same code path over an ephemeral VFS scope.
+//! Persistence behavior therefore comes entirely from the injected namespace.
 
 use alloc::{
-    borrow::ToOwned, boxed::Box, collections::BTreeSet, format, string::String, sync::Arc, vec::Vec,
+    borrow::ToOwned, boxed::Box, collections::BTreeSet, format, rc::Rc, string::String, sync::Arc,
+    vec::Vec,
 };
 use core::cell::{RefCell, RefMut};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use barracuda_fs::{FileSystem, FsError, FsFile};
+use barracuda_vfs::{FsError, ScopedVfs};
 
 /// Per-transcript filenames: `{dir}/{id}{DATA_EXT|INDEX_EXT}`.
 const DATA_EXT: &str = ".jsonl";
@@ -108,7 +107,7 @@ impl ByteOffset {
     fn advance(self, len: ByteLen) -> ByteOffset {
         ByteOffset(self.0.saturating_add(len.0))
     }
-    /// As the `u64` the [`FileSystem`] read API expects (widening, lossless).
+    /// As the `u64` the VFS read API expects (widening, lossless).
     fn as_u64(self) -> u64 {
         self.0 as u64
     }
@@ -128,7 +127,7 @@ impl ByteLen {
     fn of(bytes: &[u8]) -> ByteLen {
         ByteLen(bytes.len())
     }
-    /// As the `usize` the [`FileSystem`] read API expects.
+    /// As the `usize` used for in-memory buffer lengths.
     fn as_usize(self) -> usize {
         self.0
     }
@@ -139,7 +138,7 @@ impl ByteLen {
     fn saturating_sub(self, other: ByteLen) -> ByteLen {
         ByteLen(self.0.saturating_sub(other.0))
     }
-    /// From a [`FileSystem::len`] result, clamping if it somehow exceeds `usize` (a
+    /// From a VFS file length, clamping if it somehow exceeds `usize` (a
     /// 32-bit device can only address `usize` bytes; transcript files are tiny).
     fn from_file_len(len: u64) -> ByteLen {
         ByteLen(usize::try_from(len).unwrap_or(usize::MAX))
@@ -369,8 +368,8 @@ impl StoreState {
 }
 
 /// The agent's complete transcript over one concrete filesystem instance.
-pub struct TranscriptStore<F: FileSystem> {
-    filesystem: F,
+pub struct TranscriptStore {
+    filesystem: ScopedVfs,
     transcript_id: u32,
     data_path: String,
     index_path: String,
@@ -379,37 +378,23 @@ pub struct TranscriptStore<F: FileSystem> {
     state: Arc<RefCell<StoreState>>,
 }
 
-impl<F: FileSystem> Drop for TranscriptStore<F> {
-    /// Best-effort retry for a previous persistence failure.
-    fn drop(&mut self) {
-        persist(
-            &self.filesystem,
-            self.transcript_id,
-            &self.data_path,
-            &self.index_path,
-            self.state.as_ref(),
-            true,
-        );
-    }
-}
-
 /// The agent's complete transcript: an append-only, verbatim record
 /// of every turn. See the module docs for the storage layout.
 ///
 /// Build one with [`TranscriptStore::new`], append turns through the [`TurnHandle`]
 /// returned by [`open_turn`](Self::open_turn), and read the turn-structured
-/// transcript with [`turns`](Self::turns). Dropping a non-empty turn persists it
-/// immediately; dropping the store retries any pending failed write. Drive a
-/// single store from one thread.
+/// transcript with [`turns`](Self::turns). Dropping a non-empty turn queues it;
+/// call [`flush`](Self::flush) from async execution to persist it. Drive a single
+/// store from one thread.
 ///
 /// # Examples
 ///
 /// ```
-/// # use barracuda_platform_test::MemFs;
+/// # use barracuda_platform_test::memory_vfs;
 /// # use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-/// let filesystem = std::sync::MemFs::new();
-/// let store = TranscriptStore::new(filesystem, 42, "/data/transcripts")
-///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
+/// # futures_lite::future::block_on(async {
+/// let filesystem = memory_vfs().await.unwrap();
+/// let store = TranscriptStore::new(filesystem, 42, "/data/transcripts").await.unwrap();
 ///
 /// // Each nested handle finishes its message on drop.
 /// let turn = store.open_turn().unwrap();
@@ -421,18 +406,19 @@ impl<F: FileSystem> Drop for TranscriptStore<F> {
 ///     let mut assistant = turn.assistant().unwrap();
 ///     assistant.append(AssistantFragment::Content("Sunny."));
 /// }
-/// drop(turn); // commits and persists the complete turn
+/// drop(turn); // commits the complete turn
+/// store.flush().await.unwrap();
 ///
 /// // One committed turn carrying its two messages.
 /// let turns = store.turns();
 /// assert_eq!(turns.len(), 1);
 /// assert_eq!(turns[0].messages.len(), 2);
+/// # });
 /// ```
 /// Type-erased transcript boundary used by the agent runtime.
 ///
-/// Concrete stores retain their filesystem type and use static dispatch. The
-/// runtime erases only this high-level transcript behavior so a
-/// `TranscriptStore<MemFs>` and a platform-backed store have one owner type.
+/// The runtime erases only this high-level transcript behavior; backend choice
+/// remains behind the injected VFS namespace.
 pub trait Transcript {
     /// Open the unique writable turn.
     fn open_turn(&self) -> Result<TurnHandle, TurnError>;
@@ -442,7 +428,32 @@ pub trait Transcript {
 
     /// Monotonic committed-turn version.
     fn turn_version(&self) -> u64;
+
+    /// Flushes committed turns to durable storage.
+    fn flush(&self) -> TranscriptFuture<'_, Result<(), FsError>>;
 }
+
+impl<T: Transcript + ?Sized> Transcript for Rc<T> {
+    fn open_turn(&self) -> Result<TurnHandle, TurnError> {
+        (**self).open_turn()
+    }
+
+    fn turns(&self) -> Arc<Vec<Turn>> {
+        (**self).turns()
+    }
+
+    fn turn_version(&self) -> u64 {
+        (**self).turn_version()
+    }
+
+    fn flush(&self) -> TranscriptFuture<'_, Result<(), FsError>> {
+        (**self).flush()
+    }
+}
+
+/// Object-safe future returned by transcript storage operations.
+pub type TranscriptFuture<'a, T> =
+    core::pin::Pin<alloc::boxed::Box<dyn core::future::Future<Output = T> + 'a>>;
 
 /// Process-local transcript that never touches a filesystem.
 ///
@@ -471,7 +482,6 @@ impl TransientTranscript {
         }
         Ok(TurnHandle {
             state: Arc::clone(&self.state),
-            on_drop: None,
         })
     }
 
@@ -491,6 +501,10 @@ impl Transcript for TransientTranscript {
 
     fn turn_version(&self) -> u64 {
         lock_state(self.state.as_ref()).turn_version
+    }
+
+    fn flush(&self) -> TranscriptFuture<'_, Result<(), FsError>> {
+        Box::pin(async { Ok(()) })
     }
 }
 
@@ -570,13 +584,27 @@ pub enum TranscriptListError {
     InvalidFilename(String),
 }
 
-impl<F: FileSystem> TranscriptStore<F> {
+impl TranscriptStore {
+    /// Creates a known-fresh transcript without probing storage.
+    pub fn empty(filesystem: ScopedVfs, transcript_id: u32, dir: &str) -> Self {
+        Self {
+            filesystem,
+            transcript_id,
+            data_path: transcript_path(dir, transcript_id, DATA_EXT),
+            index_path: transcript_path(dir, transcript_id, INDEX_EXT),
+            state: Arc::new(RefCell::new(StoreState::default())),
+        }
+    }
+
     /// List every transcript id represented by a data or index file in `dir`.
     ///
     /// A missing directory is empty. When only one half of a transcript remains,
     /// its id is still returned so the owner can reconcile or delete it.
-    pub fn list_persisted_ids(filesystem: &F, dir: &str) -> Result<Vec<u32>, TranscriptListError> {
-        let entries = match filesystem.list_dir(dir) {
+    pub async fn list_persisted_ids(
+        filesystem: &ScopedVfs,
+        dir: &str,
+    ) -> Result<Vec<u32>, TranscriptListError> {
+        let entries = match filesystem.list_dir(dir).await {
             Ok(entries) => entries,
             Err(FsError::NotFound) => return Ok(Vec::new()),
             Err(source) => {
@@ -612,12 +640,13 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// # Examples
     ///
     /// ```
-    /// # use barracuda_platform_test::MemFs;
+    /// # use barracuda_platform_test::memory_vfs;
     /// # use barracuda_agent_memory::TranscriptStore;
-    /// let filesystem = std::sync::MemFs::new();
-    /// let store = TranscriptStore::new(filesystem, 7, "/data/transcripts")
-    ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
+    /// # futures_lite::future::block_on(async {
+    /// let filesystem = memory_vfs().await.unwrap();
+    /// let store = TranscriptStore::new(filesystem, 7, "/data/transcripts").await.unwrap();
     /// assert!(store.turns().is_empty()); // missing files start empty
+    /// # });
     /// ```
     ///
     /// # Errors
@@ -625,15 +654,18 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// [`TranscriptInitError::Unreadable`] when the transcript *data log*
     /// exists but cannot be read. A missing transcript starts empty, and a
     /// corrupt/mismatched *index* is transparently rebuilt from the data log.
-    pub fn new(filesystem: F, transcript_id: u32, dir: &str) -> Result<Self, TranscriptInitError> {
+    pub async fn new(
+        filesystem: ScopedVfs,
+        transcript_id: u32,
+        dir: &str,
+    ) -> Result<Self, TranscriptInitError> {
         let data_path = transcript_path(dir, transcript_id, DATA_EXT);
         let index_path = transcript_path(dir, transcript_id, INDEX_EXT);
-        let (mut state, needs_rebuild) =
-            load_state(&filesystem, &data_path, &index_path).map_err(|source| {
-                TranscriptInitError::Unreadable {
-                    path: data_path.clone(),
-                    source,
-                }
+        let (mut state, needs_rebuild) = load_state(&filesystem, &data_path, &index_path)
+            .await
+            .map_err(|source| TranscriptInitError::Unreadable {
+                path: data_path.clone(),
+                source,
             })?;
         if needs_rebuild {
             write_live_set_to_files(
@@ -642,7 +674,8 @@ impl<F: FileSystem> TranscriptStore<F> {
                 &index_path,
                 &mut state,
                 transcript_id,
-            );
+            )
+            .await;
         }
         Ok(Self {
             filesystem,
@@ -663,13 +696,13 @@ impl<F: FileSystem> TranscriptStore<F> {
     ///
     /// Returns [`TranscriptDeleteError`] when either existing file cannot be
     /// removed.
-    pub fn delete(
-        filesystem: &F,
+    pub async fn delete(
+        filesystem: &ScopedVfs,
         transcript_id: u32,
         dir: &str,
     ) -> Result<(), TranscriptDeleteError> {
-        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, INDEX_EXT))?;
-        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, DATA_EXT))
+        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, INDEX_EXT)).await?;
+        delete_transcript_file(filesystem, transcript_path(dir, transcript_id, DATA_EXT)).await
     }
 
     /// A monotonic counter bumped once for every non-empty committed turn.
@@ -696,25 +729,8 @@ impl<F: FileSystem> TranscriptStore<F> {
             }
             state.open_turn = Some(OpenTurn::default());
         }
-        let filesystem = self.filesystem.clone();
-        let transcript_id = self.transcript_id;
-        let data_path = self.data_path.clone();
-        let index_path = self.index_path.clone();
         let state = Arc::clone(&self.state);
-        let persist_state = Arc::clone(&state);
-        Ok(TurnHandle {
-            state,
-            on_drop: Some(Box::new(move || {
-                persist(
-                    &filesystem,
-                    transcript_id,
-                    &data_path,
-                    &index_path,
-                    persist_state.as_ref(),
-                    false,
-                );
-            })),
-        })
+        Ok(TurnHandle { state })
     }
 
     /// A read-only snapshot of every turn, oldest-to-newest: each committed turn
@@ -727,6 +743,19 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// return a cheap refcount bump rather than rebuilding/cloning the transcript.
     pub fn turns(&self) -> Arc<Vec<Turn>> {
         turns_snapshot(self.state.as_ref())
+    }
+
+    /// Persists every committed turn currently queued in memory.
+    pub async fn flush(&self) -> Result<(), FsError> {
+        persist(
+            &self.filesystem,
+            self.transcript_id,
+            &self.data_path,
+            &self.index_path,
+            self.state.as_ref(),
+            true,
+        )
+        .await
     }
 
     fn lock_state(&self) -> RefMut<'_, StoreState> {
@@ -760,7 +789,7 @@ fn turns_snapshot(state: &RefCell<StoreState>) -> Arc<Vec<Turn>> {
     snapshot
 }
 
-impl<F: FileSystem> Transcript for TranscriptStore<F> {
+impl Transcript for TranscriptStore {
     fn open_turn(&self) -> Result<TurnHandle, TurnError> {
         TranscriptStore::open_turn(self)
     }
@@ -772,22 +801,27 @@ impl<F: FileSystem> Transcript for TranscriptStore<F> {
     fn turn_version(&self) -> u64 {
         TranscriptStore::turn_version(self)
     }
+
+    fn flush(&self) -> TranscriptFuture<'_, Result<(), FsError>> {
+        Box::pin(TranscriptStore::flush(self))
+    }
 }
 
 /// The RAII scope for one transcript turn.
 ///
 /// Open role-specific child scopes with [`user`](Self::user),
 /// [`assistant`](Self::assistant), and [`tool`](Self::tool). Each child finishes
-/// its message when dropped. Dropping this handle commits the complete turn and
-/// persists the committed turn.
+/// its message when dropped. Dropping this handle commits the complete turn to
+/// the pending queue; [`Transcript::flush`] persists it asynchronously.
 ///
 /// # Examples
 ///
 /// ```
-/// # use barracuda_platform_test::MemFs;
+/// # use barracuda_platform_test::memory_vfs;
 /// # use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-/// # let filesystem = std::sync::MemFs::new();
-/// # let store = TranscriptStore::new(filesystem, 1, "/data/transcripts").unwrap();
+/// # futures_lite::future::block_on(async {
+/// # let filesystem = memory_vfs().await.unwrap();
+/// # let store = TranscriptStore::new(filesystem, 1, "/data/transcripts").await.unwrap();
 /// let turn = store.open_turn().unwrap();
 /// {
 ///     let mut user = turn.user().unwrap();
@@ -806,12 +840,13 @@ impl<F: FileSystem> Transcript for TranscriptStore<F> {
 /// // Reads see the open turn (id == None) before it commits.
 /// let turns = store.turns();
 /// assert_eq!(turns.last().map(|t| (t.id, t.messages.len())), Some((None, 3)));
-/// drop(turn); // commits and persists
+/// drop(turn); // commits to the pending queue
+/// store.flush().await.unwrap();
+/// # });
 /// ```
-#[must_use = "the turn is committed and persisted when this handle is dropped"]
+#[must_use = "the turn is committed when this handle is dropped"]
 pub struct TurnHandle {
     state: Arc<RefCell<StoreState>>,
-    on_drop: Option<Box<dyn FnOnce()>>,
 }
 
 impl TurnHandle {
@@ -856,15 +891,13 @@ impl TurnHandle {
 
 impl Drop for TurnHandle {
     fn drop(&mut self) {
-        let committed = {
+        {
             let mut state = lock_state(self.state.as_ref());
             let Some(mut turn) = state.open_turn.take() else {
                 return;
             };
             turn.finish_message();
-            if turn.messages.is_empty() {
-                false
-            } else {
+            if !turn.messages.is_empty() {
                 let messages = turn.messages;
                 let id = state.id_allocator.next();
                 enqueue(&mut state, id, messages.clone());
@@ -874,12 +907,6 @@ impl Drop for TurnHandle {
                     loc: None,
                 });
                 state.mark_turn_boundary();
-                true
-            }
-        };
-        if committed {
-            if let Some(persist) = self.on_drop.take() {
-                persist();
             }
         }
     }
@@ -1026,59 +1053,72 @@ fn enqueue(state: &mut StoreState, id: TurnId, msgs: Vec<Value>) {
 }
 
 /// Flush pending records (one `append`) and, when needed, rewrite the manifest.
-fn persist<F: FileSystem>(
-    filesystem: &F,
+async fn persist(
+    filesystem: &ScopedVfs,
     transcript_id: u32,
     data_path: &str,
     index_path: &str,
     state: &RefCell<StoreState>,
     force_manifest: bool,
-) {
-    let mut state = lock_state(state);
-    // Pending data always makes the manifest stale: after the append the data log
-    // has records the index doesn't know about. Fold that into want_manifest so
-    let has_pending = !state.pending.is_empty();
-    let want_manifest = force_manifest || has_pending;
+) -> Result<(), FsError> {
+    let (want_manifest, staged) = {
+        let state_ref = lock_state(state);
+        // Pending data always makes the manifest stale: after the append the data log
+        // has records the index doesn't know about. Fold that into want_manifest so
+        let has_pending = !state_ref.pending.is_empty();
+        let want_manifest = force_manifest || has_pending;
+        let staged = if !state_ref.pending.is_empty() {
+            let mut data_buf = Vec::new();
+            let mut locs = Vec::with_capacity(state_ref.pending.len());
+            let mut off = state_ref.data_len.as_offset();
+            for pending in &state_ref.pending {
+                let len = ByteLen::of(&pending.line);
+                data_buf.extend_from_slice(&pending.line);
+                locs.push((pending.id, off, len));
+                off = off.advance(len);
+            }
+            Some((data_buf, locs, off, state_ref.pending.len()))
+        } else {
+            None
+        };
+        (want_manifest, staged)
+    };
     if !want_manifest {
-        return;
+        return Ok(());
     }
 
-    if !state.pending.is_empty() {
-        let mut data_buf = Vec::new();
-        let mut locs = Vec::with_capacity(state.pending.len());
-        let mut off = state.data_len.as_offset();
-        for pending in &state.pending {
-            let len = ByteLen::of(&pending.line);
-            data_buf.extend_from_slice(&pending.line);
-            locs.push((pending.id, off, len));
-            off = off.advance(len);
-        }
-        if let Err(err) = filesystem.append(data_path, &data_buf) {
+    if let Some((data_buf, locs, off, pending_count)) = staged {
+        if let Err(err) = filesystem.append(data_path, &data_buf).await {
             log::warn!("transcript {transcript_id}: data append failed: {err}");
-            return;
+            return Err(err);
         }
+        let mut state = lock_state(state);
         state.data_len = off.as_len();
         for (id, off, len) in locs {
             set_loc(&mut state, id, off, len);
         }
-        state.pending.clear();
+        state.pending.drain(..pending_count);
     }
-    if let Some(bytes) = build_manifest_bytes(&state, transcript_id) {
-        match filesystem.write_atomic(index_path, &bytes) {
+    let bytes = build_manifest_bytes(&lock_state(state), transcript_id);
+    if let Some(bytes) = bytes {
+        match filesystem.write_atomic(index_path, &bytes).await {
             Ok(()) => {
+                let mut state = lock_state(state);
                 state.manifest_covered_len = state.data_len;
             }
             Err(err) => {
                 log::warn!("transcript {transcript_id}: index write failed: {err}");
+                return Err(err);
             }
         }
     }
+    Ok(())
 }
 
 /// Rewrite `.jsonl` + `.json` from the in-memory turns in id order, updating
 /// state locs to the new layout on success.
-fn write_live_set_to_files<F: FileSystem>(
-    filesystem: &F,
+async fn write_live_set_to_files(
+    filesystem: &ScopedVfs,
     data_path: &str,
     index_path: &str,
     state: &mut StoreState,
@@ -1122,11 +1162,11 @@ fn write_live_set_to_files<F: FileSystem>(
         }
     };
 
-    if let Err(err) = filesystem.write_atomic(data_path, &data_buf) {
+    if let Err(err) = filesystem.write_atomic(data_path, &data_buf).await {
         log::warn!("transcript {transcript_id}: write_live data write failed: {err}");
         return;
     }
-    if let Err(err) = filesystem.write_atomic(index_path, &manifest_bytes) {
+    if let Err(err) = filesystem.write_atomic(index_path, &manifest_bytes).await {
         log::warn!("transcript {transcript_id}: write_live index write failed: {err}");
         // Data file is the fresh truth; stale manifest is rebuilt on next load.
     }
@@ -1208,8 +1248,8 @@ fn verify_entry(entry: &IndexEntry, record: &LogRecord) -> bool {
 /// log ([`FsError::NotFound`]) yields an empty state, and index problems are
 /// recovered from the data log rather than surfaced — so a genuine data-log I/O
 /// fault is never silently treated as an empty transcript.
-fn load_state<F: FileSystem>(
-    filesystem: &F,
+async fn load_state(
+    filesystem: &ScopedVfs,
     data_path: &str,
     index_path: &str,
 ) -> Result<(StoreState, bool), FsError> {
@@ -1218,30 +1258,29 @@ fn load_state<F: FileSystem>(
     let mut manifest_next_id = TurnId::new(1);
     let mut mismatch = false;
 
-    // One handle to the data log, reused for every indexed record read and the
-    // tail scan below, instead of reopening the file per access. A missing log is
-    // a fresh transcript; any other open failure is a real fault, surfaced so
-    // the empty state is not mistaken for "no transcript".
-    let mut data_file = match filesystem.open(data_path) {
-        Ok(file) => Some(file),
+    let data_file_len = match filesystem.len(data_path).await {
+        Ok(len) => Some(len),
         Err(FsError::NotFound) => None,
         Err(error) => return Err(error),
     };
 
-    match filesystem.read(index_path) {
+    match filesystem.read(index_path).await {
         Ok(bytes) => {
             if let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes) {
                 covered_len = manifest.covered_len;
                 manifest_next_id = manifest.next_id;
                 'entries: for entry in &manifest.live {
                     let (off, len) = (entry.off, entry.len);
-                    let Some(file) = data_file.as_mut() else {
+                    let Some(_data_len) = data_file_len else {
                         // The manifest references a data log that cannot be opened;
                         // rebuild from whatever the tail scan recovers.
                         mismatch = true;
                         break 'entries;
                     };
-                    match file.read_exact_at(off.as_u64(), len.as_usize()) {
+                    match filesystem
+                        .read_at(data_path, off.as_u64(), len.as_usize())
+                        .await
+                    {
                         Ok(buf) => match parse_record(&buf) {
                             Some(record) if verify_entry(entry, &record) => {
                                 apply_record(&mut state, record, Some((off, len)));
@@ -1276,19 +1315,19 @@ fn load_state<F: FileSystem>(
                         }
                     }
                 }
-            } else if data_file.is_some() {
+            } else if data_file_len.is_some() {
                 log::error!("transcript load: manifest could not be parsed; rebuilding");
                 mismatch = true;
             }
         }
         Err(FsError::NotFound) => {
-            if data_file.is_some() {
+            if data_file_len.is_some() {
                 mismatch = true;
             }
         }
         Err(err) => {
             log::error!("transcript load: manifest could not be read: {err}; rebuilding");
-            if data_file.is_some() {
+            if data_file_len.is_some() {
                 mismatch = true;
             }
         }
@@ -1300,17 +1339,17 @@ fn load_state<F: FileSystem>(
         manifest_next_id = TurnId::new(1);
     }
 
-    let mut data_file_len = 0;
-    if let Some(file) = data_file.as_ref() {
-        if let Ok(len) = file.size() {
-            data_file_len = len;
-        }
-    }
-    let data_len = ByteLen::from_file_len(data_file_len);
+    let data_len = ByteLen::from_file_len(data_file_len.unwrap_or_default());
     if data_len > covered_len {
         let extra = data_len.saturating_sub(covered_len);
-        if let Some(file) = data_file.as_mut() {
-            let tail = file.read_exact_at(covered_len.as_offset().as_u64(), extra.as_usize())?;
+        if data_file_len.is_some() {
+            let tail = filesystem
+                .read_at(
+                    data_path,
+                    covered_len.as_offset().as_u64(),
+                    extra.as_usize(),
+                )
+                .await?;
             scan_tail(&mut state, &tail, covered_len.as_offset());
         }
     }
@@ -1380,11 +1419,11 @@ fn transcript_path(dir: &str, transcript_id: u32, ext: &str) -> String {
     format!("{}/{transcript_id}{ext}", dir.trim_end_matches('/'))
 }
 
-fn delete_transcript_file<F: FileSystem>(
-    filesystem: &F,
+async fn delete_transcript_file(
+    filesystem: &ScopedVfs,
     path: String,
 ) -> Result<(), TranscriptDeleteError> {
-    match filesystem.remove(&path) {
+    match filesystem.remove(&path).await {
         Ok(()) | Err(FsError::NotFound) => Ok(()),
         Err(source) => Err(TranscriptDeleteError::Delete { path, source }),
     }
@@ -1399,118 +1438,152 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::future::block_on;
 
     #[test]
     fn invalid_index_is_rebuilt_from_data_log() {
-        let filesystem = MemFs::new();
-        let dir = "/transcript-index-rebuild";
-        let index_path = transcript_path(dir, 1, INDEX_EXT);
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let dir = "/transcript-index-rebuild";
+            let index_path = transcript_path(dir, 1, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(filesystem.clone(), 1, dir).unwrap();
-        {
-            let turn = store.open_turn().unwrap();
+            let store = TranscriptStore::new(filesystem.clone(), 1, dir)
+                .await
+                .unwrap();
             {
-                let mut user = turn.user().unwrap();
-                user.append("persisted user");
+                let turn = store.open_turn().unwrap();
+                {
+                    let mut user = turn.user().unwrap();
+                    user.append("persisted user");
+                }
+                {
+                    let mut assistant = turn.assistant().unwrap();
+                    assistant.append(AssistantFragment::Content("persisted reply"));
+                }
             }
-            {
-                let mut assistant = turn.assistant().unwrap();
-                assistant.append(AssistantFragment::Content("persisted reply"));
-            }
-        }
-        // Turn drop persists immediately, so both files are already on disk.
-        assert!(serde_json::from_slice::<Manifest>(&filesystem.read(&index_path).unwrap()).is_ok());
+            store.flush().await.unwrap();
+            assert!(serde_json::from_slice::<Manifest>(
+                &filesystem.read(&index_path).await.unwrap()
+            )
+            .is_ok());
 
-        filesystem
-            .write_atomic(&index_path, b"{not valid json")
-            .unwrap();
-        let rebuilt = TranscriptStore::<MemFs>::new(filesystem.clone(), 1, dir).unwrap();
-        let messages: String = rebuilt
-            .turns()
-            .iter()
-            .flat_map(|turn| turn.messages.iter())
-            .map(Value::to_string)
-            .collect();
-        assert!(messages.contains("persisted user"));
-        assert!(messages.contains("persisted reply"));
-        assert!(serde_json::from_slice::<Manifest>(&filesystem.read(&index_path).unwrap()).is_ok());
+            filesystem
+                .write_atomic(&index_path, b"{not valid json")
+                .await
+                .unwrap();
+            let rebuilt = TranscriptStore::new(filesystem.clone(), 1, dir)
+                .await
+                .unwrap();
+            let messages: String = rebuilt
+                .turns()
+                .iter()
+                .flat_map(|turn| turn.messages.iter())
+                .map(Value::to_string)
+                .collect();
+            assert!(messages.contains("persisted user"));
+            assert!(messages.contains("persisted reply"));
+            assert!(serde_json::from_slice::<Manifest>(
+                &filesystem.read(&index_path).await.unwrap()
+            )
+            .is_ok());
+        });
     }
 
     #[test]
     fn delete_removes_both_transcript_files_and_is_idempotent() {
-        let filesystem = MemFs::new();
-        let dir = "/transcript-delete";
-        let data_path = transcript_path(dir, 7, DATA_EXT);
-        let index_path = transcript_path(dir, 7, INDEX_EXT);
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let dir = "/transcript-delete";
+            let data_path = transcript_path(dir, 7, DATA_EXT);
+            let index_path = transcript_path(dir, 7, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(filesystem.clone(), 7, dir).unwrap();
-        {
-            let turn = store.open_turn().unwrap();
+            let store = TranscriptStore::new(filesystem.clone(), 7, dir)
+                .await
+                .unwrap();
             {
-                let mut user = turn.user().unwrap();
-                user.append("delete me");
+                let turn = store.open_turn().unwrap();
+                {
+                    let mut user = turn.user().unwrap();
+                    user.append("delete me");
+                }
+                {
+                    let mut assistant = turn.assistant().unwrap();
+                    assistant.append(AssistantFragment::Content("deleted"));
+                }
             }
-            {
-                let mut assistant = turn.assistant().unwrap();
-                assistant.append(AssistantFragment::Content("deleted"));
-            }
-        }
-        drop(store);
-        assert!(filesystem
-            .exists(&data_path)
-            .expect("existence check succeeds"));
-        assert!(filesystem
-            .exists(&index_path)
-            .expect("existence check succeeds"));
+            store.flush().await.unwrap();
+            drop(store);
+            assert!(filesystem
+                .exists(&data_path)
+                .await
+                .expect("existence check succeeds"));
+            assert!(filesystem
+                .exists(&index_path)
+                .await
+                .expect("existence check succeeds"));
 
-        TranscriptStore::<MemFs>::delete(&filesystem, 7, dir).unwrap();
-        assert!(!filesystem
-            .exists(&data_path)
-            .expect("existence check succeeds"));
-        assert!(!filesystem
-            .exists(&index_path)
-            .expect("existence check succeeds"));
+            TranscriptStore::delete(&filesystem, 7, dir).await.unwrap();
+            assert!(!filesystem
+                .exists(&data_path)
+                .await
+                .expect("existence check succeeds"));
+            assert!(!filesystem
+                .exists(&index_path)
+                .await
+                .expect("existence check succeeds"));
 
-        TranscriptStore::<MemFs>::delete(&filesystem, 7, dir).unwrap();
+            TranscriptStore::delete(&filesystem, 7, dir).await.unwrap();
+        });
     }
 
     #[test]
     fn list_persisted_ids_unions_data_and_index_files() {
-        let filesystem = MemFs::new();
-        let dir = "/transcript-list";
-        filesystem
-            .write_atomic(&transcript_path(dir, 3, DATA_EXT), b"")
-            .unwrap();
-        filesystem
-            .write_atomic(&transcript_path(dir, 3, INDEX_EXT), b"")
-            .unwrap();
-        filesystem
-            .write_atomic(&transcript_path(dir, 7, DATA_EXT), b"")
-            .unwrap();
-        filesystem
-            .write_atomic(&format!("{dir}/unrelated"), b"")
-            .unwrap();
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let dir = "/transcript-list";
+            filesystem
+                .write_atomic(&transcript_path(dir, 3, DATA_EXT), b"")
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic(&transcript_path(dir, 3, INDEX_EXT), b"")
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic(&transcript_path(dir, 7, DATA_EXT), b"")
+                .await
+                .unwrap();
+            filesystem
+                .write_atomic(&format!("{dir}/unrelated"), b"")
+                .await
+                .unwrap();
 
-        assert_eq!(
-            TranscriptStore::<MemFs>::list_persisted_ids(&filesystem, dir).unwrap(),
-            vec![3, 7]
-        );
+            assert_eq!(
+                TranscriptStore::list_persisted_ids(&filesystem, dir)
+                    .await
+                    .unwrap(),
+                vec![3, 7]
+            );
+        });
     }
 
     #[test]
     fn list_persisted_ids_rejects_invalid_transcript_filenames() {
-        let filesystem = MemFs::new();
-        let dir = "/transcript-list-invalid";
-        filesystem
-            .write_atomic(&format!("{dir}/not-an-id.jsonl"), b"")
-            .unwrap();
+        block_on(async {
+            let filesystem = memory_vfs().await.unwrap();
+            let dir = "/transcript-list-invalid";
+            filesystem
+                .write_atomic(&format!("{dir}/not-an-id.jsonl"), b"")
+                .await
+                .unwrap();
 
-        assert_eq!(
-            TranscriptStore::<MemFs>::list_persisted_ids(&filesystem, dir),
-            Err(TranscriptListError::InvalidFilename(
-                "not-an-id.jsonl".to_owned()
-            ))
-        );
+            assert_eq!(
+                TranscriptStore::list_persisted_ids(&filesystem, dir).await,
+                Err(TranscriptListError::InvalidFilename(
+                    "not-an-id.jsonl".to_owned()
+                ))
+            );
+        });
     }
 }

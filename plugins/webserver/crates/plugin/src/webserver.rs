@@ -1,9 +1,7 @@
 //! One cross-platform picoserve server configured by dependent Plugins.
 //!
 //! [`WebServer`] owns portable routes only. [`WebServerPlugin`](crate::WebServerPlugin)
-//! loads the listener Component that supplies sockets and a picoserve timer.
-//! The same server therefore runs on Tokio, Embassy, or another
-//! picoserve-compatible runtime without platform `cfg`s in this module.
+//! starts the Embassy task that supplies sockets and a picoserve timer.
 
 use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
@@ -416,7 +414,7 @@ impl WebServer {
         }
     }
 
-    /// Registers one portable WebSocket endpoint during Plugin startup.
+    /// Registers one portable WebSocket endpoint during Plugin registration.
     ///
     /// # Errors
     ///
@@ -447,7 +445,7 @@ impl WebServer {
         })
     }
 
-    /// Registers one portable ordinary HTTP endpoint during Plugin startup.
+    /// Registers one portable ordinary HTTP endpoint during Plugin registration.
     ///
     /// # Errors
     ///

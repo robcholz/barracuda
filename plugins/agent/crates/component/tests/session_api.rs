@@ -14,7 +14,8 @@ use barracuda_agent_component::dto::{FixedStr, SessionIdDto, SessionPersistenceD
 use barracuda_agent_component::list_sessions::ListSessions;
 use barracuda_agent_component::new_session::{NewSession, NewSessionRequest};
 use barracuda_agent_component::open_session::{
-    OpenSession, OpenSessionRequest, OpenSessionResponse, SessionEventDto,
+    frames_from_open_session_response, OpenSession, OpenSessionRequest, OpenSessionResponse,
+    OpenSessionResponseDecoder, SessionEventDto, ToolOutputDto,
 };
 use barracuda_agent_component::session;
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionId};
@@ -23,8 +24,7 @@ use barracuda_event_router::{
     RpcError, RpcFrame, RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
 };
 use barracuda_model_api::ModelApi;
-use barracuda_platform_test::MemFs;
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::{install_global_memory_vfs, memory_vfs, ScriptStep, ScriptedStack};
 use static_cell::StaticCell;
 
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
@@ -102,8 +102,11 @@ async fn run_session_api(
         Ok(frame) => *frame.view()?,
         Err(error) => panic!("open session method error: {:?}", error.view()?),
     };
-    let response: OpenSessionResponse = serde_json::from_str(frame.json.as_str())
-        .unwrap_or_else(|error| panic!("invalid Opened JSON: {error}"));
+    let mut decoder = OpenSessionResponseDecoder::new();
+    let response = decoder
+        .push(frame)
+        .unwrap_or_else(|error| panic!("invalid Opened event: {error}"))
+        .expect("complete Opened event");
     assert!(matches!(response, OpenSessionResponse::Opened { .. }));
     success(
         client
@@ -120,8 +123,12 @@ async fn run_session_api(
             Ok(frame) => *frame.view()?,
             Err(error) => panic!("open session method error: {:?}", error.view()?),
         };
-        let response: OpenSessionResponse = serde_json::from_str(frame.json.as_str())
-            .unwrap_or_else(|error| panic!("invalid event JSON: {error}"));
+        let Some(response) = decoder
+            .push(frame)
+            .unwrap_or_else(|error| panic!("invalid event frame: {error}"))
+        else {
+            continue;
+        };
         match response {
             OpenSessionResponse::Event {
                 event:
@@ -150,6 +157,35 @@ async fn run_session_api(
     Ok(())
 }
 
+#[test]
+fn session_open_chunks_and_recovers_long_tool_results() {
+    let session = SessionId::new(77);
+    let response = OpenSessionResponse::Event {
+        session,
+        event: SessionEventDto::ToolResult {
+            call: barracuda_agent_runtime::ToolCall {
+                id: "call-1".into(),
+                name: "large-tool".into(),
+                arguments_json: format!(r#"{{"input":"{}"}}"#, "a".repeat(900)),
+            },
+            output: ToolOutputDto {
+                content: "result".repeat(400),
+                ok: true,
+            },
+        },
+    };
+
+    let frames = frames_from_open_session_response(session, &response).expect("encode event");
+    assert!(frames.len() > 4);
+
+    let mut decoder = OpenSessionResponseDecoder::new();
+    let decoded = frames
+        .into_iter()
+        .find_map(|frame| decoder.push(frame).expect("decode frame"))
+        .expect("complete event");
+    assert_eq!(decoded, response);
+}
+
 fn success<T, E>(outcome: Result<RpcFrame<T>, RpcFrame<E>>) -> Result<RpcFrame<T>, RpcError> {
     outcome.map_err(|_error| RpcError::InvalidFrameState)
 }
@@ -164,9 +200,9 @@ data: [DONE]
 "#;
         let network: &'static ScriptedStack =
             NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[event])]));
-        let factory = ModelApiFactory::new(move || ModelApi::new(network, 4096, 1024));
-        let (runtime, service) = AgentRuntime::<MemFs, ScriptedStack>::new(
-            MemFs::new(),
+        let factory = ModelApiFactory::new(move || ModelApi::new(network, network, 4096, 1024));
+        let (runtime, service) = AgentRuntime::<ScriptedStack, ScriptedStack>::new(
+            memory_vfs().await.expect("memory VFS mounts"),
             RuntimeStorageConfig {
                 persistence_root: "/agent".into(),
                 skill_roots: Vec::new(),
@@ -188,9 +224,12 @@ data: [DONE]
             .expect("configure model API");
 
         let result = Rc::new(ResultState::default());
+        install_global_memory_vfs()
+            .await
+            .expect("install global test VFS");
         let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-        let filesystem = MemFs::new();
-        let mut router = EventRouter::<8, 512, 8>::new(lanes, filesystem, "workflows")
+        let mut router = EventRouter::<8, 512, 8>::new(lanes)
+            .await
             .expect("build Event Router");
         router
             .load(Box::new(AgentComponent::new(runtime, service)))

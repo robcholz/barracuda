@@ -1,35 +1,24 @@
 # IMessage Gateway RPC API
 
 The IMessage Gateway Component exposes outbound delivery independently from
-any Workflow, Agent, or concrete IM provider. Both RPCs select their
-destination with the same `GatewayRoute` and return the provider-assigned
-message identifier in `GatewaySendReceipt`.
+any Workflow, Agent, or concrete IM provider. All RPCs select their destination
+with `GatewayRoute` and return the provider-assigned identifier in
+`GatewaySendReceipt`.
 
 ## `gateway.send`
 
-Sends one text message.
+Sends one bounded complete text message. This is the simple and dynamic API.
 
 - Address: `gateway.send`
-- Request: streaming `GatewaySendRequestFrame`
+- Request: unary `GatewaySendRequest`
 - Response: unary `GatewaySendReceipt`
 - Method error: `GatewaySendError`
+- Dynamic: yes (`call_json` is supported)
 
-### Logical request
-
-`GatewayOutboundMessage` is the caller-facing logical value encoded by
-`frames_from_gateway_send`:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `route` | `GatewayRoute` | Provider channel, conversation, and optional thread. |
-| `text` | `String` | Complete user-visible message text. |
-| `reply_to` | `Option<String>` | Optional provider message identifier being replied to. |
-| `kind` | `MessageKind` | `Reply`, `Reasoning`, `Tool`, or `Notice`. |
-
-Each frame contains a `GatewaySendField`, a `GatewayMessageKind`, and
-NUL-terminated UTF-8 `GatewayText`. Route metadata occupies one frame per
-field. Message text uses `TextMore` frames followed by exactly one
-`TextComplete` frame. The helper preserves UTF-8 character boundaries.
+`GatewaySendRequest` contains bounded `channel`, `conversation`, `thread`,
+`reply_to`, and `text` fields. Empty `thread` and `reply_to` values mean absent.
+Use `GatewaySendRequest::new` or `GatewaySendRequest::with_reply_to` for typed
+calls.
 
 ### Response
 
@@ -40,10 +29,44 @@ selected provider.
 
 | Variant | Meaning |
 | --- | --- |
-| `InvalidRequest` | Required fields are absent, a field is duplicated or out of order, message kinds differ between frames, or text is invalid. |
+| `InvalidRequest` | A request field is invalid. |
 | `UnknownChannel` | `route.channel` does not name a registered `MessageChannel`. |
 | `Delivery` | The selected provider rejected the request or its transport failed. |
 | `InvalidReceipt` | The provider returned a message identifier that cannot fit in the Gateway response contract. |
+
+## `gateway.send_stream`
+
+Streams primary text and optional extra content in one ordered delivery. This
+is the complete typed API.
+
+- Address: `gateway.send_stream`
+- Request: streaming `GatewaySendStreamRequestFrame`
+- Response: unary `GatewaySendReceipt`
+- Method error: `GatewaySendStreamError`
+- Dynamic: no
+
+Each fixed-layout request frame contains `value` and one
+`GatewaySendStreamField`. The stream begins with `Channel`, `Conversation`,
+optional `Thread`, and optional `ReplyTo`. Content follows as field variants:
+
+- `TextMore` / `TextComplete`
+- `ReasoningMore` / `ReasoningComplete`
+- `EffectResultMore` / `EffectResultComplete`
+- `NoticeMore` / `NoticeComplete`
+- `EventMore` / `EventComplete`
+- structured tool fields from `ToolResultStart` through `ToolResultEnd`
+
+The handler reads only the metadata prefix, then hands the remaining live
+stream to the selected provider. `frames_from_gateway_send_stream` encodes a
+logical buffered value; `frames_from_gateway_stream_frame` incrementally
+encodes one content frame.
+
+Plain providers use the default projection, which consumes all frames and
+delivers only `Text`. Rich providers override `MessageChannel::send_stream` to
+render extra frames.
+
+Errors are `InvalidRequest`, `UnknownChannel`, `Delivery`, and
+`InvalidReceipt`, with the same routing and receipt meanings as `gateway.send`.
 
 ## `gateway.send_media`
 

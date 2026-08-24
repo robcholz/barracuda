@@ -5,7 +5,8 @@ use std::sync::Arc;
 use barracuda_agent_memory::{
     AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
 
 #[test]
 fn turn_id_uses_the_shared_prefixed_wire_format() {
@@ -146,19 +147,26 @@ fn tool_handle_records_one_atomic_result() {
 
 #[test]
 fn turn_drop_can_persist_after_the_store_drops() {
-    let filesystem = MemFs::new();
-    let store = TranscriptStore::new(filesystem.clone(), 9, "/transcript-detached-turn").unwrap();
-    let turn = store.open_turn().unwrap();
-    {
-        let mut user = turn.user().unwrap();
-        user.append("still persists");
-    }
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let store = TranscriptStore::new(filesystem.clone(), 9, "/transcript-detached-turn")
+            .await
+            .unwrap();
+        let turn = store.open_turn().unwrap();
+        {
+            let mut user = turn.user().unwrap();
+            user.append("still persists");
+        }
 
-    drop(store);
-    drop(turn);
+        drop(turn);
+        store.flush().await.unwrap();
+        drop(store);
 
-    let reloaded = TranscriptStore::new(filesystem, 9, "/transcript-detached-turn").unwrap();
-    assert_eq!(reloaded.turns()[0].messages[0]["content"], "still persists");
+        let reloaded = TranscriptStore::new(filesystem, 9, "/transcript-detached-turn")
+            .await
+            .unwrap();
+        assert_eq!(reloaded.turns()[0].messages[0]["content"], "still persists");
+    });
 }
 
 #[test]
@@ -181,28 +189,40 @@ fn transcript_trait_is_the_only_type_erased_boundary() {
 
 #[test]
 fn persisted_transcript_restores_turn_version() {
-    let filesystem = MemFs::new();
-    let store = Arc::new(
-        TranscriptStore::<MemFs>::new(filesystem.clone(), 7, "/transcript-version-reload").unwrap(),
-    );
-    {
-        let turn = store.clone().open_turn().unwrap();
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let store = Arc::new(
+            TranscriptStore::new(filesystem.clone(), 7, "/transcript-version-reload")
+                .await
+                .unwrap(),
+        );
         {
-            let mut user = turn.user().unwrap();
-            user.append("hello");
+            let turn = store.clone().open_turn().unwrap();
+            {
+                let mut user = turn.user().unwrap();
+                user.append("hello");
+            }
+            {
+                let mut assistant = turn.assistant().unwrap();
+                assistant.append(AssistantFragment::Content("world"));
+            }
         }
-        {
-            let mut assistant = turn.assistant().unwrap();
-            assistant.append(AssistantFragment::Content("world"));
-        }
-    }
-    assert_eq!(store.turn_version(), 1);
+        assert_eq!(store.turn_version(), 1);
+        store.flush().await.unwrap();
 
-    let reloaded =
-        TranscriptStore::<MemFs>::new(filesystem, 7, "/transcript-version-reload").unwrap();
-    assert_eq!(reloaded.turn_version(), 1);
+        let reloaded = TranscriptStore::new(filesystem, 7, "/transcript-version-reload")
+            .await
+            .unwrap();
+        assert_eq!(reloaded.turn_version(), 1);
+    });
 }
 
-fn store() -> Arc<TranscriptStore<MemFs>> {
-    Arc::new(TranscriptStore::new(MemFs::new(), 1, "/transcript-store-tests").unwrap())
+fn store() -> Arc<TranscriptStore> {
+    block_on(async {
+        Arc::new(
+            TranscriptStore::new(memory_vfs().await.unwrap(), 1, "/transcript-store-tests")
+                .await
+                .unwrap(),
+        )
+    })
 }

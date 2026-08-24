@@ -1,7 +1,0 @@
-name: local-host
-hardware:
-  chip: host
-storage:
-  filesystem: filesystem
-  web-assets: web-assets
-  database: database

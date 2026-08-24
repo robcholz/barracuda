@@ -1,7 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
 use barracuda_agent_memory::{MemoryDraft, Transcript, Turn, TurnId};
-use barracuda_fs::FileSystem;
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -18,7 +17,7 @@ struct ExtractionBatch<'a> {
     skipped: usize,
 }
 
-impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
+impl LongTermMemoryContextProvider {
     /// Run one bounded extraction after a full batch of turns has committed.
     ///
     /// The cheap turn-version check avoids cloning a transcript snapshot on
@@ -111,7 +110,7 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
                     );
                 });
                 for op in ops {
-                    self.apply_op(op);
+                    self.apply_op(op).await;
                 }
             }
             Err(error) => {
@@ -128,20 +127,20 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
         }
     }
 
-    fn apply_op(&self, op: MemoryOp) {
+    async fn apply_op(&self, op: MemoryOp) {
         match op {
             MemoryOp::Add(item) => {
                 let draft = MemoryDraft::new(item.content)
                     .with_tags(item.tags)
                     .with_keywords(item.keywords)
                     .with_source("extracted");
-                self.stores.store(draft);
+                self.stores.store(draft).await;
             }
             MemoryOp::Update { id, patch } => {
-                let _ = self.stores.update(&id, patch);
+                let _ = self.stores.update(&id, patch).await;
             }
             MemoryOp::Forget { id } => {
-                let _ = self.stores.forget(&id);
+                let _ = self.stores.forget(&id).await;
             }
         }
     }
@@ -212,7 +211,7 @@ mod tests {
     use barracuda_agent_memory::{LongTermMemory, TranscriptStore};
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::ToolError;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
 
     use crate::engine::{AgentStorage, ContextProvider};
@@ -358,21 +357,33 @@ mod tests {
         assert!(retry.contains("user: second-07"));
     }
 
-    fn provider(extractor: Arc<RecordingExtractor>) -> LongTermMemoryContextProvider<MemFs> {
-        let filesystem = MemFs::new();
-        let agent = LongTermMemory::new(filesystem.clone(), "/memory/agent", "a-")
-            .expect("the agent memory store opens");
-        let global = LongTermMemory::new(filesystem, "/memory/global", "g-")
-            .expect("the global memory store opens");
-        let extractor: Arc<dyn Extractor> = extractor;
-        LongTermMemoryContextProvider::new(agent, global, extractor)
+    fn provider(extractor: Arc<RecordingExtractor>) -> LongTermMemoryContextProvider {
+        block_on(async {
+            let filesystem = memory_vfs().await.expect("memory VFS mounts");
+            let agent = LongTermMemory::new(filesystem.clone(), "/memory/agent", "a-")
+                .await
+                .expect("the agent memory store opens");
+            let global = LongTermMemory::new(filesystem, "/memory/global", "g-")
+                .await
+                .expect("the global memory store opens");
+            let extractor: Arc<dyn Extractor> = extractor;
+            LongTermMemoryContextProvider::new(agent, global, extractor)
+        })
     }
 
-    fn transcript() -> TranscriptStore<MemFs> {
-        TranscriptStore::new(MemFs::new(), 1, "/transcript").expect("the transcript store opens")
+    fn transcript() -> TranscriptStore {
+        block_on(async {
+            TranscriptStore::new(
+                memory_vfs().await.expect("memory VFS mounts"),
+                1,
+                "/transcript",
+            )
+            .await
+            .expect("the transcript store opens")
+        })
     }
 
-    fn commit_turn(transcript: &TranscriptStore<MemFs>, content: &str) {
+    fn commit_turn(transcript: &TranscriptStore, content: &str) {
         let turn = transcript.open_turn().expect("the test turn opens");
         {
             let mut user = turn.user().expect("the user message opens");

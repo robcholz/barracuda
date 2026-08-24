@@ -6,16 +6,27 @@ mod support;
 use core::cell::{Cell, RefCell};
 use std::future::pending;
 use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, FileSystem, RegisterContext,
-    RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
+    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcFrame,
+    RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
     WorkflowControlError,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
+use barracuda_vfs::{read, remove_file};
+use futures_lite::future::block_on;
 
 const FRAME_CAPACITY: usize = 64;
+static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn reset_global_vfs() -> MutexGuard<'static, ()> {
+    let guard = GLOBAL_VFS_TEST_LOCK.lock().expect("lock global VFS test");
+    block_on(install_global_memory_vfs()).expect("install global test VFS");
+    let _ignored = block_on(remove_file("/system/workflows.json"));
+    guard
+}
 
 struct Sink;
 
@@ -74,16 +85,15 @@ impl Component<FRAME_CAPACITY> for CatalogLoader {
     }
 }
 
-fn router(filesystem: &MemFs, directory: &'static str) -> EventRouter<2, FRAME_CAPACITY, 2> {
+fn router() -> EventRouter<2, FRAME_CAPACITY, 2> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<2, FRAME_CAPACITY, 2>::new()));
-    EventRouter::new(lanes, filesystem.clone(), directory).expect("create Event Router")
+    block_on(EventRouter::new(lanes)).expect("create Event Router")
 }
 
 #[test]
 fn hundreds_of_workflows_persist_and_restore_in_load_order() {
+    let _global_vfs = reset_global_vfs();
     const WORKFLOWS: usize = 256;
-    const DIRECTORY: &str = "catalog-scale";
-
     let documents = (0..WORKFLOWS)
         .map(|index| {
             format!(
@@ -91,9 +101,8 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
             )
         })
         .collect();
-    let filesystem = MemFs::new();
     let state = Rc::new(LoadState::default());
-    let mut event_router = router(&filesystem, DIRECTORY);
+    let mut event_router = router();
     event_router
         .load(Box::new(CatalogLoader {
             documents,
@@ -114,13 +123,11 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
         definitions.last().expect("last definition").id().as_str(),
         "workflow-0255"
     );
-    let index = filesystem
-        .read("catalog-scale/index")
-        .expect("read Workflow index");
-    assert_eq!(
-        index.iter().filter(|byte| **byte == b'\n').count(),
-        WORKFLOWS
-    );
+    let catalog: Vec<serde_json::Value> = serde_json::from_slice(
+        &block_on(read("/system/workflows.json")).expect("read Workflow catalog"),
+    )
+    .expect("catalog is a JSON array");
+    assert_eq!(catalog.len(), WORKFLOWS);
 
     let elapsed = state.elapsed.get().expect("catalog load elapsed time");
     eprintln!(
@@ -131,7 +138,7 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
 
     drop(event_router);
     let restored_started = Instant::now();
-    let restored = router(&filesystem, DIRECTORY);
+    let restored = router();
     let restored_elapsed = restored_started.elapsed();
     assert_eq!(restored.workflow_definitions(), definitions);
     eprintln!(
@@ -143,9 +150,8 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
 
 #[test]
 fn workflow_json_and_step_count_are_not_bounded_by_lane_frame_capacity() {
+    let _global_vfs = reset_global_vfs();
     const STEPS: usize = 512;
-    const DIRECTORY: &str = "large-definition";
-
     let steps = (0..STEPS)
         .map(|_| r#"{"call":"scale.sink"}"#)
         .collect::<Vec<_>>()
@@ -154,9 +160,8 @@ fn workflow_json_and_step_count_are_not_bounded_by_lane_frame_capacity() {
         format!(r#"{{"id":"large-workflow","match":{{"event":"scale.event"}},"steps":[{steps}]}}"#);
     assert!(document.len() > FRAME_CAPACITY);
 
-    let filesystem = MemFs::new();
     let state = Rc::new(LoadState::default());
-    let mut event_router = router(&filesystem, DIRECTORY);
+    let mut event_router = router();
     event_router
         .load(Box::new(CatalogLoader {
             documents: vec![document],

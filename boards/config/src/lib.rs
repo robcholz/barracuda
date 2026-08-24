@@ -4,6 +4,7 @@
 //! generated static description from `barracuda-board` instead of parsing YAML.
 
 use serde::Deserialize;
+use std::path::{Component, Path};
 
 /// Parsed, validated Board definition.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -11,7 +12,8 @@ use serde::Deserialize;
 pub struct BoardDefinition {
     name: String,
     hardware: HardwareDefinition,
-    storage: StorageDefinition,
+    #[serde(rename = "native-layout")]
+    native_layout: NativeLayoutDefinition,
 }
 
 impl BoardDefinition {
@@ -27,30 +29,27 @@ impl BoardDefinition {
         &self.hardware
     }
 
-    /// Returns logical storage roles bound to native-layout region names.
+    /// Returns the Board-bundled native physical layout.
     #[must_use]
-    pub const fn storage(&self) -> &StorageDefinition {
-        &self.storage
+    pub const fn native_layout(&self) -> &NativeLayoutDefinition {
+        &self.native_layout
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
         if self.hardware.chip.trim().is_empty() {
             return Err(ConfigError::EmptyChip);
         }
-        let bindings = self.storage.bindings();
-        for (index, (role, region)) in bindings.iter().enumerate() {
-            if region.trim().is_empty() {
-                return Err(ConfigError::EmptyStorageBinding(role));
-            }
-            for (other_role, other_region) in bindings.iter().skip(index.saturating_add(1)) {
-                if region == other_region {
-                    return Err(ConfigError::DuplicateStorageBinding {
-                        first: role,
-                        second: other_role,
-                        region: (*region).into(),
-                    });
-                }
-            }
+        let artifact = self.native_layout.artifact.trim();
+        if artifact.is_empty() {
+            return Err(ConfigError::EmptyNativeLayoutArtifact);
+        }
+        let path = Path::new(artifact);
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(ConfigError::InvalidNativeLayoutArtifact);
         }
         Ok(())
     }
@@ -71,41 +70,18 @@ impl HardwareDefinition {
     }
 }
 
-/// Logical storage consumers and their physical partition names.
+/// A Platform-native layout file stored inside the Board bundle.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-pub struct StorageDefinition {
-    filesystem: String,
-    web_assets: Option<String>,
-    database: String,
+#[serde(deny_unknown_fields)]
+pub struct NativeLayoutDefinition {
+    artifact: String,
 }
 
-impl StorageDefinition {
-    fn bindings(&self) -> Vec<(&'static str, &str)> {
-        let mut bindings = vec![("filesystem", self.filesystem.as_str())];
-        if let Some(web_assets) = self.web_assets.as_deref() {
-            bindings.push(("web-assets", web_assets));
-        }
-        bindings.push(("database", self.database.as_str()));
-        bindings
-    }
-
-    /// Returns the mutable filesystem partition name.
+impl NativeLayoutDefinition {
+    /// Returns the artifact path relative to the Board bundle.
     #[must_use]
-    pub fn filesystem(&self) -> &str {
-        &self.filesystem
-    }
-
-    /// Returns the optional provisioned Web asset partition name.
-    #[must_use]
-    pub fn web_assets(&self) -> Option<&str> {
-        self.web_assets.as_deref()
-    }
-
-    /// Returns the system database partition name.
-    #[must_use]
-    pub fn database(&self) -> &str {
-        &self.database
+    pub fn artifact(&self) -> &str {
+        &self.artifact
     }
 }
 
@@ -118,22 +94,15 @@ pub enum ConfigError {
     /// Exactly one YAML document is required.
     #[error("expected one Board YAML document, found {0}")]
     DocumentCount(usize),
-    /// A Board must identify its concrete chip or host runtime.
+    /// A Board must identify its concrete chip or native operating-system runtime.
     #[error("Board hardware chip must not be empty")]
     EmptyChip,
-    /// A storage role has no native-layout label.
-    #[error("storage role `{0}` must name a native-layout region")]
-    EmptyStorageBinding(&'static str),
-    /// Two storage roles resolve to the same native region.
-    #[error("storage roles `{first}` and `{second}` both bind native region `{region}`")]
-    DuplicateStorageBinding {
-        /// First logical role.
-        first: &'static str,
-        /// Second logical role.
-        second: &'static str,
-        /// Duplicated native-layout region name.
-        region: String,
-    },
+    /// A Board did not identify its native physical-layout artifact.
+    #[error("Board native-layout artifact must not be empty")]
+    EmptyNativeLayoutArtifact,
+    /// A native-layout artifact is absolute or escapes the Board bundle.
+    #[error("Board native-layout artifact must remain inside its Board bundle")]
+    InvalidNativeLayoutArtifact,
 }
 
 /// Parses and validates exactly one platform-neutral Board YAML document.
@@ -159,18 +128,11 @@ pub fn parse(yaml: &str) -> Result<BoardDefinition, ConfigError> {
 /// that Platform's initializer.
 #[must_use]
 pub fn render_rust(board: &BoardDefinition) -> String {
-    let mut output = String::new();
-    let assets = board
-        .storage
-        .web_assets()
-        .map_or_else(|| "None".into(), |name| format!("Some({name:?})"));
-    output.push_str(&format!(
+    format!(
         "/// Board selected by the build configuration.\n\
-         pub const BOARD: ::barracuda_board::Board = ::barracuda_board::Board::new(\n    {:?},\n    ::barracuda_board::Hardware::new({:?}),\n    ::barracuda_board::Storage::new({:?}, {assets}, {:?}),\n);\n",
+         pub const BOARD: ::barracuda_board::Board = ::barracuda_board::Board::new(\n    {:?},\n    ::barracuda_board::Hardware::new({:?}),\n    ::barracuda_board::NativeLayout::new({:?}),\n);\n",
         board.name(),
         board.hardware().chip(),
-        board.storage().filesystem(),
-        board.storage().database(),
-    ));
-    output
+        board.native_layout().artifact(),
+    )
 }

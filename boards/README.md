@@ -16,14 +16,14 @@ boards/
 One directory under `configs/` describes one concrete product. `board.yml`
 contains the maximum common denominator: identity, canonical chip name, and
 logical storage mappings. It must not contain a Rust Platform type or select
-`host`, `esp32`, or another Platform implementation.
+`macos`, `linux`, `esp32`, or another Platform implementation.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's
 native format:
 
 - ESP32: `partitions.csv` (including OTA slots and ESP flags).
 - STM32: `memory.x` and linker/Embassy Boot symbols.
-- Host: `host-layout.yml` for its file-backed NOR image.
+- macOS and Linux: `file-layout.yml` for its file-backed NOR image.
 
 Those native files are the only physical source of truth. Platform build code
 validates `board.yml` bindings against them and projects the selected region

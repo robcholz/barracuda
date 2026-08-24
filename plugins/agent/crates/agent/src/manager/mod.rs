@@ -7,16 +7,17 @@ mod layout;
 mod long_term;
 mod persistence;
 
-use alloc::{string::String, sync::Arc};
+use alloc::{collections::BTreeMap, rc::Rc, string::String, sync::Arc, vec::Vec};
+use core::cell::RefCell;
 
 use crate::config::SharedApiManager;
-use barracuda_agent_memory::ProfileStore;
-use barracuda_agent_persistence::SharedPersistence;
+use barracuda_agent_memory::{ProfileStore, TranscriptStore};
+use barracuda_agent_persistence::{DurableState, SharedPersistence};
 use barracuda_agent_skill::SkillRegistry;
 use barracuda_agent_tool::ToolRegistry;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::ScopedVfs;
+use embedded_nal_async::{Dns, TcpConnect};
 
 use self::long_term::LongTermDeps;
 pub use create::PersistenceConfig;
@@ -31,14 +32,17 @@ crate::define_id_allocator!(
 );
 
 /// Shared assembly dependencies for independently-built agents.
-pub struct AgentManager<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static> {
-    filesystem: Filesystem,
-    persistence: SharedPersistence<Filesystem>,
+pub struct AgentManager<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    filesystem: ScopedVfs,
+    persistence: SharedPersistence,
     api_manager: SharedApiManager,
     tool_registry: Arc<ToolRegistry>,
-    llm_factory: ModelApiFactory<Http>,
+    llm_factory: ModelApiFactory<Tcp, Resolver>,
     transcript_dir: String,
-    long_term: LongTermDeps<Filesystem>,
-    profile_store: ProfileStore<Filesystem>,
+    long_term: LongTermDeps,
+    profile_store: ProfileStore,
     skill_registry: Arc<dyn SkillRegistry>,
+    persisted_agents: RefCell<BTreeMap<AgentId, DurableState<crate::AgentEngineState>>>,
+    transcripts: RefCell<BTreeMap<AgentId, Rc<TranscriptStore>>>,
+    pending_transcript_deletes: RefCell<Vec<AgentId>>,
 }

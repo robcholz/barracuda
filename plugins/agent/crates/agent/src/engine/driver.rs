@@ -6,9 +6,9 @@ use barracuda_agent_permission::{PermissionDecision, PermissionPolicy, Permissio
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolSet;
 use barracuda_model_api::{ModelApi, RetryPolicy, ToolCall};
-use barracuda_net::{Dns, TcpConnect};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::StreamExt as _;
 use getset::Getters;
 use tracing::Instrument as _;
@@ -81,9 +81,9 @@ pub(crate) enum AgentEngineBuildError {
 
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
-pub(crate) struct AgentEngine<H: TcpConnect + Dns + 'static> {
+pub(crate) struct AgentEngine<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
     state: DurableState<AgentEngineState>,
-    llm: ModelApi<'static, H>,
+    llm: ModelApi<'static, Tcp, Resolver>,
     api_manager: SharedApiManager,
     api_purpose: ApiPurpose,
     retry_policy: RetryPolicy,
@@ -99,10 +99,10 @@ pub(crate) struct AgentEngine<H: TcpConnect + Dns + 'static> {
     context_providers: Vec<ContextProviderEntry>,
 }
 
-impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentEngine<Tcp, Resolver> {
     pub(crate) fn build(
         config: AgentEngineConfig,
-        llm: ModelApi<'static, H>,
+        llm: ModelApi<'static, Tcp, Resolver>,
     ) -> Result<Self, AgentEngineBuildError> {
         let mut tools = config.tools;
         let mut context_providers = Vec::with_capacity(config.context_providers.len());
@@ -183,7 +183,7 @@ impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
         Ok(())
     }
 
-    fn reduce_iteration(
+    async fn reduce_iteration(
         &mut self,
         result: Result<IterationCompletion, AgentError>,
         control: &RunControl,
@@ -193,18 +193,19 @@ impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
                 if self.apply_continuations(control)? {
                     return Ok(None);
                 }
-                self.commit_active_turn()?;
+                self.commit_active_turn().await?;
                 self.stop(StopReason::Completed);
                 Some(AgentEngineEvent::Finished(AgentOutcome::Completed(
                     AgentCompletion::Streamed(text),
                 )))
             }
             IterationCompletion::Tools => {
-                if let Some(event) = self.reduce_agent_effects()? {
+                if let Some(event) = self.reduce_agent_effects().await? {
                     return Ok(Some(event));
                 }
                 if control.take_interrupt() {
                     self.abandon_open_task();
+                    self.transcript.flush().await?;
                     self.stop(StopReason::Interrupted);
                     return Ok(Some(AgentEngineEvent::Finished(AgentOutcome::Interrupted)));
                 }
@@ -212,18 +213,20 @@ impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
             }
             IterationCompletion::Interrupted => {
                 self.abandon_open_task();
+                self.transcript.flush().await?;
                 self.stop(StopReason::Interrupted);
                 Some(AgentEngineEvent::Finished(AgentOutcome::Interrupted))
             }
             IterationCompletion::Cancelled => {
                 self.abandon_open_task();
+                self.transcript.flush().await?;
                 self.stop(StopReason::Cancelled);
                 Some(AgentEngineEvent::Finished(AgentOutcome::Cancelled))
             }
         })
     }
 
-    fn reduce_agent_effects(&mut self) -> Result<Option<AgentEngineEvent>, AgentError> {
+    async fn reduce_agent_effects(&mut self) -> Result<Option<AgentEngineEvent>, AgentError> {
         let mut effects = self.effect_inbox.drain();
         if effects.len() > 1 {
             let count = effects.len();
@@ -231,23 +234,26 @@ impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
             tracing::error!(name: "agent_effect_conflict", count = count as u64);
             return Err(AgentError::ConflictingEffects { count });
         }
-        effects
-            .pop()
-            .map(|effect| self.reduce_tool_effect(effect))
-            .transpose()
+        match effects.pop() {
+            Some(effect) => self.reduce_tool_effect(effect).await.map(Some),
+            None => Ok(None),
+        }
     }
 
-    fn reduce_tool_effect(&mut self, effect: AgentEffect) -> Result<AgentEngineEvent, AgentError> {
+    async fn reduce_tool_effect(
+        &mut self,
+        effect: AgentEffect,
+    ) -> Result<AgentEngineEvent, AgentError> {
         let message = match effect {
             AgentEffect::Finish { final_message } => {
                 self.finish_effect_assistant(&final_message)?;
-                self.commit_active_turn()?;
+                self.commit_active_turn().await?;
                 self.stop(StopReason::Completed);
                 final_message
             }
             AgentEffect::Yield { message } => {
                 self.finish_effect_assistant(&message)?;
-                self.commit_active_turn()?;
+                self.commit_active_turn().await?;
                 self.stop(StopReason::Completed);
                 message
             }
@@ -289,8 +295,9 @@ impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
         Ok(())
     }
 
-    fn commit_active_turn(&mut self) -> Result<(), AgentError> {
+    async fn commit_active_turn(&mut self) -> Result<(), AgentError> {
         drop(self.active_turn.take().ok_or(AgentError::StateInvariant)?);
+        self.transcript.flush().await?;
         Ok(())
     }
 
@@ -465,7 +472,7 @@ impl<'a> IterationConsumer<'a> {
     }
 }
 
-impl<H: TcpConnect + Dns + 'static> AgentEngine<H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> AgentEngine<Tcp, Resolver> {
     pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
         &self.state
     }
@@ -529,15 +536,16 @@ impl ToolPermissionPolicy for EnginePermissionPolicy<'_> {
 
 /// Restores AgentEngine's stopped-state invariant if its borrowing stream is
 /// dropped before producing a terminal event or error.
-struct ActiveRunGuard<'a, H: TcpConnect + Dns + 'static> {
-    agent: &'a mut AgentEngine<H>,
+struct ActiveRunGuard<'a, Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    agent: &'a mut AgentEngine<Tcp, Resolver>,
 }
 
-impl<'a, H> ActiveRunGuard<'a, H>
+impl<'a, Tcp, Resolver> ActiveRunGuard<'a, Tcp, Resolver>
 where
-    H: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    fn new(agent: &'a mut AgentEngine<H>) -> Self {
+    fn new(agent: &'a mut AgentEngine<Tcp, Resolver>) -> Self {
         Self { agent }
     }
 
@@ -834,7 +842,7 @@ where
                     .yield_one(Ok(AgentEngineEvent::Iteration(StreamPart::End)))
                     .await;
 
-                match self.agent.reduce_iteration(result, &control) {
+                match self.agent.reduce_iteration(result, &control).await {
                     Ok(Some(event @ AgentEngineEvent::Finished(_))) => {
                         yielder.yield_one(Ok(event)).await;
                         break;
@@ -851,7 +859,9 @@ where
     }
 }
 
-impl<H: TcpConnect + Dns + 'static> Drop for ActiveRunGuard<'_, H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Drop
+    for ActiveRunGuard<'_, Tcp, Resolver>
+{
     fn drop(&mut self) {
         if self.agent.is_stopped() {
             return;
@@ -865,15 +875,15 @@ impl<H: TcpConnect + Dns + 'static> Drop for ActiveRunGuard<'_, H> {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use barracuda_agent_memory::TranscriptStore;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::future::block_on;
     use serde_json::json;
 
     use super::*;
 
     #[test]
     fn streamed_output_reaches_the_transcript_before_progress() {
-        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 1, "/transcript")
-            .expect("in-memory transcript opens");
+        let transcript = transcript(1);
         let turn = transcript.open_turn().expect("turn opens");
         {
             let mut user = turn.user().expect("user message opens");
@@ -921,8 +931,7 @@ mod tests {
 
     #[test]
     fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
-        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 2, "/transcript")
-            .expect("in-memory transcript opens");
+        let transcript = transcript(2);
         let turn = transcript.open_turn().expect("turn opens");
         {
             let mut user = turn.user().expect("user message opens");
@@ -972,8 +981,7 @@ mod tests {
 
     #[test]
     fn long_reasoning_delta_is_forwarded_in_full() {
-        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 3, "/transcript")
-            .expect("in-memory transcript opens");
+        let transcript = transcript(3);
         let turn = transcript.open_turn().expect("turn opens");
         {
             let mut user = turn.user().expect("user message opens");
@@ -989,7 +997,19 @@ mod tests {
         );
     }
 
-    fn assistant_content(transcript: &TranscriptStore<MemFs>) -> Option<String> {
+    fn transcript(id: u32) -> TranscriptStore {
+        block_on(async {
+            TranscriptStore::new(
+                memory_vfs().await.expect("memory VFS mounts"),
+                id,
+                "/transcript",
+            )
+            .await
+            .expect("in-memory transcript opens")
+        })
+    }
+
+    fn assistant_content(transcript: &TranscriptStore) -> Option<String> {
         let turns = transcript.turns();
         let assistant = turns.last()?.messages.get(1)?;
         assistant.get("content")?.as_str().map(str::to_owned)

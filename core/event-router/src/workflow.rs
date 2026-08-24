@@ -1,17 +1,16 @@
 //! Durable Workflow Runtime adapter owned by Event Router.
 
 use alloc::boxed::Box;
-use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use barracuda_fs::{FileSystem, FsError};
 use barracuda_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
 use barracuda_rpc::RpcContext;
+use barracuda_vfs::{create_dir_all, read, remove_file, rename, write, FsError};
 use barracuda_workflow::integration::{
     InternalEmit, WorkflowJsonRequest, WorkflowLoad, WorkflowRuntime, WorkflowRuntimeControl,
     WorkflowRuntimeView, WorkflowUnload,
@@ -20,61 +19,46 @@ use barracuda_workflow::{validate_definition, WorkflowControlRejection, Workflow
 
 use crate::EventRouterCreateError;
 
-const WORKFLOW_INDEX_FILE: &str = "index";
+const WORKFLOW_CATALOG_PATH: &str = "/system/workflows.json";
+const WORKFLOW_CATALOG_TEMP_PATH: &str = "/system/.workflows.json.tmp";
+const SYSTEM_DIRECTORY: &str = "/system";
 
-pub(super) struct WorkflowComponent<Filesystem>
-where
-    Filesystem: FileSystem,
-{
-    runtime: WorkflowRuntime,
-    filesystem: Filesystem,
-    directory: String,
-    index: Rc<RefCell<Vec<u8>>>,
+#[derive(Clone)]
+struct PersistedWorkflow {
+    id: WorkflowId,
+    json: Vec<u8>,
 }
 
-impl<Filesystem> WorkflowComponent<Filesystem>
-where
-    Filesystem: FileSystem,
-{
-    pub(super) fn new(
-        filesystem: Filesystem,
-        directory: String,
-    ) -> Result<(Self, WorkflowRuntimeView), EventRouterCreateError> {
-        if directory.trim().is_empty() {
-            return Err(EventRouterCreateError::InvalidPersistenceDirectory);
-        }
-        filesystem.create_dir_all(&directory)?;
+pub(super) struct WorkflowComponent {
+    runtime: WorkflowRuntime,
+    catalog: Rc<RefCell<Vec<PersistedWorkflow>>>,
+}
+
+impl WorkflowComponent {
+    pub(super) async fn new() -> Result<(Self, WorkflowRuntimeView), EventRouterCreateError> {
+        create_dir_all(SYSTEM_DIRECTORY).await?;
         let runtime = WorkflowRuntime::new();
         let view = runtime.view();
-        let index = restore(&runtime.control(), &filesystem, &directory)?;
+        let catalog = restore(&runtime.control()).await?;
         Ok((
             Self {
                 runtime,
-                filesystem,
-                directory,
-                index: Rc::new(RefCell::new(index)),
+                catalog: Rc::new(RefCell::new(catalog)),
             },
             view,
         ))
     }
 }
 
-impl<Filesystem, const M: usize> Component<M> for WorkflowComponent<Filesystem>
-where
-    Filesystem: FileSystem,
-{
+impl<const M: usize> Component<M> for WorkflowComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<InternalEmit<M>, _>(self.runtime.ingress_handler::<M>())?;
 
         let load_control = self.runtime.control();
-        let load_index = Rc::clone(&self.index);
-        let load_filesystem = self.filesystem.clone();
-        let load_directory = self.directory.clone();
+        let load_catalog = Rc::clone(&self.catalog);
         context.register_rpc::<WorkflowLoad<M>, _>(move |context: RpcContext, frames| {
             let control = load_control.clone();
-            let index = Rc::clone(&load_index);
-            let directory = load_directory.clone();
-            let filesystem = load_filesystem.clone();
+            let catalog = Rc::clone(&load_catalog);
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
                     Ok(request) => request,
@@ -84,8 +68,6 @@ where
                     Ok(definition) => definition,
                     Err(rejection) => return Ok(Err(rejection)),
                 };
-                // Primary gate: reject workflows whose steps cannot be
-                // resolved and linked before anything is persisted.
                 if let Err(rejection) = validate_definition(context.client(), &definition) {
                     return Ok(Err(rejection));
                 }
@@ -93,38 +75,29 @@ where
                     return Ok(Err(WorkflowControlRejection::DuplicateId));
                 }
 
-                let workflow_path = workflow_path(&directory, definition.id());
-                if filesystem
-                    .write_atomic(&workflow_path, request.bytes())
-                    .is_err()
-                {
+                let mut next_catalog = catalog.borrow().clone();
+                next_catalog.push(PersistedWorkflow {
+                    id: definition.id().clone(),
+                    json: request.bytes().to_vec(),
+                });
+                if write_catalog(&next_catalog).await.is_err() {
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
-                let mut index = index.borrow_mut();
-                let original_len = index.len();
-                index.extend_from_slice(definition.id().as_str().as_bytes());
-                index.push(b'\n');
-                if write_index(&filesystem, &directory, &index).is_err() {
-                    index.truncate(original_len);
-                    return Ok(Err(WorkflowControlRejection::Persistence));
-                }
-                drop(index);
                 match control.load(definition) {
-                    Ok(()) => Ok(Ok(())),
+                    Ok(()) => {
+                        *catalog.borrow_mut() = next_catalog;
+                        Ok(Ok(()))
+                    }
                     Err(_error) => Ok(Err(WorkflowControlRejection::DuplicateId)),
                 }
             }
         })?;
 
         let unload_control = self.runtime.control();
-        let unload_index = Rc::clone(&self.index);
-        let unload_filesystem = self.filesystem.clone();
-        let unload_directory = self.directory.clone();
+        let unload_catalog = Rc::clone(&self.catalog);
         context.register_rpc::<WorkflowUnload<M>, _>(move |_context, frames| {
             let control = unload_control.clone();
-            let index = Rc::clone(&unload_index);
-            let directory = unload_directory.clone();
-            let filesystem = unload_filesystem.clone();
+            let catalog = Rc::clone(&unload_catalog);
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
                     Ok(request) => request,
@@ -137,21 +110,22 @@ where
                 if !control.contains(&workflow_id) {
                     return Ok(Err(WorkflowControlRejection::NotFound));
                 }
-                let mut index = index.borrow_mut();
-                let previous = index.clone();
-                if !remove_index_entry(&mut index, &workflow_id)
-                    || write_index(&filesystem, &directory, &index).is_err()
-                {
-                    *index = previous;
+
+                let mut next_catalog = catalog.borrow().clone();
+                let Some(position) = next_catalog
+                    .iter()
+                    .position(|workflow| workflow.id == workflow_id)
+                else {
+                    return Ok(Err(WorkflowControlRejection::Persistence));
+                };
+                next_catalog.remove(position);
+                if write_catalog(&next_catalog).await.is_err() {
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
-                drop(index);
                 if control.unload(&workflow_id).is_err() {
                     return Ok(Err(WorkflowControlRejection::NotFound));
                 }
-                // The index is authoritative. A stale orphan is ignored on
-                // restart and can be overwritten by a future load.
-                let _ignored = filesystem.remove(&workflow_path(&directory, &workflow_id));
+                *catalog.borrow_mut() = next_catalog;
                 Ok(Ok(()))
             }
         })
@@ -171,100 +145,63 @@ where
     }
 }
 
-fn restore<Filesystem>(
+async fn restore(
     control: &WorkflowRuntimeControl,
-    filesystem: &Filesystem,
-    directory: &str,
-) -> Result<Vec<u8>, EventRouterCreateError>
-where
-    Filesystem: FileSystem,
-{
-    let index_path = index_path(directory);
-    let index = match filesystem.read(&index_path) {
-        Ok(index) => index,
-        Err(FsError::NotFound) => return Ok(Vec::new()),
+) -> Result<Vec<PersistedWorkflow>, EventRouterCreateError> {
+    let bytes = match read(WORKFLOW_CATALOG_PATH).await {
+        Ok(bytes) => bytes,
+        Err(FsError::NotFound) => {
+            write(WORKFLOW_CATALOG_PATH, b"[]").await?;
+            return Ok(Vec::new());
+        }
         Err(error) => return Err(error.into()),
     };
-    let index_text = core::str::from_utf8(&index).map_err(|_error| {
-        EventRouterCreateError::InvalidPersistedWorkflow {
-            path: index_path.clone(),
-            rejection: WorkflowControlRejection::InvalidWorkflowId,
-        }
-    })?;
-    for id in index_text.lines() {
-        let workflow_id = WorkflowId::try_from(id).map_err(|_error| {
-            EventRouterCreateError::InvalidPersistedWorkflow {
-                path: index_path.clone(),
-                rejection: WorkflowControlRejection::InvalidWorkflowId,
-            }
-        })?;
-        let path = workflow_path(directory, &workflow_id);
-        let request =
-            WorkflowJsonRequest::try_from(filesystem.read(&path)?).map_err(|rejection| {
-                EventRouterCreateError::InvalidPersistedWorkflow {
-                    path: path.clone(),
-                    rejection,
-                }
-            })?;
-        let definition = request.definition().map_err(|rejection| {
-            EventRouterCreateError::InvalidPersistedWorkflow {
-                path: path.clone(),
-                rejection,
-            }
-        })?;
-        if definition.id() != &workflow_id {
-            return Err(EventRouterCreateError::MismatchedPersistedWorkflow(path));
-        }
-        control.load(definition).map_err(|_error| {
-            EventRouterCreateError::InvalidPersistedWorkflow {
-                path,
-                rejection: WorkflowControlRejection::DuplicateId,
-            }
-        })?;
+    let documents: Vec<serde_json::Value> = serde_json::from_slice(&bytes)
+        .map_err(|_error| invalid_catalog(WorkflowControlRejection::InvalidJson))?;
+    let mut catalog = Vec::with_capacity(documents.len());
+    for document in documents {
+        let json = serde_json::to_vec(&document)
+            .map_err(|_error| invalid_catalog(WorkflowControlRejection::InvalidJson))?;
+        let request = WorkflowJsonRequest::try_from(json.clone()).map_err(invalid_catalog)?;
+        let definition = request.definition().map_err(invalid_catalog)?;
+        let id = definition.id().clone();
+        control
+            .load(definition)
+            .map_err(|_error| invalid_catalog(WorkflowControlRejection::DuplicateId))?;
+        catalog.push(PersistedWorkflow { id, json });
     }
-    Ok(index)
+    Ok(catalog)
 }
 
-fn write_index<Filesystem>(
-    filesystem: &Filesystem,
-    directory: &str,
-    bytes: &[u8],
-) -> Result<(), FsError>
-where
-    Filesystem: FileSystem,
-{
-    filesystem.write_atomic(&index_path(directory), bytes)
-}
-
-fn remove_index_entry(bytes: &mut Vec<u8>, workflow_id: &WorkflowId) -> bool {
-    let needle = workflow_id.as_str().as_bytes();
-    let mut start = 0;
-    while start < bytes.len() {
-        let Some(remaining) = bytes.get(start..) else {
-            return false;
-        };
-        let end = remaining
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |offset| start.saturating_add(offset));
-        if bytes.get(start..end) == Some(needle) {
-            let remove_end = end.saturating_add(usize::from(end < bytes.len()));
-            bytes.drain(start..remove_end);
-            return true;
-        }
-        start = end.saturating_add(1);
+async fn write_catalog(catalog: &[PersistedWorkflow]) -> Result<(), FsError> {
+    let bytes = catalog_json(catalog);
+    if let Err(error) = write(WORKFLOW_CATALOG_TEMP_PATH, &bytes).await {
+        let _ignored = remove_file(WORKFLOW_CATALOG_TEMP_PATH).await;
+        return Err(error);
     }
-    false
+    if let Err(error) = rename(WORKFLOW_CATALOG_TEMP_PATH, WORKFLOW_CATALOG_PATH).await {
+        let _ignored = remove_file(WORKFLOW_CATALOG_TEMP_PATH).await;
+        return Err(error);
+    }
+    Ok(())
 }
 
-fn index_path(directory: &str) -> String {
-    join(directory, WORKFLOW_INDEX_FILE)
+fn catalog_json(catalog: &[PersistedWorkflow]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.push(b'[');
+    for (index, workflow) in catalog.iter().enumerate() {
+        if index > 0 {
+            bytes.push(b',');
+        }
+        bytes.extend_from_slice(&workflow.json);
+    }
+    bytes.push(b']');
+    bytes
 }
 
-fn workflow_path(directory: &str, workflow_id: &WorkflowId) -> String {
-    join(directory, &format!("{}.json", workflow_id.as_str()))
-}
-
-fn join(directory: &str, name: &str) -> String {
-    format!("{}/{}", directory.trim_end_matches('/'), name)
+fn invalid_catalog(rejection: WorkflowControlRejection) -> EventRouterCreateError {
+    EventRouterCreateError::InvalidPersistedWorkflow {
+        path: String::from(WORKFLOW_CATALOG_PATH),
+        rejection,
+    }
 }

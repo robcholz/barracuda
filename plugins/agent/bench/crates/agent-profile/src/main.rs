@@ -11,13 +11,13 @@ use std::path::{Path, PathBuf};
 
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
-use barracuda_platform_test::MemFs;
-use barracuda_platform_test::NeverStack;
+use barracuda_platform_test::{memory_vfs, NeverStack};
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
+use futures_lite::future::block_on;
 
 barracuda_profile::install_dhat_allocator!();
 
-type ProfileAgentRuntime = AgentRuntime<MemFs, NeverStack>;
+type ProfileAgentRuntime = AgentRuntime<NeverStack, NeverStack>;
 static NETWORK: NeverStack = NeverStack;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,13 +80,11 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn profile_agent_init(
-    output_file: &Path,
-) -> Result<AllocationStats, barracuda_agent_runtime::RuntimeError> {
+fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, Box<dyn std::error::Error>> {
     let profile = HeapProfile::start(output_file);
-    let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
+    let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, &NETWORK, 1024, 1024));
     let (runtime, service) = ProfileAgentRuntime::new(
-        MemFs::new(),
+        block_on(memory_vfs())?,
         RuntimeStorageConfig {
             persistence_root: "/profile/agent-init".to_owned(),
             skill_roots: Vec::new(),

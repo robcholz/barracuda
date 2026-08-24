@@ -3,8 +3,7 @@ use alloc::vec::Vec;
 
 use barracuda_agent_runtime::AgentRuntime;
 use barracuda_event_router::{rpc_dynamic, RpcHandler, RpcMethod, RpcStream, Streaming, Unary};
-use barracuda_fs::FileSystem;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::stream;
 
 use crate::convert;
@@ -26,12 +25,12 @@ impl RpcMethod for ListSessions {
 }
 
 /// Builds the reusable handler for [`ListSessions`].
-pub fn list_sessions_handler<Filesystem, Http>(
-    runtime: Rc<AgentRuntime<Filesystem, Http>>,
+pub fn list_sessions_handler<Tcp, Resolver>(
+    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
 ) -> impl RpcHandler<ListSessions>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     move |_context, _request| {
         let runtime = Rc::clone(&runtime);

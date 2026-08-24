@@ -1,8 +1,8 @@
 //! Process-wide VFS behavior.
 
 use barracuda_vfs::{
-    create, create_dir_all, metadata, mount, open, read, read_dir, remove_dir, remove_file, rename,
-    unmount, write, MountOptions,
+    create, create_dir_all, global_namespace, metadata, mount, open, read, read_dir, remove_dir,
+    remove_file, rename, unmount, write, MountOptions,
 };
 use barracuda_vfs_memfs::MemFs;
 use embedded_io_async::{Read, Write};
@@ -58,6 +58,8 @@ fn global_namespace_has_std_fs_style_operations() {
                 .count(),
             2
         );
+        let scoped = global_namespace().await.scoped(ROOT).unwrap();
+        assert_eq!(scoped.read("/assets/index.html").await.unwrap(), b"index");
 
         rename(
             "/__barracuda_vfs_global_test/assets/app.js",

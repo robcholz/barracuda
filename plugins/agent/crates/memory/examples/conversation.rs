@@ -8,15 +8,20 @@
 //! ```
 //!
 //! The store is pure storage — no summarization, no LLM. Persistence is an
-//! in-memory [`MemFs`]; on device the same code runs over the DATA root.
+//! in-memory VFS; on device the same code runs over the plugin-private root.
 
 use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
 
 fn main() -> anyhow::Result<()> {
+    block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     let conversation_id = 42;
-    let filesystem = MemFs::new();
-    let store = TranscriptStore::<MemFs>::new(filesystem, conversation_id, "/data/conversations")?;
+    let filesystem = memory_vfs().await?;
+    let store = TranscriptStore::new(filesystem, conversation_id, "/data/conversations").await?;
 
     // One handle owns the turn and commits it as one record on drop.
     {
@@ -66,6 +71,6 @@ fn main() -> anyhow::Result<()> {
     );
     println!("{}", serde_json::to_string_pretty(&messages)?);
 
-    // Each turn was persisted when its handle dropped.
+    store.flush().await?;
     Ok(())
 }

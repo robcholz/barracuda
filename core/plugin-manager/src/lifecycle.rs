@@ -2,22 +2,62 @@
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::{type_name, Any, TypeId};
 use core::error::Error;
 use core::fmt::{self, Debug};
-use core::future::Future;
-use core::pin::Pin;
 
 use barracuda_event_router::{Component, ComponentId, EventRouter, LoadError, UnloadError};
 use barracuda_kv::Database;
+use barracuda_vfs::{FsError, Vfs};
+use embassy_executor::Spawner;
 use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
 
 use crate::storage::ScopedStorage;
-use crate::{PluginStorage, StorageError};
+use crate::{PluginStorage, PluginVfs, StorageError};
+
+/// Filesystem access requested by one Plugin.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PluginFilesystem {
+    /// The Plugin has no file namespace.
+    #[default]
+    None,
+    /// The Plugin receives a private namespace on System's writable VFS.
+    Private,
+}
+
+/// Machine-readable resources requested before Plugin registration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PluginRequirements {
+    filesystem: PluginFilesystem,
+}
+
+impl PluginRequirements {
+    /// Creates requirements with KV storage only.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            filesystem: PluginFilesystem::None,
+        }
+    }
+
+    /// Declares the Plugin filesystem requirement.
+    #[must_use]
+    pub const fn with_filesystem(mut self, filesystem: PluginFilesystem) -> Self {
+        self.filesystem = filesystem;
+        self
+    }
+
+    /// Returns the declared filesystem requirement.
+    #[must_use]
+    pub const fn filesystem(&self) -> PluginFilesystem {
+        self.filesystem
+    }
+}
 
 /// Stable identity and persistent namespace of one Plugin.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -59,12 +99,6 @@ impl TryFrom<&'static str> for PluginId {
 /// Result returned by Plugin initialization.
 pub type PluginResult<T> = Result<T, PluginError>;
 
-/// Cooperative future returned by [`Plugin::register`].
-pub type PluginRegisterFuture<'a> = Pin<Box<dyn Future<Output = PluginResult<()>> + 'a>>;
-
-/// Cooperative future returned by [`Plugin::start`].
-pub type PluginStartFuture<'a> = Pin<Box<dyn Future<Output = PluginResult<()>> + 'a>>;
-
 /// Failure while a Plugin initializes its Components or storage state.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -78,6 +112,12 @@ pub enum PluginError {
     /// A typed capability could not be published or required.
     #[error(transparent)]
     Capability(#[from] CapabilityError),
+    /// The Plugin attempted to obtain VFS access without declaring it.
+    #[error("Plugin did not declare private filesystem access")]
+    FilesystemNotDeclared,
+    /// System did not install an Embassy task spawner for Plugin startup.
+    #[error("Plugin task spawner is unavailable during startup")]
+    TaskSpawnerUnavailable,
     /// Plugin-specific initialization failed.
     #[error("Plugin initialization failed: {0}")]
     Registration(#[source] Box<dyn Error>),
@@ -96,40 +136,42 @@ pub trait Plugin<const M: usize> {
     /// Stable identities of Plugins that must already be registered.
     const DEPENDS_ON: &'static [&'static str] = &[];
 
+    /// Resources that Plugin Manager must prepare before registration.
+    const REQUIREMENTS: PluginRequirements = PluginRequirements::new();
+
     /// Returns the stable identity used for lifecycle tracking and storage.
     fn id(&self) -> &'static str;
 
-    /// Registers Plugin-owned state before any Plugin starts.
+    /// Registers the Plugin's capabilities and Event Router Components.
     ///
-    /// The default registration phase performs no work.
-    fn register<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginRegisterFuture<'a>
+    /// Component graph construction belongs exclusively to this phase. The
+    /// default registration phase performs no work.
+    fn register<Storage>(
+        &mut self,
+        _context: &mut PluginContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: PluginStorage,
     {
-        Box::pin(async { Ok(()) })
+        Ok(())
     }
 
-    /// Starts the Plugin after every Plugin has registered.
+    /// Runs the Plugin's startup hook after every Plugin has registered.
     ///
-    /// The Plugin may clone its scoped storage into any registered Component.
-    /// A returned error causes the manager to unload Components registered by
-    /// this call in reverse order.
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    /// This hook cannot load Event Router Components or publish capabilities;
+    /// those operations belong to [`Self::register`]. A returned error causes
+    /// the manager to unload the Plugin's registered Components in reverse
+    /// order.
+    fn start<Storage>(&mut self, _context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
-        Storage: PluginStorage;
+        Storage: PluginStorage,
+    {
+        Ok(())
+    }
 }
 
 trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
-    fn start<'a>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>;
+    fn start(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>;
 }
 
 impl<T, const M: usize, Storage> ManagedPlugin<M, Storage> for T
@@ -137,10 +179,7 @@ where
     T: Plugin<M>,
     Storage: PluginStorage,
 {
-    fn start<'a>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a> {
+    fn start(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()> {
         Plugin::start(self, context)
     }
 }
@@ -167,24 +206,14 @@ impl<const N: usize, const M: usize, const Q: usize> ComponentRegistrar<M>
     }
 }
 
-/// Capabilities provided while one Plugin initializes.
-#[derive(Getters)]
-pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
+/// Registration-only access to Event Router Component loading.
+pub struct PluginEventRouterContext<'a, const M: usize> {
     registrar: &'a mut dyn ComponentRegistrar<M>,
-    /// Persistent typed key-value storage restricted to this Plugin's namespace.
-    #[getset(get = "pub")]
-    storage: Storage,
-    plugin_id: &'a PluginId,
-    dependencies: &'a [PluginId],
-    capabilities: &'a mut CapabilityRegistry,
-    system_capabilities: &'a SystemCapabilityRegistry,
     component_ids: &'a mut Vec<ComponentId>,
-    provided_capabilities: &'a mut Vec<CapabilityKey>,
-    retained_resources: &'a mut Vec<Box<dyn Any>>,
 }
 
-impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
-    /// Loads one Component owned by the current Plugin.
+impl<const M: usize> PluginEventRouterContext<'_, M> {
+    /// Loads one Component owned by the registering Plugin.
     ///
     /// The manager records the returned identity for Plugin-wide rollback and
     /// unload.
@@ -199,6 +228,35 @@ impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
         let id = self.registrar.register_component(Box::new(component))?;
         self.component_ids.push(id);
         Ok(id)
+    }
+}
+
+/// Context provided exclusively during [`Plugin::register`].
+#[derive(Getters)]
+pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
+    /// Explicit Event Router registration boundary.
+    pub event_router: PluginEventRouterContext<'a, M>,
+    /// Persistent typed key-value storage restricted to this Plugin's namespace.
+    #[getset(get = "pub")]
+    storage: Storage,
+    filesystem: Option<PluginVfs>,
+    plugin_id: &'a PluginId,
+    dependencies: &'a [PluginId],
+    capabilities: &'a mut CapabilityRegistry,
+    provided_capabilities: &'a mut Vec<CapabilityKey>,
+    retained_resources: &'a mut Vec<Box<dyn Any>>,
+}
+
+impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
+    /// Returns this Plugin's private VFS when it declared one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
+    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+        self.filesystem
+            .as_ref()
+            .ok_or(PluginError::FilesystemNotDeclared)
     }
 
     /// Publishes one typed capability owned by the current Plugin.
@@ -232,37 +290,7 @@ impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
     where
         T: Any,
     {
-        let provider =
-            PluginId::try_from(provider).map_err(|source| CapabilityError::InvalidProvider {
-                provider: provider.to_string(),
-                source,
-            })?;
-        if !self.dependencies.contains(&provider) {
-            return Err(CapabilityError::DependencyNotDeclared(provider).into());
-        }
-        self.capabilities
-            .get::<T>(&provider)
-            .map_err(PluginError::from)
-    }
-
-    /// Obtains one capability installed by the System composition root.
-    ///
-    /// System capabilities are concrete, statically selected Platform handles.
-    /// Lookup happens only during Plugin registration or startup; Plugins clone
-    /// the lightweight handle into their Components, so no type lookup remains
-    /// on runtime hot paths.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`CapabilityError::SystemNotProvided`] when System did not
-    /// install the requested concrete type.
-    pub fn require_system<T>(&self) -> PluginResult<Rc<T>>
-    where
-        T: Any,
-    {
-        self.system_capabilities
-            .get::<T>()
-            .map_err(PluginError::from)
+        require_capability(self.dependencies, self.capabilities, provider)
     }
 
     /// Retains a resource for exactly the lifetime of the current Plugin.
@@ -276,6 +304,97 @@ impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
     {
         self.retained_resources.push(Box::new(resource));
     }
+}
+
+/// Hook-only context provided during [`Plugin::start`].
+///
+/// Event Router loading and capability publication are intentionally absent.
+/// The complete Component and capability graph must already exist before any
+/// startup hook runs.
+///
+/// ```compile_fail
+/// use barracuda_plugin_manager::{PluginStartContext, PluginStorage};
+///
+/// fn load_late<Storage: PluginStorage>(context: &mut PluginStartContext<'_, Storage>) {
+///     let _router = &mut context.event_router;
+/// }
+/// ```
+#[derive(Getters)]
+pub struct PluginStartContext<'a, Storage: PluginStorage> {
+    /// Persistent typed key-value storage restricted to this Plugin's namespace.
+    #[getset(get = "pub")]
+    storage: Storage,
+    filesystem: Option<PluginVfs>,
+    dependencies: &'a [PluginId],
+    capabilities: &'a CapabilityRegistry,
+    task_spawner: Option<Spawner>,
+    retained_resources: &'a mut Vec<Box<dyn Any>>,
+}
+
+impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
+    /// Returns this Plugin's declared private VFS.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
+    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+        self.filesystem
+            .as_ref()
+            .ok_or(PluginError::FilesystemNotDeclared)
+    }
+
+    /// Requires one typed capability from a declared provider dependency.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the provider is invalid, undeclared, or did not
+    /// publish the requested capability during registration.
+    pub fn require<T>(&self, provider: &'static str) -> PluginResult<Rc<T>>
+    where
+        T: Any,
+    {
+        require_capability(self.dependencies, self.capabilities, provider)
+    }
+
+    /// Returns the Embassy spawner installed by the System composition root.
+    ///
+    /// Task spawning is intentionally available only during Plugin startup,
+    /// after the complete capability and Component graph has registered.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PluginError::TaskSpawnerUnavailable`] when System did not
+    /// install the executor spawner.
+    pub fn task_spawner(&self) -> PluginResult<Spawner> {
+        self.task_spawner.ok_or(PluginError::TaskSpawnerUnavailable)
+    }
+
+    /// Retains a resource for exactly the lifetime of the current Plugin.
+    pub fn retain<T>(&mut self, resource: T)
+    where
+        T: Any,
+    {
+        self.retained_resources.push(Box::new(resource));
+    }
+}
+
+fn require_capability<T>(
+    dependencies: &[PluginId],
+    capabilities: &CapabilityRegistry,
+    provider: &'static str,
+) -> PluginResult<Rc<T>>
+where
+    T: Any,
+{
+    let provider =
+        PluginId::try_from(provider).map_err(|source| CapabilityError::InvalidProvider {
+            provider: provider.to_string(),
+            source,
+        })?;
+    if !dependencies.contains(&provider) {
+        return Err(CapabilityError::DependencyNotDeclared(provider).into());
+    }
+    capabilities.get::<T>(&provider).map_err(PluginError::from)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -296,44 +415,6 @@ impl CapabilityKey {
 #[derive(Default)]
 struct CapabilityRegistry {
     entries: BTreeMap<CapabilityKey, Rc<dyn Any>>,
-}
-
-#[derive(Default)]
-struct SystemCapabilityRegistry {
-    entries: BTreeMap<TypeId, Rc<dyn Any>>,
-}
-
-impl SystemCapabilityRegistry {
-    fn insert<T>(&mut self, capability: Rc<T>) -> Result<(), CapabilityError>
-    where
-        T: Any,
-    {
-        let type_id = TypeId::of::<T>();
-        if self.entries.contains_key(&type_id) {
-            return Err(CapabilityError::SystemAlreadyProvided {
-                capability: type_name::<T>(),
-            });
-        }
-        let capability: Rc<dyn Any> = capability;
-        self.entries.insert(type_id, capability);
-        Ok(())
-    }
-
-    fn get<T>(&self) -> Result<Rc<T>, CapabilityError>
-    where
-        T: Any,
-    {
-        self.entries
-            .get(&TypeId::of::<T>())
-            .cloned()
-            .ok_or(CapabilityError::SystemNotProvided {
-                capability: type_name::<T>(),
-            })?
-            .downcast::<T>()
-            .map_err(|_capability| CapabilityError::SystemTypeMismatch {
-                capability: type_name::<T>(),
-            })
-    }
 }
 
 impl CapabilityRegistry {
@@ -389,24 +470,6 @@ impl CapabilityRegistry {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CapabilityError {
-    /// System did not install the requested concrete capability type.
-    #[error("System did not provide capability {capability}")]
-    SystemNotProvided {
-        /// Requested Rust type name.
-        capability: &'static str,
-    },
-    /// System attempted to install the same concrete capability type twice.
-    #[error("System already provided capability {capability}")]
-    SystemAlreadyProvided {
-        /// Duplicate Rust type name.
-        capability: &'static str,
-    },
-    /// A System capability did not match its `TypeId` key.
-    #[error("System capability had the wrong type for {capability}")]
-    SystemTypeMismatch {
-        /// Requested Rust type name.
-        capability: &'static str,
-    },
     /// A provider identity passed to `require` is invalid.
     #[error("Capability provider has an invalid identity: {provider}")]
     InvalidProvider {
@@ -453,6 +516,7 @@ struct LoadedPlugin<const M: usize, Storage: PluginStorage> {
     dependencies: Vec<PluginId>,
     provided_capabilities: Vec<CapabilityKey>,
     retained_resources: Vec<Box<dyn Any>>,
+    filesystem: Option<PluginVfs>,
 }
 
 /// Component cleanup failure associated with a Plugin lifecycle operation.
@@ -489,6 +553,12 @@ pub enum PluginRegisterError {
     /// A declared dependency has not been registered yet.
     #[error("Plugin dependency is not registered: {0}")]
     MissingDependency(PluginId),
+    /// The Plugin declared a private VFS but System did not install one.
+    #[error("Plugin {0} requires a private filesystem, but System did not install a VFS")]
+    FilesystemUnavailable(PluginId),
+    /// Plugin filesystem namespace preparation failed.
+    #[error(transparent)]
+    Filesystem(#[from] FsError),
     /// Plugin initialization failed and every Component was rolled back.
     #[error("Plugin registration failed: {0}")]
     Registration(#[source] PluginError),
@@ -561,7 +631,8 @@ where
 {
     database: Rc<Database<DatabaseRegion>>,
     capabilities: CapabilityRegistry,
-    system_capabilities: SystemCapabilityRegistry,
+    task_spawner: Option<Spawner>,
+    vfs_root: Option<Vfs>,
     loaded: BTreeMap<PluginId, LoadedPlugin<M, ScopedStorage<DatabaseRegion>>>,
     registration_order: Vec<PluginId>,
 }
@@ -585,26 +656,25 @@ where
         Ok(Self {
             database: Rc::new(database),
             capabilities: CapabilityRegistry::default(),
-            system_capabilities: SystemCapabilityRegistry::default(),
+            task_spawner: None,
+            vfs_root: None,
             loaded: BTreeMap::new(),
             registration_order: Vec::new(),
         })
     }
 
-    /// Installs one concrete capability owned by the System composition root.
+    /// Installs a snapshot of System's writable global VFS namespace.
+    pub fn install_vfs(&mut self, vfs: Vfs) {
+        self.vfs_root = Some(vfs);
+    }
+
+    /// Installs the Embassy spawner exposed only to Plugin startup hooks.
     ///
-    /// Plugins can obtain it through [`PluginContext::require_system`] during
-    /// registration or startup. The concrete type is retained, so calls made by
-    /// the resulting Component remain statically dispatched.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the same concrete type was already installed.
-    pub fn provide_system<T>(&mut self, capability: Rc<T>) -> Result<(), CapabilityError>
-    where
-        T: Any,
-    {
-        self.system_capabilities.insert(capability)
+    /// System calls this during composition before [`Self::start`]. The
+    /// registration context deliberately has no access to the spawner, so
+    /// Plugin tasks cannot begin before the complete graph is registered.
+    pub fn install_task_spawner(&mut self, spawner: Spawner) {
+        self.task_spawner = Some(spawner);
     }
 
     /// Runs one Plugin's registration phase and retains it for startup.
@@ -617,7 +687,7 @@ where
     ///
     /// Returns an error for an invalid or duplicate identity, Plugin
     /// initialization failure, or incomplete Component rollback.
-    pub async fn register<const N: usize, const Q: usize, T: Plugin<M> + 'static>(
+    pub fn register<const N: usize, const Q: usize, T: Plugin<M> + 'static>(
         &mut self,
         router: &mut EventRouter<N, M, Q>,
         mut plugin: T,
@@ -630,6 +700,18 @@ where
         let dependencies =
             resolve_dependencies::<M, T, ScopedStorage<DatabaseRegion>>(&id, &self.loaded)?;
 
+        let filesystem = match T::REQUIREMENTS.filesystem() {
+            PluginFilesystem::None => None,
+            PluginFilesystem::Private => {
+                let root = self
+                    .vfs_root
+                    .as_ref()
+                    .ok_or_else(|| PluginRegisterError::FilesystemUnavailable(id.clone()))?;
+                let source_root = format!("/plugins/{id}");
+                Some(root.scoped(&source_root)?)
+            }
+        };
+
         let mut component_ids = Vec::new();
         let mut provided_capabilities = Vec::new();
         let mut retained_resources = Vec::new();
@@ -637,17 +719,19 @@ where
         let result = {
             let mut registrar = EventRouterRegistrar { router };
             let mut context = PluginContext {
-                registrar: &mut registrar,
+                event_router: PluginEventRouterContext {
+                    registrar: &mut registrar,
+                    component_ids: &mut component_ids,
+                },
                 storage,
+                filesystem: filesystem.clone(),
                 plugin_id: &id,
                 dependencies: &dependencies,
                 capabilities: &mut self.capabilities,
-                system_capabilities: &self.system_capabilities,
-                component_ids: &mut component_ids,
                 provided_capabilities: &mut provided_capabilities,
                 retained_resources: &mut retained_resources,
             };
-            plugin.register(&mut context).await
+            plugin.register(&mut context)
         };
 
         match result {
@@ -663,6 +747,7 @@ where
                         dependencies,
                         provided_capabilities,
                         retained_resources,
+                        filesystem,
                     },
                 );
                 Ok(())
@@ -683,6 +768,7 @@ where
                             dependencies,
                             provided_capabilities,
                             retained_resources,
+                            filesystem,
                         },
                     );
                     Err(PluginRegisterError::Rollback { source, cleanup })
@@ -697,7 +783,7 @@ where
     ///
     /// Returns an error when one Plugin fails to start. Components owned by the
     /// failing Plugin are rolled back in reverse registration order.
-    pub async fn start<const N: usize, const Q: usize>(
+    pub fn start<const N: usize, const Q: usize>(
         &mut self,
         router: &mut EventRouter<N, M, Q>,
     ) -> Result<(), PluginStartError> {
@@ -713,19 +799,15 @@ where
 
             let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
             let result = {
-                let mut registrar = EventRouterRegistrar { router };
-                let mut context = PluginContext {
-                    registrar: &mut registrar,
+                let mut context = PluginStartContext {
                     storage,
-                    plugin_id: &id,
+                    filesystem: plugin.filesystem.clone(),
                     dependencies: &plugin.dependencies,
-                    capabilities: &mut self.capabilities,
-                    system_capabilities: &self.system_capabilities,
-                    component_ids: &mut plugin.component_ids,
-                    provided_capabilities: &mut plugin.provided_capabilities,
+                    capabilities: &self.capabilities,
+                    task_spawner: self.task_spawner,
                     retained_resources: &mut plugin.retained_resources,
                 };
-                plugin.plugin.start(&mut context).await
+                plugin.plugin.start(&mut context)
             };
 
             match result {
@@ -788,6 +870,7 @@ where
             dependencies,
             provided_capabilities,
             retained_resources,
+            filesystem,
         } = plugin;
         let (remaining, cleanup) = rollback_components(router, component_ids);
         if cleanup.is_empty() {
@@ -807,6 +890,7 @@ where
                     dependencies,
                     provided_capabilities,
                     retained_resources,
+                    filesystem,
                 },
             );
             Err(PluginUnloadError::Cleanup(cleanup))

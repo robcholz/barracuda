@@ -2,6 +2,7 @@
 
 - Plugin ID: `imessage-web`
 - Direct Plugin dependencies: `imessage-gateway`, `webserver`
+- Provided typed capabilities: `IMessageWebRoute`
 
 The Plugin requires the `IMessageGateway` capability and registers the `web`
 message channel for its lifetime. It requires the `WebServer` capability,

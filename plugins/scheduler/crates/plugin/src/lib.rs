@@ -4,9 +4,7 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
-
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
 use barracuda_time_plugin::PLUGIN_ID as TIME_PLUGIN_ID;
 
@@ -26,19 +24,16 @@ impl<const M: usize> Plugin<M> for SchedulerPlugin {
         PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.load(SchedulerComponent::new(SchedulerConfig::new(
+        context
+            .event_router
+            .load(SchedulerComponent::new(SchedulerConfig::new(
                 SCHEDULE_CAPACITY,
                 MAX_RECHECK_MILLIS,
             )))?;
-            Ok(())
-        })
+        Ok(())
     }
 }

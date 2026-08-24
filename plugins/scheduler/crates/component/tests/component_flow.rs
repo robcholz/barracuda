@@ -12,7 +12,7 @@ use barracuda_event_router::{
     RpcAddress, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_scheduler_component::event::Triggered;
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
 use barracuda_time_component::{
@@ -103,10 +103,10 @@ impl Component<FRAME_SIZE> for TestDriver {
 
 #[test]
 fn scheduler_calls_typed_time_rpc_and_routes_trigger_event() {
+    futures_lite::future::block_on(install_global_memory_vfs()).expect("install global test VFS");
     let lanes = Box::leak(Box::new(RpcLaneStorage::<8, FRAME_SIZE, 8>::new()));
-    let filesystem = MemFs::new();
-    let mut router = EventRouter::new(lanes, filesystem, "scheduler-component-flow")
-        .expect("create Event Router");
+    let mut router =
+        futures_lite::future::block_on(EventRouter::new(lanes)).expect("create Event Router");
     router
         .load(Box::new(TimeComponent::new(
             ImmediateNetworkTime,

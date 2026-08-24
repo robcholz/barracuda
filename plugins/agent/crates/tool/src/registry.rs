@@ -10,7 +10,6 @@ use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, PersistenceError, SchemaVersion,
     SharedPersistence, StateBlob, StateSlice,
 };
-use barracuda_fs::FileSystem;
 use serde::{Deserialize, Serialize};
 
 use super::definition::Tool;
@@ -212,14 +211,9 @@ impl ToolRegistry {
     ///
     /// Returns [`PersistenceError`] when the state cannot be loaded or
     /// registered.
-    pub fn new<Filesystem>(
-        persistence: SharedPersistence<Filesystem>,
-    ) -> Result<Self, PersistenceError>
-    where
-        Filesystem: FileSystem,
-    {
+    pub async fn new(persistence: SharedPersistence) -> Result<Self, PersistenceError> {
         let entry = persistence.singleton::<ToolRegistryState>(TOOL_REGISTRY_STATE_NAME)?;
-        let state = DurableState::new(entry.load()?.unwrap_or_default());
+        let state = DurableState::new(entry.load().await?.unwrap_or_default());
         entry.register(&state)?;
         Ok(Self::from_state(state))
     }

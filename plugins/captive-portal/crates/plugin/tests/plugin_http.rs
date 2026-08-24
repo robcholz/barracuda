@@ -1,6 +1,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
 #![allow(missing_docs)]
+#![recursion_limit = "256"]
 
 use std::boxed::Box;
 use std::cell::RefCell;
@@ -12,14 +13,12 @@ use barracuda_agent_plugin::{
 };
 use barracuda_captive_portal_plugin::{CaptivePortalPlugin, SET_API_PATH};
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
-use barracuda_platform_host::TokioStack;
-use barracuda_platform_test::{memory_partition, MemFs};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginManager, PluginStartFuture};
-use barracuda_webserver_plugin::{
-    WebServer, WebServerListenFuture, WebServerListener, PLUGIN_ID as WEBSERVER_PLUGIN_ID,
-    WEB_SERVER_CONNECTION_SLOTS,
-};
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+use barracuda_platform_test::{install_global_memory_vfs, loopback_network, memory_partition};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginManager, PluginResult};
+use barracuda_webserver_plugin::{WebServer, PLUGIN_ID as WEBSERVER_PLUGIN_ID};
+use embassy_net::{tcp::TcpSocket, Ipv4Address};
+use embedded_io_async::Write as _;
+use picoserve::time::EmbassyTimer;
 
 const FRAME_SIZE: usize = 512;
 
@@ -32,18 +31,16 @@ impl Plugin<FRAME_SIZE> for AgentProvider {
         AGENT_PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let capability = self.capability.take().expect("capability starts once");
-            context.provide(Rc::new(capability))?;
-            Ok(())
-        })
+        let capability = self.capability.take().expect("capability starts once");
+        context.provide(Rc::new(capability))?;
+        Ok(())
     }
 }
 
@@ -56,17 +53,15 @@ impl Plugin<FRAME_SIZE> for WebServerProvider {
         WEBSERVER_PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.provide(Rc::clone(&self.server))?;
-            Ok(())
-        })
+        context.provide(Rc::clone(&self.server))?;
+        Ok(())
     }
 }
 
@@ -79,7 +74,10 @@ async fn plugin_exposes_agent_set_api_over_http() {
         .await
         .expect("open Plugin storage");
     let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-    let mut router = EventRouter::new(lanes, MemFs::new(), "workflows").expect("create router");
+    install_global_memory_vfs()
+        .await
+        .expect("install global test VFS");
+    let mut router = EventRouter::new(lanes).await.expect("create router");
     let observed = Rc::new(RefCell::new(None::<(ModelApiConfig, ApiPurpose, bool)>));
     let target = Rc::clone(&observed);
     let server = Rc::new(WebServer::new());
@@ -94,7 +92,6 @@ async fn plugin_exposes_agent_set_api_over_http() {
                 })),
             },
         )
-        .await
         .expect("register Agent provider");
     manager
         .register(
@@ -103,24 +100,32 @@ async fn plugin_exposes_agent_set_api_over_http() {
                 server: Rc::clone(&server),
             },
         )
-        .await
         .expect("register WebServer provider");
     manager
         .register(&mut router, CaptivePortalPlugin::new())
-        .await
         .expect("register Captive Portal Plugin");
-    manager.start(&mut router).await.expect("start Plugins");
+    manager.start(&mut router).expect("start Plugins");
 
-    let available =
-        std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).expect("reserve test port");
-    let port = available.local_addr().expect("read test address").port();
-    drop(available);
-    let mut network = TokioStack::default();
-    let listener: WebServerListenFuture<'_, std::io::Error> =
-        network.listen(Rc::clone(&server), port, WEB_SERVER_CONNECTION_SLOTS);
+    let network = loopback_network();
+    let stack = network.stack();
+    let port = 8787;
+    let listener = async {
+        let mut tcp_rx = [0_u8; 4096];
+        let mut tcp_tx = [0_u8; 4096];
+        let mut http = [0_u8; 8192];
+        let mut socket = TcpSocket::new(stack, &mut tcp_rx, &mut tcp_tx);
+        socket.accept(port).await.expect("accept HTTP connection");
+        server
+            .serve_connection(EmbassyTimer, &mut http, socket)
+            .await
+            .expect("serve HTTP connection");
+    };
     let client = async move {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let mut socket = tokio::net::TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, port))
+        let mut tcp_rx = [0_u8; 4096];
+        let mut tcp_tx = [0_u8; 4096];
+        let mut socket = TcpSocket::new(stack, &mut tcp_rx, &mut tcp_tx);
+        socket
+            .connect((Ipv4Address::new(10, 0, 0, 1), port))
             .await
             .expect("connect to WebServer");
         let body = br#"{"timeout_ms":30000,"max_tokens":4096,"image_max_bytes":1048576,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"test-model","base_url":"https://example.invalid/v1"}"#;
@@ -151,7 +156,8 @@ async fn plugin_exposes_agent_set_api_over_http() {
 
     tokio::time::timeout(Duration::from_secs(2), async {
         tokio::select! {
-            result = listener => panic!("listener stopped unexpectedly: {result:?}"),
+            () = network.run() => panic!("network runner stopped"),
+            result = listener => panic!("listener stopped before client completed: {result:?}"),
             () = client => {}
         }
     })

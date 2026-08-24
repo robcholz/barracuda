@@ -12,8 +12,8 @@ use futures_lite::future::block_on;
 use futures_lite::StreamExt as _;
 use serde_json::json;
 
-fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack> {
-    let mut api = ModelApi::new(stack, 4096, 9);
+fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    let mut api = ModelApi::new(stack, stack, 4096, 9);
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",
@@ -127,7 +127,7 @@ fn non_success_stream_surfaces_status_and_body() {
 #[test]
 fn stalled_stream_body_times_out_after_the_response_head() {
     let stack = ScriptedStack::new([ScriptStep::pending_after_headers(200, "text/event-stream")]);
-    let mut api = ModelApi::new(&stack, 4096, 9);
+    let mut api = ModelApi::new(&stack, &stack, 4096, 9);
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

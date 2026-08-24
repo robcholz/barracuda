@@ -3,7 +3,8 @@ use core::cell::RefCell;
 
 use crate::{
     DeleteMessageRequest, EditMessageRequest, GatewayError, MediaKind, MessageChannel,
-    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SetTypingRequest,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamRequest,
+    SetTypingRequest,
 };
 
 /// Registry-backed outbound messaging facade.
@@ -42,6 +43,18 @@ impl MessageGateway {
         let channel = request.target.channel.clone();
         self.provider(&channel)?
             .send_message(request)
+            .await
+            .map_err(|source| GatewayError::Channel { channel, source })
+    }
+
+    /// Sends one ordered primary-text stream with optional extra-content frames.
+    pub async fn send_stream(
+        &self,
+        request: SendStreamRequest,
+    ) -> Result<SendReceipt, GatewayError> {
+        let channel = request.target.channel.clone();
+        self.provider(&channel)?
+            .send_stream(request)
             .await
             .map_err(|source| GatewayError::Channel { channel, source })
     }

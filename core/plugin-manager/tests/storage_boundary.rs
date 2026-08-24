@@ -1,26 +1,14 @@
 //! Plugin storage must not expose its database's physical flash backend.
 
-use alloc::boxed::Box;
-
 extern crate alloc;
 
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture, PluginStorage};
+use barracuda_plugin_manager::Plugin;
 
 struct StorageAgnosticPlugin;
 
 impl<const M: usize> Plugin<M> for StorageAgnosticPlugin {
     fn id(&self) -> &'static str {
         "storage-agnostic"
-    }
-
-    fn start<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
-    where
-        Storage: PluginStorage + 'static,
-    {
-        Box::pin(async { Ok(()) })
     }
 }
 

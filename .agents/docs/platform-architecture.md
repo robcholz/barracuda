@@ -1,474 +1,406 @@
 # Platform Architecture
 
-This document is the authoritative target architecture for Barracuda platform
-integration. It takes precedence over the current repository layout while the
-migration is incomplete. Existing platform implementations under `shared/` or
-Plugin crates are violations to remove, not patterns to copy.
+This document defines Barracuda's target architecture. It is authoritative for
+the meaning and ownership of Platform, Board, Driver, HAL, Target, System, and
+Plugin. Current code that contradicts these boundaries is migration work, not
+precedent.
 
-## Architectural boundary
+## Core model
 
-Barracuda uses Embassy as its execution framework on every supported target,
-including host systems. Embassy is not a device-only implementation detail: it
-is the common task, timer, and lifecycle model that keeps Platform behavior
-consistent. A dedicated selected-target crate reads the Board and Platform
-build selections and exposes their statically dispatched resource factory. The
-fixed Embassy entry depends only on that crate, obtains `PlatformResources`,
-and passes them to System to construct the fixed Plugin set.
+Barracuda has two independently selected axes:
 
-```text
-Embassy entry
-    |
-    v
-independently selected Board YAML + Platform YAML
-    |
-    v
-barracuda_target::resources(spawner)
-    |-- generated SelectedPlatform + BOARD
-    |-- SelectedPlatform::prepare()
-    `-- SelectedPlatform::initialize(spawner, &BOARD)
-        |-- validate the Board against its Platform-native layout
-        |-- project native regions into Embassy storage capabilities
-        `-- initialize platform resources and permanent driver tasks
-    |
-    v
-System::new(lanes, resources, configuration)
-    |-- construct Event Router and Plugin Manager
-    `-- construct the fixed Plugin set
-```
+~~~text
+Target = Platform + HAL
+HAL    = Board matrix + peripheral Drivers
+~~~
 
-Do not add a generic `Platform::run` merely to wrap the Embassy executor.
-Embassy already owns executor startup on host and device targets. The
-Platform boundary is asynchronous initialization with an
-`embassy_executor::Spawner`, invoked only by the selected-target crate. The
-Embassy application entry must not parse selection YAML, import a concrete
-Platform crate, or name the generated Board/Platform types itself.
+- **Platform** is an execution platform family: ESP, STM32, nRF, CH, Linux,
+  macOS, or an equivalent environment. It provides platform mechanisms such as
+  an IP stack and partitions. It does not describe a Board's concrete
+  peripherals, wiring, or product hardware matrix.
+- **Board** is one concrete hardware combination. Its matrix describes the
+  chip, buses, pins, clocks, attached peripherals, fixed wiring, and native
+  physical layout of that product.
+- **Driver** means a reusable peripheral driver. Display controllers, sensors,
+  touch controllers, and external storage devices are Drivers. Network is a
+  Platform service in this architecture; it is not classified as a peripheral
+  Driver.
+- **HAL** is the statically composed result of applying peripheral Drivers to a
+  Board matrix. It exposes initialized hardware capabilities such as Display
+  for System or Plugins to consume.
+- **Target** is the independently selected Platform combined with the selected
+  Board's HAL.
+- **System** is the aggregation entry. It constructs system-owned services,
+  assembles the fixed Plugin graph, and routes Platform and HAL capabilities to
+  their consumers.
+- **Plugin** is a self-contained functional module managed by System.
 
-A representative shape is:
+A Platform is not a Board support package, a peripheral-driver collection, a
+HAL, or a System dependency bag.
 
-```rust,ignore
-pub trait Platform {
-    type Network: 'static;
-    type FileSystem: FileSystem;
-    type DatabaseRegion: embedded_storage_async::nor_flash::NorFlash;
-    type ModelApiFactory: 'static;
-    type Error;
+## Composition boundary
 
-    fn initialize(
-        spawner: embassy_executor::Spawner,
-        board: &'static barracuda_board::Board,
-    ) -> impl Future<
-        Output = Result<
-            PlatformResources<
-                Self::Network,
-                Self::FileSystem,
-                Self::DatabaseRegion,
-                Self::ModelApiFactory,
-            >,
-            Self::Error,
-        >,
-    >;
-}
-```
+Board and Platform selection are independent build inputs. A Board never
+selects its Platform through a Rust associated type, Cargo dependency, or YAML
+reference.
 
-This shape is architectural guidance rather than a frozen API signature. Keep
-the ownership and dependency boundaries below when refining the Rust API.
-`PlatformResources` is constructed by the selected-target facade. Callers do
-not assemble its fields or choose implementations through dependency injection.
+~~~text
+selected Platform YAML -------------------------+
+                                                 |
+selected Board YAML -> Board matrix              |
+                         |                       |
+                         v                       v
+               peripheral Drivers -> HAL     Platform
+                         |                       |
+                         +-----------+-----------+
+                                     |
+                                     v
+                                   Target
+                                     |
+                                     v
+                          barracuda_target::resources
+                                     |
+                                     v
+                                   System
+                                     |
+                                     v
+                                  Plugins
+~~~
 
-A representative composition entry is:
+The selected-target composition root validates that the independently selected
+Platform and Board can form one Target. It invokes Platform initialization and
+the Board HAL composition independently, then returns their resources to
+System without flattening one axis into the other. Application
+entries do not parse YAML, import a concrete Platform, instantiate peripheral
+Drivers, or wire Board peripherals.
 
-```rust,ignore
+~~~rust,ignore
 let resources = barracuda_target::resources(spawner).await?;
-let system = System::new(lanes, resources, workflow_directory).await?;
-```
+let system = System::new(lanes, resources).await?;
+~~~
 
-## Board versus Platform
+The returned shape preserves ownership:
 
-A Board is one concrete hardware product. Its bundle owns fixed facts: chip
-identity, pin assignments, attached peripherals, clock choices, native boot
-layout files, and product-specific feature wiring. The platform-neutral
-`Board` value generated from `board.yml` contains only common hardware facts
-and logical capability bindings. It does not contain a second physical
-partition table.
-
-A Platform is a reusable implementation family such as ESP32, Host, STM32, or
-test. It owns drivers, Embassy tasks, and adapters that turn one Board's fixed
-facts into portable Barracuda capabilities. ESP32 is therefore one Platform,
-not one Board. An ESP32 Platform implementation should be generic over the
-supported ESP32 Board description rather than copied per product.
-
-Board and Platform selection is build configuration, not a Rust type
-relationship. Board YAML files live only under `boards/configs/`; Platform
-YAML lives with its implementation under `platforms/<name>/platform.yml`. The
-build independently selects one of each, validates them, and generates a
-static [`barracuda_board::Board`] value plus the concrete Platform type. A
-Board must not select a Platform through an associated type, Cargo dependency,
-or Rust module reference.
-
-The common API is the maximum useful intersection across Platforms. Physical
-layout is deliberately not part of that intersection: ESP32 uses its ESP-IDF
-partition table, STM32/nRF/RP use linker and bootloader layout symbols, and
-Host uses a native image-layout document. Vendor-only flags remain native.
-
-The native boot format is the sole source of physical truth. Platform build
-code may validate it and project named regions into Embassy capabilities; it
-must not generate it from a Barracuda-wide physical table. Consequently OTA
-slots such as ESP `ota_0`/`ota_1`, Embassy Boot active/DFU/state regions, and
-vendor metadata remain visible to the boot ecosystem that owns them. There is
-no universal Barracuda partition format and no cross-vendor layout converter.
-
-`board.yml` binds portable roles such as `database`, `filesystem`, and
-`web-assets` to names in that native layout. Board and Platform remain
-independent selections: declaring `hardware.chip: esp32c6` is a compatibility
-fact, not a request to select the ESP32 Platform. The independently selected
-Platform must reject an incompatible chip or missing native layout.
-
-## Dependency direction
-
-```text
-shared contracts <------ Plugins
-       ^
-       |
-Board API + Platforms
-       ^
-       |
-build configuration selects Board YAML and Platform YAML
-```
-
-- `shared/` defines portable contracts and platform-neutral algorithms only.
-- `platforms/` owns every concrete Network, FileSystem, and Flash
-  implementation, including native and test implementations.
-- Plugins consume only contracts. They never implement support for a concrete
-  platform type.
-- Plugin implementations and `PluginContext` remain platform-agnostic. They
-  depend on semantic capabilities such as `PluginStorage`, never `NorFlash`,
-  partitions, or concrete Platform types. The System/Plugin Manager composition
-  seam may own the concrete database region needed to construct that storage.
-- `platforms/selected` is the Platform-resource composition root. Build
-  configuration independently selects one Board YAML and one concrete Platform
-  YAML there.
-- System is the runtime/Plugin-graph composition root and consumes the selected
-  resource bundle without knowing how YAML selection was performed.
-
-Adding a Platform must be possible by adding `platforms/<name>` without
-modifying any Plugin.
-
-## Repository layout
-
-```text
-core/
-|-- system/
-`-- plugin-manager/
-
-boards/
-|-- api/               # no_std static Board description
-|-- config/            # host-only YAML parser, validator, and code generator
-`-- configs/
-    `-- <board>/
-        |-- board.yml  # common facts and logical capability bindings
-        `-- ...        # native files: partitions.csv, memory.x, host-layout.yml
-
-platforms/
-|-- api/               # barracuda-platform: trait and PlatformResources
-|-- selected/          # generated Board + Platform selection and resource factory
-|-- host/              # real host implementation
-|-- test/              # deterministic test implementation
-`-- <device>/          # one concrete embedded platform
-
-shared/
-|-- net/               # network contracts only
-`-- fs/                # filesystem contracts only
-```
-
-Concrete implementations are forbidden in `shared/`, including test doubles.
-For example:
-
-- Host network and disk filesystem implementations belong to
-  `platforms/host`.
-- scripted/never network, memory filesystem, and memory NOR flash belong to
-  `platforms/test`.
-- Embassy network adapters, hardware filesystems, flash partitions, and runner
-  tasks belong to the relevant device Platform.
-
-## Native storage realization
-
-The portable storage boundary is an Embassy/embedded-storage capability, not
-a table format:
-
-| Platform family | Physical source of truth | Runtime realization |
-| --- | --- | --- |
-| ESP32 | Board `partitions.csv`/binary consumed by ESP-IDF tooling | `esp-storage::FlashStorage` + Embassy async adapter + `Partition` |
-| STM32 | Board `memory.x` and bootloader symbols | `embassy_stm32::flash::Flash` + Embassy `Partition` |
-| nRF/RP | Board linker/Embassy Boot symbols | the corresponding Embassy HAL flash + `Partition` |
-| Host | Board `host-layout.yml` image description | file-backed NOR + Embassy `Partition` |
-
-Filesystem choice is above this layer. A FAT image, LittleFS image, or another
-format is provisioned into a native region; the Platform exposes its block or
-file capability without making Picoserve understand partition tables. Ekv is
-given only the writable database NOR region. Read-only Web assets are never
-issued as a writable NOR capability.
-
-`shared/` may expose generic contract-conformance helpers, but those helpers
-must accept an implementation from a Platform crate and must not instantiate a
-backend themselves.
-
-## Platform-owned tasks
-
-The concrete Platform owns every task required to keep a platform service
-alive. A Network handle alone is not a running network stack. For Embassy Net,
-the Platform initializes both `Stack` and `Runner`, stores the handle in static
-platform state, and spawns a concrete task that owns the Runner.
-
-```rust,ignore
-#[embassy_executor::task]
-async fn network_task(mut runner: ConcreteNetworkRunner) {
-    runner.run().await
+~~~rust,ignore
+TargetResources {
+    platform: PlatformResources { ip_stack, partitions },
+    board_hal: BoardHalResources { /* semantic capabilities */ },
 }
-```
+~~~
 
-The same rule applies to a filesystem or device backend that requires a
-permanent driver loop. System and Plugins receive handles; they never receive,
-poll, or spawn concrete platform runners.
+Board HAL capabilities never become fields of `PlatformResources`. Platform
+services never become fields of a Board HAL resource bundle.
 
-Platform tasks are statically allocated Embassy tasks. Do not replace them
-with boxed futures, runtime registries, or a `PlatformRuntime` future stored in
-System.
+## Platform
 
-## Embassy on Host Platforms
+A Platform represents a family such as ESP, STM32, nRF, CH, Linux, or macOS.
+It owns integration with that family's execution environment and supplies
+platform-level services. Concrete Board peripherals do not become Platform
+fields or Platform associated types.
 
-Host is a Platform implementation, not an alternate execution architecture.
-Its application entry, System future, Plugin Components, timers, and permanent
-service tasks follow the same Embassy lifecycle as device Platforms.
+Platform resources have stable, exact shapes. The current common contract
+exposes one Embassy IP stack and one partitions collection:
 
-A Host Platform may use operating-system APIs or a host async reactor behind
-its concrete Network, FileSystem, and Flash adapters. That backend mechanism
-must remain encapsulated by `platforms/host`: it must not make System or a
-Plugin select Tokio, async-std, or any other executor, and it must not require a
-different Plugin lifecycle. In particular, a Tokio `main` that directly polls
-System is a migration-state violation, not the Host Platform design.
-
-The desired invariant is:
-
-```text
-                   common Embassy executor/task model
-                         /                 \
-              Host Platform             device Platform
-        OS/reactor-backed adapters      HAL-backed adapters
-                         \                 /
-                    identical System + Plugins
-```
-
-Prefer portable Embassy facilities such as `embassy-time` everywhere. A
-Platform-specific timer or task abstraction is justified only when Embassy
-cannot express the required hardware behavior.
-
-## Network ownership
-
-The concrete Platform defines a local, zero-cost Network adapter type around
-its real network stack. It implements the portable contracts required by the
-system, such as DNS, outgoing TCP, UDP, and incoming TCP listen/accept.
-
-```rust,ignore
-#[repr(transparent)]
-pub struct DeviceNetwork {
-    stack: embassy_net::Stack<'static>,
+~~~rust,ignore
+pub struct PlatformResources<Partitions> {
+    pub ip_stack: embassy_net::Stack<'static>,
+    pub partitions: Partitions,
 }
-```
+~~~
 
-The Platform returns a shared static handle:
+This is architectural guidance rather than a frozen Rust signature. The
+invariant is that partitions remain a collection. Business roles never become
+fields such as filesystem_partition, web_assets_partition, or
+database_partition. The IP capability likewise remains `ip_stack` rather than
+web_network or database_network.
 
-```rust,ignore
-network: &'static DeviceNetwork
-```
+Adding a Plugin, peripheral, filesystem, database, or application subsystem
+does not modify the Platform API or PlatformResources shape.
 
-This matches long-lived network clients and the static storage required by
-Embassy Net. Time, WebServer, and Agent share the same handle and create their
-own sockets. Socket capacity is concrete Platform configuration.
+Platform initialization may start tasks required by its own services. It does
+not start tasks belonging to a peripheral Driver. Driver lifecycle belongs to
+the HAL composition that owns that Driver.
 
-Network runner ownership is separate:
+## Board
 
-```text
-Platform task owns Runner
-System and Plugins share Network handle
-```
+A Board describes one concrete product hardware matrix:
 
-`shared/net` must not contain Tokio or Embassy implementations. It defines the
-contracts. Each Platform crate implements those contracts for its own local
-adapter type.
+- exact chip and package;
+- buses, pins, DMA channels, interrupts, and clocks;
+- attached peripheral models and their fixed wiring;
+- external memories and storage devices;
+- native boot and physical layout artifacts;
+- product-specific hardware feature presence.
 
-## Filesystem ownership and contract
+Board YAML and Board-related crates live under boards/. A Board matrix is data
+used to construct a HAL; it does not implement or select a Platform.
 
-`FileSystem` is a lightweight handle contract, not a backend object that every
-consumer wraps in `Arc`.
+Board configuration identifies concrete hardware and the native names required
+to construct it. It does not contain mounted filesystems, database objects,
+Plugin instances, or application services.
 
-The target contract must require a cheap clone that preserves filesystem
-identity:
+## Peripheral Drivers and HAL
 
-```rust,ignore
-pub trait FileSystem: Clone + 'static {
-    type File: FsFile;
-    // asynchronous, statically dispatched operations
-}
-```
+Drivers implement reusable peripheral behavior. The Board matrix supplies the
+concrete bus and wiring values used to instantiate them:
 
-Cloning a FileSystem handle must be O(1), must not copy stored data, and must
-address the same namespace. The concrete implementation chooses its internal
-sharing mechanism. Framework code must not impose `Arc<F>`, `Rc<F>`, a leaked
-`&'static F`, or dynamic dispatch around a generic filesystem handle.
+~~~text
+Board matrix + peripheral Drivers -> HAL capabilities
+~~~
 
-Platform returns one handle by value. System clones it for Event Router and
-filesystem-consuming Plugins. Event Router owns its handle. Agent Runtime owns
-its handle and clones it for its internal persistence consumers.
+For a display:
 
-Filesystem I/O must be asynchronous and statically dispatched so flash, SPI,
-SD, or another cooperative backend cannot block Time, Scheduler, Network, and
-other Embassy tasks. Do not use `async-trait` or boxed trait futures for this
-contract.
+~~~text
+Board matrix
++-- display controller model
++-- SPI or parallel bus
++-- chip-select, data/command, reset, and backlight pins
++-- DMA and interrupt bindings
++-- geometry and orientation
+             |
+             v
+Display peripheral Driver
+             |
+             v
+Display capability
+             |
+             +----> System
+             +----> Display-consuming Plugin
+~~~
 
-The persistence contract must expose the recovery semantics Barracuda actually
-needs:
+The consumer receives the semantic Display capability. It does not reconstruct
+the Driver from raw pins or import the concrete Board crate.
 
-- reliable append that cannot corrupt previously committed records;
-- atomic/durable replacement implemented by the backend, not a default
-  `create + write + rename` approximation;
-- fallible existence checks (`Result<bool, FsError>`);
-- rooted implementations that reject parent traversal and cannot escape their
-  configured root;
-- consistent directory semantics across native, device, and test Platforms.
+Adding a Display changes the Board matrix, peripheral-driver composition, and
+the System or Plugin wiring that consumes Display. It does not change Platform
+or PlatformResources.
 
-Low-level primitives must not let callers bypass the documented append and
-replacement disciplines.
+Driver tasks and interrupt-facing state are owned by the HAL composition that
+instantiated the Driver. System and Plugins receive handles or semantic
+capabilities; they do not own the Driver runner.
 
-## Flash ownership and partition composition
+## Partitions
 
-The Board bundle carries the vendor-native physical layout, while `board.yml`
-binds logical roles into it. The selected Platform owns the one physical flash
-driver, validates the complete native table, creates
-non-overlapping regions, and mounts concrete filesystems. This must happen
-inside the selected-target factory, before System consumes `PlatformResources`.
+Partitions are a Platform service presented as one generic collection. A
+Platform implements the mechanism appropriate to its family, while the
+selected Board supplies the concrete native layout artifact for the product.
 
-Portable partition handles use the standard asynchronous NOR contract:
+| Platform | Native source |
+| --- | --- |
+| ESP | ESP partition CSV or binary |
+| STM32 | linker and bootloader layout symbols |
+| nRF/RP | linker and Embassy Boot symbols |
+| Linux/macOS | file-backed image layout |
 
-```rust,ignore
-type DatabaseRegion: embedded_storage_async::nor_flash::NorFlash;
-```
+The native format remains authoritative. Barracuda does not introduce a second
+cross-platform physical partition-table format or translate one vendor's table
+into another vendor's table.
 
-Do not expose `ekv::flash::Flash` from Platform. That trait is an ekv-internal
-database interface and would couple Platform to the current persistence engine.
-Platform returns the already mounted filesystem handle and only the database
-NOR region needed by System; it never returns a second, independently owned
-view of the same entire physical flash.
+Platform initialization validates the selected native layout and exposes its
+usable regions through partitions. The collection supports arbitrary entries;
+its Rust type does not grow a field for every consumer.
 
-```text
-Board partition table
-        |
-        v
-Platform-owned physical Flash
-|-- filesystem region
-|   `-- Platform mounts concrete filesystem and returns its handle
-|-- database region
-|   `-- System -> Plugin Manager -> ekv / scoped Plugin storage
-`-- OTA or future regions
-```
+~~~text
+PlatformResources
++-- partitions
+    +-- partition A
+    +-- partition B
+    +-- partition C
+    +-- ...
+~~~
 
-Plugin Manager receives only its database region, never the entire physical
-flash. Inside Plugin Manager, a private local adapter implements
-`ekv::flash::Flash` over the region's async `NorFlash` implementation.
+System assigns business meaning after taking regions from the collection:
 
-The physical type stops there. Plugin implementations receive the semantic
-`PluginStorage` contract through `PluginContext`; neither `Plugin` nor its
-Components name the database region or any NOR trait.
+~~~text
+partitions
++-- region selected by System -> mount LittleFS
++-- region selected by System -> mount read-only FATFS
++-- region selected by System -> open ekv
++-- remaining regions         -> OTA, boot state, or future consumers
+~~~
 
-The adapter must validate at least:
+Platform does not know LittleFS, FATFS, ekv, Event Router, WebServer, Plugin
+Manager, or Plugin identities. System owns those choices and constructions.
 
-- ekv page size versus physical erase size;
-- ekv alignment versus flash read/write alignment;
-- region capacity versus ekv page size;
-- erased-value compatibility.
+A Plugin normally receives scoped semantic storage from System. If a product
+requires a new dedicated physical region, its native Board layout gains that
+region and System consumes it from partitions; the Platform API remains
+unchanged.
 
-Plugin Manager constructs and mounts ekv itself, then derives one scoped KV
-store per Plugin identity. Platform never constructs or exposes Plugin storage.
+## Filesystems and database
 
-## Plugin rules
+System constructs software storage from Platform partitions. Filesystem and
+database objects are not Platform resources.
 
-Plugins are self-contained system-managed units. They declare portable
-capability requirements and obtain initialized system handles through the
-system/Plugin context boundary. They must not receive concrete platform
-objects through application-level dependency injection.
+Different filesystems retain their native APIs:
+
+- mutable runtime files use the selected LittleFS implementation;
+- provisioned read-only Web assets use the selected FAT implementation;
+- key/value state uses ekv over its raw writable region.
+
+Barracuda does not force LittleFS and FATFS through one universal filesystem
+trait. Their different APIs and guarantees remain visible to the System-owned
+consumer that selected them.
+
+~~~text
+PlatformResources::partitions
+             |
+             v
+System storage construction
++-- LittleFS -> Event Router and file-oriented consumers
++-- FATFS    -> WebServer static assets
++-- ekv      -> Plugin Manager scoped storage
+~~~
+
+System mounts the process-wide VFS before constructing its consumers. Event
+Router accesses that global namespace directly and owns
+`/system/workflows.json`, a single JSON array containing its ordered Workflow
+definitions. `/system` is a shared System namespace; Event Router does not own
+sibling paths.
+WebServer owns URL-to-asset behavior over the read-only FAT filesystem. Plugin
+Manager owns ekv namespaces and exposes only semantic Plugin storage.
+
+## IP and communication capabilities
+
+`network` is too broad to be a useful capability name. The current Platform
+contract supplies an `embassy_net::Stack` named `ip_stack`, which means exactly
+IPv4/IPv6, TCP, UDP, and the protocols enabled on that stack. System and
+Plugins share this exact capability. Consumer-specific fields such as
+`web_network` and `database_network` do not exist.
+
+Wi-Fi control, BLE, USB, cellular control, and future communication mechanisms
+are separate capabilities with separate APIs and lifecycles. They are not
+hidden behind a universal `Network` trait or stuffed into the `ip_stack`
+field.
+
+Platform owns the execution work required to keep its IP service alive. System
+and Plugins receive the usable IP stack handle, not its runner or
+platform-specific setup objects.
+
+Embassy is the common task, timer, and lifecycle model used by Barracuda on
+embedded, macOS, and Linux Platforms. The operating-system Platforms may use
+native facilities behind their implementations, while System and Plugins retain
+the same Embassy lifecycle.
+
+The boundary between Event Router Components and owner-managed Embassy tasks is
+defined in [`execution-ownership.md`](execution-ownership.md).
+
+## System
+
+System is the aggregation entry. Its responsibilities include:
+
+- consuming the selected Target resources;
+- constructing mounted filesystems and databases from partitions;
+- constructing Event Router and Plugin Manager;
+- assembling the fixed Plugin set;
+- supplying Platform services and HAL capabilities to their consumers;
+- establishing Plugin registration and startup order.
+
+System does not interpret a concrete Board's pins, instantiate peripheral
+Drivers, parse a vendor partition format, or expose the selected Platform type
+through Plugin APIs.
+
+Capabilities produced by HAL may be consumed directly by System or installed
+as typed capabilities for Plugins. The choice follows ownership and lifecycle,
+not the hardware type that produced the capability.
+
+## Plugins
+
+Plugins are system-managed functional modules. They consume semantic
+capabilities and remain independent of Platform, Board, and peripheral Driver
+types.
+
+For example, a Display Plugin consumes Display. It does not consume SPI pins,
+a Board matrix, or a concrete display-controller Driver. A storage-consuming
+Plugin receives scoped storage rather than a raw partition.
 
 Guidance for choosing between Event Router contracts and typed Plugin
-capabilities lives in
-[`plugin-communication.md`](plugin-communication.md).
+capabilities lives in [`plugin-communication.md`](plugin-communication.md).
+Execution ownership for long-lived Plugin work lives in
+[`execution-ownership.md`](execution-ownership.md).
 
-Forbidden in Plugin crates:
+## Dependency and repository direction
 
-- dependencies on a concrete Platform crate;
-- `impl` blocks for Tokio, Embassy Net, or chip-specific types;
-- platform-selection Cargo features such as `tokio`, `embassy`, or a chip name;
-- spawning or polling a platform runner;
-- constructing a filesystem, network stack, or raw flash;
-- exposing `ekv::flash::Flash` as a platform contract.
+~~~text
+platforms/
++-- api/
++-- selected/          # selects only Platform
++-- esp/
++-- stm32/
++-- nrf/
++-- ch/
++-- linux/
++-- macos/
 
-WebServer is the current example to correct. Its Plugin must consume a portable
-TCP listen/accept contract from `shared/net`. Embassy and Tokio listener
-implementations belong to their Platform crates. Picoserve request routing and
-generic connection adaptation remain inside WebServer because they are Web
-server behavior, not platform initialization.
+drivers/
++-- <peripheral>/
 
-## Test policy
+boards/
++-- api/
++-- hal/
++-- config/
++-- configs/<board>/
++-- selected/          # selects only Board + Board HAL
++-- <board-related composition crates>/
 
-Tests are not exceptions to the Platform boundary.
+composition/
++-- api/               # separate Platform and Board HAL resource fields
++-- selected/          # thin orchestration of both selected axes
 
-- Deterministic tests use `platforms/test`.
-- Real host integration tests use `platforms/host`.
-- Core and Plugin test targets add the appropriate Platform crate as a dev
-  dependency.
-- No `MemFs`, `NeverStack`, `ScriptedStack`, `MemFlash`, or comparable concrete
-  backend remains in `shared/`.
-- Each Platform runs the common contract-conformance suite against its own
-  implementation.
+core/
++-- system/
++-- plugin-manager/
 
-The test Platform may expose direct control and observation handles for
-scripts, recorded traffic, failure injection, filesystem contents, and flash
-fault simulation. Those APIs are test-only Platform APIs, not shared contracts.
+plugins/
++-- <plugin>/
+~~~
 
-## Zero-overhead requirements
+Dependencies flow toward semantic consumers:
 
-The Platform abstraction must preserve these properties:
+~~~text
+peripheral Drivers + Board matrix -> HAL capabilities --+
+                                                         |
+Platform -------------------------> Platform resources --+-> System -> Plugins
+~~~
 
-- concrete Platform selected at compile time;
-- Embassy executor, task, and time semantics on host and device Platforms;
-- no `dyn Platform`, `Any` Platform registry, or runtime Platform lookup;
-- no boxed Platform task futures;
-- platform tasks statically allocated by Embassy;
-- Network and FileSystem calls statically dispatched and eligible for inlining;
-- no framework-mandated reference counting around FileSystem handles;
-- no Platform generic parameter propagated into Plugin Manager or Plugin
-  Context;
-- any typed capability lookup occurs only during Plugin registration/start and
-  never on network, filesystem, RPC, event, or scheduler hot paths.
+Platform crates do not own peripheral Driver implementations or Board
+composition. Board-related crates remain under boards/; peripheral Drivers
+remain under drivers/; the selected Target composition root remains outside an
+individual Platform implementation.
 
-Monomorphization for the one selected Platform is intentional. Generic
-contagion through unrelated core infrastructure is not.
+## Static composition requirements
+
+- Platform and Board are independently selected at build time.
+- HAL is statically composed from one Board matrix and its peripheral Drivers.
+- The concrete Platform and HAL are monomorphized for one Target.
+- Runtime Platform lookup and a dyn Platform registry are unnecessary.
+- Peripheral Driver calls remain statically dispatched.
+- Platform runners and Driver runners stay with their respective owners.
+- System and Plugin hot paths do not perform Platform, Board, or Driver lookup.
+- Adding a Plugin does not change Platform API.
+- Adding a peripheral does not change Platform API.
+- Adding a Board composes existing Platform and Driver building blocks without
+  copying either implementation.
 
 ## Review checklist
 
-Before adding or changing a platform-sensitive feature, verify:
+Before changing target-sensitive code, verify:
 
-1. Is the file under `platforms/` if it instantiates a real or test backend?
-2. Does `shared/` contain only contracts and platform-neutral algorithms?
-3. Can a new Platform be added without editing a Plugin?
-4. Does the Platform own and spawn every required permanent driver task?
-5. Are Network and FileSystem exposed as handles rather than their runners?
-6. Does the Board own fixed layout while the reusable Platform validates and
-   realizes it before returning resources?
-7. Are Board and Platform selected independently by build configuration, with
-   no Board-associated Platform type?
-8. Does Plugin Manager remain unaware of the selected Platform type?
-9. Are calls statically dispatched outside one-time Plugin capability lookup?
-10. Does a test use `platforms/test` or `platforms/host` instead of a shared
-   concrete backend?
-11. Does Host preserve the Embassy execution model instead of making System
-    or Plugins depend on a host executor?
-12. Does the application obtain resources from `barracuda-target` instead of
-    parsing selection YAML or importing a concrete Platform itself?
+1. Is Platform used only for ESP/STM32/nRF/CH/Linux/macOS-level mechanisms?
+2. Is concrete product hardware described by Board rather than Platform?
+3. Is an external peripheral implementation under drivers/?
+4. Is HAL composition expressed as Board matrix plus peripheral Drivers?
+5. Does Platform expose one partitions collection instead of business-specific
+   partition fields?
+6. Are IP, Wi-Fi control, BLE, USB, and other communication capabilities named
+   exactly instead of being hidden behind a generic Network abstraction?
+7. Are LittleFS, FATFS, and ekv constructed by System rather than Platform?
+8. Can a Plugin or peripheral be added without changing Platform API?
+9. Does a Plugin consume semantic capabilities instead of Board, Driver, or raw
+   partition types?
+10. Are Platform and Board selected independently, with compatibility checked
+    only at Target composition?
+11. Does a Display flow from Board matrix plus Display Driver into HAL, then to
+    System or a Plugin?
+12. Does the application obtain the complete selected Target from the target
+    composition crate without performing the wiring itself?

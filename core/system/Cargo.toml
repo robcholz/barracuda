@@ -8,6 +8,8 @@ description = "Barracuda system composition root that registers the fixed Plugin
 default = []
 tokio = [
     "barracuda-agent-plugin/mbedtls-host",
+    "barracuda-vfs/std",
+    "barracuda-webserver-plugin/std",
 ]
 
 [lib]
@@ -20,19 +22,23 @@ barracuda-captive-portal-plugin = { path = "../../plugins/captive-portal/crates/
 barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "../../plugins/imessage-gateway/crates/plugin" }
 barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plugin" }
-barracuda-net = { path = "../../shared/net" }
 barracuda-plugin-manager = { path = "../plugin-manager" }
 barracuda-platform = { path = "../../platforms/api" }
+barracuda-target-api = { path = "../../composition/api" }
 barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
+barracuda-vfs = { path = "../../shared/vfs" }
+barracuda-vfs-littlefs = { path = "../../shared/vfs-littlefs" }
 barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
 barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
+embassy-executor.workspace = true
+embassy-embedded-hal = "0.5.0"
+embassy-net.workspace = true
 thiserror = { version = "2", default-features = false }
-embedded-storage-async.workspace = true
+embedded-storage = "0.3"
 
 [dev-dependencies]
 barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
-barracuda-net = { path = "../../shared/net" }
 barracuda-platform-test = { path = "../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"

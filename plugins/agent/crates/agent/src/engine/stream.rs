@@ -12,6 +12,7 @@ use barracuda_agent_tool::{ToolDetachHandle, ToolOutput};
 use barracuda_model_api::ProviderUsage;
 use barracuda_model_api::ToolCall;
 use barracuda_runtime_utils::{stream::StreamPart, CancellationFlag};
+use barracuda_vfs::FsError;
 use futures_core::Stream;
 use futures_lite::future;
 
@@ -54,6 +55,8 @@ pub enum AgentError {
     Iteration(#[from] IterationLoopError),
     #[error(transparent)]
     Transcript(#[from] TurnError),
+    #[error("transcript persistence failed: {0}")]
+    TranscriptStorage(#[from] FsError),
     #[error("multiple task effects were emitted in one tool round: {count}")]
     ConflictingEffects { count: usize },
     #[error("LLM assistant message cannot be reconstructed from streamed deltas")]

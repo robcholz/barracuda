@@ -2,21 +2,23 @@ use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::mutex::{Mutex, MutexGuard};
 
 use barracuda_model_api::ModelApi;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 
 /// Private shared lease helper used by the concrete memory-side LLM providers.
-pub(super) struct SharedAsyncLlm<H: TcpConnect + Dns + 'static> {
-    api: Mutex<NoopRawMutex, ModelApi<'static, H>>,
+pub(super) struct SharedAsyncLlm<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    api: Mutex<NoopRawMutex, ModelApi<'static, Tcp, Resolver>>,
 }
 
-impl<H: TcpConnect + Dns + 'static> SharedAsyncLlm<H> {
-    pub(super) fn new(api: ModelApi<'static, H>) -> Self {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> SharedAsyncLlm<Tcp, Resolver> {
+    pub(super) fn new(api: ModelApi<'static, Tcp, Resolver>) -> Self {
         Self {
             api: Mutex::new(api),
         }
     }
 
-    pub(super) async fn lease(&self) -> MutexGuard<'_, NoopRawMutex, ModelApi<'static, H>> {
+    pub(super) async fn lease(
+        &self,
+    ) -> MutexGuard<'_, NoopRawMutex, ModelApi<'static, Tcp, Resolver>> {
         self.api.lock().await
     }
 }
@@ -62,7 +64,7 @@ mod tests {
     #[test]
     fn every_independent_lease_waiter_makes_progress() {
         static NETWORK: NeverStack = NeverStack;
-        let api = ModelApi::new(&NETWORK, 256, 256);
+        let api = ModelApi::new(&NETWORK, &NETWORK, 256, 256);
         let shared = SharedAsyncLlm::new(api);
         let holder = futures_lite::future::block_on(shared.lease());
 

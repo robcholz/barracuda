@@ -3,8 +3,10 @@ use core::{future::Future, pin::Pin};
 
 use crate::{
     ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation, ReactRequest,
-    SendMediaRequest, SendMessageRequest, SendReceipt, SetTypingRequest,
+    SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamField, SendStreamRequest,
+    SetTypingRequest,
 };
+use futures_lite::{stream, StreamExt};
 
 /// Local, executor-neutral future returned by a message-channel provider.
 pub type ChannelFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ChannelError>> + 'a>>;
@@ -15,6 +17,36 @@ pub trait MessageChannel: 'static {
     fn channel(&self) -> &str;
 
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt>;
+
+    /// Sends one ordered primary-text stream with optional extra-content frames.
+    ///
+    /// The default projection consumes every frame and forwards only primary
+    /// text to [`MessageChannel::send_message`]. Rich channels override this
+    /// method to interpret extra fields.
+    fn send_stream(&self, request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
+        Box::pin(async move {
+            let SendStreamRequest {
+                target,
+                frames,
+                reply_to,
+            } = request;
+            let chunks = stream::unfold(frames, |mut frames| async move {
+                loop {
+                    match frames.next().await {
+                        Some(Ok(frame)) if frame.field == SendStreamField::Text => {
+                            return Some((Ok(frame.text), frames));
+                        }
+                        Some(Ok(_extra)) => {}
+                        Some(Err(error)) => return Some((Err(error), frames)),
+                        None => return None,
+                    }
+                }
+            });
+            let mut request = SendMessageRequest::stream(target, Box::pin(chunks));
+            request.reply_to = reply_to;
+            self.send_message(request).await
+        })
+    }
 
     fn send_media(
         &self,

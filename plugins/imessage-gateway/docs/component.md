@@ -7,11 +7,12 @@ contracts remain independent from Workflows, Agents, and adapters.
 
 The Component provides:
 
-- `gateway.send` for outbound text.
+- `gateway.send` for one bounded complete text message.
+- `gateway.send_stream` for live primary text plus optional extra frames.
 - `gateway.send_media` for outbound files, images, audio, and video.
 - `gateway.message.received` for normalized inbound text messages.
 
-Both outbound RPCs use the same `GatewayRoute` and return the same
+All outbound RPCs use the same `GatewayRoute` and return the same
 `GatewaySendReceipt`. Their reusable public handlers live beside their
 `RpcMethod` definitions. `component.rs` contains registration and lifecycle
 state.

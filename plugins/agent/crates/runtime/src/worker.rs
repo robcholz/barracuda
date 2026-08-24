@@ -6,14 +6,15 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use async_channel::Receiver;
-use barracuda_agent_persistence::SharedPersistence;
+use barracuda_agent_persistence::{PersistenceError, SharedPersistence};
 use barracuda_agent_tool::ToolRegistry;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::ScopedVfs;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
+use barracuda_agent::AgentCreateError;
 use barracuda_agent::SharedApiManager;
 use barracuda_agent_session::{
     OpenSessionError, SessionControl, SessionCreateError, SessionDeleteError, SessionId,
@@ -41,40 +42,46 @@ pub(super) enum RuntimeCommand {
     Stop,
 }
 
-pub(super) struct RuntimeWorkerInit<Filesystem, Http>
+pub(super) struct RuntimeWorkerInit<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub(super) filesystem: Filesystem,
+    pub(super) filesystem: ScopedVfs,
     pub(super) tool_registry: Arc<ToolRegistry>,
-    pub(super) persistence: SharedPersistence<Filesystem>,
+    pub(super) persistence: SharedPersistence,
     pub(super) persistence_dir: String,
     pub(super) skill_roots: Vec<String>,
     pub(super) api_manager: SharedApiManager,
-    pub(super) llm_factory: ModelApiFactory<Http>,
+    pub(super) llm_factory: ModelApiFactory<Tcp, Resolver>,
     pub(super) commands: Receiver<RuntimeCommand>,
 }
 
-pub(super) struct RuntimeWorker<Filesystem, Http>
+pub(super) struct RuntimeWorker<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    persistence: SharedPersistence<Filesystem>,
-    session_manager: SessionManager<Filesystem, Http>,
+    persistence: Option<SharedPersistence>,
+    persistence_task: Option<PersistenceTask>,
+    maintenance_task: Option<MaintenanceTask>,
+    session_manager: SessionManager<Tcp, Resolver>,
     commands: Pin<Box<Receiver<RuntimeCommand>>>,
     stopping: bool,
     next_task: WorkerTask,
 }
 
-impl<Filesystem, Http> RuntimeWorker<Filesystem, Http>
+type PersistenceTask =
+    Pin<Box<dyn Future<Output = (SharedPersistence, Result<(), PersistenceError>)>>>;
+type MaintenanceTask = Pin<Box<dyn Future<Output = Result<(), AgentCreateError>>>>;
+
+impl<Tcp, Resolver> RuntimeWorker<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub(super) fn new(
-        init: RuntimeWorkerInit<Filesystem, Http>,
+    pub(super) async fn new(
+        init: RuntimeWorkerInit<Tcp, Resolver>,
     ) -> Result<Self, RuntimeBuildError> {
         let RuntimeWorkerInit {
             filesystem,
@@ -95,9 +102,12 @@ where
             api_manager,
             llm_factory,
         )
+        .await
         .map_err(map_session_manager_init_error)?;
         Ok(Self {
-            persistence,
+            persistence: Some(persistence),
+            persistence_task: None,
+            maintenance_task: None,
             session_manager,
             commands: Box::pin(commands),
             stopping: false,
@@ -149,19 +159,58 @@ where
     fn shutdown_complete(&self) -> bool {
         !self.session_manager.has_live_actors()
     }
+
+    fn poll_persistence(&mut self, context: &mut Context<'_>) {
+        if self.persistence_task.is_none() {
+            let Some(persistence) = self.persistence.take() else {
+                return;
+            };
+            self.persistence_task = Some(Box::pin(async move {
+                let result = persistence.maybe_persist().await;
+                (persistence, result)
+            }));
+        }
+        let Some(task) = self.persistence_task.as_mut() else {
+            return;
+        };
+        if let Poll::Ready((persistence, result)) = task.as_mut().poll(context) {
+            self.persistence_task = None;
+            self.persistence = Some(persistence);
+            if let Err(error) = result {
+                log::error!("runtime persistence failed: {error}");
+                tracing::error!(name: "persistence_failed", error = %error);
+            }
+        }
+    }
+
+    fn poll_maintenance(&mut self, context: &mut Context<'_>) {
+        if self.maintenance_task.is_none() {
+            self.maintenance_task = Some(self.session_manager.storage_maintenance());
+        }
+        let Some(task) = self.maintenance_task.as_mut() else {
+            return;
+        };
+        if let Poll::Ready(result) = task.as_mut().poll(context) {
+            self.maintenance_task = None;
+            if let Err(error) = result {
+                log::error!("runtime storage maintenance failed: {error}");
+                tracing::error!(name: "storage_maintenance_failed", error = %error);
+            }
+        }
+    }
 }
 
-impl<Filesystem, Http> Unpin for RuntimeWorker<Filesystem, Http>
+impl<Tcp, Resolver> Unpin for RuntimeWorker<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
 }
 
-impl<Filesystem, Http> Future for RuntimeWorker<Filesystem, Http>
+impl<Tcp, Resolver> Future for RuntimeWorker<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     type Output = ();
 
@@ -190,10 +239,8 @@ where
             }
         }
 
-        if let Err(error) = this.persistence.maybe_persist() {
-            log::error!("runtime persistence failed: {error}");
-            tracing::error!(name: "persistence_failed", error = %error);
-        }
+        this.poll_persistence(context);
+        this.poll_maintenance(context);
 
         if this.stopping && this.shutdown_complete() {
             this.reject_commands();

@@ -15,6 +15,7 @@ enum CatalogBufferKind {
 }
 
 /// Per-agent skill view and cache.
+#[derive(Clone)]
 pub struct SkillSet {
     registry: Arc<dyn SkillRegistry>,
     catalog_version: SkillRegistryVersion,
@@ -41,8 +42,8 @@ impl SkillSet {
 
     /// Re-scan the backing registry. The next catalog render observes the new
     /// snapshot version and refreshes its cache.
-    pub fn reload(&self) -> Result<(), SkillError> {
-        self.registry.reload()
+    pub async fn reload(&self) -> Result<(), SkillError> {
+        self.registry.reload().await
     }
 
     /// JSON catalog for tool output. The returned borrow is valid until the next
@@ -66,15 +67,14 @@ impl SkillSet {
     }
 
     /// Read one skill's Markdown instructions on demand.
-    pub fn read_skill(&mut self, name: &SkillName) -> Result<SkillDocument, SkillError> {
+    pub async fn read_skill(&mut self, name: &SkillName) -> Result<SkillDocument, SkillError> {
         self.document_buffer.clear();
         let directory = self
             .registry
             .catalog()
             .get(name)
             .and_then(|skill| skill.directory().map(String::from));
-        self.registry
-            .read_document_into(name, &mut self.document_buffer)?;
+        self.document_buffer = self.registry.read_document(name).await?;
         Ok(SkillDocument::new(self.document_buffer.clone(), directory))
     }
 

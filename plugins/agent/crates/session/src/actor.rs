@@ -13,10 +13,9 @@ use core::task::{Context, Poll};
 use async_channel::{Receiver, Sender};
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ToolCall;
-use barracuda_net::{Dns, TcpConnect};
 use barracuda_runtime_utils::stream::StreamPart;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 use futures_core::Stream;
 
@@ -197,22 +196,22 @@ impl SessionActorExit {
 ///
 /// The actor polls its active Agents fairly and projects only root-Agent events
 /// onto the public Session stream.
-pub(super) struct SessionActor<Filesystem, Http>
+pub(super) struct SessionActor<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     session: SessionId,
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    agent_manager: SharedAgentManager<Filesystem, Http>,
+    agent_manager: SharedAgentManager<Tcp, Resolver>,
     agent_id_allocator: AgentIdAllocatorHandle,
 
-    agents: AgentSlots<Http>,
+    agents: AgentSlots<Tcp, Resolver>,
     inbox: VecDeque<Message>,
     active_turn: Option<ActiveTurn>,
     next_turn: u32,
-    approval: ApprovalFlow<LlmApprovalResolver<Http>>,
+    approval: ApprovalFlow<LlmApprovalResolver<Tcp, Resolver>>,
     orchestration: SessionOrchestration,
     managed_agents: BTreeSet<barracuda_agent::AgentId>,
 
@@ -225,18 +224,18 @@ where
     lifecycle: ActorLifecycle,
 }
 
-impl<Filesystem, Http> SessionActor<Filesystem, Http>
+impl<Tcp, Resolver> SessionActor<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     pub(super) fn new(
         session: SessionId,
         persistence: SessionPersistence,
-        agent_manager: SharedAgentManager<Filesystem, Http>,
+        agent_manager: SharedAgentManager<Tcp, Resolver>,
         agent_id_allocator: AgentIdAllocatorHandle,
         state: DurableState<SessionPersistentState>,
-        approval_resolver: SharedApprovalResolver<Http>,
+        approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
     ) -> (Self, Sender<SessionCommand>) {
         let (command_sender, commands) = async_channel::unbounded();
         (
@@ -986,7 +985,7 @@ where
         self.state.get().root_agent
     }
 
-    fn root_mut(&mut self) -> Option<&mut AgentSlot<Http>> {
+    fn root_mut(&mut self) -> Option<&mut AgentSlot<Tcp, Resolver>> {
         let root = self.root_id()?;
         self.agents.get_mut(&root)
     }
@@ -1045,10 +1044,10 @@ where
     }
 }
 
-impl<Filesystem, Http> OrchestrationHost for SessionActor<Filesystem, Http>
+impl<Tcp, Resolver> OrchestrationHost for SessionActor<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     fn allocate_agent_id(&mut self) -> AgentId {
         self.agent_id_allocator.next()

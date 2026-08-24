@@ -110,8 +110,9 @@ uv run --script plugins/agent/crates/context/scripts/context_viewer.py
 
 Production crates use `no_std + alloc` and do not depend on a chip PAC or a
 concrete executor. Constructing an `AgentRuntime` also returns an
-`RuntimeService` future. Spawn that future from the application, implement
-`FileSystem`, and provide an `embedded-nal-async` TCP/DNS stack to `barracuda-net`.
+`RuntimeService` future. Spawn that future from the application, supply the
+Plugin's System-scoped `Vfs`, and construct the model API from Embassy TCP and
+DNS resources.
 
 ```rust,ignore
 let factory = ModelApiFactory::new(|| build_barracuda_model_api_from_static_resources());

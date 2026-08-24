@@ -1,4 +1,4 @@
-//! Platform-neutral Board identity and native-storage bindings generated from YAML.
+//! Concrete Board hardware identity and native-layout selection generated from YAML.
 
 #![no_std]
 
@@ -7,17 +7,17 @@
 pub struct Board {
     name: &'static str,
     hardware: Hardware,
-    storage: Storage,
+    native_layout: NativeLayout,
 }
 
 impl Board {
     /// Creates a static Board description generated from YAML.
     #[must_use]
-    pub const fn new(name: &'static str, hardware: Hardware, storage: Storage) -> Self {
+    pub const fn new(name: &'static str, hardware: Hardware, native_layout: NativeLayout) -> Self {
         Self {
             name,
             hardware,
-            storage,
+            native_layout,
         }
     }
 
@@ -33,10 +33,10 @@ impl Board {
         &self.hardware
     }
 
-    /// Returns logical roles bound to names in the selected Platform's native layout.
+    /// Returns the native physical-layout artifact bundled with this Board.
     #[must_use]
-    pub const fn storage(&self) -> &Storage {
-        &self.storage
+    pub const fn native_layout(&self) -> &NativeLayout {
+        &self.native_layout
     }
 }
 
@@ -60,44 +60,22 @@ impl Hardware {
     }
 }
 
-/// Logical storage roles mapped to labels in a Platform-native layout.
+/// Board-bundled native physical-layout artifact.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Storage {
-    filesystem: &'static str,
-    web_assets: Option<&'static str>,
-    database: &'static str,
+pub struct NativeLayout {
+    artifact: &'static str,
 }
 
-impl Storage {
-    /// Creates a logical storage mapping.
+impl NativeLayout {
+    /// Creates a native-layout reference relative to the Board bundle.
     #[must_use]
-    pub const fn new(
-        filesystem: &'static str,
-        web_assets: Option<&'static str>,
-        database: &'static str,
-    ) -> Self {
-        Self {
-            filesystem,
-            web_assets,
-            database,
-        }
+    pub const fn new(artifact: &'static str) -> Self {
+        Self { artifact }
     }
 
-    /// Returns the mutable filesystem partition name.
+    /// Returns the artifact path relative to the Board bundle.
     #[must_use]
-    pub const fn filesystem(&self) -> &'static str {
-        self.filesystem
-    }
-
-    /// Returns the optional read-only Web asset partition name.
-    #[must_use]
-    pub const fn web_assets(&self) -> Option<&'static str> {
-        self.web_assets
-    }
-
-    /// Returns the system database partition name.
-    #[must_use]
-    pub const fn database(&self) -> &'static str {
-        self.database
+    pub const fn artifact(&self) -> &'static str {
+        self.artifact
     }
 }

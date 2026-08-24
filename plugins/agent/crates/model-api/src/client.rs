@@ -27,21 +27,21 @@ use super::types::{
 };
 
 /// LLM client backed directly by one exclusively owned reqwless client.
-pub struct ModelApi<'net, S: TcpConnect + Dns + 'net> {
+pub struct ModelApi<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> {
     backend: Option<Backend>,
-    http: HttpTransport<'net, S>,
+    http: HttpTransport<'net, Tcp, Resolver>,
 }
 
 /// Application-supplied constructor for independent, fully configured client
 /// resources. It owns no HTTP behavior; each call returns one concrete
 /// [`ModelApi`] with its own reqwless state and buffers.
-pub struct ModelApiFactory<S: TcpConnect + Dns + 'static> {
-    make: Rc<dyn Fn() -> ModelApi<'static, S>>,
+pub struct ModelApiFactory<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    make: Rc<dyn Fn() -> ModelApi<'static, Tcp, Resolver>>,
 }
 
-impl<S: TcpConnect + Dns + 'static> Clone for ModelApiFactory<S> {
-    // A derived impl would unnecessarily require `S: Clone`; cloning the
-    // factory only increments the `Rc` count.
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Clone for ModelApiFactory<Tcp, Resolver> {
+    // A derived impl would unnecessarily require the transports to be Clone;
+    // cloning the factory only increments the Rc count.
     fn clone(&self) -> Self {
         Self {
             make: Rc::clone(&self.make),
@@ -49,16 +49,16 @@ impl<S: TcpConnect + Dns + 'static> Clone for ModelApiFactory<S> {
     }
 }
 
-impl<S: TcpConnect + Dns + 'static> ModelApiFactory<S> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> ModelApiFactory<Tcp, Resolver> {
     #[must_use]
-    pub fn new(make: impl Fn() -> ModelApi<'static, S> + 'static) -> Self {
+    pub fn new(make: impl Fn() -> ModelApi<'static, Tcp, Resolver> + 'static) -> Self {
         Self {
             make: Rc::new(make),
         }
     }
 
     #[must_use]
-    pub fn create(&self) -> ModelApi<'static, S> {
+    pub fn create(&self) -> ModelApi<'static, Tcp, Resolver> {
         (self.make)()
     }
 }
@@ -86,14 +86,15 @@ fn parse_chat_json_response<T: DeserializeOwned>(
     })
 }
 
-fn retrying_chat_stream<'h, 'r, S>(
+fn retrying_chat_stream<'h, 'r, Tcp, Resolver>(
     backend: &'h Backend,
-    http: &'h mut HttpTransport<'_, S>,
+    http: &'h mut HttpTransport<'_, Tcp, Resolver>,
     request: &'r ChatRequest<'r>,
     cancel: Cancel<'h>,
 ) -> Driver<'h>
 where
-    S: TcpConnect + Dns,
+    Tcp: TcpConnect,
+    Resolver: Dns,
     'r: 'h,
 {
     yield_stream(|yielder| async move {
@@ -133,7 +134,7 @@ where
                         .await;
                     match next {
                         Err(error) => {
-                            break 'attempt (ChatError::from(deadline_error(error)), "body")
+                            break 'attempt (ChatError::from(deadline_error(error)), "body");
                         }
                         Ok(Some(Ok(event))) => {
                             emitted = true;
@@ -212,8 +213,8 @@ where
     })
 }
 
-impl<'net, S: TcpConnect + Dns + 'net> ModelApi<'net, S> {
-    fn with_transport(http: HttpTransport<'net, S>) -> Self {
+impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Resolver> {
+    fn with_transport(http: HttpTransport<'net, Tcp, Resolver>) -> Self {
         Self {
             backend: None,
             http,
@@ -222,9 +223,15 @@ impl<'net, S: TcpConnect + Dns + 'net> ModelApi<'net, S> {
 
     /// Construct an unconfigured client over the supplied reqwless transport.
     #[must_use]
-    pub fn new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self {
+    pub fn new(
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+    ) -> Self {
         Self::with_transport(HttpTransport::new(
-            network,
+            tcp,
+            resolver,
             header_buffer_size,
             read_buffer_size,
         ))
@@ -234,13 +241,15 @@ impl<'net, S: TcpConnect + Dns + 'net> ModelApi<'net, S> {
     #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
     #[must_use]
     pub fn new_with_tls(
-        network: &'net S,
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
         tls: reqwless::client::TlsConfig<'net>,
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
         Self::with_transport(HttpTransport::new_with_tls(
-            network,
+            tcp,
+            resolver,
             tls,
             header_buffer_size,
             read_buffer_size,

@@ -29,10 +29,10 @@ intrusive-observability = [
 
 [dependencies]
 json-validator = { path = "../../../../shared/json-validator" }
-barracuda-fs = { path = "../../../../shared/fs" }
+barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 barracuda-model-api = { path = "../model-api" }
-barracuda-net = { path = "../../../../shared/net" }
+embedded-nal-async = "0.9"
 embassy-time.workspace = true
 embassy-sync.workspace = true
 barracuda-agent-persistence = { path = "../persistence" }
@@ -86,12 +86,10 @@ barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
 [dev-dependencies]
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
-# Host filesystem implementation shared from barracuda-fs (tests only).
-barracuda-platform-host = { path = "../../../../platforms/host" }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+# Host-only mounted VFS helpers for tests.
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
 # `block_on` for tests (smol family; replaces the removed `barracuda_runtime_utils::block_on`).
 futures-lite = "2"
-barracuda-net = { path = "../../../../shared/net" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

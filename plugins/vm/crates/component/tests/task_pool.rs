@@ -12,7 +12,7 @@ use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
     RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vm_component::run::{ChunkBoundary, Run, RunErrorKind, RunRequestFrame};
 use barracuda_vm_component::{
     BuiltinPackages, VM_TASK_SLOTS, VM_YIELD_DELAY_MILLIS, VmComponent, VmLimits, VmRuntime,
@@ -107,7 +107,10 @@ async fn exercise_pool(spawner: Spawner, completed: SyncSender<Result<(), String
     let runtime = VmRuntime::new().expect("create VM memory pool");
     runtime.start(spawner).expect("start VM runtime");
     let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 64, 8>::new()));
-    let mut router = EventRouter::new(lanes, MemFs::new()).expect("create Event Router");
+    install_global_memory_vfs()
+        .await
+        .expect("install global test VFS");
+    let mut router = EventRouter::new(lanes).await.expect("create Event Router");
     router
         .load(Box::new(
             VmComponent::with_runtime(BuiltinPackages::all(), runtime)

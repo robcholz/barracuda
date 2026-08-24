@@ -1,0 +1,21 @@
+[package]
+name = "barracuda-board-hal"
+version = "0.1.0"
+edition = "2021"
+description = "Board HAL composition contract for Barracuda"
+
+[dependencies]
+barracuda-board = { path = "../api" }
+embassy-executor.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

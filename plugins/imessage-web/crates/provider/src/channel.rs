@@ -14,8 +14,8 @@ use futures_core::Stream;
 use futures_lite::StreamExt;
 use gateway::{
     BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
-    MessageChannel, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
-    SetTypingRequest, TextBody,
+    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
+    SendReceipt, SendStreamField, SendStreamRequest, SetTypingRequest, TextBody,
 };
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
@@ -188,6 +188,66 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                     }
                 }
             }
+            self.publish(
+                &request.target,
+                WebEventData::MessageEnd {
+                    message_id: message_id.clone(),
+                    error: None,
+                },
+            )?;
+            Ok(SendReceipt::new(message_id))
+        })
+    }
+
+    fn send_stream(&self, mut request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
+        Box::pin(async move {
+            let message_id = Self::message_id(self.next_id.get());
+            self.publish(
+                &request.target,
+                WebEventData::MessageStart {
+                    message_id: message_id.clone(),
+                    reply_to: request.reply_to.clone(),
+                    kind: MessageKind::Reply,
+                },
+            )?;
+
+            while let Some(frame) = request.frames.next().await {
+                match frame {
+                    Ok(frame) if frame.field == SendStreamField::Text => {
+                        if !frame.text.is_empty() {
+                            self.publish(
+                                &request.target,
+                                WebEventData::MessageDelta {
+                                    message_id: message_id.clone(),
+                                    delta: frame.text,
+                                },
+                            )?;
+                        }
+                    }
+                    Ok(frame) => {
+                        self.publish(
+                            &request.target,
+                            WebEventData::MessageExtra {
+                                message_id: message_id.clone(),
+                                field: frame.field,
+                                boundary: frame.boundary,
+                                content: frame.text,
+                            },
+                        )?;
+                    }
+                    Err(error) => {
+                        self.publish(
+                            &request.target,
+                            WebEventData::MessageEnd {
+                                message_id: message_id.clone(),
+                                error: Some(stream_error_message(&error)),
+                            },
+                        )?;
+                        return Err(error.into());
+                    }
+                }
+            }
+
             self.publish(
                 &request.target,
                 WebEventData::MessageEnd {

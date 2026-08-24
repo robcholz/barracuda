@@ -6,16 +6,26 @@ mod support;
 use core::cell::{Cell, RefCell};
 use std::future::pending;
 use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EmitError, Event, EventEmitter, EventRouter,
     RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient, WorkflowControlError,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
+use barracuda_vfs::remove_file;
+use futures_lite::future::block_on;
 
 const FRAME_CAPACITY: usize = 64;
-const DIRECTORY: &str = "capacity-workflows";
+static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn reset_global_vfs() -> MutexGuard<'static, ()> {
+    let guard = GLOBAL_VFS_TEST_LOCK.lock().expect("lock global VFS test");
+    block_on(install_global_memory_vfs()).expect("install global test VFS");
+    let _ignored = block_on(remove_file("/system/workflows.json"));
+    guard
+}
 
 struct CapacityEvent;
 
@@ -94,18 +104,16 @@ impl Component<FRAME_CAPACITY> for FanoutComponent {
     }
 }
 
-fn new_router<const N: usize, const Q: usize>(
-    filesystem: &MemFs,
-) -> EventRouter<N, FRAME_CAPACITY, Q> {
+fn new_router<const N: usize, const Q: usize>() -> EventRouter<N, FRAME_CAPACITY, Q> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, FRAME_CAPACITY, Q>::new()));
-    EventRouter::new(lanes, filesystem.clone(), DIRECTORY).expect("create Event Router")
+    block_on(EventRouter::new(lanes)).expect("create Event Router")
 }
 
 #[test]
 fn matched_fanout_can_use_every_lane_except_the_ingress_lane() {
-    let filesystem = MemFs::new();
+    let _global_vfs = reset_global_vfs();
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<4, 4>(&filesystem);
+    let mut event_router = new_router::<4, 4>();
     event_router
         .load(Box::new(FanoutComponent {
             workflows: 3,
@@ -125,9 +133,9 @@ fn matched_fanout_can_use_every_lane_except_the_ingress_lane() {
 
 #[test]
 fn matched_fanout_equal_to_lane_count_is_rejected_as_nested_exhaustion() {
-    let filesystem = MemFs::new();
+    let _global_vfs = reset_global_vfs();
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<4, 4>(&filesystem);
+    let mut event_router = new_router::<4, 4>();
     event_router
         .load(Box::new(FanoutComponent {
             workflows: 4,

@@ -12,7 +12,7 @@ use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
     RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vm_component::run::{ChunkBoundary, Run, RunRequestFrame};
 use barracuda_vm_component::{BuiltinPackages, VmComponent};
 use futures_lite::stream;
@@ -73,9 +73,10 @@ impl Component<64> for VmClient {
 fn vm_component_runs_chunked_source_and_input_through_event_router() {
     futures_lite::future::block_on(async {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 64, 4>::new()));
-        let filesystem = MemFs::new();
-        let mut router =
-            EventRouter::new(lanes, filesystem, "workflows").expect("build Event Router");
+        install_global_memory_vfs()
+            .await
+            .expect("install global test VFS");
+        let mut router = EventRouter::new(lanes).await.expect("build Event Router");
         router
             .load(Box::new(VmComponent::new(BuiltinPackages::all())))
             .expect("load VM Component");

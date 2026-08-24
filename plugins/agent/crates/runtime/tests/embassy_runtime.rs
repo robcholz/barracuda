@@ -2,17 +2,17 @@ use barracuda_agent_runtime::{
     AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionPersistence,
 };
 use barracuda_model_api::ModelApi;
-use barracuda_platform_test::MemFs;
-use barracuda_platform_test::NeverStack;
+use barracuda_platform_test::{memory_vfs, NeverStack};
 use futures_lite::future::{block_on, zip};
 
 static NETWORK: NeverStack = NeverStack;
 
 #[test]
 fn executor_neutral_service_drives_public_session_api() {
-    let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
-    let (runtime, service) = AgentRuntime::<MemFs, NeverStack>::new(
-        MemFs::new(),
+    let llm_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, &NETWORK, 1024, 1024));
+    let filesystem = block_on(memory_vfs()).expect("memory VFS mounts");
+    let (runtime, service) = AgentRuntime::<NeverStack, NeverStack>::new(
+        filesystem,
         RuntimeStorageConfig {
             persistence_root: "/agent".into(),
             skill_roots: Vec::new(),

@@ -60,8 +60,8 @@ impl ToolHandler for ReadSkillTool {
     fn invoke<'a>(&'a self, args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
             let skill_name = args.name.trim();
-            let mut skills = lock_skill_set(&self.skills);
-            match skills.read_skill(&SkillName::new(skill_name)) {
+            let mut skills = { lock_skill_set(&self.skills).clone() };
+            match skills.read_skill(&SkillName::new(skill_name)).await {
                 Ok(document) => {
                     let (instructions, directory) = document.into_parts();
                     let content = if let Some(directory) = directory {
@@ -100,8 +100,8 @@ impl ToolHandler for ReloadSkillsTool {
 
     fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
         alloc::boxed::Box::pin(async move {
-            let skills = lock_skill_set(&self.skills);
-            if let Err(error) = skills.reload() {
+            let skills = { lock_skill_set(&self.skills).clone() };
+            if let Err(error) = skills.reload().await {
                 return Ok(ToolOutput {
                     content: format!("Could not refresh skills from disk: {error}"),
                     ok: false,

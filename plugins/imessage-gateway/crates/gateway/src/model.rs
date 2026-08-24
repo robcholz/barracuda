@@ -29,6 +29,74 @@ pub enum MessageKind {
 /// Asynchronous append-only chunks for one text message.
 pub type TextStream = Pin<Box<dyn Stream<Item = Result<String, StreamError>> + 'static>>;
 
+/// Ordered content field carried by one full Gateway send stream.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendStreamField {
+    /// Primary text understood by every channel.
+    Text,
+    /// Optional model reasoning metadata.
+    Reasoning,
+    /// Optional effect-produced result metadata.
+    EffectResult,
+    /// Optional user-facing notice metadata.
+    Notice,
+    /// Generic producer lifecycle or metadata event.
+    Event,
+    /// Start of one structured tool result.
+    ToolResultStart,
+    /// Provider tool-call identifier.
+    ToolCallId,
+    /// Tool name.
+    ToolName,
+    /// Tool arguments JSON.
+    ToolArguments,
+    /// Tool output text.
+    ToolOutput,
+    /// Successful tool completion marker.
+    ToolSucceeded,
+    /// Failed tool completion marker.
+    ToolFailed,
+    /// End of one structured tool result.
+    ToolResultEnd,
+}
+
+/// Whether more chunks belong to the current stream field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamBoundary {
+    /// More chunks follow for this field.
+    More,
+    /// This chunk completes the field.
+    Complete,
+}
+
+/// One ordered primary-text or extra-content frame delivered to a channel.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendStreamFrame {
+    /// Semantic content carried by this frame.
+    pub field: SendStreamField,
+    /// Current field's chunk boundary.
+    pub boundary: StreamBoundary,
+    /// UTF-8 content; marker fields carry an empty string.
+    pub text: String,
+}
+
+impl SendStreamFrame {
+    /// Creates one channel-facing stream frame.
+    #[must_use]
+    pub fn new(field: SendStreamField, boundary: StreamBoundary, text: impl Into<String>) -> Self {
+        Self {
+            field,
+            boundary,
+            text: text.into(),
+        }
+    }
+}
+
+/// Ordered frame stream for one outbound Gateway delivery.
+pub type SendStream = Pin<Box<dyn Stream<Item = Result<SendStreamFrame, StreamError>> + 'static>>;
+
 /// Asynchronous chunks for one binary payload.
 pub type BinaryStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, StreamError>> + 'static>>;
 
@@ -68,6 +136,16 @@ pub struct SendMessageRequest {
     pub body: TextBody,
     pub reply_to: Option<String>,
     pub kind: MessageKind,
+}
+
+/// One full outbound Gateway stream with primary text and optional extra frames.
+pub struct SendStreamRequest {
+    /// Destination provider and conversation.
+    pub target: MessageTarget,
+    /// Ordered primary-text and extra-content frames.
+    pub frames: SendStream,
+    /// Optional provider message being replied to.
+    pub reply_to: Option<String>,
 }
 
 impl SendMessageRequest {

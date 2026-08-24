@@ -27,7 +27,8 @@ plugins/<my-plugin>/
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       └── component.rs  # only for a small inline Component
+│   │       ├── component.rs  # only for a small Event Router Component
+│   │       └── task.rs       # only for a small Plugin-owned Embassy task
 │   └── component/                 # only for a substantial Component
 │       ├── Cargo.toml
 │       └── src/
@@ -49,6 +50,8 @@ plugins/<my-plugin>/
 - A standalone Component package is named `barracuda-<name>-component`.
 - A Plugin with no Component is valid; capability-only Plugins keep only the
   Plugin implementation and the modules needed by that capability.
+- Put a small owner-managed Embassy task in `task.rs`. A task is independent of
+  whether the Plugin also owns an Event Router Component.
 - Put additional implementation crates, such as `wire`, under
   `plugins/<my-plugin>/crates/` beside `plugin`.
 - Register the Plugin directory in the root workspace with
@@ -60,22 +63,33 @@ Give every Plugin a stable `&'static str` identity. In `lib.rs`:
 
 - define and document `XxxPlugin`;
 - declare `Plugin::DEPENDS_ON` when other Plugins must register first;
-- implement the async `register` phase only for preparation that must finish
-  before any Plugin starts; keep the default no-op when it has no such work;
-- implement the async `start` phase for actual Plugin startup, including
-  constructing and loading owned Components;
+- implement the synchronous `register` phase to construct the Plugin's complete
+  capability and Component graph; keep the default no-op only when the Plugin
+  owns no registration-time resources;
+- explicitly load every owned Component during `register` with
+  `context.event_router.load(component)`;
+- use the optional synchronous `start` phase after every Plugin has registered;
+  `PluginStartContext` deliberately cannot load Components or publish
+  capabilities, but exposes the System-installed Embassy spawner for starting
+  Plugin-owned tasks;
 - use `PluginContext::require` and `provide` for typed cross-Plugin
   capabilities;
 - use the Plugin's scoped storage directly when persistent state is needed;
 - retain registration guards with `PluginContext::retain` so unload reverses
   external registrations;
-- load each owned Component with `PluginContext::load`.
+- never defer capability publication, route registration, or Component loading
+  to `start`.
 
 `barracuda-system` first calls `PluginManager::register` for the complete
 Plugin set in dependency order, then calls `PluginManager::start` once. Never
-start one Plugin between registrations. Both lifecycle phases may await
-cooperative work. Long-running service futures belong in a Component loaded by
-the Plugin; Event Router drives those futures after System construction.
+start one Plugin between registrations. Both lifecycle phases are synchronous:
+`register` atomically mutates the capability and Component graph, while `start`
+synchronously starts owner-managed tasks. Async I/O and long-running work do
+not run inside either lifecycle method. A long-running future belongs in an
+Event Router Component only when it directly advances an Event Router
+contract. Other service futures run as Plugin-owned Embassy tasks started
+through `PluginStartContext::task_spawner`. Follow
+[execution-ownership.md](../../docs/execution-ownership.md) for this boundary.
 
 The Plugin owns construction and defaults for its Components. The selected
 Platform initializes system capability handles; Plugins obtain their declared
@@ -87,9 +101,11 @@ Component internals.
 ## Component and contract design
 
 When the Plugin has an inline Component, keep `component.rs` focused on Event
-Router registration and lifecycle. For a standalone Component crate, keep the
-same separation in its `src/component.rs`. Put one RPC module per address and
-expose reusable `*_handler` constructors from those modules.
+Router registration and Event Router-facing lifecycle. Keep unrelated socket,
+Driver, and service loops in owner-managed Embassy tasks. For a standalone
+Component crate, keep the same separation in its `src/component.rs`. Put one
+RPC module per address and expose reusable `*_handler` constructors from those
+modules.
 
 Design RPCs and events like a REST API: expose the minimal caller-independent
 surface and match existing naming and message shapes.

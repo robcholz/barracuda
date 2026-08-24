@@ -6,7 +6,8 @@ use gateway::{
     BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest,
     GatewayError, MediaKind, MessageChannel, MessageChannelRegistration, MessageGateway,
     MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
-    SetTypingRequest, StreamError, TextBody,
+    SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
+    StreamError, TextBody,
 };
 
 #[derive(Default)]
@@ -293,6 +294,47 @@ fn reports_an_unknown_target_channel() {
             result,
             Err(GatewayError::UnknownChannel { channel }) if channel == "missing"
         ));
+    });
+}
+
+#[test]
+fn default_stream_projection_consumes_extras_and_delivers_only_primary_text() {
+    block_on(async {
+        let (gateway, state, _registration) = fixture("imessage");
+        let frames = stream::iter([
+            Ok(SendStreamFrame::new(
+                SendStreamField::Reasoning,
+                StreamBoundary::Complete,
+                "hidden thought",
+            )),
+            Ok(SendStreamFrame::new(
+                SendStreamField::Text,
+                StreamBoundary::More,
+                "hel",
+            )),
+            Ok(SendStreamFrame::new(
+                SendStreamField::ToolOutput,
+                StreamBoundary::Complete,
+                "hidden tool output",
+            )),
+            Ok(SendStreamFrame::new(
+                SendStreamField::Text,
+                StreamBoundary::Complete,
+                "lo",
+            )),
+        ]);
+
+        let receipt = gateway
+            .send_stream(SendStreamRequest {
+                target: target("imessage"),
+                frames: Box::pin(frames),
+                reply_to: None,
+            })
+            .await
+            .expect("send projected stream");
+
+        assert_eq!(receipt.message_id, "platform-message");
+        assert_eq!(state.borrow().streamed_text, "hello");
     });
 }
 

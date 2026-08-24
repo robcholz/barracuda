@@ -8,9 +8,8 @@ use alloc::boxed::Box;
 
 use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
-use barracuda_agent_memory::{ProfileDocument, ProfileError, ProfileStore};
+use barracuda_agent_memory::{ProfileDocument, ProfileError, ProfileSnapshot, ProfileStore};
 use barracuda_agent_tool::{Tool, ToolGroup};
-use barracuda_fs::FileSystem;
 
 use crate::engine::{ContextProvider, ContextProviderResult};
 
@@ -27,14 +26,18 @@ pub(crate) enum ProfileProviderError {
 }
 
 /// Pulls global profile documents into the current agent context.
-pub(crate) struct ProfileContextProvider<F: FileSystem + 'static> {
-    store: ProfileStore<F>,
+pub(crate) struct ProfileContextProvider {
+    store: ProfileStore,
+    snapshot: ProfileSnapshot,
 }
 
-impl<F: FileSystem + 'static> ProfileContextProvider<F> {
+impl ProfileContextProvider {
     /// Build an provider over `store`.
-    pub(crate) fn new(store: ProfileStore<F>) -> Self {
-        Self { store }
+    pub(crate) fn new(store: ProfileStore) -> Self {
+        Self {
+            store,
+            snapshot: ProfileSnapshot::default(),
+        }
     }
 
     fn contribute_document(
@@ -47,30 +50,39 @@ impl<F: FileSystem + 'static> ProfileContextProvider<F> {
             ProfileDocument::AssistantIdentity => BlockKind::AssistantIdentity,
             ProfileDocument::UserProfile => BlockKind::UserProfile,
         };
-        match self.store.read(document) {
-            Ok(Some(content)) => {
+        let content = match document {
+            ProfileDocument::Soul => self.snapshot.soul.as_deref(),
+            ProfileDocument::AssistantIdentity => self.snapshot.assistant_identity.as_deref(),
+            ProfileDocument::UserProfile => self.snapshot.user_profile.as_deref(),
+        };
+        match content {
+            Some(content) => {
                 output.block(Block::new(kind, content));
             }
-            Ok(None) => {
+            None => {
                 output.block(Block::new(kind, ""));
-            }
-            Err(error) => {
-                log::warn!("profile context read failed for {document}: {error}");
-                tracing::warn!(
-                    name: "profile_context_read_failed",
-                    document = %document,
-                    error = %error,
-                );
-                return Err(error.into());
             }
         }
         Ok(())
     }
 }
 
-impl<F: FileSystem + 'static> ContextProvider for ProfileContextProvider<F> {
+impl ContextProvider for ProfileContextProvider {
     fn id(&self) -> &'static str {
         "profile"
+    }
+
+    fn prepare<'a>(
+        &'a mut self,
+        _storage: &'a AgentStorage,
+        _transcript: &'a dyn barracuda_agent_memory::Transcript,
+    ) -> crate::engine::ContextProviderFuture<'a> {
+        Box::pin(async move {
+            self.snapshot = self.store.snapshot().await.map_err(
+                |error| -> Box<dyn core::error::Error + Send + Sync> { Box::new(error) },
+            )?;
+            Ok(())
+        })
     }
 
     fn contribute(

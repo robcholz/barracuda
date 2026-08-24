@@ -12,12 +12,10 @@ their channels through its typed capability.
 
 ```rust
 manager
-    .register(&mut router, IMessageGatewayPlugin::new())
-    .await?;
+    .register(&mut router, IMessageGatewayPlugin::new())?;
 manager
-    .register(&mut router, IMessageWebPlugin::new())
-    .await?;
-manager.start(&mut router).await?;
+    .register(&mut router, IMessageWebPlugin::new())?;
+manager.start(&mut router)?;
 ```
 
 `IMessageWebPlugin` depends on `imessage-gateway` and `webserver`. Telegram,
@@ -29,7 +27,7 @@ RPC callers use the Event Router's `RpcClient`.
 ## 1. Register a provider channel
 
 A provider Plugin declares `imessage-gateway` in `DEPENDS_ON`, requires the
-capability during startup, and retains its channel registration:
+capability during registration, and retains its channel registration:
 
 ```rust
 let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
@@ -63,23 +61,18 @@ gateway
 The bounded ingress queue applies backpressure. The Component subsequently
 emits one `gateway.message.received` Event stream.
 
-## 3. Send text
+## 3. Send complete text
 
-Build one logical request and use `frames_from_gateway_send` to preserve the
-typed frame protocol:
+Use the unary dynamic API for a bounded complete message:
 
 ```rust
-let request = GatewayOutboundMessage {
-    route: GatewayRoute::new("telegram", "chat-42"),
-    text: "hello from Gateway".into(),
-    reply_to: Some("message-100".into()),
-    kind: gateway::MessageKind::Reply,
-};
-
-let input = RpcStream::new(futures_lite::stream::iter(
-    frames_from_gateway_send(&request)?.into_iter().map(Ok),
-));
-let outcome = client.call::<GatewaySend>(input)?.await?;
+let route = GatewayRoute::new("telegram", "chat-42");
+let request = GatewaySendRequest::with_reply_to(
+    &route,
+    "hello from Gateway",
+    Some("message-100"),
+)?;
+let outcome = client.call::<GatewaySend>(request)?.await?;
 
 match outcome {
     Ok(response) => {
@@ -95,7 +88,18 @@ match outcome {
 The route selects the provider and conversation. `reply_to` selects the
 existing provider message being answered.
 
-## 4. Send media
+## 4. Stream text and extras
+
+Use `GatewaySendStream` when content should render while it is produced or
+when rich providers need reasoning, effect, notice, event, or structured tool
+frames. The RPC input starts with route metadata and continues with content
+frames. `frames_from_gateway_send_stream` is convenient for buffered callers;
+live mappers can emit `GatewaySendStreamRequestFrame` values incrementally.
+
+Plain IM providers receive only the `Text` projection. Web receives
+`message.delta` for text and `message.extra` for every extra frame.
+
+## 5. Send media
 
 Use one `gateway.send_media` contract for files, images, audio, and video. Set
 `kind` to choose the provider operation:
@@ -131,7 +135,7 @@ match outcome {
 The helper emits metadata first and splits the opaque body into bounded binary
 chunks. Input-stream completion completes the media body.
 
-## 5. Consume inbound Events
+## 6. Consume inbound Events
 
 Use `GatewayMessageReceived` as the Event marker. A Workflow ingress RPC uses
 the exact Event message type and streaming cardinality:
@@ -156,8 +160,8 @@ use `GatewayEventFrame`.
 
 ## Examples
 
-- `crates/component/tests/component.rs` — typed `gateway.send` and
-  `gateway.send_media` calls through a running Event Router.
+- `crates/component/tests/component.rs` — typed `gateway.send`,
+  `gateway.send_stream`, and `gateway.send_media` calls through Event Router.
 - `crates/gateway/tests/gateway.rs` — direct provider routing for text and all
   four media kinds.
 - `../imessage-web/crates/provider/tests/web.rs` — Web channel behavior.
@@ -180,6 +184,8 @@ cargo test -p gateway
 - Route fields, media metadata fields, and returned provider message IDs are
   bounded UTF-8 C strings. A media metadata field holds at most 251 UTF-8
   bytes; a returned message ID holds at most 251 UTF-8 bytes.
-- Text message and Event bodies span as many typed text frames as needed.
+- `gateway.send` text is bounded by its unary request field.
+- `gateway.send_stream` content and Event bodies span as many typed frames as
+  needed.
 - Text fields contain UTF-8 and no embedded NUL byte. Media body chunks contain
   opaque bytes.

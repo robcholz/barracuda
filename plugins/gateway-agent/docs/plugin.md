@@ -1,11 +1,14 @@
 # Gateway-Agent Plugin
 
 - Plugin ID: `gateway-agent`
-- Direct Plugin dependencies: `agent`, `imessage-gateway`, `imessage-web`
+- Direct Plugin dependencies: `agent`, `imessage-gateway`
+- Provided typed capabilities: none
 
-The Gateway-Agent Plugin loads the standalone Gateway-Agent bridge Component.
-The bridge routes normalized inbound gateway Events into Agent session RPCs and
-delivers Agent output through IMessage Gateway RPCs.
+The Plugin loads the stateful Gateway-Agent Component. It does not depend on a
+specific provider: Web, iMessage, WeChat, Telegram, and future channels all use
+the route carried by `gateway.message.received`.
 
-It is an integration mapping between the Agent and IMessage Gateway contracts;
-it requires `IMessageWebRoute` from `imessage-web` to select its reply route.
+The Component installs the two-step Workflow documented in
+[`component.md`](component.md). No Agent type crosses the Gateway/provider
+boundary; `gateway_agent.respond` maps Agent events to generic Gateway stream
+fields first.

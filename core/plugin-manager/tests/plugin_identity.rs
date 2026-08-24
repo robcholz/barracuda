@@ -6,10 +6,9 @@ use std::boxed::Box;
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
-use barracuda_platform_test::{memory_partition, MemFs, MemoryPartition};
+use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginId, PluginIdError, PluginManager, PluginRegisterError,
-    PluginStartFuture,
+    Plugin, PluginId, PluginIdError, PluginManager, PluginRegisterError,
 };
 use futures_lite::future::block_on;
 
@@ -20,16 +19,6 @@ struct IdentifiedPlugin(&'static str);
 impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
     fn id(&self) -> &'static str {
         self.0
-    }
-
-    fn start<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
-    where
-        Storage: barracuda_plugin_manager::PluginStorage,
-    {
-        Box::pin(async { Ok(()) })
     }
 }
 
@@ -45,9 +34,9 @@ fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
 }
 
 fn router() -> EventRouter<4, FRAME_SIZE, 4> {
+    block_on(install_global_memory_vfs()).expect("install global test VFS");
     let lanes = Box::leak(Box::new(RpcLaneStorage::new()));
-    let filesystem = MemFs::new();
-    EventRouter::new(lanes, filesystem, "workflows").expect("create Event Router")
+    block_on(EventRouter::new(lanes)).expect("create Event Router")
 }
 
 #[test]
@@ -56,7 +45,8 @@ fn manager_uses_the_identity_declared_by_the_plugin() {
     let mut router = router();
     let id = PluginId::try_from("identified").expect("valid Plugin ID");
 
-    block_on(manager.register(&mut router, IdentifiedPlugin("identified")))
+    manager
+        .register(&mut router, IdentifiedPlugin("identified"))
         .expect("register Plugin");
 
     assert!(manager.is_loaded(&id));
@@ -67,7 +57,8 @@ fn manager_rejects_an_invalid_plugin_identity() {
     let mut manager = manager();
     let mut router = router();
 
-    let error = block_on(manager.register(&mut router, IdentifiedPlugin("")))
+    let error = manager
+        .register(&mut router, IdentifiedPlugin(""))
         .expect_err("reject invalid Plugin ID");
 
     assert!(matches!(
@@ -82,9 +73,11 @@ fn manager_rejects_a_duplicate_plugin_identity() {
     let mut router = router();
     let id = PluginId::try_from("duplicate").expect("valid Plugin ID");
 
-    block_on(manager.register(&mut router, IdentifiedPlugin("duplicate")))
+    manager
+        .register(&mut router, IdentifiedPlugin("duplicate"))
         .expect("register Plugin");
-    let error = block_on(manager.register(&mut router, IdentifiedPlugin("duplicate")))
+    let error = manager
+        .register(&mut router, IdentifiedPlugin("duplicate"))
         .expect_err("reject duplicate Plugin ID");
 
     assert!(matches!(error, PluginRegisterError::AlreadyRegistered(found) if found == id));

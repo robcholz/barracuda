@@ -18,10 +18,25 @@ register(webserver) -> register(imessage-gateway) -> register(imessage-web) -> .
 start(webserver)    -> start(imessage-gateway)    -> start(imessage-web)    -> ...
 ```
 
-Both phases are cooperative futures. `register` is preparation that must
-finish before any Plugin starts and defaults to a no-op. `start` performs the
-Plugin's actual initialization. A Plugin starts long-running work by loading a
-Component; Event Router remains responsible for polling Component futures.
+Both phases are synchronous. `register` atomically constructs the complete
+typed capability and Component graph without yielding. A Plugin explicitly
+loads each owned Component through `context.event_router.load(component)` in
+this phase. `start` is only an optional post-registration hook:
+`PluginStartContext` cannot publish capabilities or load Components, and task
+spawning itself is synchronous. Event Router remains responsible for polling
+Component futures after the complete Plugin set has registered and all startup
+hooks have run. Only work that directly advances an Event Router contract
+belongs in those Component futures. Independent services run as owner-managed
+Embassy tasks under the repository's
+[`execution-ownership.md`](../../.agents/docs/execution-ownership.md) boundary.
+System installs the Embassy spawner directly on Plugin Manager; only
+`PluginStartContext::task_spawner` exposes it, so registration cannot start a
+service before the complete graph exists.
+
+Async storage access and other I/O run in the Component or Embassy task that
+owns that work. Lifecycle methods may clone storage handles into those owners,
+but do not block or await I/O themselves. `PluginManager::open` remains async
+because mounting the shared database performs real storage I/O.
 
 The manager validates `Plugin::id()`, derives one namespace-restricted storage
 implementation from that stable identity, and passes it through
@@ -31,17 +46,17 @@ Plugin-owned fixed-layout zerocopy types; Plugin Manager adds no serialization
 format of its own.
 
 Plugins can also exchange runtime-only typed capabilities. A provider calls
-`PluginContext::provide(Rc<T>)`; a consumer declares the provider in
-`Plugin::DEPENDS_ON` and calls `PluginContext::require::<T>(provider)`. The
-manager stores the value as `Rc<dyn Any>` under `(provider PluginId, TypeId)`.
-It has no knowledge of concrete capability types, and these entries are never
-persisted to `ekv`.
+`PluginContext::provide(Rc<T>)` during registration; a consumer declares the
+provider in `Plugin::DEPENDS_ON` and calls
+`PluginContext::require::<T>(provider)`. The manager stores the value as
+`Rc<dyn Any>` under `(provider PluginId, TypeId)`. It has no knowledge of
+concrete capability types, and these entries are never persisted to `ekv`.
 
-System installs statically selected Platform handles separately with
-`PluginManager::provide_system`. A Plugin obtains them during registration or
-startup through `PluginContext::require_system::<T>()`. This lookup exists only
-at composition time: the Plugin clones the concrete handle into its Component,
-so filesystem and network calls remain statically dispatched.
+System passes statically selected Platform handles and other fixed resources
+directly to each concrete Plugin constructor. `PluginContext` carries only
+Plugin-owned storage, declared Plugin capabilities, retained resources, and
+the explicit Event Router registration boundary. The Embassy spawner remains
+an explicit startup lifecycle facility rather than a typed resource lookup.
 
 Capabilities follow their provider's lifecycle. A provider cannot unload while
 declared dependents remain registered, and phase rollback removes everything
@@ -49,16 +64,17 @@ published by that attempt. `PluginContext::retain` keeps registration guards or
 other resources alive until the owning Plugin unloads successfully.
 
 Each Plugin declares its own identity, constructs its own Components, and calls
-`PluginContext::load`. `barracuda-system` therefore knows which Plugins make up
-the application but does not know their IDs or which Components they contain.
+`context.event_router.load`. `barracuda-system` therefore knows which Plugins
+make up the application but does not know their IDs or which Components they
+contain.
 
 ```text
 System
+├── fixed Plugin construction inputs
 └── PluginManager
     ├── EventRouter registrar
     │   └── Plugin -> Component, Component, ...
-    ├── Typed capability registries
-    │   ├── System TypeId -> Rc<dyn Any>
+    ├── Typed capability registry
     │   └── (provider, TypeId) -> Rc<dyn Any>
     └── ekv Database
         ├── PluginStorage("scheduler")

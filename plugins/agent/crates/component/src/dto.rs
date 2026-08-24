@@ -460,16 +460,47 @@ pub struct RespondRequestFrame {
     pub text: FixedStr<MESSAGE_TEXT_CAPACITY>,
 }
 
-/// One streamed event from `session.open`.
+/// Semantic position of one chunk in the `session.open` response stream.
+#[repr(u8)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    Immutable,
+    IntoBytes,
+    KnownLayout,
+    PartialEq,
+    Serialize,
+    TryFromBytes,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenSessionResponseField {
+    /// More bytes follow for the initial `opened` response.
+    OpenedMore,
+    /// Completes the initial `opened` response.
+    OpenedComplete,
+    /// More bytes follow for one Agent event.
+    EventMore,
+    /// Completes one Agent event.
+    EventComplete,
+}
+
+/// One typed chunk from `session.open`.
 ///
-/// `session` is the typed session identifier; `json` carries one complete
-/// logical event as a JSON document.
+/// The field marks both the logical response kind and its boundary. Large
+/// events therefore cross any number of fixed-size frames without truncation.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpenSessionResponseFrame {
     /// Session that emitted the event.
     pub session: SessionIdDto,
-    /// One logical event encoded as JSON.
-    pub json: FixedStr<400>,
+    /// One UTF-8 JSON chunk of the logical response.
+    pub value: FixedStr<506>,
+    /// Logical response kind and chunk boundary.
+    pub field: OpenSessionResponseField,
+    /// Explicit alignment byte; always zero on the wire.
+    pub(crate) reserved: u8,
 }

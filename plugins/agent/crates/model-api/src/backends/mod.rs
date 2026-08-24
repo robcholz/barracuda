@@ -75,9 +75,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat<S: TcpConnect + Dns>(
+    pub(crate) async fn chat<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &ChatRequest<'_>,
     ) -> Result<LlmResponse, ChatError> {
         match self {
@@ -86,9 +86,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat_json<S: TcpConnect + Dns>(
+    pub(crate) async fn chat_json<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
@@ -99,9 +99,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn infer_media<S: TcpConnect + Dns>(
+    pub(crate) async fn infer_media<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &MediaRequest<'_>,
     ) -> Result<String, InferMediaError> {
         match self {
@@ -110,9 +110,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat_stream<'h, S: TcpConnect + Dns>(
+    pub(crate) async fn chat_stream<'h, Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &'h mut NetClient<'_, S>,
+        http: &'h mut NetClient<'_, Tcp, Resolver>,
         request: &ChatRequest<'_>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
         match self {

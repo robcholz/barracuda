@@ -12,6 +12,8 @@ pub mod gateway_message_received;
 pub mod gateway_send;
 /// Outbound Gateway media-send RPC.
 pub mod gateway_send_media;
+/// Typed streaming outbound message RPC.
+pub mod gateway_send_stream;
 /// Gateway provider routing identity.
 pub mod route;
 /// Shared fixed-layout Gateway wire values.

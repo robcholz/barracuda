@@ -9,11 +9,9 @@ description = "Agent memory subsystem: conversation tape and compaction"
 crate-type = ["rlib"]
 
 [dependencies]
-# Core crate: depends only on the inbound trait crate. The concrete `FileSystem` and
-# `Compactor` (e.g. `barracuda_agent_runtime::LlmCompactor`) are passed in by the caller, so
-# this crate pulls in neither a concrete platform boundary nor the LLM
-# client (`barracuda-model-api`).
-barracuda-fs = { path = "../../../../shared/fs" }
+# Filesystem paths are always scoped by System/Plugin Manager before reaching
+# Agent memory; backend selection remains outside this crate.
+barracuda-vfs = { path = "../../../../shared/vfs" }
 # Shared id/allocator macros (`define_id_allocator!` for the `TurnId` counter).
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 log = { version = "0.4", default-features = false }
@@ -25,8 +23,7 @@ thiserror = { version = "2", default-features = false }
 [dev-dependencies]
 # Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
 # disk-backed inspection backend. None of these reach device builds.
-barracuda-platform-host = { path = "../../../../platforms/host", features = ["filesystem-pretty-json"] }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

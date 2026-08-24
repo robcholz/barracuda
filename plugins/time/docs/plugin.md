@@ -2,9 +2,11 @@
 
 - Plugin ID: `time`
 - Direct Plugin dependencies: none
+- Provided typed capabilities: none
 
-The Time Plugin receives only the platform network capability. It owns the
-SNTP source and its server, retry, resynchronization, and holdover policy, then
+System constructs the Time Plugin with the common `embassy_net::Stack`. The
+Plugin owns the SNTP source and uses Embassy DNS and `UdpSocket` directly,
+together with its server, retry, resynchronization, and holdover policy, then
 loads the standalone Time Component. The Component synchronizes UTC, maintains
 RTC holdover state, and exposes `time.now`.
 

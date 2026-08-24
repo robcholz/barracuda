@@ -10,7 +10,7 @@ use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcError, RpcFrame,
     RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::install_global_memory_vfs;
 use static_cell::ConstStaticCell;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
@@ -96,8 +96,8 @@ impl Component<FRAME_SIZE> for StartupCaller {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(ReviewState::default());
-    let filesystem = MemFs::new();
-    let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
+    install_global_memory_vfs().await?;
+    let mut event_router = EventRouter::new(RPC_LANES.take()).await?;
 
     let service = event_router.load(Box::new(CounterService {
         state: Rc::clone(&state),

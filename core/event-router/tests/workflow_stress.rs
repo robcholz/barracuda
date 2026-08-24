@@ -6,6 +6,7 @@ mod support;
 use core::cell::{Cell, RefCell};
 use std::future::pending;
 use std::rc::Rc;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
@@ -13,10 +14,12 @@ use barracuda_event_router::{
     RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient,
 };
-use barracuda_platform_test::MemFs;
-use futures_lite::future::yield_now;
+use barracuda_platform_test::install_global_memory_vfs;
+use barracuda_vfs::remove_file;
+use futures_lite::future::{block_on, yield_now};
 
 const FRAME_CAPACITY: usize = 64;
+static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 const WORKFLOW_JSON: &str = r#"{
     "id": "stress-workflow",
     "match": { "event": "stress.event" },
@@ -103,20 +106,25 @@ impl Component<FRAME_CAPACITY> for Producer {
     }
 }
 
-fn new_router<const N: usize, const Q: usize>(
-    directory: &'static str,
-) -> EventRouter<N, FRAME_CAPACITY, Q> {
-    let filesystem = MemFs::new();
+fn reset_global_vfs() -> MutexGuard<'static, ()> {
+    let guard = GLOBAL_VFS_TEST_LOCK.lock().expect("lock global VFS test");
+    block_on(install_global_memory_vfs()).expect("install global test VFS");
+    let _ignored = block_on(remove_file("/system/workflows.json"));
+    guard
+}
+
+fn new_router<const N: usize, const Q: usize>() -> EventRouter<N, FRAME_CAPACITY, Q> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, FRAME_CAPACITY, Q>::new()));
-    EventRouter::new(lanes, filesystem, directory).expect("create Event Router")
+    block_on(EventRouter::new(lanes)).expect("create Event Router")
 }
 
 #[test]
 fn cooperative_producer_drives_thousands_of_events_through_two_lanes() {
+    let _global_vfs = reset_global_vfs();
     const EVENTS: usize = 2_000;
 
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<2, 2>("cooperative-stress");
+    let mut event_router = new_router::<2, 2>();
     event_router
         .load(Box::new(Producer {
             events: EVENTS,
@@ -144,10 +152,11 @@ fn cooperative_producer_drives_thousands_of_events_through_two_lanes() {
 
 #[test]
 fn non_cooperative_burst_exhausts_nested_lanes_instead_of_queueing() {
+    let _global_vfs = reset_global_vfs();
     const LANES: usize = 4;
 
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<LANES, 4>("burst-boundary");
+    let mut event_router = new_router::<LANES, 4>();
     event_router
         .load(Box::new(Producer {
             events: 16,

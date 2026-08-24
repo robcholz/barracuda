@@ -5,7 +5,8 @@ use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SetTypingRequest, StreamError,
+    SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
+    StreamError,
 };
 use web::{
     InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, MediaPhase,
@@ -52,6 +53,66 @@ fn registers_as_web_and_streams_text_as_start_delta_end() {
         assert!(
             matches!(end, WebDelivery::Event(event) if matches!(event.data, WebEventData::MessageEnd { .. }))
         );
+    });
+}
+
+#[test]
+fn rich_stream_preserves_extra_frames_beside_primary_text() {
+    block_on(async {
+        let web = Web::<16, 1>::new();
+        let mut events = web.subscribe("chat-42").expect("subscriber");
+        let frames = stream::iter([
+            Ok(SendStreamFrame::new(
+                SendStreamField::Reasoning,
+                StreamBoundary::Complete,
+                "thinking",
+            )),
+            Ok(SendStreamFrame::new(
+                SendStreamField::Text,
+                StreamBoundary::Complete,
+                "answer",
+            )),
+        ]);
+
+        let receipt = web
+            .send_stream(SendStreamRequest {
+                target: target(),
+                frames: Box::pin(frames),
+                reply_to: Some("incoming-1".into()),
+            })
+            .await
+            .expect("send rich stream");
+
+        let start = events.next().await.expect("start");
+        let reasoning = events.next().await.expect("reasoning");
+        let text = events.next().await.expect("text");
+        let end = events.next().await.expect("end");
+
+        assert!(matches!(
+            start,
+            WebDelivery::Event(event)
+                if matches!(&event.data, WebEventData::MessageStart { message_id, reply_to: Some(reply_to), .. }
+                    if message_id == &receipt.message_id && reply_to == "incoming-1")
+        ));
+        assert!(matches!(
+            reasoning,
+            WebDelivery::Event(event)
+                if matches!(&event.data, WebEventData::MessageExtra {
+                    field: SendStreamField::Reasoning,
+                    boundary: StreamBoundary::Complete,
+                    content,
+                    ..
+                } if content == "thinking")
+        ));
+        assert!(matches!(
+            text,
+            WebDelivery::Event(event)
+                if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "answer")
+        ));
+        assert!(matches!(
+            end,
+            WebDelivery::Event(event) if matches!(event.data, WebEventData::MessageEnd { error: None, .. })
+        ));
     });
 }
 

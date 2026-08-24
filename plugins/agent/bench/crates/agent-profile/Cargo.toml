@@ -16,7 +16,6 @@ embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 barracuda-agent-runtime = { path = "../../../crates/runtime" }
 barracuda-agent-skill = { path = "../../../crates/skill", features = ["std"] }
 barracuda-model-api = { path = "../../../crates/model-api" }
-barracuda-net = { path = "../../../../../shared/net" }
 barracuda-platform-test = { path = "../../../../../platforms/test" }
-barracuda-fs = { path = "../../../../../shared/fs" }
 barracuda-profile = { path = "../../../../../shared/profile", features = ["dhat-heap"] }
+futures-lite = "2"

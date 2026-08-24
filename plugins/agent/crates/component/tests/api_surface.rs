@@ -17,7 +17,6 @@ use barracuda_agent_component::session;
 use barracuda_event_router::{
     RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Streaming, Unary,
 };
-use barracuda_platform_test::MemFs;
 use barracuda_platform_test::ScriptedStack;
 
 fn assert_method<M, Request, Response, Error, Input, Output>()
@@ -39,10 +38,10 @@ where
 
 #[test]
 fn runtime_rpcs_are_exposed_at_the_component_root() {
-    let _ = new_session_handler::<MemFs, ScriptedStack>;
-    let _ = list_sessions_handler::<MemFs, ScriptedStack>;
-    let _ = open_session_handler::<MemFs, ScriptedStack>;
-    let _ = delete_session_handler::<MemFs, ScriptedStack>;
+    let _ = new_session_handler::<ScriptedStack, ScriptedStack>;
+    let _ = list_sessions_handler::<ScriptedStack, ScriptedStack>;
+    let _ = open_session_handler::<ScriptedStack, ScriptedStack>;
+    let _ = delete_session_handler::<ScriptedStack, ScriptedStack>;
     assert_eq!(NewSession::ADDRESS, "session.new");
     assert_method::<NewSession, NewSessionRequest, NewSessionResponse, NewSessionError, Unary, Unary>(
     );

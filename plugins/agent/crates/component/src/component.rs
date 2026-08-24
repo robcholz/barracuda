@@ -5,8 +5,7 @@ use barracuda_agent_runtime::{AgentRuntime, RuntimeService};
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_fs::FileSystem;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::delete_session::{delete_session_handler, DeleteSession};
 use crate::list_sessions::{list_sessions_handler, ListSessions};
@@ -15,26 +14,26 @@ use crate::open_session::{open_session_handler, OpenSession};
 use crate::session;
 
 /// Event Router Component exposing the existing Agent runtime API.
-pub struct AgentComponent<Filesystem, Http>
+pub struct AgentComponent<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    runtime: Rc<AgentRuntime<Filesystem, Http>>,
-    service: Option<RuntimeService<Filesystem, Http>>,
+    runtime: Rc<AgentRuntime<Tcp, Resolver>>,
+    service: Option<RuntimeService<Tcp, Resolver>>,
     sessions: session::SessionRegistry,
 }
 
-impl<Filesystem, Http> AgentComponent<Filesystem, Http>
+impl<Tcp, Resolver> AgentComponent<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     /// Creates a Component around the two values returned by `AgentRuntime::new`.
     #[must_use]
     pub fn new(
-        runtime: AgentRuntime<Filesystem, Http>,
-        service: RuntimeService<Filesystem, Http>,
+        runtime: AgentRuntime<Tcp, Resolver>,
+        service: RuntimeService<Tcp, Resolver>,
     ) -> Self {
         Self::from_shared(Rc::new(runtime), service)
     }
@@ -42,8 +41,8 @@ where
     /// Creates a Component sharing an Agent runtime with another adapter.
     #[must_use]
     pub fn from_shared(
-        runtime: Rc<AgentRuntime<Filesystem, Http>>,
-        service: RuntimeService<Filesystem, Http>,
+        runtime: Rc<AgentRuntime<Tcp, Resolver>>,
+        service: RuntimeService<Tcp, Resolver>,
     ) -> Self {
         Self {
             runtime,
@@ -53,10 +52,10 @@ where
     }
 }
 
-impl<Filesystem, Http, const M: usize> Component<M> for AgentComponent<Filesystem, Http>
+impl<Tcp, Resolver, const M: usize> Component<M> for AgentComponent<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<NewSession, _>(new_session_handler(Rc::clone(&self.runtime)))?;

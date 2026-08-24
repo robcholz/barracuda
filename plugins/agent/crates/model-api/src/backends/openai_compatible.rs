@@ -142,9 +142,9 @@ impl OpenAiCompatible {
         self.context.timeout_ms
     }
 
-    pub(super) async fn chat<S: TcpConnect + Dns>(
+    pub(super) async fn chat<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &ChatRequest<'_>,
     ) -> Result<LlmResponse, ChatError> {
         let body = self.build_chat_body(request)?;
@@ -152,9 +152,9 @@ impl OpenAiCompatible {
         parse_openai_chat_response(&response.body).map_err(Into::into)
     }
 
-    pub(super) async fn chat_json<S: TcpConnect + Dns>(
+    pub(super) async fn chat_json<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
@@ -164,9 +164,9 @@ impl OpenAiCompatible {
         parse_openai_chat_response(&response.body).map_err(Into::into)
     }
 
-    pub(super) async fn infer_media<S: TcpConnect + Dns>(
+    pub(super) async fn infer_media<Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &mut NetClient<'_, S>,
+        http: &mut NetClient<'_, Tcp, Resolver>,
         request: &MediaRequest<'_>,
     ) -> Result<String, InferMediaError> {
         let body = self.build_media_body(request)?;
@@ -174,9 +174,9 @@ impl OpenAiCompatible {
         media_text(parse_openai_chat_response(&response.body)?)
     }
 
-    pub(super) async fn chat_stream<'h, 'r, S: TcpConnect + Dns>(
+    pub(super) async fn chat_stream<'h, 'r, Tcp: TcpConnect, Resolver: Dns>(
         &self,
-        http: &'h mut NetClient<'_, S>,
+        http: &'h mut NetClient<'_, Tcp, Resolver>,
         request: &'r ChatRequest<'r>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
         let body = self.build_stream_body(request)?;

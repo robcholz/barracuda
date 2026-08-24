@@ -1,0 +1,16 @@
+//! Concrete Platform mechanisms belong to concrete Platform crates.
+
+use std::path::Path;
+
+#[test]
+fn platform_mechanisms_are_not_standalone_pseudo_platforms() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    assert!(!root.join("shared/platform-std").exists());
+    assert!(!root.join("shared/embassy-net-tun").exists());
+    assert!(!root.join("platforms/file-storage").exists());
+    assert!(!root.join("platforms/tun").exists());
+    assert!(root.join("platforms/macos/platform.yml").is_file());
+    assert!(root.join("platforms/linux/platform.yml").is_file());
+    assert!(root.join("platforms/esp32c6/platform.yml").is_file());
+}

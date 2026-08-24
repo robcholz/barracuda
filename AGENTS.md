@@ -10,3 +10,7 @@ precedent.
 See [.agents/docs/plugin-communication.md](.agents/docs/plugin-communication.md)
 for guidance on choosing between Event Router contracts and typed Plugin
 capabilities, and for the required capability declaration in `plugin.md`.
+
+See [.agents/docs/execution-ownership.md](.agents/docs/execution-ownership.md)
+for the authoritative boundary between Event Router Components and
+owner-managed Embassy tasks.

@@ -1,7 +1,9 @@
 use alloc::{boxed::Box, string::String};
 use core::net::SocketAddr;
 
-use barracuda_net::{AddrType, ConnectedUdp, Dns, UdpStack};
+use embassy_net::Stack;
+use embassy_net::dns::DnsQueryType;
+use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};
 use embassy_time::{Duration, Instant, with_timeout};
 use getset::{CopyGetters, Getters};
@@ -82,52 +84,52 @@ impl NtpTimestampGenerator for RtcTimestampGenerator {
     }
 }
 
-struct ConnectedSntpSocket<Socket> {
-    socket: Mutex<NoopRawMutex, Socket>,
+struct ConnectedSntpSocket<'a> {
+    socket: Mutex<NoopRawMutex, UdpSocket<'a>>,
     remote: SocketAddr,
 }
 
-impl<Socket> NtpUdpSocket for ConnectedSntpSocket<Socket>
-where
-    Socket: ConnectedUdp,
-{
+impl NtpUdpSocket for ConnectedSntpSocket<'_> {
     async fn send_to(&self, buffer: &[u8], address: SocketAddr) -> sntpc::Result<usize> {
         if address != self.remote {
             return Err(sntpc::Error::Network);
         }
+        let SocketAddr::V4(address) = address else {
+            return Err(sntpc::Error::Network);
+        };
         self.socket
             .lock()
             .await
-            .send(buffer)
+            .send_to(buffer, address)
             .await
             .map_err(|_error| sntpc::Error::Network)?;
         Ok(buffer.len())
     }
 
     async fn recv_from(&self, buffer: &mut [u8]) -> sntpc::Result<(usize, SocketAddr)> {
-        let length = self
+        let (length, metadata) = self
             .socket
             .lock()
             .await
-            .receive_into(buffer)
+            .recv_from(buffer)
             .await
             .map_err(|_error| sntpc::Error::Network)?;
-        Ok((length, self.remote))
+        Ok((length, metadata.endpoint.into()))
     }
 }
 
-/// `no_std` SNTP source over the repository's generic async network traits.
-pub struct SntpSource<Network> {
-    network: Network,
+/// `no_std` SNTP source over the common Embassy Net stack.
+pub struct SntpSource {
+    network: Stack<'static>,
     config: SntpConfig,
     unix_anchor_millis: u64,
     monotonic_anchor: Instant,
 }
 
-impl<Network> SntpSource<Network> {
+impl SntpSource {
     /// Creates a source whose cold-start era pivot is the configured minimum time.
     #[must_use]
-    pub fn new(network: Network, config: SntpConfig) -> Self {
+    pub fn new(network: Stack<'static>, config: SntpConfig) -> Self {
         let unix_anchor_millis = config.minimum_unix_seconds.saturating_mul(1_000);
         Self {
             network,
@@ -138,23 +140,28 @@ impl<Network> SntpSource<Network> {
     }
 }
 
-impl<Network> TimeSource for SntpSource<Network>
-where
-    Network: Dns + UdpStack + 'static,
-{
+impl TimeSource for SntpSource {
     fn synchronize(&mut self) -> TimeSourceFuture<'_> {
         Box::pin(async move {
-            let ip = self
+            let addresses = self
                 .network
-                .get_host_by_name(&self.config.server, AddrType::IPv4)
+                .dns_query(&self.config.server, DnsQueryType::A)
                 .await
                 .map_err(|_error| TimeSourceError::Dns)?;
-            let remote = SocketAddr::new(ip, self.config.port);
-            let (_local, socket) = self
-                .network
-                .connect(remote)
-                .await
-                .map_err(|_error| TimeSourceError::Network)?;
+            let ip = addresses.first().copied().ok_or(TimeSourceError::Dns)?;
+            let remote = SocketAddr::new(ip.into(), self.config.port);
+            let mut rx_metadata = [PacketMetadata::EMPTY; 1];
+            let mut tx_metadata = [PacketMetadata::EMPTY; 1];
+            let mut rx_buffer = [0_u8; 512];
+            let mut tx_buffer = [0_u8; 512];
+            let mut socket = UdpSocket::new(
+                self.network,
+                &mut rx_metadata,
+                &mut rx_buffer,
+                &mut tx_metadata,
+                &mut tx_buffer,
+            );
+            socket.bind(0).map_err(|_error| TimeSourceError::Network)?;
             let socket = ConnectedSntpSocket {
                 socket: Mutex::new(socket),
                 remote,

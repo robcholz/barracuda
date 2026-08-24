@@ -4,11 +4,10 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::rc::Rc;
 
 use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
 use gateway::{GatewayError, MessageChannel, MessageChannelRegistration, MessageGateway};
 
 pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
@@ -22,9 +21,9 @@ const GATEWAY_INGRESS_CAPACITY: usize = 16;
 
 /// Typed capability used by IMessage provider Plugins.
 ///
-/// Providers require this capability during startup, register one channel, and
-/// retain the returned guard for their Plugin lifetime. Inbound providers also
-/// publish normalized messages through the same capability.
+/// Providers require this capability during registration, register one channel,
+/// and retain the returned guard for their Plugin lifetime. Inbound providers
+/// also publish normalized messages through the same capability.
 pub struct IMessageGateway {
     gateway: Rc<MessageGateway>,
     ingress: GatewayIngress,
@@ -74,21 +73,16 @@ impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
         PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let gateway = Rc::new(MessageGateway::new());
-            let (component, ingress) =
-                GatewayComponent::new(gateway.as_ref().clone(), GATEWAY_INGRESS_CAPACITY);
-            context.load(component)?;
-            context.provide(Rc::new(IMessageGateway { gateway, ingress }))?;
-            Ok(())
-        })
+        let gateway = Rc::new(MessageGateway::new());
+        let (component, ingress) =
+            GatewayComponent::new(gateway.as_ref().clone(), GATEWAY_INGRESS_CAPACITY);
+        context.event_router.load(component)?;
+        context.provide(Rc::new(IMessageGateway { gateway, ingress }))?;
+        Ok(())
     }
 }
 
@@ -99,23 +93,34 @@ mod tests {
     use super::IMessageGatewayPlugin;
     use alloc::boxed::Box;
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{memory_partition, MemFs};
+    use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     #[test]
     fn plugin_loads_the_shared_gateway_component() {
-        let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
-        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-        let mut router = EventRouter::new(lanes, MemFs::new(), "workflows").expect("create router");
-        let id = PluginId::try_from("imessage-gateway").expect("valid Plugin ID");
-        let plugin = IMessageGatewayPlugin::new();
-        assert_eq!(Plugin::<512>::id(&plugin), "imessage-gateway");
+        block_on(async {
+            let partition = memory_partition(64 * 1024)
+                .await
+                .expect("create database partition");
+            let mut manager = PluginManager::open(partition)
+                .await
+                .expect("open Plugin storage");
+            install_global_memory_vfs()
+                .await
+                .expect("install global test VFS");
+            let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
+            let mut router = EventRouter::new(lanes).await.expect("create router");
+            let id = PluginId::try_from("imessage-gateway").expect("valid Plugin ID");
+            let plugin = IMessageGatewayPlugin::new();
+            assert_eq!(Plugin::<512>::id(&plugin), "imessage-gateway");
 
-        block_on(manager.register(&mut router, plugin)).expect("register IMessage Gateway Plugin");
-        block_on(manager.start(&mut router)).expect("start Plugins");
+            manager
+                .register(&mut router, plugin)
+                .expect("register IMessage Gateway Plugin");
+            manager.start(&mut router).expect("start Plugins");
 
-        assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+            assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+        });
     }
 }

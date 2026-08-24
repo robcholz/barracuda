@@ -10,7 +10,7 @@ use async_channel::{Receiver, TryRecvError};
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::{ToolDetachHandle, ToolInvocation, ToolOutput};
 use barracuda_model_api::ToolCall;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
 use futures_util::stream::SelectAll;
@@ -151,26 +151,24 @@ impl PendingTurn {
 }
 
 /// One long-lived Agent instance around the single-task `AgentEngine` core.
-pub struct Agent<H: TcpConnect + Dns + 'static> {
-    engine: AgentEngine<H>,
+pub struct Agent<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    engine: AgentEngine<Tcp, Resolver>,
     ephemeral: AgentEphemeralState,
 }
 
-impl<H> Agent<H>
+impl<Tcp, Resolver> Agent<Tcp, Resolver>
 where
-    H: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub(super) fn new(engine: AgentEngine<H>) -> Self {
+    pub(super) fn new(engine: AgentEngine<Tcp, Resolver>) -> Self {
         Self {
             engine,
             ephemeral: AgentEphemeralState::new(),
         }
     }
 
-    pub fn into_stream(self, message: Message) -> (AgentStream<H>, AgentHandle)
-    where
-        H: 'static,
-    {
+    pub fn into_stream(self, message: Message) -> (AgentStream<Tcp, Resolver>, AgentHandle) {
         let (handle, commands, activity, awaiting_approval) = AgentHandle::channel();
         let stream =
             OwnedAgentGuard::new(self, activity).into_stream(message, commands, awaiting_approval);
@@ -182,16 +180,17 @@ where
     }
 }
 
-struct OwnedAgentGuard<H: TcpConnect + Dns + 'static> {
-    agent: Option<Agent<H>>,
+struct OwnedAgentGuard<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
+    agent: Option<Agent<Tcp, Resolver>>,
     activity: Rc<Cell<AgentActivity>>,
 }
 
-impl<H> OwnedAgentGuard<H>
+impl<Tcp, Resolver> OwnedAgentGuard<Tcp, Resolver>
 where
-    H: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    fn new(agent: Agent<H>, activity: Rc<Cell<AgentActivity>>) -> Self {
+    fn new(agent: Agent<Tcp, Resolver>, activity: Rc<Cell<AgentActivity>>) -> Self {
         Self {
             agent: Some(agent),
             activity,
@@ -203,7 +202,7 @@ where
         first_message: Message,
         commands: Receiver<AgentCommand>,
         awaiting_approval: Rc<RefCell<Option<super::ToolCallId>>>,
-    ) -> impl futures_core::Stream<Item = AgentStreamItem<H>> + 'static {
+    ) -> impl futures_core::Stream<Item = AgentStreamItem<Tcp, Resolver>> + 'static {
         yield_stream(|yielder| async move {
             let activity = Rc::clone(&self.activity);
             {
@@ -398,7 +397,7 @@ where
     }
 }
 
-impl<H: TcpConnect + Dns + 'static> Drop for OwnedAgentGuard<H> {
+impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Drop for OwnedAgentGuard<Tcp, Resolver> {
     fn drop(&mut self) {
         self.activity.set(AgentActivity::Closed);
         if let Some(agent) = &mut self.agent {

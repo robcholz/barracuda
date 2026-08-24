@@ -6,8 +6,8 @@
 //! cargo run -p barracuda-agent-persistence --example basic
 //! ```
 //!
-//! `MemFs` keeps the example hermetic. A production caller supplies its own
-//! `FileSystem` implementation without changing the persistence API.
+//! A mounted in-memory VFS keeps the example hermetic. Production callers pass
+//! the plugin-private VFS namespace supplied by the system.
 
 use std::{borrow::Cow, error::Error};
 
@@ -15,7 +15,8 @@ use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, InstanceId, Persistence, SchemaVersion,
     StateBlob, StateSlice,
 };
-use barracuda_platform_test::MemFs;
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -50,12 +51,16 @@ impl DurableStateCodec for ExampleState {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let filesystem = MemFs::new();
+    block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn Error>> {
+    let filesystem = memory_vfs().await?;
 
     let root = "/example";
     let session_id = InstanceId::new("session-1")?;
 
-    let persistence = Persistence::<MemFs>::new(filesystem.clone(), root)?;
+    let persistence = Persistence::new(filesystem.clone(), root).await?;
     let runtime_entry = persistence.singleton::<ExampleState>("runtime")?;
     let sessions_entry = persistence.collection::<ExampleState>("sessions")?;
 
@@ -74,7 +79,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     session.get_mut().turn_count += 2;
 
     // Persist every dirty state captured above.
-    persistence.maybe_persist()?;
+    persistence.maybe_persist().await?;
 
     drop(runtime);
     drop(session);
@@ -82,18 +87,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Typed entries are reopened when the process starts again. Loading returns
     // only the decoded DTO; a runtime owner creates its own DurableState.
-    let resumed = Persistence::<MemFs>::new(filesystem, root)?;
+    let resumed = Persistence::new(filesystem, root).await?;
     let runtime_entry = resumed.singleton::<ExampleState>("runtime")?;
     let sessions_entry = resumed.collection::<ExampleState>("sessions")?;
 
-    let runtime = runtime_entry.load()?.expect("runtime state was persisted");
+    let runtime = runtime_entry
+        .load()
+        .await?
+        .expect("runtime state was persisted");
     let session = sessions_entry
-        .load(&session_id)?
+        .load(&session_id)
+        .await?
         .expect("session state was persisted");
 
     println!("runtime turns: {}", runtime.turn_count);
     println!("session turns: {}", session.turn_count);
-    println!("persisted sessions: {:?}", sessions_entry.list()?);
+    println!("persisted sessions: {:?}", sessions_entry.list().await?);
 
     sessions_entry.remove(&session_id)?;
     Ok(())

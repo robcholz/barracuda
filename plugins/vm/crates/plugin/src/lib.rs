@@ -68,7 +68,7 @@ mod tests {
     use std::time::Duration;
 
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{memory_partition, MemFs};
+    use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginStartError};
     use embassy_executor::{Executor, Spawner};
     use futures_lite::future::block_on;
@@ -79,9 +79,9 @@ mod tests {
     fn plugin_loads_its_vm_component() {
         let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
         let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+        block_on(install_global_memory_vfs()).expect("install global test VFS");
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
-        let filesystem = MemFs::new();
-        let mut router = EventRouter::new(lanes, filesystem).expect("create router");
+        let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         let id = PluginId::try_from("vm").expect("valid Plugin ID");
         let plugin = VmPlugin::default();
         assert_eq!(Plugin::<512>::id(&plugin), "vm");
@@ -96,8 +96,9 @@ mod tests {
     fn plugin_requires_an_embassy_spawner_during_startup() {
         let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
         let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+        block_on(install_global_memory_vfs()).expect("install global test VFS");
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
-        let mut router = EventRouter::new(lanes, MemFs::new()).expect("create router");
+        let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         manager
             .register(&mut router, VmPlugin::default())
             .expect("register VM Plugin");
@@ -118,9 +119,13 @@ mod tests {
             let mut manager = PluginManager::open(partition)
                 .await
                 .map_err(|error| error.to_string())?;
+            install_global_memory_vfs()
+                .await
+                .map_err(|error| error.to_string())?;
             let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
-            let mut router =
-                EventRouter::new(lanes, MemFs::new()).map_err(|error| error.to_string())?;
+            let mut router = EventRouter::new(lanes)
+                .await
+                .map_err(|error| error.to_string())?;
             manager.install_task_spawner(spawner);
             manager
                 .register(&mut router, VmPlugin::default())

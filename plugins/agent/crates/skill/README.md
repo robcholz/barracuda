@@ -48,21 +48,23 @@ its `cap_groups`, `manage_mode`, category, peripheral, and tag schema.
 ```rust
 use std::sync::Arc;
 
-use barracuda_fs::MemFs;
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};
+use barracuda_platform_test::memory_vfs;
+use futures_lite::future::block_on;
 
-fn build(filesystem: Arc<MemFs>) -> Result<(), barracuda_agent_skill::SkillError> {
-    let registry = Arc::new(
-        FsSkillRegistry::new(filesystem)
-            .set_root("data/skills")?
-            .set_root("system/skills")?,
-    );
+fn build() -> Result<(), barracuda_agent_skill::SkillError> {
+    block_on(async {
+    let filesystem = memory_vfs().await.unwrap();
+    let registry = Arc::new(FsSkillRegistry::new(filesystem)
+        .set_root("data/skills").await?
+        .set_root("system/skills").await?);
     let mut skills = registry.skill_set();
 
     println!("{}", skills.list_skills());
-    let document = skills.read_skill(&SkillName::new("light-switch"))?;
+    let document = skills.read_skill(&SkillName::new("light-switch")).await?;
     println!("{}", document.content());
     Ok(())
+    })
 }
 ```
 

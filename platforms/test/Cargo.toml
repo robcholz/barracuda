@@ -4,13 +4,21 @@ version = "0.1.0"
 edition = "2021"
 description = "Deterministic test Platform implementations for Barracuda"
 
+[features]
+default = []
+std = []
+
 [dependencies]
-barracuda-fs = { path = "../../shared/fs" }
-barracuda-net = { path = "../../shared/net" }
+barracuda-vfs = { path = "../../shared/vfs", features = ["std"] }
+barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
+embassy-futures.workspace = true
+embassy-net.workspace = true
+embassy-net-driver-channel.workspace = true
 embassy-sync.workspace = true
 embassy-embedded-hal = "0.5.0"
 embedded-io = "0.7"
 embedded-io-async = "0.7"
+embedded-nal-async = "0.9"
 embedded-storage-async.workspace = true
 thiserror = { version = "2", default-features = false }
 

@@ -9,9 +9,9 @@ use crate::engine::AgentStorage;
 use barracuda_agent_context::{Block, BlockKind, ContextSink};
 use barracuda_agent_memory::{LongTermInitError, LongTermMemory, Transcript, TurnId};
 use barracuda_agent_tool::{Tool, ToolGroup};
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::ScopedVfs;
+use embedded_nal_async::{Dns, TcpConnect};
 
 use crate::config::SharedApiManager;
 use crate::engine::{ContextProvider, ContextProviderFuture, ContextProviderResult};
@@ -32,8 +32,7 @@ mod tools;
 use extraction::{ExtractionInput, Extractor, MemoryOp, MemorySnapshot};
 use tier::MemoryTier;
 
-type ProviderBuilder<F> =
-    dyn Fn(LongTermMemory<F>, LongTermMemory<F>) -> LongTermMemoryContextProvider<F>;
+type ProviderBuilder = dyn Fn(LongTermMemory, LongTermMemory) -> LongTermMemoryContextProvider;
 
 /// The provider's rendered-catalog cache, keyed on each store's change version.
 #[derive(Default)]
@@ -63,21 +62,17 @@ struct ExtractionCursor {
 }
 
 /// A [`ContextProvider`] over a dual-tier long-term store. See the module docs.
-pub(crate) struct LongTermMemoryContextProvider<F: FileSystem + 'static> {
-    stores: MemoryStores<F>,
+pub(crate) struct LongTermMemoryContextProvider {
+    stores: MemoryStores,
     extractor: Arc<dyn Extractor>,
     /// Rebuilt only when a store version advances.
     catalog: CatalogCache,
     extraction_cursor: ExtractionCursor,
 }
 
-impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
+impl LongTermMemoryContextProvider {
     /// Build an provider over the two stores and an `extractor`.
-    fn new(
-        agent: LongTermMemory<F>,
-        global: LongTermMemory<F>,
-        extractor: Arc<dyn Extractor>,
-    ) -> Self {
+    fn new(agent: LongTermMemory, global: LongTermMemory, extractor: Arc<dyn Extractor>) -> Self {
         Self {
             stores: MemoryStores { global, agent },
             extractor,
@@ -87,30 +82,31 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
     }
 
     /// Open the shared tier with the provider's canonical ID namespace.
-    pub(crate) fn open_global_store(
-        filesystem: F,
+    pub(crate) async fn open_global_store(
+        filesystem: ScopedVfs,
         dir: &str,
-    ) -> Result<LongTermMemory<F>, LongTermInitError> {
-        global_store(filesystem, dir)
+    ) -> Result<LongTermMemory, LongTermInitError> {
+        global_store(filesystem, dir).await
     }
 
     /// Open an Agent tier with the provider's canonical ID namespace.
-    pub(crate) fn open_agent_store(
-        filesystem: F,
+    pub(crate) async fn open_agent_store(
+        filesystem: ScopedVfs,
         dir: &str,
-    ) -> Result<LongTermMemory<F>, LongTermInitError> {
-        agent_store(filesystem, dir)
+    ) -> Result<LongTermMemory, LongTermInitError> {
+        agent_store(filesystem, dir).await
     }
 
     /// Build the shared LLM-backed provider constructor used by AgentManager.
-    pub(crate) fn llm_builder<H>(
+    pub(crate) fn llm_builder<Tcp, Resolver>(
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<H>,
-    ) -> Arc<ProviderBuilder<F>>
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> Arc<ProviderBuilder>
     where
-        H: TcpConnect + Dns + 'static,
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
     {
-        let extractor = LlmExtractor::<H>::shared(api_manager, &llm_factory);
+        let extractor = LlmExtractor::<Tcp, Resolver>::shared(api_manager, &llm_factory);
         Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
     }
 
@@ -134,7 +130,7 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
     }
 }
 
-impl<F: FileSystem + 'static> ContextProvider for LongTermMemoryContextProvider<F> {
+impl ContextProvider for LongTermMemoryContextProvider {
     fn id(&self) -> &'static str {
         "memory"
     }

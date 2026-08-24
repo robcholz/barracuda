@@ -13,14 +13,13 @@ mbedtls-host = ["std", "barracuda-model-api/mbedtls-host"]
 barracuda-agent-component = { path = "../component" }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
-barracuda-fs = { path = "../../../../shared/fs" }
-barracuda-net = { path = "../../../../shared/net" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+embassy-net.workspace = true
+static_cell = "2"
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-model-api = { path = "../model-api" }
-barracuda-net = { path = "../../../../shared/net" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"

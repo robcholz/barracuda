@@ -16,9 +16,9 @@ barracuda-agent-multiagent = { path = "../multiagent", optional = true }
 barracuda-agent-permission = { path = "../permission" }
 barracuda-agent-persistence = { path = "../persistence" }
 barracuda-agent-tool = { path = "../tool" }
-barracuda-fs = { path = "../../../../shared/fs" }
+barracuda-vfs = { path = "../../../../shared/vfs" }
 barracuda-model-api = { path = "../model-api" }
-barracuda-net = { path = "../../../../shared/net" }
+embedded-nal-async = "0.9"
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 async-channel = { version = "2", default-features = false }
 embassy-time.workspace = true
@@ -33,9 +33,7 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
 [dev-dependencies]
-barracuda-net = { path = "../../../../shared/net" }
-barracuda-platform-host = { path = "../../../../platforms/host" }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

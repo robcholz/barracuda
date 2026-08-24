@@ -1,6 +1,7 @@
 //! Ownership and lifecycle for every Session in one runtime.
 
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet, VecDeque},
     rc::Rc,
     string::String,
@@ -8,15 +9,16 @@ use alloc::{
     vec::Vec,
 };
 use core::task::{Context, Poll};
+use core::{future::Future, pin::Pin};
 
 use async_channel::Sender;
 use barracuda_agent_persistence::{
     DurableState, InvalidInstanceId, PersistenceError, SharedPersistence,
 };
 use barracuda_agent_tool::ToolRegistry;
-use barracuda_fs::FileSystem;
 use barracuda_model_api::ModelApiFactory;
-use barracuda_net::{Dns, TcpConnect};
+use barracuda_vfs::ScopedVfs;
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_channel::oneshot;
 
 use barracuda_agent::SharedApiManager;
@@ -32,7 +34,7 @@ use super::state::{
 };
 use super::{SessionEvent, SessionStream};
 
-pub(super) type SharedAgentManager<Filesystem, Http> = Rc<AgentManager<Filesystem, Http>>;
+pub(super) type SharedAgentManager<Tcp, Resolver> = Rc<AgentManager<Tcp, Resolver>>;
 
 barracuda_runtime_utils::define_prefixed_id!(SessionId, "session-", "session");
 
@@ -84,24 +86,24 @@ pub enum SessionDeleteError {
     InvalidInstanceId(#[from] InvalidInstanceId),
 }
 
-struct LiveActor<Filesystem, Http>
+struct LiveActor<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     commands: Sender<SessionCommand>,
-    actor: SessionActor<Filesystem, Http>,
+    actor: SessionActor<Tcp, Resolver>,
     span: tracing::Span,
 }
 
-struct SessionEntry<Filesystem, Http>
+struct SessionEntry<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     persistence: SessionPersistence,
     state: DurableState<SessionPersistentState>,
-    actor: Option<LiveActor<Filesystem, Http>>,
+    actor: Option<LiveActor<Tcp, Resolver>>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -123,56 +125,61 @@ pub enum SessionManagerInitError {
 /// Session-owned metadata stays in `SessionPersistentState`; Agent records and
 /// transcripts remain canonical in `AgentManager`. A live `SessionActor`
 /// coordinates both without exposing either store to the worker loop.
-pub struct SessionManager<Filesystem, Http>
+pub struct SessionManager<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    persistence: SharedPersistence<Filesystem>,
+    persistence: SharedPersistence,
     state: DurableState<SessionManagerState>,
-    agent_manager: SharedAgentManager<Filesystem, Http>,
-    approval_resolver: SharedApprovalResolver<Http>,
-    sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http>>,
+    agent_manager: SharedAgentManager<Tcp, Resolver>,
+    approval_resolver: SharedApprovalResolver<Tcp, Resolver>,
+    sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>>,
     actor_poll_queue: VecDeque<SessionId>,
 }
 
-impl<Filesystem, Http> SessionManager<Filesystem, Http>
+impl<Tcp, Resolver> SessionManager<Tcp, Resolver>
 where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
-    pub fn new(
-        filesystem: Filesystem,
+    pub async fn new(
+        filesystem: ScopedVfs,
         tool_registry: Arc<ToolRegistry>,
-        persistence: SharedPersistence<Filesystem>,
+        persistence: SharedPersistence,
         persistence_dir: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<Http>,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
     ) -> Result<Self, SessionManagerInitError> {
         let state = {
             let entry = persistence.singleton::<SessionManagerState>(SESSION_MANAGER_STATE_NAME)?;
-            let state = DurableState::new(entry.load()?.unwrap_or_default());
+            let state = DurableState::new(entry.load().await?.unwrap_or_default());
             entry.register(&state)?;
             state
         };
-        let agent_manager = Rc::new(AgentManager::new(
-            filesystem,
-            tool_registry,
-            Arc::clone(&persistence),
-            persistence_dir,
-            skill_roots,
-            Arc::clone(&api_manager),
-            llm_factory.clone(),
-        )?);
-        let approval_resolver: SharedApprovalResolver<Http> =
-            Rc::new(LlmApprovalResolver::<Http>::new(api_manager, llm_factory));
+        let agent_manager = Rc::new(
+            AgentManager::new(
+                filesystem,
+                tool_registry,
+                Arc::clone(&persistence),
+                persistence_dir,
+                skill_roots,
+                Arc::clone(&api_manager),
+                llm_factory.clone(),
+            )
+            .await?,
+        );
+        let approval_resolver: SharedApprovalResolver<Tcp, Resolver> = Rc::new(
+            LlmApprovalResolver::<Tcp, Resolver>::new(api_manager, llm_factory),
+        );
         let states = persistence.collection::<SessionPersistentState>(SESSION_STATE_NAME)?;
-        let mut sessions: BTreeMap<SessionId, SessionEntry<Filesystem, Http>> = BTreeMap::new();
-        for instance in states.list()? {
+        let mut sessions: BTreeMap<SessionId, SessionEntry<Tcp, Resolver>> = BTreeMap::new();
+        for instance in states.list().await? {
             let session = SessionId::from_wire(instance.as_str())?;
             let persisted = states
-                .load(&instance)?
+                .load(&instance)
+                .await?
                 .ok_or(SessionManagerInitError::MissingState(session))?;
             let state = DurableState::new(persisted);
             states.register(&instance, &state)?;
@@ -289,6 +296,14 @@ where
 
     pub fn has_live_actors(&self) -> bool {
         !self.actor_poll_queue.is_empty()
+    }
+
+    /// Returns one owned maintenance future for deferred Agent storage cleanup.
+    pub fn storage_maintenance(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AgentCreateError>>>> {
+        let manager = Rc::clone(&self.agent_manager);
+        Box::pin(async move { manager.flush_storage().await })
     }
 
     fn purge_dead(&mut self) -> Result<(), AgentCreateError> {

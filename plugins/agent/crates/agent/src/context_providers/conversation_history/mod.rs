@@ -16,7 +16,7 @@ use crate::engine::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
 use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use barracuda_model_api::ModelApiFactory;
-use barracuda_net::{Dns, TcpConnect};
+use embedded_nal_async::{Dns, TcpConnect};
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -88,18 +88,22 @@ impl ConversationHistoryContextProvider {
 
     /// Build the configured LLM-backed conversation projection used by Agent
     /// AgentManager without exposing its compactor implementation or policy type.
-    pub(crate) fn with_llm_compaction<H>(
+    pub(crate) fn with_llm_compaction<Tcp, Resolver>(
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory<H>,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
         trigger_tokens: usize,
         keep_recent_tokens: usize,
         segment_token_budget: usize,
     ) -> Self
     where
-        H: TcpConnect + Dns + 'static,
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
     {
         Self::new(
-            Box::new(LlmCompactor::<H>::new(api_manager, &llm_factory)),
+            Box::new(LlmCompactor::<Tcp, Resolver>::new(
+                api_manager,
+                &llm_factory,
+            )),
             CompactionPolicy::new(trigger_tokens, keep_recent_tokens, segment_token_budget),
         )
     }
@@ -286,7 +290,7 @@ mod tests {
     use barracuda_agent_context::Context;
     use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
     use barracuda_agent_persistence::DurableState;
-    use barracuda_platform_test::MemFs;
+    use barracuda_platform_test::memory_vfs;
     use futures_lite::future::block_on;
     use serde_json::{json, Value};
 
@@ -314,8 +318,15 @@ mod tests {
 
     #[test]
     fn one_projection_has_summary_prefix_and_exact_complementary_tail() {
-        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 1, "/transcript")
-            .expect("in-memory transcript opens");
+        let transcript = block_on(async {
+            TranscriptStore::new(
+                memory_vfs().await.expect("memory VFS mounts"),
+                1,
+                "/transcript",
+            )
+            .await
+            .expect("in-memory transcript opens")
+        });
         for text in ["turn-one", "turn-two", "turn-three"] {
             let turn = transcript.open_turn().expect("test turn opens");
             {

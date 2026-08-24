@@ -19,11 +19,12 @@ path = "bench/throughput/main.rs"
 harness = false
 
 [dependencies]
-barracuda-fs = { path = "../../shared/fs" }
+barracuda-vfs = { path = "../../shared/vfs" }
 barracuda-router = { path = "crates/router" }
 barracuda-rpc = { path = "crates/rpc" }
 barracuda-rpc-schema = { path = "crates/rpc-schema", optional = true }
 barracuda-workflow = { path = "crates/workflow" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [features]
@@ -33,6 +34,7 @@ schema = ["dep:barracuda-rpc-schema"]
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../platforms/test" }
+barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
 barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
 futures-lite = "2"
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }

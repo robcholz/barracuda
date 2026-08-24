@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "boards/api",
     "boards/config",
+    "composition/*",
     "core/event-router",
     "core/plugin-manager",
     "core/system",
@@ -27,7 +28,7 @@ members = [
 ]
 default-members = [
     "plugins/agent/crates/agent",
-    "shared/fs",
+    "shared/vfs",
 ]
 
 [workspace.dependencies]
@@ -35,6 +36,8 @@ embassy-time = { version = "0.5.1", default-features = false }
 embassy-futures = { version = "0.1.2", default-features = false }
 embassy-sync = { version = "0.7.2", default-features = false }
 embassy-executor = { version = "0.9.1", default-features = false }
+embassy-net = { version = "0.9.1", default-features = false, features = ["dns", "medium-ip", "proto-ipv4", "tcp", "udp"] }
+embassy-net-driver-channel = { version = "0.4.0", default-features = false }
 embedded-storage-async = "0.4.1"
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so

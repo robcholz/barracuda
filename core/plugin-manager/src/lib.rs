@@ -8,14 +8,17 @@
 
 extern crate alloc;
 
+mod filesystem;
 mod lifecycle;
 mod storage;
 
 pub use barracuda_kv::Value;
+pub use filesystem::PluginVfs;
 pub use lifecycle::{
-    CapabilityError, Plugin, PluginComponentCleanupFailure, PluginContext, PluginError, PluginId,
-    PluginIdError, PluginManager, PluginManagerInitError, PluginRegisterError,
-    PluginRegisterFuture, PluginResult, PluginStartError, PluginStartFuture, PluginUnloadError,
+    CapabilityError, Plugin, PluginComponentCleanupFailure, PluginContext, PluginError,
+    PluginEventRouterContext, PluginFilesystem, PluginId, PluginIdError, PluginManager,
+    PluginManagerInitError, PluginRegisterError, PluginRequirements, PluginResult,
+    PluginStartContext, PluginStartError, PluginUnloadError,
 };
 pub use storage::{
     PluginReadTransaction, PluginStorage, PluginWriteTransaction, StorageError, StorageResult,

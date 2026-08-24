@@ -2,6 +2,7 @@
 
 - Plugin ID: `scheduler`
 - Direct Plugin dependencies: `time`
+- Provided typed capabilities: none
 
 The Scheduler Plugin constructs the standalone RTC-authoritative Scheduler
 Component with its own internal defaults. The Component accepts schedule and

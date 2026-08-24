@@ -18,10 +18,10 @@
 //! | [`ModelApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
 //! | [`ModelApi::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
-//! Networking uses reqwless directly. The application supplies one concrete
-//! `embedded_nal_async::TcpConnect + Dns` stack directly to [`ModelApi`]; Embassy
-//! and host applications share all HTTP behavior and differ only at the TCP/DNS
-//! HAL boundary.
+//! Networking uses reqwless directly. The application supplies independent
+//! `embedded_nal_async::TcpConnect` and `embedded_nal_async::Dns` implementations
+//! to [`ModelApi`]; Embassy and host applications share all HTTP behavior and
+//! differ only at those official transport boundaries.
 //!
 //! # Cancellation
 //!

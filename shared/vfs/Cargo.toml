@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Asynchronous no_std virtual filesystem and mount namespace for Barracuda"
 
+[features]
+default = []
+std = ["critical-section/std"]
+
 [lib]
 crate-type = ["rlib"]
 
@@ -11,6 +15,7 @@ crate-type = ["rlib"]
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embassy-sync = { workspace = true }
+critical-section = { version = "1", optional = true }
 
 [dev-dependencies]
 critical-section = { version = "1", features = ["std"] }

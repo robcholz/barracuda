@@ -14,11 +14,11 @@ use barracuda_event_router::{
     RunContext, UnregisterContext,
 };
 use barracuda_kv::MAX_CAPACITY;
-use barracuda_platform_test::{memory_partition, MemFs, MemoryPartition};
+use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
     CapabilityError, Plugin, PluginContext, PluginError, PluginId, PluginIdError, PluginManager,
-    PluginRegisterError, PluginRegisterFuture, PluginStartError, PluginStartFuture,
-    PluginUnloadError, PluginWriteTransaction,
+    PluginRegisterError, PluginResult, PluginStartContext, PluginStartError, PluginUnloadError,
+    PluginWriteTransaction,
 };
 use futures_lite::future::block_on;
 
@@ -36,9 +36,9 @@ fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
 }
 
 fn router() -> EventRouter<8, FRAME_SIZE, 8> {
+    block_on(install_global_memory_vfs()).expect("install global test VFS");
     let lanes = Box::leak(Box::new(RpcLaneStorage::new()));
-    let filesystem = MemFs::new();
-    EventRouter::new(lanes, filesystem, "workflows").expect("create Event Router")
+    block_on(EventRouter::new(lanes)).expect("create Event Router")
 }
 
 struct PendingComponent<Storage: barracuda_plugin_manager::PluginStorage> {
@@ -81,16 +81,6 @@ impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
     fn id(&self) -> &'static str {
         self.0
     }
-
-    fn start<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
-    where
-        Storage: barracuda_plugin_manager::PluginStorage,
-    {
-        Box::pin(async { Ok(()) })
-    }
 }
 
 #[test]
@@ -99,7 +89,9 @@ fn register_uses_the_identity_declared_by_the_plugin() {
     let mut router = router();
     let id = PluginId::try_from("identified").unwrap();
 
-    block_on(manager.register(&mut router, IdentifiedPlugin("identified"))).unwrap();
+    manager
+        .register(&mut router, IdentifiedPlugin("identified"))
+        .unwrap();
 
     assert!(manager.is_loaded(&id));
 }
@@ -109,26 +101,27 @@ impl Plugin<FRAME_SIZE> for StatefulPlugin {
         self.id
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
+        block_on(async {
             *self.observed.borrow_mut() = context.storage().get("state").await?;
             context.storage().put("state", &self.value).await?;
+            Ok::<(), PluginError>(())
+        })?;
 
-            for _ in 0..self.component_count {
-                context.load(PendingComponent {
-                    registered: Rc::clone(&self.registered),
-                    unregistered: Rc::clone(&self.unregistered),
-                    storage: context.storage().clone(),
-                })?;
-            }
-            Ok(())
-        })
+        for _ in 0..self.component_count {
+            context.event_router.load(PendingComponent {
+                registered: Rc::clone(&self.registered),
+                unregistered: Rc::clone(&self.unregistered),
+                storage: context.storage().clone(),
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -148,7 +141,9 @@ fn registering_a_plugin_with_an_invalid_identity_is_rejected() {
     let mut manager = manager();
     let mut router = router();
 
-    let error = block_on(manager.register(&mut router, IdentifiedPlugin(""))).unwrap_err();
+    let error = manager
+        .register(&mut router, IdentifiedPlugin(""))
+        .unwrap_err();
 
     assert!(matches!(
         error,
@@ -179,31 +174,33 @@ fn plugins_have_isolated_durable_scopes() {
     let scheduler_observed = Rc::new(RefCell::new(None));
     let other_observed = Rc::new(RefCell::new(None));
 
-    block_on(manager.register(
-        &mut router,
-        StatefulPlugin {
-            id: "scheduler",
-            value: 41,
-            observed: Rc::clone(&scheduler_observed),
-            registered: Rc::clone(&registered),
-            unregistered: Rc::clone(&unregistered),
-            component_count: 1,
-        },
-    ))
-    .unwrap();
-    block_on(manager.register(
-        &mut router,
-        StatefulPlugin {
-            id: "other",
-            value: 72,
-            observed: Rc::clone(&other_observed),
-            registered: Rc::clone(&registered),
-            unregistered: Rc::clone(&unregistered),
-            component_count: 1,
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            StatefulPlugin {
+                id: "scheduler",
+                value: 41,
+                observed: Rc::clone(&scheduler_observed),
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+                component_count: 1,
+            },
+        )
+        .unwrap();
+    manager
+        .register(
+            &mut router,
+            StatefulPlugin {
+                id: "other",
+                value: 72,
+                observed: Rc::clone(&other_observed),
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+                component_count: 1,
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     assert_eq!(*scheduler_observed.borrow(), None);
     assert_eq!(*other_observed.borrow(), None);
@@ -212,19 +209,20 @@ fn plugins_have_isolated_durable_scopes() {
         .unload(&mut router, &PluginId::try_from("scheduler").unwrap())
         .unwrap();
     let restored = Rc::new(RefCell::new(None));
-    block_on(manager.register(
-        &mut router,
-        StatefulPlugin {
-            id: "scheduler",
-            value: 99,
-            observed: Rc::clone(&restored),
-            registered: Rc::clone(&registered),
-            unregistered: Rc::clone(&unregistered),
-            component_count: 1,
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            StatefulPlugin {
+                id: "scheduler",
+                value: 99,
+                observed: Rc::clone(&restored),
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+                component_count: 1,
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     assert_eq!(*restored.borrow(), Some(41));
 }
@@ -237,19 +235,20 @@ fn one_plugin_can_register_multiple_components() {
     let unregistered = Rc::new(Cell::new(0));
     let id = PluginId::try_from("multi").unwrap();
 
-    block_on(manager.register(
-        &mut router,
-        StatefulPlugin {
-            id: "multi",
-            value: 1,
-            observed: Rc::new(RefCell::new(None)),
-            registered: Rc::clone(&registered),
-            unregistered: Rc::clone(&unregistered),
-            component_count: 3,
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            StatefulPlugin {
+                id: "multi",
+                value: 1,
+                observed: Rc::new(RefCell::new(None)),
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+                component_count: 3,
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     assert_eq!(registered.get(), 3);
     assert_eq!(manager.component_ids(&id).unwrap().len(), 3);
@@ -271,8 +270,8 @@ fn duplicate_plugin_id_is_rejected() {
         component_count: 0,
     };
 
-    block_on(manager.register(&mut router, make_plugin())).unwrap();
-    let error = block_on(manager.register(&mut router, make_plugin())).unwrap_err();
+    manager.register(&mut router, make_plugin()).unwrap();
+    let error = manager.register(&mut router, make_plugin()).unwrap_err();
 
     assert!(matches!(error, PluginRegisterError::AlreadyRegistered(found) if found == id));
 }
@@ -291,21 +290,26 @@ impl Plugin<FRAME_SIZE> for FailingPlugin {
         "failure"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.load(PendingComponent {
-                registered: Rc::clone(&self.registered),
-                unregistered: Rc::clone(&self.unregistered),
-                storage: context.storage().clone(),
-            })?;
-            Err(PluginError::registration(RegistrationFailure))
-        })
+        context.event_router.load(PendingComponent {
+            registered: Rc::clone(&self.registered),
+            unregistered: Rc::clone(&self.unregistered),
+            storage: context.storage().clone(),
+        })?;
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, _context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        Err(PluginError::registration(RegistrationFailure))
     }
 }
 
@@ -317,15 +321,16 @@ fn failed_plugin_start_rolls_back_loaded_components() {
     let unregistered = Rc::new(Cell::new(0));
     let id = PluginId::try_from("failure").unwrap();
 
-    block_on(manager.register(
-        &mut router,
-        FailingPlugin {
-            registered: Rc::clone(&registered),
-            unregistered: Rc::clone(&unregistered),
-        },
-    ))
-    .unwrap();
-    let error = block_on(manager.start(&mut router)).unwrap_err();
+    manager
+        .register(
+            &mut router,
+            FailingPlugin {
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+            },
+        )
+        .unwrap();
+    let error = manager.start(&mut router).unwrap_err();
 
     assert!(matches!(error, PluginStartError::Start(_)));
     assert_eq!(registered.get(), 1);
@@ -344,14 +349,11 @@ impl Plugin<FRAME_SIZE> for AtomicPlugin {
         "atomic"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
+        block_on(async {
             let mut transaction = context.storage().write_transaction().await;
             transaction.write("a", &1_u32).await?;
             transaction.write("b", &2_u32).await?;
@@ -360,7 +362,7 @@ impl Plugin<FRAME_SIZE> for AtomicPlugin {
                 context.storage().get("a").await?,
                 context.storage().get("b").await?,
             );
-            Ok(())
+            Ok::<(), PluginError>(())
         })
     }
 }
@@ -371,14 +373,15 @@ fn scoped_storage_preserves_ekv_write_transactions() {
     let mut router = router();
     let observed = Rc::new(RefCell::new((None, None)));
 
-    block_on(manager.register(
-        &mut router,
-        AtomicPlugin {
-            observed: Rc::clone(&observed),
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            AtomicPlugin {
+                observed: Rc::clone(&observed),
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     assert_eq!(*observed.borrow(), (Some(1), Some(2)));
 }
@@ -395,17 +398,15 @@ impl Plugin<FRAME_SIZE> for CapabilityProvider {
         "provider"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.provide(Rc::clone(&self.capability))?;
-            Ok(())
-        })
+        context.provide(Rc::clone(&self.capability))?;
+        Ok(())
     }
 }
 
@@ -420,17 +421,15 @@ impl Plugin<FRAME_SIZE> for CapabilityConsumer {
         "consumer"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            *self.observed.borrow_mut() = Some(context.require::<TestCapability>("provider")?);
-            Ok(())
-        })
+        *self.observed.borrow_mut() = Some(context.require::<TestCapability>("provider")?);
+        Ok(())
     }
 }
 
@@ -441,21 +440,23 @@ fn declared_dependency_can_require_a_typed_capability() {
     let capability = Rc::new(TestCapability(42));
     let observed = Rc::new(RefCell::new(None));
 
-    block_on(manager.register(
-        &mut router,
-        CapabilityProvider {
-            capability: Rc::clone(&capability),
-        },
-    ))
-    .unwrap();
-    block_on(manager.register(
-        &mut router,
-        CapabilityConsumer {
-            observed: Rc::clone(&observed),
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::clone(&capability),
+            },
+        )
+        .unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityConsumer {
+                observed: Rc::clone(&observed),
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     let required = observed.borrow().clone().unwrap();
     assert!(Rc::ptr_eq(&required, &capability));
@@ -467,13 +468,14 @@ fn declared_dependency_must_be_registered_before_consumer() {
     let mut manager = manager();
     let mut router = router();
 
-    let error = block_on(manager.register(
-        &mut router,
-        CapabilityConsumer {
-            observed: Rc::new(RefCell::new(None)),
-        },
-    ))
-    .unwrap_err();
+    let error = manager
+        .register(
+            &mut router,
+            CapabilityConsumer {
+                observed: Rc::new(RefCell::new(None)),
+            },
+        )
+        .unwrap_err();
 
     assert!(
         matches!(error, PluginRegisterError::MissingDependency(id) if id.as_str() == "provider")
@@ -487,17 +489,15 @@ impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
         "undeclared"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let _capability = context.require::<TestCapability>("provider")?;
-            Ok(())
-        })
+        let _capability = context.require::<TestCapability>("provider")?;
+        Ok(())
     }
 }
 
@@ -505,20 +505,22 @@ impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
 fn require_rejects_an_undeclared_dependency() {
     let mut manager = manager();
     let mut router = router();
-    block_on(manager.register(
-        &mut router,
-        CapabilityProvider {
-            capability: Rc::new(TestCapability(1)),
-        },
-    ))
-    .unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::new(TestCapability(1)),
+            },
+        )
+        .unwrap();
 
-    block_on(manager.register(&mut router, UndeclaredConsumer)).unwrap();
-    let error = block_on(manager.start(&mut router)).unwrap_err();
+    let error = manager
+        .register(&mut router, UndeclaredConsumer)
+        .unwrap_err();
 
     assert!(matches!(
         error,
-        PluginStartError::Start(PluginError::Capability(
+        PluginRegisterError::Registration(PluginError::Capability(
             CapabilityError::DependencyNotDeclared(id)
         )) if id.as_str() == "provider"
     ));
@@ -533,17 +535,15 @@ impl Plugin<FRAME_SIZE> for MissingCapabilityConsumer {
         "consumer"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let _capability = context.require::<String>("provider")?;
-            Ok(())
-        })
+        let _capability = context.require::<String>("provider")?;
+        Ok(())
     }
 }
 
@@ -551,20 +551,22 @@ impl Plugin<FRAME_SIZE> for MissingCapabilityConsumer {
 fn require_reports_a_capability_the_provider_did_not_publish() {
     let mut manager = manager();
     let mut router = router();
-    block_on(manager.register(
-        &mut router,
-        CapabilityProvider {
-            capability: Rc::new(TestCapability(1)),
-        },
-    ))
-    .unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::new(TestCapability(1)),
+            },
+        )
+        .unwrap();
 
-    block_on(manager.register(&mut router, MissingCapabilityConsumer)).unwrap();
-    let error = block_on(manager.start(&mut router)).unwrap_err();
+    let error = manager
+        .register(&mut router, MissingCapabilityConsumer)
+        .unwrap_err();
 
     assert!(matches!(
         error,
-        PluginStartError::Start(PluginError::Capability(
+        PluginRegisterError::Registration(PluginError::Capability(
             CapabilityError::NotProvided { provider, .. }
         )) if provider.as_str() == "provider"
     ));
@@ -576,21 +578,23 @@ fn provider_cannot_unload_while_a_dependent_is_loaded() {
     let mut router = router();
     let provider = PluginId::try_from("provider").unwrap();
     let consumer = PluginId::try_from("consumer").unwrap();
-    block_on(manager.register(
-        &mut router,
-        CapabilityProvider {
-            capability: Rc::new(TestCapability(1)),
-        },
-    ))
-    .unwrap();
-    block_on(manager.register(
-        &mut router,
-        CapabilityConsumer {
-            observed: Rc::new(RefCell::new(None)),
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::new(TestCapability(1)),
+            },
+        )
+        .unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityConsumer {
+                observed: Rc::new(RefCell::new(None)),
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 
     let error = manager.unload(&mut router, &provider).unwrap_err();
     assert!(matches!(
@@ -624,22 +628,17 @@ impl Plugin<FRAME_SIZE> for RetainingPlugin {
         self.id
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.retain(RetainedResource {
-                dropped: Rc::clone(&self.dropped),
-            });
-            if self.fail {
-                return Err(PluginError::registration(RegistrationFailure));
-            }
-            Ok(())
-        })
+        context.retain(RetainedResource {
+            dropped: Rc::clone(&self.dropped),
+        });
+        if self.fail {
+            return Err(PluginError::registration(RegistrationFailure));
+        }
+        Ok(())
     }
 }
 
@@ -650,30 +649,32 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
     let dropped = Rc::new(Cell::new(0));
     let retained = PluginId::try_from("retained").unwrap();
 
-    block_on(manager.register(
-        &mut router,
-        RetainingPlugin {
-            id: "retained",
-            dropped: Rc::clone(&dropped),
-            fail: false,
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            RetainingPlugin {
+                id: "retained",
+                dropped: Rc::clone(&dropped),
+                fail: false,
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
     assert_eq!(dropped.get(), 0);
     manager.unload(&mut router, &retained).unwrap();
     assert_eq!(dropped.get(), 1);
 
-    block_on(manager.register(
-        &mut router,
-        RetainingPlugin {
-            id: "failing-retain",
-            dropped: Rc::clone(&dropped),
-            fail: true,
-        },
-    ))
-    .unwrap();
-    let error = block_on(manager.start(&mut router)).unwrap_err();
+    manager
+        .register(
+            &mut router,
+            RetainingPlugin {
+                id: "failing-retain",
+                dropped: Rc::clone(&dropped),
+                fail: true,
+            },
+        )
+        .unwrap();
+    let error = manager.start(&mut router).unwrap_err();
     assert!(matches!(error, PluginStartError::Start(_)));
     assert_eq!(dropped.get(), 2);
 }
@@ -685,18 +686,16 @@ impl Plugin<FRAME_SIZE> for DuplicateCapabilityProvider {
         "provider"
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            context.provide(Rc::new(TestCapability(1)))?;
-            context.provide(Rc::new(TestCapability(2)))?;
-            Ok(())
-        })
+        context.provide(Rc::new(TestCapability(1)))?;
+        context.provide(Rc::new(TestCapability(2)))?;
+        Ok(())
     }
 }
 
@@ -705,23 +704,25 @@ fn duplicate_capability_is_rejected_and_rolled_back() {
     let mut manager = manager();
     let mut router = router();
 
-    block_on(manager.register(&mut router, DuplicateCapabilityProvider)).unwrap();
-    let error = block_on(manager.start(&mut router)).unwrap_err();
+    let error = manager
+        .register(&mut router, DuplicateCapabilityProvider)
+        .unwrap_err();
     assert!(matches!(
         error,
-        PluginStartError::Start(PluginError::Capability(
+        PluginRegisterError::Registration(PluginError::Capability(
             CapabilityError::AlreadyProvided { .. }
         ))
     ));
 
-    block_on(manager.register(
-        &mut router,
-        CapabilityProvider {
-            capability: Rc::new(TestCapability(3)),
-        },
-    ))
-    .unwrap();
-    block_on(manager.start(&mut router)).unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::new(TestCapability(3)),
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
 }
 
 struct RegisterPhasePlugin {
@@ -733,30 +734,23 @@ impl Plugin<FRAME_SIZE> for RegisterPhasePlugin {
         "register-phase"
     }
 
-    fn register<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginRegisterFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        _context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            self.phases.borrow_mut().push("provider.register");
-            Ok(())
-        })
+        self.phases.borrow_mut().push("provider.register");
+        Ok(())
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn start<Storage>(&mut self, _context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            self.phases.borrow_mut().push("provider.start");
-            Ok(())
-        })
+        self.phases.borrow_mut().push("provider.start");
+        Ok(())
     }
 }
 
@@ -771,30 +765,23 @@ impl Plugin<FRAME_SIZE> for DependentPhasePlugin {
         "dependent-phase"
     }
 
-    fn register<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginRegisterFuture<'a>
+    fn register<Storage>(
+        &mut self,
+        _context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            self.phases.borrow_mut().push("consumer.register");
-            Ok(())
-        })
+        self.phases.borrow_mut().push("consumer.register");
+        Ok(())
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn start<Storage>(&mut self, _context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            self.phases.borrow_mut().push("consumer.start");
-            Ok(())
-        })
+        self.phases.borrow_mut().push("consumer.start");
+        Ok(())
     }
 }
 
@@ -804,27 +791,29 @@ fn plugins_register_before_any_plugin_starts() {
     let mut router = router();
     let phases = Rc::new(RefCell::new(Vec::new()));
 
-    block_on(manager.register(
-        &mut router,
-        RegisterPhasePlugin {
-            phases: Rc::clone(&phases),
-        },
-    ))
-    .unwrap();
-    block_on(manager.register(
-        &mut router,
-        DependentPhasePlugin {
-            phases: Rc::clone(&phases),
-        },
-    ))
-    .unwrap();
+    manager
+        .register(
+            &mut router,
+            RegisterPhasePlugin {
+                phases: Rc::clone(&phases),
+            },
+        )
+        .unwrap();
+    manager
+        .register(
+            &mut router,
+            DependentPhasePlugin {
+                phases: Rc::clone(&phases),
+            },
+        )
+        .unwrap();
 
     assert_eq!(
         phases.borrow().as_slice(),
         ["provider.register", "consumer.register"]
     );
 
-    block_on(manager.start(&mut router)).unwrap();
+    manager.start(&mut router).unwrap();
 
     assert_eq!(
         phases.borrow().as_slice(),

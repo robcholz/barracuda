@@ -5,17 +5,16 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::rc::Rc;
-use core::marker::PhantomData;
 
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture};
+use barracuda_plugin_manager::{
+    Plugin, PluginContext, PluginError, PluginResult, PluginStartContext,
+};
+use embassy_net::Stack;
 
-pub use listener::{WebServerListenFuture, WebServerListener};
 pub use webserver::*;
 
-mod component;
-mod listener;
+mod task;
 mod webserver;
 
 /// Stable identity of the WebServer capability provider.
@@ -24,7 +23,7 @@ pub const PLUGIN_ID: &str = "webserver";
 /// TCP port served by the WebServer Plugin.
 pub const WEB_SERVER_PORT: u16 = 8787;
 
-/// Number of connections that the platform listener serves concurrently.
+/// Number of connections that the WebServer task serves concurrently.
 pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 
 /// Plugin that owns and publishes the portable WebServer.
@@ -35,44 +34,57 @@ pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 /// ```compile_fail
 /// use barracuda_webserver_plugin::WebServerPlugin;
 ///
-/// fn expose<Listener>(plugin: WebServerPlugin<Listener>) {
+/// fn expose(plugin: WebServerPlugin) {
 ///     let _server = plugin.webserver();
 /// }
 /// ```
-pub struct WebServerPlugin<Listener> {
-    listener: PhantomData<fn() -> Listener>,
+pub struct WebServerPlugin {
+    stack: Stack<'static>,
+    runtime: Option<Rc<WebServer>>,
 }
 
-impl<Listener> Default for WebServerPlugin<Listener> {
-    fn default() -> Self {
+impl WebServerPlugin {
+    /// Creates the Plugin with the IP stack used by its owned server task.
+    #[must_use]
+    pub const fn new(stack: Stack<'static>) -> Self {
         Self {
-            listener: PhantomData,
+            stack,
+            runtime: None,
         }
     }
 }
 
-impl<const M: usize, Listener> Plugin<M> for WebServerPlugin<Listener>
-where
-    Listener: Clone + WebServerListener + 'static,
-{
+impl<const M: usize> Plugin<M> for WebServerPlugin {
     fn id(&self) -> &'static str {
         PLUGIN_ID
     }
 
-    fn start<'a, Storage>(
-        &'a mut self,
-        context: &'a mut PluginContext<'_, M, Storage>,
-    ) -> PluginStartFuture<'a>
+    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        Box::pin(async move {
-            let listener = context.require_system::<&'static Listener>()?;
-            let listener = (**listener).clone();
-            let webserver = Rc::new(WebServer::new());
-            context.provide(Rc::clone(&webserver))?;
-            context.load(component::WebServerComponent::new(webserver, listener))?;
-            Ok(())
-        })
+        let webserver = Rc::new(WebServer::new());
+        context.provide(Rc::clone(&webserver))?;
+        self.runtime = Some(webserver);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        let webserver = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(WebServerRuntimeUnavailable))?;
+        context
+            .task_spawner()?
+            .spawn(task::web_server(webserver, self.stack))
+            .map_err(PluginError::registration)?;
+        Ok(())
     }
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("WebServer runtime was not prepared during Plugin registration")]
+struct WebServerRuntimeUnavailable;

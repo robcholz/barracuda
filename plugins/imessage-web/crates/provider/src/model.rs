@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use gateway::{MediaKind, MessageKind};
+use gateway::{MediaKind, MessageKind, SendStreamField, StreamBoundary};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -22,6 +22,13 @@ pub enum WebEventData {
     MessageDelta {
         message_id: String,
         delta: String,
+    },
+    /// Optional rich content carried beside the primary text stream.
+    MessageExtra {
+        message_id: String,
+        field: SendStreamField,
+        boundary: StreamBoundary,
+        content: String,
     },
     MessageEnd {
         message_id: String,
@@ -77,6 +84,7 @@ impl WebEventData {
         match self {
             Self::MessageStart { .. } => "message.start",
             Self::MessageDelta { .. } => "message.delta",
+            Self::MessageExtra { .. } => "message.extra",
             Self::MessageEnd { .. } => "message.end",
             Self::Media { kind, .. } => match kind {
                 MediaKind::File => "message.file",
