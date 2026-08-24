@@ -1,40 +1,47 @@
 //! `no_std` aggregation of Barracuda's fixed Plugin set.
 //!
-//! The outer Platform/Board entry supplies low-level capabilities. The System
-//! constructs, registers, and starts the fixed Plugin set and owns their shared
-//! runtime services.
+//! The selected-target crate supplies initialized capabilities. System consumes
+//! those handles, constructs the fixed Plugin set, and owns their shared runtime
+//! services.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::string::String;
+use alloc::{rc::Rc, string::String};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_agent_plugin::{AgentPlugin, ModelApiFactory, RuntimeStorageConfig};
-use barracuda_event_router::{
-    EventRouter, EventRouterCreateError, FileSystem, RouterError, RpcLaneStorage,
-};
+use barracuda_agent_plugin::{AgentPlugin, ModelApiFactory};
+use barracuda_captive_portal_plugin::CaptivePortalPlugin;
+use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
-use barracuda_message_gateway_plugin::MessageGatewayPlugin;
+use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
+use barracuda_imessage_web_plugin::IMessageWebPlugin;
 use barracuda_net::{Dns, TcpConnect, UdpStack};
+use barracuda_platform::PlatformResources;
 use barracuda_plugin_manager::{
-    EkvFlash, EkvStore, PluginManager, PluginRegisterError, PluginStartError, RawMutex,
+    CapabilityError, PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
 };
 use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_time_plugin::TimePlugin;
 use barracuda_vm_plugin::VmPlugin;
 use barracuda_webserver_plugin::{WebServerListener, WebServerPlugin};
+use embedded_storage_async::nor_flash::NorFlash;
 
 /// Fully assembled portable Barracuda system.
 ///
-/// The outer entry owns the executor, listeners, sockets, timers, and concrete
-/// capability implementations used to drive this System.
-pub struct System<const N: usize, const M: usize, const Q: usize> {
+/// Platform owns the executor-facing runners and concrete implementations;
+/// System owns the portable handles and fixed Plugin graph.
+pub struct System<
+    const N: usize,
+    const M: usize,
+    const Q: usize,
+    DatabaseRegion: NorFlash + 'static,
+> {
     router: EventRouter<N, M, Q>,
-    _plugins: PluginManager<M>,
+    _plugins: PluginManager<M, DatabaseRegion>,
 }
 
 /// Failure while constructing the System or registering its fixed Plugins.
@@ -50,67 +57,69 @@ pub enum SystemCreateError {
     /// A registered Plugin failed to start.
     #[error(transparent)]
     PluginStart(#[from] PluginStartError),
+    /// A required System capability could not be installed.
+    #[error(transparent)]
+    Capability(#[from] CapabilityError),
+    /// Plugin persistence could not be opened from its validated partition.
+    #[error(transparent)]
+    PluginManager(#[from] PluginManagerInitError),
 }
 
-impl<const N: usize, const M: usize, const Q: usize> System<N, M, Q> {
+impl<const N: usize, const M: usize, const Q: usize, DatabaseRegion> System<N, M, Q, DatabaseRegion>
+where
+    DatabaseRegion: NorFlash + 'static,
+    DatabaseRegion::Error: core::fmt::Debug,
+{
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
-    /// The caller supplies platform capabilities and configuration. The System
-    /// constructs the fixed Plugin set and owns the complete registration
+    /// The caller supplies capabilities from the selected-target resource
+    /// factory. System consumes them and owns the complete Plugin registration
     /// order.
     ///
     /// # Errors
     ///
     /// Returns [`SystemCreateError`] when Event Router initialization or Plugin
     /// registration or startup fails.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn new<
-        WorkflowFilesystem,
-        WebServerNetwork,
-        TimeNetwork,
-        AgentFilesystem,
-        Http,
-        Flash,
-        Mutex,
-    >(
+    pub async fn new<Filesystem, Network>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        workflow_filesystem: &'static WorkflowFilesystem,
+        resources: PlatformResources<Network, Filesystem, DatabaseRegion, ModelApiFactory<Network>>,
         workflow_directory: impl Into<String>,
-        plugin_store: EkvStore<Flash, Mutex>,
-        webserver_network: WebServerNetwork,
-        time_network: TimeNetwork,
-        agent_filesystem: AgentFilesystem,
-        agent_storage: RuntimeStorageConfig,
-        model_api_factory: ModelApiFactory<Http>,
     ) -> Result<Self, SystemCreateError>
     where
-        WorkflowFilesystem: FileSystem,
-        WebServerNetwork: Clone + WebServerListener + 'static,
-        TimeNetwork: Dns + UdpStack + 'static,
-        AgentFilesystem: FileSystem + 'static,
-        Http: TcpConnect + Dns + 'static,
-        Flash: EkvFlash + 'static,
-        Mutex: RawMutex + 'static,
+        Filesystem: barracuda_event_router::FileSystem,
+        Network: Clone + WebServerListener + TcpConnect + Dns + UdpStack + 'static,
     {
-        let mut router = EventRouter::new(lanes, workflow_filesystem, workflow_directory)?;
-        let mut plugins = PluginManager::new(plugin_store);
+        let PlatformResources {
+            network,
+            filesystem,
+            database_region,
+            model_api_factory,
+        } = resources;
+        let mut router = EventRouter::new(lanes, filesystem.clone(), workflow_directory)?;
+        let mut plugins = PluginManager::open(database_region).await?;
+        plugins.provide_system(Rc::new(filesystem))?;
+        plugins.provide_system(Rc::new(network))?;
+        plugins.provide_system(Rc::new(model_api_factory))?;
 
         plugins
-            .register(&mut router, WebServerPlugin::new(webserver_network))
+            .register(&mut router, WebServerPlugin::<Network>::default())
             .await?;
-        plugins.register(&mut router, VmPlugin).await?;
+        plugins.register(&mut router, VmPlugin::default()).await?;
         plugins
-            .register(&mut router, TimePlugin::new(time_network))
+            .register(&mut router, TimePlugin::<Network>::default())
             .await?;
         plugins.register(&mut router, SchedulerPlugin).await?;
         plugins
-            .register(
-                &mut router,
-                AgentPlugin::new(agent_filesystem, agent_storage, model_api_factory),
-            )
+            .register(&mut router, AgentPlugin::<Filesystem, Network>::default())
             .await?;
         plugins
-            .register(&mut router, MessageGatewayPlugin::new())
+            .register(&mut router, CaptivePortalPlugin::new())
+            .await?;
+        plugins
+            .register(&mut router, IMessageGatewayPlugin::new())
+            .await?;
+        plugins
+            .register(&mut router, IMessageWebPlugin::new())
             .await?;
         plugins
             .register(&mut router, GatewayAgentPlugin::new())
@@ -124,80 +133,15 @@ impl<const N: usize, const M: usize, const Q: usize> System<N, M, Q> {
     }
 }
 
-impl<const N: usize, const M: usize, const Q: usize> Future for System<N, M, Q> {
+impl<const N: usize, const M: usize, const Q: usize, DatabaseRegion> Future
+    for System<N, M, Q, DatabaseRegion>
+where
+    DatabaseRegion: NorFlash + 'static,
+    DatabaseRegion::Error: core::fmt::Debug,
+{
     type Output = Result<(), RouterError>;
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.get_mut().router).poll(context)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use alloc::boxed::Box;
-    use alloc::vec::Vec;
-    use barracuda_agent_plugin::{ModelApiFactory, RuntimeStorageConfig};
-    use barracuda_event_router::{MemFs, RpcLaneStorage};
-    use barracuda_model_api::ModelApi;
-    use barracuda_net::testing::NeverStack;
-    use barracuda_plugin_manager::{EkvConfig, EkvStore, NoopRawMutex, PluginId};
-    use barracuda_webserver_plugin::{WebServer, WebServerListenFuture, WebServerListener};
-    use core::convert::Infallible;
-    use core::future::pending;
-    use ekv::flash::MemFlash;
-    use futures_lite::future::block_on;
-
-    use super::System;
-
-    static NETWORK: NeverStack = NeverStack;
-
-    #[derive(Clone, Copy)]
-    struct NeverWebServerListener;
-
-    impl WebServerListener for NeverWebServerListener {
-        type Error = Infallible;
-
-        fn listen<'a>(
-            &'a mut self,
-            _server: &'a WebServer,
-            _port: u16,
-        ) -> WebServerListenFuture<'a, Self::Error> {
-            Box::pin(pending())
-        }
-    }
-
-    #[test]
-    fn system_registers_fixed_plugin_set() {
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<32, 512, 8>::new()));
-        let workflow_filesystem = Box::leak(Box::new(MemFs::new()));
-        let model_api_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
-        let plugin_store =
-            EkvStore::<MemFlash, NoopRawMutex>::new(MemFlash::new(), EkvConfig::default());
-        block_on(plugin_store.format()).expect("format Plugin store");
-
-        let system = block_on(System::new(
-            lanes,
-            workflow_filesystem,
-            "/workflows",
-            plugin_store,
-            NeverWebServerListener,
-            NeverStack,
-            MemFs::new(),
-            RuntimeStorageConfig {
-                persistence_root: "/agent".into(),
-                skill_roots: Vec::new(),
-            },
-            model_api_factory,
-        ));
-
-        let system = system.expect("create System");
-        assert!(system
-            ._plugins
-            .is_loaded(&PluginId::try_from("time").expect("valid Time Plugin ID")));
-        assert!(system
-            ._plugins
-            .is_loaded(&PluginId::try_from("scheduler").expect("valid Scheduler Plugin ID")));
     }
 }

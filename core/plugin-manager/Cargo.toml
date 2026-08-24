@@ -11,13 +11,13 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-event-router = { path = "../event-router" }
-ekv = { version = "1.0.0", default-features = false, features = ["crc"] }
-embassy-sync-06 = { package = "embassy-sync", version = "0.6.0", default-features = false }
+barracuda-kv = { path = "../../shared/kv" }
+embedded-storage-async.workspace = true
 getset = "0.1.7"
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-ekv = { version = "1.0.0", features = ["std", "crc"] }
+barracuda-platform-test = { path = "../../platforms/test" }
 futures-lite = "2"
 
 [lints.rust]

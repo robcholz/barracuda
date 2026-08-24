@@ -26,13 +26,13 @@
 //! # Using the transcript store
 //!
 //! ```no_run
-//! use barracuda_fs::MemFs;
+//! use barracuda_platform_test::MemFs;
 //! use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
 //! use std::sync::Arc;
 //!
 //! // A filesystem for persistence. Device applications provide their `FileSystem`;
 //! // here it is the in-memory host double.
-//! let filesystem = Arc::new(MemFs::new());
+//! let filesystem = MemFs::new();
 //!
 //! // Build the store for one transcript id. Typically one per agent instance.
 //! let transcript_id = 42;
@@ -82,6 +82,6 @@ pub use profile::{
 };
 pub use transcript_store::{
     AssistantFragment, AssistantHandle, ToolHandle, Transcript, TranscriptDeleteError,
-    TranscriptInitError, TranscriptListError, TranscriptStore, Turn, TurnError, TurnHandle, TurnId,
-    UserHandle,
+    TranscriptInitError, TranscriptListError, TranscriptStore, TransientTranscript, Turn,
+    TurnError, TurnHandle, TurnId, UserHandle,
 };

@@ -28,7 +28,7 @@ pub type SharedApiManager = Arc<RefCell<ModelApiManager>>;
 /// Registers LLM API configs per [`ApiPurpose`], de-duplicated by model, with a
 /// default fallback.
 ///
-/// Configs are keyed by their `model`: [`link_api`](Self::link_api) with a model
+/// Configs are keyed by their `model`: [`set_api`](Self::set_api) with a model
 /// that already exists **replaces** the stored config (e.g. to rotate a key), and
 /// every purpose bound to that model then resolves to the updated config.
 #[derive(Debug, Default)]
@@ -47,12 +47,12 @@ impl ModelApiManager {
     /// If a config with the same `model` is already stored it is replaced, so
     /// every purpose bound to that model sees the new config. When `default` is
     /// `true`, this model becomes the fallback for purposes without an explicit
-    /// binding (the most recent `default` link wins).
+    /// binding (the most recent default assignment wins).
     ///
     /// # Errors
     ///
     /// Returns [`InitError`] without changing the manager when `api` is invalid.
-    pub fn link_api(
+    pub fn set_api(
         &mut self,
         api: ModelApiConfig,
         purpose: ApiPurpose,
@@ -105,10 +105,10 @@ mod tests {
     fn explicit_binding_takes_precedence_over_default() {
         let mut manager = ModelApiManager::default();
         manager
-            .link_api(cfg("default-model", "k0"), ApiPurpose::Memory, true)
+            .set_api(cfg("default-model", "k0"), ApiPurpose::Memory, true)
             .unwrap();
         manager
-            .link_api(cfg("root-model", "k1"), ApiPurpose::RootAgent, false)
+            .set_api(cfg("root-model", "k1"), ApiPurpose::RootAgent, false)
             .unwrap();
 
         assert_eq!(
@@ -126,9 +126,9 @@ mod tests {
     fn unbound_purpose_falls_back_to_default() {
         let mut manager = ModelApiManager::default();
         manager
-            .link_api(cfg("default-model", "k0"), ApiPurpose::RootAgent, true)
+            .set_api(cfg("default-model", "k0"), ApiPurpose::RootAgent, true)
             .unwrap();
-        // SubAgent was never linked -> falls back to the default.
+        // SubAgent was never assigned -> falls back to the default.
         assert_eq!(
             manager.get_api(ApiPurpose::SubAgent).unwrap().model,
             "default-model"
@@ -139,7 +139,7 @@ mod tests {
     fn unbound_purpose_without_default_is_none() {
         let mut manager = ModelApiManager::default();
         manager
-            .link_api(cfg("root-model", "k1"), ApiPurpose::RootAgent, false)
+            .set_api(cfg("root-model", "k1"), ApiPurpose::RootAgent, false)
             .unwrap();
         assert_eq!(manager.get_api(ApiPurpose::Compaction), None);
     }
@@ -150,24 +150,24 @@ mod tests {
         let invalid = cfg("invalid", "");
 
         assert_eq!(
-            manager.link_api(invalid, ApiPurpose::RootAgent, true),
+            manager.set_api(invalid, ApiPurpose::RootAgent, true),
             Err(InitError::MissingApiKey)
         );
         assert_eq!(manager.get_api(ApiPurpose::RootAgent), None);
     }
 
     #[test]
-    fn linking_same_model_replaces_and_updates_all_bindings() {
+    fn setting_same_model_replaces_and_updates_all_bindings() {
         let mut manager = ModelApiManager::default();
         manager
-            .link_api(cfg("shared", "old-key"), ApiPurpose::RootAgent, false)
+            .set_api(cfg("shared", "old-key"), ApiPurpose::RootAgent, false)
             .unwrap();
         manager
-            .link_api(cfg("shared", "old-key"), ApiPurpose::Memory, false)
+            .set_api(cfg("shared", "old-key"), ApiPurpose::Memory, false)
             .unwrap();
-        // Re-link the same model with a rotated key.
+        // Set the same model again with a rotated key.
         manager
-            .link_api(cfg("shared", "new-key"), ApiPurpose::RootAgent, false)
+            .set_api(cfg("shared", "new-key"), ApiPurpose::RootAgent, false)
             .unwrap();
 
         assert_eq!(

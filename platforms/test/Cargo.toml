@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-platform-test"
+version = "0.1.0"
+edition = "2021"
+description = "Deterministic test Platform implementations for Barracuda"
+
+[dependencies]
+barracuda-fs = { path = "../../shared/fs" }
+barracuda-net = { path = "../../shared/net" }
+embassy-sync.workspace = true
+embassy-embedded-hal = "0.5.0"
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+embedded-storage-async.workspace = true
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+anyhow = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -123,7 +123,7 @@ impl RuntimeControl {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
     pub(crate) fn new<Filesystem, Http>(
-        filesystem: Arc<Filesystem>,
+        filesystem: Filesystem,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,
@@ -156,15 +156,13 @@ impl RuntimeControl {
     }
 
     /// Register an LLM API config for a purpose.
-    pub(crate) fn link_api(
+    pub(crate) fn set_api(
         &self,
         api: ModelApiConfig,
         purpose: ApiPurpose,
         default: bool,
     ) -> Result<(), InitError> {
-        self.api_manager
-            .borrow_mut()
-            .link_api(api, purpose, default)
+        self.api_manager.borrow_mut().set_api(api, purpose, default)
     }
 
     /// Open a Session's long-lived event stream.

@@ -13,6 +13,7 @@ barracuda-fs = { path = "../../../../shared/fs" }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 barracuda-fs = { path = "../../../../shared/fs" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

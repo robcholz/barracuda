@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Event Router Component bridging the Message Gateway and the Agent.
+//! Event Router Component bridging the IMessage Gateway and the Agent.
 //!
 //! This Component keeps the CLI (and any IM provider) fully decoupled from the
 //! Agent: inbound gateway messages drive an Agent turn, and the turn's events

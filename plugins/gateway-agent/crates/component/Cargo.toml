@@ -7,8 +7,8 @@ description = "Gateway-Agent bridge Component for Event Router"
 [dependencies]
 barracuda-agent-component = { path = "../../../agent/crates/component" }
 barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-message-gateway-component = { path = "../../../message-gateway/crates/component" }
-gateway = { path = "../../../message-gateway/crates/gateway" }
+barracuda-imessage-gateway-component = { path = "../../../imessage-gateway/crates/component" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
@@ -18,10 +18,11 @@ zerocopy = { version = "0.8", features = ["derive"] }
 barracuda-agent-runtime = { path = "../../../agent/crates/runtime" }
 barracuda-fs = { path = "../../../../shared/fs" }
 barracuda-model-api = { path = "../../../agent/crates/model-api" }
-barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
+barracuda-net = { path = "../../../../shared/net" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
-gateway = { path = "../../../message-gateway/crates/gateway" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
 static_cell = "2"
 
 [lints.rust]

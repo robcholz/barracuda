@@ -9,10 +9,11 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter,
-    EventRouterCreateError, FileSystem, MemFs, RegisterContext, RouterError, RpcFrame,
-    RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
-    WorkflowControlError, WorkflowId,
+    EventRouterCreateError, FileSystem, RegisterContext, RouterError, RpcFrame, RpcLaneStorage,
+    RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient, WorkflowControlError,
+    WorkflowId,
 };
+use barracuda_platform_test::MemFs;
 
 const FRAME_SIZE: usize = 64;
 const WORKFLOW_DIRECTORY: &str = "workflows";
@@ -103,9 +104,9 @@ impl Component<FRAME_SIZE> for WorkflowUninstaller {
     }
 }
 
-fn new_router(filesystem: &'static MemFs) -> Result<TestEventRouter, EventRouterCreateError> {
+fn new_router(filesystem: &MemFs) -> Result<TestEventRouter, EventRouterCreateError> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-    EventRouter::new(lanes, filesystem, WORKFLOW_DIRECTORY)
+    EventRouter::new(lanes, filesystem.clone(), WORKFLOW_DIRECTORY)
 }
 
 async fn drive_until(
@@ -127,11 +128,11 @@ async fn drive_until(
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
 
     // Persist: load a Workflow, then reconstruct the Event Router.
     let install_state = Rc::new(ControlState::default());
-    let mut first = new_router(filesystem)?;
+    let mut first = new_router(&filesystem)?;
     first.load(Box::new(WorkflowInstaller {
         state: Rc::clone(&install_state),
     }))?;
@@ -146,7 +147,7 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let definitions = first.workflow_definitions();
     drop(first);
 
-    let mut second = new_router(filesystem)?;
+    let mut second = new_router(&filesystem)?;
     assert_eq!(second.workflow_definitions(), definitions);
 
     // Unload: remove the durable definition and verify a fresh router is empty.
@@ -157,10 +158,10 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     drive_until(&mut second, |_router| uninstall_state.done.get()).await?;
     assert!(uninstall_state.error.borrow().is_none());
     assert!(second.workflow_definitions().is_empty());
-    assert!(!filesystem.exists("workflows/persisted-recorder.json"));
+    assert!(!filesystem.exists("workflows/persisted-recorder.json")?);
 
     drop(second);
-    let third = new_router(filesystem)?;
+    let third = new_router(&filesystem)?;
     assert!(third.workflow_definitions().is_empty());
 
     println!("Workflow persisted across restart and was durably unloaded");

@@ -8,10 +8,11 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_event_router::{
-    rpc_dynamic, Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext,
+    rpc_dynamic, Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
     RpcAddress, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcWire, RunContext, Unary,
     UnregisterContext,
 };
+use barracuda_platform_test::MemFs;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use static_cell::ConstStaticCell;
@@ -188,7 +189,7 @@ impl Component<FRAME_SIZE> for JsonCaller {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(JsonCallState::default());
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
 
     let service = event_router.load(Box::new(PermissionService {

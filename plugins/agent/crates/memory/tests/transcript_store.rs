@@ -5,7 +5,7 @@ use std::sync::Arc;
 use barracuda_agent_memory::{
     AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId,
 };
-use barracuda_fs::MemFs;
+use barracuda_platform_test::MemFs;
 
 #[test]
 fn turn_id_uses_the_shared_prefixed_wire_format() {
@@ -146,9 +146,8 @@ fn tool_handle_records_one_atomic_result() {
 
 #[test]
 fn turn_drop_can_persist_after_the_store_drops() {
-    let filesystem = Arc::new(MemFs::new());
-    let store =
-        TranscriptStore::new(Arc::clone(&filesystem), 9, "/transcript-detached-turn").unwrap();
+    let filesystem = MemFs::new();
+    let store = TranscriptStore::new(filesystem.clone(), 9, "/transcript-detached-turn").unwrap();
     let turn = store.open_turn().unwrap();
     {
         let mut user = turn.user().unwrap();
@@ -182,10 +181,9 @@ fn transcript_trait_is_the_only_type_erased_boundary() {
 
 #[test]
 fn persisted_transcript_restores_turn_version() {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     let store = Arc::new(
-        TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 7, "/transcript-version-reload")
-            .unwrap(),
+        TranscriptStore::<MemFs>::new(filesystem.clone(), 7, "/transcript-version-reload").unwrap(),
     );
     {
         let turn = store.clone().open_turn().unwrap();
@@ -206,5 +204,5 @@ fn persisted_transcript_restores_turn_version() {
 }
 
 fn store() -> Arc<TranscriptStore<MemFs>> {
-    Arc::new(TranscriptStore::new(Arc::new(MemFs::new()), 1, "/transcript-store-tests").unwrap())
+    Arc::new(TranscriptStore::new(MemFs::new(), 1, "/transcript-store-tests").unwrap())
 }

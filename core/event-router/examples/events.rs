@@ -8,9 +8,10 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    MemFs, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
-    UnregisterContext, WorkflowClient, WorkflowInfo,
+    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
+    WorkflowClient, WorkflowInfo,
 };
+use barracuda_platform_test::MemFs;
 use static_cell::ConstStaticCell;
 
 const FRAME_SIZE: usize = 256;
@@ -99,7 +100,7 @@ fn assert_idle(info: &WorkflowInfo) {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(GatewayState::default());
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
 
     assert!(event_router.workflow_definitions().is_empty());

@@ -8,10 +8,11 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_event_router::{
-    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, MemFs,
-    RegisterContext, RpcAddress, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
+    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
+    RpcAddress, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient,
 };
+use barracuda_platform_test::MemFs;
 use barracuda_scheduler_component::event::Triggered;
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
 use barracuda_time_component::{
@@ -103,7 +104,7 @@ impl Component<FRAME_SIZE> for TestDriver {
 #[test]
 fn scheduler_calls_typed_time_rpc_and_routes_trigger_event() {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<8, FRAME_SIZE, 8>::new()));
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut router = EventRouter::new(lanes, filesystem, "scheduler-component-flow")
         .expect("create Event Router");
     router

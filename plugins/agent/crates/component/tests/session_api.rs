@@ -10,10 +10,7 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_component::dto::{
-    ApiPurposeDto, BackendKindDto, FixedStr, SessionIdDto, SessionPersistenceDto,
-};
-use barracuda_agent_component::link_api::{LinkApi, LinkApiRequest};
+use barracuda_agent_component::dto::{FixedStr, SessionIdDto, SessionPersistenceDto};
 use barracuda_agent_component::list_sessions::ListSessions;
 use barracuda_agent_component::new_session::{NewSession, NewSessionRequest};
 use barracuda_agent_component::open_session::{
@@ -22,11 +19,12 @@ use barracuda_agent_component::open_session::{
 use barracuda_agent_component::session;
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionId};
 use barracuda_event_router::{
-    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, MemFs,
-    RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
+    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
+    RpcError, RpcFrame, RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
 };
 use barracuda_model_api::ModelApi;
-use barracuda_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::MemFs;
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use static_cell::StaticCell;
 
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
@@ -66,21 +64,6 @@ async fn run_session_api(
     result: Rc<ResultState>,
 ) -> Result<(), RpcError> {
     let client = context.rpc();
-    *result.stage.borrow_mut() = "link_api";
-    let link = LinkApiRequest {
-        backend: BackendKindDto::OpenAiCompatible,
-        api_key: FixedStr::new("test-key").map_err(|_| RpcError::InvalidFrameState)?,
-        model: FixedStr::new("test-model").map_err(|_| RpcError::InvalidFrameState)?,
-        base_url: FixedStr::new("http://example.invalid")
-            .map_err(|_| RpcError::InvalidFrameState)?,
-        timeout_ms: 1,
-        max_tokens: 1,
-        image_max_bytes: 1,
-        purpose: ApiPurposeDto::RootAgent,
-        default: true,
-    };
-    success(client.call::<LinkApi>(link)?.await?)?;
-
     *result.stage.borrow_mut() = "new_session";
     let session = success(
         client
@@ -191,10 +174,22 @@ data: [DONE]
             factory,
         )
         .expect("build Agent runtime");
+        runtime
+            .set_api(
+                barracuda_agent_runtime::ModelApiConfig::new(
+                    barracuda_agent_runtime::BackendKind::OpenAiCompatible,
+                    "test-key",
+                    "test-model",
+                    "http://example.invalid",
+                ),
+                barracuda_agent_runtime::ApiPurpose::RootAgent,
+                true,
+            )
+            .expect("configure model API");
 
         let result = Rc::new(ResultState::default());
         let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-        let filesystem = Box::leak(Box::new(MemFs::new()));
+        let filesystem = MemFs::new();
         let mut router = EventRouter::<8, 512, 8>::new(lanes, filesystem, "workflows")
             .expect("build Event Router");
         router

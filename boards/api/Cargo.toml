@@ -1,0 +1,17 @@
+[package]
+name = "barracuda-board"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-neutral static Board description for Barracuda"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

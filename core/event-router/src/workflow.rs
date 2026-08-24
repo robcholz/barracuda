@@ -27,7 +27,7 @@ where
     Filesystem: FileSystem,
 {
     runtime: WorkflowRuntime,
-    filesystem: &'static Filesystem,
+    filesystem: Filesystem,
     directory: String,
     index: Rc<RefCell<Vec<u8>>>,
 }
@@ -37,7 +37,7 @@ where
     Filesystem: FileSystem,
 {
     pub(super) fn new(
-        filesystem: &'static Filesystem,
+        filesystem: Filesystem,
         directory: String,
     ) -> Result<(Self, WorkflowRuntimeView), EventRouterCreateError> {
         if directory.trim().is_empty() {
@@ -46,7 +46,7 @@ where
         filesystem.create_dir_all(&directory)?;
         let runtime = WorkflowRuntime::new();
         let view = runtime.view();
-        let index = restore(&runtime.control(), filesystem, &directory)?;
+        let index = restore(&runtime.control(), &filesystem, &directory)?;
         Ok((
             Self {
                 runtime,
@@ -68,12 +68,13 @@ where
 
         let load_control = self.runtime.control();
         let load_index = Rc::clone(&self.index);
-        let load_filesystem = self.filesystem;
+        let load_filesystem = self.filesystem.clone();
         let load_directory = self.directory.clone();
         context.register_rpc::<WorkflowLoad<M>, _>(move |context: RpcContext, frames| {
             let control = load_control.clone();
             let index = Rc::clone(&load_index);
             let directory = load_directory.clone();
+            let filesystem = load_filesystem.clone();
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
                     Ok(request) => request,
@@ -93,7 +94,7 @@ where
                 }
 
                 let workflow_path = workflow_path(&directory, definition.id());
-                if load_filesystem
+                if filesystem
                     .write_atomic(&workflow_path, request.bytes())
                     .is_err()
                 {
@@ -103,7 +104,7 @@ where
                 let original_len = index.len();
                 index.extend_from_slice(definition.id().as_str().as_bytes());
                 index.push(b'\n');
-                if write_index(load_filesystem, &directory, &index).is_err() {
+                if write_index(&filesystem, &directory, &index).is_err() {
                     index.truncate(original_len);
                     return Ok(Err(WorkflowControlRejection::Persistence));
                 }
@@ -117,12 +118,13 @@ where
 
         let unload_control = self.runtime.control();
         let unload_index = Rc::clone(&self.index);
-        let unload_filesystem = self.filesystem;
+        let unload_filesystem = self.filesystem.clone();
         let unload_directory = self.directory.clone();
         context.register_rpc::<WorkflowUnload<M>, _>(move |_context, frames| {
             let control = unload_control.clone();
             let index = Rc::clone(&unload_index);
             let directory = unload_directory.clone();
+            let filesystem = unload_filesystem.clone();
             async move {
                 let request = match WorkflowJsonRequest::accept(frames).await? {
                     Ok(request) => request,
@@ -138,7 +140,7 @@ where
                 let mut index = index.borrow_mut();
                 let previous = index.clone();
                 if !remove_index_entry(&mut index, &workflow_id)
-                    || write_index(unload_filesystem, &directory, &index).is_err()
+                    || write_index(&filesystem, &directory, &index).is_err()
                 {
                     *index = previous;
                     return Ok(Err(WorkflowControlRejection::Persistence));
@@ -149,7 +151,7 @@ where
                 }
                 // The index is authoritative. A stale orphan is ignored on
                 // restart and can be overwritten by a future load.
-                let _ignored = unload_filesystem.remove(&workflow_path(&directory, &workflow_id));
+                let _ignored = filesystem.remove(&workflow_path(&directory, &workflow_id));
                 Ok(Ok(()))
             }
         })

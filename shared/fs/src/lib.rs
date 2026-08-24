@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Platform-neutral filesystem contracts and host/memory implementations.
+//! Platform-neutral filesystem contracts.
 //!
 //! Networking is provided by `barracuda-net`; time is provided globally by
 //! `embassy-time`.
@@ -9,8 +9,8 @@
 //!
 //! This is the persistence seam for everything that has to survive a reboot
 //! (conversation tapes, profile/long-term memory, …). It is a
-//! dependency-injection point: device applications implement it over their
-//! storage stack, while host tests provide `std::fs` or an in-memory map.
+//! platform boundary: concrete Platforms implement it over their storage
+//! stack, while framework and Plugin crates depend only on this contract.
 //! Modules never touch `std::fs` directly so they stay portable.
 //!
 //! # Two layers: a filesystem backend that produces file handles
@@ -29,32 +29,21 @@
 //!
 //! For the common one-shot cases, [`FileSystem`] provides path-addressed
 //! conveniences ([`read`](FileSystem::read), [`read_at`](FileSystem::read_at),
-//! [`append`](FileSystem::append), [`write_atomic`](FileSystem::write_atomic), …) as
-//! default methods implemented over the handle primitives, so callers that do
-//! not need a persistent handle keep a terse API.
+//! [`append`](FileSystem::append), …) as default methods implemented over the
+//! handle primitives, so callers that do not need a persistent handle keep a
+//! terse API. Atomic replacement remains a required backend operation because
+//! it cannot be reconstructed portably from weaker primitives.
 //!
 //! Paths are byte-oriented, opaque strings already resolved against the DATA
 //! root by the caller (`barracuda_paths`); this trait does no path joining.
 //!
 
 extern crate alloc;
-#[cfg(feature = "diskfs")]
-extern crate std;
-
-use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::error::Error;
 use core::fmt;
-
-#[cfg(feature = "diskfs")]
-mod disk;
-mod memory;
-
-#[cfg(feature = "diskfs")]
-pub use disk::{DiskFile, DiskFs};
-pub use memory::{MemFile, MemFs};
 
 /// Filesystem failure.
 ///
@@ -79,17 +68,6 @@ impl FsError {
     /// source error.
     pub fn io_message(message: impl Into<String>) -> Self {
         Self::Io(FsIoError::message(message))
-    }
-}
-
-#[cfg(feature = "diskfs")]
-impl From<std::io::Error> for FsError {
-    fn from(error: std::io::Error) -> Self {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Self::NotFound
-        } else {
-            Self::io(error)
-        }
     }
 }
 
@@ -175,14 +153,13 @@ pub trait FsFile {
 /// Byte-oriented persistence injection point: a filesystem backend that hands out
 /// [`FsFile`] handles.
 ///
-/// This is a `std::fs`-like HAL owned as a runtime filesystem instance.
-/// Filesystem identity is explicit: stateful implementations such as [`MemFs`]
-/// keep their namespace in the instance, and owners that intentionally share
-/// one instance do so through an [`Arc`].
+/// This is a `std::fs`-like HAL represented by a cheap, cloneable Platform
+/// handle. Every clone addresses the same filesystem namespace.
 ///
 /// Implementations must provide any synchronization required for concurrent
 /// calls through `&self`; callers do not wrap the filesystem in a lock.
-/// [`Arc`] is used only when multiple long-lived owners need the same instance.
+/// Framework code owns and clones this handle directly; it does not impose an
+/// additional reference-counting wrapper.
 ///
 /// Two write disciplines coexist:
 /// - [`open_append`](FileSystem::open_append) +
@@ -192,9 +169,9 @@ pub trait FsFile {
 /// - [`write_atomic`](FileSystem::write_atomic) for whole-file checkpoints that must
 ///   replace the target tear-free: the small index manifest (`.json`) rewritten
 ///   on compaction/collapse, and the `.jsonl` itself when a collapse rewrites it
-///   to drop dead records. The default implementation writes a temporary sibling
-///   then [`rename`](FileSystem::rename)s it over the target.
-pub trait FileSystem: 'static {
+///   to drop dead records. Each backend implements its own durable replacement
+///   boundary; portable code cannot safely synthesize it.
+pub trait FileSystem: Clone + 'static {
     /// The open-file handle this filesystem produces.
     type File: FsFile;
 
@@ -232,7 +209,9 @@ pub trait FileSystem: 'static {
     fn create_dir_all(&self, path: &str) -> Result<(), FsError>;
 
     /// Whether `path` currently exists.
-    fn exists(&self, path: &str) -> bool;
+    ///
+    /// A missing path is `Ok(false)`; backend failures remain observable.
+    fn exists(&self, path: &str) -> Result<bool, FsError>;
 
     /// Remove a file or empty directory at `path`. Removing a missing path
     /// succeeds (idempotent).
@@ -279,16 +258,8 @@ pub trait FileSystem: 'static {
 
     /// Durably replace `path` with `data`.
     ///
-    /// The default writes to a temporary `"{path}.tmp"` sibling and
-    /// [`rename`](Self::rename)s it over the target so a crash mid-write never
-    /// leaves a half-written file — the file is either the old contents or the
-    /// new contents, never a torn mix.
-    fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError> {
-        let tmp = format!("{path}.tmp");
-        {
-            let mut file = self.create(&tmp)?;
-            file.write_all(data)?;
-        }
-        self.rename(&tmp, path)
-    }
+    /// Implementations define the durability boundary appropriate to their
+    /// storage medium. Portable code must not approximate atomic replacement
+    /// from weaker primitives.
+    fn write_atomic(&self, path: &str, data: &[u8]) -> Result<(), FsError>;
 }

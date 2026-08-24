@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext, Router,
-    RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext,
-    WorkflowClient,
+    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, Router, RpcFrame,
+    RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext, WorkflowClient,
 };
+use barracuda_platform_test::MemFs;
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 use futures_lite::future::{block_on, poll_once};
 use static_cell::StaticCell;
@@ -280,7 +280,8 @@ fn profile_catalog(output: &Path) -> Report {
     static LANES: StaticCell<RpcLaneStorage<2, EVENT_FRAME, 2>> = StaticCell::new();
     let filesystem: &'static MemFs = FILESYSTEM.init(MemFs::new());
     let lanes = LANES.init(RpcLaneStorage::new());
-    let mut router = EventRouter::new(lanes, filesystem, "catalog-profile").expect("create router");
+    let mut router =
+        EventRouter::new(lanes, filesystem.clone(), "catalog-profile").expect("create router");
     let state = Rc::new(CatalogState::default());
     router
         .load(Box::new(CatalogLoader {

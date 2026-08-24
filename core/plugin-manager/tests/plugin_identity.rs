@@ -4,12 +4,13 @@
 
 use std::boxed::Box;
 
-use barracuda_event_router::{EventRouter, MemFs, RpcLaneStorage};
+use barracuda_event_router::{EventRouter, RpcLaneStorage};
+use barracuda_kv::MAX_CAPACITY;
+use barracuda_platform_test::{memory_partition, MemFs, MemoryPartition};
 use barracuda_plugin_manager::{
-    EkvStore, NoopRawMutex, Plugin, PluginContext, PluginId, PluginIdError, PluginManager,
-    PluginRegisterError, PluginStartFuture,
+    Plugin, PluginContext, PluginId, PluginIdError, PluginManager, PluginRegisterError,
+    PluginStartFuture,
 };
-use ekv::{flash::MemFlash, Config};
 use futures_lite::future::block_on;
 
 const FRAME_SIZE: usize = 64;
@@ -21,23 +22,31 @@ impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
         self.0
     }
 
-    fn start<'a>(
+    fn start<'a, Storage>(
         &'a mut self,
-        _context: &'a mut PluginContext<'_, FRAME_SIZE>,
-    ) -> PluginStartFuture<'a> {
+        _context: &'a mut PluginContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
         Box::pin(async { Ok(()) })
     }
 }
 
-fn manager() -> PluginManager<FRAME_SIZE> {
-    let store = EkvStore::<MemFlash, NoopRawMutex>::new(MemFlash::new(), Config::default());
-    block_on(store.format()).expect("format test store");
-    PluginManager::new(store)
+fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
+    block_on(async {
+        let partition = memory_partition(MAX_CAPACITY)
+            .await
+            .expect("create database partition");
+        PluginManager::open(partition)
+            .await
+            .expect("open Plugin storage")
+    })
 }
 
 fn router() -> EventRouter<4, FRAME_SIZE, 4> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::new()));
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     EventRouter::new(lanes, filesystem, "workflows").expect("create Event Router")
 }
 

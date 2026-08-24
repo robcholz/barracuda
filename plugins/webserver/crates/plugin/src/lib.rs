@@ -4,11 +4,10 @@
 #![recursion_limit = "256"]
 
 extern crate alloc;
-#[cfg(feature = "tokio")]
-extern crate std;
 
 use alloc::boxed::Box;
 use alloc::rc::Rc;
+use core::marker::PhantomData;
 
 use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture};
 
@@ -16,11 +15,7 @@ pub use listener::{WebServerListenFuture, WebServerListener};
 pub use webserver::*;
 
 mod component;
-#[cfg(feature = "embassy")]
-mod embassy_listener;
 mod listener;
-#[cfg(feature = "tokio")]
-mod tokio_listener;
 mod webserver;
 
 /// Stable identity of the WebServer capability provider.
@@ -28,6 +23,9 @@ pub const PLUGIN_ID: &str = "webserver";
 
 /// TCP port served by the WebServer Plugin.
 pub const WEB_SERVER_PORT: u16 = 8787;
+
+/// Number of connections that the platform listener serves concurrently.
+pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 
 /// Plugin that owns and publishes the portable WebServer.
 ///
@@ -42,17 +40,13 @@ pub const WEB_SERVER_PORT: u16 = 8787;
 /// }
 /// ```
 pub struct WebServerPlugin<Listener> {
-    webserver: Rc<WebServer>,
-    listener: Listener,
+    listener: PhantomData<fn() -> Listener>,
 }
 
-impl<Listener> WebServerPlugin<Listener> {
-    /// Creates the WebServer Plugin from the platform listener capability.
-    #[must_use]
-    pub fn new(listener: Listener) -> Self {
+impl<Listener> Default for WebServerPlugin<Listener> {
+    fn default() -> Self {
         Self {
-            webserver: Rc::new(WebServer::new()),
-            listener,
+            listener: PhantomData,
         }
     }
 }
@@ -65,13 +59,19 @@ where
         PLUGIN_ID
     }
 
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a> {
+    fn start<'a, Storage>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
         Box::pin(async move {
-            context.provide(Rc::clone(&self.webserver))?;
-            context.load(component::WebServerComponent::new(
-                Rc::clone(&self.webserver),
-                self.listener.clone(),
-            ))?;
+            let listener = context.require_system::<&'static Listener>()?;
+            let listener = (**listener).clone();
+            let webserver = Rc::new(WebServer::new());
+            context.provide(Rc::clone(&webserver))?;
+            context.load(component::WebServerComponent::new(webserver, listener))?;
             Ok(())
         })
     }

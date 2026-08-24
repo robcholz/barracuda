@@ -27,6 +27,7 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 anyhow = "1"
 barracuda-fs = { path = "../../../../shared/fs" }
 futures-lite = "2"

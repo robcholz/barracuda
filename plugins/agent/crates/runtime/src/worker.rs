@@ -46,7 +46,7 @@ where
     Filesystem: FileSystem + 'static,
     Http: TcpConnect + Dns + 'static,
 {
-    pub(super) filesystem: Arc<Filesystem>,
+    pub(super) filesystem: Filesystem,
     pub(super) tool_registry: Arc<ToolRegistry>,
     pub(super) persistence: SharedPersistence<Filesystem>,
     pub(super) persistence_dir: String,

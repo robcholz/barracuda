@@ -9,7 +9,7 @@ use barracuda_agent_component::open_session::{
     OpenSession, OpenSessionRequest, OpenSessionResponse, SessionEventDto,
 };
 use barracuda_event_router::{RpcClient, RpcError, RpcResult, RpcStream};
-use barracuda_message_gateway_component::gateway_send::{
+use barracuda_imessage_gateway_component::gateway_send::{
     frames_from_gateway_send, GatewayOutboundMessage, GatewaySend,
 };
 use futures_lite::stream;

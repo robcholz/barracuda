@@ -9,9 +9,10 @@ use std::rc::Rc;
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EmitError, Event, EventEmitter, EventRouter,
-    MemFs, RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
+    RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient, WorkflowControlError,
 };
+use barracuda_platform_test::MemFs;
 
 const FRAME_CAPACITY: usize = 64;
 const DIRECTORY: &str = "capacity-workflows";
@@ -94,17 +95,17 @@ impl Component<FRAME_CAPACITY> for FanoutComponent {
 }
 
 fn new_router<const N: usize, const Q: usize>(
-    filesystem: &'static MemFs,
+    filesystem: &MemFs,
 ) -> EventRouter<N, FRAME_CAPACITY, Q> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, FRAME_CAPACITY, Q>::new()));
-    EventRouter::new(lanes, filesystem, DIRECTORY).expect("create Event Router")
+    EventRouter::new(lanes, filesystem.clone(), DIRECTORY).expect("create Event Router")
 }
 
 #[test]
 fn matched_fanout_can_use_every_lane_except_the_ingress_lane() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<4, 4>(filesystem);
+    let mut event_router = new_router::<4, 4>(&filesystem);
     event_router
         .load(Box::new(FanoutComponent {
             workflows: 3,
@@ -124,9 +125,9 @@ fn matched_fanout_can_use_every_lane_except_the_ingress_lane() {
 
 #[test]
 fn matched_fanout_equal_to_lane_count_is_rejected_as_nested_exhaustion() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(State::default());
-    let mut event_router = new_router::<4, 4>(filesystem);
+    let mut event_router = new_router::<4, 4>(&filesystem);
     event_router
         .load(Box::new(FanoutComponent {
             workflows: 4,

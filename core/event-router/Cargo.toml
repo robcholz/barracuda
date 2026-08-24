@@ -32,6 +32,7 @@ thiserror = { version = "2", default-features = false }
 schema = ["dep:barracuda-rpc-schema"]
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../platforms/test" }
 barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
 futures-lite = "2"
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }

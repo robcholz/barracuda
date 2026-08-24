@@ -26,7 +26,13 @@ impl<const M: usize> Plugin<M> for SchedulerPlugin {
         PLUGIN_ID
     }
 
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a> {
+    fn start<'a, Storage>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
         Box::pin(async move {
             context.load(SchedulerComponent::new(SchedulerConfig::new(
                 SCHEDULE_CAPACITY,

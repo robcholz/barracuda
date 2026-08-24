@@ -7,17 +7,17 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::any::{type_name, Any, TypeId};
 use core::error::Error;
-use core::fmt;
+use core::fmt::{self, Debug};
 use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_event_router::{Component, ComponentId, EventRouter, LoadError, UnloadError};
-use ekv::flash::Flash;
-use embassy_sync_06::blocking_mutex::raw::RawMutex;
+use barracuda_kv::Database;
+use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
 
-use crate::storage::StorageBackend;
-use crate::{EkvStore, ScopedStorage, StorageError};
+use crate::storage::ScopedStorage;
+use crate::{PluginStorage, StorageError};
 
 /// Stable identity and persistent namespace of one Plugin.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -102,10 +102,13 @@ pub trait Plugin<const M: usize> {
     /// Registers Plugin-owned state before any Plugin starts.
     ///
     /// The default registration phase performs no work.
-    fn register<'a>(
+    fn register<'a, Storage>(
         &'a mut self,
-        _context: &'a mut PluginContext<'_, M>,
-    ) -> PluginRegisterFuture<'a> {
+        _context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginRegisterFuture<'a>
+    where
+        Storage: PluginStorage,
+    {
         Box::pin(async { Ok(()) })
     }
 
@@ -114,18 +117,30 @@ pub trait Plugin<const M: usize> {
     /// The Plugin may clone its scoped storage into any registered Component.
     /// A returned error causes the manager to unload Components registered by
     /// this call in reverse order.
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a>;
+    fn start<'a, Storage>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: PluginStorage;
 }
 
-trait ManagedPlugin<const M: usize> {
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a>;
+trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
+    fn start<'a>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>;
 }
 
-impl<P, const M: usize> ManagedPlugin<M> for P
+impl<T, const M: usize, Storage> ManagedPlugin<M, Storage> for T
 where
-    P: Plugin<M>,
+    T: Plugin<M>,
+    Storage: PluginStorage,
 {
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a> {
+    fn start<'a>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a> {
         Plugin::start(self, context)
     }
 }
@@ -154,20 +169,21 @@ impl<const N: usize, const M: usize, const Q: usize> ComponentRegistrar<M>
 
 /// Capabilities provided while one Plugin initializes.
 #[derive(Getters)]
-pub struct PluginContext<'a, const M: usize> {
+pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
     registrar: &'a mut dyn ComponentRegistrar<M>,
-    /// Persistent raw byte storage restricted to this Plugin's namespace.
+    /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
-    storage: ScopedStorage,
+    storage: Storage,
     plugin_id: &'a PluginId,
     dependencies: &'a [PluginId],
     capabilities: &'a mut CapabilityRegistry,
+    system_capabilities: &'a SystemCapabilityRegistry,
     component_ids: &'a mut Vec<ComponentId>,
     provided_capabilities: &'a mut Vec<CapabilityKey>,
     retained_resources: &'a mut Vec<Box<dyn Any>>,
 }
 
-impl<const M: usize> PluginContext<'_, M> {
+impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
     /// Loads one Component owned by the current Plugin.
     ///
     /// The manager records the returned identity for Plugin-wide rollback and
@@ -229,6 +245,26 @@ impl<const M: usize> PluginContext<'_, M> {
             .map_err(PluginError::from)
     }
 
+    /// Obtains one capability installed by the System composition root.
+    ///
+    /// System capabilities are concrete, statically selected Platform handles.
+    /// Lookup happens only during Plugin registration or startup; Plugins clone
+    /// the lightweight handle into their Components, so no type lookup remains
+    /// on runtime hot paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapabilityError::SystemNotProvided`] when System did not
+    /// install the requested concrete type.
+    pub fn require_system<T>(&self) -> PluginResult<Rc<T>>
+    where
+        T: Any,
+    {
+        self.system_capabilities
+            .get::<T>()
+            .map_err(PluginError::from)
+    }
+
     /// Retains a resource for exactly the lifetime of the current Plugin.
     ///
     /// Registration guards can use `Drop` to undo entries installed into a
@@ -260,6 +296,44 @@ impl CapabilityKey {
 #[derive(Default)]
 struct CapabilityRegistry {
     entries: BTreeMap<CapabilityKey, Rc<dyn Any>>,
+}
+
+#[derive(Default)]
+struct SystemCapabilityRegistry {
+    entries: BTreeMap<TypeId, Rc<dyn Any>>,
+}
+
+impl SystemCapabilityRegistry {
+    fn insert<T>(&mut self, capability: Rc<T>) -> Result<(), CapabilityError>
+    where
+        T: Any,
+    {
+        let type_id = TypeId::of::<T>();
+        if self.entries.contains_key(&type_id) {
+            return Err(CapabilityError::SystemAlreadyProvided {
+                capability: type_name::<T>(),
+            });
+        }
+        let capability: Rc<dyn Any> = capability;
+        self.entries.insert(type_id, capability);
+        Ok(())
+    }
+
+    fn get<T>(&self) -> Result<Rc<T>, CapabilityError>
+    where
+        T: Any,
+    {
+        self.entries
+            .get(&TypeId::of::<T>())
+            .cloned()
+            .ok_or(CapabilityError::SystemNotProvided {
+                capability: type_name::<T>(),
+            })?
+            .downcast::<T>()
+            .map_err(|_capability| CapabilityError::SystemTypeMismatch {
+                capability: type_name::<T>(),
+            })
+    }
 }
 
 impl CapabilityRegistry {
@@ -315,6 +389,24 @@ impl CapabilityRegistry {
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CapabilityError {
+    /// System did not install the requested concrete capability type.
+    #[error("System did not provide capability {capability}")]
+    SystemNotProvided {
+        /// Requested Rust type name.
+        capability: &'static str,
+    },
+    /// System attempted to install the same concrete capability type twice.
+    #[error("System already provided capability {capability}")]
+    SystemAlreadyProvided {
+        /// Duplicate Rust type name.
+        capability: &'static str,
+    },
+    /// A System capability did not match its `TypeId` key.
+    #[error("System capability had the wrong type for {capability}")]
+    SystemTypeMismatch {
+        /// Requested Rust type name.
+        capability: &'static str,
+    },
     /// A provider identity passed to `require` is invalid.
     #[error("Capability provider has an invalid identity: {provider}")]
     InvalidProvider {
@@ -353,8 +445,8 @@ pub enum CapabilityError {
     },
 }
 
-struct LoadedPlugin<const M: usize> {
-    plugin: Box<dyn ManagedPlugin<M>>,
+struct LoadedPlugin<const M: usize, Storage: PluginStorage> {
+    plugin: Box<dyn ManagedPlugin<M, Storage>>,
     available: bool,
     started: bool,
     component_ids: Vec<ComponentId>,
@@ -449,32 +541,70 @@ pub enum PluginUnloadError {
     Cleanup(Vec<PluginComponentCleanupFailure>),
 }
 
+/// Failure while opening Plugin Manager persistence.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum PluginManagerInitError {
+    /// The shared key-value database could not be opened.
+    #[error(transparent)]
+    Database(#[from] barracuda_kv::OpenError),
+}
+
 /// Manages Plugin identities, scoped storage, and grouped Components.
 ///
 /// Event Router continues to own Component execution. The manager only uses a
 /// mutable Router reference while registering, starting, or unloading a Plugin.
-pub struct PluginManager<const M: usize> {
-    backend: Rc<dyn StorageBackend>,
+pub struct PluginManager<const M: usize, DatabaseRegion>
+where
+    DatabaseRegion: NorFlash + 'static,
+    DatabaseRegion::Error: Debug,
+{
+    database: Rc<Database<DatabaseRegion>>,
     capabilities: CapabilityRegistry,
-    loaded: BTreeMap<PluginId, LoadedPlugin<M>>,
+    system_capabilities: SystemCapabilityRegistry,
+    loaded: BTreeMap<PluginId, LoadedPlugin<M, ScopedStorage<DatabaseRegion>>>,
     registration_order: Vec<PluginId>,
 }
 
-impl<const M: usize> PluginManager<M> {
-    /// Creates an empty manager backed by one shared `ekv` database.
-    #[must_use]
-    pub fn new<F, Mutex>(store: EkvStore<F, Mutex>) -> Self
-    where
-        F: Flash + 'static,
-        Mutex: RawMutex + 'static,
-    {
-        let backend: Rc<dyn StorageBackend> = Rc::new(store);
-        Self {
-            backend,
+impl<const M: usize, DatabaseRegion> PluginManager<M, DatabaseRegion>
+where
+    DatabaseRegion: NorFlash + 'static,
+    DatabaseRegion::Error: Debug,
+{
+    /// Opens the Plugin database on a validated Barracuda partition.
+    ///
+    /// Plugin Manager owns database construction and only exposes scoped
+    /// storage to Plugins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the partition geometry, I/O, or existing database
+    /// contents are invalid.
+    pub async fn open(region: DatabaseRegion) -> Result<Self, PluginManagerInitError> {
+        let database = Database::open(region).await?;
+        Ok(Self {
+            database: Rc::new(database),
             capabilities: CapabilityRegistry::default(),
+            system_capabilities: SystemCapabilityRegistry::default(),
             loaded: BTreeMap::new(),
             registration_order: Vec::new(),
-        }
+        })
+    }
+
+    /// Installs one concrete capability owned by the System composition root.
+    ///
+    /// Plugins can obtain it through [`PluginContext::require_system`] during
+    /// registration or startup. The concrete type is retained, so calls made by
+    /// the resulting Component remain statically dispatched.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the same concrete type was already installed.
+    pub fn provide_system<T>(&mut self, capability: Rc<T>) -> Result<(), CapabilityError>
+    where
+        T: Any,
+    {
+        self.system_capabilities.insert(capability)
     }
 
     /// Runs one Plugin's registration phase and retains it for startup.
@@ -487,22 +617,23 @@ impl<const M: usize> PluginManager<M> {
     ///
     /// Returns an error for an invalid or duplicate identity, Plugin
     /// initialization failure, or incomplete Component rollback.
-    pub async fn register<const N: usize, const Q: usize, P: Plugin<M> + 'static>(
+    pub async fn register<const N: usize, const Q: usize, T: Plugin<M> + 'static>(
         &mut self,
         router: &mut EventRouter<N, M, Q>,
-        mut plugin: P,
+        mut plugin: T,
     ) -> Result<(), PluginRegisterError> {
         let id = PluginId::try_from(plugin.id())?;
         if self.loaded.contains_key(&id) {
             return Err(PluginRegisterError::AlreadyRegistered(id));
         }
 
-        let dependencies = resolve_dependencies::<M, P>(&id, &self.loaded)?;
+        let dependencies =
+            resolve_dependencies::<M, T, ScopedStorage<DatabaseRegion>>(&id, &self.loaded)?;
 
         let mut component_ids = Vec::new();
         let mut provided_capabilities = Vec::new();
         let mut retained_resources = Vec::new();
-        let storage = ScopedStorage::new(Rc::clone(&self.backend), &id);
+        let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
         let result = {
             let mut registrar = EventRouterRegistrar { router };
             let mut context = PluginContext {
@@ -511,6 +642,7 @@ impl<const M: usize> PluginManager<M> {
                 plugin_id: &id,
                 dependencies: &dependencies,
                 capabilities: &mut self.capabilities,
+                system_capabilities: &self.system_capabilities,
                 component_ids: &mut component_ids,
                 provided_capabilities: &mut provided_capabilities,
                 retained_resources: &mut retained_resources,
@@ -579,7 +711,7 @@ impl<const M: usize> PluginManager<M> {
                 continue;
             }
 
-            let storage = ScopedStorage::new(Rc::clone(&self.backend), &id);
+            let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
             let result = {
                 let mut registrar = EventRouterRegistrar { router };
                 let mut context = PluginContext {
@@ -588,6 +720,7 @@ impl<const M: usize> PluginManager<M> {
                     plugin_id: &id,
                     dependencies: &plugin.dependencies,
                     capabilities: &mut self.capabilities,
+                    system_capabilities: &self.system_capabilities,
                     component_ids: &mut plugin.component_ids,
                     provided_capabilities: &mut plugin.provided_capabilities,
                     retained_resources: &mut plugin.retained_resources,
@@ -695,12 +828,12 @@ impl<const M: usize> PluginManager<M> {
     }
 }
 
-fn resolve_dependencies<const M: usize, P: Plugin<M>>(
+fn resolve_dependencies<const M: usize, T: Plugin<M>, Storage: PluginStorage>(
     plugin: &PluginId,
-    loaded: &BTreeMap<PluginId, LoadedPlugin<M>>,
+    loaded: &BTreeMap<PluginId, LoadedPlugin<M, Storage>>,
 ) -> Result<Vec<PluginId>, PluginRegisterError> {
     let mut dependencies = BTreeSet::new();
-    for dependency in P::DEPENDS_ON {
+    for dependency in T::DEPENDS_ON {
         let id = PluginId::try_from(*dependency).map_err(|source| {
             PluginRegisterError::InvalidDependency {
                 dependency: (*dependency).to_string(),

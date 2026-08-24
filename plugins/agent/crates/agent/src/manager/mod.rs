@@ -32,7 +32,7 @@ crate::define_id_allocator!(
 
 /// Shared assembly dependencies for independently-built agents.
 pub struct AgentManager<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static> {
-    filesystem: Arc<Filesystem>,
+    filesystem: Filesystem,
     persistence: SharedPersistence<Filesystem>,
     api_manager: SharedApiManager,
     tool_registry: Arc<ToolRegistry>,

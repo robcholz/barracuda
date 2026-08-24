@@ -4,7 +4,7 @@ use barracuda_model_api::{
     BackendKind, ChatError, ChatJsonRequest, ChatRequest, ModelApi, ModelApiConfig, ModelApiError,
     RetryPolicy,
 };
-use barracuda_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use embedded_io::ErrorKind;
 use futures_lite::future::{block_on, poll_once};

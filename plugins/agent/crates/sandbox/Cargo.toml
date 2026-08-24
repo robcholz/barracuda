@@ -16,6 +16,7 @@ barracuda-fs = { path = "../../../../shared/fs" }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 # Hermetic in-memory FileSystem double for host-target sandbox tests.
 barracuda-fs = { path = "../../../../shared/fs" }
 # Ergonomic error handling for the host dev workflow `sandbox_demo` example.

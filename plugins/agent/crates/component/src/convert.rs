@@ -1,8 +1,8 @@
 //! Domain-to-DTO conversions for the Agent Component.
 
 use barracuda_agent_runtime::{
-    ApiPurpose, BackendKind, InputRequestId, PermissionLevel, ReasoningEffort, SessionControlError,
-    SessionId, SessionPersistence,
+    InputRequestId, PermissionLevel, ReasoningEffort, SessionControlError, SessionId,
+    SessionPersistence,
 };
 
 use crate::dto;
@@ -40,22 +40,6 @@ pub(crate) fn reasoning_effort_from_wire(value: dto::ReasoningEffortDto) -> Reas
         dto::ReasoningEffortDto::Medium => ReasoningEffort::Medium,
         dto::ReasoningEffortDto::High => ReasoningEffort::High,
         dto::ReasoningEffortDto::Ultra => ReasoningEffort::Ultra,
-    }
-}
-
-pub(crate) fn backend_from_wire(value: dto::BackendKindDto) -> BackendKind {
-    match value {
-        dto::BackendKindDto::OpenAiCompatible => BackendKind::OpenAiCompatible,
-        dto::BackendKindDto::AnthropicCompatible => BackendKind::AnthropicCompatible,
-    }
-}
-
-pub(crate) fn purpose_from_wire(value: dto::ApiPurposeDto) -> ApiPurpose {
-    match value {
-        dto::ApiPurposeDto::RootAgent => ApiPurpose::RootAgent,
-        dto::ApiPurposeDto::SubAgent => ApiPurpose::SubAgent,
-        dto::ApiPurposeDto::Memory => ApiPurpose::Memory,
-        dto::ApiPurposeDto::Compaction => ApiPurpose::Compaction,
     }
 }
 

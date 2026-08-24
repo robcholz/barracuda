@@ -11,7 +11,6 @@
 
 use alloc::format;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -53,7 +52,7 @@ struct Route {
 /// Construct with [`Sandbox::new`], then use it through the [`SandboxFs`] trait.
 #[derive(Debug)]
 pub struct Sandbox<F: FileSystem> {
-    filesystem: Arc<F>,
+    filesystem: F,
     routes: Vec<Route>,
 }
 
@@ -69,7 +68,7 @@ impl<F: FileSystem> Sandbox<F> {
     /// Returns [`SandboxError::Fs`] if materializing the scratch directories
     /// fails.
     pub fn new(
-        filesystem: Arc<F>,
+        filesystem: F,
         sandbox_host_dir: impl Into<String>,
         real: RealRoots,
     ) -> Result<Self, SandboxError> {
@@ -165,7 +164,7 @@ impl<F: FileSystem> SandboxFs for Sandbox<F> {
 
     fn exists(&self, path: &str) -> Result<bool, SandboxError> {
         let (_, real_path) = self.route(path)?;
-        Ok(self.filesystem.exists(&real_path))
+        Ok(self.filesystem.exists(&real_path)?)
     }
 
     fn remove(&self, path: &str) -> Result<(), SandboxError> {

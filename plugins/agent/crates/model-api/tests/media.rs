@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use barracuda_model_api::{BackendKind, MediaAsset, MediaRequest, ModelApi, ModelApiConfig};
-use barracuda_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
 

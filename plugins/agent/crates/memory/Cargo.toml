@@ -25,7 +25,8 @@ thiserror = { version = "2", default-features = false }
 [dev-dependencies]
 # Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
 # disk-backed inspection backend. None of these reach device builds.
-barracuda-fs = { path = "../../../../shared/fs", features = ["diskfs-pretty"] }
+barracuda-platform-host = { path = "../../../../platforms/host", features = ["filesystem-pretty-json"] }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

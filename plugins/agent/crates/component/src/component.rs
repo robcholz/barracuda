@@ -9,7 +9,6 @@ use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
 
 use crate::delete_session::{delete_session_handler, DeleteSession};
-use crate::link_api::{link_api_handler, LinkApi};
 use crate::list_sessions::{list_sessions_handler, ListSessions};
 use crate::new_session::{new_session_handler, NewSession};
 use crate::open_session::{open_session_handler, OpenSession};
@@ -37,8 +36,17 @@ where
         runtime: AgentRuntime<Filesystem, Http>,
         service: RuntimeService<Filesystem, Http>,
     ) -> Self {
+        Self::from_shared(Rc::new(runtime), service)
+    }
+
+    /// Creates a Component sharing an Agent runtime with another adapter.
+    #[must_use]
+    pub fn from_shared(
+        runtime: Rc<AgentRuntime<Filesystem, Http>>,
+        service: RuntimeService<Filesystem, Http>,
+    ) -> Self {
         Self {
-            runtime: Rc::new(runtime),
+            runtime,
             service: Some(service),
             sessions: session::SessionRegistry::default(),
         }
@@ -51,7 +59,6 @@ where
     Http: TcpConnect + Dns + 'static,
 {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<LinkApi, _>(link_api_handler(Rc::clone(&self.runtime)))?;
         context.register_rpc::<NewSession, _>(new_session_handler(Rc::clone(&self.runtime)))?;
         context.register_rpc::<ListSessions, _>(list_sessions_handler(Rc::clone(&self.runtime)))?;
         context.register_rpc::<OpenSession, _>(open_session_handler(

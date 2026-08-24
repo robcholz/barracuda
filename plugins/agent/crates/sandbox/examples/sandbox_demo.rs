@@ -10,18 +10,17 @@
 //!
 //! Everything else — bare roots, unlisted paths, `..` escapes — is rejected.
 
-use std::sync::Arc;
-
 use barracuda_agent_sandbox::{RealRoots, Sandbox, SandboxError, SandboxFs};
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 fn main() -> anyhow::Result<()> {
     // The real backing store. We retain its shared handle so the host side can
     // inspect the raw paths where the sandbox routed writes.
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
 
     let sandbox = Sandbox::<MemFs>::new(
-        Arc::clone(&filesystem),
+        filesystem.clone(),
         "/data/sandboxes/inst-1",
         RealRoots {
             shared_skills: "/data/shared/skills",

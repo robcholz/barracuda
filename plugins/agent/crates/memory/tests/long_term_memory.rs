@@ -1,11 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
-use std::sync::Arc;
-
 use barracuda_agent_memory::{
     LongTermError, LongTermMemory, MemoryDraft, MemoryId, MemoryPatch, StoreOutcome,
 };
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 #[test]
 fn store_mints_prefixed_ids_in_order() {
@@ -83,10 +82,10 @@ fn forget_removes_the_item() {
 
 #[test]
 fn state_survives_reload_from_journal() {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     {
-        let memory = LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-")
-            .expect("load empty store");
+        let memory =
+            LongTermMemory::<MemFs>::new(filesystem.clone(), "/m", "g-").expect("load empty store");
         memory.store(draft("Persistent", &["fact"]));
         let id = memory
             .store(draft("To be edited", &["fact"]))
@@ -104,7 +103,7 @@ fn state_survives_reload_from_journal() {
             .expect("update");
     }
     let reloaded =
-        LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-").expect("replay journal");
+        LongTermMemory::<MemFs>::new(filesystem.clone(), "/m", "g-").expect("replay journal");
     assert_eq!(reloaded.list().len(), 2);
     let edited = reloaded.recall(&[], Some("edited"), 10);
     assert_eq!(edited.len(), 1);
@@ -121,10 +120,10 @@ fn state_survives_reload_from_journal() {
 
 #[test]
 fn torn_trailing_journal_record_is_ignored_on_reload() {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     {
-        let memory = LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-")
-            .expect("load empty store");
+        let memory =
+            LongTermMemory::<MemFs>::new(filesystem.clone(), "/m", "g-").expect("load empty store");
         memory.store(draft("Committed before crash", &["fact"]));
     }
     filesystem
@@ -132,7 +131,7 @@ fn torn_trailing_journal_record_is_ignored_on_reload() {
         .unwrap();
 
     let reloaded =
-        LongTermMemory::<MemFs>::new(Arc::clone(&filesystem), "/m", "g-").expect("replay journal");
+        LongTermMemory::<MemFs>::new(filesystem.clone(), "/m", "g-").expect("replay journal");
     let items = reloaded.list();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].content, "Committed before crash");
@@ -147,7 +146,7 @@ fn torn_trailing_journal_record_is_ignored_on_reload() {
 }
 
 fn memory() -> LongTermMemory<MemFs> {
-    LongTermMemory::new(Arc::new(MemFs::new()), "/m", "g-").expect("load empty store")
+    LongTermMemory::new(MemFs::new(), "/m", "g-").expect("load empty store")
 }
 
 fn draft(content: &str, tags: &[&str]) -> MemoryDraft {

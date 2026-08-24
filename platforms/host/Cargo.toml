@@ -1,0 +1,51 @@
+[package]
+name = "barracuda-platform-host"
+version = "0.1.0"
+edition = "2021"
+description = "Host Platform implementations for Barracuda"
+
+[features]
+default = []
+filesystem-pretty-json = ["dep:serde_json"]
+testing = ["embassy-executor/arch-std", "embassy-executor/executor-thread"]
+
+[dependencies]
+async-channel = "2"
+barracuda-board = { path = "../../boards/api" }
+barracuda-fs = { path = "../../shared/fs" }
+barracuda-model-api = { path = "../../plugins/agent/crates/model-api", features = ["mbedtls-host"] }
+barracuda-net = { path = "../../shared/net" }
+barracuda-platform = { path = "../api" }
+barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
+embassy-executor.workspace = true
+embassy-embedded-hal = "0.5.0"
+embassy-sync.workspace = true
+embedded-io = { version = "0.7", features = ["std"] }
+embedded-io-async = "0.7"
+embedded-storage-async.workspace = true
+futures-util = "0.3"
+getrandom = { version = "0.4", features = ["sys_rng"] }
+picoserve = { version = "0.19.0", default-features = false, features = ["std"] }
+serde_json = { version = "1", optional = true }
+thiserror = "2"
+tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-util", "net", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1.52.3", features = ["macros", "rt"] }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+yaml-peg = { version = "1.0.8", features = ["serde"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

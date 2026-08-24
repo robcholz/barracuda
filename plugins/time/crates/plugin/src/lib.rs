@@ -5,9 +5,10 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use core::marker::PhantomData;
 
 use barracuda_net::{Dns, UdpStack};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginStartFuture};
+use barracuda_plugin_manager::{Plugin, PluginContext, PluginStartFuture};
 use barracuda_time_component::{
     TimeComponent, TimeConfig,
     sntp::{SntpConfig, SntpSource},
@@ -24,33 +25,35 @@ pub const PLUGIN_ID: &str = "time";
 
 /// Plugin that owns the network-synchronized Time Component.
 pub struct TimePlugin<Network> {
-    network: Option<Network>,
+    network: PhantomData<fn() -> Network>,
 }
 
-impl<Network> TimePlugin<Network> {
-    /// Creates the Time Plugin from the platform network capability.
-    #[must_use]
-    pub const fn new(network: Network) -> Self {
+impl<Network> Default for TimePlugin<Network> {
+    fn default() -> Self {
         Self {
-            network: Some(network),
+            network: PhantomData,
         }
     }
 }
 
 impl<Network, const M: usize> Plugin<M> for TimePlugin<Network>
 where
-    Network: Dns + UdpStack + 'static,
+    Network: Clone + Dns + UdpStack + 'static,
 {
     fn id(&self) -> &'static str {
         PLUGIN_ID
     }
 
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a> {
+    fn start<'a, Storage>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
         Box::pin(async move {
-            let network = self
-                .network
-                .take()
-                .ok_or_else(|| PluginError::registration(AlreadyRegistered))?;
+            let network = context.require_system::<&'static Network>()?;
+            let network = (**network).clone();
             let source =
                 SntpSource::new(network, SntpConfig::new(SNTP_SERVER, MINIMUM_UNIX_SECONDS));
             let config = TimeConfig::new(
@@ -63,7 +66,3 @@ where
         })
     }
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error("Time Plugin has already registered its Component")]
-struct AlreadyRegistered;

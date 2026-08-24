@@ -10,14 +10,12 @@
 //! The store is pure storage — no summarization, no LLM. Persistence is an
 //! in-memory [`MemFs`]; on device the same code runs over the DATA root.
 
-use std::sync::Arc;
-
 use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-use barracuda_fs::MemFs;
+use barracuda_platform_test::MemFs;
 
 fn main() -> anyhow::Result<()> {
     let conversation_id = 42;
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     let store = TranscriptStore::<MemFs>::new(filesystem, conversation_id, "/data/conversations")?;
 
     // One handle owns the turn and commits it as one record on drop.

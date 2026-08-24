@@ -11,18 +11,22 @@ The method is intentionally typed-only. It does not opt into Event Router's
 runtime JSON surface, because a long-lived duplex execution is not a useful
 unary JSON operation.
 
-## Host setup
+## Plugin setup
 
-The Component has one construction path. The VM crate creates the Lua state,
-constructs an empty Environment, selects external packages, and installs them
-internally once for every RPC call. The host cannot replace that configuration.
+`VmPlugin::register` fixes the built-in package installation plan before any
+Plugin starts. `VmPlugin::start` passes that plan to the Component. The
+Component then creates a fresh Lua state and fresh package instances for every
+RPC call. Host does not assemble or replace this configuration.
 
-```rust
-use barracuda_vm_component::VmComponent;
+```rust,ignore
+use barracuda_vm_component::{BuiltinPackages, VmComponent};
 
-let component = VmComponent::default();
+let component = VmComponent::new(BuiltinPackages::all());
 // event_router.load(Box::new(component))?;
 ```
+
+Direct Component construction is intended for tests and embedding. Normal
+system composition loads it through `VmPlugin`.
 
 There is no RPC for installing libraries or changing sandbox policy. Scripts
 can only access a library installed by the VM crate, for example

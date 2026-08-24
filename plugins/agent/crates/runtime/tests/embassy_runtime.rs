@@ -1,9 +1,9 @@
 use barracuda_agent_runtime::{
     AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionPersistence,
 };
-use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
-use barracuda_net::testing::NeverStack;
+use barracuda_platform_test::MemFs;
+use barracuda_platform_test::NeverStack;
 use futures_lite::future::{block_on, zip};
 
 static NETWORK: NeverStack = NeverStack;

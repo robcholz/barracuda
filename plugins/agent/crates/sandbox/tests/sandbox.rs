@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-use std::sync::Arc;
-
 use barracuda_agent_sandbox::{RealRoots, Sandbox, SandboxError, SandboxFs};
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 const REAL: RealRoots = RealRoots {
     shared_skills: "/real/shared/skills",
@@ -14,8 +13,8 @@ const REAL: RealRoots = RealRoots {
 
 #[test]
 fn routes_each_visible_root_to_its_real_path() {
-    let filesystem = Arc::new(MemFs::new());
-    let sb = Sandbox::<MemFs>::new(Arc::clone(&filesystem), "/host/sandbox", REAL).unwrap();
+    let filesystem = MemFs::new();
+    let sb = Sandbox::<MemFs>::new(filesystem.clone(), "/host/sandbox", REAL).unwrap();
 
     sb.write_atomic("/sandbox/tmp/a", b"1").unwrap();
     sb.write_atomic("/shared/data/b", b"2").unwrap();
@@ -88,7 +87,7 @@ fn system_root_is_read_only() {
 
 #[test]
 fn system_root_is_readable() {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     filesystem
         .write_atomic("/real/system/skills/doc", b"hi")
         .unwrap();
@@ -107,5 +106,5 @@ fn exists_distinguishes_absent_from_inaccessible() {
 }
 
 fn sandbox() -> Sandbox<MemFs> {
-    Sandbox::<MemFs>::new(Arc::new(MemFs::new()), "/real/sandbox/inst-1", REAL).unwrap()
+    Sandbox::<MemFs>::new(MemFs::new(), "/real/sandbox/inst-1", REAL).unwrap()
 }

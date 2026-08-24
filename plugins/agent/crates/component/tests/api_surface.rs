@@ -3,9 +3,6 @@
 use barracuda_agent_component::delete_session::{
     delete_session_handler, DeleteSession, DeleteSessionError, DeleteSessionRequest,
 };
-use barracuda_agent_component::link_api::{
-    link_api_handler, LinkApi, LinkApiError, LinkApiRequest,
-};
 use barracuda_agent_component::list_sessions::{
     list_sessions_handler, ListSessions, ListSessionsResponse,
 };
@@ -18,9 +15,10 @@ use barracuda_agent_component::open_session::{
 };
 use barracuda_agent_component::session;
 use barracuda_event_router::{
-    MemFs, RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Streaming, Unary,
+    RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Streaming, Unary,
 };
-use barracuda_net::testing::ScriptedStack;
+use barracuda_platform_test::MemFs;
+use barracuda_platform_test::ScriptedStack;
 
 fn assert_method<M, Request, Response, Error, Input, Output>()
 where
@@ -41,14 +39,10 @@ where
 
 #[test]
 fn runtime_rpcs_are_exposed_at_the_component_root() {
-    let _ = link_api_handler::<MemFs, ScriptedStack>;
     let _ = new_session_handler::<MemFs, ScriptedStack>;
     let _ = list_sessions_handler::<MemFs, ScriptedStack>;
     let _ = open_session_handler::<MemFs, ScriptedStack>;
     let _ = delete_session_handler::<MemFs, ScriptedStack>;
-    assert_eq!(LinkApi::ADDRESS, "agent.link_api");
-    assert_method::<LinkApi, LinkApiRequest, (), LinkApiError, Unary, Unary>();
-
     assert_eq!(NewSession::ADDRESS, "agent.new_session");
     assert_method::<NewSession, NewSessionRequest, NewSessionResponse, NewSessionError, Unary, Unary>(
     );

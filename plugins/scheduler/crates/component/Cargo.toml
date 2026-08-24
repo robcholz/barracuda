@@ -18,6 +18,7 @@ time = { version = "0.3.55", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 serde_json = "1"

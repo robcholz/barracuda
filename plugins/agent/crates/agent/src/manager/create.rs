@@ -1,11 +1,11 @@
 use alloc::{borrow::ToOwned, boxed::Box, sync::Arc, vec::Vec};
 
 use barracuda_agent_context::{Block, BlockKind};
-use barracuda_agent_memory::{Transcript, TranscriptStore};
+use barracuda_agent_memory::{Transcript, TranscriptStore, TransientTranscript};
 use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
 use barracuda_model_api::RetryPolicy;
 use barracuda_net::{Dns, TcpConnect};
 
@@ -115,7 +115,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
     ) -> Result<Box<dyn Transcript>, AgentCreateError> {
         match persistence {
             PersistenceConfig::Persistent => TranscriptStore::<Filesystem>::new(
-                Arc::clone(&self.filesystem),
+                self.filesystem.clone(),
                 id.0,
                 &self.transcript_dir,
             )
@@ -132,11 +132,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
                 );
                 AgentCreateError::Transcript(error)
             }),
-            PersistenceConfig::InMemory => {
-                TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), id.0, "/transcript")
-                    .map(|store| Box::new(store) as Box<dyn Transcript>)
-                    .map_err(AgentCreateError::Transcript)
-            }
+            PersistenceConfig::InMemory => Ok(Box::new(TransientTranscript::new())),
         }
     }
 

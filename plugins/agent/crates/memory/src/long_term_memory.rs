@@ -238,7 +238,7 @@ struct State {
 }
 
 struct Inner<F: FileSystem + 'static> {
-    filesystem: Arc<F>,
+    filesystem: F,
     path: String,
     id_prefix: String,
     state: RefCell<State>,
@@ -254,10 +254,10 @@ struct Inner<F: FileSystem + 'static> {
 /// # Examples
 ///
 /// ```
-/// use barracuda_fs::MemFs;
+/// use barracuda_platform_test::MemFs;
 /// use barracuda_agent_memory::{LongTermMemory, MemoryDraft, StoreOutcome};
 ///
-/// # let filesystem = std::sync::Arc::new(MemFs::new());
+/// # let filesystem = std::sync::MemFs::new();
 /// let memory = LongTermMemory::<MemFs>::new(filesystem, "/m", "g-")
 ///     .expect("a fresh MemFs has no journal, so the store starts empty");
 ///
@@ -297,17 +297,16 @@ impl<F: FileSystem + 'static> LongTermMemory<F> {
     /// [`LongTermInitError::Unreadable`] when the journal exists but cannot be
     /// read — a genuine I/O failure is never silently mistaken for an empty
     /// store. A *missing* journal is not an error: the store starts empty.
-    pub fn new(filesystem: Arc<F>, dir: &str, id_prefix: &str) -> Result<Self, LongTermInitError> {
+    pub fn new(filesystem: F, dir: &str, id_prefix: &str) -> Result<Self, LongTermInitError> {
         let path = journal_path(dir);
         if let Err(error) = filesystem.create_dir_all(dir) {
             log::warn!("long-term memory {dir}: create dir failed: {error}");
         }
-        let state = load_state(filesystem.as_ref(), &path).map_err(|source| {
-            LongTermInitError::Unreadable {
+        let state =
+            load_state(&filesystem, &path).map_err(|source| LongTermInitError::Unreadable {
                 path: path.clone(),
                 source,
-            }
-        })?;
+            })?;
         Ok(Self {
             inner: Arc::new(Inner {
                 filesystem,

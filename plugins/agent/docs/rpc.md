@@ -10,7 +10,6 @@ Streaming RPCs carry unbounded text and are not dynamic.
 
 | Address | Input | Output | Method error | Dynamic |
 | --- | --- | --- | --- | --- |
-| `agent.link_api` | unary `LinkApiRequest` | unary `()` | `LinkApiError` | yes |
 | `agent.new_session` | unary `NewSessionRequest` | unary `NewSessionResponse` | `NewSessionError` | yes |
 | `agent.delete_session` | unary `DeleteSessionRequest` | unary `()` | `DeleteSessionError` | yes |
 | `session.set_reasoning_effort` | unary `SetReasoningEffortRequest` | unary `()` | `SessionRpcError` | yes |
@@ -29,20 +28,6 @@ Text is always a fixed-capacity, NUL-terminated UTF-8 C-string (`FixedStr`)
 that serializes as a JSON string — never as a byte array.
 
 ## Request and response shapes
-
-### `agent.link_api`
-
-`LinkApiRequest` registers one LLM API configuration:
-
-- `backend`: `"openai_compatible"` or `"anthropic_compatible"`
-- `api_key`: string, up to 127 bytes
-- `model`: string, up to 127 bytes
-- `base_url`: string, up to 128 bytes
-- `timeout_ms`: `u32`
-- `max_tokens`: `u32`
-- `image_max_bytes`: `u32`
-- `purpose`: `"root_agent"`, `"sub_agent"`, `"memory"`, or `"compaction"`
-- `default`: `bool`
 
 ### `agent.new_session`
 
@@ -83,7 +68,6 @@ the target `session` identifier and, where applicable, the new value.
 
 ## Error reference
 
-- `LinkApiError::InvalidConfiguration` — the linked API config is invalid.
 - `NewSessionError::{WorkerStopped, Persistence}`.
 - `DeleteSessionError::{SessionNotFound, AlreadyDeleting, WorkerStopped, Storage}`.
 - `OpenSessionError::{SessionNotFound, AlreadyOpen, WorkerStopped, InvalidEvent}`.

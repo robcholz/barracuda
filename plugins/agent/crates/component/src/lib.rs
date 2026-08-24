@@ -11,8 +11,6 @@ mod convert;
 pub mod delete_session;
 /// Fixed-layout RPC messages.
 pub mod dto;
-/// `AgentRuntime::link_api` RPC.
-pub mod link_api;
 /// `AgentRuntime::list_sessions` RPC.
 pub mod list_sessions;
 /// `AgentRuntime::new_session` RPC.

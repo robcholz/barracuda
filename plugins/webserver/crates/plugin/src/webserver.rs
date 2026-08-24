@@ -17,9 +17,10 @@ use core::pin::Pin;
 use async_channel::{Receiver, Sender};
 use futures_lite::future;
 use picoserve::futures::Either;
+use picoserve::io::Write;
 use picoserve::request::{Path, Request};
 use picoserve::response::ws::{Message, SocketRx, SocketTx, WebSocketCallback};
-use picoserve::response::{IntoResponse, ResponseWriter, StatusCode};
+use picoserve::response::{Content, IntoResponse, Response, ResponseWriter, StatusCode};
 use picoserve::routing::{get, MethodHandler, PathRouterService, Router};
 use picoserve::time::Timer;
 use picoserve::{Config, DisconnectionInfo, NoGracefulShutdown, Server};
@@ -29,6 +30,115 @@ const WEBSOCKET_QUEUE_CAPACITY: usize = 4;
 
 /// Cooperative future returned by a WebSocket endpoint.
 pub type WebSocketFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
+
+/// Cooperative future returned by a portable HTTP endpoint.
+pub type HttpFuture<'a> = Pin<Box<dyn Future<Output = HttpResponse> + 'a>>;
+
+/// HTTP method presented to a portable endpoint.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum HttpMethod {
+    /// GET request.
+    Get,
+    /// POST request.
+    Post,
+    /// PUT request.
+    Put,
+    /// DELETE request.
+    Delete,
+    /// OPTIONS request.
+    Options,
+    /// TRACE request.
+    Trace,
+    /// PATCH request.
+    Patch,
+    /// A method not represented by this portable contract.
+    Other,
+}
+
+impl HttpMethod {
+    fn from_request(method: &str) -> Self {
+        match method {
+            "GET" => Self::Get,
+            "POST" => Self::Post,
+            "PUT" => Self::Put,
+            "DELETE" => Self::Delete,
+            "OPTIONS" => Self::Options,
+            "TRACE" => Self::Trace,
+            "PATCH" => Self::Patch,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Owned HTTP request passed to a portable endpoint.
+pub struct HttpRequest {
+    method: HttpMethod,
+    body: Vec<u8>,
+}
+
+impl HttpRequest {
+    /// Creates a request value.
+    #[must_use]
+    pub const fn new(method: HttpMethod, body: Vec<u8>) -> Self {
+        Self { method, body }
+    }
+
+    /// Returns the request method.
+    #[must_use]
+    pub const fn method(&self) -> HttpMethod {
+        self.method
+    }
+
+    /// Returns the complete request body.
+    #[must_use]
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+}
+
+/// Owned HTTP response returned by a portable endpoint.
+pub struct HttpResponse {
+    status: u16,
+    content_type: &'static str,
+    body: Vec<u8>,
+}
+
+impl HttpResponse {
+    /// Creates a response from its status, media type, and body.
+    #[must_use]
+    pub const fn new(status: u16, content_type: &'static str, body: Vec<u8>) -> Self {
+        Self {
+            status,
+            content_type,
+            body,
+        }
+    }
+
+    /// Returns the numeric HTTP status.
+    #[must_use]
+    pub const fn status(&self) -> u16 {
+        self.status
+    }
+
+    /// Returns the response media type.
+    #[must_use]
+    pub const fn content_type(&self) -> &'static str {
+        self.content_type
+    }
+
+    /// Returns the response body.
+    #[must_use]
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+}
+
+/// Portable behavior served at one ordinary HTTP route.
+pub trait HttpEndpoint: 'static {
+    /// Handles one complete request.
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a>;
+}
 
 /// One client message delivered to a registered WebSocket endpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,9 +201,15 @@ pub trait WebSocketEndpoint: 'static {
 }
 
 #[derive(Clone)]
+enum Endpoint {
+    WebSocket(Rc<dyn WebSocketEndpoint>),
+    Http(Rc<dyn HttpEndpoint>),
+}
+
+#[derive(Clone)]
 struct RegisteredEndpoint {
     path: &'static str,
-    endpoint: Rc<dyn WebSocketEndpoint>,
+    endpoint: Endpoint,
 }
 
 #[derive(Clone)]
@@ -107,7 +223,7 @@ impl PathRouterService for EndpointRouter {
         _state: &(),
         (): (),
         path: Path<'_>,
-        request: Request<'_, R>,
+        mut request: Request<'_, R>,
         response_writer: W,
     ) -> Result<picoserve::ResponseSent, W::Error>
     where
@@ -123,15 +239,58 @@ impl PathRouterService for EndpointRouter {
                 .write_to(request.body_connection.finalize().await?, response_writer)
                 .await;
         };
-        let callback = EndpointCallback {
-            endpoint: Rc::clone(&registered.endpoint),
-        };
-        get(move |upgrade: picoserve::response::ws::WebSocketUpgrade| {
-            let callback = callback.clone();
-            async move { upgrade.on_upgrade(callback) }
-        })
-        .call_method_handler(&(), (), request, response_writer)
-        .await
+        match registered.endpoint.clone() {
+            Endpoint::WebSocket(endpoint) => {
+                let callback = EndpointCallback { endpoint };
+                get(move |upgrade: picoserve::response::ws::WebSocketUpgrade| {
+                    let callback = callback.clone();
+                    async move { upgrade.on_upgrade(callback) }
+                })
+                .call_method_handler(&(), (), request, response_writer)
+                .await
+            }
+            Endpoint::Http(endpoint) => {
+                let method = HttpMethod::from_request(request.parts.method());
+                let body = match request.body_connection.body().read_all().await {
+                    Ok(body) => body.to_vec(),
+                    Err(error) => {
+                        return error
+                            .write_to(request.body_connection.finalize().await?, response_writer)
+                            .await;
+                    }
+                };
+                let response = endpoint.handle(HttpRequest::new(method, body)).await;
+                let response = Response::new(
+                    StatusCode::new(response.status),
+                    HttpContent {
+                        content_type: response.content_type,
+                        body: response.body,
+                    },
+                );
+                response
+                    .write_to(request.body_connection.finalize().await?, response_writer)
+                    .await
+            }
+        }
+    }
+}
+
+struct HttpContent {
+    content_type: &'static str,
+    body: Vec<u8>,
+}
+
+impl Content for HttpContent {
+    fn content_type(&self) -> &'static str {
+        self.content_type
+    }
+
+    fn content_length(&self) -> usize {
+        self.body.len()
+    }
+
+    async fn write_content<W: Write>(self, writer: W) -> Result<(), W::Error> {
+        self.body.write_content(writer).await
     }
 }
 
@@ -210,7 +369,7 @@ pub enum WebServerError {
     DuplicatePath,
 }
 
-/// Scoped registration of one WebSocket endpoint.
+/// Scoped registration of one WebSocket or ordinary HTTP endpoint.
 ///
 /// Dropping this value removes the endpoint, so Plugins should retain it for
 /// their own lifecycle with `PluginContext::retain`.
@@ -280,7 +439,38 @@ impl WebServer {
         }
         endpoints.push(RegisteredEndpoint {
             path,
-            endpoint: Rc::new(endpoint),
+            endpoint: Endpoint::WebSocket(Rc::new(endpoint)),
+        });
+        Ok(WebRouteRegistration {
+            endpoints: Rc::downgrade(&self.endpoints),
+            path,
+        })
+    }
+
+    /// Registers one portable ordinary HTTP endpoint during Plugin startup.
+    ///
+    /// # Errors
+    ///
+    /// Returns a scoped registration that removes the endpoint when dropped.
+    /// Returns an error for a relative path or a duplicate path.
+    pub fn serve_http<E>(
+        &self,
+        path: &'static str,
+        endpoint: E,
+    ) -> Result<WebRouteRegistration, WebServerError>
+    where
+        E: HttpEndpoint,
+    {
+        if !path.starts_with('/') {
+            return Err(WebServerError::InvalidPath);
+        }
+        let mut endpoints = self.endpoints.borrow_mut();
+        if endpoints.iter().any(|endpoint| endpoint.path == path) {
+            return Err(WebServerError::DuplicatePath);
+        }
+        endpoints.push(RegisteredEndpoint {
+            path,
+            endpoint: Endpoint::Http(Rc::new(endpoint)),
         });
         Ok(WebRouteRegistration {
             endpoints: Rc::downgrade(&self.endpoints),
@@ -330,9 +520,11 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use alloc::boxed::Box;
+    use alloc::vec::Vec;
 
     use super::{
-        WebServer, WebServerError, WebSocketConnection, WebSocketEndpoint, WebSocketFuture,
+        HttpEndpoint, HttpFuture, HttpRequest, HttpResponse, WebServer, WebServerError,
+        WebSocketConnection, WebSocketEndpoint, WebSocketFuture,
     };
 
     struct EmptyEndpoint;
@@ -340,6 +532,14 @@ mod tests {
     impl WebSocketEndpoint for EmptyEndpoint {
         fn connected<'a>(&'a self, _connection: WebSocketConnection) -> WebSocketFuture<'a> {
             Box::pin(async {})
+        }
+    }
+
+    struct EmptyHttpEndpoint;
+
+    impl HttpEndpoint for EmptyHttpEndpoint {
+        fn handle<'a>(&'a self, _request: HttpRequest) -> HttpFuture<'a> {
+            Box::pin(async { HttpResponse::new(204, "application/json", Vec::new()) })
         }
     }
 
@@ -357,6 +557,14 @@ mod tests {
             .expect("register second endpoint");
         assert!(matches!(
             server.serve("/second", EmptyEndpoint),
+            Err(WebServerError::DuplicatePath)
+        ));
+        assert!(matches!(
+            server.serve_http("relative-http", EmptyHttpEndpoint),
+            Err(WebServerError::InvalidPath)
+        ));
+        assert!(matches!(
+            server.serve_http("/second", EmptyHttpEndpoint),
             Err(WebServerError::DuplicatePath)
         ));
 

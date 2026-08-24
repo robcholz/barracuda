@@ -5,7 +5,8 @@ use std::sync::Arc;
 use barracuda_agent_skill::{
     CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry,
 };
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 struct ExternalRegistry {
     catalog: Arc<CatalogSnapshot>,
@@ -53,9 +54,9 @@ fn public_registry_trait_drives_skill_set() {
 
 #[test]
 fn registry_parses_standard_frontmatter() {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     write_skill(
-        filesystem.as_ref(),
+        &filesystem,
         "example-skill",
         "---\nname: example-skill\ndescription: >\n  Does a useful thing.\n  Use for examples.\nlicense: Apache-2.0\ncompatibility: Requires network access\nmetadata:\n  author: example-org\n  version: \"1.0\"\nallowed-tools: Read Bash(git:*)\n---\n# Instructions\n\nRead references/GUIDE.md.\n",
     );
@@ -186,7 +187,7 @@ fn write_skill(filesystem: &MemFs, name: &str, document: &str) {
 }
 
 fn registry_error(filesystem: MemFs) -> SkillError {
-    match FsSkillRegistry::new(Arc::new(filesystem)).set_root("skills") {
+    match FsSkillRegistry::new(filesystem).set_root("skills") {
         Ok(_) => panic!("registry load should fail"),
         Err(error) => error,
     }

@@ -1,4 +1,4 @@
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{string::String, vec::Vec};
 
 use barracuda_agent_memory::{
     LongTermError, LongTermInitError, LongTermMemory, MemoryDraft, MemoryId, MemoryItem,
@@ -20,7 +20,7 @@ pub(super) const AGENT_ID_PREFIX: &str = "a-";
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
 pub(super) fn global_store<F: FileSystem + 'static>(
-    filesystem: Arc<F>,
+    filesystem: F,
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
     LongTermMemory::new(filesystem, dir, GLOBAL_ID_PREFIX)
@@ -32,7 +32,7 @@ pub(super) fn global_store<F: FileSystem + 'static>(
 ///
 /// Propagates [`LongTermInitError`] when the journal exists but is unreadable.
 pub(super) fn agent_store<F: FileSystem + 'static>(
-    filesystem: Arc<F>,
+    filesystem: F,
     dir: &str,
 ) -> Result<LongTermMemory<F>, LongTermInitError> {
     LongTermMemory::new(filesystem, dir, AGENT_ID_PREFIX)

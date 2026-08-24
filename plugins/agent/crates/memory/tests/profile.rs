@@ -1,11 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
-use std::sync::Arc;
-
 use barracuda_agent_memory::{
     ProfileDocument, ProfileError, ProfileStore, DEFAULT_PROFILE_DOCUMENT_MAX_BYTES,
 };
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 #[test]
 fn missing_document_is_absent() {
@@ -84,8 +83,8 @@ fn store() -> ProfileStore<MemFs> {
     store_with_fs().1
 }
 
-fn store_with_fs() -> (Arc<MemFs>, ProfileStore<MemFs>) {
-    let filesystem = Arc::new(MemFs::new());
-    let store = ProfileStore::new(Arc::clone(&filesystem), "/memory");
+fn store_with_fs() -> (MemFs, ProfileStore<MemFs>) {
+    let filesystem = MemFs::new();
+    let store = ProfileStore::new(filesystem.clone(), "/memory");
     (filesystem, store)
 }

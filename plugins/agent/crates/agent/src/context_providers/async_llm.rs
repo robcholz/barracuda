@@ -31,7 +31,7 @@ mod tests {
     use std::task::Wake;
 
     use barracuda_model_api::ModelApi;
-    use barracuda_net::testing::NeverStack;
+    use barracuda_platform_test::NeverStack;
 
     use super::SharedAsyncLlm;
 

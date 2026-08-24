@@ -2,23 +2,26 @@
 
 #![allow(clippy::expect_used)]
 
-use barracuda_event_router::{EventRouter, MemFs, RpcLaneStorage};
-use barracuda_net::testing::NeverStack;
-use barracuda_plugin_manager::{
-    EkvStore, NoopRawMutex, Plugin, PluginId, PluginManager, PluginRegisterError,
-};
+use std::rc::Rc;
+
+use barracuda_event_router::{EventRouter, RpcLaneStorage};
+use barracuda_platform_test::{MemFs, NeverStack, memory_partition};
+use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginRegisterError};
 use barracuda_scheduler_plugin::{PLUGIN_ID, SchedulerPlugin};
 use barracuda_time_plugin::TimePlugin;
-use ekv::{Config, flash::MemFlash};
 use futures_lite::future::block_on;
+
+static NETWORK: NeverStack = NeverStack;
 
 #[test]
 fn plugin_requires_time_and_loads_the_scheduler_component() {
-    let store = EkvStore::<MemFlash, NoopRawMutex>::new(MemFlash::new(), Config::default());
-    block_on(store.format()).expect("format store");
-    let mut manager = PluginManager::new(store);
+    let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
+    let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+    manager
+        .provide_system(Rc::new(&NETWORK))
+        .expect("provide network");
     let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut router = EventRouter::new(lanes, filesystem, "workflows").expect("create router");
     let scheduler = || SchedulerPlugin;
 
@@ -31,7 +34,7 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
         .expect_err("reject Scheduler before Time");
     assert!(matches!(error, PluginRegisterError::MissingDependency(id) if id.as_str() == "time"));
 
-    block_on(manager.register(&mut router, TimePlugin::new(NeverStack)))
+    block_on(manager.register(&mut router, TimePlugin::<NeverStack>::default()))
         .expect("register Time Plugin");
     block_on(manager.register(&mut router, scheduler())).expect("register Scheduler Plugin");
     block_on(manager.start(&mut router)).expect("start Plugins");

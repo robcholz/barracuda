@@ -9,10 +9,11 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, FileSystem, MemFs, RegisterContext,
+    Component, ComponentFuture, ComponentResult, EventRouter, FileSystem, RegisterContext,
     RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
     WorkflowControlError,
 };
+use barracuda_platform_test::MemFs;
 
 const FRAME_CAPACITY: usize = 64;
 
@@ -73,12 +74,9 @@ impl Component<FRAME_CAPACITY> for CatalogLoader {
     }
 }
 
-fn router(
-    filesystem: &'static MemFs,
-    directory: &'static str,
-) -> EventRouter<2, FRAME_CAPACITY, 2> {
+fn router(filesystem: &MemFs, directory: &'static str) -> EventRouter<2, FRAME_CAPACITY, 2> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<2, FRAME_CAPACITY, 2>::new()));
-    EventRouter::new(lanes, filesystem, directory).expect("create Event Router")
+    EventRouter::new(lanes, filesystem.clone(), directory).expect("create Event Router")
 }
 
 #[test]
@@ -93,9 +91,9 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
             )
         })
         .collect();
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(LoadState::default());
-    let mut event_router = router(filesystem, DIRECTORY);
+    let mut event_router = router(&filesystem, DIRECTORY);
     event_router
         .load(Box::new(CatalogLoader {
             documents,
@@ -133,7 +131,7 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
 
     drop(event_router);
     let restored_started = Instant::now();
-    let restored = router(filesystem, DIRECTORY);
+    let restored = router(&filesystem, DIRECTORY);
     let restored_elapsed = restored_started.elapsed();
     assert_eq!(restored.workflow_definitions(), definitions);
     eprintln!(
@@ -156,9 +154,9 @@ fn workflow_json_and_step_count_are_not_bounded_by_lane_frame_capacity() {
         format!(r#"{{"id":"large-workflow","match":{{"event":"scale.event"}},"steps":[{steps}]}}"#);
     assert!(document.len() > FRAME_CAPACITY);
 
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(LoadState::default());
-    let mut event_router = router(filesystem, DIRECTORY);
+    let mut event_router = router(&filesystem, DIRECTORY);
     event_router
         .load(Box::new(CatalogLoader {
             documents: vec![document],

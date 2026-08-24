@@ -5,14 +5,15 @@
 use std::sync::Arc;
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 fn skill_md(name: &str, description: &str, body: &str) -> Vec<u8> {
     format!("---\nname: {name}\ndescription: {description}\n---\n{body}").into_bytes()
 }
 
 fn main() -> anyhow::Result<()> {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     filesystem.write_atomic(
         "skills/board-hardware-info/SKILL.md",
         &skill_md(

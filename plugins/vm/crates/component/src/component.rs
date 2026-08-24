@@ -5,6 +5,7 @@ use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
 use barracuda_lua::Lua;
+use barracuda_vm_builtin_packages::BuiltinPackages;
 use getset::CopyGetters;
 
 use crate::run::{Run, run_handler};
@@ -14,15 +15,8 @@ pub const DEFAULT_MAX_SOURCE_BYTES: usize = 65_536;
 /// Default maximum size of one logical `io.input()` message.
 pub const DEFAULT_MAX_INPUT_BYTES: usize = 4_096;
 
-fn configure_lua(_lua: &mut Lua) -> barracuda_lua::Result<()> {
-    // Register allowlisted native modules here. Lua::new() is already sandboxed.
-    Ok(())
-}
-
 pub(crate) fn create_lua() -> barracuda_lua::Result<Lua> {
-    let mut lua = Lua::new()?;
-    configure_lua(&mut lua)?;
-    Ok(lua)
+    Lua::new()
 }
 
 /// Per-call allocation limits enforced by the `vm.run` protocol.
@@ -54,14 +48,25 @@ impl Default for VmLimits {
 }
 
 /// Event Router Component exposing the `vm.run` RPC.
-#[derive(Default)]
 pub struct VmComponent {
     limits: VmLimits,
+    builtin_packages: BuiltinPackages,
+}
+
+impl VmComponent {
+    /// Creates the Component from the package plan prepared by the VM Plugin.
+    #[must_use]
+    pub const fn new(builtin_packages: BuiltinPackages) -> Self {
+        Self {
+            limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
+            builtin_packages,
+        }
+    }
 }
 
 impl<const M: usize> Component<M> for VmComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Run, _>(run_handler(self.limits))
+        context.register_rpc::<Run, _>(run_handler(self.limits, self.builtin_packages))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
@@ -80,11 +85,10 @@ mod tests {
 
     use barracuda_lua::Lua;
 
-    use super::{VmComponent, create_lua};
+    use super::create_lua;
 
     #[test]
-    fn default_component_creates_configured_lua() {
-        let _component = VmComponent::default();
+    fn creates_a_sandboxed_lua_state() {
         create_lua().expect("create configured Lua");
     }
 

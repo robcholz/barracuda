@@ -8,7 +8,7 @@ use barracuda_event_router::{
     Event, RpcContext, RpcError, RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming,
     Unary,
 };
-use barracuda_message_gateway_component::gateway_message_received::{
+use barracuda_imessage_gateway_component::gateway_message_received::{
     gateway_event_from_frames, GatewayEventFrame, GatewayMessageReceived,
 };
 use futures_lite::future::yield_now;

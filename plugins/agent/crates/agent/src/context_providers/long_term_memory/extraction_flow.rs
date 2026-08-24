@@ -212,7 +212,7 @@ mod tests {
     use barracuda_agent_memory::{LongTermMemory, TranscriptStore};
     use barracuda_agent_persistence::DurableState;
     use barracuda_agent_tool::ToolError;
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
     use futures_lite::future::block_on;
 
     use crate::engine::{AgentStorage, ContextProvider};
@@ -359,8 +359,8 @@ mod tests {
     }
 
     fn provider(extractor: Arc<RecordingExtractor>) -> LongTermMemoryContextProvider<MemFs> {
-        let filesystem = Arc::new(MemFs::new());
-        let agent = LongTermMemory::new(Arc::clone(&filesystem), "/memory/agent", "a-")
+        let filesystem = MemFs::new();
+        let agent = LongTermMemory::new(filesystem.clone(), "/memory/agent", "a-")
             .expect("the agent memory store opens");
         let global = LongTermMemory::new(filesystem, "/memory/global", "g-")
             .expect("the global memory store opens");
@@ -369,8 +369,7 @@ mod tests {
     }
 
     fn transcript() -> TranscriptStore<MemFs> {
-        TranscriptStore::new(Arc::new(MemFs::new()), 1, "/transcript")
-            .expect("the transcript store opens")
+        TranscriptStore::new(MemFs::new(), 1, "/transcript").expect("the transcript store opens")
     }
 
     fn commit_turn(transcript: &TranscriptStore<MemFs>, content: &str) {

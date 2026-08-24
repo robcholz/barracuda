@@ -7,9 +7,10 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext, RpcError,
-    RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
+    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcError, RpcFrame,
+    RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
 };
+use barracuda_platform_test::MemFs;
 use static_cell::ConstStaticCell;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
@@ -95,7 +96,7 @@ impl Component<FRAME_SIZE> for StartupCaller {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(ReviewState::default());
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
 
     let service = event_router.load(Box::new(CounterService {

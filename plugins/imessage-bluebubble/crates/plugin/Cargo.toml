@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-imessage-bluebubble-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "IMessage BlueBubbles provider Plugin"
+
+[dependencies]
+bluebubbles = { path = "../provider" }
+barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
+http-client = { path = "../../../../shared/http-client" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

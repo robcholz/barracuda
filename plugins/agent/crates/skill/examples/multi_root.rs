@@ -9,7 +9,8 @@
 use std::sync::Arc;
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 fn skill_md(name: &str, description: &str) -> Vec<u8> {
     format!("---\nname: {name}\ndescription: {description}\n---\n# body\n").into_bytes()
@@ -17,7 +18,7 @@ fn skill_md(name: &str, description: &str) -> Vec<u8> {
 
 fn main() -> anyhow::Result<()> {
     // Two distinct roots, each contributing different skills.
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     filesystem.write_atomic(
         "system/time/SKILL.md",
         &skill_md("time", "Built-in time helper."),
@@ -28,7 +29,7 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     let registry = Arc::new(
-        FsSkillRegistry::new(Arc::clone(&filesystem))
+        FsSkillRegistry::new(filesystem.clone())
             .set_root("data")?
             .set_root("system")?,
     );
@@ -38,7 +39,7 @@ fn main() -> anyhow::Result<()> {
 
     // Now use a collision: the same id `time` exists in both roots, and the
     // earlier DATA root shadows the later SYSTEM root.
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     filesystem.write_atomic("system/time/SKILL.md", &skill_md("time", "baked"))?;
     filesystem.write_atomic("data/time/SKILL.md", &skill_md("time", "installed"))?;
 

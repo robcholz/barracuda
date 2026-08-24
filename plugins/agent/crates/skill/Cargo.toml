@@ -20,7 +20,8 @@ yaml-peg = { version = "1.0.8", default-features = false, features = ["serde"] }
 [dev-dependencies]
 # `diskfs` reads the data-driven golden fixtures from the checkout; `MemFs` is
 # part of the base interface crate.
-barracuda-fs = { path = "../../../../shared/fs", features = ["diskfs"] }
+barracuda-platform-host = { path = "../../../../platforms/host" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

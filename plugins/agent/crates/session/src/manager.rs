@@ -142,7 +142,7 @@ where
     Http: TcpConnect + Dns + 'static,
 {
     pub fn new(
-        filesystem: Arc<Filesystem>,
+        filesystem: Filesystem,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         persistence_dir: String,

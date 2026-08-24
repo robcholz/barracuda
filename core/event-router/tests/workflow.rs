@@ -9,10 +9,11 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    FileSystem, MemFs, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext,
+    FileSystem, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext,
     Streaming, Unary, UnregisterContext, WorkflowClient, WorkflowControlError,
     WorkflowControlRejection, WorkflowId,
 };
+use barracuda_platform_test::MemFs;
 use futures_lite::future::block_on;
 use futures_util::stream;
 
@@ -44,13 +45,13 @@ static BOTH_WORKFLOWS: &[&str] = &[ALPHA_JSON, BETA_JSON];
 static DUPLICATE_ALPHA: &[&str] = &[ALPHA_JSON, ALPHA_JSON];
 static INVALID_WORKFLOW: &[&str] = &["{"];
 
-fn new_router(filesystem: &'static MemFs) -> TestEventRouter {
+fn new_router(filesystem: &MemFs) -> TestEventRouter {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<
         LANE_COUNT,
         FRAME_SIZE,
         WAITER_COUNT,
     >::new()));
-    EventRouter::new(lanes, filesystem, WORKFLOW_DIRECTORY).expect("create Event Router")
+    EventRouter::new(lanes, filesystem.clone(), WORKFLOW_DIRECTORY).expect("create Event Router")
 }
 
 fn drive_until(event_router: &mut TestEventRouter, ready: impl Fn(&TestEventRouter) -> bool) {
@@ -158,9 +159,9 @@ impl Component<FRAME_SIZE> for WorkflowUninstaller {
 
 #[test]
 fn streaming_load_persists_order_and_recovers_it_after_restart() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(ControlState::default());
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(WorkflowInstaller {
             json: BOTH_WORKFLOWS,
@@ -192,15 +193,15 @@ fn streaming_load_persists_order_and_recovers_it_after_restart() {
     );
 
     drop(event_router);
-    let recovered = new_router(filesystem);
+    let recovered = new_router(&filesystem);
     assert_eq!(recovered.workflow_definitions(), definitions);
 }
 
 #[test]
 fn streaming_unload_removes_runtime_and_durable_state() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let state = Rc::new(ControlState::default());
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(WorkflowUninstaller {
             state: Rc::clone(&state),
@@ -211,18 +212,18 @@ fn streaming_unload_removes_runtime_and_durable_state() {
 
     assert!(state.error.borrow().is_none());
     assert!(event_router.workflow_definitions().is_empty());
-    assert!(
-        !filesystem.exists("workflows/gateway-message-to-recorder-with-a-long-workflow-id.json")
-    );
+    assert!(!filesystem
+        .exists("workflows/gateway-message-to-recorder-with-a-long-workflow-id.json")
+        .expect("existence check succeeds"));
     drop(event_router);
-    assert!(new_router(filesystem).workflow_definitions().is_empty());
+    assert!(new_router(&filesystem).workflow_definitions().is_empty());
 }
 
 #[test]
 fn invalid_and_duplicate_workflow_json_are_rejected_without_corrupting_the_catalog() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let invalid_state = Rc::new(ControlState::default());
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(WorkflowInstaller {
             json: INVALID_WORKFLOW,
@@ -331,10 +332,10 @@ impl Component<FRAME_SIZE> for SequentialExecution {
 
 #[test]
 fn matching_event_executes_sequential_rpc_steps_and_updates_snapshot() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let emitted = Rc::new(Cell::new(false));
     let recorded = Rc::new(Cell::new(None));
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(SequentialExecution {
             emitted: Rc::clone(&emitted),
@@ -418,11 +419,11 @@ impl Component<FRAME_SIZE> for FanoutExecution {
 
 #[test]
 fn one_event_executes_every_exact_and_wildcard_match() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let emitted = Rc::new(Cell::new(false));
     let recorded = Rc::new(Cell::new(false));
     let audited = Rc::new(Cell::new(false));
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(FanoutExecution {
             emitted: Rc::clone(&emitted),
@@ -512,10 +513,10 @@ impl Component<FRAME_SIZE> for StreamingExecution {
 
 #[test]
 fn streaming_event_preserves_message_order_through_workflow_ingress() {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let emitted = Rc::new(Cell::new(false));
     let collected = Rc::new(RefCell::new(Vec::new()));
-    let mut event_router = new_router(filesystem);
+    let mut event_router = new_router(&filesystem);
     event_router
         .load(Box::new(StreamingExecution {
             emitted: Rc::clone(&emitted),

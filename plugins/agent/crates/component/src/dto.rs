@@ -249,57 +249,6 @@ pub enum ReasoningEffortDto {
     Ultra,
 }
 
-/// Wire representation of an LLM backend kind.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    TryFromBytes,
-)]
-pub enum BackendKindDto {
-    /// OpenAI-compatible chat backend.
-    #[serde(rename = "openai_compatible")]
-    OpenAiCompatible,
-    /// Anthropic-compatible chat backend.
-    #[serde(rename = "anthropic_compatible")]
-    AnthropicCompatible,
-}
-
-/// Wire representation of the purpose an LLM API config serves.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    TryFromBytes,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiPurposeDto {
-    /// Root agent requests.
-    RootAgent,
-    /// Sub-agent requests.
-    SubAgent,
-    /// Memory extraction requests.
-    Memory,
-    /// Conversation compaction requests.
-    Compaction,
-}
-
 /// Request corresponding to `agent.new_session`.
 #[repr(C)]
 #[barracuda_event_router::rpc_message]
@@ -375,52 +324,6 @@ pub enum DeleteSessionError {
     WorkerStopped,
     /// Persistent state could not be deleted.
     Storage,
-}
-
-/// Request corresponding to `agent.link_api`.
-#[repr(C)]
-#[barracuda_event_router::rpc_message]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LinkApiRequest {
-    /// Per-request HTTP timeout in milliseconds.
-    pub timeout_ms: u32,
-    /// Maximum output tokens.
-    pub max_tokens: u32,
-    /// Maximum local image size in bytes.
-    pub image_max_bytes: u32,
-    /// Built-in backend kind.
-    pub backend: BackendKindDto,
-    /// Purpose the config serves.
-    pub purpose: ApiPurposeDto,
-    /// Whether the config is the default fallback.
-    pub default: bool,
-    /// Provider API key.
-    pub api_key: FixedStr<128>,
-    /// Model name sent to the provider.
-    pub model: FixedStr<128>,
-    /// API base URL.
-    pub base_url: FixedStr<129>,
-}
-
-/// Failure returned by `agent.link_api`.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    TryFromBytes,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkApiError {
-    /// The supplied model API configuration is invalid.
-    InvalidConfiguration,
 }
 
 /// Request corresponding to `session.cancel`.

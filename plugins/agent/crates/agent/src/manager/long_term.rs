@@ -24,13 +24,13 @@ pub(super) struct LongTermDeps<F: FileSystem + 'static> {
 }
 
 struct AgentMemoryStores<F: FileSystem + 'static> {
-    filesystem: Arc<F>,
+    filesystem: F,
     root_dir: String,
     by_kind: RefCell<BTreeMap<String, LongTermMemory<F>>>,
 }
 
 impl<F: FileSystem + 'static> AgentMemoryStores<F> {
-    fn new(filesystem: Arc<F>, root_dir: String) -> Self {
+    fn new(filesystem: F, root_dir: String) -> Self {
         Self {
             filesystem,
             root_dir,
@@ -45,10 +45,8 @@ impl<F: FileSystem + 'static> AgentMemoryStores<F> {
         }
 
         let dir = join_storage_path(&self.root_dir, kind);
-        let store = LongTermMemoryContextProvider::<F>::open_agent_store(
-            Arc::clone(&self.filesystem),
-            &dir,
-        )?;
+        let store =
+            LongTermMemoryContextProvider::<F>::open_agent_store(self.filesystem.clone(), &dir)?;
         stores.insert(kind.to_owned(), store.clone());
         Ok(store)
     }
@@ -56,7 +54,7 @@ impl<F: FileSystem + 'static> AgentMemoryStores<F> {
 
 impl<F: FileSystem + 'static> LongTermDeps<F> {
     pub(super) fn from_root<H>(
-        filesystem: Arc<F>,
+        filesystem: F,
         long_term_dir: &str,
         api_manager: SharedApiManager,
         llm_factory: ModelApiFactory<H>,
@@ -68,7 +66,7 @@ impl<F: FileSystem + 'static> LongTermDeps<F> {
         let agent_root_dir = join_storage_path(long_term_dir, AGENT_LONG_TERM_DIR);
         Ok(Self {
             global: LongTermMemoryContextProvider::<F>::open_global_store(
-                Arc::clone(&filesystem),
+                filesystem.clone(),
                 &global_dir,
             )?,
             agent_stores: AgentMemoryStores::new(filesystem, agent_root_dir),
@@ -91,17 +89,14 @@ impl<F: FileSystem + 'static> LongTermDeps<F> {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use std::sync::Arc;
-
     use barracuda_agent_memory::{MemoryDraft, StoreOutcome};
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
 
     use super::AgentMemoryStores;
 
     #[test]
     fn same_kind_reuses_one_live_store_owner() {
-        let stores =
-            AgentMemoryStores::<MemFs>::new(Arc::new(MemFs::new()), "/memory/a".to_owned());
+        let stores = AgentMemoryStores::<MemFs>::new(MemFs::new(), "/memory/a".to_owned());
         let first = stores.get("conversation").expect("first store opens");
         let second = stores.get("conversation").expect("second store opens");
 

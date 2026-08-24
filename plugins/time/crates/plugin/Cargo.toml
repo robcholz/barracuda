@@ -9,13 +9,11 @@ license = "Apache-2.0"
 barracuda-net = { path = "../../../../shared/net" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-time-component = { path = "../component" }
-thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-ekv = { version = "1", features = ["std"] }
 futures-lite = "2"
 
 [lints.rust]

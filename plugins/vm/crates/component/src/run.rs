@@ -2,9 +2,12 @@ use alloc::string::{String, ToString};
 use core::{future::Future, pin::Pin, task::Poll};
 
 use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming};
-use barracuda_lua::{Environment, Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
-use barracuda_lua_io::{Input as LuaInput, Io, Output as LuaOutput};
+use barracuda_lua::{Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
 use barracuda_runtime_utils::yield_stream::{Yielder, try_yield_stream};
+use barracuda_vm_builtin_packages::{
+    BuiltinPackages,
+    io::{Input as LuaInput, Output as LuaOutput},
+};
 use getset::CopyGetters;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -349,12 +352,11 @@ impl RpcMethod for Run {
 }
 
 /// Builds the reusable `vm.run` handler.
-pub fn run_handler(limits: VmLimits) -> impl RpcHandler<Run> {
+pub fn run_handler(limits: VmLimits, builtin_packages: BuiltinPackages) -> impl RpcHandler<Run> {
     move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| async move {
-        let stream =
-            try_yield_stream(
-                move |yielder| async move { drive_run(yielder, requests, limits).await },
-            );
+        let stream = try_yield_stream(move |yielder| async move {
+            drive_run(yielder, requests, limits, builtin_packages).await
+        });
         Ok(RpcStream::new(stream))
     }
 }
@@ -365,6 +367,7 @@ async fn drive_run(
     yielder: Yielder<RunItem>,
     mut requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
+    builtin_packages: BuiltinPackages,
 ) -> RpcResult<()> {
     let source = match collect_source(&mut requests, limits).await? {
         Ok(source) => source,
@@ -374,10 +377,8 @@ async fn drive_run(
         Ok(lua) => lua,
         Err(error) => return emit_error(&yielder, factory_error(&error)).await,
     };
-    let (io, input, mut output) = Io::new();
-    let environment = Environment::new().with_package(io);
-    match environment.install(&mut lua) {
-        Ok(()) => {}
+    let (input, mut output) = match builtin_packages.install(&mut lua) {
+        Ok(installed) => installed.into_io(),
         Err(error) => {
             return emit_error(
                 &yielder,
@@ -773,12 +774,10 @@ mod tests {
     use super::*;
 
     fn install_environment(lua: &mut barracuda_lua::Lua) -> (LuaInput, LuaOutput) {
-        let (io, input, output) = Io::new();
-        Environment::new()
-            .with_package(io)
+        BuiltinPackages::all()
             .install(lua)
-            .expect("install environment");
-        (input, output)
+            .expect("install environment")
+            .into_io()
     }
 
     #[test]

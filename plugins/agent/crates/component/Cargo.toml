@@ -20,7 +20,8 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-model-api = { path = "../model-api" }
-barracuda-net = { path = "../../../../shared/net", features = ["testing"] }
+barracuda-net = { path = "../../../../shared/net" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2", features = ["std"] }
 static_cell = "2.1.1"

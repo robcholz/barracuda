@@ -10,19 +10,17 @@ name = "barracuda"
 path = "src/main.rs"
 
 [dependencies]
-web = { path = "../../plugins/message-gateway/crates/web" }
-barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
+web = { path = "../../plugins/imessage-web/crates/provider" }
 barracuda-event-router = { path = "../../core/event-router" }
-barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
-barracuda-net = { path = "../../shared/net", features = ["tokio"] }
-barracuda-plugin-manager = { path = "../../core/plugin-manager" }
+barracuda-target = { path = "../../platforms/selected" }
 barracuda-system = { path = "../../core/system", features = ["tokio"] }
 anyhow = "1"
 tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
-ekv = { version = "1", features = ["std"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-sync.workspace = true
 anstyle = "1"
 rustyline = { version = "18.0.1", default-features = false }
 strum = { version = "0.28", features = ["derive"] }

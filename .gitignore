@@ -19,3 +19,6 @@ output/
 simulator_log.log
 simulator_trace.log
 trace.json
+
+# Local Barracuda runtime state
+.barracuda/

@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EmitError, Event, EventEmitter, EventRouter,
-    MemFs, RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
+    RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
     UnregisterContext, WorkflowClient,
 };
+use barracuda_platform_test::MemFs;
 use futures_lite::future::yield_now;
 
 const FRAME_CAPACITY: usize = 64;
@@ -105,7 +106,7 @@ impl Component<FRAME_CAPACITY> for Producer {
 fn new_router<const N: usize, const Q: usize>(
     directory: &'static str,
 ) -> EventRouter<N, FRAME_CAPACITY, Q> {
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, FRAME_CAPACITY, Q>::new()));
     EventRouter::new(lanes, filesystem, directory).expect("create Event Router")
 }

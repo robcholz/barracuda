@@ -9,11 +9,12 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_event_router::{
-    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, MemFs,
-    RegisterContext, RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
+    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
+    RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
 };
-use barracuda_vm_component::component::VmComponent;
+use barracuda_platform_test::MemFs;
 use barracuda_vm_component::run::{ChunkBoundary, Run, RunRequestFrame};
+use barracuda_vm_component::{BuiltinPackages, VmComponent};
 use futures_lite::stream;
 
 #[derive(Default)]
@@ -72,11 +73,11 @@ impl Component<64> for VmClient {
 fn vm_component_runs_chunked_source_and_input_through_event_router() {
     futures_lite::future::block_on(async {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 64, 4>::new()));
-        let filesystem = Box::leak(Box::new(MemFs::new()));
+        let filesystem = MemFs::new();
         let mut router =
             EventRouter::new(lanes, filesystem, "workflows").expect("build Event Router");
         router
-            .load(Box::new(VmComponent::default()))
+            .load(Box::new(VmComponent::new(BuiltinPackages::all())))
             .expect("load VM Component");
 
         let result = Rc::new(ResultState::default());

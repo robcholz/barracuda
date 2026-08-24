@@ -28,7 +28,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
     /// Returns [`AgentManagerError::MissingPersistenceDir`] when the
     /// persistence root is blank.
     pub fn new(
-        filesystem: Arc<Filesystem>,
+        filesystem: Filesystem,
         tool_registry: Arc<ToolRegistry>,
         persistence: SharedPersistence<Filesystem>,
         memory_directory: String,
@@ -46,7 +46,7 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
         let layout = AgentManagerLayout::new(memory_directory);
 
         let long_term = match LongTermDeps::<Filesystem>::from_root::<Http>(
-            Arc::clone(&filesystem),
+            filesystem.clone(),
             &layout.long_term_dir,
             Arc::clone(&api_manager),
             llm_factory.clone(),
@@ -59,9 +59,9 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
             }
         };
 
-        let profile_store = ProfileStore::new(Arc::clone(&filesystem), &layout.profile_dir);
+        let profile_store = ProfileStore::new(filesystem.clone(), &layout.profile_dir);
         let skill_registry: Arc<dyn SkillRegistry> =
-            build_fs_skill_registry(Arc::clone(&filesystem), skill_roots)?;
+            build_fs_skill_registry(filesystem.clone(), skill_roots)?;
 
         let manager = Self {
             filesystem,
@@ -84,14 +84,17 @@ impl<Filesystem: FileSystem + 'static, Http: TcpConnect + Dns + 'static>
 /// A missing root is skipped so the agent still starts; a real scan failure
 /// (e.g. a malformed `SKILL.md`) aborts construction.
 fn build_fs_skill_registry<F: FileSystem + 'static>(
-    filesystem: Arc<F>,
+    filesystem: F,
     skill_roots: Vec<String>,
 ) -> Result<Arc<FsSkillRegistry<F>>, SkillError> {
     let span = tracing::info_span!("skill.catalog");
     let _enter = span.enter();
-    let mut registry = FsSkillRegistry::new(Arc::clone(&filesystem));
+    let mut registry = FsSkillRegistry::new(filesystem.clone());
     for root in skill_roots {
-        if !filesystem.exists(root.as_str()) {
+        if !filesystem
+            .exists(root.as_str())
+            .map_err(|error| SkillError::ScanFailed(root.clone(), error))?
+        {
             log::warn!("skill catalog root is missing: {root}");
             tracing::warn!(name: "root_missing", "");
             continue;

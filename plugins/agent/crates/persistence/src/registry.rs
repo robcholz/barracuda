@@ -57,7 +57,7 @@ pub struct Persistence<Filesystem: FileSystem> {
     persistence_directory: String,
     entry_types: RefCell<BTreeMap<EntryKey, RegisteredEntryType>>,
     parts: RefCell<BTreeMap<StateAddress, Arc<dyn RegisteredPart>>>,
-    filesystem: Arc<Filesystem>,
+    filesystem: Filesystem,
 }
 
 /// One typed singleton entry.
@@ -77,7 +77,7 @@ pub struct Collection<'a, Filesystem: FileSystem, T> {
 impl<Filesystem: FileSystem> Persistence<Filesystem> {
     /// Create a persistence registry rooted at `persistence_directory`.
     pub fn new(
-        filesystem: Arc<Filesystem>,
+        filesystem: Filesystem,
         persistence_directory: impl Into<String>,
     ) -> Result<Self, PersistenceError> {
         let persistence_directory = persistence_directory.into();
@@ -592,7 +592,8 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
-    use barracuda_fs::{FileSystem, MemFs};
+    use barracuda_fs::FileSystem;
+    use barracuda_platform_test::MemFs;
 
     use super::*;
 
@@ -659,10 +660,10 @@ mod tests {
         InstanceId::new(id).expect("test instance id is valid")
     }
 
-    fn fixture(root: &str) -> (Arc<MemFs>, Persistence<MemFs>) {
-        let filesystem = Arc::new(MemFs::new());
+    fn fixture(root: &str) -> (MemFs, Persistence<MemFs>) {
+        let filesystem = MemFs::new();
         let persistence =
-            Persistence::new(Arc::clone(&filesystem), root).expect("persistence initializes");
+            Persistence::new(filesystem.clone(), root).expect("persistence initializes");
         (filesystem, persistence)
     }
 
@@ -690,7 +691,7 @@ mod tests {
         assert_eq!(&file[SCHEMA_VERSION_SIZE..], &2_u32.to_le_bytes());
 
         let restored =
-            Persistence::new(Arc::clone(&filesystem), root).expect("persistence reinitializes");
+            Persistence::new(filesystem.clone(), root).expect("persistence reinitializes");
         let singleton = restored
             .singleton::<TestState>("state")
             .expect("singleton reopens");
@@ -730,7 +731,9 @@ mod tests {
         drop(state);
 
         persistence.maybe_persist().unwrap();
-        assert!(!filesystem.exists(&format!("{root}/state.bin")));
+        assert!(!filesystem
+            .exists(&format!("{root}/state.bin"))
+            .expect("existence check succeeds"));
     }
 
     #[test]
@@ -786,8 +789,12 @@ mod tests {
             .unwrap();
         persistence.maybe_persist().unwrap();
 
-        assert!(filesystem.exists(&format!("{root}/sessions.bin")));
-        assert!(filesystem.exists(&format!("{root}/sessions/session-1.bin")));
+        assert!(filesystem
+            .exists(&format!("{root}/sessions.bin"))
+            .expect("existence check succeeds"));
+        assert!(filesystem
+            .exists(&format!("{root}/sessions/session-1.bin"))
+            .expect("existence check succeeds"));
     }
 
     #[test]
@@ -817,7 +824,9 @@ mod tests {
         persistence.maybe_persist().unwrap();
 
         assert!(collection.load(&id).unwrap().is_none());
-        assert!(!filesystem.exists(&format!("{root}/sessions/session-1.bin")));
+        assert!(!filesystem
+            .exists(&format!("{root}/sessions/session-1.bin"))
+            .expect("existence check succeeds"));
     }
 
     #[test]

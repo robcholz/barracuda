@@ -6,9 +6,9 @@ use core::cell::{Cell, RefCell};
 use barracuda_agent_component::dto::SessionIdDto;
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, RegisterContext, RunContext,
-    UnregisterContext, WorkflowClient,
+    UnregisterContext, WorkflowClient, WorkflowControlError, WorkflowControlRejection,
 };
-use barracuda_message_gateway_component::route::GatewayRoute;
+use barracuda_imessage_gateway_component::route::GatewayRoute;
 
 use crate::handle::{bridge_handle_handler, BridgeHandle};
 use crate::outbound::{create_session, pump_session_events};
@@ -68,10 +68,14 @@ impl<const M: usize> Component<M> for GatewayAgentBridge {
         let state = Rc::clone(&self.state);
         Box::pin(async move {
             let client = context.rpc().clone();
-            WorkflowClient::<M>::new(client.clone())
+            match WorkflowClient::<M>::new(client.clone())
                 .load(BRIDGE_WORKFLOW)
                 .await
-                .map_err(ComponentError::lifecycle)?;
+            {
+                Ok(())
+                | Err(WorkflowControlError::Rejected(WorkflowControlRejection::DuplicateId)) => {}
+                Err(error) => return Err(ComponentError::lifecycle(error)),
+            }
             let session = create_session(&client)
                 .await
                 .map_err(ComponentError::lifecycle)?;

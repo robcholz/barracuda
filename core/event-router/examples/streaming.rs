@@ -8,9 +8,10 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    MemFs, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext, Streaming,
-    Unary, UnregisterContext, WorkflowClient,
+    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext, Streaming, Unary,
+    UnregisterContext, WorkflowClient,
 };
+use barracuda_platform_test::MemFs;
 use futures_util::stream;
 use static_cell::ConstStaticCell;
 
@@ -98,7 +99,7 @@ impl Component<FRAME_SIZE> for StreamingDemo {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(StreamState::default());
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
 
     let demo = event_router.load(Box::new(StreamingDemo {

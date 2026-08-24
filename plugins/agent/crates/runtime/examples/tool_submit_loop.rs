@@ -23,9 +23,9 @@ use barracuda_agent_runtime::{
     ModelApiFactory, SessionEvent, SessionPersistence, TurnEvent,
 };
 use barracuda_agent_trace::{LevelFilter, LogOutput, TracingConfig};
-use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
-use barracuda_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::MemFs;
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::StreamExt;
 use static_cell::StaticCell;
 
@@ -110,7 +110,7 @@ async fn run() -> anyhow::Result<()> {
         [ToolGroup::new("example", true, [Tool::new(TimeNowTool)])],
     )?;
     let service_task = tokio::task::spawn_local(service);
-    runtime.link_api(scripted_llm(), ApiPurpose::RootAgent, true)?;
+    runtime.set_api(scripted_llm(), ApiPurpose::RootAgent, true)?;
     println!("registered tool `time_now`");
     runtime.start_all()?;
     let session = runtime.new_session(SessionPersistence::Persistent).await?;

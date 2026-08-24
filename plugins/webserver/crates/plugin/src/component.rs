@@ -6,7 +6,7 @@ use barracuda_event_router::{
     UnregisterContext,
 };
 
-use crate::{WebServer, WebServerListener, WEB_SERVER_PORT};
+use crate::{WebServer, WebServerListener, WEB_SERVER_CONNECTION_SLOTS, WEB_SERVER_PORT};
 
 pub(crate) struct WebServerComponent<Listener> {
     webserver: Rc<WebServer>,
@@ -33,7 +33,11 @@ where
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
         Box::pin(async move {
             self.listener
-                .listen(&self.webserver, WEB_SERVER_PORT)
+                .listen(
+                    Rc::clone(&self.webserver),
+                    WEB_SERVER_PORT,
+                    WEB_SERVER_CONNECTION_SLOTS,
+                )
                 .await
                 .map_err(ComponentError::lifecycle)
         })

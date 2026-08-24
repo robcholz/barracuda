@@ -8,7 +8,8 @@
 use std::sync::Arc;
 
 use barracuda_agent_skill::FsSkillRegistry;
-use barracuda_fs::{FileSystem, MemFs};
+use barracuda_fs::FileSystem;
+use barracuda_platform_test::MemFs;
 
 /// Build a standard `SKILL.md` with YAML frontmatter and a Markdown body.
 fn skill_md(name: &str, description: &str, body: &str) -> Vec<u8> {
@@ -17,7 +18,7 @@ fn skill_md(name: &str, description: &str, body: &str) -> Vec<u8> {
 
 fn main() -> anyhow::Result<()> {
     // Lay out two skills under the `skills` root.
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
     filesystem.write_atomic(
         "skills/weather-search/SKILL.md",
         &skill_md(

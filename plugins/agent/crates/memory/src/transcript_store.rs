@@ -60,7 +60,7 @@
 //! instance. Persistence behavior therefore comes entirely from the injected
 //! filesystem instead of a separate store mode.
 //!
-//! [`MemFs`]: barracuda_fs::MemFs
+//! [`MemFs`]: barracuda_platform_test::MemFs
 
 use alloc::{
     borrow::ToOwned, boxed::Box, collections::BTreeSet, format, string::String, sync::Arc, vec::Vec,
@@ -370,7 +370,7 @@ impl StoreState {
 
 /// The agent's complete transcript over one concrete filesystem instance.
 pub struct TranscriptStore<F: FileSystem> {
-    filesystem: Arc<F>,
+    filesystem: F,
     transcript_id: u32,
     data_path: String,
     index_path: String,
@@ -383,7 +383,7 @@ impl<F: FileSystem> Drop for TranscriptStore<F> {
     /// Best-effort retry for a previous persistence failure.
     fn drop(&mut self) {
         persist(
-            self.filesystem.as_ref(),
+            &self.filesystem,
             self.transcript_id,
             &self.data_path,
             &self.index_path,
@@ -405,9 +405,9 @@ impl<F: FileSystem> Drop for TranscriptStore<F> {
 /// # Examples
 ///
 /// ```
-/// # use barracuda_fs::MemFs;
+/// # use barracuda_platform_test::MemFs;
 /// # use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-/// let filesystem = std::sync::Arc::new(MemFs::new());
+/// let filesystem = std::sync::MemFs::new();
 /// let store = TranscriptStore::new(filesystem, 42, "/data/transcripts")
 ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
 ///
@@ -442,6 +442,56 @@ pub trait Transcript {
 
     /// Monotonic committed-turn version.
     fn turn_version(&self) -> u64;
+}
+
+/// Process-local transcript that never touches a filesystem.
+///
+/// This is a domain implementation of [`Transcript`], not a Platform
+/// filesystem. It is used when an Agent explicitly requests non-persistent
+/// conversation state.
+#[derive(Default)]
+pub struct TransientTranscript {
+    state: Arc<RefCell<StoreState>>,
+}
+
+impl TransientTranscript {
+    /// Creates an empty process-local transcript.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn open_turn(&self) -> Result<TurnHandle, TurnError> {
+        {
+            let mut state = lock_state(self.state.as_ref());
+            if state.open_turn.is_some() {
+                return Err(TurnError::AlreadyOpen);
+            }
+            state.open_turn = Some(OpenTurn::default());
+        }
+        Ok(TurnHandle {
+            state: Arc::clone(&self.state),
+            on_drop: None,
+        })
+    }
+
+    fn turns(&self) -> Arc<Vec<Turn>> {
+        turns_snapshot(self.state.as_ref())
+    }
+}
+
+impl Transcript for TransientTranscript {
+    fn open_turn(&self) -> Result<TurnHandle, TurnError> {
+        Self::open_turn(self)
+    }
+
+    fn turns(&self) -> Arc<Vec<Turn>> {
+        Self::turns(self)
+    }
+
+    fn turn_version(&self) -> u64 {
+        lock_state(self.state.as_ref()).turn_version
+    }
 }
 
 /// One structured contribution appended through an [`AssistantHandle`].
@@ -562,9 +612,9 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// # Examples
     ///
     /// ```
-    /// # use barracuda_fs::MemFs;
+    /// # use barracuda_platform_test::MemFs;
     /// # use barracuda_agent_memory::TranscriptStore;
-    /// let filesystem = std::sync::Arc::new(MemFs::new());
+    /// let filesystem = std::sync::MemFs::new();
     /// let store = TranscriptStore::new(filesystem, 7, "/data/transcripts")
     ///     .expect("a fresh MemFs has no data log, so the transcript starts empty");
     /// assert!(store.turns().is_empty()); // missing files start empty
@@ -575,21 +625,19 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// [`TranscriptInitError::Unreadable`] when the transcript *data log*
     /// exists but cannot be read. A missing transcript starts empty, and a
     /// corrupt/mismatched *index* is transparently rebuilt from the data log.
-    pub fn new(
-        filesystem: Arc<F>,
-        transcript_id: u32,
-        dir: &str,
-    ) -> Result<Self, TranscriptInitError> {
+    pub fn new(filesystem: F, transcript_id: u32, dir: &str) -> Result<Self, TranscriptInitError> {
         let data_path = transcript_path(dir, transcript_id, DATA_EXT);
         let index_path = transcript_path(dir, transcript_id, INDEX_EXT);
-        let (mut state, needs_rebuild) = load_state(filesystem.as_ref(), &data_path, &index_path)
-            .map_err(|source| TranscriptInitError::Unreadable {
-            path: data_path.clone(),
-            source,
-        })?;
+        let (mut state, needs_rebuild) =
+            load_state(&filesystem, &data_path, &index_path).map_err(|source| {
+                TranscriptInitError::Unreadable {
+                    path: data_path.clone(),
+                    source,
+                }
+            })?;
         if needs_rebuild {
             write_live_set_to_files(
-                filesystem.as_ref(),
+                &filesystem,
                 &data_path,
                 &index_path,
                 &mut state,
@@ -648,7 +696,7 @@ impl<F: FileSystem> TranscriptStore<F> {
             }
             state.open_turn = Some(OpenTurn::default());
         }
-        let filesystem = Arc::clone(&self.filesystem);
+        let filesystem = self.filesystem.clone();
         let transcript_id = self.transcript_id;
         let data_path = self.data_path.clone();
         let index_path = self.index_path.clone();
@@ -658,7 +706,7 @@ impl<F: FileSystem> TranscriptStore<F> {
             state,
             on_drop: Some(Box::new(move || {
                 persist(
-                    filesystem.as_ref(),
+                    &filesystem,
                     transcript_id,
                     &data_path,
                     &index_path,
@@ -678,34 +726,38 @@ impl<F: FileSystem> TranscriptStore<F> {
     /// on `id`. Cached and shared as an `Arc`: repeated calls between mutations
     /// return a cheap refcount bump rather than rebuilding/cloning the transcript.
     pub fn turns(&self) -> Arc<Vec<Turn>> {
-        let mut state = self.lock_state();
-        if let Some(cached) = &state.turns_cache {
-            return Arc::clone(cached);
-        }
-        let mut turns: Vec<Turn> = state
-            .groups
-            .iter()
-            .map(|group| Turn {
-                id: Some(group.id),
-                messages: group.msgs.clone(),
-            })
-            .collect();
-        if let Some(open_turn) = &state.open_turn {
-            if !open_turn.is_empty() {
-                turns.push(Turn {
-                    id: None,
-                    messages: open_turn.snapshot(),
-                });
-            }
-        }
-        let snapshot = Arc::new(turns);
-        state.turns_cache = Some(Arc::clone(&snapshot));
-        snapshot
+        turns_snapshot(self.state.as_ref())
     }
 
     fn lock_state(&self) -> RefMut<'_, StoreState> {
         lock_state(&self.state)
     }
+}
+
+fn turns_snapshot(state: &RefCell<StoreState>) -> Arc<Vec<Turn>> {
+    let mut state = lock_state(state);
+    if let Some(cached) = &state.turns_cache {
+        return Arc::clone(cached);
+    }
+    let mut turns: Vec<Turn> = state
+        .groups
+        .iter()
+        .map(|group| Turn {
+            id: Some(group.id),
+            messages: group.msgs.clone(),
+        })
+        .collect();
+    if let Some(open_turn) = &state.open_turn {
+        if !open_turn.is_empty() {
+            turns.push(Turn {
+                id: None,
+                messages: open_turn.snapshot(),
+            });
+        }
+    }
+    let snapshot = Arc::new(turns);
+    state.turns_cache = Some(Arc::clone(&snapshot));
+    snapshot
 }
 
 impl<F: FileSystem> Transcript for TranscriptStore<F> {
@@ -732,9 +784,9 @@ impl<F: FileSystem> Transcript for TranscriptStore<F> {
 /// # Examples
 ///
 /// ```
-/// # use barracuda_fs::MemFs;
+/// # use barracuda_platform_test::MemFs;
 /// # use barracuda_agent_memory::{AssistantFragment, TranscriptStore};
-/// # let filesystem = std::sync::Arc::new(MemFs::new());
+/// # let filesystem = std::sync::MemFs::new();
 /// # let store = TranscriptStore::new(filesystem, 1, "/data/transcripts").unwrap();
 /// let turn = store.open_turn().unwrap();
 /// {
@@ -1347,15 +1399,15 @@ mod tests {
     use alloc::{string::ToString, vec};
 
     use super::*;
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
 
     #[test]
     fn invalid_index_is_rebuilt_from_data_log() {
-        let filesystem = Arc::new(MemFs::new());
+        let filesystem = MemFs::new();
         let dir = "/transcript-index-rebuild";
         let index_path = transcript_path(dir, 1, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 1, dir).unwrap();
+        let store = TranscriptStore::<MemFs>::new(filesystem.clone(), 1, dir).unwrap();
         {
             let turn = store.open_turn().unwrap();
             {
@@ -1373,7 +1425,7 @@ mod tests {
         filesystem
             .write_atomic(&index_path, b"{not valid json")
             .unwrap();
-        let rebuilt = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 1, dir).unwrap();
+        let rebuilt = TranscriptStore::<MemFs>::new(filesystem.clone(), 1, dir).unwrap();
         let messages: String = rebuilt
             .turns()
             .iter()
@@ -1387,12 +1439,12 @@ mod tests {
 
     #[test]
     fn delete_removes_both_transcript_files_and_is_idempotent() {
-        let filesystem = Arc::new(MemFs::new());
+        let filesystem = MemFs::new();
         let dir = "/transcript-delete";
         let data_path = transcript_path(dir, 7, DATA_EXT);
         let index_path = transcript_path(dir, 7, INDEX_EXT);
 
-        let store = TranscriptStore::<MemFs>::new(Arc::clone(&filesystem), 7, dir).unwrap();
+        let store = TranscriptStore::<MemFs>::new(filesystem.clone(), 7, dir).unwrap();
         {
             let turn = store.open_turn().unwrap();
             {
@@ -1405,14 +1457,22 @@ mod tests {
             }
         }
         drop(store);
-        assert!(filesystem.exists(&data_path));
-        assert!(filesystem.exists(&index_path));
+        assert!(filesystem
+            .exists(&data_path)
+            .expect("existence check succeeds"));
+        assert!(filesystem
+            .exists(&index_path)
+            .expect("existence check succeeds"));
 
-        TranscriptStore::<MemFs>::delete(filesystem.as_ref(), 7, dir).unwrap();
-        assert!(!filesystem.exists(&data_path));
-        assert!(!filesystem.exists(&index_path));
+        TranscriptStore::<MemFs>::delete(&filesystem, 7, dir).unwrap();
+        assert!(!filesystem
+            .exists(&data_path)
+            .expect("existence check succeeds"));
+        assert!(!filesystem
+            .exists(&index_path)
+            .expect("existence check succeeds"));
 
-        TranscriptStore::<MemFs>::delete(filesystem.as_ref(), 7, dir).unwrap();
+        TranscriptStore::<MemFs>::delete(&filesystem, 7, dir).unwrap();
     }
 
     #[test]

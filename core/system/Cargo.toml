@@ -6,11 +6,8 @@ description = "Barracuda system composition root that registers the fixed Plugin
 
 [features]
 default = []
-embassy = ["barracuda-webserver-plugin/embassy"]
 tokio = [
     "barracuda-agent-plugin/std",
-    "barracuda-net/tokio",
-    "barracuda-webserver-plugin/tokio",
 ]
 
 [lib]
@@ -19,20 +16,24 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-event-router = { path = "../event-router" }
 barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
+barracuda-captive-portal-plugin = { path = "../../plugins/captive-portal/crates/plugin" }
 barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/plugin" }
-barracuda-message-gateway-plugin = { path = "../../plugins/message-gateway/crates/plugin" }
+barracuda-imessage-gateway-plugin = { path = "../../plugins/imessage-gateway/crates/plugin" }
+barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plugin" }
 barracuda-net = { path = "../../shared/net" }
 barracuda-plugin-manager = { path = "../plugin-manager" }
+barracuda-platform = { path = "../../platforms/api" }
 barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
 barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
 thiserror = { version = "2", default-features = false }
+embedded-storage-async.workspace = true
 
 [dev-dependencies]
 barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
-barracuda-net = { path = "../../shared/net", features = ["testing"] }
-ekv = { version = "1", features = ["std"] }
+barracuda-net = { path = "../../shared/net" }
+barracuda-platform-test = { path = "../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

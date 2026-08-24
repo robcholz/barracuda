@@ -15,6 +15,7 @@ mod local_host;
 mod protocol;
 
 use anyhow::{anyhow, bail, Result};
+use embassy_executor::Spawner;
 
 const DEFAULT_URL: &str = "ws://127.0.0.1:8787";
 
@@ -24,19 +25,18 @@ enum RunMode<'a> {
     Remote(&'a str),
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    let local = tokio::task::LocalSet::new();
-    if let Err(error) = local.run_until(run()).await {
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    if let Err(error) = run(spawner).await {
         eprintln!("error: {error}");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<()> {
+async fn run(spawner: Spawner) -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match mode_from_args(&args.iter().skip(1).map(String::as_str).collect::<Vec<_>>())? {
-        RunMode::Local => run_local().await,
+        RunMode::Local => run_local(spawner).await,
         RunMode::Remote(url) => client::run(url).await,
     }
 }
@@ -52,8 +52,8 @@ fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
     }
 }
 
-async fn run_local() -> Result<()> {
-    let system = local_host::build().await?;
+async fn run_local(spawner: Spawner) -> Result<()> {
+    let system = local_host::build(spawner).await?;
     tokio::pin!(system);
 
     tokio::select! {

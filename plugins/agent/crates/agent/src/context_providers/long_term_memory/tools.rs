@@ -332,10 +332,8 @@ fn render_items(header: &str, items: &[MemoryItem]) -> String {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use alloc::sync::Arc;
-
     use barracuda_agent_memory::LongTermMemory;
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
     use futures_lite::future::block_on;
 
     use super::*;
@@ -343,9 +341,9 @@ mod tests {
     #[test]
     fn standard_handlers_preserve_live_memory_mutations() {
         block_on(async {
-            let filesystem = Arc::new(MemFs::new());
+            let filesystem = MemFs::new();
             let stores = MemoryStores {
-                global: LongTermMemory::new(Arc::clone(&filesystem), "/global", "g-")
+                global: LongTermMemory::new(filesystem.clone(), "/global", "g-")
                     .expect("global store opens"),
                 agent: LongTermMemory::new(filesystem, "/agent", "a-").expect("agent store opens"),
             };

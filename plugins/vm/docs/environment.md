@@ -42,16 +42,14 @@ operations:
 
 ```rust,ignore
 let mut lua = Lua::new()?;
-let (io, input, output) = barracuda_lua_io::Io::new();
-Environment::new()
-    .with_package(io)
-    .install(&mut lua)?;
+let packages = barracuda_vm_builtin_packages::BuiltinPackages::all();
+let (input, output) = packages.install(&mut lua)?.into_io();
 let completion = lua.run(source);
 ```
 
-The Lua crate provides an empty `Environment` builder and the `Package` trait.
-The VM selects the external `barracuda-lua-io` package and adds it with
-`with_package`. That package provides:
+During Plugin registration, the VM selects the complete built-in package plan
+from `barracuda-vm-builtin-packages`. Each `vm.run` call applies that immutable
+plan to its own Lua state. The current plan installs `io`, which provides:
 
 - `require("io").input()` asynchronously waits for one complete input message.
   After the caller closes input and queued messages are consumed, it returns
@@ -83,12 +81,12 @@ searchers are not supported. The `package` table is not exposed, and the
 bootstrap entries for `_G` and `package` are removed from the loaded-module
 cache, so `require("_G")` and `require("package")` fail.
 
-The VM currently composes one external native package: `io`. It is our
+The VM currently composes one built-in native package: `io`. It is our
 message-based package, not Lua's filesystem and process-oriented standard
 `io` library. It is require-only: no global `io` table is installed. Calls such
 as `require("gpio")`, `require("time")`, or `require("net")` still fail today.
-Future capabilities are separate crates under `packages/` and are selected with
-additional `with_package` calls.
+Future VM-owned built-ins belong in `plugins/vm/crates/builtin-packages` and are
+selected with additional `with_package` calls.
 
 Repeated `require` calls for a registered module return the cached module table
 for that Lua state.

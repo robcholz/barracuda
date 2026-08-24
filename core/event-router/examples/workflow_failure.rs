@@ -9,9 +9,10 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    MemFs, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
-    UnregisterContext, WorkflowClient,
+    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
+    WorkflowClient,
 };
+use barracuda_platform_test::MemFs;
 use static_cell::ConstStaticCell;
 
 const FRAME_SIZE: usize = 64;
@@ -86,7 +87,7 @@ impl Component<FRAME_SIZE> for FailureDemo {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(FailureState::default());
-    let filesystem = Box::leak(Box::new(MemFs::new()));
+    let filesystem = MemFs::new();
     let mut event_router = EventRouter::new(RPC_LANES.take(), filesystem, "workflows")?;
 
     let demo = event_router.load(Box::new(FailureDemo {

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};
-use barracuda_fs::DiskFs;
+use barracuda_platform_host::DiskFs;
 use serde_json::Value;
 
 const SKILLS_ROOT: &str = "skills";
@@ -26,7 +26,7 @@ fn update_golden() -> bool {
 }
 
 fn registry() -> Arc<FsSkillRegistry<DiskFs>> {
-    let filesystem = Arc::new(DiskFs::rooted(data_dir()));
+    let filesystem = DiskFs::rooted(data_dir());
     Arc::new(
         FsSkillRegistry::new(filesystem)
             .set_root(SKILLS_ROOT)

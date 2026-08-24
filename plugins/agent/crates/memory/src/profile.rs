@@ -7,7 +7,6 @@
 use alloc::{
     format,
     string::{String, ToString},
-    sync::Arc,
     vec::Vec,
 };
 use core::fmt;
@@ -133,7 +132,7 @@ pub struct ProfileSnapshot {
 
 /// Pure storage for the editable profile documents.
 pub struct ProfileStore<F: FileSystem + 'static> {
-    filesystem: Arc<F>,
+    filesystem: F,
     /// Directory holding `soul.md`, `identity.md`, and `user.md`.
     dir: String,
     /// Maximum accepted byte length for each profile document.
@@ -143,7 +142,7 @@ pub struct ProfileStore<F: FileSystem + 'static> {
 impl<F: FileSystem + 'static> Clone for ProfileStore<F> {
     fn clone(&self) -> Self {
         Self {
-            filesystem: Arc::clone(&self.filesystem),
+            filesystem: self.filesystem.clone(),
             dir: self.dir.clone(),
             max_document_bytes: self.max_document_bytes,
         }
@@ -152,7 +151,7 @@ impl<F: FileSystem + 'static> Clone for ProfileStore<F> {
 
 impl<F: FileSystem + 'static> ProfileStore<F> {
     /// Build a store rooted at `dir` over the selected filesystem backend.
-    pub fn new(filesystem: Arc<F>, dir: &str) -> Self {
+    pub fn new(filesystem: F, dir: &str) -> Self {
         Self {
             filesystem,
             dir: dir.to_string(),
@@ -212,7 +211,11 @@ impl<F: FileSystem + 'static> ProfileStore<F> {
         document: ProfileDocument,
         content: impl AsRef<str>,
     ) -> Result<bool, ProfileError> {
-        if self.filesystem.exists(&self.path(document)) {
+        if self
+            .filesystem
+            .exists(&self.path(document))
+            .map_err(|source| ProfileError::File { document, source })?
+        {
             return Ok(false);
         }
         self.replace(document, content)?;

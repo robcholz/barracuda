@@ -1,3 +1,5 @@
+#![allow(clippy::arc_with_non_send_sync)]
+
 use core::future::Future;
 use core::task::{Context, Poll};
 use std::sync::Arc;
@@ -9,7 +11,7 @@ use barracuda_agent_tool::{
     EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
     ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
 };
-use barracuda_fs::MemFs;
+use barracuda_platform_test::MemFs;
 use futures_lite::StreamExt as _;
 
 #[test]
@@ -507,7 +509,7 @@ fn execute_tool(handle: &ToolSetHandle<'_>, call: &ToolInvocation) -> Result<Too
 
 fn persistence() -> Result<SharedPersistence<MemFs>> {
     Ok(Arc::new(Persistence::new(
-        Arc::new(MemFs::new()),
+        MemFs::new(),
         "/barracuda-agent-tool-tests",
     )?))
 }

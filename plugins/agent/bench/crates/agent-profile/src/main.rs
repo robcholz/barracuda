@@ -10,9 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
-use barracuda_fs::MemFs;
 use barracuda_model_api::ModelApi;
-use barracuda_net::testing::NeverStack;
+use barracuda_platform_test::MemFs;
+use barracuda_platform_test::NeverStack;
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 
 barracuda_profile::install_dhat_allocator!();

@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-imessage-web-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "IMessage Web provider Plugin"
+
+[dependencies]
+barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
+web = { path = "../provider", features = ["server"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

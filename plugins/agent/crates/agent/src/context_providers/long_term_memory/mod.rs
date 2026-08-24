@@ -88,7 +88,7 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
 
     /// Open the shared tier with the provider's canonical ID namespace.
     pub(crate) fn open_global_store(
-        filesystem: Arc<F>,
+        filesystem: F,
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
         global_store(filesystem, dir)
@@ -96,7 +96,7 @@ impl<F: FileSystem + 'static> LongTermMemoryContextProvider<F> {
 
     /// Open an Agent tier with the provider's canonical ID namespace.
     pub(crate) fn open_agent_store(
-        filesystem: Arc<F>,
+        filesystem: F,
         dir: &str,
     ) -> Result<LongTermMemory<F>, LongTermInitError> {
         agent_store(filesystem, dir)

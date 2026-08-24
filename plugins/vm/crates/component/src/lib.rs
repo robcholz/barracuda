@@ -12,4 +12,5 @@ pub mod component;
 /// The `vm.run` RPC contract and reusable handler.
 pub mod run;
 
+pub use barracuda_vm_builtin_packages::BuiltinPackages;
 pub use component::{VmComponent, VmLimits};

@@ -29,13 +29,13 @@ where
             .into_iter()
             .collect::<BTreeSet<_>>();
         for transcript in TranscriptStore::<Filesystem>::list_persisted_ids(
-            self.filesystem.as_ref(),
+            &self.filesystem,
             &self.transcript_dir,
         )? {
             let agent = AgentId::new(transcript);
             if !agents.contains(&agent) {
                 TranscriptStore::<Filesystem>::delete(
-                    self.filesystem.as_ref(),
+                    &self.filesystem,
                     transcript,
                     &self.transcript_dir,
                 )?;
@@ -66,11 +66,7 @@ where
         self.persistence
             .collection::<AgentEngineState>(AGENT_STATE_NAME)?
             .remove(&agent_instance(id)?)?;
-        TranscriptStore::<Filesystem>::delete(
-            self.filesystem.as_ref(),
-            id.0,
-            &self.transcript_dir,
-        )?;
+        TranscriptStore::<Filesystem>::delete(&self.filesystem, id.0, &self.transcript_dir)?;
         Ok(())
     }
 

@@ -65,7 +65,7 @@ pub struct RuntimeStorageConfig {
 /// What can go wrong while building or driving an [`AgentRuntime`].
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
-    /// An LLM API config could not be linked because a required field is empty.
+    /// An LLM API config could not be set because a required field is empty.
     #[error(transparent)]
     LlmConfig(#[from] InitError),
     /// Building the agent runtime failed.
@@ -152,9 +152,8 @@ where
         llm_factory: ModelApiFactory<Http>,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
     ) -> RuntimeResult<(Self, RuntimeService<Filesystem, Http>)> {
-        let filesystem = Arc::new(filesystem);
         let shared_persistence: SharedPersistence<Filesystem> = Arc::new(Persistence::new(
-            Arc::clone(&filesystem),
+            filesystem.clone(),
             persistence.persistence_root.clone(),
         )?);
         let tools = Arc::new(ToolRegistry::new(Arc::clone(&shared_persistence))?);
@@ -242,16 +241,14 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`RuntimeError::LlmConfig`] without changing bindings when `api` is
-    /// invalid.
-    pub fn link_api(
+    /// Returns [`InitError`] without changing bindings when `api` is invalid.
+    pub fn set_api(
         &self,
         api: ModelApiConfig,
         purpose: ApiPurpose,
         default: bool,
-    ) -> RuntimeResult<()> {
-        self.control.link_api(api, purpose, default)?;
-        Ok(())
+    ) -> Result<(), InitError> {
+        self.control.set_api(api, purpose, default)
     }
 
     /// Create a fresh isolated conversation session with explicit persistence.

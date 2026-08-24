@@ -865,14 +865,14 @@ impl<H: TcpConnect + Dns + 'static> Drop for ActiveRunGuard<'_, H> {
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use barracuda_agent_memory::TranscriptStore;
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
     use serde_json::json;
 
     use super::*;
 
     #[test]
     fn streamed_output_reaches_the_transcript_before_progress() {
-        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
+        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 1, "/transcript")
             .expect("in-memory transcript opens");
         let turn = transcript.open_turn().expect("turn opens");
         {
@@ -921,7 +921,7 @@ mod tests {
 
     #[test]
     fn assistant_draft_preserves_reasoning_text_and_tool_calls() {
-        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 2, "/transcript")
+        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 2, "/transcript")
             .expect("in-memory transcript opens");
         let turn = transcript.open_turn().expect("turn opens");
         {
@@ -972,7 +972,7 @@ mod tests {
 
     #[test]
     fn long_reasoning_delta_is_forwarded_in_full() {
-        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 3, "/transcript")
+        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 3, "/transcript")
             .expect("in-memory transcript opens");
         let turn = transcript.open_turn().expect("turn opens");
         {

@@ -11,7 +11,10 @@ Components and may provide or require typed capabilities. Every integration
 has a Plugin crate even when its Component remains a separate crate.
 
 Follow [.agents/docs/codestyle.md](../../docs/codestyle.md) for Rust API and
-lint conventions.
+lint conventions. Follow
+[.agents/docs/platform-architecture.md](../../docs/platform-architecture.md)
+for platform capability boundaries. A Plugin must never implement support for
+a concrete Platform type or depend on a concrete Platform crate.
 
 ## Layout
 
@@ -74,9 +77,12 @@ start one Plugin between registrations. Both lifecycle phases may await
 cooperative work. Long-running service futures belong in a Component loaded by
 the Plugin; Event Router drives those futures after System construction.
 
-The Plugin owns construction and defaults for its Components.
-`barracuda-system` receives raw low-level platform capabilities, constructs and
-registers the fixed Plugin set, and must not assemble Component internals.
+The Plugin owns construction and defaults for its Components. The selected
+Platform initializes system capability handles; Plugins obtain their declared
+portable capabilities through the system/Plugin context boundary. A Plugin
+must not receive or construct concrete platform implementations.
+`barracuda-system` registers the fixed Plugin set and must not assemble
+Component internals.
 
 ## Component and contract design
 
@@ -99,9 +105,11 @@ Create Plugin and contract documentation with the Plugin:
 
 - `plugins/<my-plugin>/docs/plugin.md` is required. It states the stable Plugin
   ID exactly as returned by `Plugin::id()`, lists the direct Plugin dependencies
-  exactly as declared by `Plugin::DEPENDS_ON` (write `none` when empty), and
-  explains the Plugin's purpose and responsibilities. When applicable, also
-  list its owned Components and provided or required typed capabilities.
+  exactly as declared by `Plugin::DEPENDS_ON` (write `none` when empty), lists
+  every provided typed capability by its exact public Rust type name (write
+  `none` when empty), and explains the Plugin's purpose and responsibilities.
+  When applicable, also list its owned Components and required typed
+  capabilities.
 - `plugins/<my-plugin>/docs/rpc.md` lists every RPC address, request, response,
   and method error variant when the Plugin exposes RPCs.
 - `plugins/<my-plugin>/docs/event.md` lists every emitted event, message type,

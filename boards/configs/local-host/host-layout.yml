@@ -1,0 +1,14 @@
+capacity: 4194304
+regions:
+  - name: filesystem
+    offset: 0
+    size: 2097152
+    access: read-write
+  - name: web-assets
+    offset: 2097152
+    size: 1048576
+    access: read-only
+  - name: database
+    offset: 3145728
+    size: 1048576
+    access: read-write

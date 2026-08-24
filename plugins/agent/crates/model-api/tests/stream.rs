@@ -4,7 +4,7 @@ use barracuda_model_api::{
     BackendKind, ChatError, ChatRequest, ChatStreamEvent, ModelApi, ModelApiConfig, ModelApiError,
     RetryPolicy, StatusCode,
 };
-use barracuda_net::testing::{ScriptStep, ScriptedStack};
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::Cancel;
 use embedded_io::ErrorKind;

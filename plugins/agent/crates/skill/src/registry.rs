@@ -118,7 +118,7 @@ impl SkillRegistry for EmptySkillRegistry {
 
 /// Filesystem-backed registry over one or more priority-ordered skill roots.
 pub struct FsSkillRegistry<F: FileSystem> {
-    filesystem: Arc<F>,
+    filesystem: F,
     roots: Vec<String>,
     snapshot: RefCell<Arc<CatalogSnapshot>>,
     next_version: AtomicU32,
@@ -126,7 +126,7 @@ pub struct FsSkillRegistry<F: FileSystem> {
 
 impl<F: FileSystem> FsSkillRegistry<F> {
     /// Create an empty registry builder.
-    pub fn new(filesystem: Arc<F>) -> Self {
+    pub fn new(filesystem: F) -> Self {
         Self {
             filesystem,
             roots: Vec::new(),
@@ -189,7 +189,7 @@ impl<F: FileSystem> FsSkillRegistry<F> {
 
     fn scan_catalog_next_version(&self) -> Result<CatalogSnapshot, SkillError> {
         let version = self.next_version.fetch_add(1, Ordering::Relaxed);
-        scan_catalog(self.filesystem.as_ref(), &self.roots, version)
+        scan_catalog(&self.filesystem, &self.roots, version)
     }
 
     fn read_skill_document(&self, path: &str) -> Result<Vec<u8>, FsError> {
@@ -233,7 +233,10 @@ fn scan_catalog<F: FileSystem>(
                 continue;
             }
             let path = skill_document_path(root, name.as_str());
-            if !filesystem.exists(&path) {
+            if !filesystem
+                .exists(&path)
+                .map_err(|error| SkillError::ScanFailed(root.clone(), error))?
+            {
                 continue;
             }
             let document = read_document(filesystem, &name, &path)?;

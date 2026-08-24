@@ -1,4 +1,5 @@
 use alloc::boxed::Box;
+use alloc::rc::Rc;
 use core::error::Error;
 use core::future::Future;
 use core::pin::Pin;
@@ -10,8 +11,9 @@ pub type WebServerListenFuture<'a, E> = Pin<Box<dyn Future<Output = Result<(), E
 
 /// Platform capability that binds and drives the WebServer listener.
 ///
-/// Implementations own socket acceptance and concurrency policy. The future
-/// normally runs until the Component is unloaded.
+/// Implementations own socket acceptance and must honor the requested fixed
+/// connection pool size. The future normally runs until the Component is
+/// unloaded.
 pub trait WebServerListener {
     /// Fatal listener error returned to Event Router.
     type Error: Error + 'static;
@@ -19,7 +21,8 @@ pub trait WebServerListener {
     /// Binds `port` and serves connections with the shared portable server.
     fn listen<'a>(
         &'a mut self,
-        server: &'a WebServer,
+        server: Rc<WebServer>,
         port: u16,
+        connection_slots: usize,
     ) -> WebServerListenFuture<'a, Self::Error>;
 }

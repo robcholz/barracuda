@@ -5,97 +5,127 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::marker::PhantomData;
 
 use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_runtime::AgentRuntime;
+use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
 use barracuda_fs::FileSystem;
 use barracuda_net::{Dns, TcpConnect};
 use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginStartFuture};
 
-pub use barracuda_agent_runtime::{ModelApiFactory, RuntimeStorageConfig};
+pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
+pub use barracuda_model_api::{BackendKind, InitError};
 
+const PERSISTENCE_ROOT: &str = "/agent";
 /// Stable identity of the Agent Plugin.
 pub const PLUGIN_ID: &str = "agent";
 
-/// Plugin that constructs and owns the Agent runtime and Component.
-pub struct AgentPlugin<Filesystem, Http>
-where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
-{
-    filesystem: Option<Filesystem>,
-    storage: Option<RuntimeStorageConfig>,
-    model_api_factory: Option<ModelApiFactory<Http>>,
+type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
+
+/// Typed capability for configuring the Agent's model APIs.
+pub struct AgentSetApi {
+    handler: Box<SetApiHandler>,
 }
 
-impl<Filesystem, Http> AgentPlugin<Filesystem, Http>
-where
-    Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
-{
-    /// Creates the Plugin from low-level abstract capabilities.
+impl AgentSetApi {
+    /// Creates a model API configuration capability around one synchronous handler.
     #[must_use]
     pub fn new(
-        filesystem: Filesystem,
-        storage: RuntimeStorageConfig,
-        model_api_factory: ModelApiFactory<Http>,
+        handler: impl Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError> + 'static,
     ) -> Self {
         Self {
-            filesystem: Some(filesystem),
-            storage: Some(storage),
-            model_api_factory: Some(model_api_factory),
+            handler: Box::new(handler),
+        }
+    }
+
+    /// Applies one model API configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InitError`] when the configuration is invalid.
+    pub fn set_api(
+        &self,
+        api: ModelApiConfig,
+        purpose: ApiPurpose,
+        default: bool,
+    ) -> Result<(), InitError> {
+        (self.handler)(api, purpose, default)
+    }
+}
+
+/// Plugin that constructs and owns the Agent runtime and Component.
+pub struct AgentPlugin<Filesystem, Network>
+where
+    Filesystem: FileSystem + 'static,
+    Network: TcpConnect + Dns + 'static,
+{
+    capabilities: PhantomData<fn() -> (Filesystem, Network)>,
+}
+
+impl<Filesystem, Network> Default for AgentPlugin<Filesystem, Network>
+where
+    Filesystem: FileSystem + 'static,
+    Network: TcpConnect + Dns + 'static,
+{
+    fn default() -> Self {
+        Self {
+            capabilities: PhantomData,
         }
     }
 }
 
-impl<Filesystem, Http, const M: usize> Plugin<M> for AgentPlugin<Filesystem, Http>
+impl<Filesystem, Network, const M: usize> Plugin<M> for AgentPlugin<Filesystem, Network>
 where
     Filesystem: FileSystem + 'static,
-    Http: TcpConnect + Dns + 'static,
+    Network: TcpConnect + Dns + 'static,
 {
     fn id(&self) -> &'static str {
         PLUGIN_ID
     }
 
-    fn start<'a>(&'a mut self, context: &'a mut PluginContext<'_, M>) -> PluginStartFuture<'a> {
+    fn start<'a, Storage>(
+        &'a mut self,
+        context: &'a mut PluginContext<'_, M, Storage>,
+    ) -> PluginStartFuture<'a>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
         Box::pin(async move {
-            let filesystem = self
-                .filesystem
-                .take()
-                .ok_or_else(|| PluginError::registration(AlreadyRegistered))?;
-            let storage = self
-                .storage
-                .take()
-                .ok_or_else(|| PluginError::registration(AlreadyRegistered))?;
-            let model_api_factory = self
-                .model_api_factory
-                .take()
-                .ok_or_else(|| PluginError::registration(AlreadyRegistered))?;
+            let filesystem = context.require_system::<Filesystem>()?;
+            let filesystem = filesystem.as_ref().clone();
+            let model_api_factory = context.require_system::<ModelApiFactory<Network>>()?;
+            let model_api_factory = model_api_factory.as_ref().clone();
+            let storage = RuntimeStorageConfig {
+                persistence_root: PERSISTENCE_ROOT.into(),
+                skill_roots: Vec::new(),
+            };
             let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
                 .map_err(PluginError::registration)?;
             runtime.start_all().map_err(PluginError::registration)?;
-            context.load(AgentComponent::new(runtime, service))?;
+            let runtime = Rc::new(runtime);
+            let set_api_runtime = Rc::clone(&runtime);
+            context.provide(Rc::new(AgentSetApi::new(move |api, purpose, default| {
+                set_api_runtime.set_api(api, purpose, default)
+            })))?;
+            context.load(AgentComponent::from_shared(runtime, service))?;
             Ok(())
         })
     }
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error("Agent Plugin has already registered its Component")]
-struct AlreadyRegistered;
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
 
     use alloc::boxed::Box;
-    use alloc::vec::Vec;
-    use barracuda_agent_runtime::{ModelApiFactory, RuntimeStorageConfig};
-    use barracuda_event_router::{EventRouter, MemFs, RpcLaneStorage};
-    use barracuda_model_api::ModelApi;
-    use barracuda_net::testing::NeverStack;
-    use barracuda_plugin_manager::{EkvStore, NoopRawMutex, Plugin, PluginId, PluginManager};
-    use ekv::{flash::MemFlash, Config};
+    use alloc::rc::Rc;
+
+    use barracuda_event_router::{EventRouter, RpcLaneStorage};
+    use barracuda_model_api::{ModelApi, ModelApiFactory};
+    use barracuda_platform_test::{memory_partition, MemFs, NeverStack};
+    use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     use super::AgentPlugin;
@@ -104,28 +134,52 @@ mod tests {
 
     #[test]
     fn plugin_loads_its_agent_component() {
-        let store = EkvStore::<MemFlash, NoopRawMutex>::new(MemFlash::new(), Config::default());
-        block_on(store.format()).expect("format store");
-        let mut manager = PluginManager::new(store);
+        let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
+        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
         let lanes = Box::leak(Box::new(RpcLaneStorage::<16, 512, 8>::new()));
-        let filesystem = Box::leak(Box::new(MemFs::new()));
-        let mut router = EventRouter::new(lanes, filesystem, "workflows").expect("create router");
+        let filesystem = MemFs::new();
+        let mut router =
+            EventRouter::new(lanes, filesystem.clone(), "workflows").expect("create router");
         let id = PluginId::try_from("agent").expect("valid Plugin ID");
 
-        let model_api_factory = ModelApiFactory::new(|| ModelApi::new(&NETWORK, 1024, 1024));
-        let plugin = AgentPlugin::new(
-            MemFs::new(),
-            RuntimeStorageConfig {
-                persistence_root: "/agent".into(),
-                skill_roots: Vec::new(),
-            },
-            model_api_factory,
-        );
+        manager
+            .provide_system(Rc::new(filesystem))
+            .expect("provide filesystem");
+        manager
+            .provide_system(Rc::new(&NETWORK))
+            .expect("provide network");
+        manager
+            .provide_system(Rc::new(ModelApiFactory::new(|| {
+                ModelApi::new(&NETWORK, 1024, 1024)
+            })))
+            .expect("provide Model API factory");
+        let plugin = AgentPlugin::<MemFs, NeverStack>::default();
         assert_eq!(Plugin::<512>::id(&plugin), "agent");
 
         block_on(manager.register(&mut router, plugin)).expect("register Agent Plugin");
         block_on(manager.start(&mut router)).expect("start Plugins");
 
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+    }
+
+    #[test]
+    fn plugin_requires_the_platform_model_api_factory() {
+        let partition = block_on(memory_partition(64 * 1024)).expect("create database partition");
+        let mut manager = block_on(PluginManager::open(partition)).expect("open Plugin storage");
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<16, 512, 8>::new()));
+        let filesystem = MemFs::new();
+        let mut router =
+            EventRouter::new(lanes, filesystem.clone(), "workflows").expect("create router");
+
+        manager
+            .provide_system(Rc::new(filesystem))
+            .expect("provide filesystem");
+        manager
+            .provide_system(Rc::new(&NETWORK))
+            .expect("provide network");
+        block_on(manager.register(&mut router, AgentPlugin::<MemFs, NeverStack>::default()))
+            .expect("register Agent Plugin");
+
+        assert!(block_on(manager.start(&mut router)).is_err());
     }
 }

@@ -16,7 +16,7 @@ use barracuda_workflow::integration::WorkflowRuntimeView;
 
 use workflow::WorkflowComponent;
 
-pub use barracuda_fs::{FileSystem, FsError, FsFile, MemFs};
+pub use barracuda_fs::{FileSystem, FsError, FsFile};
 pub use barracuda_router::{
     CleanupError, Component, ComponentCleanupFailure, ComponentError, ComponentFuture, ComponentId,
     ComponentResult, LoadError, RegisterContext, Router, RouterError, RunContext, UnloadError,
@@ -94,7 +94,7 @@ impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
     /// loaded.
     pub fn new<Filesystem>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        filesystem: &'static Filesystem,
+        filesystem: Filesystem,
         persistence_directory: impl Into<alloc::string::String>,
     ) -> Result<Self, EventRouterCreateError>
     where
@@ -153,12 +153,13 @@ mod tests {
 
     use alloc::boxed::Box;
     use alloc::rc::Rc;
+    use barracuda_platform_test::MemFs;
     use core::cell::Cell;
     use core::future::pending;
 
     use super::{
-        Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext,
-        RpcLaneStorage, RunContext, UnregisterContext,
+        Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcLaneStorage,
+        RunContext, UnregisterContext,
     };
 
     const FRAME_SIZE: usize = 64;
@@ -188,7 +189,7 @@ mod tests {
     #[test]
     fn event_router_composes_router_and_workflow_runtime() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-        let filesystem = Box::leak(Box::new(MemFs::new()));
+        let filesystem = MemFs::new();
         let mut event_router =
             EventRouter::new(lanes, filesystem, "workflows").expect("create Event Router");
         let registered = Rc::new(Cell::new(false));

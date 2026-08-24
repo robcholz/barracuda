@@ -1,0 +1,6 @@
+name: host
+crate: barracuda_platform_host
+type: HostPlatform
+settings:
+  state-directory: .barracuda
+  flash-image: board.flash

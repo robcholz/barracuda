@@ -9,13 +9,13 @@
 //! `MemFs` keeps the example hermetic. A production caller supplies its own
 //! `FileSystem` implementation without changing the persistence API.
 
-use std::{borrow::Cow, error::Error, sync::Arc};
+use std::{borrow::Cow, error::Error};
 
 use barracuda_agent_persistence::{
     DurablePartError, DurableState, DurableStateCodec, InstanceId, Persistence, SchemaVersion,
     StateBlob, StateSlice,
 };
-use barracuda_fs::MemFs;
+use barracuda_platform_test::MemFs;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -50,12 +50,12 @@ impl DurableStateCodec for ExampleState {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let filesystem = Arc::new(MemFs::new());
+    let filesystem = MemFs::new();
 
     let root = "/example";
     let session_id = InstanceId::new("session-1")?;
 
-    let persistence = Persistence::<MemFs>::new(Arc::clone(&filesystem), root)?;
+    let persistence = Persistence::<MemFs>::new(filesystem.clone(), root)?;
     let runtime_entry = persistence.singleton::<ExampleState>("runtime")?;
     let sessions_entry = persistence.collection::<ExampleState>("sessions")?;
 

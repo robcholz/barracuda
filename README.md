@@ -17,46 +17,48 @@
 ## System composition
 
 Barracuda separates portable system behavior from runtime implementations and
-physical hardware composition:
+platform implementations:
 
-- **Platforms** provide implementations of the runtime environment and its
-  low-level capabilities, such as executors, networking, storage, and HAL
-  access.
-- **Drivers** implement concrete peripheral capabilities, such as displays,
-  audio devices, cameras, and sensors, behind the traits consumed by the rest
-  of the system.
-- **Boards** are the hardware composition matrix. A Board selects the exact
-  Drivers, buses, pins, and configuration present on one physical product.
-  Different Boards may use different peripherals and wiring even when they use
-  the same Platform.
+- **Boards** live under `boards/`. Their YAML files contain product-fixed
+  flash layout and storage mappings; the Board config crate validates and
+  generates a static, platform-neutral description at build time.
+- **Platform contract** lives in `platforms/api`. It defines the
+  compile-time initialization boundary and the resources consumed by System.
+- **Concrete Platforms** live under `platforms/<name>`. Host and device
+  Platforms use the same Embassy executor, task, timer, and lifecycle model;
+  only their low-level network, filesystem, flash, and HAL adapters differ.
+- **Board and Platform are selected independently** by build configuration.
+  A Board Rust type never selects or depends on a Platform type.
 - **System** is the `no_std` aggregation layer. It receives low-level platform
   capabilities, constructs the fixed Plugin set, registers every Plugin in
-  dependency order, and then starts the complete set. System never selects a
-  concrete executor, filesystem, network stack, or listener, and it does not
+  dependency order, and then starts the complete set. System and Plugins never
+  select a host/device executor, filesystem, network stack, or listener and do not
   construct a Plugin's component-specific services.
 - **Plugins** own and load their Components, component-specific runtime
   resources, and other Plugin-scoped resources. Built-in Plugins establish
   their own defaults instead of receiving an assembled component dependency
   bundle from Host. Components and higher-level crates depend on traits and
-  portable services, not on a particular Platform, Driver, or Board.
+  portable services, not on a particular concrete Platform.
 
 ```text
-Platform implementations       Peripheral Drivers
-            \                       /
-             +---- Board matrix ---+
-                        |
-                     System
-                        |
-          Plugins [Components + resources]
+Embassy entry
+     |
+Board YAML + Platform YAML
+     |
+Selected Platform realizes generated Board settings
+     |
+   System
+     |
+Plugins [Components + resources]
 ```
 
 Cross-platform services remain single portable implementations. For example,
-`WebServer` is built on picoserve and is shared by Tokio- and Embassy-based
-systems. Plugins register endpoints during their lifecycle; the outer
-Board/Platform wiring supplies the executor, network stack, listener, and
-sockets that drive that same server. Platform selection must not be encoded as
-separate `WebServer` implementations or scattered `cfg` branches in portable
-system code.
+`WebServer` is built on picoserve and is shared by host and device Platforms.
+Plugins register endpoints during their lifecycle; the selected Platform
+supplies the network stack, listener, and sockets that drive that same server.
+Platform selection must not be encoded as separate `WebServer`
+implementations, scattered `cfg` branches, or a different application executor
+in portable system code.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:

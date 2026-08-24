@@ -283,12 +283,10 @@ fn estimate_message_tokens(message: &Value) -> usize {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use std::sync::Arc;
-
     use barracuda_agent_context::Context;
     use barracuda_agent_memory::{CompactFuture, Compactor, Transcript, TranscriptStore};
     use barracuda_agent_persistence::DurableState;
-    use barracuda_fs::MemFs;
+    use barracuda_platform_test::MemFs;
     use futures_lite::future::block_on;
     use serde_json::{json, Value};
 
@@ -316,7 +314,7 @@ mod tests {
 
     #[test]
     fn one_projection_has_summary_prefix_and_exact_complementary_tail() {
-        let transcript = TranscriptStore::<MemFs>::new(Arc::new(MemFs::new()), 1, "/transcript")
+        let transcript = TranscriptStore::<MemFs>::new(MemFs::new(), 1, "/transcript")
             .expect("in-memory transcript opens");
         for text in ["turn-one", "turn-two", "turn-three"] {
             let turn = transcript.open_turn().expect("test turn opens");
