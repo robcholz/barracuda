@@ -13,8 +13,6 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use embedded_nal_async::{Dns, TcpConnect};
-
 use super::super::chat_stream::ProviderStream;
 use super::super::errors::{ChatError, InferMediaError, ModelApiError};
 use super::super::media::{prepare_asset, Prepared};
@@ -448,9 +446,9 @@ impl Anthropic {
         self.context.timeout_ms
     }
 
-    pub(super) async fn chat<Tcp: TcpConnect, Resolver: Dns>(
+    pub(super) async fn chat(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &ChatRequest<'_>,
     ) -> Result<LlmResponse, ChatError> {
         let body = self.build_chat_body(request)?;
@@ -458,9 +456,9 @@ impl Anthropic {
         parse_chat_response(&response.body).map_err(Into::into)
     }
 
-    pub(super) async fn chat_json<Tcp: TcpConnect, Resolver: Dns>(
+    pub(super) async fn chat_json(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &ChatJsonRequest<'_>,
         _schema_name: &str,
         schema: &Value,
@@ -470,9 +468,9 @@ impl Anthropic {
         parse_chat_response(&response.body).map_err(Into::into)
     }
 
-    pub(super) async fn infer_media<Tcp: TcpConnect, Resolver: Dns>(
+    pub(super) async fn infer_media(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &MediaRequest<'_>,
     ) -> Result<String, InferMediaError> {
         let body = self.build_media_body(request)?;
@@ -480,9 +478,9 @@ impl Anthropic {
         media_text(parse_chat_response(&response.body)?)
     }
 
-    pub(super) async fn chat_stream<'h, 'r, Tcp: TcpConnect, Resolver: Dns>(
+    pub(super) async fn chat_stream<'h, 'r>(
         &self,
-        http: &'h mut NetClient<'_, Tcp, Resolver>,
+        http: &'h mut NetClient<'_>,
         request: &'r ChatRequest<'r>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
         let body = self.build_stream_body(request)?;

@@ -34,29 +34,27 @@ fn retry_backoff_is_capped_and_saturating() {
 }
 
 #[test]
-fn transport_error_preserves_reqwless_source_and_classifies_retries() {
-    let dns = HttpError::from(reqwless::Error::Dns);
-    assert!(dns.retryable());
-    assert!(matches!(dns, HttpError::Reqwless(reqwless::Error::Dns)));
+fn transport_error_preserves_shared_http_source_and_classifies_retries() {
+    let disconnected = HttpError::from(http_client::Error::ConnectionAborted);
+    assert!(disconnected.retryable());
+    assert!(matches!(
+        disconnected,
+        HttpError::Http(http_client::Error::ConnectionAborted)
+    ));
 
-    assert!(HttpError::from(reqwless::Error::Network(
-        embedded_io::ErrorKind::ConnectionReset,
-    ))
-    .retryable());
-    assert!(HttpError::from(reqwless::Error::ConnectionAborted).retryable());
-    assert!(!HttpError::from(reqwless::Error::Codec).retryable());
+    assert!(!HttpError::from(http_client::Error::InvalidUrl).retryable());
     assert!(!HttpError::Cancelled.retryable());
 }
 
 #[test]
 fn api_error_delegates_transport_retry_classification() {
-    let transient = ModelApiError::from(HttpError::from(reqwless::Error::Dns));
+    let transient = ModelApiError::from(HttpError::from(http_client::Error::ConnectionAborted));
     assert!(transient.is_retryable());
     assert!(matches!(
         transient,
-        ModelApiError::Transport(HttpError::Reqwless(reqwless::Error::Dns))
+        ModelApiError::Transport(HttpError::Http(http_client::Error::ConnectionAborted))
     ));
 
-    let permanent = ModelApiError::from(HttpError::from(reqwless::Error::Codec));
+    let permanent = ModelApiError::from(HttpError::from(http_client::Error::InvalidUrl));
     assert!(!permanent.is_retryable());
 }

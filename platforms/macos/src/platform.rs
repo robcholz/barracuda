@@ -76,6 +76,14 @@ impl MacosPlatform {
         Ok(())
     }
 
+    /// Loads macOS trust roots and initializes the Platform TLS capability.
+    ///
+    /// # Errors
+    /// Returns an error when the macOS trust store or TLS engine is invalid.
+    pub fn initialize_tls() -> Result<barracuda_tls::MbedTls, MacosPlatformError> {
+        crate::tls::initialize().map_err(MacosPlatformError::Tls)
+    }
+
     /// Initializes partitions using generated macOS settings.
     ///
     /// # Errors
@@ -128,6 +136,7 @@ impl MacosPlatform {
 
 impl Platform for MacosPlatform {
     type Bindings = &'static Board;
+    type Tls = barracuda_tls::MbedTls;
     type Partitions = MacosPartitions;
     type Error = MacosPlatformError;
 
@@ -139,8 +148,10 @@ impl Platform for MacosPlatform {
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
         let ip_stack = crate::network::initialize(spawner).await?;
+        let tls = Self::initialize_tls()?;
         Ok(PlatformResources {
             ip_stack,
+            tls,
             partitions,
         })
     }
@@ -161,6 +172,9 @@ pub enum MacosPlatformError {
     /// The real UTUN-backed Embassy network failed to initialize.
     #[error(transparent)]
     Network(#[from] MacosNetworkError),
+    /// Host TLS initialization failed.
+    #[error(transparent)]
+    Tls(#[from] crate::MacosTlsError),
     /// File-backed NOR initialization failed.
     #[error(transparent)]
     Flash(#[from] FileNorFlashError),

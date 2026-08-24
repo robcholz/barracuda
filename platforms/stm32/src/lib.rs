@@ -167,6 +167,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Stm32Platform`].
     pub struct Stm32PlatformBindings {
         ip_stack: Stack<'static>,
+        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
     }
 
@@ -183,12 +184,17 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
+            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Stm32Flash>>,
         ) -> Result<Self, Stm32PlatformError> {
             if board.hardware().chip() != "stm32f429zi" {
                 return Err(Stm32PlatformError::IncompatibleChip);
             }
-            Ok(Self { ip_stack, flash })
+            Ok(Self {
+                ip_stack,
+                tls,
+                flash,
+            })
         }
     }
 
@@ -241,6 +247,7 @@ mod internal_flash {
 
     impl Platform for Stm32Platform {
         type Bindings = Stm32PlatformBindings;
+        type Tls = barracuda_tls::MbedTls;
         type Partitions = Stm32Partitions;
         type Error = Stm32PlatformError;
 
@@ -249,25 +256,35 @@ mod internal_flash {
             bindings: Self::Bindings,
         ) -> PlatformInitResult<Self> {
             let partitions = partitions(bindings.flash)?;
+            let tls = bindings.tls.initialize()?;
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
+                tls,
                 partitions,
             })
         }
     }
 
     /// STM32F429 Platform initialization failure.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug)]
     pub enum Stm32PlatformError {
         /// The selected Board targets a different chip family.
         IncompatibleChip,
         /// Native linker regions could not become generic partitions.
         Partitions(Stm32PartitionsError),
+        /// Platform TLS initialization failed.
+        Tls(barracuda_tls::TlsError),
     }
 
     impl From<Stm32PartitionsError> for Stm32PlatformError {
         fn from(error: Stm32PartitionsError) -> Self {
             Self::Partitions(error)
+        }
+    }
+
+    impl From<barracuda_tls::TlsError> for Stm32PlatformError {
+        fn from(error: barracuda_tls::TlsError) -> Self {
+            Self::Tls(error)
         }
     }
 
@@ -278,6 +295,7 @@ mod internal_flash {
                 Self::Partitions(error) => {
                     write!(formatter, "invalid STM32 partitions: {error:?}")
                 }
+                Self::Tls(error) => write!(formatter, "failed to initialize STM32 TLS: {error}"),
             }
         }
     }

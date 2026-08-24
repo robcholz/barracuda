@@ -2,7 +2,7 @@
 
 use std::{env, error::Error, fs, path::PathBuf};
 
-use barracuda_board_config::parse;
+use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -49,7 +49,6 @@ enum FileRegionAccess {
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=platform.yml");
-    println!("cargo:rerun-if-env-changed=BARRACUDA_BOARD");
     let yaml = fs::read_to_string("platform.yml")?;
     let mut documents = yaml_peg::serde::from_str::<PlatformDocument>(&yaml)?;
     let platform = exactly_one(&mut documents, "platform.yml")?;
@@ -67,8 +66,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         platform.settings.network_interface,
     );
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
-    let board_name = env::var("BARRACUDA_BOARD").unwrap_or_else(|_| "local-linux".into());
-    validate_name(&board_name)?;
+    let root = manifest.join("../..");
+    let selection_path = root.join(SELECTED_BOARD_PATH);
+    println!("cargo:rerun-if-changed={}", selection_path.display());
+    let board_name = if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        read_selected_board(&root)?
+            .ok_or("no Board selected; run `cargo board select` first")?
+    } else {
+        "local-linux".into()
+    };
     let board_directory = manifest
         .join("../..")
         .join("boards/configs")
@@ -101,17 +107,6 @@ fn exactly_one<T>(documents: &mut Vec<T>, source: &str) -> Result<T, Box<dyn Err
     documents
         .pop()
         .ok_or_else(|| format!("{source} is empty").into())
-}
-
-fn validate_name(value: &str) -> Result<(), Box<dyn Error>> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err(format!("invalid Board name `{value}`").into());
-    }
-    Ok(())
 }
 
 fn render_layout(generated: &mut String, layout: FileLayoutDocument) {

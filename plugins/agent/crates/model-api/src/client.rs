@@ -1,7 +1,7 @@
 //! `ModelApi` — the LLM client.
 //!
-//! Owns one concrete reqwless client and an optional resolved backend. Construct
-//! it with [`ModelApi::new`], then install a complete config with
+//! Owns one shared HTTP-client facade and an optional resolved backend.
+//! Construct it with [`ModelApi::new`], then install a complete config with
 //! [`ModelApi::set_config`] before issuing requests.
 
 use alloc::format;
@@ -15,7 +15,6 @@ use tracing::Instrument as _;
 
 use barracuda_runtime_utils::yield_stream::yield_stream;
 use barracuda_runtime_utils::Cancel;
-use embedded_nal_async::{Dns, TcpConnect};
 
 use super::backends::Backend;
 use super::chat_stream::{ChatStream, Driver, DriverItem};
@@ -26,20 +25,20 @@ use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, LlmResponse, MediaRequest, ModelApiConfig,
 };
 
-/// LLM client backed directly by one exclusively owned reqwless client.
-pub struct ModelApi<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> {
+/// LLM client backed by one shared HTTP-client facade.
+pub struct ModelApi<'net> {
     backend: Option<Backend>,
-    http: HttpTransport<'net, Tcp, Resolver>,
+    http: HttpTransport<'net>,
 }
 
 /// Application-supplied constructor for independent, fully configured client
-/// resources. It owns no HTTP behavior; each call returns one concrete
-/// [`ModelApi`] with its own reqwless state and buffers.
-pub struct ModelApiFactory<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> {
-    make: Rc<dyn Fn() -> ModelApi<'static, Tcp, Resolver>>,
+/// resources. It owns no HTTP behavior; each call returns one [`ModelApi`]
+/// whose transport lifecycle is hidden behind the injected facade.
+pub struct ModelApiFactory {
+    make: Rc<dyn Fn() -> ModelApi<'static>>,
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Clone for ModelApiFactory<Tcp, Resolver> {
+impl Clone for ModelApiFactory {
     // A derived impl would unnecessarily require the transports to be Clone;
     // cloning the factory only increments the Rc count.
     fn clone(&self) -> Self {
@@ -49,16 +48,16 @@ impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> Clone for ModelApiFacto
     }
 }
 
-impl<Tcp: TcpConnect + 'static, Resolver: Dns + 'static> ModelApiFactory<Tcp, Resolver> {
+impl ModelApiFactory {
     #[must_use]
-    pub fn new(make: impl Fn() -> ModelApi<'static, Tcp, Resolver> + 'static) -> Self {
+    pub fn new(make: impl Fn() -> ModelApi<'static> + 'static) -> Self {
         Self {
             make: Rc::new(make),
         }
     }
 
     #[must_use]
-    pub fn create(&self) -> ModelApi<'static, Tcp, Resolver> {
+    pub fn create(&self) -> ModelApi<'static> {
         (self.make)()
     }
 }
@@ -86,15 +85,13 @@ fn parse_chat_json_response<T: DeserializeOwned>(
     })
 }
 
-fn retrying_chat_stream<'h, 'r, Tcp, Resolver>(
+fn retrying_chat_stream<'h, 'r>(
     backend: &'h Backend,
-    http: &'h mut HttpTransport<'_, Tcp, Resolver>,
+    http: &'h mut HttpTransport<'_>,
     request: &'r ChatRequest<'r>,
     cancel: Cancel<'h>,
 ) -> Driver<'h>
 where
-    Tcp: TcpConnect,
-    Resolver: Dns,
     'r: 'h,
 {
     yield_stream(|yielder| async move {
@@ -213,51 +210,22 @@ where
     })
 }
 
-impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Resolver> {
-    fn with_transport(http: HttpTransport<'net, Tcp, Resolver>) -> Self {
+impl<'net> ModelApi<'net> {
+    fn with_transport(http: HttpTransport<'net>) -> Self {
         Self {
             backend: None,
             http,
         }
     }
 
-    /// Construct an unconfigured client over the supplied reqwless transport.
+    /// Constructs an unconfigured model client over the shared HTTP facade.
     #[must_use]
-    pub fn new(
-        tcp: &'net Tcp,
-        resolver: &'net Resolver,
-        header_buffer_size: usize,
-        read_buffer_size: usize,
-    ) -> Self {
-        Self::with_transport(HttpTransport::new(
-            tcp,
-            resolver,
-            header_buffer_size,
-            read_buffer_size,
-        ))
-    }
-
-    /// Construct an unconfigured HTTPS client over the supplied network stack.
-    #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
-    #[must_use]
-    pub fn new_with_tls(
-        tcp: &'net Tcp,
-        resolver: &'net Resolver,
-        tls: reqwless::client::TlsConfig<'net>,
-        header_buffer_size: usize,
-        read_buffer_size: usize,
-    ) -> Self {
-        Self::with_transport(HttpTransport::new_with_tls(
-            tcp,
-            resolver,
-            tls,
-            header_buffer_size,
-            read_buffer_size,
-        ))
+    pub fn new(http: http_client::Client<'net>) -> Self {
+        Self::with_transport(HttpTransport::new(http))
     }
 
     /// Rebind this client to a new [`ModelApiConfig`] at runtime, keeping the
-    /// existing reqwless client and reusable buffers. Only the backend —
+    /// existing shared HTTP client and reusable buffers. Only the backend —
     /// provider, key, model, base URL — is rebuilt.
     ///
     /// Used to apply a per-turn config selected from a `ModelApiManager` without
@@ -269,7 +237,7 @@ impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Res
         Ok(())
     }
 
-    /// Async chat completion over the owned reqwless client.
+    /// Async chat completion over the owned shared HTTP client.
     pub async fn chat(
         &mut self,
         request: &ChatRequest<'_>,
@@ -357,7 +325,7 @@ impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Res
         }
     }
 
-    /// Streaming chat completion over the owned reqwless client.
+    /// Streaming chat completion over the owned shared HTTP client.
     ///
     /// Yields [`ChatStreamEvent`](crate::ChatStreamEvent) values as reasoning,
     /// output, and tool-call logical streams of
@@ -381,7 +349,7 @@ impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Res
         ChatStream::open(retrying_chat_stream(backend, http, request, cancel)).await
     }
 
-    /// Async structured JSON chat over the owned reqwless client.
+    /// Async structured JSON chat over the owned shared HTTP client.
     pub async fn chat_json<Output: DeserializeOwned>(
         &mut self,
         request: &ChatJsonRequest<'_>,
@@ -410,7 +378,7 @@ impl<'net, Tcp: TcpConnect + 'net, Resolver: Dns + 'net> ModelApi<'net, Tcp, Res
         .await
     }
 
-    /// Async one-shot image inference over the owned reqwless client.
+    /// Async one-shot image inference over the owned shared HTTP client.
     pub async fn infer_media(
         &mut self,
         request: &MediaRequest<'_>,

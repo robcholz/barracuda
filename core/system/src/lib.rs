@@ -27,6 +27,7 @@ use barracuda_plugin_manager::{
 use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_target_api::TargetResources;
 use barracuda_time_plugin::TimePlugin;
+use barracuda_tls::ClientTls;
 use barracuda_vfs::{global_namespace, mount, FsError, MountOptions};
 use barracuda_vfs_littlefs::mount_or_format_partition;
 use barracuda_vm_plugin::VmPlugin;
@@ -63,7 +64,7 @@ pub enum SystemCreateError {
     /// Selected Target resources cannot be assigned to required System roles.
     #[error(transparent)]
     Resources(#[from] SystemResourceError),
-    /// The writable filesystem partition could not be mounted as LittleFS.
+    /// The writable System partition could not be mounted as LittleFS.
     #[error(transparent)]
     Filesystem(#[from] FsError),
     /// Event Router initialization failed.
@@ -98,24 +99,28 @@ where
     ///
     /// Returns [`SystemCreateError`] when Event Router initialization or Plugin
     /// registration or startup fails.
-    pub async fn new(
+    pub async fn new<Tls: ClientTls>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        resources: TargetResources<PlatformResources<Partitions<Region, P>>, BoardHal>,
+        resources: TargetResources<PlatformResources<Tls, Partitions<Region, P>>, BoardHal>,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         let prepared = resources::prepare(resources)?;
-        let backend = mount_or_format_partition(prepared.filesystem)?;
+        let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/", backend, MountOptions::read_write()).await?;
         let mut router = EventRouter::new(lanes).await?;
-        let mut plugins = PluginManager::open(BlockingAsync::new(prepared.database)).await?;
+        let mut plugins =
+            PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
+
+        let tls = prepared.tls;
+        let http = http_client::ClientFactory::new(prepared.ip_stack, move || tls.config());
 
         plugins.register(&mut router, WebServerPlugin::new(prepared.ip_stack))?;
         plugins.register(&mut router, VmPlugin::default())?;
         plugins.register(&mut router, TimePlugin::new(prepared.ip_stack))?;
         plugins.register(&mut router, SchedulerPlugin)?;
-        plugins.register(&mut router, AgentPlugin::new(prepared.ip_stack))?;
+        plugins.register(&mut router, AgentPlugin::new(http))?;
         plugins.register(&mut router, CaptivePortalPlugin::new())?;
         plugins.register(&mut router, IMessageGatewayPlugin::new())?;
         plugins.register(&mut router, IMessageWebPlugin::new())?;
@@ -125,8 +130,8 @@ where
         Ok(Self {
             router,
             _plugins: plugins,
-            _web_assets: prepared.web_assets,
-            _remaining_partitions: prepared.partitions,
+            _web_assets: prepared.partitions.web_assets,
+            _remaining_partitions: prepared.partitions.remaining,
             _board_hal: prepared.board_hal,
         })
     }

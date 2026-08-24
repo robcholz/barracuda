@@ -18,7 +18,10 @@ pub use selected::PLATFORM_NAME;
 pub type Bindings = <SelectedPlatform as Platform>::Bindings;
 
 /// Resource bundle produced only by the selected Platform.
-pub type Resources = PlatformResources<<SelectedPlatform as Platform>::Partitions>;
+pub type Resources = PlatformResources<
+    <SelectedPlatform as Platform>::Tls,
+    <SelectedPlatform as Platform>::Partitions,
+>;
 
 /// Initialization error produced only by the selected Platform.
 pub type Error = <SelectedPlatform as Platform>::Error;

@@ -2,15 +2,20 @@
 
 use std::{env, error::Error, fs, path::PathBuf};
 
-use barracuda_board_config::parse;
+use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use esp_idf_part::{AppType, Flags, Partition, PartitionTable, SubType, Type};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-env-changed=BARRACUDA_BOARD");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
-    let board_name = env::var("BARRACUDA_BOARD").unwrap_or_else(|_| "esp32c6-devkitc-1".into());
-    validate_name(&board_name)?;
+    let selection_path = root.join(SELECTED_BOARD_PATH);
+    println!("cargo:rerun-if-changed={}", selection_path.display());
+    let board_name = if env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("riscv32") {
+        read_selected_board(&root)?
+            .ok_or("no Board selected; run `cargo board select` first")?
+    } else {
+        "esp32c6-devkitc-1".into()
+    };
     let bundle = root.join("boards/configs").join(&board_name);
     let board_path = bundle.join("board.yml");
     println!("cargo:rerun-if-changed={}", board_path.display());
@@ -81,15 +86,4 @@ fn render_region(partition: &Partition) -> String {
         partition.offset(),
         partition.size()
     )
-}
-
-fn validate_name(value: &str) -> Result<(), Box<dyn Error>> {
-    if value.is_empty()
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        return Err(format!("invalid Board name `{value}`").into());
-    }
-    Ok(())
 }

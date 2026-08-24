@@ -4,8 +4,6 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use embedded_nal_async::{Dns, TcpConnect};
-use reqwless::response::Status;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -97,11 +95,11 @@ fn truncated_error_body(mut body: String) -> String {
 
 fn status_is_transient(status: StatusCode) -> bool {
     let code = status.0;
-    code == STATUS_REQUEST_TIMEOUT || status == Status::TooManyRequests || status.is_server_error()
+    code == STATUS_REQUEST_TIMEOUT || code == 429 || status.is_server_error()
 }
 
-pub(super) async fn post_json<Tcp: TcpConnect, Resolver: Dns>(
-    http: &mut NetClient<'_, Tcp, Resolver>,
+pub(super) async fn post_json(
+    http: &mut NetClient<'_>,
     context: &BackendContext,
     body: &str,
 ) -> Result<Response, ModelApiError> {
@@ -120,8 +118,8 @@ pub(super) async fn post_json<Tcp: TcpConnect, Resolver: Dns>(
     }
 }
 
-pub(super) async fn post_stream<'h, Tcp: TcpConnect, Resolver: Dns>(
-    http: &'h mut NetClient<'_, Tcp, Resolver>,
+pub(super) async fn post_stream<'h>(
+    http: &'h mut NetClient<'_>,
     context: &BackendContext,
     body: String,
     sse: ProviderSse,

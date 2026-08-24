@@ -1,7 +1,8 @@
 //! Compile-time Platform resource contract.
 //!
 //! Platforms expose exact platform mechanisms. The current common contract is
-//! one Embassy IP stack and one generic collection of native partitions.
+//! one Embassy IP stack, one TLS client capability, and one generic collection
+//! of native partitions.
 
 #![no_std]
 
@@ -172,16 +173,20 @@ impl core::fmt::Display for PartitionsInsertError {
 impl core::error::Error for PartitionsInsertError {}
 
 /// Portable mechanisms produced by one concrete Platform.
-pub struct PlatformResources<Partitions> {
+pub struct PlatformResources<Tls, Partitions> {
     /// Embassy IP stack. Its device runner remains Platform-owned.
     pub ip_stack: Stack<'static>,
+    /// Platform-owned TLS client capability.
+    pub tls: Tls,
     /// Arbitrarily named regions projected from the Platform's native layout.
     pub partitions: Partitions,
 }
 
 /// Result of initializing one statically selected [`Platform`].
-pub type PlatformInitResult<P> =
-    Result<PlatformResources<<P as Platform>::Partitions>, <P as Platform>::Error>;
+pub type PlatformInitResult<P> = Result<
+    PlatformResources<<P as Platform>::Tls, <P as Platform>::Partitions>,
+    <P as Platform>::Error,
+>;
 
 /// One statically selected Barracuda execution platform.
 ///
@@ -195,6 +200,8 @@ pub trait Platform: Sized + 'static {
     /// a concrete binding type containing only the chip resources that Target
     /// composition assigned to Platform mechanisms.
     type Bindings;
+    /// TLS client capability initialized and owned by this Platform.
+    type Tls;
     /// Generic named partition collection produced from the native layout.
     type Partitions;
     /// Platform initialization failure.

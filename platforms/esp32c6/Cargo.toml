@@ -9,6 +9,7 @@ barracuda-board = { path = "../../boards/api" }
 barracuda-platform = { path = "../api" }
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
+barracuda-tls = { path = "../../shared/tls" }
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net.workspace = true

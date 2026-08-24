@@ -145,6 +145,7 @@ mod internal_flash {
     /// Board/HAL bindings consumed by [`Esp32c6Platform`].
     pub struct Esp32c6PlatformBindings {
         ip_stack: Stack<'static>,
+        tls: barracuda_tls::MbedTlsInput,
         flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32c6Flash<'static>>>,
     }
 
@@ -161,12 +162,17 @@ mod internal_flash {
         pub fn from_initialized_services(
             board: &Board,
             ip_stack: Stack<'static>,
+            tls: barracuda_tls::MbedTlsInput,
             flash: &'static Mutex<CriticalSectionRawMutex, RefCell<Esp32c6Flash<'static>>>,
         ) -> Result<Self, Esp32c6PlatformError> {
             if board.hardware().chip() != "esp32c6" {
                 return Err(Esp32c6PlatformError::IncompatibleChip);
             }
-            Ok(Self { ip_stack, flash })
+            Ok(Self {
+                ip_stack,
+                tls,
+                flash,
+            })
         }
     }
 
@@ -202,6 +208,7 @@ mod internal_flash {
 
     impl Platform for Esp32c6Platform {
         type Bindings = Esp32c6PlatformBindings;
+        type Tls = barracuda_tls::MbedTls;
         type Partitions = Esp32c6Partitions;
         type Error = Esp32c6PlatformError;
 
@@ -210,20 +217,24 @@ mod internal_flash {
             bindings: Self::Bindings,
         ) -> PlatformInitResult<Self> {
             let partitions = partitions(bindings.flash)?;
+            let tls = bindings.tls.initialize()?;
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
+                tls,
                 partitions,
             })
         }
     }
 
     /// ESP32-C6 Platform initialization failure.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[derive(Debug)]
     pub enum Esp32c6PlatformError {
         /// The selected Board targets a different chip family.
         IncompatibleChip,
         /// The native table exceeded or violated the generic collection.
         Partitions(PartitionsInsertError),
+        /// Platform TLS initialization failed.
+        Tls(barracuda_tls::TlsError),
     }
 
     impl From<PartitionsInsertError> for Esp32c6PlatformError {
@@ -232,11 +243,18 @@ mod internal_flash {
         }
     }
 
+    impl From<barracuda_tls::TlsError> for Esp32c6PlatformError {
+        fn from(error: barracuda_tls::TlsError) -> Self {
+            Self::Tls(error)
+        }
+    }
+
     impl core::fmt::Display for Esp32c6PlatformError {
         fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             match self {
                 Self::IncompatibleChip => formatter.write_str("incompatible ESP32 chip"),
                 Self::Partitions(error) => write!(formatter, "invalid ESP32 partitions: {error}"),
+                Self::Tls(error) => write!(formatter, "failed to initialize ESP32 TLS: {error}"),
             }
         }
     }

@@ -1,0 +1,32 @@
+[package]
+name = "barracuda-tls"
+version = "0.1.0"
+edition = "2021"
+description = "Platform-owned TLS client capability for Barracuda"
+
+[features]
+default = ["mbedtls"]
+mbedtls = [
+    "http-client/mbedtls",
+    "dep:mbedtls-rs",
+]
+pem = ["mbedtls", "mbedtls-rs/pem-parse"]
+std = ["mbedtls", "mbedtls-rs/std"]
+
+[dependencies]
+http-client = { path = "../http-client" }
+mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
+rand_core = "0.10.0-rc-2"
+thiserror = { version = "2", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

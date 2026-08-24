@@ -7,9 +7,9 @@
 //!
 //! # Overview
 //!
-//! [`ModelApi`] owns one long-lived reqwless client, including its persistent
-//! connection and reusable buffers. Install a complete [`ModelApiConfig`], then issue
-//! requests:
+//! [`ModelApi`] owns one long-lived shared HTTP client, including its persistent
+//! connection and reusable buffers. Install a complete [`ModelApiConfig`], then
+//! issue requests:
 //!
 //! | Method | Request | Returns |
 //! |---|---|---|
@@ -18,10 +18,9 @@
 //! | [`ModelApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
 //! | [`ModelApi::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
-//! Networking uses reqwless directly. The application supplies independent
-//! `embedded_nal_async::TcpConnect` and `embedded_nal_async::Dns` implementations
-//! to [`ModelApi`]; Embassy and host applications share all HTTP behavior and
-//! differ only at those official transport boundaries.
+//! Networking is delegated to the workspace-wide [`http_client::Client`]
+//! facade. [`ModelApi`] receives that client directly and has no TCP, DNS, TLS,
+//! buffer, or concrete HTTP-engine parameters.
 //!
 //! # Cancellation
 //!
@@ -58,8 +57,6 @@
 )]
 
 extern crate alloc;
-#[cfg(feature = "mbedtls-host")]
-extern crate std;
 
 // Implementation modules are private: the public surface is the curated
 // re-exports below. The backend registry, media-prep pipeline, prompt helpers,
@@ -68,8 +65,6 @@ mod backends;
 mod chat_stream;
 mod client;
 mod errors;
-#[cfg(feature = "mbedtls-host")]
-mod host_tls;
 mod media;
 mod retry;
 mod transport;
@@ -80,17 +75,6 @@ pub use barracuda_runtime_utils::stream;
 pub use chat_stream::ChatStream;
 pub use client::{ModelApi, ModelApiFactory};
 pub use errors::{ChatError, ChatJsonError, InferMediaError, InitError, ModelApiError};
-#[cfg(feature = "mbedtls-host")]
-pub use host_tls::{HostTls, HostTlsError};
-#[cfg(feature = "mbedtls-host")]
-pub use mbedtls_rs::Tls;
-#[cfg(feature = "mbedtls")]
-pub use reqwless::client::TlsConfig;
-#[cfg(feature = "embedded-tls")]
-pub use reqwless::client::{TlsConfig, TlsVerify};
-pub use reqwless::response::StatusCode;
-#[cfg(feature = "mbedtls")]
-pub use reqwless::{Certificate, Credentials, TlsReference, TlsVersion, X509};
 pub use transport::Error as HttpError;
 #[cfg(feature = "cache_profile")]
 pub use types::ProviderUsage;
@@ -98,3 +82,18 @@ pub use types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, ChatStreamEvent, LlmResponse, MediaAsset,
     MediaRequest, ModelApiConfig, RetryPolicy, StaticOutputSchema, ToolCall,
 };
+
+/// HTTP response status used by Model API errors without exposing the
+/// underlying HTTP transport implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatusCode(pub u16);
+
+impl StatusCode {
+    pub(crate) fn is_successful(self) -> bool {
+        (200..300).contains(&self.0)
+    }
+
+    pub(crate) fn is_server_error(self) -> bool {
+        (500..600).contains(&self.0)
+    }
+}

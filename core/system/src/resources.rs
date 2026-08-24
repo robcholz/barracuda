@@ -2,16 +2,21 @@ use barracuda_platform::{PartitionAccess, Partitions, PlatformResources};
 use barracuda_target_api::TargetResources;
 use embassy_net::Stack;
 
-const FILESYSTEM_PARTITION: &str = "filesystem";
-const DATABASE_PARTITION: &str = "database";
-const WEB_ASSETS_PARTITION: &str = "web-assets";
+const SYSTEM_PARTITION: &str = "system";
+const KV_DATABASE_PARTITION: &str = "kv_database";
+const WEB_ASSETS_PARTITION: &str = "web_assets";
 
-pub(super) struct PreparedTarget<Region, BoardHal, const P: usize> {
-    pub(super) ip_stack: Stack<'static>,
-    pub(super) partitions: Partitions<Region, P>,
-    pub(super) filesystem: Region,
-    pub(super) database: Region,
+pub(super) struct PreparedPartitions<Region, const P: usize> {
+    pub(super) system: Region,
+    pub(super) kv_database: Region,
     pub(super) web_assets: Region,
+    pub(super) remaining: Partitions<Region, P>,
+}
+
+pub(super) struct PreparedTarget<Region, Tls, BoardHal, const P: usize> {
+    pub(super) ip_stack: Stack<'static>,
+    pub(super) tls: Tls,
+    pub(super) partitions: PreparedPartitions<Region, P>,
     pub(super) board_hal: BoardHal,
 }
 
@@ -36,24 +41,26 @@ pub enum SystemResourceError {
     },
 }
 
-pub(super) fn prepare<Region, BoardHal, const P: usize>(
-    resources: TargetResources<PlatformResources<Partitions<Region, P>>, BoardHal>,
-) -> Result<PreparedTarget<Region, BoardHal, P>, SystemResourceError> {
+pub(super) fn prepare<Region, Tls, BoardHal, const P: usize>(
+    resources: TargetResources<PlatformResources<Tls, Partitions<Region, P>>, BoardHal>,
+) -> Result<PreparedTarget<Region, Tls, BoardHal, P>, SystemResourceError> {
     let TargetResources {
-        platform: PlatformResources {
-            ip_stack,
-            mut partitions,
-        },
+        platform:
+            PlatformResources {
+                ip_stack,
+                tls,
+                mut partitions,
+            },
         board_hal,
     } = resources;
-    let filesystem = take_partition(
+    let system = take_partition(
         &mut partitions,
-        FILESYSTEM_PARTITION,
+        SYSTEM_PARTITION,
         PartitionAccess::ReadWrite,
     )?;
-    let database = take_partition(
+    let kv_database = take_partition(
         &mut partitions,
-        DATABASE_PARTITION,
+        KV_DATABASE_PARTITION,
         PartitionAccess::ReadWrite,
     )?;
     let web_assets = take_partition(
@@ -64,10 +71,13 @@ pub(super) fn prepare<Region, BoardHal, const P: usize>(
 
     Ok(PreparedTarget {
         ip_stack,
-        partitions,
-        filesystem,
-        database,
-        web_assets,
+        tls,
+        partitions: PreparedPartitions {
+            system,
+            kv_database,
+            web_assets,
+            remaining: partitions,
+        },
         board_hal,
     })
 }
@@ -110,10 +120,11 @@ mod tests {
 
     fn target(
         partitions: Partitions<u8, 4>,
-    ) -> TargetResources<PlatformResources<Partitions<u8, 4>>, BoardHal> {
+    ) -> TargetResources<PlatformResources<(), Partitions<u8, 4>>, BoardHal> {
         TargetResources {
             platform: PlatformResources {
                 ip_stack: never_embassy_stack(),
+                tls: (),
                 partitions,
             },
             board_hal: BoardHal(7),
@@ -123,17 +134,17 @@ mod tests {
     fn complete_partitions() -> Partitions<u8, 4> {
         let mut partitions = Partitions::new();
         partitions
-            .insert(partition("database", PartitionAccess::ReadWrite, 2))
-            .expect("insert database partition");
+            .insert(partition("kv_database", PartitionAccess::ReadWrite, 2))
+            .expect("insert KV database partition");
         partitions
             .insert(partition("future", PartitionAccess::ReadWrite, 4))
             .expect("insert future partition");
         partitions
-            .insert(partition("web-assets", PartitionAccess::ReadOnly, 3))
-            .expect("insert Web assets partition");
+            .insert(partition("system", PartitionAccess::ReadWrite, 1))
+            .expect("insert System partition");
         partitions
-            .insert(partition("filesystem", PartitionAccess::ReadWrite, 1))
-            .expect("insert filesystem partition");
+            .insert(partition("web_assets", PartitionAccess::ReadOnly, 3))
+            .expect("insert unassigned Web assets partition");
         partitions
     }
 
@@ -141,14 +152,15 @@ mod tests {
     fn prepares_target_resources_without_flattening_platform_and_board_hal() {
         let prepared = prepare(target(complete_partitions())).expect("prepare target resources");
 
-        assert_eq!(prepared.filesystem, 1);
-        assert_eq!(prepared.database, 2);
-        assert_eq!(prepared.web_assets, 3);
+        assert_eq!(prepared.partitions.system, 1);
+        assert_eq!(prepared.partitions.kv_database, 2);
+        assert_eq!(prepared.partitions.web_assets, 3);
         assert_eq!(prepared.board_hal, BoardHal(7));
-        assert_eq!(prepared.partitions.len(), 1);
+        assert_eq!(prepared.partitions.remaining.len(), 1);
         assert_eq!(
             prepared
                 .partitions
+                .remaining
                 .get("future")
                 .map(NamedPartition::region),
             Some(&4)
@@ -157,7 +169,7 @@ mod tests {
 
     #[test]
     fn rejects_each_missing_required_partition() {
-        for missing in ["filesystem", "database", "web-assets"] {
+        for missing in ["system", "kv_database", "web_assets"] {
             let mut partitions = complete_partitions();
             let _removed = partitions.take(missing);
 
@@ -176,17 +188,17 @@ mod tests {
     fn rejects_partition_access_that_does_not_match_its_system_role() {
         for (name, expected, actual) in [
             (
-                "filesystem",
+                "system",
                 PartitionAccess::ReadWrite,
                 PartitionAccess::ReadOnly,
             ),
             (
-                "database",
+                "kv_database",
                 PartitionAccess::ReadWrite,
                 PartitionAccess::ReadOnly,
             ),
             (
-                "web-assets",
+                "web_assets",
                 PartitionAccess::ReadOnly,
                 PartitionAccess::ReadWrite,
             ),

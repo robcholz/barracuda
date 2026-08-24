@@ -2,6 +2,7 @@ use barracuda_model_api::{BackendKind, ChatRequest, ModelApi, ModelApiConfig};
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
+use http_client::Client;
 use serde_json::json;
 
 fn main() -> anyhow::Result<()> {
@@ -9,7 +10,9 @@ fn main() -> anyhow::Result<()> {
         200,
         r#"{"choices":[{"message":{"role":"assistant","content":"hello"}}]}"#,
     )]);
-    let mut api = ModelApi::new(&stack, &stack, 4096, 512);
+    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
+        &stack, &stack, 4096, 512,
+    ));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "key",

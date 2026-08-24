@@ -7,7 +7,7 @@ description = "Barracuda system composition root that registers the fixed Plugin
 [features]
 default = []
 tokio = [
-    "barracuda-agent-plugin/mbedtls-host",
+    "barracuda-agent-plugin/std",
     "barracuda-vfs/std",
     "barracuda-webserver-plugin/std",
 ]
@@ -25,6 +25,8 @@ barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plug
 barracuda-plugin-manager = { path = "../plugin-manager" }
 barracuda-platform = { path = "../../platforms/api" }
 barracuda-target-api = { path = "../../composition/api" }
+barracuda-tls = { path = "../../shared/tls" }
+http-client = { path = "../../shared/http-client", features = ["mbedtls"] }
 barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
 barracuda-vfs = { path = "../../shared/vfs" }

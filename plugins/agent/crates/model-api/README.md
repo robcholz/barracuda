@@ -1,14 +1,13 @@
 # barracuda-model-api
 
 LLM client: OpenAI- and Anthropic-compatible chat, structured JSON output, and
-image inference over reqwless.
+image inference over the workspace-wide `http-client` transport.
 
 The standalone LLM surface can be reused independently of agent execution.
 
 ## Entry point
 
-`ModelApi` owns one long-lived reqwless client, persistent connection, and
-reusable buffers:
+`ModelApi` owns one injected `http_client::Client` facade:
 
 | Method | Request | Returns |
 |---|---|---|
@@ -21,13 +20,12 @@ Both `openai_compatible` and `anthropic_compatible` backends are supported; the
 crate converts the unified request shape (and tool definitions, tool-call /
 tool-result roles, structured-output config) into each provider's wire format.
 
-## Networking is injected
+## HTTP is injected
 
-The application supplies independent `embedded_nal_async::TcpConnect` and
-`embedded_nal_async::Dns` implementations directly to `ModelApi`. Embassy and
-host applications use the same reqwless HTTP code and differ only at those
-official transport boundaries. Sequential calls on one `ModelApi` reuse one
-reqwless `HttpResource` connection.
+The application supplies `http_client::Client` directly to `ModelApi`. TCP,
+DNS, TLS, concrete HTTP engine, connection state, and buffer sizes are owned by
+`shared/http-client` and its composition-time `ClientFactory`. Sequential calls
+on one `ModelApi` reuse its client connection when the server permits it.
 
 ## Cancellation
 
@@ -66,10 +64,10 @@ pipeline, retry loop — are private):
 cargo run -p barracuda-model-api --example client
 ```
 
-Builds a client over the wire-level scripted TCP/DNS stack and runs a chat.
+Builds a facade client over a scripted test network and runs a chat.
 
 ## Where it fits
 
-A no_std core crate depending on `embedded-nal-async`, `embassy-time`, `barracuda-runtime-utils`,
-`serde`/`serde_json`, `base64`, and `thiserror`. It is consumed by `barracuda-agent-runtime`
-and the memory-side LLM providers.
+A no_std core crate depending on `http-client`, `embassy-time`,
+`barracuda-runtime-utils`, `serde`/`serde_json`, `base64`, and `thiserror`. It is
+consumed by `barracuda-agent-runtime` and the memory-side LLM providers.

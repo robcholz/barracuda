@@ -6,6 +6,7 @@ use barracuda_board::{Board, Hardware, NativeLayout};
 use barracuda_platform_macos::{
     FileLayout, FileRegion, MacosPlatform, MacosPlatformError, MacosSettings,
 };
+use barracuda_tls::ClientTls as _;
 
 const REGIONS: &[FileRegion] = &[
     FileRegion::read_write("fs", 0, 4096),
@@ -28,6 +29,12 @@ static LINUX_BOARD: Board = Board::new(
 fn macos_platform_installs_its_os_reactor_for_embassy() {
     MacosPlatform::install_reactor().expect("install Tokio reactor");
     assert!(tokio::runtime::Handle::try_current().is_ok());
+}
+
+#[test]
+fn macos_platform_owns_host_tls_initialization() {
+    let tls = MacosPlatform::initialize_tls().expect("initialize macOS TLS");
+    assert!(tls.config().is_some());
 }
 
 #[tokio::test(flavor = "current_thread")]

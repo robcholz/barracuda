@@ -8,6 +8,7 @@ mod flash;
 mod layout;
 mod network;
 mod platform;
+mod tls;
 mod tun;
 
 pub use flash::{FileNorFlash, FileNorFlashError, VolatileNorFlash, VolatileNorFlashError};
@@ -16,6 +17,7 @@ pub use network::{MacosNetworkError, NETWORK_FD_ENV};
 pub use platform::{
     MacosPartition, MacosPartitions, MacosPlatform, MacosPlatformError, MacosSettings,
 };
+pub use tls::MacosTlsError;
 pub use tun::{GATEWAY_ADDRESS, STACK_ADDRESS};
 
 include!(concat!(env!("OUT_DIR"), "/macos_config.rs"));

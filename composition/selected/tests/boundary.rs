@@ -32,3 +32,13 @@ fn only_outer_composition_depends_on_both_selected_axes() -> Result<(), std::io:
     assert!(manifest.contains("barracuda-board-selected"));
     Ok(())
 }
+
+#[test]
+fn outer_composition_does_not_guess_a_board_from_the_target() -> Result<(), std::io::Error> {
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+    )?;
+    assert!(!manifest.contains("features = ["));
+    assert_eq!(manifest.matches("barracuda-board-selected").count(), 1);
+    Ok(())
+}

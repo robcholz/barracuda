@@ -7,7 +7,6 @@ mod openai_compatible;
 pub(crate) mod shared;
 pub(crate) mod sse;
 
-use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use strum::{Display, EnumString, IntoStaticStr};
@@ -75,9 +74,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat<Tcp: TcpConnect, Resolver: Dns>(
+    pub(crate) async fn chat(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &ChatRequest<'_>,
     ) -> Result<LlmResponse, ChatError> {
         match self {
@@ -86,9 +85,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat_json<Tcp: TcpConnect, Resolver: Dns>(
+    pub(crate) async fn chat_json(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &ChatJsonRequest<'_>,
         schema_name: &str,
         schema: &Value,
@@ -99,9 +98,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn infer_media<Tcp: TcpConnect, Resolver: Dns>(
+    pub(crate) async fn infer_media(
         &self,
-        http: &mut NetClient<'_, Tcp, Resolver>,
+        http: &mut NetClient<'_>,
         request: &MediaRequest<'_>,
     ) -> Result<String, InferMediaError> {
         match self {
@@ -110,9 +109,9 @@ impl Backend {
         }
     }
 
-    pub(crate) async fn chat_stream<'h, Tcp: TcpConnect, Resolver: Dns>(
+    pub(crate) async fn chat_stream<'h>(
         &self,
-        http: &'h mut NetClient<'_, Tcp, Resolver>,
+        http: &'h mut NetClient<'_>,
         request: &ChatRequest<'_>,
     ) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
         match self {

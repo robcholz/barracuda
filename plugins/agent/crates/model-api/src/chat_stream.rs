@@ -76,7 +76,7 @@ pub(crate) struct ProviderStream<S> {
     /// `None` after provider completion or a terminal parser error.
     parser: Option<ProviderSse>,
     /// Provider completion was observed; drain the remaining HTTP framing so
-    /// reqwless can safely reuse the connection.
+    /// the shared HTTP client can safely reuse the connection.
     drain_after_done: bool,
     queue: VecDeque<Result<ChatStreamEvent, ChatError>>,
 }

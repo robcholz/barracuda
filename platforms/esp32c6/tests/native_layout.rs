@@ -13,16 +13,23 @@ fn native_csv_supplies_the_complete_partition_table() {
     assert!(BOARD_ESP32C6_PARTITION_TABLE.get("ota_0").is_some());
     assert_eq!(
         BOARD_ESP32C6_PARTITION_TABLE
-            .get("database")
-            .expect("database region")
+            .get("kv_database")
+            .expect("KV database region")
             .offset(),
         0x42_0000
     );
+    assert_eq!(
+        BOARD_ESP32C6_PARTITION_TABLE
+            .get("system")
+            .expect("System region")
+            .offset(),
+        0x52_0000
+    );
 
     let assets = BOARD_ESP32C6_PARTITION_TABLE
-        .get("web-assets")
+        .get("web_assets")
         .expect("Web asset region");
-    assert_eq!(assets.name(), "web-assets");
+    assert_eq!(assets.name(), "web_assets");
     assert_eq!(assets.access(), Esp32c6RegionAccess::ReadOnly);
 }
 
