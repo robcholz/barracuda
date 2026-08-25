@@ -3,12 +3,17 @@
 
 extern crate alloc;
 
+mod client;
 mod model;
 mod multipart;
 mod reqwless_client;
 
+pub use client::{Client, ClientFactory, RequestBuilder};
 pub use model::{
     Body, BodyError, BodyStream, Header, HttpClient, HttpFuture, Method, Request, Response,
+    ResponsePart, ResponseStream,
 };
 pub use multipart::{Multipart, MultipartError};
-pub use reqwless_client::{Error, ReqwlessClient};
+#[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
+pub use reqwless::client::TlsConfig;
+pub use reqwless_client::Error;

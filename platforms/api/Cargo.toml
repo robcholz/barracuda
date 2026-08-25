@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-platform"
+version = "0.1.0"
+edition = "2021"
+description = "Zero-cost platform initialization contract for Barracuda"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+embassy-executor.workspace = true
+embassy-net.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

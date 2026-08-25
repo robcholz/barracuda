@@ -3,6 +3,9 @@
 //! Run one scenario per process so retained memory and allocation totals stay
 //! attributable to that workload.
 
+#![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
+
 use core::cell::Cell;
 use core::future::Future;
 use core::pin::Pin;
@@ -12,10 +15,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext, Router,
-    RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext,
-    WorkflowClient,
+    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, Router, RpcFrame,
+    RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext, WorkflowClient,
 };
+use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
 use futures_lite::future::{block_on, poll_once};
 use static_cell::StaticCell;
@@ -273,11 +276,10 @@ fn profile_catalog(output: &Path) -> Report {
             )
         })
         .collect();
-    static FILESYSTEM: StaticCell<MemFs> = StaticCell::new();
     static LANES: StaticCell<RpcLaneStorage<2, EVENT_FRAME, 2>> = StaticCell::new();
-    let filesystem: &'static MemFs = FILESYSTEM.init(MemFs::new());
+    block_on(install_global_memory_vfs()).expect("install global benchmark VFS");
     let lanes = LANES.init(RpcLaneStorage::new());
-    let mut router = EventRouter::new(lanes, filesystem, "catalog-profile").expect("create router");
+    let mut router = block_on(EventRouter::new(lanes)).expect("create router");
     let state = Rc::new(CatalogState::default());
     router
         .load(Box::new(CatalogLoader {
@@ -291,7 +293,6 @@ fn profile_catalog(output: &Path) -> Report {
     let live = profile.stats();
     drop(router);
     drop(state);
-    filesystem.clear();
     let after_drop = profile.stats();
     drop(profile);
     Report { live, after_drop }

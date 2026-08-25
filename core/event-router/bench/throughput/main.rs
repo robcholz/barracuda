@@ -5,6 +5,8 @@
 
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
+#![allow(clippy::arithmetic_side_effects)]
+#![allow(clippy::too_many_arguments)]
 
 use core::cell::{Cell, RefCell};
 use core::future::{pending, Future};
@@ -14,11 +16,11 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter, MemFs,
-    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
-    WorkflowClient,
+    Component, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter, RegisterContext,
+    RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
 };
-use futures_lite::future::yield_now;
+use barracuda_platform_test::install_global_memory_vfs;
+use futures_lite::future::{block_on, yield_now};
 
 const DEFAULT_SAMPLES: usize = 7;
 
@@ -249,9 +251,8 @@ fn one_sample<const N: usize, const M: usize, const Q: usize, const P: usize>(
         return Err(format!("N={N} must exceed fanout={fanout}"));
     }
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, M, Q>::new()));
-    let filesystem = Box::leak(Box::new(MemFs::new()));
-    let mut router = EventRouter::new(lanes, filesystem, format!("bench-{scenario}-{sample}"))
-        .map_err(|error| error.to_string())?;
+    block_on(install_global_memory_vfs()).map_err(|error| error.to_string())?;
+    let mut router = block_on(EventRouter::new(lanes)).map_err(|error| error.to_string())?;
     let state = Rc::new(State::default());
     router
         .load(Box::new(Producer::<N, M, P> {

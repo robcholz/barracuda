@@ -16,33 +16,38 @@ use barracuda_workflow::integration::WorkflowRuntimeView;
 
 use workflow::WorkflowComponent;
 
-pub use barracuda_fs::{FileSystem, FsError, FsFile, MemFs};
 pub use barracuda_router::{
     CleanupError, Component, ComponentCleanupFailure, ComponentError, ComponentFuture, ComponentId,
     ComponentResult, LoadError, RegisterContext, Router, RouterError, RunContext, UnloadError,
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    RpcAddress, RpcAddressError, RpcCallId, RpcClient, RpcContext, RpcEndpointId, RpcError,
-    RpcFrame, RpcGroup, RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput,
-    RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage, RpcMethod, RpcMulticastBranch,
-    RpcOutputMode, RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter,
-    RpcRegistration, RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming, Unary,
+    rpc_dynamic, rpc_message, Dynamic, JsonCodec, RpcAddress, RpcAddressError, RpcCallId,
+    RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
+    RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
+    RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
+    RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration,
+    RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, RpcWire, Streaming, Unary, WireField,
+    WireSupport,
 };
+/// Host-side JSON Schema bake pipeline, surfaced through the facade for
+/// `build.rs` and wire crates. Requires the `schema` feature and never ships to
+/// the device.
+#[cfg(feature = "schema")]
+pub use barracuda_rpc_schema::{bake_all, register, SchemaEntry};
+pub use barracuda_vfs::FsError;
 pub use barracuda_workflow::{
-    EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode, Rule,
-    RuleError, WorkflowClient, WorkflowControlError, WorkflowControlRejection, WorkflowDefinition,
-    WorkflowDefinitionError, WorkflowExecutionError, WorkflowFailure, WorkflowId, WorkflowIdError,
-    WorkflowInfo, WorkflowLoadError, WorkflowUnloadError,
+    validate_definition, EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError,
+    EventInputMode, Rule, RuleError, Topic, TopicError, WorkflowClient, WorkflowControlError,
+    WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError,
+    WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError,
+    WorkflowUnloadError, TOPIC_MAX_BYTES,
 };
 
 /// Failure while constructing Event Router and restoring durable Workflows.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum EventRouterCreateError {
-    /// The configured Workflow persistence directory is empty.
-    #[error("Workflow persistence directory cannot be empty")]
-    InvalidPersistenceDirectory,
     /// A filesystem operation failed while initializing or restoring Workflows.
     #[error(transparent)]
     Persistence(#[from] FsError),
@@ -54,9 +59,6 @@ pub enum EventRouterCreateError {
         /// Workflow validation failure.
         rejection: WorkflowControlRejection,
     },
-    /// A persisted file name did not match its JSON Workflow ID.
-    #[error("persisted Workflow path does not match its ID: {0}")]
-    MismatchedPersistedWorkflow(alloc::string::String),
     /// A Component lifecycle failure prevented Event Router construction.
     #[error(transparent)]
     Component(#[from] LoadError),
@@ -74,27 +76,22 @@ pub struct EventRouter<const N: usize, const M: usize, const Q: usize> {
 }
 
 impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
-    /// Creates an Event Router backed by a statically dispatched filesystem.
+    /// Creates an Event Router on System's mounted VFS.
     ///
-    /// Persisted Workflow JSON is restored from `persistence_directory` before
-    /// the internal Workflow Component is registered.
+    /// Persisted Workflow JSON is restored from `/system/workflows.json`
+    /// before the internal Workflow Component is registered. Event Router owns
+    /// only that file; sibling paths in `/system` remain available to other
+    /// System services.
     ///
     /// # Errors
     ///
-    /// Returns an error when the persistence directory cannot be initialized,
-    /// a persisted Workflow is invalid, or the internal Component cannot be
-    /// loaded.
-    pub fn new<Filesystem>(
+    /// Returns an error when the catalog cannot be initialized, a persisted
+    /// Workflow is invalid, or the internal Component cannot be loaded.
+    pub async fn new(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        filesystem: &'static Filesystem,
-        persistence_directory: impl Into<alloc::string::String>,
-    ) -> Result<Self, EventRouterCreateError>
-    where
-        Filesystem: FileSystem,
-    {
+    ) -> Result<Self, EventRouterCreateError> {
         let mut router = Router::new(lanes);
-        let (workflow_component, workflow) =
-            WorkflowComponent::new(filesystem, persistence_directory.into())?;
+        let (workflow_component, workflow) = WorkflowComponent::new().await?;
         router.load(Box::new(workflow_component))?;
         Ok(Self { router, workflow })
     }
@@ -145,12 +142,13 @@ mod tests {
 
     use alloc::boxed::Box;
     use alloc::rc::Rc;
+    use barracuda_platform_test::install_global_memory_vfs;
     use core::cell::Cell;
     use core::future::pending;
 
     use super::{
-        Component, ComponentFuture, ComponentResult, EventRouter, MemFs, RegisterContext,
-        RpcLaneStorage, RunContext, UnregisterContext,
+        Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcLaneStorage,
+        RunContext, UnregisterContext,
     };
 
     const FRAME_SIZE: usize = 64;
@@ -180,9 +178,10 @@ mod tests {
     #[test]
     fn event_router_composes_router_and_workflow_runtime() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-        let filesystem = Box::leak(Box::new(MemFs::new()));
+        futures_lite::future::block_on(install_global_memory_vfs())
+            .expect("install global test VFS");
         let mut event_router =
-            EventRouter::new(lanes, filesystem, "workflows").expect("create Event Router");
+            futures_lite::future::block_on(EventRouter::new(lanes)).expect("create Event Router");
         let registered = Rc::new(Cell::new(false));
 
         assert!(event_router.workflow_definitions().is_empty());

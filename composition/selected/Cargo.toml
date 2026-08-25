@@ -1,0 +1,24 @@
+[package]
+name = "barracuda-target"
+version = "0.1.0"
+edition = "2021"
+description = "Selected Barracuda Platform and Board HAL composition"
+
+[dependencies]
+barracuda-board-selected = { path = "../../boards/selected" }
+barracuda-platform-selected = { path = "../../platforms/selected" }
+barracuda-target-api = { path = "../api" }
+embassy-executor.workspace = true
+thiserror = { version = "2", default-features = false }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

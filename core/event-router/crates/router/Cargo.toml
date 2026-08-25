@@ -11,7 +11,7 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-rpc = { path = "../rpc" }
 getset = "0.1.7"
-thiserror = "2"
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 futures-lite = "2"

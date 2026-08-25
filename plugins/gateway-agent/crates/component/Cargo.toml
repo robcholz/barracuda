@@ -1,0 +1,39 @@
+[package]
+name = "barracuda-gateway-agent-component"
+version = "0.1.0"
+edition = "2021"
+description = "Gateway-Agent bridge Component for Event Router"
+
+[dependencies]
+barracuda-agent-component = { path = "../../../agent/crates/component" }
+barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-imessage-gateway-component = { path = "../../../imessage-gateway/crates/component" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+barracuda-agent-runtime = { path = "../../../agent/crates/runtime" }
+barracuda-model-api = { path = "../../../agent/crates/model-api" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
+http-client = { path = "../../../../shared/http-client" }
+static_cell = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

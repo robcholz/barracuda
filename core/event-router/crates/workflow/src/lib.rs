@@ -10,18 +10,22 @@ mod control;
 mod definition;
 mod event;
 mod ingress;
+mod link;
 mod rule;
 mod runtime;
+mod topic;
 
 pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
-    WorkflowUnloadError,
+    WorkflowStep, WorkflowUnloadError,
 };
 pub use event::{
     EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode,
 };
+pub use link::LinkError;
 pub use rule::{Rule, RuleError};
-pub use runtime::{WorkflowExecutionError, WorkflowFailure, WorkflowInfo};
+pub use runtime::{validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo};
+pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 
 /// Runtime integration surface used by Event Router's Component adapter.
 pub mod integration {

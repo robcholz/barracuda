@@ -1,0 +1,6 @@
+interface:
+  display_name: "Example Authoring"
+  short_description: "Write runnable examples that teach one usage"
+  default_prompt: "Use $write-example to write or review a runnable example."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,7 @@
+name: linux
+crate: barracuda_platform_linux
+type: LinuxPlatform
+settings:
+  state-directory: .barracuda
+  flash-image: board.flash
+  network-interface: barracuda0

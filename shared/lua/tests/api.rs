@@ -1,14 +1,242 @@
 use barracuda_lua::{
-    Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Result, Table, UserData,
-    UserDataHandle, UserDataMethods, Variadic,
+    Environment, Error, ErrorKind, Function, Lua, LuaReturn, MetaMethod, Package, Result, Table,
+    UserData, UserDataHandle, UserDataMethods, Variadic,
 };
+
+#[test]
+fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let sandboxed: bool = lua
+        .load(
+            "return _G == _ENV and package == nil and io == nil and os == nil \
+             and debug == nil and load == nil and loadfile == nil and dofile == nil \
+             and collectgarbage == nil and warn == nil and print == nil \
+             and getmetatable == nil and setmetatable == nil \
+             and rawget == nil and rawset == nil and rawlen == nil and rawequal == nil \
+             and not pcall(require, '_G') and not pcall(require, 'package') \
+             and type(require) == 'function' and type(pcall) == 'function' \
+             and type(tostring) == 'function' and type(select) == 'function'",
+        )
+        .eval()?;
+
+    assert!(sandboxed);
+    Ok(())
+}
+
+struct FlagPackage {
+    name: &'static str,
+}
+
+impl Package for FlagPackage {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        lua.register_lib(self.name, |package| package.set("installed", true))
+    }
+}
+
+const TEST_IO_INSTALL: &str = r##"
+local io = require("io")
+local emit = io.__emit
+io.__emit = nil
+function io.print(...)
+    local line = ""
+    for index = 1, select("#", ...) do
+        if index > 1 then
+            line = line .. "\t"
+        end
+        line = line .. tostring(select(index, ...))
+    end
+    emit(line)
+end
+"##;
+
+struct TestIo {
+    input: async_channel::Receiver<String>,
+    output: async_channel::Sender<String>,
+}
+
+impl Package for TestIo {
+    fn install(&self, lua: &mut Lua) -> Result<()> {
+        let input = self.input.clone();
+        let output = self.output.clone();
+        lua.register_lib("io", move |package| {
+            package.register_async("input", move |(): ()| {
+                let input = input.clone();
+                async move { Some(Ok(input.recv().await.ok())) }
+            })?;
+            package.register_async("__emit", move |line: String| {
+                let output = output.clone();
+                async move {
+                    let _ = output.send(line).await;
+                    None::<Result<()>>
+                }
+            })
+        })?;
+        lua.load(TEST_IO_INSTALL).exec()
+    }
+}
+
+struct TestInput(async_channel::Sender<String>);
+
+impl TestInput {
+    async fn send(&self, value: impl Into<String>) -> Result<()> {
+        self.0
+            .send(value.into())
+            .await
+            .map_err(|_| Error::runtime("Lua input is closed"))
+    }
+
+    fn close(&self) {
+        self.0.close();
+    }
+}
+
+struct TestOutput(async_channel::Receiver<String>);
+
+impl TestOutput {
+    async fn next(&mut self) -> Option<String> {
+        self.0.recv().await.ok()
+    }
+}
+
+fn install_test_io(lua: &mut Lua) -> Result<(TestInput, TestOutput)> {
+    let (input_sender, input_receiver) = async_channel::bounded(16);
+    let (output_sender, output_receiver) = async_channel::bounded(16);
+    let io = TestIo {
+        input: input_receiver,
+        output: output_sender,
+    };
+    Environment::new().with_package(io).install(lua)?;
+    Ok((TestInput(input_sender), TestOutput(output_receiver)))
+}
+
+#[test]
+fn environment_composes_external_packages_in_a_chain() -> Result<()> {
+    let environment = Environment::new()
+        .with_package(FlagPackage { name: "first" })
+        .with_package(FlagPackage { name: "second" });
+    let mut lua = Lua::new()?;
+
+    environment.install(&mut lua)?;
+
+    assert!(
+        lua.load(
+            "local first = require('first') \
+             local second = require('second') \
+             return first.installed and second.installed",
+        )
+        .eval::<bool>()?
+    );
+    Ok(())
+}
+
+#[test]
+fn execution_environment_is_injected_after_sandbox_creation() -> Result<()> {
+    let mut lua = Lua::new()?;
+    assert!(
+        lua.load("return input == nil and print == nil and not pcall(require, 'io')")
+            .eval::<bool>()?
+    );
+
+    let (input, mut output) = install_test_io(&mut lua)?;
+    assert!(
+        lua.load(
+            "local io = require('io') \
+             return _G.io == nil \
+                 and input == nil \
+                 and print == nil \
+                 and io == require('io') \
+                 and io.__emit == nil \
+                 and type(io.input) == 'function' \
+                 and type(io.print) == 'function' \
+                 and io.read == nil \
+                 and io.write == nil",
+        )
+        .eval::<bool>()?
+    );
+
+    let completion = lua.run(
+        "local io = require('io'); \
+         local value = io.input(); \
+         io.print('received', value)",
+    );
+    futures_lite::future::block_on(input.send("message"))?;
+    input.close();
+    futures_lite::future::block_on(completion)?;
+
+    assert_eq!(
+        futures_lite::future::block_on(output.next()),
+        Some("received\tmessage".into())
+    );
+    assert_eq!(futures_lite::future::block_on(output.next()), None);
+    Ok(())
+}
 use core::{
+    alloc::{GlobalAlloc, Layout},
     cell::Cell,
     future::{Future, pending},
     pin::Pin,
     task::{Context, Poll, Waker},
 };
+use std::alloc::System;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+struct CountingAllocator {
+    allocations: AtomicUsize,
+    deallocations: AtomicUsize,
+}
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.allocations.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+        self.deallocations.fetch_add(1, Ordering::Relaxed);
+        unsafe { System.dealloc(pointer, layout) };
+    }
+}
+
+static LUA_ALLOCATOR: CountingAllocator = CountingAllocator {
+    allocations: AtomicUsize::new(0),
+    deallocations: AtomicUsize::new(0),
+};
+
+#[test]
+fn instruction_hook_yields_cpu_bound_lua_back_to_the_executor() -> Result<()> {
+    let hook_calls = Rc::new(Cell::new(0_u32));
+    let mut lua = Lua::new()?;
+    lua.set_instruction_hook(100, {
+        let hook_calls = Rc::clone(&hook_calls);
+        move || {
+            hook_calls.set(hook_calls.get().saturating_add(1));
+        }
+    })?;
+
+    let total = futures_lite::future::block_on(
+        lua.load("local n=0; for i=1,10000 do n=n+i end; return n")
+            .eval_async::<i64>(),
+    )?;
+
+    assert_eq!(total, 50_005_000);
+    assert_ne!(hook_calls.get(), 0);
+    Ok(())
+}
+
+#[test]
+fn lua_uses_the_external_rust_allocator() -> Result<()> {
+    let allocations_before = LUA_ALLOCATOR.allocations.load(Ordering::Relaxed);
+    let deallocations_before = LUA_ALLOCATOR.deallocations.load(Ordering::Relaxed);
+    let mut lua = unsafe { Lua::new_with_allocator(&raw const LUA_ALLOCATOR) }?;
+
+    assert_eq!(lua.load("return 42").eval::<i64>()?, 42);
+    drop(lua);
+
+    assert!(LUA_ALLOCATOR.allocations.load(Ordering::Relaxed) > allocations_before);
+    assert!(LUA_ALLOCATOR.deallocations.load(Ordering::Relaxed) > deallocations_before);
+    Ok(())
+}
 
 #[test]
 fn binds_sync_rust_function_with_mlua_shaped_api() -> Result<()> {
@@ -147,24 +375,18 @@ fn registers_a_lazy_require_only_library() -> Result<()> {
         Ok(())
     })?;
 
-    let before: (bool, bool, bool) = lua
-        .load(
-            "return native == nil, package.loaded.native == nil, \
-             type(package.preload.native) == 'function'",
-        )
-        .eval()?;
-    assert_eq!(before, (true, true, true));
+    let before: (bool, bool) = lua.load("return native == nil, package == nil").eval()?;
+    assert_eq!(before, (true, true));
 
-    let result: (bool, bool, String, i64) = futures_lite::future::block_on(
+    let result: (bool, String, i64) = futures_lite::future::block_on(
         lua.load(
             "local first = require('native'); \
              local second = require('native'); \
-             return first == second, package.loaded.native == first, \
-                    first.name, first.double(first.add(20, 1))",
+             return first == second, first.name, first.double(first.add(20, 1))",
         )
         .eval_async(),
     )?;
-    assert_eq!(result, (true, true, "barracuda".into(), 42));
+    assert_eq!(result, (true, "barracuda".into(), 42));
     Ok(())
 }
 
@@ -333,7 +555,7 @@ fn exposes_typed_rust_userdata_with_methods_and_drop() -> Result<()> {
     assert_eq!(result, (10, 15, "counter:15".into()));
     assert!(!dropped.get());
 
-    lua.load("collectgarbage('collect')").exec()?;
+    drop(lua);
     assert!(dropped.get());
     Ok(())
 }
@@ -578,14 +800,26 @@ fn exec_variants_and_completed_execution_are_well_defined() -> Result<()> {
         .as_mut()
         .poll(&mut Context::from_waker(Waker::noop()));
     assert!(matches!(second, Poll::Ready(Err(error)) if error.kind() == ErrorKind::Runtime));
+
+    let lua = Lua::new()?;
+    let mut execution = lua.run("return 7");
+    assert!(matches!(
+        Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Ok(()))
+    ));
+    assert!(matches!(
+        Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
+        Poll::Ready(Err(error)) if error.kind() == ErrorKind::Runtime
+    ));
     Ok(())
 }
 
 #[test]
 fn lua_exposes_input_output_and_execution_as_separate_flows() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, execution) =
-        lua.run("local name = input(); print('hello', name); return 'ignored top-level value'")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); local name = io.input(); io.print('hello', name); return 'ignored top-level value'");
 
     futures_lite::future::block_on(input.send("agent"))?;
     input.close();
@@ -601,9 +835,10 @@ fn lua_exposes_input_output_and_execution_as_separate_flows() -> Result<()> {
 
 #[test]
 fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, mut execution) =
-        lua.run("local first = input(); print(first); local eof = input(); print(eof == nil)")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let mut execution =
+        lua.run("local io = require('io'); local first = io.input(); io.print(first); local eof = io.input(); io.print(eof == nil)");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
@@ -628,9 +863,10 @@ fn input_waits_asynchronously_and_closed_input_becomes_nil() -> Result<()> {
 
 #[test]
 fn execution_errors_do_not_discard_buffered_output() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, execution) =
-        lua.run("print('before failure'); error('script failed')")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); io.print('before failure'); error('script failed')");
 
     let error = futures_lite::future::block_on(execution).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Runtime);
@@ -649,8 +885,10 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
     lua.register_lib("native", |lib| {
         lib.register_async("double", |value: i64| async move { Some(Ok(value * 2)) })
     })?;
-    let (_input, mut output, execution) =
-        lua.run("local native = require('native'); print(native.double(21))")?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run(
+        "local io = require('io'); local native = require('native'); io.print(native.double(21))",
+    );
 
     futures_lite::future::block_on(execution)?;
     assert_eq!(
@@ -662,8 +900,10 @@ fn lua_runs_with_registered_libraries() -> Result<()> {
 
 #[test]
 fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, output, execution) = lua.run("print('ignored'); print('also ignored')")?;
+    let mut lua = Lua::new()?;
+    let (_input, output) = install_test_io(&mut lua)?;
+    let execution =
+        lua.run("local io = require('io'); io.print('ignored'); io.print('also ignored')");
     drop(output);
 
     futures_lite::future::block_on(execution)?;
@@ -672,8 +912,9 @@ fn dropping_output_discards_prints_without_failing_the_script() -> Result<()> {
 
 #[test]
 fn dropping_execution_closes_both_data_flows() -> Result<()> {
-    let lua = Lua::new()?;
-    let (input, mut output, execution) = lua.run("input()")?;
+    let mut lua = Lua::new()?;
+    let (input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run("local io = require('io'); io.input()");
     drop(execution);
 
     let send_error = futures_lite::future::block_on(input.send("late")).unwrap_err();
@@ -684,8 +925,9 @@ fn dropping_execution_closes_both_data_flows() -> Result<()> {
 
 #[test]
 fn lua_defers_script_load_errors_to_execution() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, execution) = lua.run("this is not lua")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let execution = lua.run("this is not lua");
 
     let error = futures_lite::future::block_on(execution).unwrap_err();
     assert_eq!(error.kind(), ErrorKind::Load);
@@ -695,8 +937,10 @@ fn lua_defers_script_load_errors_to_execution() -> Result<()> {
 
 #[test]
 fn full_output_buffer_yields_until_the_host_consumes_a_message() -> Result<()> {
-    let lua = Lua::new()?;
-    let (_input, mut output, mut execution) = lua.run("for value = 1, 17 do print(value) end")?;
+    let mut lua = Lua::new()?;
+    let (_input, mut output) = install_test_io(&mut lua)?;
+    let mut execution =
+        lua.run("local io = require('io'); for value = 1, 17 do io.print(value) end");
 
     assert!(matches!(
         Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop())),
@@ -983,15 +1227,6 @@ fn userdata_checks_self_type_equality_and_runtime_borrows() -> Result<()> {
         assert_eq!(error.kind(), ErrorKind::Runtime);
     }
 
-    for source in [
-        "local c = counter(1); getmetatable(c).__eq()",
-        "local c = counter(1); getmetatable(c).__close()",
-    ] {
-        let error = lua.load(source).exec().unwrap_err();
-        assert_eq!(error.kind(), ErrorKind::Runtime);
-    }
-    lua.load("local c = counter(1); getmetatable(c).__gc()")
-        .exec()?;
     Ok(())
 }
 

@@ -1,0 +1,73 @@
+[package]
+name = "barracuda-agent-runtime"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Top-level Agent runtime API over single-agent execution and Sessions"
+autotests = false
+
+[lib]
+name = "barracuda_agent_runtime"
+path = "src/lib.rs"
+
+[[test]]
+name = "embassy_runtime"
+
+[features]
+# Concepts:
+# - target selection and concrete HAL adapters belong to the application, not
+#   to this executor-neutral framework crate.
+# - `cache_profile` forwards provider usage support.
+#
+std = ["barracuda-agent-skill/std"]
+multiagent = ["barracuda-agent-session/multiagent"]
+intrusive-observability = ["barracuda-agent/intrusive-observability"]
+# Provider token/cache usage diagnostics.
+cache_profile = [
+    "barracuda-model-api/cache_profile",
+    "barracuda-agent/cache_profile",
+    "barracuda-agent-session/cache_profile",
+]
+
+[dependencies]
+json-validator = { path = "../../../../shared/json-validator" }
+barracuda-agent = { path = "../agent", default-features = false }
+barracuda-agent-session = { path = "../session", default-features = false }
+barracuda-agent-memory = { path = "../memory" }
+barracuda-agent-skill = { path = "../skill" }
+barracuda-model-api = { path = "../model-api" }
+barracuda-agent-persistence = { path = "../persistence" }
+barracuda-agent-tool = { path = "../tool" }
+# Filesystem traits remain platform-neutral. HTTP is injected through the
+# shared client facade; time is provided globally by `embassy-time`.
+barracuda-vfs = { path = "../../../../shared/vfs" }
+barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
+async-channel = { version = "2", default-features = false }
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-core = { version = "0.3", default-features = false }
+log = { version = "0.4", default-features = false }
+thiserror = { version = "2", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+
+[dev-dependencies]
+http-client = { path = "../../../../shared/http-client" }
+# Host-only dependencies used by tests and the `tool_submit_loop` API example.
+anyhow = "1"
+barracuda-agent-trace = { path = "../trace" }
+# Host test dependencies enable serde's std support, so yaml-peg must expose
+# its matching std error implementation in the unified test graph.
+barracuda-agent-skill = { path = "../skill", features = ["std"] }
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
+# In-memory fs + scripted network doubles so the end-to-end tests run hermetically
+# (no network, no API key) entirely through the public API.
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+serde_json = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
+# `block_on` for tests (smol family; replaces the removed local spin executor).
+futures-lite = "2"
+tempdir = "0.3"
+static_cell = "2"
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unreachable_pub = "deny"

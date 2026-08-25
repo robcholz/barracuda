@@ -1,0 +1,107 @@
+[package]
+name = "barracuda-agent"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Single-Agent execution and context-provider implementations"
+# Agent manifests under `resources/agents/<kind>/` are parsed + validated at
+# compile time and emitted as typed catalog entries (see `manifest_gen/`),
+# so malformed metadata fails the build instead of the device at boot.
+build = "manifest_gen/main.rs"
+
+[lib]
+# barracuda_agent is a pure-Rust rlib bundled (with the other logic crates) into the
+# single `barracuda_rt` staticlib that the firmware links.
+crate-type = ["rlib"]
+
+[features]
+# Host-side API/cache profiling. Kept out of defaults so firmware does not pay
+# for diagnostic-only response fields and session events.
+cache_profile = ["barracuda-model-api/cache_profile"]
+# Include multiagent metadata in the baked Agent catalog for the sibling
+# barracuda-agent-multiagent policy crate.
+multiagent = []
+# Host-only raw Context snapshots served over a private WebSocket endpoint.
+intrusive-observability = [
+    "barracuda-agent-context/intrusive-observability",
+    "barracuda-agent-skill/std",
+]
+
+[dependencies]
+json-validator = { path = "../../../../shared/json-validator" }
+barracuda-vfs = { path = "../../../../shared/vfs" }
+barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
+barracuda-model-api = { path = "../model-api" }
+embassy-time.workspace = true
+embassy-sync.workspace = true
+barracuda-agent-persistence = { path = "../persistence" }
+# Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
+# open session gets one unbounded channel that carries its `SessionEvent` stream.
+async-channel = { version = "2", default-features = false }
+# The `Stream` trait `async_channel::Receiver` implements, so
+# `SessionEventStream` can poll it. `default-features = false` keeps this
+# `no_std`-friendly for the device.
+futures-core = { version = "0.3", default-features = false }
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+# `SelectAll` fairly merges the per-batch detached-tool completion streams the
+# Agent wrapper tracks, replacing a hand-written round-robin poll queue.
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+getset = "0.1.7"
+# The runtime is exposed as an ordinary Future. The application chooses Embassy,
+# Tokio, or another executor and spawns that future at its own boundary.
+barracuda-agent-memory = { path = "../memory" }
+barracuda-agent-skill = { path = "../skill" }
+barracuda-agent-context = { path = "../context" }
+barracuda-agent-permission = { path = "../permission" }
+# The tool runtime used by core agents.
+barracuda-agent-tool = { path = "../tool" }
+# Flat production diagnostics. Compile-time level ceilings are selected by the
+# final application through `log`'s max-level features.
+log = { version = "0.4", default-features = false }
+# Observability facade reserved for the trace instrumentation pass. `log-always`
+# is intentionally NOT enabled: with a real subscriber it would double-emit every
+# event (once via the log bridge, once via the subscriber). The facade stays
+# `no_std`; `attributes` is enabled for the spans used by the runtime.
+tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
+
+[build-dependencies]
+# The build script parses the agent manifest JSON at compile time and generates
+# typed catalog entries into `OUT_DIR`. `quote`/`proc-macro2` build the
+# generated source as a typed token stream (no `syn`, so no extra build cost).
+# `anyhow` is build-only: it gives the generator ergonomic, context-rich errors
+# and never reaches the device image.
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quote = "1"
+proc-macro2 = "1"
+barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
+
+[dev-dependencies]
+http-client = { path = "../../../../shared/http-client" }
+# Host-only test generators; production streams use the internal no_std adapter.
+async-stream = "0.3"
+# Host-only mounted VFS helpers for tests.
+barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+# `block_on` for tests (smol family; replaces the removed `barracuda_runtime_utils::block_on`).
+futures-lite = "2"
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+
+[lints.rust]
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

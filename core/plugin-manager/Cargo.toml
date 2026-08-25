@@ -1,0 +1,38 @@
+[package]
+name = "barracuda-plugin-manager"
+authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>"]
+version = "0.1.0"
+edition = "2021"
+description = "Plugin management and scoped persistent storage for Barracuda"
+readme = "README.md"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-event-router = { path = "../event-router" }
+barracuda-kv = { path = "../../shared/kv" }
+barracuda-vfs = { path = "../../shared/vfs" }
+embassy-executor.workspace = true
+embedded-storage-async.workspace = true
+getset = "0.1.7"
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test = { path = "../../platforms/test" }
+barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"

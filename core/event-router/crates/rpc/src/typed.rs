@@ -11,6 +11,7 @@ use futures_core::Stream;
 use getset::{CopyGetters, Getters};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
+use super::dynamic::Dynamic;
 use super::frame::{write_frame, write_method_error_frame, FramedReader, RpcFrame};
 use super::lane::{LaneReader, LaneWriter, LANE_FRAME_ALIGNMENT};
 use super::payload::{
@@ -124,6 +125,31 @@ pub struct Unary;
 /// Marker selecting zero or more typed messages.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Streaming;
+
+/// Runtime cardinality of one side of a method.
+///
+/// The [`Unary`] and [`Streaming`] markers are the only implementors of the
+/// sealed mode traits, so a mode marker's `TypeId` maps onto exactly these two
+/// values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RpcCardinality {
+    /// Exactly one message.
+    Unary,
+    /// Zero or more messages.
+    Streaming,
+}
+
+impl RpcCardinality {
+    /// Classifies a mode marker type ID.
+    #[must_use]
+    pub fn from_type_id(id: TypeId) -> Self {
+        if id == TypeId::of::<Streaming>() {
+            Self::Streaming
+        } else {
+            Self::Unary
+        }
+    }
+}
 
 impl private::Sealed for Unary {}
 
@@ -260,11 +286,28 @@ pub trait RpcMethod: 'static {
 
     /// Response-side cardinality.
     type Output: RpcOutputMode<Self::Response, Self::Error>;
+
+    /// Runtime-dynamic surface: JSON transcoder, wire field tables, and schema.
+    ///
+    /// Defaults to `None`, leaving the method reachable only through the typed
+    /// [`call`](crate::RpcClient::call). Annotating the `impl` with
+    /// `#[rpc_dynamic]` overrides this to return
+    /// [`Dynamic::new`](crate::Dynamic::new) built from
+    /// [`JsonCodec::of::<Self>`](crate::JsonCodec::of),
+    /// [`WireSupport::of::<Self>`](crate::WireSupport::of), and the baked
+    /// request schema, which
+    /// [`RpcRegistry::register`](crate::RpcRegistry::register) captures beside
+    /// the endpoint. Overriding it by hand requires the same `serde` bounds as
+    /// [`JsonCodec::of`](crate::JsonCodec::of) and that `Request`/`Response`
+    /// implement [`RpcWire`](crate::RpcWire).
+    fn dynamic() -> Option<Dynamic> {
+        None
+    }
 }
 
 /// Runtime descriptor used to reject client/handler mismatches before IO.
 #[derive(Clone, CopyGetters, Debug, Getters, PartialEq, Eq)]
-pub(crate) struct RpcMethodDescriptor {
+pub struct RpcMethodDescriptor {
     #[getset(get = "pub(crate)")]
     address: RpcAddress,
     method_type_id: TypeId,
@@ -272,12 +315,24 @@ pub(crate) struct RpcMethodDescriptor {
     method_type_name: &'static str,
     #[getset(get_copy = "pub(crate)")]
     request_frame_size: usize,
+    /// Fixed-layout type identity of the request message.
+    #[getset(get_copy = "pub")]
     request_type_id: TypeId,
     #[getset(get_copy = "pub(crate)")]
     request_type_name: &'static str,
+    /// Fixed-layout type identity of the response message.
+    #[getset(get_copy = "pub")]
+    response_type_id: TypeId,
+    #[getset(get_copy = "pub(crate)")]
+    response_type_name: &'static str,
+    #[getset(get_copy = "pub(crate)")]
     input_mode_type_id: TypeId,
     #[getset(get_copy = "pub(crate)")]
     input_mode_type_name: &'static str,
+    #[getset(get_copy = "pub(crate)")]
+    output_mode_type_id: TypeId,
+    #[getset(get_copy = "pub(crate)")]
+    output_mode_type_name: &'static str,
 }
 
 impl RpcMethodDescriptor {
@@ -323,8 +378,12 @@ impl RpcMethodDescriptor {
             request_frame_size: size_of::<M::Request>(),
             request_type_id: TypeId::of::<M::Request>(),
             request_type_name: type_name::<M::Request>(),
+            response_type_id: TypeId::of::<M::Response>(),
+            response_type_name: type_name::<M::Response>(),
             input_mode_type_id: TypeId::of::<M::Input>(),
             input_mode_type_name: type_name::<M::Input>(),
+            output_mode_type_id: TypeId::of::<M::Output>(),
+            output_mode_type_name: type_name::<M::Output>(),
         })
     }
 

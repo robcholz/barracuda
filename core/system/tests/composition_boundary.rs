@@ -1,0 +1,76 @@
+//! The selected-target crate must own Board/Platform resource construction.
+
+#[test]
+fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let system = std::fs::read_to_string(root.join("core/system/src/lib.rs"))?;
+    let target = std::fs::read_to_string(root.join("composition/selected/src/lib.rs"))?;
+    let application = std::fs::read_to_string(root.join("apps/barracuda-cli/src/local_native.rs"))?;
+
+    assert!(target.contains("barracuda_platform_selected::prepare()"));
+    assert!(target.contains("barracuda_board_selected::resources(spawner)"));
+    assert!(application.contains("barracuda_target::resources(spawner)"));
+    assert!(application.contains("System::new(lanes, resources, spawner)"));
+    assert!(system.contains("TargetResources<"));
+    assert!(system.contains("PlatformResources<Tls, Partitions<"));
+    assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
+    assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
+    assert!(system.contains("mount(\"/\", backend, MountOptions::read_write())"));
+    assert!(system.contains("EventRouter::new(lanes)"));
+    assert!(!system.contains("filesystem.scoped(\"/system/event-router\")"));
+    assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
+    assert!(!system.contains("StorageNotConstructed"));
+    let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;
+    assert!(resources.contains("SYSTEM_PARTITION: &str = \"system\""));
+    assert!(resources.contains("KV_DATABASE_PARTITION: &str = \"kv_database\""));
+    assert!(resources.contains("WEB_ASSETS_PARTITION: &str = \"web_assets\""));
+    assert!(resources.contains("take_partition("));
+    assert!(!application.contains("mod selected"));
+    assert!(!application.contains("SelectedPlatform::initialize"));
+    assert!(!system.contains("P::initialize(spawner, board)"));
+    Ok(())
+}
+
+#[test]
+fn vfs_scopes_replace_the_custom_agent_sandbox_crate() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    assert!(!root
+        .join("plugins/agent/crates/sandbox/Cargo.toml")
+        .exists());
+
+    for relative in [
+        "plugins/agent/crates/agent/src",
+        "plugins/agent/crates/runtime/src",
+        "plugins/agent/crates/tool/src",
+    ] {
+        let mut files = Vec::new();
+        collect_rust_files(&root.join(relative), &mut files)?;
+        for path in files {
+            let source = std::fs::read_to_string(&path)?;
+            for forbidden in ["SandboxFs", "RealRoots", "barracuda_agent_sandbox"] {
+                assert!(
+                    !source.contains(forbidden),
+                    "{} still references obsolete `{forbidden}`",
+                    path.display()
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_rust_files(
+    directory: &std::path::Path,
+    files: &mut Vec<std::path::PathBuf>,
+) -> Result<(), std::io::Error> {
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}

@@ -1,0 +1,34 @@
+[package]
+name = "barracuda-kv"
+version = "0.1.0"
+edition = "2021"
+description = "Partition-bound key-value database for Barracuda"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+ekv = { version = "1.0.0", default-features = false, features = ["crc"] }
+embassy-sync-06 = { package = "embassy-sync", version = "0.6.0", default-features = false }
+embedded-storage-async.workspace = true
+thiserror = { version = "2", default-features = false }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+barracuda-platform-test = { path = "../../platforms/test" }
+embassy-sync.workspace = true
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

@@ -1,0 +1,6 @@
+name: macos
+crate: barracuda_platform_macos
+type: MacosPlatform
+settings:
+  state-directory: .barracuda
+  flash-image: board.flash

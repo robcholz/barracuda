@@ -9,13 +9,15 @@ use core::task::{Context, Poll};
 
 use futures_core::Stream;
 use serde::Deserialize;
+use serde_json::Value;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use barracuda_rpc::{
     RpcClient, RpcError, RpcFrame, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
 };
 
-use crate::{Rule, WorkflowDefinition, WorkflowId};
+use crate::definition::WorkflowDefinitionError;
+use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
 
 /// Receiver-side rejection returned by a Workflow control RPC.
 #[repr(u8)]
@@ -39,6 +41,14 @@ pub enum WorkflowControlRejection {
     NotFound,
     /// The persistence operation failed.
     Persistence,
+    /// A step's link arguments were malformed or placed on the ingress step.
+    InvalidArguments,
+    /// A step addressed a method that is not registered.
+    UnknownMethod,
+    /// A step's link violated a validation rule.
+    InvalidLink,
+    /// The JSON contained an invalid Event topic.
+    InvalidTopic,
 }
 
 /// Failure returned by [`WorkflowClient`].
@@ -201,15 +211,18 @@ pub struct WorkflowJsonRequest {
     bytes: Vec<u8>,
 }
 
-impl WorkflowJsonRequest {
-    /// Wraps one complete JSON document read from persistent storage.
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, WorkflowControlRejection> {
+impl TryFrom<Vec<u8>> for WorkflowJsonRequest {
+    type Error = WorkflowControlRejection;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
         if bytes.is_empty() {
             return Err(WorkflowControlRejection::InvalidJson);
         }
         Ok(Self { bytes })
     }
+}
 
+impl WorkflowJsonRequest {
     /// Collects and validates all request frames through EOF.
     pub async fn accept<const M: usize>(
         mut frames: RpcStream<RpcFrame<WorkflowJsonFrame<M>>>,
@@ -225,7 +238,7 @@ impl WorkflowJsonRequest {
             };
             bytes.extend_from_slice(data);
         }
-        Ok(Self::from_bytes(bytes))
+        Ok(bytes.try_into())
     }
 
     /// Returns the original JSON bytes for durable storage.
@@ -263,12 +276,16 @@ struct WorkflowDocument {
 #[serde(deny_unknown_fields)]
 struct WorkflowMatchDocument {
     event: String,
+    #[serde(default)]
+    topic: Option<String>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkflowStepDocument {
     call: String,
+    #[serde(default)]
+    arguments: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -285,16 +302,32 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)?;
         let event = Rule::try_from(document.matcher.event)
             .map_err(|_error| WorkflowControlRejection::InvalidRule)?;
+        let topic = document
+            .matcher
+            .topic
+            .map(Topic::try_from)
+            .transpose()
+            .map_err(|_error| WorkflowControlRejection::InvalidTopic)?;
         let steps = document
             .steps
             .into_iter()
             .map(|step| {
-                barracuda_rpc::RpcAddress::try_from(step.call.as_str())
-                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)
+                let address = barracuda_rpc::RpcAddress::try_from(step.call.as_str())
+                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
+                Ok(WorkflowStep::new(address, step.arguments))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        WorkflowDefinition::new(id, event, steps)
-            .map_err(|_error| WorkflowControlRejection::EmptySteps)
+        let definition = match topic {
+            Some(topic) => WorkflowDefinition::with_topic(id, event, topic, steps),
+            None => WorkflowDefinition::new(id, event, steps),
+        };
+        definition.map_err(|error| match error {
+            WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
+            WorkflowDefinitionError::FirstStepHasArguments
+            | WorkflowDefinitionError::InvalidReference(_) => {
+                WorkflowControlRejection::InvalidArguments
+            }
+        })
     }
 }
 
@@ -351,7 +384,7 @@ mod tests {
 
     #[test]
     fn workflow_json_uses_the_documented_match_and_step_shape() {
-        let request = WorkflowJsonRequest::from_bytes(
+        let request = WorkflowJsonRequest::try_from(
             br#"{
                 "id":"gateway-to-agent",
                 "match":{"event":"gateway.*"},
@@ -365,19 +398,61 @@ mod tests {
 
         assert_eq!(definition.id().as_str(), "gateway-to-agent");
         assert_eq!(definition.event().as_str(), "gateway.*");
+        assert!(definition.topic().is_none());
         assert_eq!(
             definition
                 .steps()
                 .iter()
-                .map(AsRef::as_ref)
+                .map(|step| step.address().as_ref())
                 .collect::<Vec<_>>(),
             ["adapter.gateway", "agent.run"]
         );
     }
 
     #[test]
+    fn workflow_json_accepts_an_optional_exact_topic() {
+        let request = WorkflowJsonRequest::try_from(
+            br#"{
+                "id":"morning-alarm",
+                "match":{"event":"scheduler.triggered","topic":"morning"},
+                "steps":[{"call":"alarm.ring"}]
+            }"#
+            .to_vec(),
+        )
+        .expect("non-empty JSON");
+
+        let definition = request.definition().expect("valid Workflow JSON");
+        assert_eq!(
+            definition.topic().map(crate::Topic::as_str),
+            Some("morning")
+        );
+
+        let invalid = WorkflowJsonRequest::try_from(
+            br#"{"id":"bad","match":{"event":"scheduler.triggered","topic":"topic-name-is-over-16"},"steps":[{"call":"alarm.ring"}]}"#
+                .to_vec(),
+        )
+        .expect("non-empty JSON")
+        .definition();
+        assert!(matches!(
+            invalid,
+            Err(WorkflowControlRejection::InvalidTopic)
+        ));
+
+        let wildcard = WorkflowJsonRequest::try_from(
+            br#"{"id":"wildcard","match":{"event":"scheduler.triggered","topic":"*"},"steps":[{"call":"alarm.ring"}]}"#
+                .to_vec(),
+        )
+        .expect("non-empty JSON")
+        .definition();
+        assert!(matches!(
+            wildcard,
+            Err(WorkflowControlRejection::InvalidTopic)
+        ));
+    }
+
+    #[test]
     fn workflow_json_rejects_invalid_json_and_empty_steps() {
-        let malformed = WorkflowJsonRequest::from_bytes(b"{".to_vec())
+        let malformed = WorkflowJsonRequest::try_from(b"{".to_vec())
             .expect("non-empty malformed request")
             .definition();
         assert!(matches!(
@@ -385,7 +460,7 @@ mod tests {
             Err(WorkflowControlRejection::InvalidJson)
         ));
 
-        let empty_steps = WorkflowJsonRequest::from_bytes(
+        let empty_steps = WorkflowJsonRequest::try_from(
             br#"{"id":"empty","match":{"event":"gateway.*"},"steps":[]}"#.to_vec(),
         )
         .expect("non-empty JSON")

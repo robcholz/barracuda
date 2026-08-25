@@ -1,0 +1,176 @@
+# Lua Execution Environment
+
+This document describes the environment that exists today. It is a contract of
+the current implementation, not a list of planned libraries.
+
+## Lifetime and isolation
+
+Every `vm.run` call creates a new Lua state. The state, its globals, loaded
+modules, input queue, and output queue belong to that call and are dropped when
+the script completes, fails, or is cancelled. Nothing in the Lua environment is
+shared or persisted across calls.
+
+`Lua::new()` has one construction mode: an allowlist sandbox. There is no full
+standard-library mode, no feature flag that disables the sandbox, and no host
+factory that replaces it. Every loaded chunk receives the sandbox table as its
+`_ENV`; `_G` refers to that same table.
+
+Scripts may create or replace globals inside their own `_ENV`. Those changes
+remain local to that one Lua state.
+
+## Globals available after `Lua::new()`
+
+| Global | Purpose |
+| --- | --- |
+| `_G` | The sandbox environment itself. |
+| `_VERSION` | Lua version string. |
+| `assert`, `error` | Raise Lua errors. |
+| `pcall`, `xpcall` | Run a function with Lua error capture. |
+| `pairs`, `ipairs`, `next` | Iterate tables. |
+| `select` | Select variadic arguments. |
+| `tonumber`, `tostring`, `type` | Basic value conversion and inspection. |
+| `require` | Load a native package installed into this Lua state. |
+
+Lua syntax and language primitives remain available: values, tables, functions,
+closures, conditionals, loops, operators, and multiple return values do not
+come from a standard-library table.
+
+## Execution data flow
+
+Creating the sandbox and installing the execution environment are separate
+operations:
+
+```rust,ignore
+let mut lua = Lua::new()?;
+let packages = barracuda_vm_builtin_packages::BuiltinPackages::all();
+let (input, output) = packages.install(&mut lua)?.into_io();
+let completion = lua.run(source);
+```
+
+During Plugin registration, the VM selects the complete built-in package plan
+from `barracuda-vm-builtin-packages`. Each `vm.run` call applies that immutable
+plan to its own Lua state. The current plan installs `io`, which provides:
+
+- `require("io").input()` asynchronously waits for one complete input message.
+  After the caller closes input and queued messages are consumed, it returns
+  `nil`.
+- `require("io").print(...)` converts each argument with the sandbox
+  `tostring`, joins the values with tabs, and emits one complete output
+  message.
+
+Installing the IO package creates no global `io`, `input`, or `print` aliases.
+
+These functions are message flows, not process standard input or standard
+output. They do not read a terminal, write a console, or grant access to host
+file descriptors. Both internal queues hold up to 16 complete messages and
+apply backpressure when full.
+
+`Lua::run()` only executes the already-configured sandbox. It does not install
+an Environment, packages, or any globals.
+
+At the `vm.run` RPC boundary, source and messages are transported in bounded
+frames. The default complete-source limit is 65,536 UTF-8 bytes and the default
+limit for one logical input message is 4,096 UTF-8 bytes. See [rpc.md](rpc.md)
+for framing, completion, and error behavior.
+
+## Native modules
+
+`require` only searches the internal preload table populated through Rust
+`register_lib`. Filesystem Lua modules, native shared libraries, and arbitrary
+searchers are not supported. The `package` table is not exposed, and the
+bootstrap entries for `_G` and `package` are removed from the loaded-module
+cache, so `require("_G")` and `require("package")` fail.
+
+The VM currently composes one built-in native package: `io`. It is our
+message-based package, not Lua's filesystem and process-oriented standard
+`io` library. It is require-only: no global `io` table is installed. Calls such
+as `require("gpio")`, `require("time")`, or `require("net")` still fail today.
+Future VM-owned built-ins belong in `plugins/vm/crates/builtin-packages` and are
+selected with additional `with_package` calls.
+
+Repeated `require` calls for a registered module return the cached module table
+for that Lua state.
+
+## Native functions
+
+Registered Rust functions may be synchronous or asynchronous. An asynchronous
+native function suspends and resumes the Lua execution internally; Lua code
+does not receive an executor or a coroutine handle.
+
+The Rust return contract is:
+
+| Rust return | Lua result |
+| --- | --- |
+| `None` | No returned values. |
+| `Some(Ok(values))` | The converted Lua values. |
+| `Some(Err(error))` | `nil, error`. |
+
+## Capabilities not present
+
+The following Lua standard-library surfaces are not available:
+
+- `package`, `coroutine`, `string`, `table`, `math`, and `utf8`;
+- the standard Lua `io` library, plus `os` and `debug`;
+- `load`, `loadfile`, and `dofile`;
+- `collectgarbage` and `warn`;
+- `getmetatable`, `setmetatable`, `rawequal`, `rawget`, `rawlen`, and `rawset`.
+
+Consequently, a script currently has no direct filesystem, network, clock,
+process, terminal, dynamic-code-loading, hardware, registry, metatable, or
+debug-reflection capability. Such access must arrive through an explicitly
+registered Rust module.
+
+The full `debug` library is intentionally excluded because it can expose the
+Lua registry, recover private upvalues such as `require`'s package state,
+replace a function's `_ENV`, mutate protected metatables, and interfere with VM
+execution hooks. A future traceback API should expose only formatted diagnostic
+text rather than the `debug` table.
+
+## Cooperative instruction yielding
+
+Normal `VmPlugin` executions run in a statically allocated Embassy task pool.
+Lua's count hook yields after each configured instruction interval; the hook
+does not run a timer and does not expose one to Lua. After observing that
+yield, the VM executor task performs `Timer::after_millis(100).await` and then
+resumes polling the same Lua execution. The default interval is 10,000
+instructions and the pool supports four concurrent executions.
+
+`VmComponent::new` remains a direct, inline construction path for tests and
+special embedding. It does not install the task-owned instruction scheduler.
+Normal system composition uses `VmPlugin`, `VmRuntime`, and
+`VmComponent::with_runtime`.
+
+## Lua memory pool
+
+`VmRuntime` preallocates four reusable allocator slots, matching the four
+Embassy VM task slots. Each slot uses an `embedded_alloc::TlsfHeap` with a
+default 64 KiB backing buffer. Starting one execution leases one slot and
+passes that external Rust allocator to Lua through `Lua::new_with_allocator`.
+Lua allocation, reallocation, garbage collection, and state destruction all
+use that allocator; dropping the Lua state returns the allocator slot to the
+pool.
+
+Exceeding the fixed per-execution Lua heap terminates the execution with
+`RunErrorKind::LuaMemory`. `VmRuntime::with_memory_bytes` can replace the
+default per-slot capacity when constructing the runtime.
+
+The Lua heap limit does not include Rust-side RPC source/input/output buffers,
+native callback objects, or Embassy task storage. `VmComponent::new`, the
+direct inline construction path, continues to use Lua's normal Rust global
+allocator; normal Plugin composition uses the bounded pool.
+
+Dropping an RPC response stream is observed by its VM task. For CPU-bound Lua,
+cleanup happens at an instruction-hook boundary or after the current 100 ms
+task delay.
+
+## Resource limits not yet implemented
+
+The current environment is a capability sandbox with a bounded Lua heap. It
+does not currently enforce:
+
+- an instruction or CPU-time budget;
+- a wall-clock deadline;
+
+Instruction yielding is scheduling, not a hard budget: a looping script is
+periodically suspended and resumed but is not automatically terminated. The
+VM still has no total-instruction ceiling, CPU quota, or wall-clock timeout.

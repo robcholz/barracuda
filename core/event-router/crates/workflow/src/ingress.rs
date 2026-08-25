@@ -16,11 +16,13 @@ use barracuda_rpc::{
 use super::event::{
     cardinality, into_stream, EmitError, EmitRejection, Event, EventCardinality, EventId,
 };
+use super::topic::{Topic, TOPIC_STORAGE_BYTES};
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
 enum InternalEmitFrameKind {
     Header,
+    Topic,
     Payload,
 }
 
@@ -67,7 +69,7 @@ struct InternalEmitHeader {
 ///
 /// `M` is inherited from Event Router's RPC lane capacity. Header metadata
 /// occupies [`size_of::<InternalEmitHeader>()`], and all remaining bytes carry
-/// either the Event ID or opaque Event payload.
+/// the Event ID, fixed Topic metadata, or opaque Event payload.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
 pub struct InternalEmitFrame<const M: usize> {
@@ -81,6 +83,7 @@ impl<const M: usize> InternalEmitFrame<M> {
 
     fn new_header(
         event_id: &EventId,
+        has_topic: bool,
         cardinality: EventCardinality,
         message_size: usize,
     ) -> Result<Self, EmitRejection> {
@@ -96,11 +99,25 @@ impl<const M: usize> InternalEmitFrame<M> {
                 kind: InternalEmitFrameKind::Header,
                 cardinality: cardinality.into(),
                 event_id_length: event_id_bytes.len(),
-                data_length: 0,
+                data_length: if has_topic { TOPIC_STORAGE_BYTES } else { 0 },
                 message_size,
             },
             event_id_bytes,
             EmitRejection::EventIdTooLong,
+        )
+    }
+
+    fn new_topic(topic: &Topic) -> Result<Self, EmitRejection> {
+        Self::encode(
+            InternalEmitHeader {
+                kind: InternalEmitFrameKind::Topic,
+                cardinality: InternalEmitCardinality::None,
+                event_id_length: 0,
+                data_length: TOPIC_STORAGE_BYTES,
+                message_size: 0,
+            },
+            topic.wire_bytes(),
+            EmitRejection::TopicTooLong,
         )
     }
 
@@ -149,7 +166,9 @@ impl<const M: usize> InternalEmitFrame<M> {
     /// Decodes this frame as the required first Header frame.
     pub(super) fn header(&self) -> Result<EmitHeader, EmitRejection> {
         let (header, data) = self.decode(EmitRejection::InvalidHeader)?;
-        if header.kind != InternalEmitFrameKind::Header || header.data_length != 0 {
+        if header.kind != InternalEmitFrameKind::Header
+            || !matches!(header.data_length, 0 | TOPIC_STORAGE_BYTES)
+        {
             return Err(EmitRejection::InvalidHeader);
         }
         if header.event_id_length == 0 || header.event_id_length > data.len() {
@@ -173,9 +192,33 @@ impl<const M: usize> InternalEmitFrame<M> {
         }
         Ok(EmitHeader {
             event_id,
+            topic: None,
+            topic_expected: header.data_length == TOPIC_STORAGE_BYTES,
             cardinality: header.cardinality.try_into()?,
             message_size: header.message_size,
         })
+    }
+
+    fn topic(&self) -> Result<Topic, EmitRejection> {
+        let (header, data) = self.decode(EmitRejection::InvalidTopic)?;
+        if header.kind != InternalEmitFrameKind::Topic
+            || header.cardinality != InternalEmitCardinality::None
+            || header.event_id_length != 0
+            || header.data_length != TOPIC_STORAGE_BYTES
+            || header.message_size != 0
+        {
+            return Err(EmitRejection::InvalidTopic);
+        }
+        let bytes = data
+            .get(..TOPIC_STORAGE_BYTES)
+            .ok_or(EmitRejection::InvalidTopic)?;
+        if data
+            .get(TOPIC_STORAGE_BYTES..)
+            .is_none_or(|unused| unused.iter().any(|byte| *byte != 0))
+        {
+            return Err(EmitRejection::InvalidTopic);
+        }
+        Topic::from_wire(bytes).map_err(|_error| EmitRejection::InvalidTopic)
     }
 
     /// Decodes this frame as one opaque Payload frame.
@@ -210,8 +253,16 @@ pub(super) struct EmitHeader {
     /// Event ID used by the Workflow matcher.
     #[getset(get = "pub(super)")]
     event_id: EventId,
+    topic: Option<Topic>,
+    topic_expected: bool,
     cardinality: EventCardinality,
     message_size: usize,
+}
+
+impl EmitHeader {
+    pub(super) const fn topic(&self) -> Option<&Topic> {
+        self.topic.as_ref()
+    }
 }
 
 /// Receiver-side view of one accepted `internal.emit` request.
@@ -241,10 +292,22 @@ impl<const M: usize> InternalEmitRequest<M> {
             return Ok(Err(EmitErrorFrame::new(EmitRejection::InvalidHeader)));
         };
         let frame = frame?;
-        let header = match frame.view()?.header() {
+        let mut header = match frame.view()?.header() {
             Ok(header) => header,
             Err(rejection) => return Ok(Err(EmitErrorFrame::new(rejection))),
         };
+        // Release the lane-backed Header before waiting for the next streaming
+        // frame; one lane cannot lend both views at the same time.
+        drop(frame);
+        if header.topic_expected {
+            let Some(topic_frame) = frames.next().await else {
+                return Ok(Err(EmitErrorFrame::new(EmitRejection::InvalidTopic)));
+            };
+            header.topic = match topic_frame?.view()?.topic() {
+                Ok(topic) => Some(topic),
+                Err(rejection) => return Ok(Err(EmitErrorFrame::new(rejection))),
+            };
+        }
         Ok(Ok(Self { header, frames }))
     }
 
@@ -377,6 +440,8 @@ impl EmitRejection {
             Self::TruncatedPayload => 7,
             Self::InvalidUnaryMessageCount => 8,
             Self::DownstreamUnavailable => 9,
+            Self::InvalidTopic => 10,
+            Self::TopicTooLong => 11,
             Self::Unknown => u8::MAX,
         }
     }
@@ -392,6 +457,8 @@ impl EmitRejection {
             7 => Self::TruncatedPayload,
             8 => Self::InvalidUnaryMessageCount,
             9 => Self::DownstreamUnavailable,
+            10 => Self::InvalidTopic,
+            11 => Self::TopicTooLong,
             _ => Self::Unknown,
         }
     }
@@ -441,6 +508,7 @@ pub(super) const fn assert_frame_capacity<const M: usize>() {
 
 pub(super) async fn emit<E, const M: usize>(
     rpc: &RpcClient,
+    topic: Option<&Topic>,
     input: <E::Input as RpcInputMode<E::Message>>::ClientInput,
 ) -> Result<(), EmitError>
 where
@@ -453,10 +521,22 @@ where
         );
     }
     let event_id = EventId::try_from(E::ID)?;
-    let header =
-        InternalEmitFrame::<M>::new_header(&event_id, cardinality::<E>(), size_of::<E::Message>())
-            .map_err(EmitError::Encoding)?;
-    let frames = RpcStream::new(EncodedEventStream::new(header, into_stream::<E>(input)));
+    let header = InternalEmitFrame::<M>::new_header(
+        &event_id,
+        topic.is_some(),
+        cardinality::<E>(),
+        size_of::<E::Message>(),
+    )
+    .map_err(EmitError::Encoding)?;
+    let topic = topic
+        .map(InternalEmitFrame::<M>::new_topic)
+        .transpose()
+        .map_err(EmitError::Encoding)?;
+    let frames = RpcStream::new(EncodedEventStream::new(
+        header,
+        topic,
+        into_stream::<E>(input),
+    ));
     let outcome = rpc.call::<InternalEmit<M>>(frames)?.await?;
     match outcome {
         Ok(accepted) => {
@@ -472,15 +552,21 @@ where
 
 struct EncodedEventStream<T, const M: usize> {
     header: Option<InternalEmitFrame<M>>,
+    topic: Option<InternalEmitFrame<M>>,
     messages: RpcStream<T>,
     current: Option<T>,
     offset: usize,
 }
 
 impl<T, const M: usize> EncodedEventStream<T, M> {
-    fn new(header: InternalEmitFrame<M>, messages: RpcStream<T>) -> Self {
+    fn new(
+        header: InternalEmitFrame<M>,
+        topic: Option<InternalEmitFrame<M>>,
+        messages: RpcStream<T>,
+    ) -> Self {
         Self {
             header: Some(header),
+            topic,
             messages,
             current: None,
             offset: 0,
@@ -500,6 +586,9 @@ where
         let this = self.get_mut();
         if let Some(header) = this.header.take() {
             return Poll::Ready(Some(Ok(header)));
+        }
+        if let Some(topic) = this.topic.take() {
+            return Poll::Ready(Some(Ok(topic)));
         }
 
         loop {
@@ -554,7 +643,7 @@ mod tests {
     use futures_util::stream;
 
     use super::*;
-    use crate::{EventEmitter, Rule};
+    use crate::{EventEmitter, Rule, Topic};
     use barracuda_rpc::{
         RpcAddress, RpcContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcStream,
         Streaming, Unary,
@@ -581,6 +670,7 @@ mod tests {
         let event_id = EventId::try_from("a".repeat(capacity)).expect("valid Event ID");
         let header = InternalEmitFrame::<64>::new_header(
             &event_id,
+            false,
             EventCardinality::Unary,
             size_of::<u32>(),
         )
@@ -670,8 +760,9 @@ mod tests {
                 .expect("register internal emit");
 
             let input = [0x5a; 300];
+            let topic = Topic::try_from("gateway-1").expect("valid topic");
             EventEmitter::<256>::new(registry.client())
-                .emit::<LargeUnaryEvent>(input)
+                .emit_to::<LargeUnaryEvent>(&topic, input)
                 .await
                 .expect("emit unary event");
 
@@ -685,6 +776,15 @@ mod tests {
             assert_eq!(header.event_id().as_str(), LargeUnaryEvent::ID);
             assert_eq!(header.cardinality, EventCardinality::Unary);
             assert_eq!(header.message_size, 300);
+            assert!(header.topic_expected);
+            assert_eq!(
+                frames
+                    .next()
+                    .expect("topic frame")
+                    .topic()
+                    .expect("decode topic"),
+                topic
+            );
 
             let mut payload = Vec::new();
             for frame in frames {

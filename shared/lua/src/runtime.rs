@@ -1,5 +1,6 @@
 use alloc::{boxed::Box, ffi::CString, rc::Rc, vec::Vec};
 use core::{
+    alloc::{GlobalAlloc, Layout},
     cell::{Cell, RefCell},
     ffi::{c_int, c_void},
     future::Future,
@@ -9,13 +10,15 @@ use core::{
 };
 
 use lunka::Thread;
-use lunka::cdef::auxlib::luaL_loadbufferx;
+use lunka::cdef::auxlib::{LOADED_TABLE, PRELOAD_TABLE, luaL_loadbufferx, luaL_ref};
 use lunka::cdef::stdlibs::{luaopen_base, luaopen_package};
 use lunka::cdef::{
-    DEFAULT_EXTRA_SPACE, lua_CFunction, lua_KContext, lua_State, lua_getextraspace, lua_getfield,
-    lua_getglobal, lua_gettop, lua_newthread, lua_pop, lua_pushcclosure, lua_pushlightuserdata,
-    lua_pushlstring, lua_pushvalue, lua_remove, lua_resetthread, lua_resume, lua_setfield,
-    lua_setglobal, lua_settop, lua_tolstring, lua_touserdata, lua_xmove,
+    DEFAULT_EXTRA_SPACE, EventMask, MAX_ALIGN, REGISTRY_GLOBALS, REGISTRY_INDEX, Status,
+    lua_CFunction, lua_Debug, lua_KContext, lua_State, lua_createtable, lua_getextraspace,
+    lua_getfield, lua_getglobal, lua_gettop, lua_newthread, lua_pop, lua_pushcclosure,
+    lua_pushlightuserdata, lua_pushlstring, lua_pushnil, lua_pushvalue, lua_rawgeti, lua_rawseti,
+    lua_remove, lua_resetthread, lua_resume, lua_setfield, lua_sethook, lua_settop, lua_setupvalue,
+    lua_tolstring, lua_touserdata, lua_xmove,
 };
 
 use crate::{
@@ -33,6 +36,8 @@ pub(crate) enum Callback {
     Async(AsyncCallback),
 }
 
+type InstructionHook = Box<dyn FnMut() + 'static>;
+
 pub(crate) struct Task {
     pub(crate) future: NativeFuture,
 }
@@ -40,14 +45,73 @@ pub(crate) struct Task {
 static ASYNC_MARKER: u8 = 0xA5;
 static ERROR_MARKER: u8 = 0xE1;
 
+const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 13] = [
+    c"assert",
+    c"error",
+    c"ipairs",
+    c"next",
+    c"pairs",
+    c"pcall",
+    c"require",
+    c"select",
+    c"tonumber",
+    c"tostring",
+    c"type",
+    c"xpcall",
+    c"_VERSION",
+];
+
 pub struct Lua {
     raw: lunka::Lua,
     state: Rc<State>,
+    environment: c_int,
+}
+
+unsafe fn retain_preload_searcher(state: *mut lua_State) {
+    unsafe {
+        lua_getglobal(state, c"package".as_ptr());
+        lua_getfield(state, -1, c"searchers".as_ptr());
+        lua_createtable(state, 1, 0);
+        lua_rawgeti(state, -2, 1);
+        lua_rawseti(state, -2, 1);
+        lua_setfield(state, -3, c"searchers".as_ptr());
+        lua_pop(state, 2);
+    }
+}
+
+unsafe fn create_environment(state: *mut lua_State) -> c_int {
+    unsafe {
+        lua_createtable(state, 0, 14);
+        for name in ENVIRONMENT_GLOBALS {
+            lua_getglobal(state, name.as_ptr());
+            lua_setfield(state, -2, name.as_ptr());
+        }
+        lua_pushvalue(state, -1);
+        lua_setfield(state, -2, c"_G".as_ptr());
+        luaL_ref(state, REGISTRY_INDEX)
+    }
+}
+
+unsafe fn discard_bootstrap_environment(state: *mut lua_State, environment: c_int) {
+    unsafe {
+        lua_getfield(state, REGISTRY_INDEX, LOADED_TABLE.as_ptr());
+        lua_pushnil(state);
+        lua_setfield(state, -2, c"_G".as_ptr());
+        lua_pushnil(state);
+        lua_setfield(state, -2, c"package".as_ptr());
+        lua_pop(state, 1);
+
+        lua_rawgeti(state, REGISTRY_INDEX, environment.into());
+        lua_rawseti(state, REGISTRY_INDEX, REGISTRY_GLOBALS);
+    }
 }
 
 pub(crate) struct State {
     main: Cell<*mut lua_State>,
     callbacks: RefCell<Vec<Rc<Callback>>>,
+    instruction_hook: RefCell<Option<InstructionHook>>,
+    instruction_hook_interval: Cell<c_int>,
+    hook_yielded: Cell<bool>,
 }
 
 impl State {
@@ -91,12 +155,81 @@ impl State {
         }
         Ok(())
     }
+
+    fn install_instruction_hook(&self, coroutine: *mut lua_State) {
+        let interval = self.instruction_hook_interval.get();
+        let enabled = self.instruction_hook.borrow().is_some() && interval > 0;
+        let hook = enabled.then_some(instruction_hook_dispatch as _);
+        let mask = if enabled { EventMask::COUNT.0 } else { 0 };
+        unsafe { lua_sethook(coroutine, hook, mask, interval) };
+    }
+}
+
+unsafe extern "C-unwind" fn rust_allocator<A>(
+    userdata: *mut c_void,
+    allocation: *mut c_void,
+    old_size: usize,
+    new_size: usize,
+) -> *mut c_void
+where
+    A: GlobalAlloc,
+{
+    let allocator = unsafe { &*userdata.cast::<A>() };
+    if allocation.is_null() {
+        if new_size == 0 {
+            return null_mut();
+        }
+        let Ok(layout) = Layout::from_size_align(new_size, MAX_ALIGN) else {
+            return null_mut();
+        };
+        return unsafe { allocator.alloc(layout).cast::<c_void>() };
+    }
+    let Ok(old_layout) = Layout::from_size_align(old_size, MAX_ALIGN) else {
+        return null_mut();
+    };
+    if new_size == 0 {
+        unsafe { allocator.dealloc(allocation.cast::<u8>(), old_layout) };
+        return null_mut();
+    }
+    unsafe {
+        allocator
+            .realloc(allocation.cast::<u8>(), old_layout, new_size)
+            .cast::<c_void>()
+    }
 }
 
 impl Lua {
     pub fn new() -> Result<Self> {
-        let mut raw = lunka::Lua::try_new()
+        let raw = lunka::Lua::try_new()
             .ok_or_else(|| Error::new(ErrorKind::Create, "failed to create Lua state"))?;
+        Self::initialize(raw)
+    }
+
+    /// Creates a sandboxed Lua state using an externally owned Rust allocator.
+    ///
+    /// # Safety
+    ///
+    /// `allocator` must remain valid until the returned Lua state is dropped.
+    /// Its backing memory must also remain valid, and the allocator must obey
+    /// [`GlobalAlloc`]'s allocation contract.
+    pub unsafe fn new_with_allocator<A>(allocator: *const A) -> Result<Self>
+    where
+        A: GlobalAlloc,
+    {
+        if allocator.is_null() {
+            return Err(Error::new(ErrorKind::Create, "Lua allocator is null"));
+        }
+        let raw = unsafe {
+            lunka::Lua::try_new_with_alloc_fn(
+                rust_allocator::<A>,
+                allocator.cast_mut().cast::<c_void>(),
+            )
+        }
+        .ok_or_else(|| Error::new(ErrorKind::Memory, "external Lua allocator is exhausted"))?;
+        Self::initialize(raw)
+    }
+
+    fn initialize(mut raw: lunka::Lua) -> Result<Self> {
         let state = raw.as_ptr();
         unsafe {
             lunka::cdef::auxlib::luaL_requiref(state, c"_G".as_ptr(), luaopen_base, 1);
@@ -104,15 +237,59 @@ impl Lua {
             lunka::cdef::auxlib::luaL_requiref(state, c"package".as_ptr(), luaopen_package, 1);
             lua_pop(state, 1);
         }
+        let environment = unsafe {
+            retain_preload_searcher(state);
+            create_environment(state)
+        };
+        unsafe { discard_bootstrap_environment(state, environment) };
         let shared = Rc::new(State {
             main: Cell::new(state),
             callbacks: RefCell::new(Vec::new()),
+            instruction_hook: RefCell::new(None),
+            instruction_hook_interval: Cell::new(0),
+            hook_yielded: Cell::new(false),
         });
         unsafe {
             let slot = lua_getextraspace(state, DEFAULT_EXTRA_SPACE).cast::<*const State>();
             slot.write(Rc::as_ptr(&shared));
         }
-        Ok(Self { raw, state: shared })
+        Ok(Self {
+            raw,
+            state: shared,
+            environment,
+        })
+    }
+
+    /// Installs a count hook called after every `instruction_interval` Lua instructions.
+    ///
+    /// The hook callback runs immediately before Lua yields from its current resume. It can
+    /// notify an external scheduler, while scheduling policy remains outside this wrapper.
+    /// The hook is internal and does not expose Lua's `debug` library to scripts.
+    pub fn set_instruction_hook<F>(&mut self, instruction_interval: u32, hook: F) -> Result<()>
+    where
+        F: FnMut() + 'static,
+    {
+        let interval = c_int::try_from(instruction_interval).map_err(|_error| {
+            Error::new(
+                ErrorKind::Conversion,
+                "instruction hook interval exceeds the Lua count range",
+            )
+        })?;
+        if interval == 0 {
+            return Err(Error::new(
+                ErrorKind::Conversion,
+                "instruction hook interval must be greater than zero",
+            ));
+        }
+        self.state.instruction_hook.replace(Some(Box::new(hook)));
+        self.state.instruction_hook_interval.set(interval);
+        Ok(())
+    }
+
+    /// Removes the configured instruction hook from future executions.
+    pub fn clear_instruction_hook(&mut self) {
+        self.state.instruction_hook.replace(None);
+        self.state.instruction_hook_interval.set(0);
     }
 
     pub fn register<A, R, F>(&mut self, name: &str, function: F) -> Result<()>
@@ -123,9 +300,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_sync(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_async<A, R, F, Fut>(&mut self, name: &str, function: F) -> Result<()>
@@ -137,9 +312,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_async(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_with<A, R, F>(&mut self, name: &str, function: F) -> Result<()>
@@ -150,9 +323,7 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_sync_with(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn register_async_with<A, R, F, Fut>(&mut self, name: &str, function: F) -> Result<()>
@@ -164,16 +335,19 @@ impl Lua {
     {
         let name = lua_name(name)?;
         let index = self.store_async_with(function);
-        self.push_callback(index)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        self.set_environment_callback(&name, index)
     }
 
     pub fn set<V: IntoLua>(&mut self, name: &str, value: V) -> Result<()> {
         let name = lua_name(name)?;
-        value.push_to_lua(&mut self.raw)?;
-        unsafe { lua_setglobal(self.raw.as_ptr(), name.as_ptr()) };
-        Ok(())
+        let initial_top = self.raw.top();
+        self.push_environment();
+        let result = value.push_to_lua(&mut self.raw);
+        if result.is_ok() {
+            unsafe { lua_setfield(self.raw.as_ptr(), -2, name.as_ptr()) };
+        }
+        unsafe { lua_settop(self.raw.as_ptr(), initial_top) };
+        result
     }
 
     pub fn register_lib<F>(&mut self, name: &str, configure: F) -> Result<()>
@@ -197,8 +371,7 @@ impl Lua {
 
         let state = self.raw.as_ptr();
         unsafe {
-            lua_getglobal(state, c"package".as_ptr());
-            lua_getfield(state, -1, c"preload".as_ptr());
+            lua_getfield(state, REGISTRY_INDEX, PRELOAD_TABLE.as_ptr());
             lua_pushvalue(state, table_index);
             lua_pushcclosure(state, preload_loader as lua_CFunction, 1);
             lua_setfield(state, -2, name.as_ptr());
@@ -301,6 +474,25 @@ impl Lua {
 
     fn push_callback(&mut self, index: usize) -> Result<()> {
         self.state.push_callback(&mut self.raw, index)
+    }
+
+    fn push_environment(&mut self) {
+        unsafe {
+            lua_rawgeti(self.raw.as_ptr(), REGISTRY_INDEX, self.environment.into());
+        }
+    }
+
+    fn set_environment_callback(&mut self, name: &CString, index: usize) -> Result<()> {
+        let initial_top = self.raw.top();
+        self.push_environment();
+        let result = self.push_callback(index);
+        if result.is_ok() {
+            unsafe { lua_setfield(self.raw.as_ptr(), -2, name.as_ptr()) };
+        } else {
+            self.state.truncate_callbacks(index);
+        }
+        unsafe { lua_settop(self.raw.as_ptr(), initial_top) };
+        result
     }
 
     fn start<R: FromLuaMulti>(&mut self, code: &[u8]) -> Execution<'_, R> {
@@ -490,9 +682,19 @@ impl<R> ExecutionState<R> {
             )
         };
         if load_status != 0 {
-            let error = unsafe { take_lua_error(state, ErrorKind::Load) };
+            let kind = if load_status == Status::MemoryError as c_int {
+                ErrorKind::Memory
+            } else {
+                ErrorKind::Load
+            };
+            let error = unsafe { take_lua_error(state, kind) };
             unsafe { lua_settop(state, main_top) };
             return Self::failed(main_top, error, convert);
+        }
+
+        lua.push_environment();
+        if unsafe { lua_setupvalue(state, -2, 1) }.is_null() {
+            unsafe { lua_pop(state, 1) };
         }
 
         let coroutine = unsafe { lua_newthread(state) };
@@ -501,6 +703,7 @@ impl<R> ExecutionState<R> {
             lua_xmove(state, coroutine, 1);
             lua_remove(state, -2);
         }
+        lua.state.install_instruction_hook(coroutine);
         Self {
             coroutine,
             main_top,
@@ -594,6 +797,17 @@ impl<R> ExecutionState<R> {
                     return Poll::Ready(output);
                 }
                 1 => {
+                    if lua.state.hook_yielded.replace(false) {
+                        if result_count != 0 {
+                            this.cleanup(lua);
+                            return Poll::Ready(Err(Error::new(
+                                ErrorKind::UnexpectedYield,
+                                "instruction hook yielded Lua values",
+                            )));
+                        }
+                        context.waker().wake_by_ref();
+                        return Poll::Pending;
+                    }
                     let task = unsafe { take_async_yield(this.coroutine, result_count) };
                     match task {
                         Ok(task) => this.pending = Some(task),
@@ -604,7 +818,12 @@ impl<R> ExecutionState<R> {
                     }
                 }
                 _ => {
-                    let error = unsafe { take_lua_error(this.coroutine, ErrorKind::Runtime) };
+                    let kind = if status == Status::MemoryError as c_int {
+                        ErrorKind::Memory
+                    } else {
+                        ErrorKind::Runtime
+                    };
+                    let error = unsafe { take_lua_error(this.coroutine, kind) };
                     this.cleanup(lua);
                     return Poll::Ready(Err(error));
                 }
@@ -646,6 +865,30 @@ pub(crate) fn push_lua_return<R: IntoLuaMulti>(
 unsafe extern "C-unwind" fn preload_loader(state: *mut lua_State) -> c_int {
     unsafe { lua_pushvalue(state, lunka::cdef::lua_upvalueindex(1)) };
     1
+}
+
+unsafe extern "C-unwind" fn instruction_hook_dispatch(
+    state: *mut lua_State,
+    _activation_record: *mut lua_Debug,
+) {
+    let lua = unsafe { Thread::from_ptr_mut(state) };
+    let shared = match state_from_thread(lua) {
+        Ok(shared) => shared,
+        Err(error) => unsafe { raise_lua_error(state, error) },
+    };
+    {
+        let mut hook = match shared.instruction_hook.try_borrow_mut() {
+            Ok(hook) => hook,
+            Err(_error) => unsafe {
+                raise_lua_error(state, Error::runtime("instruction hook was re-entered"))
+            },
+        };
+        if let Some(hook) = hook.as_mut() {
+            hook();
+        }
+    }
+    shared.hook_yielded.set(true);
+    unsafe { lua.yield_in_hook_with(0) };
 }
 
 unsafe extern "C-unwind" fn sync_dispatch(state: *mut lua_State) -> c_int {
@@ -822,8 +1065,8 @@ mod tests {
     use lunka::{
         Thread,
         cdef::{
-            DEFAULT_EXTRA_SPACE, lua_CFunction, lua_State, lua_getextraspace, lua_pushcclosure,
-            lua_setglobal, lua_settop,
+            DEFAULT_EXTRA_SPACE, lua_CFunction, lua_State, lua_getextraspace, lua_pop,
+            lua_pushcclosure, lua_setfield, lua_settop,
         },
     };
 
@@ -843,9 +1086,11 @@ mod tests {
     #[test]
     fn execution_rejects_unmanaged_lua_yields() {
         let mut lua = super::Lua::new().unwrap();
+        lua.push_environment();
         unsafe {
             lua_pushcclosure(lua.raw.as_ptr(), raw_yield as lua_CFunction, 0);
-            lua_setglobal(lua.raw.as_ptr(), c"raw_yield".as_ptr());
+            lua_setfield(lua.raw.as_ptr(), -2, c"raw_yield".as_ptr());
+            lua_pop(lua.raw.as_ptr(), 1);
         }
         let mut execution = lua.load("raw_yield()").exec_async();
         let result = Pin::new(&mut execution).poll(&mut Context::from_waker(Waker::noop()));
@@ -857,9 +1102,11 @@ mod tests {
     #[test]
     fn function_call_rejects_unmanaged_lua_yields() {
         let mut lua = super::Lua::new().unwrap();
+        lua.push_environment();
         unsafe {
             lua_pushcclosure(lua.raw.as_ptr(), raw_yield as lua_CFunction, 0);
-            lua_setglobal(lua.raw.as_ptr(), c"raw_yield".as_ptr());
+            lua_setfield(lua.raw.as_ptr(), -2, c"raw_yield".as_ptr());
+            lua_pop(lua.raw.as_ptr(), 1);
         }
         let callback: crate::Function = lua
             .load("return function() raw_yield() end")

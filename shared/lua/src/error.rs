@@ -7,6 +7,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum ErrorKind {
     Create,
     Load,
+    Memory,
     Runtime,
     Conversion,
     UnexpectedYield,

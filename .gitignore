@@ -7,6 +7,9 @@
 *.pyc
 .venv/
 .uv-cache
+__pycache__
+.ruff_cache
+.pytest_cache
 
 # Rust
 target/
@@ -16,3 +19,6 @@ output/
 simulator_log.log
 simulator_trace.log
 trace.json
+
+# Local Barracuda runtime state
+.barracuda/

@@ -1,0 +1,38 @@
+[package]
+name = "barracuda-platform-selected"
+version = "0.1.0"
+edition = "2021"
+description = "Compile-time selected Barracuda Platform"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-platform = { path = "../api" }
+barracuda-platform-esp32c6 = { path = "../esp32c6" }
+embassy-executor.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+barracuda-platform-macos = { path = "../macos" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+barracuda-platform-linux = { path = "../linux" }
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+barracuda-platform-stm32 = { path = "../stm32", features = ["stm32f429zi"] }
+
+[build-dependencies]
+serde = { version = "1", features = ["derive"] }
+yaml-peg = { version = "1.0.8", features = ["serde"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

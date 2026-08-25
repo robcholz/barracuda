@@ -1,0 +1,3 @@
+name: esp32c6
+crate: barracuda_platform_esp32c6
+type: Esp32c6Platform

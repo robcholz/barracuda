@@ -38,7 +38,7 @@ impl TryFrom<String> for Rule {
     type Error = RuleError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        validate_pattern(&value).map_err(RuleError::from_validation)?;
+        validate_pattern(&value)?;
         Ok(Self(value))
     }
 }
@@ -72,8 +72,8 @@ pub enum RuleError {
     },
 }
 
-impl RuleError {
-    fn from_validation(error: ValidationError) -> Self {
+impl From<ValidationError> for RuleError {
+    fn from(error: ValidationError) -> Self {
         match error {
             ValidationError::Empty => Self::Empty,
             ValidationError::InvalidCharacter { index, character } => {

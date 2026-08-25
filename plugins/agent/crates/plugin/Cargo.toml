@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-agent-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Plugin that owns the Agent Component"
+
+[features]
+default = []
+std = ["barracuda-agent-runtime/std"]
+
+[dependencies]
+barracuda-agent-component = { path = "../component" }
+barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
+barracuda-model-api = { path = "../model-api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
+
+[dev-dependencies]
+barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-model-api = { path = "../model-api" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

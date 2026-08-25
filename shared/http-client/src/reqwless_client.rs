@@ -17,7 +17,12 @@ use reqwless::{
     request::{Method as ReqwlessMethod, RequestBody, RequestBuilder as _},
 };
 
-use crate::{Body, BodyError, BodyStream, HttpClient, HttpFuture, Method, Request, Response};
+use barracuda_runtime_utils::yield_stream::try_yield_stream;
+
+use crate::{
+    Body, BodyError, BodyStream, HttpClient, HttpFuture, Method, Request, Response, ResponsePart,
+    ResponseStream,
+};
 
 #[cfg(all(feature = "embedded-tls", feature = "mbedtls"))]
 compile_error!("select exactly one http-client TLS backend");
@@ -36,6 +41,22 @@ pub enum Error {
     Body(#[from] BodyError),
     #[error(transparent)]
     Reqwless(#[from] reqwless::Error),
+}
+
+impl Error {
+    /// Whether retrying the request may recover from this transport failure.
+    #[must_use]
+    pub fn retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::ConnectionAborted
+                | Self::Reqwless(
+                    reqwless::Error::Dns
+                        | reqwless::Error::Network(_)
+                        | reqwless::Error::ConnectionAborted
+                )
+        )
+    }
 }
 
 struct StreamBodyState {
@@ -96,43 +117,48 @@ impl RequestBody for StreamBody {
     }
 }
 
-struct ConnectionOwner<'net, S>
+struct ConnectionOwner<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns,
+    Tcp: TcpConnect,
+    Resolver: Dns,
 {
-    client: ReqwlessHttpClient<'net, S, S>,
+    client: ReqwlessHttpClient<'net, Tcp, Resolver>,
     origin: String,
 }
 
 #[self_referencing]
-struct Connected<'net, S>
+struct Connected<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    owner: ConnectionOwner<'net, S>,
+    owner: ConnectionOwner<'net, Tcp, Resolver>,
     #[borrows(mut owner)]
     #[not_covariant]
-    resource: HttpResource<'this, S::Connection<'this>>,
+    resource: HttpResource<'this, Tcp::Connection<'this>>,
 }
 
-struct Transport<'net, S>
+struct Transport<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    disconnected: Option<ReqwlessHttpClient<'net, S, S>>,
-    connected: Option<Connected<'net, S>>,
+    disconnected: Option<ReqwlessHttpClient<'net, Tcp, Resolver>>,
+    connected: Option<Connected<'net, Tcp, Resolver>>,
     connected_origin: Option<String>,
+    connection_healthy: bool,
     header_buffer: Vec<u8>,
     read_buffer: Vec<u8>,
     tls_configured: bool,
 }
 
-impl<'net, S> Transport<'net, S>
+impl<'net, Tcp, Resolver> Transport<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
     fn from_client(
-        client: ReqwlessHttpClient<'net, S, S>,
+        client: ReqwlessHttpClient<'net, Tcp, Resolver>,
         header_buffer_size: usize,
         read_buffer_size: usize,
         tls_configured: bool,
@@ -141,6 +167,7 @@ where
             disconnected: Some(client),
             connected: None,
             connected_origin: None,
+            connection_healthy: true,
             header_buffer: vec![0; header_buffer_size],
             read_buffer: vec![0; read_buffer_size],
             tls_configured,
@@ -152,9 +179,13 @@ where
             self.disconnected = Some(connected.into_heads().owner.client);
         }
         self.connected_origin = None;
+        self.connection_healthy = true;
     }
 
     async fn ensure_connected(&mut self, origin: &str) -> Result<(), Error> {
+        if !self.connection_healthy {
+            self.disconnect();
+        }
         if self.connected_origin.as_deref() == Some(origin) && self.connected.is_some() {
             return Ok(());
         }
@@ -204,13 +235,15 @@ where
         let method = map_method(request.method);
         let Self {
             connected,
+            connection_healthy,
             header_buffer,
             read_buffer,
             ..
         } = self;
+        *connection_healthy = false;
         let connected = connected.as_mut().ok_or(Error::ConnectionAborted)?;
 
-        connected
+        let result = connected
             .with_resource_mut(|resource| {
                 Box::pin(async move {
                     match request.body {
@@ -251,7 +284,11 @@ where
                     }
                 }) as Pin<Box<dyn Future<Output = Result<Response, Error>> + '_>>
             })
-            .await
+            .await;
+        if result.is_ok() {
+            *connection_healthy = true;
+        }
+        result
     }
 
     async fn execute(&mut self, request: Request) -> Result<Response, Error> {
@@ -260,6 +297,108 @@ where
             self.disconnect();
         }
         result
+    }
+
+    fn execute_stream(&mut self, request: Request) -> ResponseStream<'_> {
+        try_yield_stream(|yielder| async move {
+            if request.url.starts_with("https://") && !self.tls_configured {
+                return Err(Error::TlsNotConfigured);
+            }
+            validate_headers(&request)?;
+            let (origin, path) = split_url(&request.url)?;
+            let origin = origin.to_string();
+            let path = path.to_string();
+            self.ensure_connected(&origin).await?;
+
+            let header_refs = request
+                .headers
+                .iter()
+                .map(|header| (header.name.as_str(), header.value.as_str()))
+                .collect::<Vec<_>>();
+            let method = map_method(request.method);
+            let Self {
+                connected,
+                connection_healthy,
+                header_buffer,
+                read_buffer,
+                ..
+            } = self;
+            *connection_healthy = false;
+            let connected = connected.as_mut().ok_or(Error::ConnectionAborted)?;
+            let result = connected
+                .with_resource_mut(|resource| {
+                    Box::pin(async move {
+                        match request.body {
+                            Body::Empty => {
+                                let response = resource
+                                    .request(method, &path)
+                                    .headers(&header_refs)
+                                    .send(header_buffer.as_mut_slice())
+                                    .await?;
+                                stream_response(response, read_buffer, &yielder).await
+                            }
+                            Body::Bytes(bytes) => {
+                                let response = resource
+                                    .request(method, &path)
+                                    .headers(&header_refs)
+                                    .body(bytes.as_slice())
+                                    .send(header_buffer.as_mut_slice())
+                                    .await?;
+                                stream_response(response, read_buffer, &yielder).await
+                            }
+                            Body::Stream {
+                                stream,
+                                content_length,
+                            } => {
+                                let body = StreamBody::new(stream, content_length);
+                                let probe = body.clone();
+                                let response = resource
+                                    .request(method, &path)
+                                    .headers(&header_refs)
+                                    .body(body)
+                                    .send(header_buffer.as_mut_slice())
+                                    .await?;
+                                if let Some(error) = probe.failure() {
+                                    return Err(Error::Body(error));
+                                }
+                                stream_response(response, read_buffer, &yielder).await
+                            }
+                        }
+                    }) as Pin<Box<dyn Future<Output = Result<(), Error>> + '_>>
+                })
+                .await;
+            if result.is_ok() {
+                *connection_healthy = true;
+            } else {
+                self.disconnect();
+            }
+            result
+        })
+    }
+}
+
+async fn stream_response<C>(
+    response: reqwless::response::Response<'_, '_, C>,
+    read_buffer: &mut Vec<u8>,
+    yielder: &barracuda_runtime_utils::yield_stream::Yielder<ResponsePart>,
+) -> Result<(), Error>
+where
+    C: embedded_io_async::Read,
+{
+    yielder
+        .yield_one(ResponsePart::Head(response.status.0))
+        .await;
+    let mut reader = response.body().reader();
+    loop {
+        let read = reader
+            .read(read_buffer.as_mut_slice())
+            .await
+            .map_err(|error| reqwless::Error::Network(error.kind()))?;
+        if read == 0 {
+            return Ok(());
+        }
+        let chunk = read_buffer.get(..read).ok_or(reqwless::Error::Codec)?;
+        yielder.yield_one(ResponsePart::Data(chunk.to_vec())).await;
     }
 }
 
@@ -330,21 +469,46 @@ fn split_url(url: &str) -> Result<(&str, &str), Error> {
     }
 }
 
-pub struct ReqwlessClient<'net, S>
+pub struct ReqwlessClient<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    transport: Mutex<NoopRawMutex, Transport<'net, S>>,
+    transport: Mutex<NoopRawMutex, Transport<'net, Tcp, Resolver>>,
 }
 
-impl<'net, S> ReqwlessClient<'net, S>
+/// Default storage reserved for encoded response headers.
+pub const DEFAULT_HEADER_BUFFER_SIZE: usize = 16 * 1024;
+/// Default chunk size used while reading response bodies.
+pub const DEFAULT_READ_BUFFER_SIZE: usize = 8 * 1024;
+
+impl<'net, Tcp, Resolver> ReqwlessClient<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    pub fn new(network: &'net S, header_buffer_size: usize, read_buffer_size: usize) -> Self {
+    /// Creates a plaintext HTTP client with practical default buffer sizes.
+    #[must_use]
+    pub fn new(tcp: &'net Tcp, resolver: &'net Resolver) -> Self {
+        Self::with_buffer_sizes(
+            tcp,
+            resolver,
+            DEFAULT_HEADER_BUFFER_SIZE,
+            DEFAULT_READ_BUFFER_SIZE,
+        )
+    }
+
+    /// Creates a plaintext HTTP client with caller-selected buffer sizes.
+    #[must_use]
+    pub fn with_buffer_sizes(
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+    ) -> Self {
         Self {
             transport: Mutex::new(Transport::from_client(
-                ReqwlessHttpClient::new(network, network),
+                ReqwlessHttpClient::new(tcp, resolver),
                 header_buffer_size,
                 read_buffer_size,
                 false,
@@ -354,19 +518,23 @@ where
 }
 
 #[cfg(any(feature = "embedded-tls", feature = "mbedtls"))]
-impl<'net, S> ReqwlessClient<'net, S>
+impl<'net, Tcp, Resolver> ReqwlessClient<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
-    pub fn new_with_tls(
-        network: &'net S,
+    /// Creates an HTTPS client with caller-selected buffer sizes.
+    #[must_use]
+    pub fn with_tls_and_buffer_sizes(
+        tcp: &'net Tcp,
+        resolver: &'net Resolver,
         tls: reqwless::client::TlsConfig<'net>,
         header_buffer_size: usize,
         read_buffer_size: usize,
     ) -> Self {
         Self {
             transport: Mutex::new(Transport::from_client(
-                ReqwlessHttpClient::new_with_tls(network, network, tls),
+                ReqwlessHttpClient::new_with_tls(tcp, resolver, tls),
                 header_buffer_size,
                 read_buffer_size,
                 true,
@@ -375,11 +543,23 @@ where
     }
 }
 
-impl<'net, S> HttpClient for ReqwlessClient<'net, S>
+impl<'net, Tcp, Resolver> HttpClient for ReqwlessClient<'net, Tcp, Resolver>
 where
-    S: TcpConnect + Dns + 'net,
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
 {
     fn execute(&self, request: Request) -> HttpFuture<'_> {
         Box::pin(async move { self.transport.lock().await.execute(request).await })
+    }
+
+    fn execute_stream(&self, request: Request) -> ResponseStream<'_> {
+        try_yield_stream(|yielder| async move {
+            let mut transport = self.transport.lock().await;
+            let mut stream = transport.execute_stream(request);
+            while let Some(part) = futures_lite::StreamExt::next(&mut stream).await {
+                yielder.yield_one(part?).await;
+            }
+            Ok(())
+        })
     }
 }

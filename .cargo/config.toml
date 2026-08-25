@@ -1,0 +1,2 @@
+[alias]
+board = "run --quiet --package barracuda-board-tool --"

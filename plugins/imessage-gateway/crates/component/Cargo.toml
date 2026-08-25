@@ -1,0 +1,32 @@
+[package]
+name = "barracuda-imessage-gateway-component"
+version = "0.1.0"
+edition = "2021"
+description = "Event Router Component adapter for the IMessage Gateway"
+
+[dependencies]
+async-channel = { version = "2", default-features = false }
+barracuda-event-router = { path = "../../../../core/event-router" }
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+gateway = { path = "../gateway" }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+thiserror = { version = "2", default-features = false }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

@@ -1,0 +1,5 @@
+name: local-linux
+hardware:
+  chip: linux
+native-layout:
+  artifact: file-layout.yml

@@ -14,17 +14,20 @@ embedded-tls = ["reqwless/embedded-tls"]
 mbedtls = ["reqwless/mbedtls-rs"]
 
 [dependencies]
+barracuda-runtime-utils = { path = "../runtime-utils" }
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
 embassy-sync.workspace = true
+embassy-net.workspace = true
 futures-core = { version = "0.3", default-features = false }
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 ouroboros = { version = "0.18.5", default-features = false }
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-net = { path = "../net", features = ["testing"] }
+barracuda-platform-test = { path = "../../platforms/test" }
 futures-lite = "2"
 
 [lints.rust]

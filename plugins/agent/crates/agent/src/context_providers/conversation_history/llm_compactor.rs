@@ -1,0 +1,99 @@
+//! LLM-backed transformation for one aged conversation-history window.
+
+use alloc::{
+    boxed::Box,
+    format,
+    string::{String, ToString},
+    vec,
+};
+
+use barracuda_agent_memory::{CompactError, CompactFuture, Compactor};
+use barracuda_model_api::{ChatRequest, ModelApiFactory};
+use barracuda_runtime_utils::Cancel;
+use serde_json::{json, Value};
+use tracing::Instrument as _;
+
+use super::super::async_llm::SharedAsyncLlm;
+use crate::config::{ApiPurpose, SharedApiManager};
+
+const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_system.md");
+const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
+
+/// A [`Compactor`] that summarizes an aged history window via the LLM client.
+pub(super) struct LlmCompactor {
+    api: SharedAsyncLlm,
+    api_manager: SharedApiManager,
+}
+
+impl LlmCompactor {
+    pub(super) fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory) -> Self {
+        Self {
+            api: SharedAsyncLlm::new(llm_factory.create()),
+            api_manager,
+        }
+    }
+}
+
+impl Compactor for LlmCompactor {
+    fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
+        Box::pin(async move {
+            let transcript = render_transcript(window);
+            let messages = [json!({
+                "role": "user",
+                "content": format!("{SUMMARY_USER_PREFIX}\n\n{transcript}")
+            })];
+
+            let request = ChatRequest::new(SUMMARY_SYSTEM_PROMPT, &messages);
+            let max_attempts = u64::from(request.retry.max_retries).saturating_add(1);
+            let chat_span = tracing::info_span!(
+                "api.chat",
+                purpose = "conversation_compaction",
+                max_attempts,
+            );
+            let response = async {
+                let mut api = self.api.lease().await;
+                if let Some(config) = self.api_manager.borrow().get_api(ApiPurpose::Compaction) {
+                    let _ = api.set_config(config);
+                }
+                api.chat(&request, Cancel::never()).await
+            }
+            .instrument(chat_span)
+            .await
+            .map_err(CompactError::summary_generation)?;
+
+            let Some(summary) = response.text else {
+                return Err(CompactError::EmptySummary);
+            };
+            if summary.trim().is_empty() {
+                return Err(CompactError::EmptySummary);
+            }
+
+            Ok(vec![json!({
+                "role": "system",
+                "content": format!("Summary of earlier conversation:\n{summary}"),
+            })])
+        })
+    }
+}
+
+fn render_transcript(window: &[Value]) -> String {
+    let mut out = String::new();
+    for message in window {
+        let Some(role) = message.get("role").and_then(Value::as_str) else {
+            continue;
+        };
+        let content = match message.get("content") {
+            Some(Value::String(text)) => text.clone(),
+            Some(other) => other.to_string(),
+            None => continue,
+        };
+        if content.is_empty() {
+            continue;
+        }
+        out.push_str(role);
+        out.push_str(": ");
+        out.push_str(&content);
+        out.push('\n');
+    }
+    out
+}

@@ -1,0 +1,3 @@
+name: stm32
+crate: barracuda_platform_stm32
+type: Stm32Platform

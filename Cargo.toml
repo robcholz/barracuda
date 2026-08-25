@@ -1,24 +1,44 @@
 [workspace]
 resolver = "2"
 members = [
-    "core/*",
+    "boards/api",
+    "boards/config",
+    "boards/tool",
+    "composition/*",
+    "core/event-router",
+    "core/plugin-manager",
+    "core/system",
     "core/event-router/crates/*",
-    "components/agent/crates/*",
-    "components/agent/bench/crates/*",
-    "components/message-gateway/crates/*",
-    "components/vm",
+    "core/event-router/example-crates/*",
+    "plugins/agent/crates/*",
+    "plugins/agent/bench/crates/*",
+    "plugins/captive-portal/crates/*",
+    "plugins/imessage-gateway/crates/*",
+    "plugins/imessage-bluebubble/crates/*",
+    "plugins/imessage-telegram/crates/*",
+    "plugins/imessage-wechat/crates/*",
+    "plugins/imessage-web/crates/*",
+    "plugins/gateway-agent/crates/*",
+    "plugins/time/crates/*",
+    "plugins/scheduler/crates/*",
+    "plugins/vm/crates/*",
+    "plugins/webserver/crates/*",
+    "platforms/*",
     "shared/*",
-    "apps/*",
+    "apps/barracuda-cli",
 ]
 default-members = [
-    "components/agent/crates/agent",
-    "shared/fs",
+    "apps/barracuda-cli",
 ]
 
 [workspace.dependencies]
 embassy-time = { version = "0.5.1", default-features = false }
 embassy-futures = { version = "0.1.2", default-features = false }
 embassy-sync = { version = "0.7.2", default-features = false }
+embassy-executor = { version = "0.9.1", default-features = false }
+embassy-net = { version = "0.9.1", default-features = false, features = ["dns", "medium-ip", "proto-ipv4", "tcp", "udp"] }
+embassy-net-driver-channel = { version = "0.4.0", default-features = false }
+embedded-storage-async = "0.4.1"
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
 # the std crates can be unit-tested on the host. LTO remains disabled so final

@@ -1,0 +1,22 @@
+[package]
+name = "barracuda-vfs-memfs"
+version = "0.1.0"
+edition = "2021"
+description = "In-memory backend for the Barracuda VFS"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+bare-vfs = { version = "0.3", default-features = false }
+barracuda-vfs = { path = "../vfs" }
+embedded-io-async = "0.7"
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+embassy-futures = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

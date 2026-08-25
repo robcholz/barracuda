@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-vfs-littlefs"
+version = "0.1.0"
+edition = "2021"
+description = "LittleFS backend for the Barracuda VFS"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-vfs = { path = "../vfs" }
+embedded-io-async = "0.7"
+embedded-storage = "0.3"
+generic-array = "0.14"
+littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+
+[dev-dependencies]
+critical-section = { version = "1", features = ["std"] }
+embassy-futures = { workspace = true }
+typenum = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

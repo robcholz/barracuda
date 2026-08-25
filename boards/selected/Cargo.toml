@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-board-selected"
+version = "0.1.0"
+edition = "2021"
+description = "Compile-time selected Barracuda Board HAL"
+
+[dependencies]
+barracuda-board = { path = "../api" }
+barracuda-board-hal = { path = "../hal" }
+embassy-executor.workspace = true
+
+[build-dependencies]
+barracuda-board-config = { path = "../config" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

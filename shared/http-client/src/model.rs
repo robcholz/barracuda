@@ -139,8 +139,31 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsePart {
+    Head(u16),
+    Data(Vec<u8>),
+}
+
 pub type HttpFuture<'a> = Pin<Box<dyn Future<Output = Result<Response, Error>> + 'a>>;
+pub type ResponseStream<'a> = Pin<Box<dyn Stream<Item = Result<ResponsePart, Error>> + 'a>>;
 
 pub trait HttpClient {
     fn execute(&self, request: Request) -> HttpFuture<'_>;
+
+    /// Executes a request as a response-part stream.
+    ///
+    /// The default implementation adapts [`Self::execute`] and therefore
+    /// buffers the complete body. Streaming transports override this method to
+    /// yield body chunks as they arrive.
+    fn execute_stream(&self, request: Request) -> ResponseStream<'_> {
+        barracuda_runtime_utils::yield_stream::try_yield_stream(|yielder| async move {
+            let Response { status, body } = self.execute(request).await?;
+            yielder.yield_one(ResponsePart::Head(status)).await;
+            if !body.is_empty() {
+                yielder.yield_one(ResponsePart::Data(body)).await;
+            }
+            Ok(())
+        })
+    }
 }

@@ -9,17 +9,21 @@ use core::marker::PhantomData;
 use core::mem::size_of;
 use core::pin::Pin;
 
-use getset::CopyGetters;
+use getset::{CopyGetters, Getters};
+use serde_json::Value;
 use smallvec::{smallvec, SmallVec};
 
 use super::address::{RpcAddress, RpcAddressError, RpcGroup};
 use super::context::{RpcCallId, RpcContext, RpcEndpointId};
+use super::dynamic::Dynamic;
+use super::json::{envelope, JsonCallDriver, JsonCodec};
 use super::lane::{LaneAcquireSet, LaneIoSet, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
 use super::payload::{RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter};
 use super::typed::{
-    HandlerAdapter, RpcHandler, RpcInputMode, RpcMessage, RpcMethod, RpcMethodDescriptor,
-    RpcOutputMode,
+    HandlerAdapter, RpcCardinality, RpcHandler, RpcInputMode, RpcMessage, RpcMethod,
+    RpcMethodDescriptor, RpcOutputMode, RpcStream,
 };
+use super::wire::WireSupport;
 
 /// Request or response side of one full-duplex RPC lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -52,6 +56,7 @@ pub struct RpcEndpoint<const M: usize> {
     address: RpcAddress,
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
+    dynamic: Option<Dynamic>,
 }
 
 impl<const M: usize> RpcEndpoint<M> {
@@ -79,6 +84,7 @@ impl<const M: usize> RpcEndpoint<M> {
             address: descriptor.address().clone(),
             handler: Rc::new(HandlerAdapter::<Method, H>::new(handler)),
             descriptor,
+            dynamic: Method::dynamic(),
         })
     }
 }
@@ -345,8 +351,12 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
     }
 
     fn register_endpoint(&self, endpoint: RpcEndpoint<M>) -> RpcResult<RpcRegistration> {
-        self.core
-            .insert_handler(endpoint.address, endpoint.handler, endpoint.descriptor)
+        self.core.insert_handler(
+            endpoint.address,
+            endpoint.handler,
+            endpoint.descriptor,
+            endpoint.dynamic,
+        )
     }
 
     fn unregister(&self, registration: &RpcRegistration) -> RpcResult<()> {
@@ -364,6 +374,7 @@ impl RegistryCore {
         address: RpcAddress,
         handler: Rc<dyn ErasedRpcHandler>,
         descriptor: RpcMethodDescriptor,
+        dynamic: Option<Dynamic>,
     ) -> RpcResult<RpcRegistration> {
         if self.endpoints.borrow().contains_key(&address) {
             return Err(RpcError::AlreadyRegistered(address));
@@ -384,9 +395,34 @@ impl RegistryCore {
                 handler,
                 descriptor,
                 lifecycle,
+                dynamic,
             },
         );
         Ok(registration)
+    }
+
+    fn json_codec(&self, address: &RpcAddress) -> RpcResult<JsonCodec> {
+        self.endpoints
+            .borrow()
+            .get(address)
+            .ok_or_else(|| RpcError::NotFound(address.clone()))?
+            .dynamic
+            .as_ref()
+            .map(|dynamic| dynamic.json().clone())
+            .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))
+    }
+
+    fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
+        let entry = self
+            .endpoints
+            .borrow()
+            .get(address)
+            .cloned()
+            .ok_or_else(|| RpcError::NotFound(address.clone()))?;
+        Ok(RpcMethodInfo {
+            descriptor: entry.descriptor,
+            dynamic: entry.dynamic,
+        })
     }
 
     fn prepare_typed_call<M>(self: &Rc<Self>, caller: &RpcClient) -> RpcResult<PreparedCalls>
@@ -577,6 +613,62 @@ struct EndpointEntry {
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
     lifecycle: Rc<EndpointLifecycle>,
+    dynamic: Option<Dynamic>,
+}
+
+/// Read-only projection of one registered method's signature and dynamic
+/// surface.
+///
+/// Returned by [`RpcClient::method_info`]. It exposes type identity and frame
+/// size for signature checks and, for dynamic methods, the JSON codec and
+/// wire tables.
+#[derive(Clone, Getters)]
+pub struct RpcMethodInfo {
+    /// Read-only view of the registered method's signature descriptor.
+    #[getset(get = "pub")]
+    descriptor: RpcMethodDescriptor,
+    dynamic: Option<Dynamic>,
+}
+
+impl RpcMethodInfo {
+    /// Returns this method's fixed request frame size in bytes.
+    #[must_use]
+    pub fn request_frame_size(&self) -> usize {
+        self.descriptor.request_frame_size()
+    }
+
+    /// Returns this method's request cardinality.
+    #[must_use]
+    pub fn input_mode(&self) -> RpcCardinality {
+        RpcCardinality::from_type_id(self.descriptor.input_mode_type_id())
+    }
+
+    /// Returns this method's response cardinality.
+    #[must_use]
+    pub fn output_mode(&self) -> RpcCardinality {
+        RpcCardinality::from_type_id(self.descriptor.output_mode_type_id())
+    }
+
+    /// Returns this method's wire field tables, when it is runtime-dynamic.
+    #[must_use]
+    pub fn wire(&self) -> Option<&WireSupport> {
+        self.dynamic.as_ref().map(Dynamic::wire)
+    }
+
+    /// Encodes a JSON request value into this method's fixed request bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::NotJsonCallable`] when the method is not dynamic, or
+    /// [`RpcError::JsonRequestInvalid`] when the value does not match the
+    /// request message.
+    pub fn encode_request(&self, address: &RpcAddress, value: &Value) -> RpcResult<Vec<u8>> {
+        self.dynamic
+            .as_ref()
+            .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))?
+            .json()
+            .encode_request(value)
+    }
 }
 
 struct EndpointLifecycle {
@@ -701,6 +793,94 @@ impl RpcClient {
         let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
         let prepared = registry.prepare_payload_call(self, address)?;
         Ok(super::payload::make_payload_call(prepared))
+    }
+
+    /// Calls the typed endpoint at `address` with a JSON payload.
+    ///
+    /// The endpoint must be registered as JSON-callable (its method's `impl`
+    /// carries `#[rpc_dynamic]`). The captured [`JsonCodec`] transcodes the request
+    /// value into the method's fixed `Request` wire bytes, so the bytes on the
+    /// lane are identical to a typed [`call`](Self::call) and the ordinary
+    /// handler serves them — no JSON travels the router. The single response or
+    /// method-error frame is transcoded back to JSON.
+    ///
+    /// Success returns `{ "ok": true, "value": <response> }`; a terminal
+    /// method-error frame returns `{ "ok": false, "error": <error> }`. A method
+    /// whose `Response` is `()` yields a `null` value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::NotJsonCallable`] when the endpoint has no codec,
+    /// [`RpcError::JsonRequestInvalid`] when the value does not match the
+    /// request message, [`RpcError::JsonResponseInvalid`] when a response or
+    /// error frame cannot be encoded as JSON, or any transport error surfaced by
+    /// the underlying payload call.
+    pub async fn call_json(&self, address: &RpcAddress, request: &Value) -> RpcResult<Value> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        let codec = registry.json_codec(address)?;
+        drop(registry);
+
+        let request_bytes = codec.encode_request(request)?;
+        let (mut writer, mut reader) = self.call_payload(address)?;
+        writer.write_all(&request_bytes).await?;
+        writer.close().await?;
+
+        match reader.read().await? {
+            Some(Ok(frame)) => Ok(envelope(true, codec.decode_response(frame.as_ref())?)),
+            Some(Err(frame)) => Ok(envelope(false, codec.decode_error(frame.as_ref())?)),
+            None => Err(RpcError::MissingUnaryFrame),
+        }
+    }
+
+    /// Calls a JSON-callable endpoint frame for frame, mirroring a typed call.
+    ///
+    /// Every JSON value in `inputs` is transcoded into one request frame and
+    /// written before the request direction closes, exactly like a typed
+    /// streaming input. Each response or method-error frame is then transcoded
+    /// back to a JSON value, so streaming inputs and outputs work the same way
+    /// they do in a typed call. The stream yields `Ok(Ok(response))`,
+    /// `Ok(Err(error))`, or a transport `Err`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::NotJsonCallable`] when the endpoint has no codec,
+    /// [`RpcError::JsonRequestInvalid`] when an input value does not match the
+    /// request message, or any transport error surfaced while opening the call.
+    pub fn call_json_stream(
+        &self,
+        address: &RpcAddress,
+        inputs: impl IntoIterator<Item = Value> + 'static,
+    ) -> RpcResult<RpcStream<Result<Value, Value>>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        let codec = registry.json_codec(address)?;
+        drop(registry);
+
+        let mut blobs = Vec::new();
+        for value in inputs {
+            blobs.push(codec.encode_request(&value)?);
+        }
+        let (writer, reader) = self.call_payload(address)?;
+        let input: RpcFuture<'static> = Box::pin(async move {
+            let mut writer = writer;
+            for blob in blobs {
+                writer.write_all(&blob).await?;
+            }
+            writer.close().await
+        });
+        Ok(RpcStream::new(JsonCallDriver::new(input, reader, codec)))
+    }
+
+    /// Returns a read-only projection of the method registered at `address`:
+    /// signature identity checks, cardinality, and the JSON codec and wire
+    /// tables when the method is dynamic.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone, or
+    /// [`RpcError::NotFound`] when no endpoint owns `address`.
+    pub fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        registry.method_info(address)
     }
 
     /// Starts a wire-level multicast with one shared request direction.
@@ -887,6 +1067,45 @@ pub enum RpcError {
     /// A non-empty `write_all` operation could not make forward progress.
     #[error("RPC payload writer accepted zero bytes")]
     PayloadWriteZero,
+    /// A [`call_json`](RpcClient::call_json) targeted an endpoint with no codec.
+    #[error("RPC endpoint is not JSON-callable: {0}")]
+    NotJsonCallable(RpcAddress),
+    /// A JSON request value did not match the endpoint's request message.
+    #[error("invalid JSON request for {message_type}: {message}")]
+    JsonRequestInvalid {
+        /// Rust request type that rejected the JSON value.
+        message_type: &'static str,
+        /// Serde error detail describing why the value was rejected.
+        message: alloc::string::String,
+    },
+    /// A response or method-error frame could not be encoded as JSON.
+    #[error("RPC frame for {message_type} could not be encoded as JSON")]
+    JsonResponseInvalid {
+        /// Rust message type that failed to serialize.
+        message_type: &'static str,
+    },
+    /// A wire field name did not exist in the method's request or response table.
+    #[error("unknown wire field: {field}")]
+    WireFieldUnknown {
+        /// Requested field name.
+        field: alloc::string::String,
+    },
+    /// A frame was shorter than a wire field's recorded byte region.
+    #[error("wire field {field} region falls outside the frame")]
+    WireFieldRegion {
+        /// Field whose region exceeded the frame.
+        field: alloc::string::String,
+    },
+    /// Wire content exceeded the destination field's capacity.
+    #[error("wire field {field} content {size} exceeds capacity {capacity}")]
+    WireFieldTooLarge {
+        /// Destination field name.
+        field: alloc::string::String,
+        /// Provided content length.
+        size: usize,
+        /// Destination field capacity.
+        capacity: usize,
+    },
 }
 
 #[cfg(test)]

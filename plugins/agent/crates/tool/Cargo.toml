@@ -1,0 +1,45 @@
+[package]
+name = "barracuda-agent-tool"
+authors = ["Finn(Ziheng) Sheng"]
+version = "0.1.0"
+edition = "2021"
+description = "Tool registry, tool set projection, and tool runner"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+# Host-only validation used by build scripts that bake tool resources.
+build-support = ["dep:anyhow"]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+barracuda-agent-permission = { path = "../permission" }
+barracuda-agent-persistence = { path = "../persistence" }
+futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-core = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+json-validator = { path = "../../../../shared/json-validator" }
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+tracing = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
+anyhow = "1"
+futures-lite = "2"
+
+[lints.rust]
+unreachable_pub = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+arithmetic_side_effects = "deny"
