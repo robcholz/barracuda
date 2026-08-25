@@ -25,6 +25,19 @@ fn add_board(root: &Path, directory_name: &str, declared_name: &str) {
     .expect("native layout");
 }
 
+fn add_cross_board(root: &Path, name: &str, target: &str) {
+    let directory = root.join("boards/configs").join(name);
+    fs::create_dir_all(&directory).expect("Board directory");
+    fs::write(
+        directory.join("board.yml"),
+        format!(
+            "name: {name}\nhardware:\n  chip: cross\ntoolchain:\n  target: {target}\nnative-layout:\n  artifact: layout.bin\n"
+        ),
+    )
+    .expect("Board YAML");
+    fs::write(directory.join("layout.bin"), "layout\n").expect("native layout");
+}
+
 #[test]
 fn select_persists_a_valid_board_for_the_next_build() {
     let root = tempdir().expect("temporary workspace");
@@ -104,10 +117,61 @@ fn command_requires_exact_select_syntax() {
 
     for args in [vec![], vec!["build"], vec!["select", "a", "b"]] {
         let error = run(args, root.path(), &mut Vec::new()).expect_err("invalid arguments");
-        assert!(error
-            .to_string()
-            .contains("usage: cargo board select [board-name]"));
+        assert!(error.to_string().contains("usage: cargo board"));
     }
+}
+
+#[test]
+fn target_prints_the_boards_declared_toolchain_triple() {
+    let root = tempdir().expect("temporary workspace");
+    add_cross_board(
+        root.path(),
+        "esp32c6-devkitc-1",
+        "riscv32imac-unknown-none-elf",
+    );
+    let mut output = Vec::new();
+
+    run(["target", "esp32c6-devkitc-1"], root.path(), &mut output).expect("read Board target");
+
+    assert_eq!(
+        String::from_utf8(output).expect("UTF-8 output"),
+        "riscv32imac-unknown-none-elf\n"
+    );
+}
+
+#[test]
+fn target_reads_the_persisted_selection_when_no_board_is_named() {
+    let root = tempdir().expect("temporary workspace");
+    add_cross_board(root.path(), "stm32f429zi-nucleo", "thumbv7em-none-eabihf");
+    write_selected_board(root.path(), "stm32f429zi-nucleo").expect("select Board");
+    let mut output = Vec::new();
+
+    run(["target"], root.path(), &mut output).expect("read selected Board target");
+
+    assert_eq!(
+        String::from_utf8(output).expect("UTF-8 output"),
+        "thumbv7em-none-eabihf\n"
+    );
+}
+
+#[test]
+fn target_of_a_host_board_prints_nothing() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let mut output = Vec::new();
+
+    run(["target", "local-macos"], root.path(), &mut output).expect("read host Board target");
+
+    assert!(String::from_utf8(output).expect("UTF-8 output").is_empty());
+}
+
+#[test]
+fn target_without_a_selection_reports_no_board() {
+    let root = tempdir().expect("temporary workspace");
+
+    let error = run(["target"], root.path(), &mut Vec::new()).expect_err("no selection");
+
+    assert!(error.to_string().contains("no Board selected"));
 }
 
 #[test]

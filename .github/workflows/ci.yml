@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The complete codebase, built and tested on the Linux host Target. Board and
+  # Platform are selected explicitly: the architecture forbids inferring a Board
+  # from the target, and this keeps the selection visible rather than relying on
+  # a default. The non-host Platform crates are excluded here — they only build
+  # for their own target and are covered by the platform-build matrix below.
+  host:
+    name: Host (linux) — build & test
+    runs-on: ubuntu-latest
+    env:
+      BARRACUDA_PLATFORM: linux
+      HOST_EXCLUDES: >-
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-platform-macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Select Linux host Board
+        run: cargo board select local-linux
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets $HOST_EXCLUDES
+
+      - name: Test
+        run: cargo test --workspace $HOST_EXCLUDES
+
+      # The non-host Platform crates carry host-runnable tests for their native
+      # layout projection (partition table, linker regions, file layout). They
+      # are excluded from the workspace run above because each build script needs
+      # its own Board selected, so run them here one Board at a time. This is the
+      # host-side coverage; the platform-build matrix proves they cross-compile.
+      - name: Test non-host Platform crates (host side)
+        run: |
+          for entry in \
+            "esp32c6-devkitc-1:barracuda-platform-esp32c6" \
+            "stm32f429zi-nucleo:barracuda-platform-stm32" \
+            "local-macos:barracuda-platform-macos"; do
+            board="${entry%%:*}"; crate="${entry##*:}"
+            echo "== $crate (Board $board) =="
+            cargo board select "$board"
+            cargo test -p "$crate"
+          done
+
+  # The full codebase is too large to build for every Platform, so the non-host
+  # Platforms are only compiled for their own target to prove they build. Each
+  # Platform crate is built alone ("without the full thing"), with its Board
+  # selected explicitly. The target triple is read from the selected Board
+  # (board.yml `toolchain.target`) rather than hardcoded here, so the Board is
+  # the single source of truth for its toolchain.
+  platform-build:
+    name: Platform build (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: esp32c6
+            board: esp32c6-devkitc-1
+            features: ""
+          - platform: stm32
+            board: stm32f429zi-nucleo
+            features: "--features stm32f429zi"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.board }}
+
+      - name: Build ${{ matrix.platform }} Platform for its Board's target
+        run: |
+          cargo board select ${{ matrix.board }}
+          target="$(cargo board target)"
+          echo "Board ${{ matrix.board }} declares target: $target"
+          rustup target add "$target"
+          cargo build -p barracuda-platform-${{ matrix.platform }} ${{ matrix.features }} --target "$target"
+
+  python:
+    name: Python tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync workspace
+        run: uv sync --all-packages --all-groups
+
+      - name: Check formatting (ruff)
+        run: uv run ruff format --check .
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Test barracuda-trace
+        working-directory: plugins/agent/crates/trace
+        run: uv run --package barracuda-trace pytest
+
+      - name: Test llm-tape
+        working-directory: plugins/agent/tools/llm-tape
+        run: uv run --package llm-tape pytest
+
+      - name: Test serial-log
+        working-directory: plugins/agent/crates/trace/scripts/serial_log
+        run: uv run --package serial-log pytest

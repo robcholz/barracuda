@@ -293,7 +293,6 @@ fn profile_catalog(output: &Path) -> Report {
     let live = profile.stats();
     drop(router);
     drop(state);
-    drop(filesystem);
     let after_drop = profile.stats();
     drop(profile);
     Report { live, after_drop }

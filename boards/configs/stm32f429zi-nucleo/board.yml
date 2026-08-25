@@ -1,5 +1,7 @@
 name: stm32f429zi-nucleo
 hardware:
   chip: stm32f429zi
+toolchain:
+  target: thumbv7em-none-eabihf
 native-layout:
   artifact: memory.x
