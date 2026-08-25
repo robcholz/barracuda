@@ -2,6 +2,8 @@
 //!
 //! Run with: `cargo run --example load_context --target x86_64-unknown-linux-gnu`
 
+#![allow(clippy::arc_with_non_send_sync)]
+
 use std::sync::Arc;
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillName};

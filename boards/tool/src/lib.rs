@@ -259,6 +259,8 @@ fn select_board<W: Write>(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use std::{cell::Cell, fs, path::Path};
 
     use barracuda_board_config::{read_selected_board, write_selected_board};

@@ -74,28 +74,6 @@ pub struct RuntimeService {
     future: Pin<Box<dyn Future<Output = ()>>>,
 }
 
-#[cfg(test)]
-mod tests {
-    use core::error::Error as _;
-
-    use super::RuntimeBuildError;
-    use barracuda_agent::{AgentCreateError, AgentManagerError};
-
-    #[test]
-    fn reconciliation_failure_preserves_typed_source() {
-        let error = RuntimeBuildError::from(AgentManagerError::AgentReconciliation(
-            AgentCreateError::UnknownKind("worker".into()),
-        ));
-
-        assert!(error.source().is_some());
-        assert!(matches!(
-            error,
-            RuntimeBuildError::AgentReconciliation(AgentCreateError::UnknownKind(kind))
-                if kind == "worker"
-        ));
-    }
-}
-
 impl Unpin for RuntimeService {}
 
 impl Future for RuntimeService {
@@ -230,5 +208,27 @@ impl RuntimeControl {
     /// Ask the service to stop after its live actors finish closing.
     pub(crate) async fn shutdown(&self) {
         let _ = self.commands.send(RuntimeCommand::Stop).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::error::Error as _;
+
+    use super::RuntimeBuildError;
+    use barracuda_agent::{AgentCreateError, AgentManagerError};
+
+    #[test]
+    fn reconciliation_failure_preserves_typed_source() {
+        let error = RuntimeBuildError::from(AgentManagerError::AgentReconciliation(
+            AgentCreateError::UnknownKind("worker".into()),
+        ));
+
+        assert!(error.source().is_some());
+        assert!(matches!(
+            error,
+            RuntimeBuildError::AgentReconciliation(AgentCreateError::UnknownKind(kind))
+                if kind == "worker"
+        ));
     }
 }

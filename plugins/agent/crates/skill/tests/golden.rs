@@ -2,7 +2,7 @@
 //!
 //! Run with `BARRACUDA_UPDATE_GOLDEN=1` to regenerate the golden files.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::arc_with_non_send_sync)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

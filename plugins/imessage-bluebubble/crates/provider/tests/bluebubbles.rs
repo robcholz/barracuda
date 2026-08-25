@@ -332,9 +332,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
             .send_media(MediaKind::Image, request)
             .await
             .expect("image succeeds");
-        let requests = http.requests.borrow();
-        assert!(matches!(&requests[0].body, Body::Bytes(_)));
-        drop(requests);
+        assert!(matches!(&http.requests.borrow()[0].body, Body::Bytes(_)));
 
         let http = Rc::new(MockHttp::default());
         let channel = provider(&http);

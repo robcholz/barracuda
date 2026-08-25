@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::indexing_slicing)]
+
 use alloc::rc::Rc;
 use core::cell::RefCell;
 

@@ -176,10 +176,8 @@ async fn drive_until(
     ready: impl Fn(&EventRouter<16, 512, 16>) -> bool,
 ) {
     core::future::poll_fn(|context| {
-        if let Poll::Ready(result) = Pin::new(&mut *router).poll(context) {
-            if let Err(error) = result {
-                panic!("Event Router failed: {error}");
-            }
+        if let Poll::Ready(Err(error)) = Pin::new(&mut *router).poll(context) {
+            panic!("Event Router failed: {error}");
         }
         if ready(router) {
             Poll::Ready(())

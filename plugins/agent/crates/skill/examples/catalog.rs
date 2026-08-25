@@ -5,6 +5,8 @@
 //! Uses an in-memory VFS so the example is self-contained. Firmware receives
 //! the same [`FsSkillRegistry`] over its plugin-private namespace.
 
+#![allow(clippy::arc_with_non_send_sync)]
+
 use std::sync::Arc;
 
 use barracuda_agent_skill::FsSkillRegistry;

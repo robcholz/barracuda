@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::arc_with_non_send_sync)]
 
 use std::{future::Future, pin::Pin, sync::Arc};
 

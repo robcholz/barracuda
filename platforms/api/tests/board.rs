@@ -1,4 +1,5 @@
 //! Platform resource-boundary tests.
+#![allow(clippy::expect_used)]
 
 use barracuda_platform::{NamedPartition, PartitionAccess, Partitions, PlatformResources};
 
