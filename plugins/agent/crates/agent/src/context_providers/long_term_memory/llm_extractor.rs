@@ -119,6 +119,8 @@ fn render_existing(existing: &[MemorySnapshot]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::indexing_slicing)]
+
     use barracuda_model_api::ToolCall;
     use futures_lite::future::block_on;
 

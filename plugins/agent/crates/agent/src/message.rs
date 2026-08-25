@@ -1,5 +1,7 @@
 //! Messages delivered to agents.
 
+use alloc::string::String;
+
 use serde::{Deserialize, Serialize};
 
 /// One message delivered to an agent.
@@ -44,4 +46,3 @@ mod tests {
         .is_err());
     }
 }
-use alloc::string::String;
