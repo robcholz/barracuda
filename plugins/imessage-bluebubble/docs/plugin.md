@@ -1,9 +1,9 @@
 # IMessage BlueBubble Plugin
 
 - Plugin ID: `imessage-bluebubble`
-- Direct Plugin dependencies: `imessage-gateway`
+- Direct Plugin dependencies: `imessage-gateway`, `webserver`
 - Provided typed capabilities: none
 
-The Plugin owns one configured BlueBubbles provider, requires the
-`IMessageGateway` capability, and registers the `imessage` message channel for
-its lifetime.
+The Plugin starts without provider credentials. It requires the `IMessageGateway`
+and `WebServer` capabilities, exposes `/api/gateway/bluebubbles` for runtime configuration, and
+registers the configured channel for its lifetime. See [`http.md`](http.md).

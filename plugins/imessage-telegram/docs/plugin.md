@@ -1,9 +1,9 @@
 # IMessage Telegram Plugin
 
 - Plugin ID: `imessage-telegram`
-- Direct Plugin dependencies: `imessage-gateway`
+- Direct Plugin dependencies: `imessage-gateway`, `webserver`
 - Provided typed capabilities: none
 
-The Plugin owns one configured Telegram provider, requires the
-`IMessageGateway` capability, and registers the `telegram` message channel for
-its lifetime.
+The Plugin starts without provider credentials. It requires the `IMessageGateway`
+and `WebServer` capabilities, exposes `/api/gateway/telegram` for runtime configuration, and
+registers the configured channel for its lifetime. See [`http.md`](http.md).
