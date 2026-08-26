@@ -17,6 +17,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-event-router = { path = "../event-router" }
+barracuda-file-plugin = { path = "../../plugins/file/crates/plugin" }
 barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
 barracuda-captive-portal-plugin = { path = "../../plugins/captive-portal/crates/plugin" }
 barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/plugin" }
