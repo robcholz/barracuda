@@ -90,7 +90,9 @@ async fn run_connected(
                         editor.clear_waiting()?;
                         waiting = false;
                     }
-                    renderer.absorb(text.as_str(), &mut editor)?;
+                    for output in renderer.absorb(text.as_str()) {
+                        editor.print(output)?;
+                    }
                 }
                 Some(Ok(Message::Close(_))) | None => {
                     editor.print("Connection closed.".to_string())?;
@@ -120,9 +122,10 @@ struct Renderer {
 }
 
 impl Renderer {
-    fn absorb(&mut self, frame: &str, editor: &mut ChatLineEditor) -> Result<()> {
+    fn absorb(&mut self, frame: &str) -> Vec<String> {
+        let mut output = Vec::new();
         let Some(frame) = parse_sse(frame) else {
-            return Ok(());
+            return output;
         };
         let data: serde_json::Value = serde_json::from_str(&frame.data).unwrap_or_default();
         match frame.event.as_str() {
@@ -136,21 +139,41 @@ impl Renderer {
                     self.text.push_str(delta);
                 }
             }
+            "message.extra"
+                if data.get("field").and_then(serde_json::Value::as_str) == Some("notice") =>
+            {
+                if let Some(notice) = data
+                    .get("content")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|notice| !notice.is_empty())
+                {
+                    output.push(MessageKind::Notice.render(notice));
+                }
+            }
             "message.end" if self.active => {
-                self.flush(editor)?;
+                if let Some(reply) = self.flush() {
+                    output.push(reply);
+                }
                 self.active = false;
+                if let Some(error) = data
+                    .get("error")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|error| !error.is_empty())
+                {
+                    output.push(MessageKind::Notice.render(error));
+                }
             }
             _ => {}
         }
-        Ok(())
+        output
     }
 
-    fn flush(&mut self, editor: &mut ChatLineEditor) -> Result<()> {
+    fn flush(&mut self) -> Option<String> {
         let text = std::mem::take(&mut self.text);
         if text.is_empty() {
-            return Ok(());
+            return None;
         }
-        editor.print(self.kind.render(&text))
+        Some(self.kind.render(&text))
     }
 }
 
@@ -213,6 +236,14 @@ fn label(tag: &str, text: &str, style: Style) -> String {
 mod tests {
     use super::*;
 
+    fn render_frames(frames: &[&str]) -> Vec<String> {
+        let mut renderer = Renderer::default();
+        frames
+            .iter()
+            .flat_map(|frame| renderer.absorb(frame))
+            .collect()
+    }
+
     #[test]
     fn kind_maps_from_gateway_role() {
         let reasoning = serde_json::json!({ "kind": "reasoning" });
@@ -246,5 +277,30 @@ mod tests {
         let rendered = label("note", "line one\nline two", Style::new());
         assert!(rendered.contains("note"));
         assert!(rendered.contains("\n         line two"));
+    }
+
+    #[test]
+    fn notice_extra_is_rendered() {
+        let rendered = render_frames(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.extra\ndata: {\"field\":\"notice\",\"boundary\":\"complete\",\"content\":\"failed to initialize LLM chat: request timed out\"}\n\n",
+            "event: message.end\ndata: {\"error\":null}\n\n",
+        ]);
+
+        assert_eq!(rendered.len(), 1);
+        assert!(rendered[0].contains("note"));
+        assert!(rendered[0].contains("request timed out"));
+    }
+
+    #[test]
+    fn message_end_error_is_rendered() {
+        let rendered = render_frames(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.end\ndata: {\"error\":\"gateway response stream failed\"}\n\n",
+        ]);
+
+        assert_eq!(rendered.len(), 1);
+        assert!(rendered[0].contains("note"));
+        assert!(rendered[0].contains("gateway response stream failed"));
     }
 }

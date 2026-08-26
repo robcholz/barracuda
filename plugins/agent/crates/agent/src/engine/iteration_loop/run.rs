@@ -140,7 +140,6 @@ where
                     return Ok(());
                 }
                 Err(error) => {
-                    log::error!("Agent LLM chat failed");
                     tracing::error!(name: "chat_failed", kind = "chat_init");
                     Err(IterationLoopError::ChatInit(error))?
                 }
@@ -186,7 +185,6 @@ where
                         return Ok(());
                     }
                     Some(Err(error)) => {
-                        log::error!("Agent LLM chat failed");
                         tracing::error!(name: "chat_failed", kind = "chat_stream");
                         Err(IterationLoopError::ChatStream(error))?;
                     }

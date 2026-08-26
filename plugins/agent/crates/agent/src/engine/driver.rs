@@ -279,6 +279,7 @@ impl AgentEngine {
     }
 
     fn fail(&mut self, error: AgentError) -> AgentError {
+        log::error!("Agent run failed: {error}");
         self.abandon_open_task();
         self.stop(StopReason::Failed);
         error
