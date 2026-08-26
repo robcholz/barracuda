@@ -27,6 +27,7 @@ fn production_plugins_do_not_reference_flash_contracts() -> Result<(), std::io::
         "plugins/captive-portal/crates/plugin/src/lib.rs",
         "plugins/gateway-agent/crates/plugin/src/lib.rs",
         "plugins/imessage-bluebubble/crates/plugin/src/lib.rs",
+        "plugins/imessage-inkbox/crates/plugin/src/lib.rs",
         "plugins/imessage-gateway/crates/plugin/src/lib.rs",
         "plugins/imessage-telegram/crates/plugin/src/lib.rs",
         "plugins/imessage-web/crates/plugin/src/lib.rs",
