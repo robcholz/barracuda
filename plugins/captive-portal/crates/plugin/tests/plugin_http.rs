@@ -13,8 +13,11 @@ use barracuda_agent_plugin::{
 };
 use barracuda_captive_portal_plugin::{CaptivePortalPlugin, SET_API_PATH};
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
-use barracuda_platform_test::{install_global_memory_vfs, loopback_network, memory_partition};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginManager, PluginResult};
+use barracuda_platform_test::{
+    install_global_memory_vfs, loopback_network, memory_partition, never_embassy_stack,
+};
+use barracuda_plugin_api::{ClientFactory, PluginContext};
+use barracuda_plugin_manager::{Plugin, PluginManager, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{WebServer, PLUGIN_ID as WEBSERVER_PLUGIN_ID};
 use embassy_net::{tcp::TcpSocket, Ipv4Address};
 use embedded_io_async::Write as _;
@@ -33,7 +36,7 @@ impl Plugin<FRAME_SIZE> for AgentProvider {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -55,7 +58,7 @@ impl Plugin<FRAME_SIZE> for WebServerProvider {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -103,8 +106,13 @@ async fn plugin_exposes_agent_set_api_over_http() {
             },
         )
         .expect("register WebServer provider");
+    let construction_stack = never_embassy_stack();
+    let context = PluginContext::new(
+        construction_stack,
+        ClientFactory::plaintext(construction_stack),
+    );
     manager
-        .register(&mut router, CaptivePortalPlugin::new())
+        .register(&mut router, CaptivePortalPlugin::new(&context))
         .expect("register Captive Portal Plugin");
     manager.start(&mut router).expect("start Plugins");
 

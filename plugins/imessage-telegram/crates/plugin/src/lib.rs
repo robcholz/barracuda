@@ -11,7 +11,8 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_imessage_gateway_plugin::{IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
     PLUGIN_ID as WEBSERVER_PLUGIN_ID,
@@ -36,8 +37,10 @@ pub struct IMessageTelegramPlugin {
 impl IMessageTelegramPlugin {
     /// Creates an unconfigured provider using Platform HTTP resources.
     #[must_use]
-    pub fn new(http_clients: ClientFactory<'static>) -> Self {
-        Self { http_clients }
+    pub fn new(context: &PluginContext) -> Self {
+        Self {
+            http_clients: context.http_clients.clone(),
+        }
     }
 }
 
@@ -48,7 +51,10 @@ impl<const M: usize> Plugin<M> for IMessageTelegramPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {

@@ -4,6 +4,7 @@
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
+use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
 use barracuda_time_plugin::{PLUGIN_ID, TimePlugin};
 use futures_lite::future::block_on;
@@ -23,7 +24,9 @@ fn plugin_loads_the_time_component() {
             .expect("install global test VFS");
         let mut router = EventRouter::new(lanes).await.expect("create router");
         let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
-        let plugin = TimePlugin::new(never_embassy_stack());
+        let stack = never_embassy_stack();
+        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let plugin = TimePlugin::new(&context);
 
         assert_eq!(Plugin::<512>::id(&plugin), "time");
         assert!(<TimePlugin as Plugin<512>>::DEPENDS_ON.is_empty());

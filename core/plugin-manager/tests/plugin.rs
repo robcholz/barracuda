@@ -16,9 +16,9 @@ use barracuda_event_router::{
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    CapabilityError, Plugin, PluginContext, PluginError, PluginId, PluginIdError, PluginManager,
-    PluginRegisterError, PluginResult, PluginStartContext, PluginStartError, PluginUnloadError,
-    PluginWriteTransaction,
+    CapabilityError, Plugin, PluginError, PluginId, PluginIdError, PluginManager,
+    PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext, PluginStartError,
+    PluginUnloadError, PluginWriteTransaction,
 };
 use futures_lite::future::block_on;
 
@@ -103,7 +103,7 @@ impl Plugin<FRAME_SIZE> for StatefulPlugin {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -292,7 +292,7 @@ impl Plugin<FRAME_SIZE> for FailingPlugin {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -400,7 +400,7 @@ impl Plugin<FRAME_SIZE> for CapabilityProvider {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -423,7 +423,7 @@ impl Plugin<FRAME_SIZE> for CapabilityConsumer {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -491,7 +491,7 @@ impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -537,7 +537,7 @@ impl Plugin<FRAME_SIZE> for MissingCapabilityConsumer {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -688,7 +688,7 @@ impl Plugin<FRAME_SIZE> for DuplicateCapabilityProvider {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -736,7 +736,7 @@ impl Plugin<FRAME_SIZE> for RegisterPhasePlugin {
 
     fn register<Storage>(
         &mut self,
-        _context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        _context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -767,7 +767,7 @@ impl Plugin<FRAME_SIZE> for DependentPhasePlugin {
 
     fn register<Storage>(
         &mut self,
-        _context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        _context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,

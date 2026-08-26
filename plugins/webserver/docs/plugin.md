@@ -5,10 +5,10 @@
 - Provided typed capabilities: `WebServer`
 
 The WebServer Plugin owns one portable picoserve server and one Embassy server
-task. System passes the common `embassy_net::Stack` into the Plugin constructor;
-the task creates `TcpSocket` values and calls `TcpSocket::accept(8787)` directly.
-The macOS and Linux Platforms assigns the stack `10.42.0.2`, so its endpoint is
-`10.42.0.2:8787`.
+task. Its constructor takes the common `PluginContext` and copies the public
+`ip_stack` handle; the task creates `TcpSocket` values and calls
+`TcpSocket::accept(8787)` directly. The macOS and Linux Platforms assign the
+stack `10.42.0.2`, so its endpoint is `10.42.0.2:8787`.
 
 It provides the typed `WebServer` capability so dependent Plugins can register
 portable WebSocket routes with `serve` and ordinary HTTP routes with

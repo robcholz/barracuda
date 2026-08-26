@@ -4,7 +4,8 @@
 
 extern crate alloc;
 
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
 use barracuda_time_component::{
     TimeComponent, TimeConfig,
     sntp::{SntpConfig, SntpSource},
@@ -28,8 +29,10 @@ pub struct TimePlugin {
 impl TimePlugin {
     /// Creates the Plugin with the IP stack used by its SNTP source.
     #[must_use]
-    pub const fn new(network: Stack<'static>) -> Self {
-        Self { network }
+    pub const fn new(context: &PluginContext) -> Self {
+        Self {
+            network: context.ip_stack,
+        }
     }
 }
 
@@ -38,7 +41,10 @@ impl<const M: usize> Plugin<M> for TimePlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {

@@ -25,6 +25,7 @@ use barracuda_imessage_telegram_plugin::IMessageTelegramPlugin;
 use barracuda_imessage_web_plugin::IMessageWebPlugin;
 use barracuda_imessage_wechat_plugin::IMessageWechatPlugin;
 use barracuda_platform::{Partitions, PlatformResources};
+use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
 };
@@ -124,26 +125,21 @@ where
 
         let http_clients =
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
+        let plugin_context = PluginContext::new(prepared.ip_stack, http_clients);
 
-        plugins.register(&mut router, WebServerPlugin::new(prepared.ip_stack))?;
-        plugins.register(&mut router, VmPlugin::default())?;
-        plugins.register(&mut router, TimePlugin::new(prepared.ip_stack))?;
-        plugins.register(&mut router, SchedulerPlugin)?;
-        plugins.register(&mut router, AgentPlugin::new(http_clients.clone()))?;
-        plugins.register(&mut router, CaptivePortalPlugin::new())?;
-        plugins.register(&mut router, IMessageGatewayPlugin::new())?;
-        plugins.register(
-            &mut router,
-            IMessageBlueBubblePlugin::new(http_clients.clone()),
-        )?;
-        plugins.register(&mut router, IMessageInkboxPlugin::new(http_clients.clone()))?;
-        plugins.register(
-            &mut router,
-            IMessageTelegramPlugin::new(http_clients.clone()),
-        )?;
-        plugins.register(&mut router, IMessageWechatPlugin::new(http_clients))?;
-        plugins.register(&mut router, IMessageWebPlugin::new())?;
-        plugins.register(&mut router, GatewayAgentPlugin::new())?;
+        plugins.register(&mut router, WebServerPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, VmPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, TimePlugin::new(&plugin_context))?;
+        plugins.register(&mut router, SchedulerPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, AgentPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, CaptivePortalPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageGatewayPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageBlueBubblePlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageInkboxPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageTelegramPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageWechatPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageWebPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, GatewayAgentPlugin::new(&plugin_context))?;
         plugins.start(&mut router)?;
         log::info!("Barracuda System started");
 

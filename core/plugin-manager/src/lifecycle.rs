@@ -148,7 +148,7 @@ pub trait Plugin<const M: usize> {
     /// default registration phase performs no work.
     fn register<Storage>(
         &mut self,
-        _context: &mut PluginContext<'_, M, Storage>,
+        _context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
         Storage: PluginStorage,
@@ -233,7 +233,7 @@ impl<const M: usize> PluginEventRouterContext<'_, M> {
 
 /// Context provided exclusively during [`Plugin::register`].
 #[derive(Getters)]
-pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
+pub struct PluginRegisterContext<'a, const M: usize, Storage: PluginStorage> {
     /// Explicit Event Router registration boundary.
     pub event_router: PluginEventRouterContext<'a, M>,
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
@@ -247,7 +247,7 @@ pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
     retained_resources: &'a mut Vec<Box<dyn Any>>,
 }
 
-impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
+impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storage> {
     /// Returns this Plugin's private VFS when it declared one.
     ///
     /// # Errors
@@ -720,7 +720,7 @@ where
         let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
         let result = {
             let mut registrar = EventRouterRegistrar { router };
-            let mut context = PluginContext {
+            let mut context = PluginRegisterContext {
                 event_router: PluginEventRouterContext {
                     registrar: &mut registrar,
                     component_ids: &mut component_ids,

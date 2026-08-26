@@ -4,8 +4,9 @@
 
 extern crate alloc;
 
+use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginError, PluginResult, PluginStartContext,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext,
 };
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_component::{VmComponent, VmRuntime};
@@ -14,9 +15,16 @@ use barracuda_vm_component::{VmComponent, VmRuntime};
 pub const PLUGIN_ID: &str = "vm";
 
 /// Registers the VM Component and starts its owner-managed Embassy runtime.
-#[derive(Default)]
 pub struct VmPlugin {
     runtime: Option<VmRuntime>,
+}
+
+impl VmPlugin {
+    /// Creates the VM Plugin from the shared construction context.
+    #[must_use]
+    pub const fn new(_context: &PluginContext) -> Self {
+        Self { runtime: None }
+    }
 }
 
 impl<const M: usize> Plugin<M> for VmPlugin {
@@ -24,7 +32,10 @@ impl<const M: usize> Plugin<M> for VmPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
@@ -68,12 +79,20 @@ mod tests {
     use std::time::Duration;
 
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
+    use barracuda_platform_test::{
+        install_global_memory_vfs, memory_partition, never_embassy_stack,
+    };
+    use barracuda_plugin_api::{ClientFactory, PluginContext};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginStartError};
     use embassy_executor::{Executor, Spawner};
     use futures_lite::future::block_on;
 
     use super::VmPlugin;
+
+    fn plugin_context() -> PluginContext {
+        let stack = never_embassy_stack();
+        PluginContext::new(stack, ClientFactory::plaintext(stack))
+    }
 
     #[test]
     fn plugin_loads_its_vm_component() {
@@ -83,7 +102,7 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
         let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         let id = PluginId::try_from("vm").expect("valid Plugin ID");
-        let plugin = VmPlugin::default();
+        let plugin = VmPlugin::new(&plugin_context());
         assert_eq!(Plugin::<512>::id(&plugin), "vm");
 
         manager
@@ -100,7 +119,7 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
         let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         manager
-            .register(&mut router, VmPlugin::default())
+            .register(&mut router, VmPlugin::new(&plugin_context()))
             .expect("register VM Plugin");
 
         let error = manager
@@ -128,7 +147,7 @@ mod tests {
                 .map_err(|error| error.to_string())?;
             manager.install_task_spawner(spawner);
             manager
-                .register(&mut router, VmPlugin::default())
+                .register(&mut router, VmPlugin::new(&plugin_context()))
                 .map_err(|error| error.to_string())?;
             manager
                 .start(&mut router)

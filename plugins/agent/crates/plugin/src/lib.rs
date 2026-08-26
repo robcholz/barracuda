@@ -11,8 +11,9 @@ use alloc::vec::Vec;
 use barracuda_agent_component::component::AgentComponent;
 use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
+use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginError, PluginFilesystem, PluginRequirements, PluginResult,
+    Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
 use http_client::ClientFactory;
 
@@ -64,8 +65,10 @@ pub struct AgentPlugin {
 impl AgentPlugin {
     /// Creates the Plugin with Platform HTTP resources.
     #[must_use]
-    pub const fn new(http_clients: ClientFactory<'static>) -> Self {
-        Self { http_clients }
+    pub fn new(context: &PluginContext) -> Self {
+        Self {
+            http_clients: context.http_clients.clone(),
+        }
     }
 }
 
@@ -77,7 +80,10 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
@@ -112,6 +118,7 @@ mod tests {
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
     };
+    use barracuda_plugin_api::PluginContext;
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
@@ -136,7 +143,9 @@ mod tests {
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("agent").expect("valid Plugin ID");
 
-            let plugin = AgentPlugin::new(ClientFactory::plaintext(never_embassy_stack()));
+            let stack = never_embassy_stack();
+            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = AgentPlugin::new(&context);
             assert_eq!(Plugin::<512>::id(&plugin), "agent");
 
             manager

@@ -6,6 +6,7 @@ members = [
     "boards/tool",
     "composition/*",
     "core/event-router",
+    "core/plugin-api",
     "core/plugin-manager",
     "core/system",
     "core/event-router/crates/*",

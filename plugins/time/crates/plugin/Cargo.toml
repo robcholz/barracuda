@@ -6,6 +6,7 @@ description = "Barracuda Plugin that owns the network-synchronized Time Componen
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-time-component = { path = "../component" }
 embassy-net.workspace = true

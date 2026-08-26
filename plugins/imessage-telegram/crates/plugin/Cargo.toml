@@ -6,6 +6,7 @@ description = "IMessage Telegram provider Plugin"
 
 [dependencies]
 barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
 gateway = { path = "../../../imessage-gateway/crates/gateway" }

@@ -424,6 +424,7 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-model-api",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "embassy-time",
  "futures-lite",
@@ -596,6 +597,7 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "embassy-net",
@@ -705,6 +707,7 @@ dependencies = [
  "barracuda-gateway-agent-component",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "futures-lite",
 ]
@@ -714,6 +717,7 @@ name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "bluebubbles",
@@ -745,6 +749,7 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-imessage-gateway-component",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "futures-lite",
  "gateway",
@@ -755,6 +760,7 @@ name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
@@ -770,6 +776,7 @@ name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
@@ -785,6 +792,7 @@ name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
@@ -796,6 +804,7 @@ name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
@@ -995,6 +1004,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "embassy-net",
+ "http-client",
+]
+
+[[package]]
 name = "barracuda-plugin-manager"
 version = "0.1.0"
 dependencies = [
@@ -1108,6 +1126,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-scheduler-component",
  "barracuda-time-plugin",
@@ -1132,6 +1151,7 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-scheduler-plugin",
  "barracuda-target-api",
@@ -1191,6 +1211,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-time-component",
  "embassy-net",
@@ -1309,6 +1330,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
@@ -1326,6 +1348,7 @@ dependencies = [
  "async-channel",
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "embassy-executor",
  "embassy-futures",

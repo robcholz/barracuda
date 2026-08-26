@@ -7,7 +7,8 @@ extern crate alloc;
 use alloc::rc::Rc;
 
 use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
 use gateway::{GatewayError, MessageChannel, MessageChannelRegistration, MessageGateway};
 
 pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
@@ -57,13 +58,12 @@ impl IMessageGateway {
 }
 
 /// Plugin that owns the shared IMessage Gateway Component and capability.
-#[derive(Default)]
 pub struct IMessageGatewayPlugin;
 
 impl IMessageGatewayPlugin {
     /// Creates the base IMessage Gateway Plugin.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(_context: &PluginContext) -> Self {
         Self
     }
 }
@@ -73,7 +73,10 @@ impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
@@ -93,7 +96,10 @@ mod tests {
     use super::IMessageGatewayPlugin;
     use alloc::boxed::Box;
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
+    use barracuda_platform_test::{
+        install_global_memory_vfs, memory_partition, never_embassy_stack,
+    };
+    use barracuda_plugin_api::{ClientFactory, PluginContext};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
@@ -112,7 +118,9 @@ mod tests {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("imessage-gateway").expect("valid Plugin ID");
-            let plugin = IMessageGatewayPlugin::new();
+            let stack = never_embassy_stack();
+            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = IMessageGatewayPlugin::new(&context);
             assert_eq!(Plugin::<512>::id(&plugin), "imessage-gateway");
 
             manager

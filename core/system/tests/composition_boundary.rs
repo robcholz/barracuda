@@ -32,6 +32,41 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
 }
 
 #[test]
+fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let plugin_api = std::fs::read_to_string(root.join("core/plugin-api/src/lib.rs"))?;
+    let system = std::fs::read_to_string(root.join("core/system/src/lib.rs"))?;
+
+    assert!(plugin_api.contains("pub struct PluginContext"));
+    assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
+    assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
+    assert!(system.contains("let plugin_context = PluginContext"));
+
+    for plugin in [
+        "WebServerPlugin",
+        "VmPlugin",
+        "TimePlugin",
+        "SchedulerPlugin",
+        "AgentPlugin",
+        "CaptivePortalPlugin",
+        "IMessageGatewayPlugin",
+        "IMessageBlueBubblePlugin",
+        "IMessageInkboxPlugin",
+        "IMessageTelegramPlugin",
+        "IMessageWechatPlugin",
+        "IMessageWebPlugin",
+        "GatewayAgentPlugin",
+    ] {
+        assert!(
+            system.contains(&format!("{plugin}::new(&plugin_context)")),
+            "{plugin} is not constructed from the shared PluginContext",
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn vfs_scopes_replace_the_custom_agent_sandbox_crate() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     assert!(!root

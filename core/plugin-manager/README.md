@@ -40,28 +40,31 @@ because mounting the shared database performs real storage I/O.
 
 The manager validates `Plugin::id()`, derives one namespace-restricted storage
 implementation from that stable identity, and passes it through
-`PluginContext` as the `PluginStorage` contract. A Plugin may clone its storage
-capability into any number of Components. Keys are UTF-8 strings and values are
-Plugin-owned fixed-layout zerocopy types; Plugin Manager adds no serialization
-format of its own.
+`PluginRegisterContext` as the `PluginStorage` contract. A Plugin may clone its
+storage capability into any number of Components. Keys are UTF-8 strings and
+values are Plugin-owned fixed-layout zerocopy types; Plugin Manager adds no
+serialization format of its own.
 
 Plugins can also exchange runtime-only typed capabilities. A provider calls
-`PluginContext::provide(Rc<T>)` during registration; a consumer declares the
-provider in `Plugin::DEPENDS_ON` and calls
-`PluginContext::require::<T>(provider)`. The manager stores the value as
+`PluginRegisterContext::provide(Rc<T>)` during registration; a consumer
+declares the provider in `Plugin::DEPENDS_ON` and calls
+`PluginRegisterContext::require::<T>(provider)`. The manager stores the value as
 `Rc<dyn Any>` under `(provider PluginId, TypeId)`. It has no knowledge of
 concrete capability types, and these entries are never persisted to `ekv`.
 
-System passes statically selected Platform handles and other fixed resources
-directly to each concrete Plugin constructor. `PluginContext` carries only
-Plugin-owned storage, declared Plugin capabilities, retained resources, and
-the explicit Event Router registration boundary. The Embassy spawner remains
-an explicit startup lifecycle facility rather than a typed resource lookup.
+System assembles statically selected Platform handles and derived shared
+services into one `barracuda_plugin_api::PluginContext`. Every concrete Plugin
+constructor receives a shared reference to that construction context and takes
+or clones only the fixed handles it owns. `PluginRegisterContext` separately
+carries Plugin-owned storage, declared Plugin capabilities, retained resources,
+and the explicit Event Router registration boundary. The Embassy spawner
+remains an explicit startup lifecycle facility rather than a construction
+resource or typed lookup.
 
 Capabilities follow their provider's lifecycle. A provider cannot unload while
 declared dependents remain registered, and phase rollback removes everything
-published by that attempt. `PluginContext::retain` keeps registration guards or
-other resources alive until the owning Plugin unloads successfully.
+published by that attempt. `PluginRegisterContext::retain` keeps registration
+guards or other resources alive until the owning Plugin unloads successfully.
 
 Each Plugin declares its own identity, constructs its own Components, and calls
 `context.event_router.load`. `barracuda-system` therefore knows which Plugins
@@ -70,7 +73,7 @@ contain.
 
 ```text
 System
-├── fixed Plugin construction inputs
+├── PluginContext { ip_stack, http_clients }
 └── PluginManager
     ├── EventRouter registrar
     │   └── Plugin -> Component, Component, ...

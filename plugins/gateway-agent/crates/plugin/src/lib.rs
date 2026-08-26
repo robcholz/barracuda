@@ -6,19 +6,19 @@ extern crate alloc;
 
 use barracuda_gateway_agent_component::component::GatewayAgentBridge;
 use barracuda_imessage_gateway_plugin::PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID;
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
 
 /// Stable identity of the Gateway-Agent Plugin.
 pub const PLUGIN_ID: &str = "gateway-agent";
 
 /// Plugin that owns the Gateway-Agent Bridge Component.
-#[derive(Default)]
 pub struct GatewayAgentPlugin;
 
 impl GatewayAgentPlugin {
     /// Creates the self-contained Gateway-Agent Plugin.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(_context: &PluginContext) -> Self {
         Self
     }
 }
@@ -30,7 +30,10 @@ impl<const M: usize> Plugin<M> for GatewayAgentPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
@@ -46,7 +49,10 @@ mod tests {
     use alloc::boxed::Box;
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
     use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
-    use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
+    use barracuda_platform_test::{
+        install_global_memory_vfs, memory_partition, never_embassy_stack,
+    };
+    use barracuda_plugin_api::{ClientFactory, PluginContext};
     use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
@@ -75,14 +81,16 @@ mod tests {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("gateway-agent").expect("valid Plugin ID");
-            let plugin = GatewayAgentPlugin::new();
+            let stack = never_embassy_stack();
+            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = GatewayAgentPlugin::new(&context);
             assert_eq!(Plugin::<512>::id(&plugin), "gateway-agent");
 
             manager
                 .register(&mut router, Dependency("agent"))
                 .expect("register Agent dependency");
             manager
-                .register(&mut router, IMessageGatewayPlugin::new())
+                .register(&mut router, IMessageGatewayPlugin::new(&context))
                 .expect("register IMessage Gateway dependency");
             manager
                 .register(&mut router, plugin)
