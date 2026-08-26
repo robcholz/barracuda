@@ -252,7 +252,7 @@ mod internal_flash {
         type Error = Stm32PlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
-            rtt_target::rtt_init_log!(log::LevelFilter::Info);
+            rtt_target::rtt_init_log!(crate::PLATFORM_LOG_LEVEL);
             log::info!("preparing STM32 Platform");
             Ok(())
         }

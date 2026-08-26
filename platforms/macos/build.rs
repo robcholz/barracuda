@@ -48,6 +48,7 @@ enum FileRegionAccess {
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed=platform.yml");
+    println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
     let yaml = fs::read_to_string("platform.yml")?;
     let mut documents = yaml_peg::serde::from_str::<PlatformDocument>(&yaml)?;
     let platform = exactly_one(&mut documents, "platform.yml")?;
@@ -88,8 +89,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut layouts = yaml_peg::serde::from_str::<FileLayoutDocument>(&layout_yaml)?;
     let layout = exactly_one(&mut layouts, "file-layout.yml")?;
     render_layout(&mut generated, layout);
+    render_log_level(&mut generated)?;
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     fs::write(output.join("macos_config.rs"), generated)?;
+    Ok(())
+}
+
+fn render_log_level(generated: &mut String) -> Result<(), Box<dyn Error>> {
+    let level = env::var("BARRACUDA_LOG_LEVEL").unwrap_or_else(|_| String::from("info"));
+    let variant = match level.as_str() {
+        "off" => "Off",
+        "error" => "Error",
+        "warn" => "Warn",
+        "info" => "Info",
+        "debug" => "Debug",
+        "trace" => "Trace",
+        _ => {
+            return Err(format!(
+                "invalid BARRACUDA_LOG_LEVEL `{level}`; expected off, error, warn, info, debug, or trace"
+            )
+            .into());
+        }
+    };
+    generated.push_str(&format!(
+        "\n/// Log level selected at build time.\npub const PLATFORM_LOG_LEVEL: ::log::LevelFilter = ::log::LevelFilter::{variant};\n"
+    ));
     Ok(())
 }
 

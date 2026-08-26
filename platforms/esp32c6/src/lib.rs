@@ -213,7 +213,7 @@ mod internal_flash {
         type Error = Esp32c6PlatformError;
 
         fn prepare() -> Result<(), Self::Error> {
-            esp_println::logger::init_logger(log::LevelFilter::Info);
+            esp_println::logger::init_logger(crate::PLATFORM_LOG_LEVEL);
             log::info!("preparing ESP32-C6 Platform");
             Ok(())
         }

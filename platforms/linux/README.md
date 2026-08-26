@@ -16,4 +16,5 @@ The application then opens `barracuda0` without root privileges.
 - WebServer endpoint: `10.42.0.2:8787`
 
 Platform, System, Core, and Plugin logs are written to standard error at
-`info`.
+`info`. Select another level for a build with, for example,
+`BARRACUDA_LOG_LEVEL=debug cargo build`.

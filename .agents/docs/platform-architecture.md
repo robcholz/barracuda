@@ -317,6 +317,12 @@ Host logger installation and sink selection live inside each concrete Host
 Platform. They are not shared mechanisms and must not be moved into a
 cross-Platform logging crate.
 
+`BARRACUDA_LOG_LEVEL` selects `off`, `error`, `warn`, `info`, `debug`, or
+`trace` at build time and defaults to `info`. Each concrete Platform build
+script validates the value and generates a `log::LevelFilter` constant for its
+backend. Platforms must not read or parse the setting at runtime; invalid
+values are build errors.
+
 Logging is process-global support, not a consumable business capability. It
 does not become a `PlatformResources` field, Plugin capability, Event Router
 contract, or Board peripheral. Platform-specific output setup remains outside

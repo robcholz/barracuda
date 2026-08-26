@@ -77,6 +77,16 @@ no `BARRACUDA_BOARD` environment variable or custom build wrapper is required.
 The Rust target independently selects the Platform, and compilation rejects an
 incompatible Board/Platform pair.
 
+The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
+one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
+
+```bash
+BARRACUDA_LOG_LEVEL=debug cargo build
+```
+
+The selected level is validated and baked into the Platform binary; it is not
+read from the environment at runtime.
+
 Automation can bypass the prompt with `cargo board select <board-name>`.
 
 Available Board names are the directory names under `boards/configs/`.

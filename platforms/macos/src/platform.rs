@@ -204,6 +204,7 @@ mod tests {
     fn prepare_installs_the_global_log_backend_before_platform_initialization() {
         MacosPlatform::prepare().expect("prepare macOS Platform");
 
+        assert_eq!(log::max_level(), crate::PLATFORM_LOG_LEVEL);
         assert!(log::log_enabled!(
             target: "barracuda_platform_macos",
             log::Level::Info
