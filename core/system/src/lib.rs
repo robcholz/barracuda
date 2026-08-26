@@ -18,8 +18,12 @@ use barracuda_agent_plugin::AgentPlugin;
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
+use barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin;
 use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
+use barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin;
+use barracuda_imessage_telegram_plugin::IMessageTelegramPlugin;
 use barracuda_imessage_web_plugin::IMessageWebPlugin;
+use barracuda_imessage_wechat_plugin::IMessageWechatPlugin;
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
@@ -128,6 +132,22 @@ where
         plugins.register(&mut router, AgentPlugin::new(http))?;
         plugins.register(&mut router, CaptivePortalPlugin::new())?;
         plugins.register(&mut router, IMessageGatewayPlugin::new())?;
+        plugins.register(
+            &mut router,
+            IMessageBlueBubblePlugin::new(alloc::rc::Rc::new(http.create())),
+        )?;
+        plugins.register(
+            &mut router,
+            IMessageInkboxPlugin::new(alloc::rc::Rc::new(http.create())),
+        )?;
+        plugins.register(
+            &mut router,
+            IMessageTelegramPlugin::new(alloc::rc::Rc::new(http.create())),
+        )?;
+        plugins.register(
+            &mut router,
+            IMessageWechatPlugin::new(alloc::rc::Rc::new(http.create())),
+        )?;
         plugins.register(&mut router, IMessageWebPlugin::new())?;
         plugins.register(&mut router, GatewayAgentPlugin::new())?;
         plugins.start(&mut router)?;

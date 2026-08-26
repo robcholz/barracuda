@@ -715,9 +715,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "bluebubbles",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -752,9 +756,13 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "gateway",
  "http-client",
  "inkbox",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -763,8 +771,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
  "telegram",
 ]
 
@@ -785,8 +797,12 @@ version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
  "wechat",
 ]
 
@@ -1103,8 +1119,12 @@ dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-event-router",
  "barracuda-gateway-agent-plugin",
+ "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
+ "barracuda-imessage-wechat-plugin",
  "barracuda-model-api",
  "barracuda-platform",
  "barracuda-platform-test",

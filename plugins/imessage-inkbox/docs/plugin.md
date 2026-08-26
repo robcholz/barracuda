@@ -1,10 +1,9 @@
 # IMessage Inkbox Plugin
 
 - Plugin ID: `imessage-inkbox`
-- Direct Plugin dependencies: `imessage-gateway`
+- Direct Plugin dependencies: `imessage-gateway`, `webserver`
 - Provided typed capabilities: none
 
-The Plugin owns one configured Inkbox provider, requires the
-`IMessageGateway` capability, and registers the `imessage` message channel for
-its lifetime. It sends through the Inkbox iMessage API using an identity-scoped
-API key and supports text, streamed text, media, tapbacks, and typing signals.
+The Plugin starts without provider credentials. It requires the `IMessageGateway`
+and `WebServer` capabilities, exposes `/api/gateway/inkbox` for runtime configuration, and
+registers the configured channel for its lifetime. See [`http.md`](http.md).
