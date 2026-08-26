@@ -6,16 +6,16 @@ extern crate alloc;
 use alloc::{
     boxed::Box,
     format,
-    rc::Rc,
     string::{String, ToString},
 };
 
 use futures_lite::StreamExt as _;
 use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, MediaKind, MessageChannel, ReactRequest,
-    SendMediaRequest, SendMessageRequest, SendReceipt, SetTypingRequest, TextBody,
+    ChannelError, ChannelFuture, MediaKind, MessageChannel, ReactRequest, SendMediaRequest,
+    SendMessageRequest, SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use http_client::{Body, BodyError, HttpClient, Multipart, Request as HttpRequest, Response};
+use gateway_http::{Method, Multipart, RequestBody, Response};
+use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 const DEFAULT_API_BASE: &str = "https://inkbox.ai";
@@ -42,15 +42,22 @@ impl InkboxConfig {
 }
 
 /// Outbound iMessage provider backed by Inkbox.
-pub struct Inkbox {
-    http: Rc<dyn HttpClient>,
+pub struct Inkbox<'net, T = http_client::Tcp, D = http_client::Resolver> {
+    http_clients: ClientFactory<'net, T, D>,
     config: InkboxConfig,
 }
 
-impl Inkbox {
-    /// Creates a provider using Barracuda's shared HTTP facade.
-    pub fn new(http: Rc<dyn HttpClient>, config: InkboxConfig) -> Self {
-        Self { http, config }
+impl<'net, T, D> Inkbox<'net, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+{
+    /// Creates a provider using Platform-owned HTTP resources.
+    pub fn new(http_clients: ClientFactory<'net, T, D>, config: InkboxConfig) -> Self {
+        Self {
+            http_clients,
+            config,
+        }
     }
 
     fn endpoint(&self, path: &str) -> String {
@@ -61,14 +68,27 @@ impl Inkbox {
         )
     }
 
-    async fn call(&self, request: HttpRequest) -> Result<Value, ChannelError> {
-        let response = self
-            .http
-            .execute(request.header("X-API-Key", &self.config.api_key))
-            .await
-            .map_err(|error| ChannelError::Transport {
-                message: error.to_string(),
-            })?;
+    async fn call<B: RequestBody>(
+        &self,
+        method: Method,
+        url: &str,
+        content_type: &str,
+        body: B,
+    ) -> Result<Value, ChannelError> {
+        let response = gateway_http::send(
+            &self.http_clients,
+            method,
+            url,
+            &[
+                ("Content-Type", content_type),
+                ("X-API-Key", self.config.api_key.as_str()),
+            ],
+            body,
+        )
+        .await
+        .map_err(|error| ChannelError::Transport {
+            message: error.to_string(),
+        })?;
         parse_response(response)
     }
 
@@ -77,9 +97,10 @@ impl Inkbox {
             message: error.to_string(),
         })?;
         self.call(
-            HttpRequest::post(self.endpoint(path))
-                .content_type("application/json")
-                .bytes(bytes),
+            Method::POST,
+            &self.endpoint(path),
+            "application/json",
+            bytes.as_slice(),
         )
         .await
     }
@@ -128,25 +149,21 @@ impl Inkbox {
         let mime = request
             .mime_type
             .unwrap_or_else(|| default_mime(kind).into());
-        let multipart = Multipart::new("barracuda-inkbox-media").file(
-            "file",
-            filename,
-            mime,
-            map_binary_body(request.body),
-        );
+        let multipart =
+            Multipart::new("barracuda-inkbox-media").file("file", filename, mime, request.body);
         let (content_type, body) =
             multipart
                 .finish()
                 .map_err(|error| ChannelError::InvalidRequest {
                     message: error.to_string(),
                 })?;
+        let body_probe = body.clone();
         let uploaded = self
-            .call(
-                HttpRequest::post(self.endpoint("media"))
-                    .content_type(content_type)
-                    .body(body),
-            )
+            .call(Method::POST, &self.endpoint("media"), &content_type, body)
             .await?;
+        if let Some(message) = body_probe.failure() {
+            return Err(ChannelError::Stream(StreamError::failed(message)));
+        }
         let media_url = uploaded
             .get("media_url")
             .and_then(Value::as_str)
@@ -175,7 +192,11 @@ impl Inkbox {
     }
 }
 
-impl MessageChannel for Inkbox {
+impl<T, D> MessageChannel for Inkbox<'static, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect + 'static,
+    D: http_client::embedded_nal_async::Dns + 'static,
+{
     fn channel(&self) -> &str {
         "imessage"
     }
@@ -303,16 +324,5 @@ fn default_mime(kind: MediaKind) -> &'static str {
         MediaKind::File | MediaKind::Audio => "application/octet-stream",
         MediaKind::Image => "image/jpeg",
         MediaKind::Video => "video/mp4",
-    }
-}
-
-fn map_binary_body(body: BinaryBody) -> Body {
-    match body {
-        BinaryBody::Bytes(bytes) => Body::Bytes(bytes),
-        BinaryBody::Stream(stream) => {
-            Body::stream(Box::pin(stream.map(|chunk| {
-                chunk.map_err(|error| BodyError::failed(error.to_string()))
-            })))
-        }
     }
 }

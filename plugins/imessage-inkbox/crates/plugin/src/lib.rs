@@ -17,7 +17,7 @@ use barracuda_webserver_plugin::{
     PLUGIN_ID as WEBSERVER_PLUGIN_ID,
 };
 use gateway::{MessageChannel, MessageChannelRegistration};
-use http_client::HttpClient;
+use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
 use serde::Deserialize;
 
@@ -30,14 +30,14 @@ const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes Inkbox configuration and registers the resulting channel.
 pub struct IMessageInkboxPlugin {
-    http: Rc<dyn HttpClient>,
+    http_clients: ClientFactory<'static>,
 }
 
 impl IMessageInkboxPlugin {
-    /// Creates an unconfigured provider using Barracuda's shared HTTP client.
+    /// Creates an unconfigured provider using Platform HTTP resources.
     #[must_use]
-    pub fn new(http: Rc<dyn HttpClient>) -> Self {
-        Self { http }
+    pub fn new(http_clients: ClientFactory<'static>) -> Self {
+        Self { http_clients }
     }
 }
 
@@ -56,7 +56,7 @@ impl<const M: usize> Plugin<M> for IMessageInkboxPlugin {
         let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
         let endpoint = ConfigEndpoint {
             gateway,
-            http: Rc::clone(&self.http),
+            http_clients: self.http_clients.clone(),
             channel_registration: RefCell::new(None),
         };
         let registration = webserver
@@ -76,11 +76,11 @@ struct ConfigRequest {
 }
 
 impl From<ConfigRequest> for InkboxConfig {
-    fn from(self: ConfigRequest) -> Self {
+    fn from(value: ConfigRequest) -> Self {
         InkboxConfig {
-            api_key: self.api_key,
-            identity_id: self.identity_id,
-            api_base: self.api_base,
+            api_key: value.api_key,
+            identity_id: value.identity_id,
+            api_base: value.api_base,
         }
     }
 }
@@ -91,7 +91,7 @@ fn default_inkbox_api_base() -> String {
 
 struct ConfigEndpoint {
     gateway: Rc<IMessageGateway>,
-    http: Rc<dyn HttpClient>,
+    http_clients: ClientFactory<'static>,
     channel_registration: RefCell<Option<MessageChannelRegistration>>,
 }
 
@@ -112,7 +112,7 @@ impl HttpEndpoint for ConfigEndpoint {
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             };
             let channel: Rc<dyn MessageChannel> =
-                Rc::new(Inkbox::new(Rc::clone(&self.http), config.into()));
+                Rc::new(Inkbox::new(self.http_clients.clone(), config.into()));
             self.channel_registration.borrow_mut().take();
             match self.gateway.register(channel) {
                 Ok(registration) => {

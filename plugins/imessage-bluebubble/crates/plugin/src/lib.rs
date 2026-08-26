@@ -18,7 +18,7 @@ use barracuda_webserver_plugin::{
 };
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
 use gateway::{MessageChannel, MessageChannelRegistration};
-use http_client::HttpClient;
+use http_client::ClientFactory;
 use serde::Deserialize;
 
 /// Stable identity of the IMessage BlueBubbles Plugin.
@@ -30,14 +30,14 @@ const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes BlueBubbles configuration and registers the resulting channel.
 pub struct IMessageBlueBubblePlugin {
-    http: Rc<dyn HttpClient>,
+    http_clients: ClientFactory<'static>,
 }
 
 impl IMessageBlueBubblePlugin {
-    /// Creates an unconfigured provider using Barracuda's shared HTTP client.
+    /// Creates an unconfigured provider using Platform HTTP resources.
     #[must_use]
-    pub fn new(http: Rc<dyn HttpClient>) -> Self {
-        Self { http }
+    pub fn new(http_clients: ClientFactory<'static>) -> Self {
+        Self { http_clients }
     }
 }
 
@@ -56,7 +56,7 @@ impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
         let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
         let endpoint = ConfigEndpoint {
             gateway,
-            http: Rc::clone(&self.http),
+            http_clients: self.http_clients.clone(),
             channel_registration: RefCell::new(None),
         };
         let registration = webserver
@@ -80,13 +80,13 @@ struct ConfigRequest {
 }
 
 impl From<ConfigRequest> for BlueBubblesConfig {
-    fn from(self: ConfigRequest) -> Self {
+    fn from(value: ConfigRequest) -> Self {
         BlueBubblesConfig {
-            server_url: self.server_url,
-            password: self.password,
-            use_private_api: self.use_private_api,
-            stream_edit_min_delta_bytes: self.stream_edit_min_delta_bytes,
-            stream_max_edits: self.stream_max_edits,
+            server_url: value.server_url,
+            password: value.password,
+            use_private_api: value.use_private_api,
+            stream_edit_min_delta_bytes: value.stream_edit_min_delta_bytes,
+            stream_max_edits: value.stream_max_edits,
         }
     }
 }
@@ -103,7 +103,7 @@ const fn default_stream_max_edits() -> usize {
 
 struct ConfigEndpoint {
     gateway: Rc<IMessageGateway>,
-    http: Rc<dyn HttpClient>,
+    http_clients: ClientFactory<'static>,
     channel_registration: RefCell<Option<MessageChannelRegistration>>,
 }
 
@@ -124,7 +124,7 @@ impl HttpEndpoint for ConfigEndpoint {
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             };
             let channel: Rc<dyn MessageChannel> =
-                Rc::new(BlueBubbles::new(Rc::clone(&self.http), config.into()));
+                Rc::new(BlueBubbles::new(self.http_clients.clone(), config.into()));
             self.channel_registration.borrow_mut().take();
             match self.gateway.register(channel) {
                 Ok(registration) => {

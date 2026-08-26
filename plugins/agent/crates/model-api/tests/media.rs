@@ -4,12 +4,10 @@ use barracuda_model_api::{BackendKind, MediaAsset, MediaRequest, ModelApi, Model
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
-use http_client::Client;
+use http_client::ClientFactory;
 
 fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a> {
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        stack, stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

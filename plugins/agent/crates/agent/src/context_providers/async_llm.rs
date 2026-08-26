@@ -25,7 +25,7 @@ mod tests {
     use core::future::Future;
     use core::pin::Pin;
     use core::task::{Context, Poll, Waker};
-    use http_client::Client;
+    use http_client::ClientFactory;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::task::Wake;
@@ -62,9 +62,7 @@ mod tests {
     #[test]
     fn every_independent_lease_waiter_makes_progress() {
         static NETWORK: NeverStack = NeverStack;
-        let api = ModelApi::new(Client::from_network_with_buffer_sizes(
-            &NETWORK, &NETWORK, 256, 256,
-        ));
+        let api = ModelApi::new(ClientFactory::from_network(&NETWORK, &NETWORK));
         let shared = SharedAsyncLlm::new(api);
         let holder = futures_lite::future::block_on(shared.lease());
 

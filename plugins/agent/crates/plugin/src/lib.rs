@@ -58,14 +58,14 @@ impl AgentSetApi {
 
 /// Plugin that constructs and owns the Agent runtime and Component.
 pub struct AgentPlugin {
-    http: ClientFactory,
+    http_clients: ClientFactory<'static>,
 }
 
 impl AgentPlugin {
-    /// Creates the Plugin with the System-owned HTTP client factory.
+    /// Creates the Plugin with Platform HTTP resources.
     #[must_use]
-    pub const fn new(http: ClientFactory) -> Self {
-        Self { http }
+    pub const fn new(http_clients: ClientFactory<'static>) -> Self {
+        Self { http_clients }
     }
 }
 
@@ -82,8 +82,8 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         let filesystem = context.filesystem()?.clone();
-        let http = self.http.clone();
-        let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http.create()));
+        let http_clients = self.http_clients.clone();
+        let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
         let storage = RuntimeStorageConfig {
             persistence_root: PERSISTENCE_ROOT.into(),
             skill_roots: Vec::new(),

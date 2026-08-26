@@ -7,7 +7,7 @@
 //!
 //! # Overview
 //!
-//! [`ModelApi`] owns one long-lived shared HTTP client, including its persistent
+//! [`ModelApi`] owns one long-lived Agent HTTP client, including its persistent
 //! connection and reusable buffers. Install a complete [`ModelApiConfig`], then
 //! issue requests:
 //!
@@ -18,9 +18,9 @@
 //! | [`ModelApi::infer_media`] | [`MediaRequest`] | `String` (model text about the image) |
 //! | [`ModelApi::chat_stream`] | [`ChatRequest`] | [`ChatStream`] of [`ChatStreamEvent`] values |
 //!
-//! Networking is delegated to the workspace-wide [`http_client::Client`]
-//! facade. [`ModelApi`] receives that client directly and has no TCP, DNS, TLS,
-//! buffer, or concrete HTTP-engine parameters.
+//! Platform supplies an [`http_client::ClientFactory`]. This crate owns the
+//! persistent reqwless connection, reusable buffers, streaming, and retry
+//! behavior required by [`ModelApi`].
 //!
 //! # Cancellation
 //!

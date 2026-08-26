@@ -8,13 +8,11 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use embedded_io::ErrorKind;
 use futures_lite::future::{block_on, poll_once};
-use http_client::Client;
+use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 fn configured<'a>(stack: &'a ScriptedStack, backend: BackendKind) -> ModelApi<'a> {
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        stack, stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         backend,
         "secret",
@@ -34,9 +32,7 @@ fn request_body(stack: &ScriptedStack) -> Value {
 #[test]
 fn chat_requires_configuration() {
     let stack = ScriptedStack::default();
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let messages = [json!({"role":"user","content":"hello"})];
     let error =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap_err();
@@ -179,9 +175,7 @@ fn timed_out_request_reconnects_before_retry() {
             r#"{"choices":[{"message":{"role":"assistant","content":"recovered"}}]}"#,
         ),
     ]);
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

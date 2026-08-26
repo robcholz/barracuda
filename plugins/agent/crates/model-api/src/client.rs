@@ -1,6 +1,6 @@
 //! `ModelApi` — the LLM client.
 //!
-//! Owns one shared HTTP-client facade and an optional resolved backend.
+//! Owns one persistent HTTP transport and an optional resolved backend.
 //! Construct it with [`ModelApi::new`], then install a complete config with
 //! [`ModelApi::set_config`] before issuing requests.
 
@@ -8,6 +8,7 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
+use embedded_nal_async::{Dns, TcpConnect};
 use futures_lite::StreamExt as _;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -25,7 +26,7 @@ use super::types::{
     ChatJsonRequest, ChatJsonResponse, ChatRequest, LlmResponse, MediaRequest, ModelApiConfig,
 };
 
-/// LLM client backed by one shared HTTP-client facade.
+/// LLM client backed by one Agent-owned persistent HTTP transport.
 pub struct ModelApi<'net> {
     backend: Option<Backend>,
     http: HttpTransport<'net>,
@@ -33,7 +34,7 @@ pub struct ModelApi<'net> {
 
 /// Application-supplied constructor for independent, fully configured client
 /// resources. It owns no HTTP behavior; each call returns one [`ModelApi`]
-/// whose transport lifecycle is hidden behind the injected facade.
+/// whose transport lifecycle is hidden behind the factory.
 pub struct ModelApiFactory {
     make: Rc<dyn Fn() -> ModelApi<'static>>,
 }
@@ -211,21 +212,21 @@ where
 }
 
 impl<'net> ModelApi<'net> {
-    fn with_transport(http: HttpTransport<'net>) -> Self {
+    /// Constructs an unconfigured model client from shared HTTP resources.
+    #[must_use]
+    pub fn new<Tcp, Resolver>(http_clients: http_client::ClientFactory<'net, Tcp, Resolver>) -> Self
+    where
+        Tcp: TcpConnect + 'net,
+        Resolver: Dns + 'net,
+    {
         Self {
             backend: None,
-            http,
+            http: HttpTransport::new(http_clients),
         }
     }
 
-    /// Constructs an unconfigured model client over the shared HTTP facade.
-    #[must_use]
-    pub fn new(http: http_client::Client<'net>) -> Self {
-        Self::with_transport(HttpTransport::new(http))
-    }
-
     /// Rebind this client to a new [`ModelApiConfig`] at runtime, keeping the
-    /// existing shared HTTP client and reusable buffers. Only the backend —
+    /// existing Agent HTTP client and reusable buffers. Only the backend —
     /// provider, key, model, base URL — is rebuilt.
     ///
     /// Used to apply a per-turn config selected from a `ModelApiManager` without
@@ -237,7 +238,7 @@ impl<'net> ModelApi<'net> {
         Ok(())
     }
 
-    /// Async chat completion over the owned shared HTTP client.
+    /// Async chat completion over the owned Agent HTTP client.
     pub async fn chat(
         &mut self,
         request: &ChatRequest<'_>,
@@ -325,7 +326,7 @@ impl<'net> ModelApi<'net> {
         }
     }
 
-    /// Streaming chat completion over the owned shared HTTP client.
+    /// Streaming chat completion over the owned Agent HTTP client.
     ///
     /// Yields [`ChatStreamEvent`](crate::ChatStreamEvent) values as reasoning,
     /// output, and tool-call logical streams of
@@ -349,7 +350,7 @@ impl<'net> ModelApi<'net> {
         ChatStream::open(retrying_chat_stream(backend, http, request, cancel)).await
     }
 
-    /// Async structured JSON chat over the owned shared HTTP client.
+    /// Async structured JSON chat over the owned Agent HTTP client.
     pub async fn chat_json<Output: DeserializeOwned>(
         &mut self,
         request: &ChatJsonRequest<'_>,
@@ -378,7 +379,7 @@ impl<'net> ModelApi<'net> {
         .await
     }
 
-    /// Async one-shot image inference over the owned shared HTTP client.
+    /// Async one-shot image inference over the owned Agent HTTP client.
     pub async fn infer_media(
         &mut self,
         request: &MediaRequest<'_>,

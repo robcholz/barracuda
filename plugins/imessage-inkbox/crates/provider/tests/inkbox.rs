@@ -1,39 +1,91 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{boxed::Box, rc::Rc};
 
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, MediaKind, MessageChannel, MessageTarget, ReactRequest, SendMediaRequest,
     SendMessageRequest, SetTypingRequest,
 };
-use http_client::{Body, Error, HttpClient, HttpFuture, Request, Response};
+use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
 
-#[derive(Default)]
-struct MockHttp {
-    requests: RefCell<Vec<Request>>,
-    responses: RefCell<VecDeque<Response>>,
+struct Header {
+    name: String,
+    value: String,
 }
 
-impl MockHttp {
-    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+impl Header {
+    fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            requests: RefCell::new(Vec::new()),
-            responses: RefCell::new(responses.into_iter().collect()),
+            name: name.into(),
+            value: value.into(),
         }
     }
 }
 
-impl HttpClient for MockHttp {
-    fn execute(&self, request: Request) -> HttpFuture<'_> {
-        Box::pin(async move {
-            self.requests.borrow_mut().push(request);
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .ok_or(Error::ConnectionAborted)
-        })
+struct Response {
+    status: u16,
+    body: Vec<u8>,
+}
+
+struct MockHttp {
+    network: &'static ScriptedStack,
+}
+
+impl MockHttp {
+    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+        let steps = responses.into_iter().map(|response| {
+            ScriptStep::response(
+                response.status,
+                "application/json",
+                &response.body,
+                usize::MAX,
+            )
+        });
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
+        }
+    }
+
+    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
+        ClientFactory::from_network(self.network, self.network)
+    }
+
+    fn requests(&self) -> Vec<RecordedRequest> {
+        self.network
+            .requests()
+            .into_iter()
+            .map(RecordedRequest::parse)
+            .collect()
+    }
+}
+
+struct RecordedRequest {
+    url: String,
+    headers: Vec<Header>,
+    body: Vec<u8>,
+}
+
+impl RecordedRequest {
+    fn parse(raw: String) -> Self {
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+        let mut lines = head.split("\r\n");
+        let url = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or_default()
+            .to_owned();
+        let headers = lines
+            .filter_map(|line| line.split_once(":"))
+            .map(|(name, value)| Header::new(name, value.trim_start()))
+            .collect();
+        Self {
+            url,
+            headers,
+            body: body.as_bytes().to_vec(),
+        }
     }
 }
 
@@ -48,18 +100,14 @@ fn target() -> MessageTarget {
     MessageTarget::new("imessage", "conversation-uuid")
 }
 
-fn provider(http: &Rc<MockHttp>) -> Inkbox {
-    Inkbox::new(
-        Rc::clone(http) as Rc<dyn HttpClient>,
-        InkboxConfig::new("ApiKey_secret", "identity-uuid"),
-    )
+fn provider(http: &Rc<MockHttp>) -> Inkbox<'static, ScriptedStack, ScriptedStack> {
+    let mut config = InkboxConfig::new("ApiKey_secret", "identity-uuid");
+    config.api_base = "http://inkbox.test".to_owned();
+    Inkbox::new(http.factory(), config)
 }
 
-fn body_json(request: &Request) -> serde_json::Value {
-    let Body::Bytes(bytes) = &request.body else {
-        panic!("expected JSON body")
-    };
-    serde_json::from_slice(bytes).expect("valid JSON")
+fn body_json(request: &RecordedRequest) -> serde_json::Value {
+    serde_json::from_slice(&request.body).expect("valid JSON")
 }
 
 #[test]
@@ -76,11 +124,11 @@ fn registers_as_imessage_and_sends_text_for_the_configured_identity() {
 
         assert_eq!(channel.channel(), "imessage");
         assert_eq!(receipt.message_id, "message-uuid");
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let request = requests.first().expect("request");
         assert_eq!(
             request.url,
-            "https://inkbox.ai/api/v1/imessage/messages?agent_identity_id=identity-uuid"
+            "/api/v1/imessage/messages?agent_identity_id=identity-uuid"
         );
         assert!(request
             .headers
@@ -118,7 +166,7 @@ fn buffers_streams_and_maps_tapbacks_and_typing() {
             .await
             .expect("typing stop is local");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 3);
         assert_eq!(body_json(&requests[0])["text"], "hello");
         assert_eq!(body_json(&requests[1])["reaction"], "like");
@@ -151,12 +199,12 @@ fn uploads_media_then_sends_the_returned_url() {
             .expect("media succeeds");
 
         assert_eq!(receipt.message_id, "media-id");
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert!(requests[0].url.ends_with("/imessage/media"));
-        assert!(matches!(
-            requests[0].body,
-            Body::Bytes(_) | Body::Stream { .. }
-        ));
+        assert!(requests[0].headers.iter().any(|header| {
+            header.name == "Content-Type"
+                && header.value.starts_with("multipart/form-data; boundary=")
+        }));
         assert_eq!(
             body_json(&requests[1])["media_urls"][0],
             "https://media.example/photo.jpg"

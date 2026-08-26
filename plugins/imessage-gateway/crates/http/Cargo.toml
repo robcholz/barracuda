@@ -1,20 +1,18 @@
 [package]
-name = "telegram"
+name = "gateway-http"
 version = "0.1.0"
 edition = "2021"
-description = "Telegram Bot API provider for the IMessage Gateway"
+description = "HTTP request helpers owned by the IMessage Gateway"
 license = "Apache-2.0"
 
 [dependencies]
+embedded-io = "0.7"
+embedded-io-async = "0.7"
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway = { path = "../../../imessage-gateway/crates/gateway" }
-gateway-http = { path = "../../../imessage-gateway/crates/http" }
+gateway = { path = "../gateway" }
 http-client = { path = "../../../../shared/http-client" }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
-
-[dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test" }
-futures-lite = "2"
+reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
+thiserror = { version = "2", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

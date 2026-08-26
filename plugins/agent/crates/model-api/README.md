@@ -1,13 +1,13 @@
 # barracuda-model-api
 
 LLM client: OpenAI- and Anthropic-compatible chat, structured JSON output, and
-image inference over the workspace-wide `http-client` transport.
+image inference over an Agent-owned persistent HTTP transport.
 
 The standalone LLM surface can be reused independently of agent execution.
 
 ## Entry point
 
-`ModelApi` owns one injected `http_client::Client` facade:
+`ModelApi` owns one Agent HTTP client:
 
 | Method | Request | Returns |
 |---|---|---|
@@ -22,10 +22,11 @@ tool-result roles, structured-output config) into each provider's wire format.
 
 ## HTTP is injected
 
-The application supplies `http_client::Client` directly to `ModelApi`. TCP,
-DNS, TLS, concrete HTTP engine, connection state, and buffer sizes are owned by
-`shared/http-client` and its composition-time `ClientFactory`. Sequential calls
-on one `ModelApi` reuse its client connection when the server permits it.
+Platform supplies `http_client::ClientFactory`, which contains only TCP, DNS,
+and TLS construction resources. This crate builds reqwless on top and owns the
+persistent connection, request/response representation, reusable buffers, and
+streaming behavior. Sequential calls on one `ModelApi` reuse its connection
+when the server permits it.
 
 ## Cancellation
 
@@ -64,7 +65,8 @@ pipeline, retry loop — are private):
 cargo run -p barracuda-model-api --example client
 ```
 
-Builds a facade client over a scripted test network and runs a chat.
+Builds the same persistent transport over a scripted network factory and runs a
+chat.
 
 ## Where it fits
 

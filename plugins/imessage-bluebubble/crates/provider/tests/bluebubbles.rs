@@ -5,40 +5,114 @@
     clippy::unwrap_used
 )]
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{boxed::Box, rc::Rc};
 
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel, MessageTarget,
     ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest,
 };
-use http_client::{Body, Error, HttpClient, HttpFuture, Method, Request, Response};
+use http_client::ClientFactory;
 
-#[derive(Default)]
-struct MockHttp {
-    requests: RefCell<Vec<Request>>,
-    responses: RefCell<VecDeque<Response>>,
+#[derive(Debug, Eq, PartialEq)]
+enum Method {
+    Get,
+    Post,
+    Put,
+    Delete,
+    Patch,
 }
 
-impl MockHttp {
-    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+struct Header {
+    name: String,
+    value: String,
+}
+
+impl Header {
+    fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            requests: RefCell::new(Vec::new()),
-            responses: RefCell::new(responses.into_iter().collect()),
+            name: name.into(),
+            value: value.into(),
         }
     }
 }
 
-impl HttpClient for MockHttp {
-    fn execute(&self, request: Request) -> HttpFuture<'_> {
-        Box::pin(async move {
-            self.requests.borrow_mut().push(request);
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .ok_or(Error::ConnectionAborted)
-        })
+struct Response {
+    status: u16,
+    body: Vec<u8>,
+}
+
+struct MockHttp {
+    network: &'static ScriptedStack,
+}
+
+impl MockHttp {
+    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+        let steps = responses.into_iter().map(|response| {
+            ScriptStep::response(
+                response.status,
+                "application/json",
+                &response.body,
+                usize::MAX,
+            )
+        });
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
+        }
+    }
+
+    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
+        ClientFactory::from_network(self.network, self.network)
+    }
+
+    fn requests(&self) -> Vec<RecordedRequest> {
+        self.network
+            .requests()
+            .into_iter()
+            .map(RecordedRequest::parse)
+            .collect()
+    }
+}
+
+impl Default for MockHttp {
+    fn default() -> Self {
+        Self::responding([])
+    }
+}
+
+struct RecordedRequest {
+    method: Method,
+    url: String,
+    headers: Vec<Header>,
+    body: Vec<u8>,
+}
+
+impl RecordedRequest {
+    fn parse(raw: String) -> Self {
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+        let mut lines = head.split("\r\n");
+        let mut request_line = lines.next().unwrap_or_default().split_whitespace();
+        let method = match request_line.next().unwrap_or_default() {
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            "PUT" => Method::Put,
+            "DELETE" => Method::Delete,
+            "PATCH" => Method::Patch,
+            other => panic!("unexpected HTTP method {other}"),
+        };
+        let url = request_line.next().unwrap_or_default().to_owned();
+        let headers = lines
+            .filter_map(|line| line.split_once(":"))
+            .map(|(name, value)| Header::new(name, value.trim_start()))
+            .collect();
+        Self {
+            method,
+            url,
+            headers,
+            body: body.as_bytes().to_vec(),
+        }
     }
 }
 
@@ -54,16 +128,13 @@ fn target() -> MessageTarget {
     MessageTarget::new("imessage", "iMessage;-;+15551234567")
 }
 
-fn body_json(request: &Request) -> serde_json::Value {
-    let Body::Bytes(bytes) = &request.body else {
-        panic!("expected JSON body");
-    };
-    serde_json::from_slice(bytes).expect("valid JSON request")
+fn body_json(request: &RecordedRequest) -> serde_json::Value {
+    serde_json::from_slice(&request.body).expect("valid JSON request")
 }
 
-fn provider(http: &Rc<MockHttp>) -> BlueBubbles {
+fn provider(http: &Rc<MockHttp>) -> BlueBubbles<'static, ScriptedStack, ScriptedStack> {
     BlueBubbles::new(
-        Rc::clone(http) as Rc<dyn HttpClient>,
+        http.factory(),
         BlueBubblesConfig::new("http://mac.local:1234", "p@ss word&"),
     )
 }
@@ -80,11 +151,11 @@ fn registers_as_imessage_and_sends_replies_with_encoded_auth() {
 
         assert_eq!(channel.channel(), "imessage");
         assert_eq!(receipt.message_id, "message-guid");
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let request = requests.first().expect("one request");
         assert_eq!(
             request.url,
-            "http://mac.local:1234/api/v1/message/text?password=p%40ss%20word%26"
+            "/api/v1/message/text?password=p%40ss%20word%26"
         );
         let json = body_json(request);
         assert_eq!(json["chatGuid"], "iMessage;-;+15551234567");
@@ -113,7 +184,7 @@ fn streams_by_sending_once_then_editing_the_same_message() {
             .expect("stream succeeds");
 
         assert_eq!(receipt.message_id, "stream-guid");
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 2);
         assert!(requests[0].url.contains("/api/v1/message/text?"));
         assert!(requests[1]
@@ -149,14 +220,17 @@ fn sends_streamed_attachments_without_buffering_them() {
             .expect("attachment succeeds");
 
         assert_eq!(receipt.message_id, "attachment-guid");
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let request = requests.first().expect("one request");
         assert!(request.url.contains("/api/v1/message/attachment?"));
         assert!(request.headers.iter().any(|header| {
             header.name == "Content-Type"
                 && header.value.starts_with("multipart/form-data; boundary=")
         }));
-        assert!(matches!(&request.body, Body::Stream { .. }));
+        assert!(request
+            .headers
+            .iter()
+            .any(|header| { header.name == "Transfer-Encoding" && header.value == "chunked" }));
     });
 }
 
@@ -199,7 +273,7 @@ fn maps_edit_unsend_reaction_and_typing_endpoints() {
             .await
             .expect("stop typing succeeds");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 5);
         assert!(requests[0].url.contains("/message/message%2Fguid/edit?"));
         assert!(requests[1].url.contains("/message/message%2Fguid/unsend?"));
@@ -219,7 +293,7 @@ fn without_private_api_streaming_falls_back_and_mutations_are_unsupported() {
         let http = Rc::new(MockHttp::responding([response("message-guid")]));
         let mut config = BlueBubblesConfig::new("http://mac.local", "password");
         config.use_private_api = false;
-        let channel = BlueBubbles::new(Rc::clone(&http) as Rc<dyn HttpClient>, config);
+        let channel = BlueBubbles::new(http.factory(), config);
         let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
 
         channel
@@ -234,7 +308,7 @@ fn without_private_api_streaming_falls_back_and_mutations_are_unsupported() {
             edit,
             Err(gateway::ChannelError::Unsupported { .. })
         ));
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(body_json(&requests[0])["message"], "hello");
         assert_eq!(body_json(&requests[0])["method"], "apple-script");
@@ -252,7 +326,7 @@ fn caps_intermediate_stream_edits_and_always_publishes_the_final_text() {
         let mut config = BlueBubblesConfig::new("http://mac.local", "password");
         config.stream_edit_min_delta_bytes = 1;
         config.stream_max_edits = 2;
-        let channel = BlueBubbles::new(Rc::clone(&http) as Rc<dyn HttpClient>, config);
+        let channel = BlueBubbles::new(http.factory(), config);
         let chunks = stream::iter([
             Ok("a".to_owned()),
             Ok("b".to_owned()),
@@ -265,7 +339,7 @@ fn caps_intermediate_stream_edits_and_always_publishes_the_final_text() {
             .await
             .expect("stream succeeds");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 3);
         assert_eq!(body_json(&requests[1])["editedMessage"], "ab");
         assert_eq!(body_json(&requests[2])["editedMessage"], "abcd");
@@ -311,7 +385,7 @@ fn maps_auth_rate_limit_platform_and_invalid_reaction_errors() {
             error,
             Err(gateway::ChannelError::InvalidRequest { .. })
         ));
-        assert!(http.requests.borrow().is_empty());
+        assert!(http.requests().is_empty());
     });
 }
 
@@ -332,7 +406,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
             .send_media(MediaKind::Image, request)
             .await
             .expect("image succeeds");
-        assert!(matches!(&http.requests.borrow()[0].body, Body::Bytes(_)));
+        assert!(!http.requests()[0].body.is_empty());
 
         let http = Rc::new(MockHttp::default());
         let channel = provider(&http);

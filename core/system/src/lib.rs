@@ -122,32 +122,26 @@ where
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
-        let tls = prepared.tls;
-        let http = http_client::ClientFactory::new(prepared.ip_stack, move || tls.config());
+        let http_clients =
+            http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
 
         plugins.register(&mut router, WebServerPlugin::new(prepared.ip_stack))?;
         plugins.register(&mut router, VmPlugin::default())?;
         plugins.register(&mut router, TimePlugin::new(prepared.ip_stack))?;
         plugins.register(&mut router, SchedulerPlugin)?;
-        plugins.register(&mut router, AgentPlugin::new(http))?;
+        plugins.register(&mut router, AgentPlugin::new(http_clients.clone()))?;
         plugins.register(&mut router, CaptivePortalPlugin::new())?;
         plugins.register(&mut router, IMessageGatewayPlugin::new())?;
         plugins.register(
             &mut router,
-            IMessageBlueBubblePlugin::new(alloc::rc::Rc::new(http.create())),
+            IMessageBlueBubblePlugin::new(http_clients.clone()),
         )?;
+        plugins.register(&mut router, IMessageInkboxPlugin::new(http_clients.clone()))?;
         plugins.register(
             &mut router,
-            IMessageInkboxPlugin::new(alloc::rc::Rc::new(http.create())),
+            IMessageTelegramPlugin::new(http_clients.clone()),
         )?;
-        plugins.register(
-            &mut router,
-            IMessageTelegramPlugin::new(alloc::rc::Rc::new(http.create())),
-        )?;
-        plugins.register(
-            &mut router,
-            IMessageWechatPlugin::new(alloc::rc::Rc::new(http.create())),
-        )?;
+        plugins.register(&mut router, IMessageWechatPlugin::new(http_clients))?;
         plugins.register(&mut router, IMessageWebPlugin::new())?;
         plugins.register(&mut router, GatewayAgentPlugin::new())?;
         plugins.start(&mut router)?;

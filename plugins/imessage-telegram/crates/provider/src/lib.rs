@@ -6,18 +6,18 @@ extern crate alloc;
 use alloc::{
     boxed::Box,
     format,
-    rc::Rc,
     string::{String, ToString},
 };
 use core::cell::Cell;
 
 use futures_lite::StreamExt as _;
 use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
+    ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
-    SetTypingRequest, TextBody,
+    SetTypingRequest, StreamError, TextBody,
 };
-use http_client::{Body, BodyError, HttpClient, Multipart, Request as HttpRequest, Response};
+use gateway_http::{Method, Multipart, RequestBody, Response};
+use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 const DEFAULT_API_BASE: &str = "https://api.telegram.org";
@@ -39,30 +39,40 @@ impl TelegramConfig {
     }
 }
 
-pub struct Telegram {
-    http: Rc<dyn HttpClient>,
+pub struct Telegram<'net, T = http_client::Tcp, D = http_client::Resolver> {
+    http_clients: ClientFactory<'net, T, D>,
     config: TelegramConfig,
     next_local_id: Cell<i32>,
 }
 
-impl Telegram {
-    pub fn new(http: Rc<dyn HttpClient>, config: TelegramConfig) -> Self {
+impl<'net, T, D> Telegram<'net, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+{
+    pub fn new(http_clients: ClientFactory<'net, T, D>, config: TelegramConfig) -> Self {
         Self {
-            http,
+            http_clients,
             config,
             next_local_id: Cell::new(0),
         }
     }
 
-    async fn call(&self, method: &str, request: HttpRequest) -> Result<Value, ChannelError> {
-        let response = self
-            .http
-            .execute(HttpRequest {
-                url: self.endpoint(method),
-                ..request
-            })
-            .await
-            .map_err(transport_error)?;
+    async fn call<B: RequestBody>(
+        &self,
+        method: &str,
+        content_type: &str,
+        body: B,
+    ) -> Result<Value, ChannelError> {
+        let response = gateway_http::send(
+            &self.http_clients,
+            Method::POST,
+            &self.endpoint(method),
+            &[("Content-Type", content_type)],
+            body,
+        )
+        .await
+        .map_err(transport_error)?;
         parse_response(response)
     }
 
@@ -70,13 +80,8 @@ impl Telegram {
         let bytes = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),
         })?;
-        self.call(
-            method,
-            HttpRequest::post("")
-                .content_type("application/json")
-                .bytes(bytes),
-        )
-        .await
+        self.call(method, "application/json", bytes.as_slice())
+            .await
     }
 
     fn endpoint(&self, method: &str) -> String {
@@ -170,11 +175,10 @@ impl Telegram {
         };
         let filename = request.filename.unwrap_or_else(|| default_name.into());
         let mime = request.mime_type.unwrap_or_else(|| default_mime.into());
-        let body = map_binary_body(request.body);
         let boundary = format!("barracuda-telegram-{}", self.next_id());
         let mut multipart = Multipart::new(boundary)
             .text("chat_id", request.target.conversation_id)
-            .file(field, filename, mime, body);
+            .file(field, filename, mime, request.body);
         if let Some(caption) = request.caption {
             multipart = multipart.text("caption", caption);
         }
@@ -191,17 +195,20 @@ impl Telegram {
                 .map_err(|error| ChannelError::InvalidRequest {
                     message: error.to_string(),
                 })?;
-        let result = self
-            .call(
-                method,
-                HttpRequest::post("").content_type(content_type).body(body),
-            )
-            .await?;
+        let body_probe = body.clone();
+        let result = self.call(method, &content_type, body).await?;
+        if let Some(message) = body_probe.failure() {
+            return Err(ChannelError::Stream(StreamError::failed(message)));
+        }
         receipt_from_result(&result, None)
     }
 }
 
-impl MessageChannel for Telegram {
+impl<T, D> MessageChannel for Telegram<'static, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect + 'static,
+    D: http_client::embedded_nal_async::Dns + 'static,
+{
     fn channel(&self) -> &str {
         "telegram"
     }
@@ -298,17 +305,6 @@ impl MessageChannel for Telegram {
     }
 }
 
-fn map_binary_body(body: BinaryBody) -> Body {
-    match body {
-        BinaryBody::Bytes(bytes) => Body::Bytes(bytes),
-        BinaryBody::Stream(stream) => {
-            Body::stream(Box::pin(stream.map(|chunk| {
-                chunk.map_err(|error| BodyError::failed(error.to_string()))
-            })))
-        }
-    }
-}
-
 fn chat_id(value: &str) -> Value {
     value
         .parse::<i64>()
@@ -383,7 +379,7 @@ fn parse_response(response: Response) -> Result<Value, ChannelError> {
         })
 }
 
-fn transport_error(error: http_client::Error) -> ChannelError {
+fn transport_error(error: gateway_http::Error) -> ChannelError {
     ChannelError::Transport {
         message: error.to_string(),
     }

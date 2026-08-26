@@ -841,10 +841,14 @@ dependencies = [
  "embassy-futures",
  "embassy-time",
  "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
  "eventsource-stream",
  "futures-core",
  "futures-lite",
  "http-client",
+ "ouroboros",
+ "reqwless",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -1520,8 +1524,10 @@ dependencies = [
 name = "bluebubbles"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "percent-encoding",
  "serde_json",
@@ -3226,6 +3232,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-http"
+version = "0.1.0"
+dependencies = [
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "reqwless",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3546,18 +3565,9 @@ dependencies = [
 name = "http-client"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
- "barracuda-runtime-utils",
  "embassy-net",
- "embassy-sync 0.7.2",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
  "embedded-nal-async",
- "futures-core",
- "futures-lite",
- "ouroboros",
  "reqwless",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3676,8 +3686,10 @@ dependencies = [
 name = "inkbox"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "serde_json",
 ]
@@ -5287,8 +5299,10 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "telegram"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "serde_json",
 ]
@@ -5770,8 +5784,10 @@ dependencies = [
 name = "wechat"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "serde_json",
 ]

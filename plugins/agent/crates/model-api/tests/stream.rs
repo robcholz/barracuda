@@ -10,13 +10,11 @@ use barracuda_runtime_utils::Cancel;
 use embedded_io::ErrorKind;
 use futures_lite::future::block_on;
 use futures_lite::StreamExt as _;
-use http_client::Client;
+use http_client::ClientFactory;
 use serde_json::json;
 
 fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a> {
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        stack, stack, 4096, 9,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",
@@ -130,9 +128,7 @@ fn non_success_stream_surfaces_status_and_body() {
 #[test]
 fn stalled_stream_body_times_out_after_the_response_head() {
     let stack = ScriptedStack::new([ScriptStep::pending_after_headers(200, "text/event-stream")]);
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 9,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

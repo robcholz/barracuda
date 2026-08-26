@@ -5,40 +5,92 @@
     clippy::unwrap_used
 )]
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{boxed::Box, rc::Rc};
 
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel, MessageTarget,
     ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest,
 };
-use http_client::{Body, Error, HttpClient, HttpFuture, Request, Response};
+use http_client::ClientFactory;
 use telegram::{Telegram, TelegramConfig};
 
-#[derive(Default)]
-struct MockHttp {
-    requests: RefCell<Vec<Request>>,
-    responses: RefCell<VecDeque<Response>>,
+struct Header {
+    name: String,
+    value: String,
 }
 
-impl MockHttp {
-    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+impl Header {
+    fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            requests: RefCell::new(Vec::new()),
-            responses: RefCell::new(responses.into_iter().collect()),
+            name: name.into(),
+            value: value.into(),
         }
     }
 }
 
-impl HttpClient for MockHttp {
-    fn execute(&self, request: Request) -> HttpFuture<'_> {
-        Box::pin(async move {
-            self.requests.borrow_mut().push(request);
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .ok_or(Error::ConnectionAborted)
-        })
+struct Response {
+    status: u16,
+    body: Vec<u8>,
+}
+
+struct MockHttp {
+    network: &'static ScriptedStack,
+}
+
+impl MockHttp {
+    fn responding(responses: impl IntoIterator<Item = Response>) -> Self {
+        let steps = responses.into_iter().map(|response| {
+            ScriptStep::response(
+                response.status,
+                "application/json",
+                &response.body,
+                usize::MAX,
+            )
+        });
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
+        }
+    }
+
+    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
+        ClientFactory::from_network(self.network, self.network)
+    }
+
+    fn requests(&self) -> Vec<RecordedRequest> {
+        self.network
+            .requests()
+            .into_iter()
+            .map(RecordedRequest::parse)
+            .collect()
+    }
+}
+
+struct RecordedRequest {
+    url: String,
+    headers: Vec<Header>,
+    body: Vec<u8>,
+}
+
+impl RecordedRequest {
+    fn parse(raw: String) -> Self {
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+        let mut lines = head.split("\r\n");
+        let url = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or_default()
+            .to_owned();
+        let headers = lines
+            .filter_map(|line| line.split_once(":"))
+            .map(|(name, value)| Header::new(name, value.trim_start()))
+            .collect();
+        Self {
+            url,
+            headers,
+            body: body.as_bytes().to_vec(),
+        }
     }
 }
 
@@ -53,11 +105,14 @@ fn target() -> MessageTarget {
     MessageTarget::new("telegram", "42")
 }
 
-fn body_json(request: &Request) -> serde_json::Value {
-    let Body::Bytes(bytes) = &request.body else {
-        return serde_json::Value::Null;
-    };
-    serde_json::from_slice(bytes).unwrap_or(serde_json::Value::Null)
+fn config(token: &str) -> TelegramConfig {
+    let mut config = TelegramConfig::new(token);
+    config.api_base = "http://api.telegram.test".to_owned();
+    config
+}
+
+fn body_json(request: &RecordedRequest) -> serde_json::Value {
+    serde_json::from_slice(&request.body).unwrap_or(serde_json::Value::Null)
 }
 
 #[test]
@@ -66,10 +121,7 @@ fn registers_as_the_telegram_channel_and_sends_text() {
         let http = Rc::new(MockHttp::responding([response(
             r#"{"ok":true,"result":{"message_id":7}}"#,
         )]));
-        let channel = Telegram::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            TelegramConfig::new("bot-token"),
-        );
+        let channel = Telegram::new(http.factory(), config("bot-token"));
 
         let receipt = channel
             .send_message(SendMessageRequest::text(target(), "hello"))
@@ -77,14 +129,11 @@ fn registers_as_the_telegram_channel_and_sends_text() {
 
         assert_eq!(channel.channel(), "telegram");
         assert!(matches!(receipt, Ok(receipt) if receipt.message_id == "7"));
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let Some(request) = requests.first() else {
             panic!("missing request");
         };
-        assert_eq!(
-            request.url,
-            "https://api.telegram.org/botbot-token/sendMessage"
-        );
+        assert_eq!(request.url, "/botbot-token/sendMessage");
         assert_eq!(body_json(request)["chat_id"], 42);
         assert_eq!(body_json(request)["text"], "hello");
     });
@@ -98,9 +147,9 @@ fn maps_text_chunks_to_drafts_and_finishes_with_a_normal_message() {
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":{"message_id":9}}"#),
         ]));
-        let mut config = TelegramConfig::new("token");
-        config.draft_min_delta_bytes = 1;
-        let channel = Telegram::new(Rc::clone(&http) as Rc<dyn HttpClient>, config);
+        let mut settings = config("token");
+        settings.draft_min_delta_bytes = 1;
+        let channel = Telegram::new(http.factory(), settings);
         let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
 
         let result = channel
@@ -108,7 +157,7 @@ fn maps_text_chunks_to_drafts_and_finishes_with_a_normal_message() {
             .await;
 
         assert!(matches!(result, Ok(receipt) if receipt.message_id == "9"));
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 3);
         assert!(requests
             .first()
@@ -133,10 +182,7 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
         let http = Rc::new(MockHttp::responding([response(
             r#"{"ok":true,"result":{"message_id":11}}"#,
         )]));
-        let channel = Telegram::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            TelegramConfig::new("token"),
-        );
+        let channel = Telegram::new(http.factory(), config("token"));
         let data = stream::iter([Ok(vec![1, 2]), Ok(vec![3, 4])]);
         let request = SendMediaRequest {
             target: target(),
@@ -150,7 +196,7 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
         let result = channel.send_media(MediaKind::Image, request).await;
 
         assert!(matches!(result, Ok(receipt) if receipt.message_id == "11"));
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let Some(request) = requests.first() else {
             panic!("missing request");
         };
@@ -159,7 +205,10 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
             header.name == "Content-Type"
                 && header.value.starts_with("multipart/form-data; boundary=")
         }));
-        assert!(matches!(request.body, Body::Stream { .. }));
+        assert!(request
+            .headers
+            .iter()
+            .any(|header| { header.name == "Transfer-Encoding" && header.value == "chunked" }));
     });
 }
 
@@ -172,10 +221,7 @@ fn maps_message_mutations_reactions_and_typing() {
             response(r#"{"ok":true,"result":true}"#),
             response(r#"{"ok":true,"result":true}"#),
         ]));
-        let channel = Telegram::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            TelegramConfig::new("token"),
-        );
+        let channel = Telegram::new(http.factory(), config("token"));
 
         channel
             .edit_message(EditMessageRequest::new(target(), "7", "edited"))
@@ -198,7 +244,7 @@ fn maps_message_mutations_reactions_and_typing() {
             .await
             .expect("stopping typing is local");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let methods: Vec<&str> = requests
             .iter()
             .filter_map(|request| request.url.rsplit('/').next())
@@ -227,10 +273,7 @@ fn maps_telegram_authentication_and_rate_limit_errors() {
                 status,
                 body: br#"{"ok":false}"#.to_vec(),
             }]));
-            let channel = Telegram::new(
-                Rc::clone(&http) as Rc<dyn HttpClient>,
-                TelegramConfig::new("token"),
-            );
+            let channel = Telegram::new(http.factory(), config("token"));
             let error = channel
                 .send_message(SendMessageRequest::text(target(), "hello"))
                 .await
