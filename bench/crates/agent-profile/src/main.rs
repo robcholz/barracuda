@@ -8,12 +8,16 @@
 //! ```
 
 use std::path::{Path, PathBuf};
+use std::{collections::BTreeMap, io};
 
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
-use barracuda_model_api::ModelApi;
-use barracuda_platform_test::{memory_vfs, NeverStack};
+use barracuda_model_api::{BackendKind, ChatRequest, ModelApi, ModelApiConfig};
+use barracuda_platform_test::{memory_vfs, NeverStack, ScriptStep, ScriptedStack};
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
+use barracuda_runtime_utils::Cancel;
+use base64::Engine as _;
 use futures_lite::future::block_on;
+use futures_lite::StreamExt;
 use http_client::Client;
 
 barracuda_profile::install_dhat_allocator!();
@@ -24,14 +28,16 @@ static NETWORK: NeverStack = NeverStack;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scenario {
     AgentInit,
+    TapeReplay,
 }
 
 impl Scenario {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
             "agent-init" => Ok(Self::AgentInit),
+            "tape-replay" => Ok(Self::TapeReplay),
             other => Err(format!(
-                "unknown scenario `{other}`; expected one of: agent-init"
+                "unknown scenario `{other}`; expected one of: agent-init, tape-replay"
             )),
         }
     }
@@ -39,6 +45,7 @@ impl Scenario {
     const fn name(self) -> &'static str {
         match self {
             Self::AgentInit => "agent-init",
+            Self::TapeReplay => "tape-replay",
         }
     }
 }
@@ -49,10 +56,82 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let stats = match scenario {
         Scenario::AgentInit => profile_agent_init(&output_file)?,
+        Scenario::TapeReplay => profile_tape_replay(&output_file)?,
     };
 
     print_summary(scenario, &output_file, stats);
     Ok(())
+}
+
+fn profile_tape_replay(output_file: &Path) -> Result<AllocationStats, Box<dyn std::error::Error>> {
+    let profile = HeapProfile::start(output_file);
+    let responses = load_tape_responses(Path::new("bench/tapes/overall-capabilities.jsonl"))?;
+    let steps = responses
+        .iter()
+        .map(|body| ScriptStep::response(200, "text/event-stream", body, 7));
+    let network = ScriptedStack::new(steps);
+    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
+        &network, &network, 4096, 1024,
+    ));
+    api.set_config(ModelApiConfig::new(
+        BackendKind::OpenAiCompatible,
+        "replay-key",
+        "replay-model",
+        "http://tape.invalid",
+    ))?;
+
+    block_on(async {
+        for turn in 0..responses.len() {
+            let messages = [serde_json::json!({
+                "role": "user",
+                "content": format!("deterministic replay turn {turn}"),
+            })];
+            let request = ChatRequest::new("profiling replay", &messages);
+            let mut stream = api.chat_stream(&request, Cancel::never()).await?;
+            while let Some(event) = stream.next().await {
+                let _event = event?;
+            }
+        }
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })?;
+
+    Ok(profile.finish())
+}
+
+fn load_tape_responses(path: &Path) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+    let mut responses = BTreeMap::<String, Vec<u8>>::new();
+    for line in std::fs::read_to_string(path)?.lines() {
+        let record: serde_json::Value = serde_json::from_str(line)?;
+        match record.get("kind").and_then(serde_json::Value::as_str) {
+            Some("response_start") => {
+                responses.insert(interaction_id(&record)?.to_owned(), Vec::new());
+            }
+            Some("response_chunk") => {
+                let encoded = record
+                    .get("data_b64")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("response chunk has no data_b64")?;
+                let decoded = base64::engine::general_purpose::STANDARD.decode(encoded)?;
+                responses
+                    .get_mut(interaction_id(&record)?)
+                    .ok_or_else(|| invalid_data("response chunk precedes response_start"))?
+                    .extend_from_slice(&decoded);
+            }
+            _ => {}
+        }
+    }
+    Ok(responses.into_values().collect())
+}
+
+fn interaction_id(record: &serde_json::Value) -> Result<&str, io::Error> {
+    record
+        .get("interaction_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| invalid_data("response record has no interaction_id"))
+}
+
+fn invalid_data(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
 fn parse_args() -> Result<(Scenario, PathBuf), String> {
