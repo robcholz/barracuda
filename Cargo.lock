@@ -495,6 +495,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-lite",
+ "http-client",
  "json-validator",
  "log",
  "serde",

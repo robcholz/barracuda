@@ -6,7 +6,7 @@ use barracuda_runtime_utils::Cancel;
 use futures_lite::future::block_on;
 use http_client::ClientFactory;
 
-fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a> {
+fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
     let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,

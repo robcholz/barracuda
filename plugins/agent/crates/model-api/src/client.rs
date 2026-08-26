@@ -19,27 +19,39 @@ use barracuda_runtime_utils::Cancel;
 
 use super::backends::Backend;
 use super::chat_stream::{ChatStream, Driver, DriverItem};
-use super::errors::{ChatError, ChatJsonError, InferMediaError, InitError, ModelApiError};
+use super::errors::{Error, InitError};
 use super::retry::{deadline_error, retry_call, sleep_or_cancel, timed, with_timeout, RetryState};
-use super::transport::{Error as HttpError, HttpTransport};
+use super::transport::Transport;
 use super::types::{
-    ChatJsonRequest, ChatJsonResponse, ChatRequest, LlmResponse, MediaRequest, ModelApiConfig,
+    ChatJsonResponse, ChatRequest, LlmResponse, MediaRequest, ModelApiConfig, StaticOutputSchema,
 };
 
 /// LLM client backed by one Agent-owned persistent HTTP transport.
-pub struct ModelApi<'net> {
+pub struct ModelApi<'net, Tcp = http_client::Tcp, Resolver = http_client::Resolver>
+where
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
+{
     backend: Option<Backend>,
-    http: HttpTransport<'net>,
+    http: Transport<'net, Tcp, Resolver>,
 }
 
 /// Application-supplied constructor for independent, fully configured client
 /// resources. It owns no HTTP behavior; each call returns one [`ModelApi`]
 /// whose transport lifecycle is hidden behind the factory.
-pub struct ModelApiFactory {
-    make: Rc<dyn Fn() -> ModelApi<'static>>,
+pub struct ModelApiFactory<Tcp = http_client::Tcp, Resolver = http_client::Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    make: Rc<dyn Fn() -> ModelApi<'static, Tcp, Resolver>>,
 }
 
-impl Clone for ModelApiFactory {
+impl<Tcp, Resolver> Clone for ModelApiFactory<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     // A derived impl would unnecessarily require the transports to be Clone;
     // cloning the factory only increments the Rc count.
     fn clone(&self) -> Self {
@@ -49,33 +61,37 @@ impl Clone for ModelApiFactory {
     }
 }
 
-impl ModelApiFactory {
+impl<Tcp, Resolver> ModelApiFactory<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     #[must_use]
-    pub fn new(make: impl Fn() -> ModelApi<'static> + 'static) -> Self {
+    pub fn new(make: impl Fn() -> ModelApi<'static, Tcp, Resolver> + 'static) -> Self {
         Self {
             make: Rc::new(make),
         }
     }
 
     #[must_use]
-    pub fn create(&self) -> ModelApi<'static> {
+    pub fn create(&self) -> ModelApi<'static, Tcp, Resolver> {
         (self.make)()
     }
 }
 
 fn parse_chat_json_response<T: DeserializeOwned>(
     response: LlmResponse,
-) -> Result<ChatJsonResponse<T>, ChatJsonError> {
+) -> Result<ChatJsonResponse<T>, Error> {
     let output = match response.text {
         Some(ref text) if !text.trim().is_empty() => Some(
             serde_json::from_str(text)
-                .map_err(|err| ChatJsonError::InvalidOutput(err.to_string()))?,
+                .map_err(|err| Error::InvalidStructuredOutput(err.to_string()))?,
         ),
         _ => None,
     };
 
     if output.is_none() && response.tool_calls.is_empty() {
-        return Err(ChatJsonError::EmptyText);
+        return Err(Error::EmptyStructuredOutput);
     }
 
     Ok(ChatJsonResponse {
@@ -86,14 +102,16 @@ fn parse_chat_json_response<T: DeserializeOwned>(
     })
 }
 
-fn retrying_chat_stream<'h, 'r>(
+fn retrying_chat_stream<'h, 'r, Tcp, Resolver>(
     backend: &'h Backend,
-    http: &'h mut HttpTransport<'_>,
+    http: &'h mut Transport<'_, Tcp, Resolver>,
     request: &'r ChatRequest<'r>,
     cancel: Cancel<'h>,
 ) -> Driver<'h>
 where
     'r: 'h,
+    Tcp: TcpConnect,
+    Resolver: Dns,
 {
     yield_stream(|yielder| async move {
         let mut retry = RetryState::new(request.retry);
@@ -132,7 +150,7 @@ where
                         .await;
                     match next {
                         Err(error) => {
-                            break 'attempt (ChatError::from(deadline_error(error)), "body");
+                            break 'attempt (deadline_error(error), "body");
                         }
                         Ok(Some(Ok(event))) => {
                             emitted = true;
@@ -199,9 +217,7 @@ where
             .await;
             if !completed {
                 yielder
-                    .yield_one(DriverItem::Event(Err(ChatError::Api(
-                        ModelApiError::Transport(HttpError::Cancelled),
-                    ))))
+                    .yield_one(DriverItem::Event(Err(Error::Cancelled)))
                     .await;
                 return;
             }
@@ -211,17 +227,17 @@ where
     })
 }
 
-impl<'net> ModelApi<'net> {
+impl<'net, Tcp, Resolver> ModelApi<'net, Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'net,
+    Resolver: Dns + 'net,
+{
     /// Constructs an unconfigured model client from shared HTTP resources.
     #[must_use]
-    pub fn new<Tcp, Resolver>(http_clients: http_client::ClientFactory<'net, Tcp, Resolver>) -> Self
-    where
-        Tcp: TcpConnect + 'net,
-        Resolver: Dns + 'net,
-    {
+    pub fn new(http_clients: http_client::ClientFactory<'net, Tcp, Resolver>) -> Self {
         Self {
             backend: None,
-            http: HttpTransport::new(http_clients),
+            http: Transport::new(http_clients),
         }
     }
 
@@ -243,12 +259,8 @@ impl<'net> ModelApi<'net> {
         &mut self,
         request: &ChatRequest<'_>,
         cancel: Cancel<'_>,
-    ) -> Result<LlmResponse, ChatError> {
-        let backend = self
-            .backend
-            .as_ref()
-            .ok_or(ModelApiError::NotConfigured)
-            .map_err(ChatError::from)?;
+    ) -> Result<LlmResponse, Error> {
+        let backend = self.backend.as_ref().ok_or(Error::NotConfigured)?;
         let mut retry = RetryState::new(request.retry);
         loop {
             let attempt = retry.attempt();
@@ -317,9 +329,7 @@ impl<'net> ModelApi<'net> {
                     ))
                     .await;
                     if !completed {
-                        return Err(ChatError::Api(ModelApiError::Transport(
-                            HttpError::Cancelled,
-                        )));
+                        return Err(Error::Cancelled);
                     }
                 }
             }
@@ -341,35 +351,29 @@ impl<'net> ModelApi<'net> {
         &'h mut self,
         request: &'r ChatRequest<'r>,
         cancel: Cancel<'h>,
-    ) -> Result<ChatStream<'h>, ChatError>
+    ) -> Result<ChatStream<'h>, Error>
     where
         'r: 'h,
     {
         let Self { backend, http } = self;
-        let backend = backend.as_ref().ok_or(ModelApiError::NotConfigured)?;
+        let backend = backend.as_ref().ok_or(Error::NotConfigured)?;
         ChatStream::open(retrying_chat_stream(backend, http, request, cancel)).await
     }
 
     /// Async structured JSON chat over the owned Agent HTTP client.
     pub async fn chat_json<Output: DeserializeOwned>(
         &mut self,
-        request: &ChatJsonRequest<'_>,
+        request: &ChatRequest<'_>,
+        output_schema: StaticOutputSchema<'_>,
         cancel: Cancel<'_>,
-    ) -> Result<ChatJsonResponse<Output>, ChatJsonError> {
-        let backend = self
-            .backend
-            .as_ref()
-            .ok_or(ModelApiError::NotConfigured)
-            .map_err(ChatError::from)?;
-        let spec = request
-            .output_schema
-            .ok_or(ChatJsonError::MissingOutputSchema)?;
-        let schema: Value = serde_json::from_str(spec.json)
-            .map_err(|err| ChatJsonError::InvalidOutput(format!("invalid schema json: {err}")))?;
+    ) -> Result<ChatJsonResponse<Output>, Error> {
+        let backend = self.backend.as_ref().ok_or(Error::NotConfigured)?;
+        let schema: Value = serde_json::from_str(output_schema.json)
+            .map_err(|err| Error::InvalidStructuredOutput(format!("invalid schema json: {err}")))?;
 
-        retry_call(request.chat.retry, cancel, async || {
+        retry_call(request.retry, cancel, async || {
             let response = timed(
-                backend.chat_json(&mut self.http, request, spec.name, &schema),
+                backend.chat_json(&mut self.http, request, output_schema.name, &schema),
                 backend.timeout_ms(),
                 cancel,
             )
@@ -384,8 +388,8 @@ impl<'net> ModelApi<'net> {
         &mut self,
         request: &MediaRequest<'_>,
         cancel: Cancel<'_>,
-    ) -> Result<String, InferMediaError> {
-        let backend = self.backend.as_ref().ok_or(ModelApiError::NotConfigured)?;
+    ) -> Result<String, Error> {
+        let backend = self.backend.as_ref().ok_or(Error::NotConfigured)?;
         retry_call(request.retry, cancel, async || {
             timed(
                 backend.infer_media(&mut self.http, request),

@@ -8,6 +8,7 @@ use crate::AgentEngineState;
 
 use super::error::AgentCreateError;
 use super::AgentManager;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 const AGENT_STATE_NAME: &str = "agents";
 
@@ -15,7 +16,11 @@ fn agent_instance(id: AgentId) -> Result<InstanceId, AgentCreateError> {
     InstanceId::new(id.to_wire()).map_err(AgentCreateError::from)
 }
 
-impl AgentManager {
+impl<Tcp, Resolver> AgentManager<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     /// Delete transcript files whose owning Agent record no longer exists.
     pub(super) async fn purge_dead(&self) -> Result<(), AgentCreateError> {
         let agents = self

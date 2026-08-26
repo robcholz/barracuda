@@ -20,115 +20,24 @@ use reqwless::{
     request::RequestBuilder as _,
 };
 
-use crate::StatusCode;
+use crate::Error;
 
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 const READ_BUFFER_SIZE: usize = 8 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Response {
-    pub(crate) status: StatusCode,
+    pub(crate) status: u16,
     pub(crate) body: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ResponsePart {
-    Head(StatusCode),
+    Head(u16),
     Data(Vec<u8>),
 }
 
 pub(crate) type ResponseStream<'a> = Pin<Box<dyn Stream<Item = Result<ResponsePart, Error>> + 'a>>;
-type ResponseFuture<'a> = Pin<Box<dyn Future<Output = Result<Response, Error>> + 'a>>;
-
-trait TransportBackend {
-    fn post_json<'a>(
-        &'a mut self,
-        url: &'a str,
-        body: &'a str,
-        headers: &'a [(&'a str, &'a str)],
-    ) -> ResponseFuture<'a>;
-
-    fn post_json_stream(
-        &mut self,
-        url: String,
-        body: String,
-        headers: Vec<(String, String)>,
-    ) -> ResponseStream<'_>;
-}
-
-/// Type-erased Agent transport; concrete network types do not leak into Agent runtime types.
-pub(crate) struct HttpTransport<'net> {
-    backend: Box<dyn TransportBackend + 'net>,
-}
-
-impl<'net> HttpTransport<'net> {
-    #[must_use]
-    pub(crate) fn new<Tcp, Resolver>(
-        factory: http_client::ClientFactory<'net, Tcp, Resolver>,
-    ) -> Self
-    where
-        Tcp: TcpConnect + 'net,
-        Resolver: Dns + 'net,
-    {
-        Self {
-            backend: Box::new(ReqwlessTransport::new(factory)),
-        }
-    }
-
-    pub(crate) async fn post_json<'a>(
-        &'a mut self,
-        url: &'a str,
-        body: &'a str,
-        headers: &'a [(&'a str, &'a str)],
-    ) -> Result<Response, Error> {
-        self.backend.post_json(url, body, headers).await
-    }
-
-    pub(crate) fn post_json_stream(
-        &mut self,
-        url: String,
-        body: String,
-        headers: Vec<(String, String)>,
-    ) -> ResponseStream<'_> {
-        self.backend.post_json_stream(url, body, headers)
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("request was cancelled")]
-    Cancelled,
-    #[error("HTTPS requested without a TLS configuration")]
-    TlsNotConfigured,
-    #[error("invalid URL")]
-    InvalidUrl,
-    #[error("invalid HTTP header")]
-    InvalidHeader,
-    #[error("HTTP codec error")]
-    Codec,
-    #[error("connection was aborted")]
-    ConnectionAborted,
-    #[error("response body is not UTF-8")]
-    InvalidUtf8,
-    #[error(transparent)]
-    Reqwless(#[from] reqwless::Error),
-}
-
-impl Error {
-    /// Whether retrying the request may recover from this transport failure.
-    #[must_use]
-    pub fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::ConnectionAborted
-                | Self::Reqwless(
-                    reqwless::Error::Dns
-                        | reqwless::Error::Network(_)
-                        | reqwless::Error::ConnectionAborted
-                )
-        )
-    }
-}
 
 struct ConnectionOwner<'net, Tcp, Resolver>
 where
@@ -152,7 +61,7 @@ where
 }
 
 /// One reqwless client and, while connected, its persistent HTTP resource.
-struct ReqwlessTransport<'net, Tcp = http_client::Tcp, Resolver = http_client::Resolver>
+pub(crate) struct Transport<'net, Tcp = http_client::Tcp, Resolver = http_client::Resolver>
 where
     Tcp: TcpConnect + 'net,
     Resolver: Dns + 'net,
@@ -166,7 +75,7 @@ where
     tls_configured: bool,
 }
 
-impl<'net, Tcp, Resolver> ReqwlessTransport<'net, Tcp, Resolver>
+impl<'net, Tcp, Resolver> Transport<'net, Tcp, Resolver>
 where
     Tcp: TcpConnect + 'net,
     Resolver: Dns + 'net,
@@ -261,7 +170,7 @@ where
                         .body(body.as_bytes())
                         .send(header_buffer.as_mut_slice())
                         .await?;
-                    let status = StatusCode(response.status.0);
+                    let status = response.status.0;
                     let mut reader = response.body().reader();
                     let mut response_body = Vec::new();
                     loop {
@@ -272,7 +181,7 @@ where
                         if read == 0 {
                             break;
                         }
-                        let chunk = read_buffer.get(..read).ok_or(Error::Codec)?;
+                        let chunk = read_buffer.get(..read).ok_or(Error::HttpCodec)?;
                         response_body.extend_from_slice(chunk);
                     }
                     let body =
@@ -340,7 +249,7 @@ where
                                 .send(header_buffer.as_mut_slice())
                                 .await?;
                             yielder
-                                .yield_one(ResponsePart::Head(StatusCode(response.status.0)))
+                                .yield_one(ResponsePart::Head(response.status.0))
                                 .await;
                             let mut reader = response.body().reader();
                             loop {
@@ -351,7 +260,7 @@ where
                                 if read == 0 {
                                     return Ok(());
                                 }
-                                let chunk = read_buffer.get(..read).ok_or(Error::Codec)?;
+                                let chunk = read_buffer.get(..read).ok_or(Error::HttpCodec)?;
                                 yielder.yield_one(ResponsePart::Data(chunk.to_vec())).await;
                             }
                         })
@@ -368,30 +277,6 @@ where
             }
             result
         })
-    }
-}
-
-impl<'net, Tcp, Resolver> TransportBackend for ReqwlessTransport<'net, Tcp, Resolver>
-where
-    Tcp: TcpConnect + 'net,
-    Resolver: Dns + 'net,
-{
-    fn post_json<'a>(
-        &'a mut self,
-        url: &'a str,
-        body: &'a str,
-        headers: &'a [(&'a str, &'a str)],
-    ) -> ResponseFuture<'a> {
-        Box::pin(async move { ReqwlessTransport::post_json(self, url, body, headers).await })
-    }
-
-    fn post_json_stream(
-        &mut self,
-        url: String,
-        body: String,
-        headers: Vec<(String, String)>,
-    ) -> ResponseStream<'_> {
-        ReqwlessTransport::post_json_stream(self, url, body, headers)
     }
 }
 
@@ -430,18 +315,15 @@ fn split_url(url: &str) -> Result<(&str, &str), Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::Error;
-    use crate::ModelApiError;
+    use crate::Error;
 
     #[test]
-    fn transport_and_api_errors_delegate_retry_classification() {
+    fn transport_errors_classify_retryability_directly() {
         let transient = Error::ConnectionAborted;
-        assert!(transient.retryable());
-        assert!(ModelApiError::from(transient).is_retryable());
+        assert!(transient.is_retryable());
 
         let permanent = Error::InvalidUrl;
-        assert!(!permanent.retryable());
-        assert!(!ModelApiError::from(permanent).is_retryable());
-        assert!(!Error::Cancelled.retryable());
+        assert!(!permanent.is_retryable());
+        assert!(!Error::Cancelled.is_retryable());
     }
 }

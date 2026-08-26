@@ -16,7 +16,7 @@
 
 use barracuda_agent_memory::{MemoryId, MemoryPatch};
 use barracuda_agent_tool::ToolInvokeError;
-use barracuda_model_api::ChatError;
+use barracuda_model_api::Error as ModelError;
 use core::future::Future;
 use core::pin::Pin;
 use strum::IntoStaticStr;
@@ -90,7 +90,7 @@ pub(crate) enum ExtractError {
     /// The extraction backend (e.g. the LLM client) failed.
     #[strum(serialize = "backend")]
     #[error("extraction backend failed: {0}")]
-    Backend(#[from] ChatError),
+    Backend(#[from] ModelError),
     /// The model returned malformed or unsupported memory tool calls.
     #[strum(serialize = "invalid_output")]
     #[error("invalid memory extraction output: {0}")]

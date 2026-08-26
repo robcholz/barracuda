@@ -30,6 +30,7 @@ cache_profile = [
 ]
 
 [dependencies]
+http-client = { path = "../../../../shared/http-client" }
 json-validator = { path = "../../../../shared/json-validator" }
 barracuda-agent = { path = "../agent", default-features = false }
 barracuda-agent-session = { path = "../session", default-features = false }
@@ -50,7 +51,6 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
 [dev-dependencies]
-http-client = { path = "../../../../shared/http-client" }
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
 anyhow = "1"
 barracuda-agent-trace = { path = "../trace" }

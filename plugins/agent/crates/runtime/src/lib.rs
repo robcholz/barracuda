@@ -15,6 +15,7 @@ mod worker;
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::cell::{Cell, RefCell};
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 pub use barracuda_agent::stream;
 pub use barracuda_agent::{
@@ -134,11 +135,15 @@ impl AgentRuntime {
     /// # Errors
     ///
     /// Returns [`RuntimeError`] when storage cleanup or runtime construction fails.
-    pub fn new(
+    pub fn new<Tcp, Resolver>(
         filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory,
-    ) -> RuntimeResult<(Self, RuntimeService)> {
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> RuntimeResult<(Self, RuntimeService)>
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         Self::with_tool_groups(
             filesystem,
             persistence,
@@ -157,12 +162,16 @@ impl AgentRuntime {
     ///
     /// Returns [`RuntimeError`] when persistence, tool registration, or runtime
     /// construction fails.
-    pub fn with_tool_groups(
+    pub fn with_tool_groups<Tcp, Resolver>(
         filesystem: ScopedVfs,
         persistence: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
         tool_groups: impl IntoIterator<Item = ToolGroup>,
-    ) -> RuntimeResult<(Self, RuntimeService)> {
+    ) -> RuntimeResult<(Self, RuntimeService)>
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         let tool_lifecycle = Arc::new(ToolLifecycle::default());
         let (control, service) = RuntimeControl::new(
             filesystem,

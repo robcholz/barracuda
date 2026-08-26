@@ -13,6 +13,7 @@ use barracuda_model_api::ToolCall;
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
 use futures_util::stream::SelectAll;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::agent_stream::{
     AgentActivity, AgentCommand, AgentEvent, AgentHandle, AgentStream, AgentStreamItem,
@@ -150,20 +151,28 @@ impl PendingTurn {
 }
 
 /// One long-lived Agent instance around the single-task `AgentEngine` core.
-pub struct Agent {
-    engine: AgentEngine,
+pub struct Agent<Tcp = http_client::Tcp, Resolver = http_client::Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    engine: AgentEngine<Tcp, Resolver>,
     ephemeral: AgentEphemeralState,
 }
 
-impl Agent {
-    pub(super) fn new(engine: AgentEngine) -> Self {
+impl<Tcp, Resolver> Agent<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    pub(super) fn new(engine: AgentEngine<Tcp, Resolver>) -> Self {
         Self {
             engine,
             ephemeral: AgentEphemeralState::new(),
         }
     }
 
-    pub fn into_stream(self, message: Message) -> (AgentStream, AgentHandle) {
+    pub fn into_stream(self, message: Message) -> (AgentStream<Tcp, Resolver>, AgentHandle) {
         let (handle, commands, activity, awaiting_approval) = AgentHandle::channel();
         let stream =
             OwnedAgentGuard::new(self, activity).into_stream(message, commands, awaiting_approval);
@@ -175,13 +184,21 @@ impl Agent {
     }
 }
 
-struct OwnedAgentGuard {
-    agent: Option<Agent>,
+struct OwnedAgentGuard<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    agent: Option<Agent<Tcp, Resolver>>,
     activity: Rc<Cell<AgentActivity>>,
 }
 
-impl OwnedAgentGuard {
-    fn new(agent: Agent, activity: Rc<Cell<AgentActivity>>) -> Self {
+impl<Tcp, Resolver> OwnedAgentGuard<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    fn new(agent: Agent<Tcp, Resolver>, activity: Rc<Cell<AgentActivity>>) -> Self {
         Self {
             agent: Some(agent),
             activity,
@@ -193,7 +210,7 @@ impl OwnedAgentGuard {
         first_message: Message,
         commands: Receiver<AgentCommand>,
         awaiting_approval: Rc<RefCell<Option<super::ToolCallId>>>,
-    ) -> impl futures_core::Stream<Item = AgentStreamItem> + 'static {
+    ) -> impl futures_core::Stream<Item = AgentStreamItem<Tcp, Resolver>> + 'static {
         yield_stream(|yielder| async move {
             let activity = Rc::clone(&self.activity);
             {
@@ -388,7 +405,11 @@ impl OwnedAgentGuard {
     }
 }
 
-impl Drop for OwnedAgentGuard {
+impl<Tcp, Resolver> Drop for OwnedAgentGuard<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     fn drop(&mut self) {
         self.activity.set(AgentActivity::Closed);
         if let Some(agent) = &mut self.agent {

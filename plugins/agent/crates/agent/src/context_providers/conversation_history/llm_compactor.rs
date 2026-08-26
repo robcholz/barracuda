@@ -10,6 +10,7 @@ use alloc::{
 use barracuda_agent_memory::{CompactError, CompactFuture, Compactor};
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use serde_json::{json, Value};
 use tracing::Instrument as _;
 
@@ -20,13 +21,24 @@ const SUMMARY_SYSTEM_PROMPT: &str = prompt!("memory/conversation_compaction_syst
 const SUMMARY_USER_PREFIX: &str = prompt!("memory/conversation_compaction_user_prefix.md");
 
 /// A [`Compactor`] that summarizes an aged history window via the LLM client.
-pub(super) struct LlmCompactor {
-    api: SharedAsyncLlm,
+pub(super) struct LlmCompactor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    api: SharedAsyncLlm<Tcp, Resolver>,
     api_manager: SharedApiManager,
 }
 
-impl LlmCompactor {
-    pub(super) fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory) -> Self {
+impl<Tcp, Resolver> LlmCompactor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    pub(super) fn new(
+        api_manager: SharedApiManager,
+        llm_factory: &ModelApiFactory<Tcp, Resolver>,
+    ) -> Self {
         Self {
             api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
@@ -34,7 +46,11 @@ impl LlmCompactor {
     }
 }
 
-impl Compactor for LlmCompactor {
+impl<Tcp, Resolver> Compactor for LlmCompactor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     fn compact<'a>(&'a self, window: &'a [Value]) -> CompactFuture<'a> {
         Box::pin(async move {
             let transcript = render_transcript(window);

@@ -8,7 +8,7 @@ use alloc::string::String;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
-use super::errors::InferMediaError;
+use super::errors::Error;
 use super::types::MediaAsset;
 
 #[derive(Debug)]
@@ -28,15 +28,12 @@ impl Prepared<'_> {
     }
 }
 
-fn prepare_inline_bytes_asset(
-    bytes: &[u8],
-    image_max_bytes: usize,
-) -> Result<String, InferMediaError> {
+fn prepare_inline_bytes_asset(bytes: &[u8], image_max_bytes: usize) -> Result<String, Error> {
     if bytes.is_empty() {
-        return Err(InferMediaError::MediaFileEmpty);
+        return Err(Error::MediaFileEmpty);
     }
     if bytes.len() > image_max_bytes {
-        return Err(InferMediaError::MediaTooLarge);
+        return Err(Error::MediaTooLarge);
     }
 
     Ok(STANDARD.encode(bytes))
@@ -45,11 +42,11 @@ fn prepare_inline_bytes_asset(
 pub(crate) fn prepare_asset<'a>(
     asset: &'a MediaAsset,
     image_max_bytes: usize,
-) -> Result<Prepared<'a>, InferMediaError> {
+) -> Result<Prepared<'a>, Error> {
     match asset {
         MediaAsset::RemoteUrl { url } => {
             if url.is_empty() {
-                return Err(InferMediaError::MediaUrlEmpty);
+                return Err(Error::MediaUrlEmpty);
             }
             Ok(Prepared::RemoteUrl(url))
         }

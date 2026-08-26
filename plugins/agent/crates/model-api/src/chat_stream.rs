@@ -16,13 +16,13 @@ use futures_core::Stream;
 use futures_lite::StreamExt;
 
 use crate::backends::sse::ProviderSse;
-use crate::errors::{ChatError, ModelApiError};
-use crate::transport::{Error as NetError, ResponsePart};
+use crate::errors::Error;
+use crate::transport::ResponsePart;
 use crate::types::ChatStreamEvent;
 
 /// A streaming chat completion.
 ///
-/// Implements [`Stream`] over `Result<ChatStreamEvent, ChatError>`. Reasoning,
+/// Implements [`Stream`] over `Result<ChatStreamEvent, Error>`. Reasoning,
 /// output, and tool-call logical streams each carry
 /// [`StreamPart`](barracuda_runtime_utils::stream::StreamPart) values and an explicit `End`.
 /// Normal provider completion then yields `None`; final parse, transport,
@@ -36,26 +36,27 @@ pub struct ChatStream<'a> {
 }
 
 pub(crate) type Driver<'a> = Pin<Box<dyn Stream<Item = DriverItem> + 'a>>;
+type ByteStream<'a> = Pin<Box<dyn Stream<Item = Result<Vec<u8>, Error>> + 'a>>;
 
 pub(crate) enum DriverItem {
     Opened,
-    Event(Result<ChatStreamEvent, ChatError>),
+    Event(Result<ChatStreamEvent, Error>),
 }
 
 impl<'a> ChatStream<'a> {
-    pub(crate) async fn open(mut driver: Driver<'a>) -> Result<Self, ChatError> {
+    pub(crate) async fn open(mut driver: Driver<'a>) -> Result<Self, Error> {
         match driver.next().await {
             Some(DriverItem::Opened) => Ok(Self { driver }),
             Some(DriverItem::Event(Err(error))) => Err(error),
-            Some(DriverItem::Event(Ok(_))) | None => Err(ChatError::Api(ModelApiError::ApiError(
-                "stream driver ended before opening",
-            ))),
+            Some(DriverItem::Event(Ok(_))) | None => {
+                Err(Error::Api("stream driver ended before opening"))
+            }
         }
     }
 }
 
 impl Stream for ChatStream<'_> {
-    type Item = Result<ChatStreamEvent, ChatError>;
+    type Item = Result<ChatStreamEvent, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -71,20 +72,27 @@ impl Stream for ChatStream<'_> {
 }
 
 /// One provider response attempt over one transport byte stream.
-pub(crate) struct ProviderStream<S> {
-    events: EventStream<ResponseDataStream<S>>,
+pub(crate) struct ProviderStream<'a> {
+    events: EventStream<ByteStream<'a>>,
     /// `None` after provider completion or a terminal parser error.
     parser: Option<ProviderSse>,
     /// Provider completion was observed; drain the remaining HTTP framing so
     /// the Agent HTTP client can safely reuse the connection.
     drain_after_done: bool,
-    queue: VecDeque<Result<ChatStreamEvent, ChatError>>,
+    queue: VecDeque<Result<ChatStreamEvent, Error>>,
 }
 
-impl<S> ProviderStream<S> {
-    pub(crate) fn new(bytes: S, parser: ProviderSse) -> Self {
+impl<'a> ProviderStream<'a> {
+    pub(crate) fn new(
+        bytes: impl Stream<Item = Result<ResponsePart, Error>> + 'a,
+        parser: ProviderSse,
+    ) -> Self {
+        let bytes = bytes.map(|part| match part? {
+            ResponsePart::Data(chunk) => Ok(chunk),
+            ResponsePart::Head(_) => Err(Error::Api("HTTP response head was emitted twice")),
+        });
         Self {
-            events: EventStream::new(ResponseDataStream { inner: bytes }),
+            events: EventStream::new(Box::pin(bytes)),
             parser: Some(parser),
             drain_after_done: false,
             queue: VecDeque::new(),
@@ -92,11 +100,8 @@ impl<S> ProviderStream<S> {
     }
 }
 
-impl<S> Stream for ProviderStream<S>
-where
-    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
-{
-    type Item = Result<ChatStreamEvent, ChatError>;
+impl Stream for ProviderStream<'_> {
+    type Item = Result<ChatStreamEvent, Error>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         // ProviderStream is Unpin (all fields are), so project by plain &mut.
@@ -134,7 +139,7 @@ where
                 }
                 Poll::Ready(Some(Err(EventStreamError::Utf8(_) | EventStreamError::Parser(_)))) => {
                     this.parser = None;
-                    return Poll::Ready(Some(Err(ModelApiError::Parse.into())));
+                    return Poll::Ready(Some(Err(Error::Parse)));
                 }
                 Poll::Ready(None) => {
                     if this.drain_after_done {
@@ -142,7 +147,7 @@ where
                         return Poll::Ready(None);
                     }
                     this.parser = None;
-                    return Poll::Ready(Some(Err(ChatError::truncated_stream())));
+                    return Poll::Ready(Some(Err(Error::truncated_stream())));
                 }
                 Poll::Pending => return Poll::Pending,
             }
@@ -150,45 +155,16 @@ where
     }
 }
 
-struct ResponseDataStream<S> {
-    inner: S,
-}
-
-impl<S> Stream for ResponseDataStream<S>
-where
-    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
-{
-    type Item = Result<Vec<u8>, ChatError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.inner).poll_next(context) {
-            Poll::Ready(Some(Ok(ResponsePart::Data(chunk)))) => Poll::Ready(Some(Ok(chunk))),
-            Poll::Ready(Some(Ok(ResponsePart::Head(_)))) => Poll::Ready(Some(Err(ChatError::Api(
-                ModelApiError::ApiError("HTTP response head was emitted twice"),
-            )))),
-            Poll::Ready(Some(Err(error))) => Poll::Ready(Some(Err(read_error(error)))),
-            Poll::Ready(None) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-/// Preserve the transport's transient/permanent classification. The outer
-/// stream driver separately decides whether replay is still safe.
-fn read_error(error: NetError) -> ChatError {
-    ModelApiError::from(error).into()
-}
-
 /// Drain a byte stream to a UTF-8 string. Used to read a non-2xx error body
 /// before failing a streaming request.
-pub(crate) async fn drain_body<S>(mut stream: S) -> Result<String, NetError>
+pub(crate) async fn drain_body<S>(mut stream: S) -> Result<String, Error>
 where
-    S: Stream<Item = Result<ResponsePart, NetError>> + Unpin,
+    S: Stream<Item = Result<ResponsePart, Error>> + Unpin,
 {
     let mut buf = Vec::new();
     while let Some(part) = stream.next().await {
         match part? {
-            ResponsePart::Head(_) => return Err(NetError::Codec),
+            ResponsePart::Head(_) => return Err(Error::HttpCodec),
             ResponsePart::Data(chunk) => buf.extend_from_slice(&chunk),
         }
     }

@@ -12,7 +12,7 @@ The standalone LLM surface can be reused independently of agent execution.
 | Method | Request | Returns |
 |---|---|---|
 | `ModelApi::chat` | `ChatRequest` | `LlmResponse` (text + reasoning + tool calls) |
-| `ModelApi::chat_json` | `ChatJsonRequest` | `ChatJsonResponse` (parsed `T` + tool calls) |
+| `ModelApi::chat_json` | `ChatRequest` + `StaticOutputSchema` | `ChatJsonResponse` (parsed `T` + tool calls) |
 | `ModelApi::infer_media` | `MediaRequest` | `String` (model text about the image) |
 | `ModelApi::chat_stream` | `ChatRequest` | `ChatStream` of `ChatStreamEvent` values containing `barracuda_runtime_utils::stream::StreamPart`; the stream exclusively borrows the HTTP transport until Drop |
 
@@ -33,8 +33,7 @@ when the server permits it.
 Calls take `Cancel`, a borrowed atomic cancellation token. For streaming calls
 the token covers request send,
 response headers, and body reads; dropping `ChatStream` also cancels body
-transfer. An abort is non-retryable and surfaces as `ModelApiError::Transport`
-containing `HttpError::Cancelled`.
+transfer. Cancellation is non-retryable and surfaces as `Error::Cancelled`.
 
 ## Retries
 
@@ -43,7 +42,7 @@ client). A fresh request carries `RetryPolicy::default()` (2 retries, 500 ms
 initial interval, exponential, capped at 8 s); override with `.with_retry(..)`
 or disable with `RetryPolicy::none()`. Only transient transport failures are
 retried (network errors and HTTP 408/429/5xx); aborts, bad URLs/bodies, and
-other 4xx are never retried. See `ModelApiError::is_retryable` for the
+other 4xx are never retried. See `Error::is_retryable` for the
 classification.
 
 ## Public API
@@ -52,12 +51,11 @@ Curated re-exports (implementation modules — backend registry, media-prep
 pipeline, retry loop — are private):
 
 - Client: `ModelApi`, `ModelApiFactory`
-- Config / requests: `ModelApiConfig`, `BackendKind`, `ChatRequest`, `ChatJsonRequest`,
+- Config / requests: `ModelApiConfig`, `BackendKind`, `ChatRequest`,
   `MediaRequest`, `RetryPolicy`, `StaticOutputSchema`
 - Responses / values: `LlmResponse`, `ChatJsonResponse`, `ChatStream`,
   `ChatStreamEvent`, `ToolCall`, `MediaAsset`
-- Errors: `ModelApiError`, `HttpError`, `ChatError`, `ChatJsonError`,
-  `InferMediaError`, `InitError`, `ParseBackendKindError`
+- Errors: `Error`, `InitError`, `ParseBackendKindError`
 
 ## Example
 
