@@ -78,7 +78,9 @@ async fn plugin_exposes_agent_set_api_over_http() {
         .await
         .expect("install global test VFS");
     let mut router = EventRouter::new(lanes).await.expect("create router");
-    let observed = Rc::new(RefCell::new(None::<(ModelApiConfig, ApiPurpose, bool)>));
+    let observed = Rc::new(RefCell::new(
+        Vec::<(ModelApiConfig, ApiPurpose, bool)>::new(),
+    ));
     let target = Rc::clone(&observed);
     let server = Rc::new(WebServer::new());
 
@@ -87,7 +89,7 @@ async fn plugin_exposes_agent_set_api_over_http() {
             &mut router,
             AgentProvider {
                 capability: Some(AgentSetApi::new(move |api, purpose, default| {
-                    *target.borrow_mut() = Some((api, purpose, default));
+                    target.borrow_mut().push((api, purpose, default));
                     Ok(())
                 })),
             },
@@ -128,7 +130,7 @@ async fn plugin_exposes_agent_set_api_over_http() {
             .connect((Ipv4Address::new(10, 0, 0, 1), port))
             .await
             .expect("connect to WebServer");
-        let body = br#"{"timeout_ms":30000,"max_tokens":4096,"image_max_bytes":1048576,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"test-model","base_url":"https://example.invalid/v1"}"#;
+        let body = br#"[{"timeout_ms":30000,"max_tokens":4096,"image_max_bytes":1048576,"backend":"openai_compatible","purpose":"root_agent","default":true,"api_key":"secret","model":"test-model","base_url":"https://example.invalid/v1"},{"timeout_ms":30000,"max_tokens":4096,"image_max_bytes":1048576,"backend":"openai_compatible","purpose":"memory","default":false,"api_key":"secret","model":"test-model","base_url":"https://example.invalid/v1"}]"#;
         let head = format!(
             "POST {SET_API_PATH} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
@@ -165,8 +167,10 @@ async fn plugin_exposes_agent_set_api_over_http() {
     .expect("HTTP request completes");
 
     let observed = observed.borrow();
-    let (api, purpose, default) = observed.as_ref().expect("Agent set API invoked");
-    assert_eq!(api.model, "test-model");
-    assert_eq!(*purpose, ApiPurpose::RootAgent);
-    assert!(*default);
+    assert_eq!(observed.len(), 2);
+    assert_eq!(observed[0].0.model, "test-model");
+    assert_eq!(observed[0].1, ApiPurpose::RootAgent);
+    assert!(observed[0].2);
+    assert_eq!(observed[1].1, ApiPurpose::Memory);
+    assert!(!observed[1].2);
 }
