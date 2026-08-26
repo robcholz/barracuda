@@ -168,6 +168,7 @@ use `GatewayEventFrame`.
 - `../imessage-telegram/crates/provider/tests/telegram.rs` — Telegram provider behavior.
 - `../imessage-wechat/crates/provider/tests/wechat.rs` — WeChat provider behavior.
 - `../imessage-bluebubble/crates/provider/tests/bluebubbles.rs` — BlueBubbles provider behavior.
+- `../imessage-inkbox/crates/provider/tests/inkbox.rs` — Inkbox provider behavior.
 
 Run them with:
 

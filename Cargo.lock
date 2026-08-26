@@ -747,6 +747,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imessage-inkbox-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-manager",
+ "gateway",
+ "http-client",
+ "inkbox",
+]
+
+[[package]]
 name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
@@ -3639,6 +3650,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "inkbox"
+version = "0.1.0"
+dependencies = [
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "serde_json",
 ]
 
 [[package]]
