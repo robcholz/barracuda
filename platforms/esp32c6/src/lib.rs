@@ -212,12 +212,21 @@ mod internal_flash {
         type Partitions = Esp32c6Partitions;
         type Error = Esp32c6PlatformError;
 
+        fn prepare() -> Result<(), Self::Error> {
+            esp_println::logger::init_logger(log::LevelFilter::Info);
+            log::info!("preparing ESP32-C6 Platform");
+            Ok(())
+        }
+
         async fn initialize(
             _spawner: Spawner,
             bindings: Self::Bindings,
         ) -> PlatformInitResult<Self> {
+            log::info!("initializing ESP32-C6 Platform partitions");
             let partitions = partitions(bindings.flash)?;
+            log::info!("initializing ESP32-C6 Platform TLS");
             let tls = bindings.tls.initialize()?;
+            log::info!("initialized ESP32-C6 Platform");
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
                 tls,

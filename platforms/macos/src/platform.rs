@@ -141,14 +141,20 @@ impl Platform for MacosPlatform {
     type Error = MacosPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
+        crate::logging::install();
+        log::info!("preparing macOS Platform");
         Self::install_reactor()
     }
 
     async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
+        log::info!("initializing macOS Platform partitions");
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
+        log::info!("initializing macOS Platform network");
         let ip_stack = crate::network::initialize(spawner).await?;
+        log::info!("initializing macOS Platform TLS");
         let tls = Self::initialize_tls()?;
+        log::info!("initialized macOS Platform");
         Ok(PlatformResources {
             ip_stack,
             tls,
@@ -184,4 +190,23 @@ pub enum MacosPlatformError {
     /// The fixed-capacity partition collection could not accept the native layout.
     #[error("macOS native partition collection rejected an entry: {0:?}")]
     Partitions(#[from] PartitionsInsertError),
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use barracuda_platform::Platform as _;
+
+    use super::MacosPlatform;
+
+    #[test]
+    fn prepare_installs_the_global_log_backend_before_platform_initialization() {
+        MacosPlatform::prepare().expect("prepare macOS Platform");
+
+        assert!(log::log_enabled!(
+            target: "barracuda_platform_macos",
+            log::Level::Info
+        ));
+    }
 }

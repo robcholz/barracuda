@@ -694,8 +694,10 @@ where
     ) -> Result<(), PluginRegisterError> {
         let id = PluginId::try_from(plugin.id())?;
         if self.loaded.contains_key(&id) {
+            log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));
         }
+        log::info!("registering Plugin {id}");
 
         let dependencies =
             resolve_dependencies::<M, T, ScopedStorage<DatabaseRegion>>(&id, &self.loaded)?;
@@ -736,6 +738,7 @@ where
 
         match result {
             Ok(()) => {
+                log::info!("registered Plugin {id}");
                 self.registration_order.push(id.clone());
                 self.loaded.insert(
                     id,
@@ -753,6 +756,7 @@ where
                 Ok(())
             }
             Err(source) => {
+                log::error!("Plugin {id} registration failed: {source}");
                 let (remaining, cleanup) = rollback_components(router, component_ids);
                 if cleanup.is_empty() {
                     self.capabilities.remove_all(&provided_capabilities);
@@ -796,6 +800,7 @@ where
                 self.loaded.insert(id, plugin);
                 continue;
             }
+            log::info!("starting Plugin {id}");
 
             let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
             let result = {
@@ -812,10 +817,12 @@ where
 
             match result {
                 Ok(()) => {
+                    log::info!("started Plugin {id}");
                     plugin.started = true;
                     self.loaded.insert(id, plugin);
                 }
                 Err(source) => {
+                    log::error!("Plugin {id} start failed: {source}");
                     let (remaining, cleanup) = rollback_components(router, plugin.component_ids);
                     if cleanup.is_empty() {
                         self.capabilities.remove_all(&plugin.provided_capabilities);

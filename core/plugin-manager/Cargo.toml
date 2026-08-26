@@ -16,6 +16,7 @@ barracuda-vfs = { path = "../../shared/vfs" }
 embassy-executor.workspace = true
 embedded-storage-async.workspace = true
 getset = "0.1.7"
+log.workspace = true
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

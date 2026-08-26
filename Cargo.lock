@@ -601,6 +601,7 @@ dependencies = [
  "embassy-net",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "log",
  "picoserve",
  "serde",
  "serde_json",
@@ -847,7 +848,9 @@ dependencies = [
  "embassy-sync 0.8.0",
  "esp-hal",
  "esp-idf-part",
+ "esp-println",
  "esp-storage",
+ "log",
 ]
 
 [[package]]
@@ -866,8 +869,10 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-storage",
+ "env_logger",
  "getrandom 0.4.3",
  "heapless 0.9.3",
+ "log",
  "rand 0.9.5",
  "serde",
  "tempfile",
@@ -893,8 +898,10 @@ dependencies = [
  "embassy-sync 0.7.2",
  "embassy-time",
  "embedded-storage",
+ "env_logger",
  "getrandom 0.4.3",
  "heapless 0.9.3",
+ "log",
  "rand 0.9.5",
  "serde",
  "tempfile",
@@ -932,7 +939,9 @@ dependencies = [
  "embassy-net",
  "embassy-stm32",
  "embassy-sync 0.8.0",
+ "log",
  "panic-halt",
+ "rtt-target",
 ]
 
 [[package]]
@@ -967,6 +976,7 @@ dependencies = [
  "embedded-storage-async",
  "futures-lite",
  "getset",
+ "log",
  "thiserror 2.0.18",
 ]
 
@@ -984,6 +994,7 @@ dependencies = [
  "barracuda-rpc",
  "futures-lite",
  "getset",
+ "log",
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
@@ -1102,6 +1113,7 @@ dependencies = [
  "embedded-storage",
  "futures-lite",
  "http-client",
+ "log",
  "thiserror 2.0.18",
 ]
 
@@ -1286,6 +1298,7 @@ dependencies = [
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
+ "log",
  "picoserve",
  "thiserror 2.0.18",
  "tokio",
@@ -2875,6 +2888,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42c2ee95b945a4780796e4359e72c033aed3b45073880e8029458f538532db8a"
 
 [[package]]
+name = "esp-println"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42dee1e9ac7c3539bf6464db1707b0edd7557168f98278cf3c84fe70e63c6ce6"
+dependencies = [
+ "document-features",
+ "esp-metadata-generated",
+ "esp-sync",
+ "log",
+ "portable-atomic",
+]
+
+[[package]]
 name = "esp-riscv-rt"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4093,6 +4119,10 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+dependencies = [
+ "critical-section",
+ "portable-atomic",
+]
 
 [[package]]
 name = "once_cell_polyfill"
@@ -4661,6 +4691,19 @@ dependencies = [
  "const-default",
  "libc",
  "rustversion",
+]
+
+[[package]]
+name = "rtt-target"
+version = "0.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7afed1f4302eeba88c601636cf2c554c45e1cbb464bab44c6012bab0e71473c"
+dependencies = [
+ "critical-section",
+ "log",
+ "once_cell",
+ "portable-atomic",
+ "ufmt-write",
 ]
 
 [[package]]

@@ -104,12 +104,17 @@ where
         resources: TargetResources<PlatformResources<Tls, Partitions<Region, P>>, BoardHal>,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
+        log::info!("assembling Barracuda System");
         let prepared = resources::prepare(resources)?;
+        log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/", backend, MountOptions::read_write()).await?;
+        log::info!("mounted System filesystem");
         let mut router = EventRouter::new(lanes).await?;
+        log::info!("initialized Event Router");
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
+        log::info!("opened Plugin Manager storage");
         plugins.install_vfs(global_namespace().await);
         plugins.install_task_spawner(spawner);
 
@@ -126,6 +131,7 @@ where
         plugins.register(&mut router, IMessageWebPlugin::new())?;
         plugins.register(&mut router, GatewayAgentPlugin::new())?;
         plugins.start(&mut router)?;
+        log::info!("Barracuda System started");
 
         Ok(Self {
             router,

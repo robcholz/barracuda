@@ -163,6 +163,7 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
     /// Creates an empty Router backed by application-lifetime RPC lanes.
     #[must_use]
     pub fn new(lanes: &'static RpcLaneStorage<N, M, Q>) -> Self {
+        log::info!("creating Event Router");
         Self {
             registry: RpcRegistry::new(lanes),
             components: BTreeMap::new(),
@@ -182,14 +183,17 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
     /// rollback fails.
     pub fn load(&mut self, mut component: Box<dyn Component<M>>) -> Result<ComponentId, LoadError> {
         if self.terminated {
+            log::warn!("refusing Component load after Event Router termination");
             return Err(LoadError::RouterTerminated);
         }
         let id = self.allocate_component_id()?;
+        log::debug!("registering Component {id}");
         let registry: &dyn RpcRegistryApi<M> = &self.registry;
         let mut registrations = Vec::new();
         if let Err(source) =
             component.register(&mut RegisterContext::new(registry, &mut registrations))
         {
+            log::error!("Component {id} registration failed: {source}");
             let component_error = component.unregister(&mut UnregisterContext::new()).err();
             let rpc_errors = unregister_all(registry, registrations);
             return match cleanup_error(component_error, rpc_errors) {
@@ -211,6 +215,7 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
                 registrations,
             },
         );
+        log::info!("loaded Component {id}");
         Ok(id)
     }
 
@@ -227,8 +232,10 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
     /// state so the caller can retry `unload`.
     pub fn unload(&mut self, id: ComponentId) -> Result<(), UnloadError> {
         let Some(mut entry) = self.components.remove(&id) else {
+            log::warn!("cannot unload unknown Component {id}");
             return Err(UnloadError::NotFound(id));
         };
+        log::info!("unloading Component {id}");
         drop(entry.run.take());
         let registry: &dyn RpcRegistryApi<M> = &self.registry;
         let (remaining, rpc_errors) = revoke_all(registry, entry.registrations);
@@ -244,10 +251,14 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
         };
         match cleanup_error(component_error, rpc_errors) {
             Some(error) => {
+                log::error!("Component {id} unload failed: {error}");
                 self.components.insert(id, entry);
                 Err(UnloadError::Cleanup(error))
             }
-            None => Ok(()),
+            None => {
+                log::info!("unloaded Component {id}");
+                Ok(())
+            }
         }
     }
 
@@ -292,7 +303,14 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
 
 impl<const N: usize, const M: usize, const Q: usize> Drop for Router<N, M, Q> {
     fn drop(&mut self) {
-        drop(self.cleanup_all());
+        let failures = self.cleanup_all();
+        for failure in failures {
+            log::error!(
+                "Component {} cleanup failed while dropping Event Router: {}",
+                failure.id,
+                failure.error
+            );
+        }
     }
 }
 
@@ -328,8 +346,13 @@ impl<const N: usize, const M: usize, const Q: usize> Future for Router<N, M, Q> 
         };
         let failures = this.cleanup_all();
         if failures.is_empty() {
+            log::error!("Event Router terminated: {cause}");
             Poll::Ready(Err(cause))
         } else {
+            log::error!(
+                "Event Router terminated with {} cleanup failure(s): {cause}",
+                failures.len()
+            );
             Poll::Ready(Err(RouterError::CleanupFailed {
                 cause: Box::new(cause),
                 failures,

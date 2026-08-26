@@ -138,15 +138,23 @@ impl HttpEndpoint for SetApiEndpoint {
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
         Box::pin(async move {
             if request.method() != HttpMethod::Post {
+                log::debug!("rejected non-POST model API configuration request");
                 return Self::response(405, br#"{"error":"method_not_allowed"}"#);
             }
             let Ok(request) = serde_json::from_slice::<SetApiRequest>(request.body()) else {
+                log::warn!("rejected invalid model API configuration request");
                 return Self::response(400, br#"{"error":"invalid_request"}"#);
             };
             let (api, purpose, default) = request.into_parts();
             match self.agent.set_api(api, purpose, default) {
-                Ok(()) => Self::response(204, b""),
-                Err(_error) => Self::response(422, br#"{"error":"invalid_configuration"}"#),
+                Ok(()) => {
+                    log::info!("configured model API for {purpose:?}, default={default}");
+                    Self::response(204, b"")
+                }
+                Err(error) => {
+                    log::warn!("rejected model API configuration for {purpose:?}: {error}");
+                    Self::response(422, br#"{"error":"invalid_configuration"}"#)
+                }
             }
         })
     }
