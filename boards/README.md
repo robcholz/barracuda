@@ -50,3 +50,8 @@ selection remains independent in `platforms/selected`; the Rust target chooses
 the Platform, and Target composition rejects incompatible Board/Platform pairs.
 Platform YAML remains beside its implementation at
 `platforms/<name>/platform.yml`.
+
+The repository currently provides reference Board bundles for the ESP32,
+ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. Each ESP bundle
+keeps its ESP-IDF partition CSV as the native layout and records the
+chip-specific Rust target in `board.yml`.

@@ -1,0 +1,7 @@
+name: esp32-devkitc-v4
+hardware:
+  chip: esp32
+toolchain:
+  target: xtensa-esp32-none-elf
+native-layout:
+  artifact: partitions.csv

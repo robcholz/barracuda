@@ -1,0 +1,7 @@
+name: esp32s2-saola-1
+hardware:
+  chip: esp32s2
+toolchain:
+  target: xtensa-esp32s2-none-elf
+native-layout:
+  artifact: partitions.csv
