@@ -1,11 +1,14 @@
 //! `cargo board` entry point.
 
-use std::{env, io, path::PathBuf, process::ExitCode};
+use std::{io, path::PathBuf, process::ExitCode};
+
+use barracuda_board_tool::{execute, Cli};
+use clap::Parser;
 
 fn main() -> ExitCode {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut output = io::stdout().lock();
-    match barracuda_board_tool::run(env::args().skip(1), &workspace_root, &mut output) {
+    match execute(Cli::parse(), &workspace_root, &mut output) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");

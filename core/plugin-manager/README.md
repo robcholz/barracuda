@@ -5,13 +5,17 @@ assigning persistent storage ownership. Runtime composition stays in
 `barracuda-system`; this core crate does not construct or own the application
 System.
 
-`barracuda-system` selects the complete Plugin set during startup. It first
-registers every Plugin in dependency order, then starts the registered set in
-that same order. It does not expose `load_plugin` or `unload_plugin` as a
+`barracuda-system` adds the complete Plugin set during startup. Plugin Manager
+scans the declared dependency DAG, registers every Plugin in dependency order,
+then starts the registered set in that same order. It does not expose
+`load_plugin` or `unload_plugin` as a
 runtime API. The manager's lifecycle operations are internal assembly
 machinery, including rollback when one phase fails.
 
 ```text
+add(imessage-web, webserver, imessage-gateway, ...)
+                         |
+                         v
 register(webserver) -> register(imessage-gateway) -> register(imessage-web) -> ...
                                                                        |
                                                                        v

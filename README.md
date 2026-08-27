@@ -8,7 +8,10 @@
   provided RPCs, wire contracts, errors, and lifecycle under its owning
   Plugin's `docs/` directory.
 - `shared/` contains crates shared across Plugins and applications.
-- `plugins/agent/bench/` contains agent measurement and profiling workloads.
+- `bench/` contains project-wide measurement and profiling workloads, including
+  workload-specific harnesses and shared recording fixtures.
+- `tools/` contains project-wide development utilities such as the LLM API
+  recorder and deterministic replay proxy.
 - `core/event-router/bench/profile/` contains Event Router heap/allocation
   profiling workloads.
 - `core/event-router/bench/throughput/` contains the Event Router bytes/s

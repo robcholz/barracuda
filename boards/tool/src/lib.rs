@@ -10,16 +10,39 @@ use barracuda_board_config::{
     parse, read_selected_board, validate_board_name, write_selected_board, BoardDefinition,
     ConfigError, SelectionError,
 };
+use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
-const USAGE: &str = "usage: cargo board <select|target> [board-name]";
+/// Command-line interface for `cargo board`.
+#[derive(Debug, Parser)]
+#[command(name = "cargo board", bin_name = "cargo board", version, about)]
+pub struct Cli {
+    /// Board operation to perform.
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+/// Operations supported by `cargo board`.
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Select a Board, interactively when no name is provided.
+    Select {
+        /// Board bundle name under `boards/configs`.
+        name: Option<String>,
+    },
+    /// Print a Board's Rust target triple.
+    Target {
+        /// Board bundle name; defaults to the selected Board.
+        name: Option<String>,
+    },
+}
 
 /// Failure while selecting a Board bundle.
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
-    /// Arguments do not match the single supported command.
-    #[error("{USAGE}")]
-    Usage,
+    /// Command-line arguments are invalid.
+    #[error(transparent)]
+    Arguments(#[from] clap::Error),
     /// The requested Board bundle does not exist.
     #[error("Board `{name}` does not exist under `boards/configs`")]
     BoardMissing {
@@ -98,27 +121,39 @@ where
     S: AsRef<str>,
     W: Write,
 {
-    run_with_selector(args, workspace_root, output, prompt_for_board)
+    let cli = Cli::try_parse_from(
+        std::iter::once(String::from("cargo board")).chain(
+            args.into_iter()
+                .map(|argument| argument.as_ref().to_owned()),
+        ),
+    )?;
+    execute_with_selector(cli, workspace_root, output, prompt_for_board)
 }
 
-fn run_with_selector<I, S, W, F>(
-    args: I,
+/// Executes a parsed Board command.
+///
+/// # Errors
+/// Returns [`CommandError`] when discovery, validation, or persistence fails.
+pub fn execute<W: Write>(
+    cli: Cli,
+    workspace_root: &Path,
+    output: &mut W,
+) -> Result<(), CommandError> {
+    execute_with_selector(cli, workspace_root, output, prompt_for_board)
+}
+
+fn execute_with_selector<W, F>(
+    cli: Cli,
     workspace_root: &Path,
     output: &mut W,
     selector: F,
 ) -> Result<(), CommandError>
 where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
     W: Write,
     F: FnOnce(&[String], Option<usize>) -> Result<Option<usize>, CommandError>,
 {
-    let args = args
-        .into_iter()
-        .map(|argument| argument.as_ref().to_owned())
-        .collect::<Vec<_>>();
-    match args.as_slice() {
-        [command] if command == "select" => {
+    match cli.command {
+        Command::Select { name: None } => {
             let boards = discover_boards(workspace_root)?;
             let current = read_selected_board(workspace_root)?;
             let default = current
@@ -133,14 +168,35 @@ where
                 .ok_or(CommandError::InvalidSelectionIndex { index })?;
             select_board(workspace_root, name, output)
         }
-        [command, name] if command == "select" => select_board(workspace_root, name, output),
-        [command] if command == "target" => {
+        Command::Select { name: Some(name) } => select_board(workspace_root, &name, output),
+        Command::Target { name: None } => {
             let name = read_selected_board(workspace_root)?.ok_or(CommandError::NoSelection)?;
             print_target(workspace_root, &name, output)
         }
-        [command, name] if command == "target" => print_target(workspace_root, name, output),
-        _ => Err(CommandError::Usage),
+        Command::Target { name: Some(name) } => print_target(workspace_root, &name, output),
     }
+}
+
+#[cfg(test)]
+fn run_with_selector<I, S, W, F>(
+    args: I,
+    workspace_root: &Path,
+    output: &mut W,
+    selector: F,
+) -> Result<(), CommandError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    W: Write,
+    F: FnOnce(&[String], Option<usize>) -> Result<Option<usize>, CommandError>,
+{
+    let cli = Cli::try_parse_from(
+        std::iter::once(String::from("cargo board")).chain(
+            args.into_iter()
+                .map(|argument| argument.as_ref().to_owned()),
+        ),
+    )?;
+    execute_with_selector(cli, workspace_root, output, selector)
 }
 
 fn prompt_for_board(

@@ -5,7 +5,7 @@
 use std::{fs, path::Path};
 
 use barracuda_board_config::{read_selected_board, write_selected_board};
-use barracuda_board_tool::run;
+use barracuda_board_tool::{run, CommandError};
 use tempfile::tempdir;
 
 fn add_board(root: &Path, directory_name: &str, declared_name: &str) {
@@ -117,7 +117,7 @@ fn command_requires_exact_select_syntax() {
 
     for args in [vec![], vec!["build"], vec!["select", "a", "b"]] {
         let error = run(args, root.path(), &mut Vec::new()).expect_err("invalid arguments");
-        assert!(error.to_string().contains("usage: cargo board"));
+        assert!(matches!(error, CommandError::Arguments(_)));
     }
 }
 
