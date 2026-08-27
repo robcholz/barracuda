@@ -464,6 +464,61 @@ fn declared_dependency_can_require_a_typed_capability() {
 }
 
 #[test]
+fn queued_plugins_register_in_dependency_order() {
+    let mut manager = manager();
+    let mut router = router();
+    let capability = Rc::new(TestCapability(42));
+    let observed = Rc::new(RefCell::new(None));
+
+    manager
+        .add(CapabilityConsumer {
+            observed: Rc::clone(&observed),
+        })
+        .unwrap();
+    manager
+        .add(CapabilityProvider {
+            capability: Rc::clone(&capability),
+        })
+        .unwrap();
+    manager.register_all(&mut router).unwrap();
+
+    let required = observed.borrow().clone().unwrap();
+    assert!(Rc::ptr_eq(&required, &capability));
+}
+
+struct CycleA;
+
+impl Plugin<FRAME_SIZE> for CycleA {
+    const DEPENDS_ON: &'static [&'static str] = &["cycle-b"];
+
+    fn id(&self) -> &'static str {
+        "cycle-a"
+    }
+}
+
+struct CycleB;
+
+impl Plugin<FRAME_SIZE> for CycleB {
+    const DEPENDS_ON: &'static [&'static str] = &["cycle-a"];
+
+    fn id(&self) -> &'static str {
+        "cycle-b"
+    }
+}
+
+#[test]
+fn queued_plugin_cycle_is_rejected() {
+    let mut manager = manager();
+    let mut router = router();
+    manager.add(CycleB).unwrap();
+    manager.add(CycleA).unwrap();
+
+    let error = manager.register_all(&mut router).unwrap_err();
+
+    assert!(matches!(error, PluginRegisterError::DependencyCycle(ids) if ids.len() == 2));
+}
+
+#[test]
 fn declared_dependency_must_be_registered_before_consumer() {
     let mut manager = manager();
     let mut router = router();

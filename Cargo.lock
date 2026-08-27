@@ -1031,6 +1031,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-tool"
+version = "0.1.0"
+
+[[package]]
 name = "barracuda-profile"
 version = "0.1.0"
 dependencies = [
@@ -1154,6 +1158,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-plugin-tool",
  "barracuda-scheduler-plugin",
  "barracuda-target-api",
  "barracuda-time-plugin",
