@@ -30,10 +30,10 @@ use embassy_executor::Spawner;
 use embedded_storage::nor_flash::NorFlash;
 
 macro_rules! register_plugins {
-    ($manager:ident, $router:ident; $($plugin:expr),+ $(,)?) => {
+    ($manager:ident, $router:ident; $($plugin:expr),* $(,)?) => {
         $(
             $manager.add($plugin)?;
-        )+
+        )*
         $manager.register_all(&mut $router)?;
     };
 }
