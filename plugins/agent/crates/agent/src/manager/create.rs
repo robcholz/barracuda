@@ -6,6 +6,7 @@ use barracuda_agent_permission::PermissionPolicy;
 use barracuda_agent_persistence::DurableState;
 use barracuda_agent_tool::ToolGroup;
 use barracuda_model_api::RetryPolicy;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::baked;
 use crate::config::ApiPurpose;
@@ -43,7 +44,11 @@ struct AgentEnvironment {
     state: Option<DurableState<AgentEngineState>>,
 }
 
-impl AgentManager {
+impl<Tcp, Resolver> AgentManager<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     pub fn resume_from(
         &self,
         id: AgentId,
@@ -51,7 +56,7 @@ impl AgentManager {
         permission_policy: Arc<dyn PermissionPolicy + 'static>,
         reasoning_effort: ReasoningEffort,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let persisted = self.load_persisted_agent(id)?;
         let kind = persisted.get().kind();
         let transcript = self.open_transcript(id, &kind, PersistenceConfig::Persistent)?;
@@ -82,7 +87,7 @@ impl AgentManager {
         reasoning_effort: ReasoningEffort,
         persistence_config: PersistenceConfig,
         extension_tools: Vec<ToolGroup>,
-    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let transcript = self.open_transcript(id, kind, persistence_config)?;
         let (agent, reasoning_effort_handle) = self.create_agent(
             id,
@@ -144,7 +149,7 @@ impl AgentManager {
         id: AgentId,
         kind: &AgentKind,
         environment: AgentEnvironment,
-    ) -> Result<(Agent, ReasoningEffortHandle), AgentCreateError> {
+    ) -> Result<(Agent<Tcp, Resolver>, ReasoningEffortHandle), AgentCreateError> {
         let span = tracing::info_span!("agent.create");
         let _enter = span.enter();
         let AgentEnvironment {

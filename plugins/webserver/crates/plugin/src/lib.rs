@@ -7,8 +7,9 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 
+use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginError, PluginResult, PluginStartContext,
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext,
 };
 use embassy_net::Stack;
 
@@ -46,9 +47,9 @@ pub struct WebServerPlugin {
 impl WebServerPlugin {
     /// Creates the Plugin with the IP stack used by its owned server task.
     #[must_use]
-    pub const fn new(stack: Stack<'static>) -> Self {
+    pub const fn new(context: &PluginContext) -> Self {
         Self {
-            stack,
+            stack: context.ip_stack,
             runtime: None,
         }
     }
@@ -59,7 +60,10 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {

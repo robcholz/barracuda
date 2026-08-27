@@ -14,12 +14,14 @@ stm32f429zi = [
     "dep:embassy-stm32",
     "dep:embassy-sync",
     "dep:panic-halt",
+    "dep:rtt-target",
     "embassy-stm32/stm32f429zi",
 ]
 
 [dependencies]
 barracuda-board = { path = "../../boards/api" }
 barracuda-platform = { path = "../api" }
+log.workspace = true
 
 [target.'cfg(target_arch = "arm")'.dependencies]
 barracuda-tls = { path = "../../shared/tls" }
@@ -30,6 +32,7 @@ embassy-net = { workspace = true, optional = true }
 embassy-stm32 = { version = "0.6.0", default-features = false, optional = true }
 embassy-sync = { version = "0.8.0", default-features = false, optional = true }
 panic-halt = { version = "1.0.0", optional = true }
+rtt-target = { version = "0.6.2", features = ["log"], optional = true }
 
 [build-dependencies]
 barracuda-board-config = { path = "../../boards/config" }

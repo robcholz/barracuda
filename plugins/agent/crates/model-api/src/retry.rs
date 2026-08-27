@@ -2,7 +2,7 @@
 //!
 //! Retry is a per-request policy ([`crate::RetryPolicy`] on each request),
 //! so the loop lives just above the backend call rather than in the transport.
-//! Only operations whose error reports [`is_retryable`](crate::ModelApiError::is_retryable)
+//! Only operations whose error reports [`is_retryable`](crate::Error::is_retryable)
 //! are retried; deadlines and backoff use the global `embassy-time` driver.
 
 use barracuda_runtime_utils::Cancel;
@@ -10,8 +10,7 @@ use core::future::Future;
 use embassy_futures::select::{select, select3, Either, Either3};
 use embassy_time::Timer;
 
-use crate::errors::{ChatError, ChatJsonError, InferMediaError, ModelApiError};
-use crate::transport::Error as HttpError;
+use crate::errors::Error;
 use crate::RetryPolicy;
 
 pub(crate) struct RetryState {
@@ -59,10 +58,10 @@ pub(crate) enum DeadlineError {
     Elapsed,
 }
 
-pub(crate) fn deadline_error(error: DeadlineError) -> ModelApiError {
+pub(crate) fn deadline_error(error: DeadlineError) -> Error {
     match error {
-        DeadlineError::Cancelled => ModelApiError::Transport(HttpError::Cancelled),
-        DeadlineError::Elapsed => ModelApiError::Timeout,
+        DeadlineError::Cancelled => Error::Cancelled,
+        DeadlineError::Elapsed => Error::Timeout,
     }
 }
 
@@ -90,53 +89,24 @@ where
     }
 }
 
-pub(crate) async fn timed<T, E>(
-    future: impl Future<Output = Result<T, E>>,
+pub(crate) async fn timed<T>(
+    future: impl Future<Output = Result<T, Error>>,
     timeout_ms: u32,
     cancel: Cancel<'_>,
-) -> Result<T, E>
-where
-    E: From<ModelApiError>,
-{
+) -> Result<T, Error> {
     match with_timeout(future, timeout_ms, cancel).await {
         Ok(result) => result,
-        Err(error) => Err(deadline_error(error).into()),
+        Err(error) => Err(deadline_error(error)),
     }
 }
 
-pub(crate) trait RetryError: Sized {
-    fn is_retryable(&self) -> bool;
-    fn cancelled() -> Self;
-}
-
-impl RetryError for ChatJsonError {
-    fn is_retryable(&self) -> bool {
-        self.is_retryable()
-    }
-
-    fn cancelled() -> Self {
-        ChatError::Api(ModelApiError::Transport(HttpError::Cancelled)).into()
-    }
-}
-
-impl RetryError for InferMediaError {
-    fn is_retryable(&self) -> bool {
-        self.is_retryable()
-    }
-
-    fn cancelled() -> Self {
-        ModelApiError::Transport(HttpError::Cancelled).into()
-    }
-}
-
-pub(crate) async fn retry_call<T, E, F>(
+pub(crate) async fn retry_call<T, F>(
     policy: RetryPolicy,
     cancel: Cancel<'_>,
     mut call: F,
-) -> Result<T, E>
+) -> Result<T, Error>
 where
-    E: RetryError,
-    F: AsyncFnMut() -> Result<T, E>,
+    F: AsyncFnMut() -> Result<T, Error>,
 {
     let mut retry = RetryState::new(policy);
     loop {
@@ -144,7 +114,7 @@ where
             Ok(value) => return Ok(value),
             Err(error) if retry.can_retry(error.is_retryable()) => {
                 if !sleep_or_cancel(retry.advance().backoff_ms, cancel).await {
-                    return Err(E::cancelled());
+                    return Err(Error::Cancelled);
                 }
             }
             Err(error) => return Err(error),

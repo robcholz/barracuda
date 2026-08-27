@@ -1,8 +1,6 @@
 use core::str::FromStr;
 
-use barracuda_model_api::{
-    BackendKind, HttpError, ModelApiError, ParseBackendKindError, RetryPolicy,
-};
+use barracuda_model_api::{BackendKind, ParseBackendKindError, RetryPolicy};
 
 #[test]
 fn backend_kind_string_contract_is_stable() {
@@ -31,30 +29,4 @@ fn retry_backoff_is_capped_and_saturating() {
     assert_eq!(policy.backoff_ms(1), u32::MAX / 2);
     assert_eq!(policy.backoff_ms(2), u32::MAX - 1);
     assert_eq!(policy.backoff_ms(u32::MAX), u32::MAX - 1);
-}
-
-#[test]
-fn transport_error_preserves_shared_http_source_and_classifies_retries() {
-    let disconnected = HttpError::from(http_client::Error::ConnectionAborted);
-    assert!(disconnected.retryable());
-    assert!(matches!(
-        disconnected,
-        HttpError::Http(http_client::Error::ConnectionAborted)
-    ));
-
-    assert!(!HttpError::from(http_client::Error::InvalidUrl).retryable());
-    assert!(!HttpError::Cancelled.retryable());
-}
-
-#[test]
-fn api_error_delegates_transport_retry_classification() {
-    let transient = ModelApiError::from(HttpError::from(http_client::Error::ConnectionAborted));
-    assert!(transient.is_retryable());
-    assert!(matches!(
-        transient,
-        ModelApiError::Transport(HttpError::Http(http_client::Error::ConnectionAborted))
-    ));
-
-    let permanent = ModelApiError::from(HttpError::from(http_client::Error::InvalidUrl));
-    assert!(!permanent.is_retryable());
 }

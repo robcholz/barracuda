@@ -18,7 +18,7 @@ use barracuda_runtime_utils::Cancel;
 use base64::Engine as _;
 use futures_lite::future::block_on;
 use futures_lite::StreamExt;
-use http_client::Client;
+use http_client::ClientFactory;
 
 barracuda_profile::install_dhat_allocator!();
 
@@ -70,9 +70,7 @@ fn profile_tape_replay(output_file: &Path) -> Result<AllocationStats, Box<dyn st
         .iter()
         .map(|body| ScriptStep::response(200, "text/event-stream", body, 7));
     let network = ScriptedStack::new(steps);
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &network, &network, 4096, 1024,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&network, &network));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "replay-key",
@@ -162,11 +160,8 @@ fn prepare_output(output_file: &Path) -> std::io::Result<()> {
 
 fn profile_agent_init(output_file: &Path) -> Result<AllocationStats, Box<dyn std::error::Error>> {
     let profile = HeapProfile::start(output_file);
-    let llm_factory = ModelApiFactory::new(|| {
-        ModelApi::new(Client::from_network_with_buffer_sizes(
-            &NETWORK, &NETWORK, 1024, 1024,
-        ))
-    });
+    let llm_factory =
+        ModelApiFactory::new(|| ModelApi::new(ClientFactory::from_network(&NETWORK, &NETWORK)));
     let (runtime, service) = ProfileAgentRuntime::new(
         block_on(memory_vfs())?,
         RuntimeStorageConfig {

@@ -80,6 +80,16 @@ no `BARRACUDA_BOARD` environment variable or custom build wrapper is required.
 The Rust target independently selects the Platform, and compilation rejects an
 incompatible Board/Platform pair.
 
+The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
+one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
+
+```bash
+BARRACUDA_LOG_LEVEL=debug cargo build
+```
+
+The selected level is validated and baked into the Platform binary; it is not
+read from the environment at runtime.
+
 Automation can bypass the prompt with `cargo board select <board-name>`.
 
 Available Board names are the directory names under `boards/configs/`.
@@ -158,13 +168,14 @@ through its HAL; it does not implement a framework-specific timer trait. The
 host CLI and host tests enable Embassy's `std` driver and a generic timer queue,
 so they exercise the same timing code as firmware.
 
-Each `ModelApi` owns one client from `shared/http-client`, including its
-persistent connection and reusable HTTP buffers. `ModelApiFactory` is only the
-application construction policy: one call creates one independent client, so
-the application decides how many agent clients exist. Sequential requests on
-one `ModelApi` reuse its TCP/TLS connection; a request never reconstructs its
-client. Model API contains only the LLM-specific request, response, and stream
-adapter; reqwless integration lives exclusively in `shared/http-client`.
+Each `ModelApi` owns one client created by the shared HTTP client factory,
+including its persistent connection and reusable HTTP buffers.
+`ModelApiFactory` is only the application construction policy: one call creates
+one independent client, so the application decides how many agent clients
+exist. Sequential requests on one `ModelApi` reuse its TCP/TLS connection; a
+request never reconstructs its client. The shared crate owns reqwless client
+construction; Model API owns the LLM-specific request, response, connection,
+and stream behavior.
 
 TLS is initialized by the selected Platform and returned beside `ip_stack` in
 `PlatformResources`. Linux and macOS load the Host certificate bundle; device

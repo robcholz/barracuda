@@ -1,20 +1,20 @@
 #![allow(clippy::unwrap_used)]
 
 use barracuda_model_api::{
-    BackendKind, ChatError, ChatJsonRequest, ChatRequest, ModelApi, ModelApiConfig, ModelApiError,
-    RetryPolicy,
+    BackendKind, ChatRequest, Error, ModelApi, ModelApiConfig, RetryPolicy, StaticOutputSchema,
 };
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use embedded_io::ErrorKind;
 use futures_lite::future::{block_on, poll_once};
-use http_client::Client;
+use http_client::ClientFactory;
 use serde_json::{json, Value};
 
-fn configured<'a>(stack: &'a ScriptedStack, backend: BackendKind) -> ModelApi<'a> {
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        stack, stack, 4096, 512,
-    ));
+fn configured<'a>(
+    stack: &'a ScriptedStack,
+    backend: BackendKind,
+) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         backend,
         "secret",
@@ -34,16 +34,11 @@ fn request_body(stack: &ScriptedStack) -> Value {
 #[test]
 fn chat_requires_configuration() {
     let stack = ScriptedStack::default();
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let messages = [json!({"role":"user","content":"hello"})];
     let error =
         block_on(api.chat(&ChatRequest::new("system", &messages), Cancel::never())).unwrap_err();
-    assert!(matches!(
-        error,
-        ChatError::Api(ModelApiError::NotConfigured)
-    ));
+    assert!(matches!(error, Error::NotConfigured));
 }
 
 #[test]
@@ -123,10 +118,13 @@ fn structured_chat_sends_schema_and_parses_output() {
     )]);
     let mut api = configured(&stack, BackendKind::OpenAiCompatible);
     let messages = [json!({"role":"user","content":"answer"})];
-    let request = ChatJsonRequest::new("system", &messages)
-        .with_output_schema("answer", r#"{"type":"object"}"#);
+    let request = ChatRequest::new("system", &messages);
+    let schema = StaticOutputSchema {
+        name: "answer",
+        json: r#"{"type":"object"}"#,
+    };
     let response: barracuda_model_api::ChatJsonResponse<Value> =
-        block_on(api.chat_json(&request, Cancel::never())).unwrap();
+        block_on(api.chat_json(&request, schema, Cancel::never())).unwrap();
     assert_eq!(response.output.unwrap()["answer"], 42);
     assert_eq!(
         request_body(&stack)["response_format"]["type"],
@@ -148,7 +146,7 @@ fn invalid_tools_are_rejected_before_network_io() {
             Cancel::never(),
         ))
         .unwrap_err();
-        assert!(matches!(error, ChatError::InvalidToolsJson));
+        assert!(matches!(error, Error::InvalidToolsJson));
         assert!(stack.requests().is_empty());
     }
 }
@@ -179,9 +177,7 @@ fn timed_out_request_reconnects_before_retry() {
             r#"{"choices":[{"message":{"role":"assistant","content":"recovered"}}]}"#,
         ),
     ]);
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 512,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",

@@ -4,79 +4,29 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use embedded_nal_async::{Dns, TcpConnect};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::super::chat_stream::{drain_body, ProviderStream};
-use super::super::errors::{ChatError, InferMediaError, ModelApiError};
-use super::super::transport::{HttpTransport as NetClient, Response, ResponsePart, ResponseStream};
+use super::super::errors::Error;
+use super::super::transport::{Response, ResponsePart, Transport};
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
-use super::super::types::{LlmResponse, ModelApiConfig, ToolCall};
-use super::super::StatusCode;
+use super::super::types::{LlmResponse, ToolCall};
 use super::sse::ProviderSse;
+use super::Backend;
 
 /// HTTP statuses that indicate a transient, retryable server condition.
 const STATUS_REQUEST_TIMEOUT: u16 = 408;
 const MAX_ERROR_BODY_BYTES: usize = 1024;
 
-#[derive(Debug)]
-pub(super) struct BackendContext {
-    model: String,
-    endpoint: String,
-    headers: Vec<(String, String)>,
-    pub(super) timeout_ms: u32,
-    max_tokens: u32,
-    pub(super) image_max_bytes: usize,
-}
-
-impl BackendContext {
-    pub(super) fn new(
-        config: ModelApiConfig,
-        path: &str,
-        make_headers: impl FnOnce(String) -> Vec<(String, String)>,
-    ) -> Self {
-        let ModelApiConfig {
-            api_key,
-            model,
-            base_url,
-            timeout_ms,
-            max_tokens,
-            image_max_bytes,
-            ..
-        } = config;
-        Self {
-            model,
-            endpoint: join_url(&base_url, path),
-            headers: make_headers(api_key),
-            timeout_ms,
-            max_tokens,
-            image_max_bytes,
-        }
-    }
-
-    pub(super) fn request_body(&self) -> Map<String, Value> {
-        let mut body = Map::new();
-        body.insert("model".to_string(), Value::String(self.model.clone()));
-        body.insert("max_tokens".to_string(), Value::from(self.max_tokens));
-        body
-    }
-
-    fn endpoint(&self) -> &str {
-        &self.endpoint
-    }
-
-    fn headers(&self) -> &[(String, String)] {
-        &self.headers
-    }
-}
-
-fn map_status_error(status: StatusCode, body: String) -> ModelApiError {
+fn map_status_error(status: u16, body: String) -> Error {
     let body = truncated_error_body(body);
     if status_is_transient(status) {
-        ModelApiError::TransientHttpStatus { status, body }
+        Error::TransientHttpStatus { status, body }
     } else {
-        ModelApiError::HttpStatus { status, body }
+        Error::HttpStatus { status, body }
     }
 }
 
@@ -93,25 +43,24 @@ fn truncated_error_body(mut body: String) -> String {
     body
 }
 
-fn status_is_transient(status: StatusCode) -> bool {
-    let code = status.0;
-    code == STATUS_REQUEST_TIMEOUT || code == 429 || status.is_server_error()
+fn status_is_transient(status: u16) -> bool {
+    status == STATUS_REQUEST_TIMEOUT || status == 429 || (500..600).contains(&status)
 }
 
 pub(super) async fn post_json(
-    http: &mut NetClient<'_>,
-    context: &BackendContext,
+    http: &mut Transport<'_, impl TcpConnect, impl Dns>,
+    backend: &Backend,
     body: &str,
-) -> Result<Response, ModelApiError> {
-    let header_refs = context
-        .headers()
+) -> Result<Response, Error> {
+    let header_refs = backend
+        .headers
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect::<Vec<_>>();
     let response = http
-        .post_json(context.endpoint(), body, &header_refs)
+        .post_json(&backend.endpoint, body, &header_refs)
         .await?;
-    if response.status.is_successful() {
+    if (200..300).contains(&response.status) {
         Ok(response)
     } else {
         Err(map_status_error(response.status, response.body))
@@ -119,40 +68,36 @@ pub(super) async fn post_json(
 }
 
 pub(super) async fn post_stream<'h>(
-    http: &'h mut NetClient<'_>,
-    context: &BackendContext,
+    http: &'h mut Transport<'_, impl TcpConnect, impl Dns>,
+    backend: &Backend,
     body: String,
     sse: ProviderSse,
-) -> Result<ProviderStream<ResponseStream<'h>>, ChatError> {
-    let mut stream = http.post_json_stream(
-        context.endpoint().to_string(),
-        body,
-        context.headers().to_vec(),
-    );
+) -> Result<ProviderStream<'h>, Error> {
+    let mut stream = http.post_json_stream(backend.endpoint.clone(), body, backend.headers.clone());
     let status = match futures_lite::StreamExt::next(&mut stream).await {
         Some(Ok(ResponsePart::Head(status))) => status,
         Some(Ok(ResponsePart::Data(_))) | None => {
-            return Err(ModelApiError::ApiError("HTTP stream ended before response head").into());
+            return Err(Error::Api("HTTP stream ended before response head"));
         }
-        Some(Err(error)) => return Err(ModelApiError::from(error).into()),
+        Some(Err(error)) => return Err(error),
     };
-    if !status.is_successful() {
-        let body = drain_body(stream).await.map_err(ModelApiError::from)?;
-        return Err(map_status_error(status, body).into());
+    if !(200..300).contains(&status) {
+        let body = drain_body(stream).await?;
+        return Err(map_status_error(status, body));
     }
     Ok(ProviderStream::new(stream, sse))
 }
 
 /// Extract the required non-empty assistant text from a media inference reply.
-pub(super) fn media_text(parsed: LlmResponse) -> Result<String, InferMediaError> {
+pub(super) fn media_text(parsed: LlmResponse) -> Result<String, Error> {
     match parsed.text {
         Some(text) if !text.is_empty() => Ok(text),
-        _ => Err(ModelApiError::EmptyResponse.into()),
+        _ => Err(Error::EmptyResponse),
     }
 }
 
 /// Join `base_url` and `path` with exactly one slash between them.
-fn join_url(base_url: &str, path: &str) -> String {
+pub(super) fn join_url(base_url: &str, path: &str) -> String {
     let base_has_slash = base_url.ends_with('/');
     let path_has_slash = path.starts_with('/');
     if base_has_slash && path_has_slash {
@@ -275,23 +220,22 @@ impl AnthropicUsage {
 }
 
 /// Parse an OpenAI chat-completions response.
-pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, ModelApiError> {
-    let mut response: OpenAiResponse =
-        serde_json::from_str(body).map_err(|_| ModelApiError::Parse)?;
+pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Error> {
+    let mut response: OpenAiResponse = serde_json::from_str(body).map_err(|_| Error::Parse)?;
     let message = response
         .choices
         .first_mut()
         .and_then(|choice| choice.message.take())
-        .ok_or(ModelApiError::MalformedResponse("response missing message"))?;
+        .ok_or(Error::MalformedResponse("response missing message"))?;
 
     if message.role.as_deref() != Some("assistant") {
-        return Err(ModelApiError::MalformedResponse(
+        return Err(Error::MalformedResponse(
             "response message is not assistant",
         ));
     }
 
     let raw_message_json = serde_json::to_string(&message)
-        .map_err(|_| ModelApiError::ApiError("out of memory copying raw message"))?;
+        .map_err(|_| Error::Api("out of memory copying raw message"))?;
 
     let text = message.content.filter(|content| !content.is_empty());
     let reasoning_content = message.reasoning_content;
@@ -299,26 +243,26 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Mode
     let tool_calls = message
         .tool_calls
         .into_iter()
-        .map(|call| -> Result<_, ModelApiError> {
+        .map(|call| -> Result<_, Error> {
             let function = call
                 .function
-                .ok_or(ModelApiError::MalformedResponse("malformed tool call"))?;
+                .ok_or(Error::MalformedResponse("malformed tool call"))?;
             Ok(ToolCall {
                 id: call
                     .id
-                    .ok_or(ModelApiError::MalformedResponse("malformed tool call"))?,
+                    .ok_or(Error::MalformedResponse("malformed tool call"))?,
                 name: function
                     .name
-                    .ok_or(ModelApiError::MalformedResponse("malformed tool call"))?,
+                    .ok_or(Error::MalformedResponse("malformed tool call"))?,
                 arguments_json: function
                     .arguments
-                    .ok_or(ModelApiError::MalformedResponse("malformed tool call"))?,
+                    .ok_or(Error::MalformedResponse("malformed tool call"))?,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
 
     if text.is_none() && tool_calls.is_empty() {
-        return Err(ModelApiError::EmptyResponse);
+        return Err(Error::EmptyResponse);
     }
 
     Ok(LlmResponse {
@@ -335,16 +279,16 @@ pub(super) fn parse_openai_chat_response(body: &str) -> Result<LlmResponse, Mode
 pub(super) fn insert_tools_into_body(
     body: &mut Map<String, Value>,
     tools_json: &str,
-) -> Result<(), ChatError> {
-    let tools: Value = serde_json::from_str(tools_json).map_err(|_| ChatError::InvalidToolsJson)?;
+) -> Result<(), Error> {
+    let tools: Value = serde_json::from_str(tools_json).map_err(|_| Error::InvalidToolsJson)?;
     if !tools.is_array() {
-        return Err(ChatError::InvalidToolsJson);
+        return Err(Error::InvalidToolsJson);
     }
     body.insert("tools".to_string(), tools);
     Ok(())
 }
 
-pub(super) fn serialize_chat_body(body: Map<String, Value>) -> Result<String, ChatError> {
+pub(super) fn serialize_chat_body(body: Map<String, Value>) -> Result<String, Error> {
     serde_json::to_string(&Value::Object(body))
-        .map_err(|_| ModelApiError::ApiError("out of memory serializing request").into())
+        .map_err(|_| Error::Api("out of memory serializing request"))
 }

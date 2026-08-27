@@ -370,7 +370,7 @@ pub enum WebServerError {
 /// Scoped registration of one WebSocket or ordinary HTTP endpoint.
 ///
 /// Dropping this value removes the endpoint, so Plugins should retain it for
-/// their own lifecycle with `PluginContext::retain`.
+/// their own lifecycle with `PluginRegisterContext::retain`.
 #[must_use = "dropping the registration immediately removes the endpoint"]
 pub struct WebRouteRegistration {
     endpoints: Weak<RefCell<Vec<RegisteredEndpoint>>>,

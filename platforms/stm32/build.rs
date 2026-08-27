@@ -10,6 +10,7 @@ struct NativeRegion<'a> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
@@ -25,11 +26,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Board bundle directory and Board name differ".into());
     }
     if board.hardware().chip() != "stm32f429zi" {
-        return Err(format!(
-            "STM32 example currently enables stm32f429zi, not `{}`",
-            board.hardware().chip()
-        )
-        .into());
+        let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+        let mut generated = String::from(
+            "/// Resolves the inactive STM32 Platform to an empty partition table.\n\
+             pub fn board_partition_table(\n\
+                 _flash_base: usize,\n\
+             ) -> Result<Stm32PartitionTable<0>, LinkerRegionError> {\n\
+                 Ok(Stm32PartitionTable::new([]))\n\
+             }\n",
+        );
+        render_log_level(&mut generated)?;
+        fs::write(output.join("stm32_layout.rs"), generated)?;
+        return Ok(());
     }
 
     let linker_path = bundle.join(board.native_layout().artifact());
@@ -82,7 +90,30 @@ fn main() -> Result<(), Box<dyn Error>> {
         ));
     }
     generated.push_str("    ]))\n}\n");
+    render_log_level(&mut generated)?;
     fs::write(output.join("stm32_layout.rs"), generated)?;
+    Ok(())
+}
+
+fn render_log_level(generated: &mut String) -> Result<(), Box<dyn Error>> {
+    let level = env::var("BARRACUDA_LOG_LEVEL").unwrap_or_else(|_| String::from("info"));
+    let variant = match level.as_str() {
+        "off" => "Off",
+        "error" => "Error",
+        "warn" => "Warn",
+        "info" => "Info",
+        "debug" => "Debug",
+        "trace" => "Trace",
+        _ => {
+            return Err(format!(
+                "invalid BARRACUDA_LOG_LEVEL `{level}`; expected off, error, warn, info, debug, or trace"
+            )
+            .into());
+        }
+    };
+    generated.push_str(&format!(
+        "\n/// Log level selected at build time.\npub const PLATFORM_LOG_LEVEL: ::log::LevelFilter = ::log::LevelFilter::{variant};\n"
+    ));
     Ok(())
 }
 

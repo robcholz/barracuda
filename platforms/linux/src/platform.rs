@@ -153,16 +153,22 @@ impl Platform for LinuxPlatform {
     type Error = LinuxPlatformError;
 
     fn prepare() -> Result<(), Self::Error> {
+        crate::logging::install();
+        log::info!("preparing Linux Platform");
         Self::install_reactor()
     }
 
     async fn initialize(spawner: Spawner, board: &'static Board) -> PlatformInitResult<Self> {
+        log::info!("initializing Linux Platform partitions");
         let partitions =
             Self::initialize_partitions_with_settings(board, &crate::PLATFORM_SETTINGS).await?;
+        log::info!("initializing Linux Platform network");
         let ip_stack =
             crate::network::initialize(spawner, crate::PLATFORM_SETTINGS.network_interface())
                 .await?;
+        log::info!("initializing Linux Platform TLS");
         let tls = Self::initialize_tls()?;
+        log::info!("initialized Linux Platform");
         Ok(PlatformResources {
             ip_stack,
             tls,
@@ -198,4 +204,24 @@ pub enum LinuxPlatformError {
     /// The fixed-capacity partition collection could not accept the native layout.
     #[error("Linux native partition collection rejected an entry: {0:?}")]
     Partitions(#[from] PartitionsInsertError),
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use barracuda_platform::Platform as _;
+
+    use super::LinuxPlatform;
+
+    #[test]
+    fn prepare_installs_the_global_log_backend_before_platform_initialization() {
+        LinuxPlatform::prepare().expect("prepare Linux Platform");
+
+        assert_eq!(log::max_level(), crate::PLATFORM_LOG_LEVEL);
+        assert!(log::log_enabled!(
+            target: "barracuda_platform_linux",
+            log::Level::Info
+        ));
+    }
 }

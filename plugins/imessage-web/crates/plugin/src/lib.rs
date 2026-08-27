@@ -11,7 +11,8 @@ use alloc::string::{String, ToString};
 use barracuda_imessage_gateway_plugin::{
     GatewayInboundMessage, GatewayRoute, IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID,
 };
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{WebServer, PLUGIN_ID as WEBSERVER_PLUGIN_ID};
 use gateway::{MessageChannel, MessageChannelRegistration};
 use web::{InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web, WebBridge};
@@ -49,13 +50,12 @@ impl IMessageWebRoute {
 }
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
-#[derive(Default)]
 pub struct IMessageWebPlugin;
 
 impl IMessageWebPlugin {
     /// Creates the IMessage Web Plugin.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(_context: &PluginContext) -> Self {
         Self
     }
 }
@@ -67,7 +67,10 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {

@@ -298,6 +298,45 @@ Platform owns the execution work required to keep its IP service alive. System
 and Plugins receive the usable IP stack handle, not its runner or
 platform-specific setup objects.
 
+## Logging and Agent tracing
+
+Ordinary diagnostics across Platform, HAL, System, Core, and Plugins use the
+`log` facade. Library and subsystem crates emit records; they do not choose an
+output device, initialize a global logger, or depend on a Host-only logging
+implementation.
+
+The selected Platform installs the process- or firmware-global `log::Log`
+backend in `Platform::prepare`, before it initializes any other Platform
+mechanism. The concrete sink belongs to the Platform integration:
+
+- macOS and Linux write formatted records to standard error;
+- ESP32-C6 writes through its USB Serial/JTAG debug channel;
+- STM32 writes through non-blocking RTT.
+
+Host logger installation and sink selection live inside each concrete Host
+Platform. They are not shared mechanisms and must not be moved into a
+cross-Platform logging crate.
+
+`BARRACUDA_LOG_LEVEL` selects `off`, `error`, `warn`, `info`, `debug`, or
+`trace` at build time and defaults to `info`. Each concrete Platform build
+script validates the value and generates a `log::LevelFilter` constant for its
+backend. Platforms must not read or parse the setting at runtime; invalid
+values are build errors.
+
+Logging is process-global support, not a consumable business capability. It
+does not become a `PlatformResources` field, Plugin capability, Event Router
+contract, or Board peripheral. Platform-specific output setup remains outside
+Core and Plugins.
+
+`tracing` is not the general logging API. It remains available only to the
+Agent subsystem where nested spans and inherited execution context justify its
+cost and complexity. Agent trace lines may be rendered into the same `log`
+sink, but ordinary Core and Plugin code must not acquire a `tracing`
+dependency.
+
+Logs must identify lifecycle boundaries and failures without including API
+keys, credentials, message bodies, or other secret-bearing payloads.
+
 ## TLS and HTTP clients
 
 TLS is a Platform capability because each Platform owns its randomness,

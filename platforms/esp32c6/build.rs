@@ -6,6 +6,8 @@ use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use esp_idf_part::{AppType, Flags, Partition, PartitionTable, SubType, Type};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
+    let log_level = generated_log_level()?;
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
@@ -30,7 +32,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // as a dependency, without inspecting the build target or naming a fallback
     // Board. An esp32c6 build selects an esp32c6 Board and gets the real table.
     if board.hardware().chip() != "esp32c6" {
-        fs::write(output.join("esp32c6_layout.rs"), inactive_layout())?;
+        let mut generated = inactive_layout();
+        generated.push_str(&log_level);
+        fs::write(output.join("esp32c6_layout.rs"), generated)?;
         return Ok(());
     }
 
@@ -70,9 +74,31 @@ fn main() -> Result<(), Box<dyn Error>> {
          );\n",
         board.hardware().chip()
     ));
+    generated.push_str(&log_level);
 
     fs::write(output.join("esp32c6_layout.rs"), generated)?;
     Ok(())
+}
+
+fn generated_log_level() -> Result<String, Box<dyn Error>> {
+    let level = env::var("BARRACUDA_LOG_LEVEL").unwrap_or_else(|_| String::from("info"));
+    let variant = match level.as_str() {
+        "off" => "Off",
+        "error" => "Error",
+        "warn" => "Warn",
+        "info" => "Info",
+        "debug" => "Debug",
+        "trace" => "Trace",
+        _ => {
+            return Err(format!(
+                "invalid BARRACUDA_LOG_LEVEL `{level}`; expected off, error, warn, info, debug, or trace"
+            )
+            .into());
+        }
+    };
+    Ok(format!(
+        "\n/// Log level selected at build time.\npub const PLATFORM_LOG_LEVEL: ::log::LevelFilter = ::log::LevelFilter::{variant};\n"
+    ))
 }
 
 /// Projection emitted when the selected Board is not an esp32c6 Board. The

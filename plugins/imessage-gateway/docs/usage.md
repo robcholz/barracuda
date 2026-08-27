@@ -12,9 +12,9 @@ their channels through its typed capability.
 
 ```rust
 manager
-    .register(&mut router, IMessageGatewayPlugin::new())?;
+    .register(&mut router, IMessageGatewayPlugin::new(&plugin_context))?;
 manager
-    .register(&mut router, IMessageWebPlugin::new())?;
+    .register(&mut router, IMessageWebPlugin::new(&plugin_context))?;
 manager.start(&mut router)?;
 ```
 
@@ -168,6 +168,7 @@ use `GatewayEventFrame`.
 - `../imessage-telegram/crates/provider/tests/telegram.rs` — Telegram provider behavior.
 - `../imessage-wechat/crates/provider/tests/wechat.rs` — WeChat provider behavior.
 - `../imessage-bluebubble/crates/provider/tests/bluebubbles.rs` — BlueBubbles provider behavior.
+- `../imessage-inkbox/crates/provider/tests/inkbox.rs` — Inkbox provider behavior.
 
 Run them with:
 

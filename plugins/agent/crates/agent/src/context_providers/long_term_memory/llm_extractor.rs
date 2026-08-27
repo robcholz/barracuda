@@ -12,6 +12,7 @@ use serde_json::json;
 
 use barracuda_model_api::{ChatRequest, ModelApiFactory};
 use barracuda_runtime_utils::Cancel;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use tracing::Instrument as _;
 
 use super::super::async_llm::SharedAsyncLlm;
@@ -35,16 +36,24 @@ const EXTRACT_TRANSCRIPT_HEADER: &str = "CONVERSATION:";
 /// `Arc<dyn Extractor>`, while [`ModelApi::chat`] needs `&mut self`, so
 /// calls borrow the client exclusively without holding a mutex while the future
 /// is running.
-pub(super) struct LlmExtractor {
-    api: SharedAsyncLlm,
+pub(super) struct LlmExtractor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    api: SharedAsyncLlm<Tcp, Resolver>,
     /// Shared per-usage config; the extraction config is applied at the start of
     /// each extraction call.
     api_manager: SharedApiManager,
 }
 
-impl LlmExtractor {
+impl<Tcp, Resolver> LlmExtractor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     /// Build an extractor with its own unconfigured LLM client.
-    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory) -> Self {
+    fn new(api_manager: SharedApiManager, llm_factory: &ModelApiFactory<Tcp, Resolver>) -> Self {
         Self {
             api: SharedAsyncLlm::new(llm_factory.create()),
             api_manager,
@@ -54,13 +63,17 @@ impl LlmExtractor {
     /// A ready-to-inject [`Extractor`] using `api_manager`.
     pub(super) fn shared(
         api_manager: SharedApiManager,
-        llm_factory: &ModelApiFactory,
+        llm_factory: &ModelApiFactory<Tcp, Resolver>,
     ) -> Arc<dyn Extractor> {
         Arc::new(Self::new(api_manager, llm_factory))
     }
 }
 
-impl Extractor for LlmExtractor {
+impl<Tcp, Resolver> Extractor for LlmExtractor<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     fn extract<'a>(&'a self, input: ExtractionInput<'a>) -> ExtractFuture<'a> {
         Box::pin(async move {
             let mut extraction_tools = ExtractionTools::new().map_err(ExtractError::from)?;

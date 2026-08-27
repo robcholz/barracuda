@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-plugin-api"
+version = "0.1.0"
+edition = "2021"
+description = "Construction context shared by Barracuda Plugins"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+embassy-net.workspace = true
+http-client = { path = "../../shared/http-client" }
+
+[dev-dependencies]
+barracuda-platform-test = { path = "../../platforms/test" }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

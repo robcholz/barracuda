@@ -1,7 +1,7 @@
 use barracuda_agent_tool::{ToolDetachHandle, ToolOutput, ToolSetError, ToolSetHandle};
 #[cfg(feature = "cache_profile")]
 use barracuda_model_api::ProviderUsage;
-use barracuda_model_api::{ChatError, ToolCall};
+use barracuda_model_api::{Error as ModelError, ToolCall};
 use barracuda_runtime_utils::stream::StreamPart;
 use serde_json::Value;
 use strum::IntoStaticStr;
@@ -22,10 +22,10 @@ pub enum IterationLoopError {
     IncompleteToolBatch,
     #[strum(serialize = "chat_init")]
     #[error("failed to initialize LLM chat: {0}")]
-    ChatInit(#[source] ChatError),
+    ChatInit(#[source] ModelError),
     #[strum(serialize = "chat_stream")]
     #[error("LLM chat stream failed: {0}")]
-    ChatStream(#[source] ChatError),
+    ChatStream(#[source] ModelError),
     #[strum(serialize = "tools")]
     #[error(transparent)]
     Tools(#[from] ToolSetError),

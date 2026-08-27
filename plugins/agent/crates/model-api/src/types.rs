@@ -156,8 +156,7 @@ const DEFAULT_MAX_BACKOFF_MS: u32 = 8_000;
 const DEFAULT_BACKOFF_MULTIPLIER: u32 = 2;
 
 /// Per-call retry policy, set via `with_retry` on a request
-/// ([`ChatRequest::with_retry`], [`ChatJsonRequest::with_retry`],
-/// [`MediaRequest::with_retry`]).
+/// ([`ChatRequest::with_retry`] or [`MediaRequest::with_retry`]).
 ///
 /// Only transient failures are retried (network errors, HTTP 408/429/5xx).
 /// Aborts and deterministic client errors (bad URL/body, 4xx) are never retried.
@@ -276,80 +275,13 @@ impl RetryPolicy {
     }
 }
 
-/// A named JSON Schema for structured output, attached to a
-/// [`ChatJsonRequest`] via [`ChatJsonRequest::with_output_schema`].
+/// A named JSON Schema passed to [`crate::ModelApi::chat_json`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticOutputSchema<'a> {
     /// Schema name reported to the provider (e.g. `"sentiment"`).
     pub name: &'a str,
     /// The JSON Schema document, as a JSON string.
     pub json: &'a str,
-}
-
-/// A request for [`crate::ModelApi::chat_json`] (structured JSON output).
-///
-/// `messages` is a JSON array of chat messages (e.g.
-/// `[{ "role": "user", "content": "..." }]`). An output schema is **required**
-/// — set it with [`with_output_schema`](ChatJsonRequest::with_output_schema).
-/// Tools are optional; the per-call [`RetryPolicy`] defaults and is overridable
-/// via [`with_retry`](ChatJsonRequest::with_retry).
-///
-/// ```
-/// use barracuda_model_api::ChatJsonRequest;
-/// let messages = [serde_json::json!({ "role": "user", "content": "hi" })];
-/// let schema = r#"{"type":"object","properties":{"ok":{"type":"boolean"}}}"#;
-/// let req = ChatJsonRequest::new("be terse", &messages)
-///     .with_output_schema("answer", schema);
-/// # let _ = req;
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ChatJsonRequest<'a> {
-    /// Common chat input and retry policy.
-    pub chat: ChatRequest<'a>,
-    /// The required output schema (set via [`Self::with_output_schema`]).
-    pub output_schema: Option<StaticOutputSchema<'a>>,
-}
-
-impl<'a> ChatJsonRequest<'a> {
-    /// A structured-output request (no schema/tools yet).
-    #[must_use]
-    pub fn new(system_prompt: &'a str, messages: &'a [serde_json::Value]) -> Self {
-        Self {
-            chat: ChatRequest::new(system_prompt, messages),
-            output_schema: None,
-        }
-    }
-
-    /// Attach an OpenAI-style tools JSON array (may be sent with `response_format`).
-    #[must_use]
-    pub fn with_tools(mut self, tools_json: &'a str) -> Self {
-        self.chat = self.chat.with_tools(tools_json);
-        self
-    }
-
-    /// Attach ephemeral trailing reminder messages for this request only.
-    #[must_use]
-    pub fn with_reminders(mut self, reminders: &'a [serde_json::Value]) -> Self {
-        self.chat = self.chat.with_reminders(reminders);
-        self
-    }
-
-    /// Attach a static JSON Schema (`name` + schema JSON string).
-    #[must_use]
-    pub fn with_output_schema(mut self, name: &'a str, schema_json: &'a str) -> Self {
-        self.output_schema = Some(StaticOutputSchema {
-            name,
-            json: schema_json,
-        });
-        self
-    }
-
-    /// Override the retry policy for this call.
-    #[must_use]
-    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
-        self.chat = self.chat.with_retry(retry);
-        self
-    }
 }
 
 /// The result of [`crate::ModelApi::chat_json`].

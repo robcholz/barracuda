@@ -1,0 +1,31 @@
+[package]
+name = "barracuda-plugin-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Plugin workspace synchronization tool"
+
+[dependencies]
+anstream = "1"
+anstyle = "1"
+clap = { version = "4", features = ["derive"] }
+dialoguer = { version = "0.12", default-features = false }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "cargo-plugin"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

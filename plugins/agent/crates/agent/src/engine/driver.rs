@@ -10,6 +10,7 @@ use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::yield_stream;
 use futures_lite::StreamExt as _;
 use getset::Getters;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use tracing::Instrument as _;
 
 use crate::config::{ApiPurpose, SharedApiManager};
@@ -80,9 +81,13 @@ pub(crate) enum AgentEngineBuildError {
 
 /// One configured Agent and its complete single-Agent state machine.
 #[derive(Getters)]
-pub(crate) struct AgentEngine {
+pub(crate) struct AgentEngine<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     state: DurableState<AgentEngineState>,
-    llm: ModelApi<'static>,
+    llm: ModelApi<'static, Tcp, Resolver>,
     api_manager: SharedApiManager,
     api_purpose: ApiPurpose,
     retry_policy: RetryPolicy,
@@ -98,10 +103,14 @@ pub(crate) struct AgentEngine {
     context_providers: Vec<ContextProviderEntry>,
 }
 
-impl AgentEngine {
+impl<Tcp, Resolver> AgentEngine<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     pub(crate) fn build(
         config: AgentEngineConfig,
-        llm: ModelApi<'static>,
+        llm: ModelApi<'static, Tcp, Resolver>,
     ) -> Result<Self, AgentEngineBuildError> {
         let mut tools = config.tools;
         let mut context_providers = Vec::with_capacity(config.context_providers.len());
@@ -279,6 +288,7 @@ impl AgentEngine {
     }
 
     fn fail(&mut self, error: AgentError) -> AgentError {
+        log::error!("Agent run failed: {error}");
         self.abandon_open_task();
         self.stop(StopReason::Failed);
         error
@@ -471,7 +481,11 @@ impl<'a> IterationConsumer<'a> {
     }
 }
 
-impl AgentEngine {
+impl<Tcp, Resolver> AgentEngine<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
         &self.state
     }
@@ -535,12 +549,20 @@ impl ToolPermissionPolicy for EnginePermissionPolicy<'_> {
 
 /// Restores AgentEngine's stopped-state invariant if its borrowing stream is
 /// dropped before producing a terminal event or error.
-struct ActiveRunGuard<'a> {
-    agent: &'a mut AgentEngine,
+struct ActiveRunGuard<'a, Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    agent: &'a mut AgentEngine<Tcp, Resolver>,
 }
 
-impl<'a> ActiveRunGuard<'a> {
-    fn new(agent: &'a mut AgentEngine) -> Self {
+impl<'a, Tcp, Resolver> ActiveRunGuard<'a, Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    fn new(agent: &'a mut AgentEngine<Tcp, Resolver>) -> Self {
         Self { agent }
     }
 
@@ -854,7 +876,11 @@ impl<'a> ActiveRunGuard<'a> {
     }
 }
 
-impl Drop for ActiveRunGuard<'_> {
+impl<Tcp, Resolver> Drop for ActiveRunGuard<'_, Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     fn drop(&mut self) {
         if self.agent.is_stopped() {
             return;

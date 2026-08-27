@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use barracuda_model_api::{
-    BackendKind, ChatError, ChatRequest, ChatStreamEvent, ModelApi, ModelApiConfig, ModelApiError,
-    RetryPolicy, StatusCode,
+    BackendKind, ChatRequest, ChatStreamEvent, Error, ModelApi, ModelApiConfig, RetryPolicy,
 };
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use barracuda_runtime_utils::stream::StreamPart;
@@ -10,13 +9,11 @@ use barracuda_runtime_utils::Cancel;
 use embedded_io::ErrorKind;
 use futures_lite::future::block_on;
 use futures_lite::StreamExt as _;
-use http_client::Client;
+use http_client::ClientFactory;
 use serde_json::json;
 
-fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a> {
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        stack, stack, 4096, 9,
-    ));
+fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",
@@ -118,10 +115,7 @@ fn non_success_stream_surfaces_status_and_body() {
     };
     assert!(matches!(
         &error,
-        ChatError::Api(ModelApiError::TransientHttpStatus {
-            status: StatusCode(429),
-            ..
-        })
+        Error::TransientHttpStatus { status: 429, .. }
     ));
     assert!(error.to_string().contains("429"));
     assert!(error.to_string().contains("rate limited"));
@@ -130,9 +124,7 @@ fn non_success_stream_surfaces_status_and_body() {
 #[test]
 fn stalled_stream_body_times_out_after_the_response_head() {
     let stack = ScriptedStack::new([ScriptStep::pending_after_headers(200, "text/event-stream")]);
-    let mut api = ModelApi::new(Client::from_network_with_buffer_sizes(
-        &stack, &stack, 4096, 9,
-    ));
+    let mut api = ModelApi::new(ClientFactory::from_network(&stack, &stack));
     let mut config = ModelApiConfig::new(
         BackendKind::OpenAiCompatible,
         "secret",
@@ -146,10 +138,7 @@ fn stalled_stream_body_times_out_after_the_response_head() {
     let mut stream = block_on(api.chat_stream(&request, Cancel::never())).unwrap();
 
     let error = block_on(stream.next()).unwrap().unwrap_err();
-    assert!(matches!(
-        error,
-        barracuda_model_api::ChatError::Api(barracuda_model_api::ModelApiError::Timeout)
-    ));
+    assert!(matches!(error, Error::Timeout));
 }
 
 #[test]

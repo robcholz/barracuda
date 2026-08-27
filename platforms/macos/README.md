@@ -14,6 +14,10 @@ cargo build -p barracuda-cli -p barracuda-platform-macos --bins
 sudo target/debug/barracuda-macos-network target/debug/barracuda
 ```
 
+Platform, System, Core, and Plugin logs are written to standard error at
+`info`. Select another level for a build with, for example,
+`BARRACUDA_LOG_LEVEL=debug cargo build`.
+
 The launcher creates UTUN, enables forwarding, installs a scoped PF NAT anchor,
 and passes the UTUN descriptor to a Barracuda child dropped back to the invoking
 user. It removes the anchor and restores forwarding when the child exits. The

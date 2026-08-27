@@ -251,12 +251,21 @@ mod internal_flash {
         type Partitions = Stm32Partitions;
         type Error = Stm32PlatformError;
 
+        fn prepare() -> Result<(), Self::Error> {
+            rtt_target::rtt_init_log!(crate::PLATFORM_LOG_LEVEL);
+            log::info!("preparing STM32 Platform");
+            Ok(())
+        }
+
         async fn initialize(
             _spawner: Spawner,
             bindings: Self::Bindings,
         ) -> PlatformInitResult<Self> {
+            log::info!("initializing STM32 Platform partitions");
             let partitions = partitions(bindings.flash)?;
+            log::info!("initializing STM32 Platform TLS");
             let tls = bindings.tls.initialize()?;
+            log::info!("initialized STM32 Platform");
             Ok(PlatformResources {
                 ip_stack: bindings.ip_stack,
                 tls,

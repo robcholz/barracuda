@@ -16,6 +16,7 @@ use barracuda_runtime_utils::stream::StreamPart;
 use barracuda_runtime_utils::yield_stream::try_yield_stream;
 use barracuda_runtime_utils::Cancel;
 use futures_lite::{future, StreamExt};
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use tracing::Instrument as _;
 
 use super::types::{IterationEvent, IterationLoopError, IterationLoopEvent, LlmStep};
@@ -89,9 +90,11 @@ fn trace_context_cache_hit_rate(usage: &ProviderUsage) {
     );
 }
 
-impl<'a, P> IterationLoop<'a, P>
+impl<'a, P, Tcp, Resolver> IterationLoop<'a, P, Tcp, Resolver>
 where
     P: ToolPermissionPolicy + 'a,
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
 {
     /// Run one LLM/tool iteration as a directly polled stream.
     ///
@@ -140,7 +143,6 @@ where
                     return Ok(());
                 }
                 Err(error) => {
-                    log::error!("Agent LLM chat failed");
                     tracing::error!(name: "chat_failed", kind = "chat_init");
                     Err(IterationLoopError::ChatInit(error))?
                 }
@@ -186,7 +188,6 @@ where
                         return Ok(());
                     }
                     Some(Err(error)) => {
-                        log::error!("Agent LLM chat failed");
                         tracing::error!(name: "chat_failed", kind = "chat_stream");
                         Err(IterationLoopError::ChatStream(error))?;
                     }
@@ -559,7 +560,7 @@ mod tests {
     use barracuda_agent_tool::{
         Tool, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
     };
-    use barracuda_model_api::{ChatError, HttpError as NetError, ModelApiError};
+    use barracuda_model_api::Error as ModelError;
     use futures_lite::future::block_on;
 
     use super::*;
@@ -764,30 +765,18 @@ mod tests {
     }
 
     #[test]
-    fn chat_phase_errors_preserve_nested_network_debug_context() {
-        let init = format!(
-            "{:?}",
-            IterationLoopError::ChatInit(ChatError::Api(ModelApiError::Transport(
-                NetError::Cancelled,
-            )))
-        );
+    fn chat_phase_errors_preserve_model_debug_context() {
+        let init = format!("{:?}", IterationLoopError::ChatInit(ModelError::Cancelled));
         let stream = format!(
             "{:?}",
-            IterationLoopError::ChatStream(ChatError::Api(ModelApiError::Transport(
-                NetError::Cancelled,
-            )))
+            IterationLoopError::ChatStream(ModelError::Cancelled)
         );
 
         assert!(init.starts_with("ChatInit("), "{init}");
         assert!(stream.starts_with("ChatStream("), "{stream}");
         assert!(!init.contains('\n'), "{init}");
         assert!(!stream.contains('\n'), "{stream}");
-        for expected in ["Transport(", "Cancelled"] {
-            assert!(init.contains(expected), "missing `{expected}` in {init}");
-            assert!(
-                stream.contains(expected),
-                "missing `{expected}` in {stream}"
-            );
-        }
+        assert_eq!(init, "ChatInit(Cancelled)");
+        assert_eq!(stream, "ChatStream(Cancelled)");
     }
 }

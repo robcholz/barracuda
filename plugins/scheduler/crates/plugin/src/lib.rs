@@ -4,7 +4,8 @@
 
 extern crate alloc;
 
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
 use barracuda_time_plugin::PLUGIN_ID as TIME_PLUGIN_ID;
 
@@ -17,6 +18,14 @@ const MAX_RECHECK_MILLIS: u64 = 1_000;
 /// Plugin that owns the RTC-authoritative Scheduler Component.
 pub struct SchedulerPlugin;
 
+impl SchedulerPlugin {
+    /// Creates the Scheduler Plugin from the shared construction context.
+    #[must_use]
+    pub const fn new(_context: &PluginContext) -> Self {
+        Self
+    }
+}
+
 impl<const M: usize> Plugin<M> for SchedulerPlugin {
     const DEPENDS_ON: &'static [&'static str] = &[TIME_PLUGIN_ID];
 
@@ -24,7 +33,10 @@ impl<const M: usize> Plugin<M> for SchedulerPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {

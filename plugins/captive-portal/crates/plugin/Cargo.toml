@@ -6,8 +6,10 @@ description = "Barracuda Plugin exposing Agent model API configuration over HTTP
 
 [dependencies]
 barracuda-agent-plugin = { path = "../../../agent/crates/plugin" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 

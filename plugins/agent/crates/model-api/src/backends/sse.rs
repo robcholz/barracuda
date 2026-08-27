@@ -17,7 +17,7 @@ use alloc::vec::Vec;
 use barracuda_runtime_utils::stream::StreamPart;
 use serde::Deserialize;
 
-use super::super::errors::{ChatError, ModelApiError};
+use super::super::errors::Error;
 #[cfg(feature = "cache_profile")]
 use super::super::types::ProviderUsage;
 use super::super::types::{ChatStreamEvent, ToolCall};
@@ -45,32 +45,19 @@ impl ProviderSse {
         &mut self,
         payload: &str,
         out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<(), Error> {
         match self {
-            Self::OpenAi(parser) => SseParse::process_data(parser, payload, out),
-            Self::Anthropic(parser) => SseParse::process_data(parser, payload, out),
+            Self::OpenAi(parser) => parser.process_data(payload, out),
+            Self::Anthropic(parser) => parser.process_data(payload, out),
         }
     }
 
     pub(crate) fn is_done(&self) -> bool {
         match self {
-            Self::OpenAi(parser) => parser.is_done(),
-            Self::Anthropic(parser) => parser.is_done(),
+            Self::OpenAi(parser) => parser.done,
+            Self::Anthropic(parser) => parser.done,
         }
     }
-}
-
-/// A provider-specific streaming parser.
-pub(crate) trait SseParse {
-    /// Process one complete SSE `data` payload.
-    fn process_data(
-        &mut self,
-        payload: &str,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError>;
-
-    /// Whether the provider's native terminal event has been parsed.
-    fn is_done(&self) -> bool;
 }
 
 /// Emits the provider-independent logical stream boundaries and rejects
@@ -91,44 +78,32 @@ enum ContentPhase {
 }
 
 impl ContentEvents {
-    fn reasoning(
-        &mut self,
-        fragment: String,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    fn reasoning(&mut self, fragment: String, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         if self.phase != ContentPhase::Reasoning {
-            return Err(ModelApiError::Parse.into());
+            return Err(Error::Parse);
         }
         self.emitted = true;
         out.push(ChatStreamEvent::Reasoning(StreamPart::Delta(fragment)));
         Ok(())
     }
 
-    fn output(
-        &mut self,
-        fragment: String,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    fn output(&mut self, fragment: String, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         self.advance_to(ContentPhase::Output, out)?;
         self.emitted = true;
         out.push(ChatStreamEvent::Output(StreamPart::Delta(fragment)));
         Ok(())
     }
 
-    fn tool_call(
-        &mut self,
-        call: ToolCall,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    fn tool_call(&mut self, call: ToolCall, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         self.advance_to(ContentPhase::ToolCalls, out)?;
         self.emitted = true;
         out.push(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)));
         Ok(())
     }
 
-    fn finish(&mut self, out: &mut Vec<ChatStreamEvent>) -> Result<(), ChatError> {
+    fn finish(&mut self, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         if self.phase == ContentPhase::Ended {
-            return Err(ModelApiError::Parse.into());
+            return Err(Error::Parse);
         }
         self.advance_to(ContentPhase::Ended, out)
     }
@@ -137,9 +112,9 @@ impl ContentEvents {
         &mut self,
         target: ContentPhase,
         out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<(), Error> {
         if self.phase > target {
-            return Err(ModelApiError::Parse.into());
+            return Err(Error::Parse);
         }
         while self.phase < target {
             let (event, next) = match self.phase {
@@ -155,7 +130,7 @@ impl ContentEvents {
                     ChatStreamEvent::ToolCalls(StreamPart::End),
                     ContentPhase::Ended,
                 ),
-                ContentPhase::Ended => return Err(ModelApiError::Parse.into()),
+                ContentPhase::Ended => return Err(Error::Parse),
             };
             out.push(event);
             self.phase = next;
@@ -233,12 +208,12 @@ impl OpenAiSse {
         Self::default()
     }
 
-    fn process_data(
+    fn process_chunk(
         &mut self,
         payload: &str,
         out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
-        let chunk: OpenAiChunk = serde_json::from_str(payload).map_err(|_| ModelApiError::Parse)?;
+    ) -> Result<(), Error> {
+        let chunk: OpenAiChunk = serde_json::from_str(payload).map_err(|_| Error::Parse)?;
         #[cfg(feature = "cache_profile")]
         if let Some(usage) = chunk.usage.and_then(OpenAiUsage::profile) {
             merge_usage(&mut self.usage, usage);
@@ -268,16 +243,16 @@ impl OpenAiSse {
         Ok(())
     }
 
-    fn merge_tool_call(&mut self, call: OpenAiToolCallDelta) -> Result<(), ChatError> {
-        let index = usize::try_from(u32::try_from(call.index).map_err(|_| ModelApiError::Parse)?)
-            .map_err(|_| ModelApiError::Parse)?;
+    fn merge_tool_call(&mut self, call: OpenAiToolCallDelta) -> Result<(), Error> {
+        let index = usize::try_from(u32::try_from(call.index).map_err(|_| Error::Parse)?)
+            .map_err(|_| Error::Parse)?;
         if index > self.tool_calls.len() {
-            return Err(ModelApiError::Parse.into());
+            return Err(Error::Parse);
         }
         if index == self.tool_calls.len() {
             self.tool_calls.push(OpenAiToolCall::default());
         }
-        let slot = self.tool_calls.get_mut(index).ok_or(ModelApiError::Parse)?;
+        let slot = self.tool_calls.get_mut(index).ok_or(Error::Parse)?;
         if let Some(id) = call.id.filter(|id| !id.is_empty()) {
             slot.id = id;
         }
@@ -293,7 +268,7 @@ impl OpenAiSse {
     }
 
     /// Emit every complete call in index order at OpenAI's `[DONE]` marker.
-    fn flush_tool_calls(&mut self, out: &mut Vec<ChatStreamEvent>) -> Result<(), ChatError> {
+    fn flush_tool_calls(&mut self, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         for slot in self.tool_calls.drain(..) {
             if slot.name.is_empty() {
                 continue;
@@ -309,18 +284,12 @@ impl OpenAiSse {
         }
         Ok(())
     }
-}
 
-impl SseParse for OpenAiSse {
-    fn process_data(
-        &mut self,
-        payload: &str,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    fn process_data(&mut self, payload: &str, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
         if payload == OPENAI_DONE {
             self.flush_tool_calls(out)?;
             if !self.events.has_delta() {
-                return Err(ModelApiError::EmptyResponse.into());
+                return Err(Error::EmptyResponse);
             }
             self.events.finish(out)?;
             #[cfg(feature = "cache_profile")]
@@ -329,13 +298,9 @@ impl SseParse for OpenAiSse {
             }
             self.done = true;
         } else {
-            OpenAiSse::process_data(self, payload, out)?;
+            self.process_chunk(payload, out)?;
         }
         Ok(())
-    }
-
-    fn is_done(&self) -> bool {
-        self.done
     }
 }
 
@@ -429,13 +394,8 @@ impl AnthropicSse {
         Self::default()
     }
 
-    fn process_data(
-        &mut self,
-        payload: &str,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
-        let event: AnthropicEvent =
-            serde_json::from_str(payload).map_err(|_| ModelApiError::Parse)?;
+    fn process_data(&mut self, payload: &str, out: &mut Vec<ChatStreamEvent>) -> Result<(), Error> {
+        let event: AnthropicEvent = serde_json::from_str(payload).map_err(|_| Error::Parse)?;
         match event {
             AnthropicEvent::MessageStart { message } => {
                 #[cfg(not(feature = "cache_profile"))]
@@ -468,7 +428,7 @@ impl AnthropicSse {
             AnthropicEvent::ContentBlockStop { index } => self.on_block_stop(index, out)?,
             AnthropicEvent::MessageStop => {
                 if !self.events.has_delta() {
-                    return Err(ModelApiError::EmptyResponse.into());
+                    return Err(Error::EmptyResponse);
                 }
                 self.events.finish(out)?;
                 #[cfg(feature = "cache_profile")]
@@ -482,23 +442,21 @@ impl AnthropicSse {
         Ok(())
     }
 
-    fn slot(&mut self, index: usize) -> Result<&mut AnthBlock, ChatError> {
+    fn slot(&mut self, index: usize) -> Result<&mut AnthBlock, Error> {
         if index > self.blocks.len() {
-            return Err(ModelApiError::Parse.into());
+            return Err(Error::Parse);
         }
         if index == self.blocks.len() {
             self.blocks.push(AnthBlock::Other);
         }
-        self.blocks
-            .get_mut(index)
-            .ok_or_else(|| ModelApiError::Parse.into())
+        self.blocks.get_mut(index).ok_or(Error::Parse)
     }
 
     fn on_block_start(
         &mut self,
         raw_index: u64,
         content_block: Option<AnthropicBlockStart>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<(), Error> {
         let index = block_index(raw_index)?;
         let block = match content_block {
             Some(content_block) if content_block.kind == "tool_use" => AnthBlock::ToolUse {
@@ -517,7 +475,7 @@ impl AnthropicSse {
         raw_index: u64,
         delta: Option<AnthropicDelta>,
         out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<(), Error> {
         let index = block_index(raw_index)?;
         let Some(delta) = delta else {
             return Ok(());
@@ -554,7 +512,7 @@ impl AnthropicSse {
         &mut self,
         raw_index: u64,
         out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
+    ) -> Result<(), Error> {
         let index = block_index(raw_index)?;
         let Some(block) = self.blocks.get_mut(index) else {
             return Ok(());
@@ -577,23 +535,8 @@ impl AnthropicSse {
     }
 }
 
-impl SseParse for AnthropicSse {
-    fn process_data(
-        &mut self,
-        payload: &str,
-        out: &mut Vec<ChatStreamEvent>,
-    ) -> Result<(), ChatError> {
-        AnthropicSse::process_data(self, payload, out)
-    }
-
-    fn is_done(&self) -> bool {
-        self.done
-    }
-}
-
-fn block_index(raw_index: u64) -> Result<usize, ChatError> {
-    usize::try_from(u32::try_from(raw_index).map_err(|_| ModelApiError::Parse)?)
-        .map_err(|_| ModelApiError::Parse.into())
+fn block_index(raw_index: u64) -> Result<usize, Error> {
+    usize::try_from(u32::try_from(raw_index).map_err(|_| Error::Parse)?).map_err(|_| Error::Parse)
 }
 
 #[cfg(test)]
@@ -605,11 +548,11 @@ mod tests {
 
     use super::*;
 
-    fn drive<P: SseParse>(parser: &mut P, body: &str) -> Vec<ChatStreamEvent> {
+    fn drive(parser: &mut ProviderSse, body: &str) -> Vec<ChatStreamEvent> {
         drive_chunks(parser, &[body.as_bytes()])
     }
 
-    fn drive_chunks<P: SseParse>(parser: &mut P, chunks: &[&[u8]]) -> Vec<ChatStreamEvent> {
+    fn drive_chunks(parser: &mut ProviderSse, chunks: &[&[u8]]) -> Vec<ChatStreamEvent> {
         let mut out = Vec::new();
         let source = futures_lite::stream::iter(
             chunks.iter().map(|chunk| Ok::<Vec<u8>, ()>(chunk.to_vec())),
@@ -630,7 +573,7 @@ mod tests {
 
     #[test]
     fn openai_emits_explicit_content_stream_boundaries_in_order() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think\"}}]}\n\n",
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}\n\n",
@@ -661,7 +604,7 @@ mod tests {
 
     #[test]
     fn openai_reassembles_frames_split_across_chunks() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let full = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n";
         let (a, b) = full.split_at(10);
         let (b, c) = b.split_at(15);
@@ -677,7 +620,7 @@ mod tests {
 
     #[test]
     fn openai_accepts_crlf_sse_frames() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\r\n\r\n",
             "data: [DONE]\r\n\r\n",
@@ -697,7 +640,7 @@ mod tests {
 
     #[test]
     fn openai_joins_multiline_sse_data_before_parsing_json() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let body = concat!(
             "data: {\"choices\":[{\"delta\":\n",
             "data: {\"content\":\"hi\"}}]}\n\n",
@@ -718,7 +661,7 @@ mod tests {
 
     #[test]
     fn openai_reassembles_multibyte_utf8_split_across_chunks() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let full = "data: {\"choices\":[{\"delta\":{\"content\":\"上\"}}]}\n\n";
         let bytes = full.as_bytes();
         let cut = full.find('上').unwrap() + 1;
@@ -734,7 +677,7 @@ mod tests {
 
     #[test]
     fn openai_empty_stream_is_an_error() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let mut out = Vec::new();
         assert!(parser.process_data(OPENAI_DONE, &mut out).is_err());
         assert!(out.is_empty());
@@ -743,7 +686,7 @@ mod tests {
 
     #[test]
     fn openai_requires_done_marker() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         drive(
             &mut parser,
             "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
@@ -754,7 +697,7 @@ mod tests {
     #[cfg(feature = "cache_profile")]
     #[test]
     fn openai_emits_usage_once_after_content_boundaries() {
-        let mut parser = OpenAiSse::new();
+        let mut parser = ProviderSse::OpenAi(OpenAiSse::new());
         let body = concat!(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n",
             "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":8}}}\n\n",
@@ -782,7 +725,7 @@ mod tests {
 
     #[test]
     fn anthropic_emits_explicit_content_stream_boundaries_in_order() {
-        let mut parser = AnthropicSse::new();
+        let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
         let body = concat!(
             "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
             "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n",
@@ -817,7 +760,7 @@ mod tests {
 
     #[test]
     fn anthropic_reassembles_frames_split_across_chunks() {
-        let mut parser = AnthropicSse::new();
+        let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
         let full = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n";
         let (a, b) = full.split_at(40);
         let out = drive_chunks(&mut parser, &[a.as_bytes(), b.as_bytes()]);
@@ -832,7 +775,7 @@ mod tests {
 
     #[test]
     fn anthropic_requires_message_stop() {
-        let mut parser = AnthropicSse::new();
+        let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
         drive(
             &mut parser,
             concat!(
@@ -846,7 +789,7 @@ mod tests {
     #[cfg(feature = "cache_profile")]
     #[test]
     fn anthropic_merges_usage_and_emits_it_once_after_content_boundaries() {
-        let mut parser = AnthropicSse::new();
+        let mut parser = ProviderSse::Anthropic(AnthropicSse::new());
         let body = concat!(
             "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":20,\"cache_read_input_tokens\":12,\"cache_creation_input_tokens\":8}}}\n\n",
             "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
