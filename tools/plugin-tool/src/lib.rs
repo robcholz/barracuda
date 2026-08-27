@@ -9,6 +9,8 @@ use dialoguer::{theme::ColorfulTheme, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
 const MANIFEST_END: &str = "# END GENERATED PLUGINS";
+const FEATURES_BEGIN: &str = "# BEGIN GENERATED PLUGIN FEATURES";
+const FEATURES_END: &str = "# END GENERATED PLUGIN FEATURES";
 const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
 const SOURCE_END: &str = "// END GENERATED PLUGINS";
 const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
@@ -19,6 +21,7 @@ struct Plugin {
     package: String,
     crate_name: String,
     entry: String,
+    has_std_feature: bool,
 }
 
 /// Whether synchronization changed generated files.
@@ -107,7 +110,13 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
         &old_manifest,
         MANIFEST_BEGIN,
         MANIFEST_END,
-        &render_dependencies(&plugins),
+        &render_dependencies(&enabled),
+    )?;
+    let manifest = replace_block(
+        &manifest,
+        FEATURES_BEGIN,
+        FEATURES_END,
+        &render_features(&enabled),
     )?;
     let source = replace_block(
         &old_source,
@@ -251,6 +260,7 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
+            has_std_feature: has_feature(&read(&manifest_path)?, "std"),
         });
     }
     plugins.sort_by(|left, right| left.directory.cmp(&right.directory));
@@ -304,7 +314,7 @@ fn plugin_entry(source: &str) -> Option<String> {
     }
 }
 
-fn render_dependencies(plugins: &[Plugin]) -> String {
+fn render_dependencies(plugins: &[&Plugin]) -> String {
     plugins
         .iter()
         .map(|plugin| {
@@ -315,6 +325,33 @@ fn render_dependencies(plugins: &[Plugin]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_features(plugins: &[&Plugin]) -> String {
+    plugins
+        .iter()
+        .filter(|plugin| plugin.has_std_feature)
+        .map(|plugin| format!("    \"{}/std\",", plugin.package))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn has_feature(manifest: &str, feature: &str) -> bool {
+    let mut in_features = false;
+    for line in manifest.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_features = line == "[features]";
+            continue;
+        }
+        if in_features
+            && line
+                .split_once('=')
+                .is_some_and(|(name, _)| name.trim() == feature)
+        {
+            return true;
+        }
+    }
+    false
 }
 fn render_registrations(plugins: &[&Plugin]) -> String {
     let entries = plugins
@@ -412,7 +449,7 @@ mod tests {
         fs::create_dir_all(root.path().join("core/system/src")).expect("System source directory");
         fs::write(
             root.path().join("core/system/Cargo.toml"),
-            "# BEGIN GENERATED PLUGINS\nold\n# END GENERATED PLUGINS\n",
+            "[features]\ntokio = [\n# BEGIN GENERATED PLUGIN FEATURES\nold\n# END GENERATED PLUGIN FEATURES\n]\n# BEGIN GENERATED PLUGINS\nold\n# END GENERATED PLUGINS\n",
         )
         .expect("System manifest");
         fs::write(
@@ -434,6 +471,6 @@ mod tests {
         assert!(!source.contains("DemoPlugin::new"));
         let manifest = fs::read_to_string(root.path().join("core/system/Cargo.toml"))
             .expect("generated System manifest");
-        assert!(manifest.contains("barracuda-demo-plugin"));
+        assert!(!manifest.contains("barracuda-demo-plugin"));
     }
 }

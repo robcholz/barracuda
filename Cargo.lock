@@ -586,6 +586,7 @@ name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "clap",
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",

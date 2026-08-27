@@ -7,9 +7,11 @@ description = "Barracuda system composition root that registers the fixed Plugin
 [features]
 default = []
 tokio = [
+# BEGIN GENERATED PLUGIN FEATURES
     "barracuda-agent-plugin/std",
-    "barracuda-vfs/std",
     "barracuda-webserver-plugin/std",
+# END GENERATED PLUGIN FEATURES
+    "barracuda-vfs/std",
 ]
 
 [lib]
