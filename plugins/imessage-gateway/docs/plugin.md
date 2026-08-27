@@ -19,3 +19,4 @@ Built-in provider Plugins:
 - `imessage-wechat`
 - `imessage-bluebubble`
 - `imessage-inkbox`
+- `imessage-qq`

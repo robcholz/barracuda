@@ -17,6 +17,7 @@ members = [
     "plugins/imessage-gateway/crates/*",
     "plugins/imessage-bluebubble/crates/*",
     "plugins/imessage-inkbox/crates/*",
+    "plugins/imessage-qq/crates/*",
     "plugins/imessage-telegram/crates/*",
     "plugins/imessage-wechat/crates/*",
     "plugins/imessage-web/crates/*",

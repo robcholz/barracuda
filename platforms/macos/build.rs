@@ -77,11 +77,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", board_path.display());
     let board = parse(&fs::read_to_string(board_path)?)?;
     if board.hardware().chip() != "macos" {
-        return Err(format!(
-            "Board `{board_name}` chip `{}` is incompatible with the macOS Platform",
-            board.hardware().chip()
-        )
-        .into());
+        render_layout(
+            &mut generated,
+            FileLayoutDocument {
+                capacity: 0,
+                regions: Vec::new(),
+            },
+        );
+        render_log_level(&mut generated)?;
+        let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+        fs::write(output.join("macos_config.rs"), generated)?;
+        return Ok(());
     }
     let layout_path = board_directory.join(board.native_layout().artifact());
     println!("cargo:rerun-if-changed={}", layout_path.display());

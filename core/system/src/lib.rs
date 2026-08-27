@@ -21,6 +21,7 @@ use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
 use barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin;
 use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
 use barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin;
+use barracuda_imessage_qq_plugin::IMessageQQPlugin;
 use barracuda_imessage_telegram_plugin::IMessageTelegramPlugin;
 use barracuda_imessage_web_plugin::IMessageWebPlugin;
 use barracuda_imessage_wechat_plugin::IMessageWechatPlugin;
@@ -136,6 +137,7 @@ where
         plugins.register(&mut router, IMessageGatewayPlugin::new(&plugin_context))?;
         plugins.register(&mut router, IMessageBlueBubblePlugin::new(&plugin_context))?;
         plugins.register(&mut router, IMessageInkboxPlugin::new(&plugin_context))?;
+        plugins.register(&mut router, IMessageQQPlugin::new(&plugin_context))?;
         plugins.register(&mut router, IMessageTelegramPlugin::new(&plugin_context))?;
         plugins.register(&mut router, IMessageWechatPlugin::new(&plugin_context))?;
         plugins.register(&mut router, IMessageWebPlugin::new(&plugin_context))?;
