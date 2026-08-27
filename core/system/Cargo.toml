@@ -20,6 +20,7 @@ barracuda-event-router = { path = "../event-router" }
 barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
 barracuda-captive-portal-plugin = { path = "../../plugins/captive-portal/crates/plugin" }
 barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/plugin" }
+barracuda-http-plugin = { path = "../../plugins/http/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "../../plugins/imessage-gateway/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "../../plugins/imessage-bluebubble/crates/plugin" }
 barracuda-imessage-inkbox-plugin = { path = "../../plugins/imessage-inkbox/crates/plugin" }

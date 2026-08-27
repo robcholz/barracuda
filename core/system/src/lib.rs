@@ -18,6 +18,7 @@ use barracuda_agent_plugin::AgentPlugin;
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
+use barracuda_http_plugin::HttpPlugin;
 use barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin;
 use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
 use barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin;
@@ -130,6 +131,7 @@ where
         plugins.register(&mut router, WebServerPlugin::new(&plugin_context))?;
         plugins.register(&mut router, VmPlugin::new(&plugin_context))?;
         plugins.register(&mut router, TimePlugin::new(&plugin_context))?;
+        plugins.register(&mut router, HttpPlugin::new(&plugin_context))?;
         plugins.register(&mut router, SchedulerPlugin::new(&plugin_context))?;
         plugins.register(&mut router, AgentPlugin::new(&plugin_context))?;
         plugins.register(&mut router, CaptivePortalPlugin::new(&plugin_context))?;

@@ -21,6 +21,7 @@ members = [
     "plugins/imessage-wechat/crates/*",
     "plugins/imessage-web/crates/*",
     "plugins/gateway-agent/crates/*",
+    "plugins/http/crates/*",
     "plugins/time/crates/*",
     "plugins/scheduler/crates/*",
     "plugins/vm/crates/*",
