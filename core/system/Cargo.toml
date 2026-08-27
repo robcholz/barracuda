@@ -32,6 +32,7 @@ barracuda-imessage-telegram-plugin = { path = "../../plugins/imessage-telegram/c
 barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plugin" }
 barracuda-imessage-wechat-plugin = { path = "../../plugins/imessage-wechat/crates/plugin" }
 barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
+barracuda-tavily-plugin = { path = "../../plugins/tavily/crates/plugin" }
 barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
 barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
