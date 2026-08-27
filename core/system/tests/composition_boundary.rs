@@ -15,10 +15,15 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
-    assert!(system.contains("mount(\"/\", backend, MountOptions::read_write())"));
+    assert!(system.contains("mount(\"/\", backend.clone(), MountOptions::read_write())"));
+    assert!(system.contains("create_dir_all(\"/system/.builtin/skills\")"));
+    assert!(system.contains("\"/system/skills\","));
+    assert!(system.contains("\"/system/.builtin/skills\","));
     assert!(system.contains("EventRouter::new(lanes)"));
     assert!(!system.contains("filesystem.scoped(\"/system/event-router\")"));
-    assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
+    assert!(system.contains("let namespace = global_namespace().await"));
+    assert!(system.contains("plugins.install_vfs(namespace.clone())"));
+    assert!(system.contains("FilePlugin::new(namespace.scoped(\"/system\")?)"));
     assert!(!system.contains("StorageNotConstructed"));
     let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;
     assert!(resources.contains("SYSTEM_PARTITION: &str = \"system\""));

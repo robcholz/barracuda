@@ -17,6 +17,7 @@ use core::task::{Context, Poll};
 use barracuda_agent_plugin::AgentPlugin;
 use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
+use barracuda_file_plugin::FilePlugin;
 use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
 use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
 use barracuda_imessage_web_plugin::IMessageWebPlugin;
@@ -28,7 +29,7 @@ use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_target_api::TargetResources;
 use barracuda_time_plugin::TimePlugin;
 use barracuda_tls::ClientTls;
-use barracuda_vfs::{global_namespace, mount, FsError, MountOptions};
+use barracuda_vfs::{create_dir_all, global_namespace, mount, mount_scoped, FsError, MountOptions};
 use barracuda_vfs_littlefs::mount_or_format_partition;
 use barracuda_vm_plugin::VmPlugin;
 use barracuda_webserver_plugin::WebServerPlugin;
@@ -108,20 +109,30 @@ where
         let prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
-        mount("/", backend, MountOptions::read_write()).await?;
+        mount("/", backend.clone(), MountOptions::read_write()).await?;
+        create_dir_all("/system/.builtin/skills").await?;
+        mount_scoped(
+            "/system/skills",
+            backend,
+            "/system/.builtin/skills",
+            MountOptions::read_write(),
+        )
+        .await?;
         log::info!("mounted System filesystem");
         let mut router = EventRouter::new(lanes).await?;
         log::info!("initialized Event Router");
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
-        plugins.install_vfs(global_namespace().await);
+        let namespace = global_namespace().await;
+        plugins.install_vfs(namespace.clone());
         plugins.install_task_spawner(spawner);
 
         let tls = prepared.tls;
         let http = http_client::ClientFactory::new(prepared.ip_stack, move || tls.config());
 
         plugins.register(&mut router, WebServerPlugin::new(prepared.ip_stack))?;
+        plugins.register(&mut router, FilePlugin::new(namespace.scoped("/system")?))?;
         plugins.register(&mut router, VmPlugin::default())?;
         plugins.register(&mut router, TimePlugin::new(prepared.ip_stack))?;
         plugins.register(&mut router, SchedulerPlugin)?;
