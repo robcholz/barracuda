@@ -2,7 +2,8 @@
 //!
 //! The selected-target crate supplies initialized capabilities. System consumes
 //! those handles, constructs the fixed Plugin set, and owns their shared runtime
-//! services.
+//! services. Its build script watches `plugins/` and rejects stale generated
+//! registry blocks before compiling System.
 
 #![no_std]
 
@@ -14,33 +15,28 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_agent_plugin::AgentPlugin;
-use barracuda_captive_portal_plugin::CaptivePortalPlugin;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
-use barracuda_gateway_agent_plugin::GatewayAgentPlugin;
-use barracuda_http_plugin::HttpPlugin;
-use barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin;
-use barracuda_imessage_gateway_plugin::IMessageGatewayPlugin;
-use barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin;
-use barracuda_imessage_telegram_plugin::IMessageTelegramPlugin;
-use barracuda_imessage_web_plugin::IMessageWebPlugin;
-use barracuda_imessage_wechat_plugin::IMessageWechatPlugin;
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
 };
-use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_target_api::TargetResources;
-use barracuda_time_plugin::TimePlugin;
 use barracuda_tls::ClientTls;
 use barracuda_vfs::{global_namespace, mount, FsError, MountOptions};
 use barracuda_vfs_littlefs::mount_or_format_partition;
-use barracuda_vm_plugin::VmPlugin;
-use barracuda_webserver_plugin::WebServerPlugin;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
 use embedded_storage::nor_flash::NorFlash;
+
+macro_rules! register_plugins {
+    ($manager:ident, $router:ident; $($plugin:expr),* $(,)?) => {
+        $(
+            $manager.add($plugin)?;
+        )*
+        $manager.register_all(&mut $router)?;
+    };
+}
 
 pub use resources::SystemResourceError;
 
@@ -128,20 +124,27 @@ where
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
         let plugin_context = PluginContext::new(prepared.ip_stack, http_clients);
 
-        plugins.register(&mut router, WebServerPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, VmPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, TimePlugin::new(&plugin_context))?;
-        plugins.register(&mut router, HttpPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, SchedulerPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, AgentPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, CaptivePortalPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageGatewayPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageBlueBubblePlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageInkboxPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageTelegramPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageWechatPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, IMessageWebPlugin::new(&plugin_context))?;
-        plugins.register(&mut router, GatewayAgentPlugin::new(&plugin_context))?;
+        // BEGIN GENERATED PLUGINS
+        register_plugins!(plugins, router;
+            barracuda_agent_plugin::AgentPlugin::new(&plugin_context),
+            barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&plugin_context),
+            barracuda_file_plugin::FilePlugin::new(&plugin_context),
+            barracuda_gateway_agent_plugin::GatewayAgentPlugin::new(&plugin_context),
+            barracuda_http_plugin::HttpPlugin::new(&plugin_context),
+            barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&plugin_context),
+            barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&plugin_context),
+            barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&plugin_context),
+            barracuda_imessage_qq_plugin::IMessageQQPlugin::new(&plugin_context),
+            barracuda_imessage_telegram_plugin::IMessageTelegramPlugin::new(&plugin_context),
+            barracuda_imessage_web_plugin::IMessageWebPlugin::new(&plugin_context),
+            barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&plugin_context),
+            barracuda_scheduler_plugin::SchedulerPlugin::new(&plugin_context),
+            barracuda_tavily_plugin::TavilyPlugin::new(&plugin_context),
+            barracuda_time_plugin::TimePlugin::new(&plugin_context),
+            barracuda_vm_plugin::VmPlugin::new(&plugin_context),
+            barracuda_webserver_plugin::WebServerPlugin::new(&plugin_context),
+        );
+        // END GENERATED PLUGINS
         plugins.start(&mut router)?;
         log::info!("Barracuda System started");
 

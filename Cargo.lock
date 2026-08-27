@@ -440,9 +440,12 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-profile",
+ "barracuda-runtime-utils",
+ "base64 0.22.1",
  "embassy-time",
  "futures-lite",
  "http-client",
+ "serde_json",
 ]
 
 [[package]]
@@ -586,6 +589,7 @@ name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "clap",
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",
@@ -677,6 +681,19 @@ dependencies = [
  "barracuda-rpc-schema",
  "schemars",
  "serde",
+ "zerocopy",
+]
+
+[[package]]
+name = "barracuda-file-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-vfs",
+ "serde",
+ "serde-big-array",
  "zerocopy",
 ]
 
@@ -793,6 +810,22 @@ dependencies = [
  "http-client",
  "inkbox",
  "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-imessage-qq-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
+ "gateway",
+ "http-client",
+ "log",
+ "qq",
  "serde",
  "serde_json",
 ]
@@ -1056,6 +1089,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-tool"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "dialoguer",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-profile"
 version = "0.1.0"
 dependencies = [
@@ -1167,11 +1212,13 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-captive-portal-plugin",
  "barracuda-event-router",
+ "barracuda-file-plugin",
  "barracuda-gateway-agent-plugin",
  "barracuda-http-plugin",
  "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
  "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
@@ -1180,8 +1227,10 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-plugin-tool",
  "barracuda-scheduler-plugin",
  "barracuda-target-api",
+ "barracuda-tavily-plugin",
  "barracuda-time-plugin",
  "barracuda-tls",
  "barracuda-vfs",
@@ -1213,6 +1262,38 @@ dependencies = [
 [[package]]
 name = "barracuda-target-api"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-tavily-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-platform-test",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-tavily-wire",
+ "barracuda-webserver-plugin",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "http-client",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-tavily-wire"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "barracuda-rpc-schema",
+ "schemars",
+ "serde",
+ "thiserror 2.0.18",
+ "zerocopy",
+]
 
 [[package]]
 name = "barracuda-time-component"
@@ -1748,6 +1829,46 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
 ]
+
+[[package]]
+name = "clap"
+version = "4.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "473c7e07f409a8d772161724aa8db6a765a2532a70f9667eeb7b49d3d02fbdca"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b48fea5a88e9ae728a2dcbedbfc0e730f7d60da42e1cb049a83c9fb8b789889"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "clap_lex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clipboard-win"
@@ -4507,6 +4628,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "qq"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "futures-lite",
+ "gateway",
+ "gateway-http",
+ "http-client",
+ "serde_json",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4984,6 +5117,15 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
+]
+
+[[package]]
+name = "serde-big-array"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
