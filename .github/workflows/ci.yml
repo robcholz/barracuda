@@ -14,7 +14,31 @@ concurrency:
 permissions:
   contents: read
 
+# CI never reuses incremental state across commits effectively. Disabling it
+# and omitting dev-profile debug info reduces both compile time and cache size.
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+
 jobs:
+  # rustfmt is target-independent. Running it once over the workspace covers
+  # every Platform without making each cross-compilation runner repeat the
+  # exact same work.
+  format:
+    name: Rust formatting (all Platforms)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
   # The complete codebase, built and tested on the Linux host Target. Board and
   # Platform are selected explicitly: the architecture forbids inferring a Board
   # from the target, and this keeps the selection visible rather than relying on
@@ -39,9 +63,6 @@ jobs:
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all --check
 
       - name: Select Linux host Board
         run: cargo board select local-linux
@@ -69,43 +90,48 @@ jobs:
             cargo test -p "$crate"
           done
 
-  # The full codebase is too large to build for every Platform, so the non-host
-  # Platforms are only compiled for their own target to prove they build. Each
-  # Platform crate is built alone ("without the full thing"), with its Board
-  # selected explicitly. The target triple is read from the selected Board
-  # (board.yml `toolchain.target`) rather than hardcoded here, so the Board is
-  # the single source of truth for its toolchain.
+  # Cross-check the selected Platform composition rather than naming individual
+  # Platform crates or chip features here. Cargo resolves the implementation
+  # and target-specific features from barracuda-platform-selected, while
+  # `cargo board` supplies the Board target. This keeps Board/toolchain policy
+  # out of the workflow and also exercises the same selection path as a real
+  # application build.
   platform-build:
-    name: Platform build (${{ matrix.platform }})
+    name: Platform check (${{ matrix.board }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: esp32c6
-            board: esp32c6-devkitc-1
-            features: ""
-          - platform: stm32
-            board: stm32f429zi-nucleo
-            features: "--features stm32f429zi"
+        board:
+          - esp32c6-devkitc-1
+          - stm32f429zi-nucleo
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.board }}
 
-      - name: Build ${{ matrix.platform }} Platform for its Board's target
+      - name: Select Board and install its Rust target
         run: |
           cargo board select ${{ matrix.board }}
           target="$(cargo board target)"
           echo "Board ${{ matrix.board }} declares target: $target"
           rustup target add "$target"
-          cargo build -p barracuda-platform-${{ matrix.platform }} ${{ matrix.features }} --target "$target"
+          echo "target=$target" >> "$GITHUB_ENV"
+
+      - name: Clippy selected Platform
+        # Bare-metal targets do not provide Rust's host-only test harness.
+        run: cargo clippy -p barracuda-platform-selected --target "$target"
+
+      - name: Build selected Platform
+        run: cargo build -p barracuda-platform-selected --target "$target"
 
   python:
     name: Python tooling
