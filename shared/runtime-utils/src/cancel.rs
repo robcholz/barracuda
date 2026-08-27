@@ -88,7 +88,6 @@ impl Cancel<'static> {
 #[cfg(test)]
 mod tests {
     use alloc::sync::Arc;
-    use core::future::Future as _;
     use core::pin::pin;
     use core::sync::atomic::{AtomicUsize, Ordering};
     use core::task::{Context, Poll};
