@@ -132,6 +132,7 @@ where
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&plugin_context),
             barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&plugin_context),
+            barracuda_imessage_qq_plugin::IMessageQQPlugin::new(&plugin_context),
             barracuda_imessage_telegram_plugin::IMessageTelegramPlugin::new(&plugin_context),
             barracuda_imessage_web_plugin::IMessageWebPlugin::new(&plugin_context),
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&plugin_context),

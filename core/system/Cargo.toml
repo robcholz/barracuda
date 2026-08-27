@@ -26,6 +26,7 @@ barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/pl
 barracuda-imessage-bluebubble-plugin = { path = "../../plugins/imessage-bluebubble/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "../../plugins/imessage-gateway/crates/plugin" }
 barracuda-imessage-inkbox-plugin = { path = "../../plugins/imessage-inkbox/crates/plugin" }
+barracuda-imessage-qq-plugin = { path = "../../plugins/imessage-qq/crates/plugin" }
 barracuda-imessage-telegram-plugin = { path = "../../plugins/imessage-telegram/crates/plugin" }
 barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plugin" }
 barracuda-imessage-wechat-plugin = { path = "../../plugins/imessage-wechat/crates/plugin" }

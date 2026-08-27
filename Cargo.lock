@@ -777,6 +777,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imessage-qq-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
+ "gateway",
+ "http-client",
+ "log",
+ "qq",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1162,6 +1178,7 @@ dependencies = [
  "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
  "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
@@ -4535,6 +4552,18 @@ dependencies = [
  "syn 2.0.118",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "qq"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "futures-lite",
+ "gateway",
+ "gateway-http",
+ "http-client",
+ "serde_json",
 ]
 
 [[package]]
