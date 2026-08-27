@@ -7,7 +7,7 @@ result with assertions.
 | --- | --- | --- |
 | Components | `components` | `EventRouter::new`, a zerocopy DTO, Component RPC registration, `RunContext::rpc`, explicit polling, `load`, `unload`, and teardown |
 | Events | `events` | Streaming `workflow.load`, durable JSON, `EventEmitter`, matching execution, and immutable Workflow snapshots |
-| JSON calls | `rpc_json` | `#[rpc_dynamic]` on a Component-hosted method and runtime `RpcClient::call_json(address, value)` returning `{ ok, ... }` |
+| JSON calls | `component_rpc_json` | `#[rpc_dynamic]` on a Component-hosted method and runtime `RpcClient::call_json(address, value)` returning `{ ok, ... }` |
 | Workflow mapping | `workflow` | A multi-step Workflow whose `$previous.output.<field>` reference is copied into the next request |
 | Persistence | `persistence` | Durable restore after Event Router reconstruction, then durable `WorkflowClient::unload` |
 | Streaming | `streaming` | A streaming Event fanned into a streaming Workflow step in order |
@@ -18,7 +18,7 @@ Run them from the `agent-framework` workspace root:
 ```console
 cargo run -p barracuda-event-router --example components
 cargo run -p barracuda-event-router --example events
-cargo run -p barracuda-event-router --example rpc_json
+cargo run -p barracuda-event-router --example component_rpc_json
 cargo run -p barracuda-event-router --example workflow
 cargo run -p barracuda-event-router --example persistence
 cargo run -p barracuda-event-router --example streaming

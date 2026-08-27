@@ -6,7 +6,7 @@
 | `rpc_payload` | Runtime-addressed payload writer/reader calls |
 | `rpc_multicast` | Shared requests with independent response branches |
 | `rpc_nested` | Nested calls, call identity, and self-call protection |
-| `rpc_json` | Runtime `call_json` over `#[rpc_json]` methods |
+| `rpc_json` | Runtime `call_json` over `#[rpc_dynamic]` methods |
 
 Run from the `agent-framework` workspace root:
 
