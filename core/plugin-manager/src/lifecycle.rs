@@ -133,7 +133,7 @@ impl PluginError {
 
 /// One system-managed Plugin that may register multiple Components.
 pub trait Plugin<const M: usize> {
-    /// Stable identities of Plugins that must already be registered.
+    /// Stable identities that must register before this Plugin.
     const DEPENDS_ON: &'static [&'static str] = &[];
 
     /// Resources that Plugin Manager must prepare before registration.
@@ -148,7 +148,7 @@ pub trait Plugin<const M: usize> {
     /// default registration phase performs no work.
     fn register<Storage>(
         &mut self,
-        _context: &mut PluginContext<'_, M, Storage>,
+        _context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
         Storage: PluginStorage,
@@ -171,6 +171,11 @@ pub trait Plugin<const M: usize> {
 }
 
 trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
+    fn id(&self) -> &'static str;
+    fn dependencies(&self) -> &'static [&'static str];
+    fn requirements(&self) -> PluginRequirements;
+    fn register(&mut self, context: &mut PluginRegisterContext<'_, M, Storage>)
+        -> PluginResult<()>;
     fn start(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>;
 }
 
@@ -179,6 +184,25 @@ where
     T: Plugin<M>,
     Storage: PluginStorage,
 {
+    fn id(&self) -> &'static str {
+        Plugin::id(self)
+    }
+
+    fn dependencies(&self) -> &'static [&'static str] {
+        T::DEPENDS_ON
+    }
+
+    fn requirements(&self) -> PluginRequirements {
+        T::REQUIREMENTS
+    }
+
+    fn register(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()> {
+        Plugin::register(self, context)
+    }
+
     fn start(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()> {
         Plugin::start(self, context)
     }
@@ -233,7 +257,7 @@ impl<const M: usize> PluginEventRouterContext<'_, M> {
 
 /// Context provided exclusively during [`Plugin::register`].
 #[derive(Getters)]
-pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
+pub struct PluginRegisterContext<'a, const M: usize, Storage: PluginStorage> {
     /// Explicit Event Router registration boundary.
     pub event_router: PluginEventRouterContext<'a, M>,
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
@@ -247,7 +271,7 @@ pub struct PluginContext<'a, const M: usize, Storage: PluginStorage> {
     retained_resources: &'a mut Vec<Box<dyn Any>>,
 }
 
-impl<const M: usize, Storage: PluginStorage> PluginContext<'_, M, Storage> {
+impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storage> {
     /// Returns this Plugin's private VFS when it declared one.
     ///
     /// # Errors
@@ -553,6 +577,9 @@ pub enum PluginRegisterError {
     /// A declared dependency has not been registered yet.
     #[error("Plugin dependency is not registered: {0}")]
     MissingDependency(PluginId),
+    /// The queued Plugin graph contains a dependency cycle.
+    #[error("Plugin dependency graph contains a cycle: {0:?}")]
+    DependencyCycle(Vec<PluginId>),
     /// The Plugin declared a private VFS but System did not install one.
     #[error("Plugin {0} requires a private filesystem, but System did not install a VFS")]
     FilesystemUnavailable(PluginId),
@@ -634,6 +661,7 @@ where
     task_spawner: Option<Spawner>,
     vfs_root: Option<Vfs>,
     loaded: BTreeMap<PluginId, LoadedPlugin<M, ScopedStorage<DatabaseRegion>>>,
+    pending: BTreeMap<PluginId, Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>>,
     registration_order: Vec<PluginId>,
 }
 
@@ -659,6 +687,7 @@ where
             task_spawner: None,
             vfs_root: None,
             loaded: BTreeMap::new(),
+            pending: BTreeMap::new(),
             registration_order: Vec::new(),
         })
     }
@@ -690,7 +719,84 @@ where
     pub fn register<const N: usize, const Q: usize, T: Plugin<M> + 'static>(
         &mut self,
         router: &mut EventRouter<N, M, Q>,
-        mut plugin: T,
+        plugin: T,
+    ) -> Result<(), PluginRegisterError> {
+        self.register_managed(router, Box::new(plugin))
+    }
+
+    /// Adds one Plugin to the graph awaiting dependency-safe registration.
+    ///
+    /// System may add Plugins in any order. [`Self::register_all`] validates
+    /// and scans the complete dependency graph before running registrations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for an invalid, duplicate, or self-dependent identity.
+    pub fn add<T: Plugin<M> + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
+        let id = PluginId::try_from(plugin.id())?;
+        if self.loaded.contains_key(&id) || self.pending.contains_key(&id) {
+            log::warn!("refusing duplicate Plugin registration: {id}");
+            return Err(PluginRegisterError::AlreadyRegistered(id));
+        }
+        validate_dependency_ids(&id, T::DEPENDS_ON)?;
+        self.pending.insert(id, Box::new(plugin));
+        Ok(())
+    }
+
+    /// Registers the complete queued Plugin graph in dependency order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a dependency is absent, the graph contains a
+    /// cycle, or one Plugin registration fails.
+    pub fn register_all<const N: usize, const Q: usize>(
+        &mut self,
+        router: &mut EventRouter<N, M, Q>,
+    ) -> Result<(), PluginRegisterError> {
+        for plugin in self.pending.values() {
+            for dependency in plugin.dependencies() {
+                let dependency = PluginId::try_from(*dependency).map_err(|source| {
+                    PluginRegisterError::InvalidDependency {
+                        dependency: (*dependency).to_string(),
+                        source,
+                    }
+                })?;
+                if !self.loaded.contains_key(&dependency) && !self.pending.contains_key(&dependency)
+                {
+                    return Err(PluginRegisterError::MissingDependency(dependency));
+                }
+            }
+        }
+        while !self.pending.is_empty() {
+            let ready = self
+                .pending
+                .iter()
+                .find(|(_id, plugin)| {
+                    plugin.dependencies().iter().all(|dependency| {
+                        PluginId::try_from(*dependency)
+                            .ok()
+                            .is_some_and(|id| self.loaded.contains_key(&id))
+                    })
+                })
+                .map(|(id, _plugin)| id.clone());
+            let Some(id) = ready else {
+                return Err(PluginRegisterError::DependencyCycle(
+                    self.pending.keys().cloned().collect(),
+                ));
+            };
+            let plugin = self
+                .pending
+                .remove(&id)
+                .ok_or_else(|| PluginRegisterError::DependencyCycle(Vec::new()))?;
+            self.register_managed(router, plugin)?;
+        }
+        Ok(())
+    }
+
+    fn register_managed<const N: usize, const Q: usize>(
+        &mut self,
+        router: &mut EventRouter<N, M, Q>,
+        mut plugin: Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>,
     ) -> Result<(), PluginRegisterError> {
         let id = PluginId::try_from(plugin.id())?;
         if self.loaded.contains_key(&id) {
@@ -699,10 +805,9 @@ where
         }
         log::info!("registering Plugin {id}");
 
-        let dependencies =
-            resolve_dependencies::<M, T, ScopedStorage<DatabaseRegion>>(&id, &self.loaded)?;
+        let dependencies = resolve_dependencies(&id, plugin.dependencies(), &self.loaded)?;
 
-        let filesystem = match T::REQUIREMENTS.filesystem() {
+        let filesystem = match plugin.requirements().filesystem() {
             PluginFilesystem::None => None,
             PluginFilesystem::Private => {
                 let root = self
@@ -720,7 +825,7 @@ where
         let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
         let result = {
             let mut registrar = EventRouterRegistrar { router };
-            let mut context = PluginContext {
+            let mut context = PluginRegisterContext {
                 event_router: PluginEventRouterContext {
                     registrar: &mut registrar,
                     component_ids: &mut component_ids,
@@ -743,7 +848,7 @@ where
                 self.loaded.insert(
                     id,
                     LoadedPlugin {
-                        plugin: Box::new(plugin),
+                        plugin,
                         available: true,
                         started: false,
                         component_ids,
@@ -765,7 +870,7 @@ where
                     self.loaded.insert(
                         id,
                         LoadedPlugin {
-                            plugin: Box::new(plugin),
+                            plugin,
                             available: false,
                             started: false,
                             component_ids: remaining,
@@ -919,12 +1024,31 @@ where
     }
 }
 
-fn resolve_dependencies<const M: usize, T: Plugin<M>, Storage: PluginStorage>(
+fn validate_dependency_ids(
     plugin: &PluginId,
+    declared: &[&'static str],
+) -> Result<(), PluginRegisterError> {
+    for dependency in declared {
+        let id = PluginId::try_from(*dependency).map_err(|source| {
+            PluginRegisterError::InvalidDependency {
+                dependency: (*dependency).to_string(),
+                source,
+            }
+        })?;
+        if id == *plugin {
+            return Err(PluginRegisterError::SelfDependency(id));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_dependencies<const M: usize, Storage: PluginStorage>(
+    plugin: &PluginId,
+    declared: &[&'static str],
     loaded: &BTreeMap<PluginId, LoadedPlugin<M, Storage>>,
 ) -> Result<Vec<PluginId>, PluginRegisterError> {
     let mut dependencies = BTreeSet::new();
-    for dependency in T::DEPENDS_ON {
+    for dependency in declared {
         let id = PluginId::try_from(*dependency).map_err(|source| {
             PluginRegisterError::InvalidDependency {
                 dependency: (*dependency).to_string(),

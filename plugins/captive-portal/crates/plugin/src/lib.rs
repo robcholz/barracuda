@@ -9,7 +9,8 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 use barracuda_agent_plugin::{AgentSetApi, ApiPurpose, BackendKind, ModelApiConfig};
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginError, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
@@ -27,13 +28,12 @@ pub const SET_API_PATH: &str = "/api/model-api";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that mounts Agent model API configuration on the shared WebServer.
-#[derive(Default)]
 pub struct CaptivePortalPlugin;
 
 impl CaptivePortalPlugin {
     /// Creates the Captive Portal Plugin.
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(_context: &PluginContext) -> Self {
         Self
     }
 }
@@ -45,7 +45,10 @@ impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
@@ -171,6 +174,8 @@ mod tests {
     use core::cell::RefCell;
 
     use barracuda_agent_plugin::{AgentSetApi, InitError};
+    use barracuda_platform_test::never_embassy_stack;
+    use barracuda_plugin_api::{ClientFactory, PluginContext};
     use barracuda_plugin_manager::Plugin;
     use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
 
@@ -205,7 +210,9 @@ mod tests {
 
     #[test]
     fn plugin_identity_and_dependencies_are_stable() {
-        let plugin = CaptivePortalPlugin::new();
+        let stack = never_embassy_stack();
+        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let plugin = CaptivePortalPlugin::new(&context);
 
         assert_eq!(Plugin::<512>::id(&plugin), PLUGIN_ID);
         assert_eq!(

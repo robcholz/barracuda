@@ -25,7 +25,7 @@ use barracuda_event_router::{
 };
 use barracuda_model_api::ModelApi;
 use barracuda_platform_test::{install_global_memory_vfs, memory_vfs, ScriptStep, ScriptedStack};
-use http_client::Client;
+use http_client::ClientFactory;
 use static_cell::StaticCell;
 
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
@@ -202,9 +202,7 @@ data: [DONE]
         let network: &'static ScriptedStack =
             NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[event])]));
         let factory = ModelApiFactory::new(move || {
-            ModelApi::new(Client::from_network_with_buffer_sizes(
-                network, network, 4096, 1024,
-            ))
+            ModelApi::new(ClientFactory::from_network(network, network))
         });
         let (runtime, service) = AgentRuntime::new(
             memory_vfs().await.expect("memory VFS mounts"),

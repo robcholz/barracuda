@@ -15,6 +15,7 @@ use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::{InitError, ModelApiConfig, ModelApiFactory};
 use barracuda_vfs::ScopedVfs;
 use futures_channel::oneshot;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use barracuda_agent::{AgentCreateError, AgentManagerError, ApiPurpose, SharedApiManager};
 use barracuda_agent_session::{
@@ -87,18 +88,22 @@ impl Future for RuntimeService {
 impl RuntimeControl {
     /// Build a control handle and its service future without starting an
     /// executor or allocating an OS thread.
-    pub(crate) fn new(
+    pub(crate) fn new<Tcp, Resolver>(
         filesystem: ScopedVfs,
         storage: RuntimeStorageConfig,
-        llm_factory: ModelApiFactory,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
         tool_groups: Vec<ToolGroup>,
         tool_lifecycle: Arc<ToolLifecycle>,
-    ) -> (Self, RuntimeService) {
+    ) -> (Self, RuntimeService)
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         let (commands, command_rx) = async_channel::unbounded();
         let api_manager = SharedApiManager::default();
         let worker_api_manager = Arc::clone(&api_manager);
         let future = Box::pin(async move {
-            let initialized: Result<RuntimeWorker, RuntimeError> = async {
+            let initialized: Result<RuntimeWorker<Tcp, Resolver>, RuntimeError> = async {
                 let persistence: SharedPersistence = Arc::new(
                     Persistence::new(filesystem.clone(), storage.persistence_root.clone()).await?,
                 );

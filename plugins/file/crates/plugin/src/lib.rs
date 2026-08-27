@@ -11,7 +11,10 @@ use alloc::rc::Rc;
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_plugin_manager::{Plugin, PluginContext, PluginResult};
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{
+    Plugin, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
+};
 use barracuda_vfs::{FsError, Metadata, ScopedVfs};
 
 pub use rpc::{
@@ -21,14 +24,14 @@ pub use rpc::{
 /// Stable identity of the File Plugin.
 pub const PLUGIN_ID: &str = "file";
 
-/// Cloneable API for files in the System-owned `/system` namespace.
+/// Cloneable API for files in the File Plugin's private namespace.
 #[derive(Clone)]
 pub struct FileSystem {
     filesystem: ScopedVfs,
 }
 
 impl FileSystem {
-    /// Creates a capability over a System-scoped VFS view.
+    /// Creates a capability over a Plugin-scoped VFS view.
     #[must_use]
     pub const fn new(filesystem: ScopedVfs) -> Self {
         Self { filesystem }
@@ -67,35 +70,39 @@ impl FileSystem {
         self.filesystem.remove(path).await
     }
 
-    /// Renames a path within the System filesystem.
+    /// Renames a path within the File Plugin's private filesystem.
     pub async fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
         self.filesystem.rename(from, to).await
     }
 }
 
 /// Plugin that publishes [`FileSystem`] and exposes its RPC harness.
-pub struct FilePlugin {
-    filesystem: ScopedVfs,
-}
+pub struct FilePlugin;
 
 impl FilePlugin {
-    /// Creates the Plugin with a view rooted at `/system`.
+    /// Creates the Plugin from shared System construction resources.
     #[must_use]
-    pub const fn new(filesystem: ScopedVfs) -> Self {
-        Self { filesystem }
+    pub const fn new(_context: &PluginContext) -> Self {
+        Self
     }
 }
 
 impl<const M: usize> Plugin<M> for FilePlugin {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
     fn id(&self) -> &'static str {
         PLUGIN_ID
     }
 
-    fn register<Storage>(&mut self, context: &mut PluginContext<'_, M, Storage>) -> PluginResult<()>
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, M, Storage>,
+    ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let filesystem = Rc::new(FileSystem::new(self.filesystem.clone()));
+        let filesystem = Rc::new(FileSystem::new(context.filesystem()?.clone()));
         context.provide(Rc::clone(&filesystem))?;
         context.event_router.load(FileComponent { filesystem })?;
         Ok(())

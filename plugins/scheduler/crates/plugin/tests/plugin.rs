@@ -4,6 +4,7 @@
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
+use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginRegisterError};
 use barracuda_scheduler_plugin::{PLUGIN_ID, SchedulerPlugin};
 use barracuda_time_plugin::TimePlugin;
@@ -23,7 +24,9 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
             .await
             .expect("install global test VFS");
         let mut router = EventRouter::new(lanes).await.expect("create router");
-        let scheduler = || SchedulerPlugin;
+        let stack = never_embassy_stack();
+        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let scheduler = || SchedulerPlugin::new(&context);
 
         assert_eq!(Plugin::<512>::id(&scheduler()), "scheduler");
         assert_eq!(
@@ -38,7 +41,7 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
         );
 
         manager
-            .register(&mut router, TimePlugin::new(never_embassy_stack()))
+            .register(&mut router, TimePlugin::new(&context))
             .expect("register Time Plugin");
         manager
             .register(&mut router, scheduler())

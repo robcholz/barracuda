@@ -10,8 +10,8 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginError, PluginFilesystem, PluginManager, PluginRequirements,
-    PluginResult, PluginStorage, PluginVfs,
+    Plugin, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
+    PluginRequirements, PluginResult, PluginStorage, PluginVfs,
 };
 use barracuda_vfs::{MountOptions, Vfs};
 use futures_lite::future::block_on;
@@ -61,7 +61,7 @@ impl Plugin<FRAME_SIZE> for FilesystemPlugin {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: PluginStorage,
@@ -82,7 +82,7 @@ impl Plugin<FRAME_SIZE> for KvOnlyPlugin {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: PluginStorage,

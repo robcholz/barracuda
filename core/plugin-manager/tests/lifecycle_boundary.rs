@@ -11,6 +11,8 @@ fn component_loading_is_explicitly_registration_only() {
 
     assert!(source.contains("pub struct PluginEventRouterContext"));
     assert!(source.contains("pub event_router: PluginEventRouterContext"));
+    assert!(source.contains("pub struct PluginRegisterContext"));
+    assert!(!source.contains("pub struct PluginContext"));
     assert!(source.contains("pub struct PluginStartContext"));
 
     let start_context = source
@@ -51,12 +53,12 @@ fn embassy_task_spawner_is_available_only_during_startup() {
     .expect("read Plugin lifecycle source");
 
     let register_context = source
-        .split("pub struct PluginContext")
+        .split("pub struct PluginRegisterContext")
         .nth(1)
-        .expect("PluginContext declaration")
+        .expect("PluginRegisterContext declaration")
         .split("impl<const M")
         .next()
-        .expect("PluginContext fields");
+        .expect("PluginRegisterContext fields");
     assert!(!register_context.contains("task_spawner"));
 
     let start_context = source

@@ -11,14 +11,20 @@ use std::time::Duration;
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
+use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{
-    Plugin, PluginContext, PluginManager, PluginResult, PluginStartError,
+    Plugin, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
 };
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin, PLUGIN_ID};
 use embassy_executor::{Executor, Spawner};
 use futures_lite::future::block_on;
 
 const FRAME_SIZE: usize = 64;
+
+fn plugin_context() -> PluginContext {
+    let stack = never_embassy_stack();
+    PluginContext::new(stack, ClientFactory::plaintext(stack))
+}
 
 struct Consumer {
     observed: Rc<RefCell<Option<Rc<WebServer>>>>,
@@ -33,7 +39,7 @@ impl Plugin<FRAME_SIZE> for Consumer {
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -55,7 +61,7 @@ fn plugin_provides_webserver_to_dependent_plugins() {
         barracuda_plugin_manager::PluginId::try_from(PLUGIN_ID).expect("valid WebServer Plugin ID");
 
     manager
-        .register(&mut router, WebServerPlugin::new(never_embassy_stack()))
+        .register(&mut router, WebServerPlugin::new(&plugin_context()))
         .expect("register WebServer Plugin");
     manager
         .register(
@@ -79,7 +85,7 @@ fn plugin_requires_a_system_task_spawner_during_startup() {
     let mut router = block_on(EventRouter::new(lanes)).expect("create router");
 
     manager
-        .register(&mut router, WebServerPlugin::new(never_embassy_stack()))
+        .register(&mut router, WebServerPlugin::new(&plugin_context()))
         .expect("register WebServer Plugin");
 
     let error = manager
@@ -108,7 +114,7 @@ async fn start_webserver_task(spawner: Spawner, completed: SyncSender<Result<(),
 
         manager.install_task_spawner(spawner);
         manager
-            .register(&mut router, WebServerPlugin::new(never_embassy_stack()))
+            .register(&mut router, WebServerPlugin::new(&plugin_context()))
             .map_err(|error| error.to_string())?;
         manager
             .start(&mut router)

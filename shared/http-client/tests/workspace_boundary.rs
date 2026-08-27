@@ -3,13 +3,56 @@
 use std::path::{Path, PathBuf};
 
 #[test]
-fn reqwless_is_owned_only_by_shared_http_client() -> Result<(), std::io::Error> {
+fn shared_http_exposes_a_client_factory() -> Result<(), std::io::Error> {
+    let source = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))?;
+
+    assert!(source.contains("pub struct ClientFactory"));
+    assert!(source.contains("pub fn create("));
+    assert!(!source.contains("pub struct Http"));
+    Ok(())
+}
+
+#[test]
+fn reqwless_clients_are_constructed_only_by_shared_http_client() -> Result<(), std::io::Error> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let owner = root.join("shared/http-client");
     let mut files = Vec::new();
     collect_source_and_manifests(&root, &owner, &mut files)?;
 
     for path in files {
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path)?;
+        for constructor in [
+            "ReqwlessHttpClient::new(",
+            "ReqwlessHttpClient::new_with_tls(",
+            "reqwless::client::HttpClient::new(",
+            "reqwless::client::HttpClient::new_with_tls(",
+        ] {
+            assert!(
+                !source.contains(constructor),
+                "{} constructs a reqwless client outside shared/http-client",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn reqwless_is_owned_only_by_transport_crates() -> Result<(), std::io::Error> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let owner = root.join("shared/http-client");
+    let agent_transport = root.join("plugins/agent/crates/model-api");
+    let gateway_transport = root.join("plugins/imessage-gateway/crates/http");
+    let mut files = Vec::new();
+    collect_source_and_manifests(&root, &owner, &mut files)?;
+
+    for path in files {
+        if path.starts_with(&agent_transport) || path.starts_with(&gateway_transport) {
+            continue;
+        }
         let source = std::fs::read_to_string(&path)?;
         let leaks_implementation = match path.file_name().and_then(|name| name.to_str()) {
             Some("Cargo.toml") => source.lines().any(|line| {
@@ -20,8 +63,65 @@ fn reqwless_is_owned_only_by_shared_http_client() -> Result<(), std::io::Error> 
         };
         assert!(
             !leaks_implementation,
-            "{} bypasses shared/http-client and imports reqwless directly",
+            "{} imports reqwless outside an owning transport crate",
             path.display()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn workspace_contains_no_removed_http_backend_trait() -> Result<(), std::io::Error> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let owner = root.join("shared/http-client");
+    let mut files = Vec::new();
+    collect_source_and_manifests(&root, &owner, &mut files)?;
+
+    for path in files {
+        if path.extension().is_none_or(|extension| extension != "rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path)?;
+        assert!(
+            !source.contains("dyn HttpClient")
+                && !source.contains("impl HttpClient")
+                && !source.contains("http_client::HttpClient"),
+            "{} depends on the removed shared HTTP backend trait",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn shared_http_client_contains_no_agent_transport_policy() -> Result<(), std::io::Error> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = std::fs::read_to_string(manifest_dir.join("Cargo.toml"))?;
+    for dependency in [
+        "barracuda-runtime-utils",
+        "embassy-sync",
+        "futures-core",
+        "futures-lite",
+        "ouroboros",
+    ] {
+        assert!(
+            !manifest.contains(dependency),
+            "shared/http-client must not own Agent transport dependency {dependency}"
+        );
+    }
+
+    let source = std::fs::read_to_string(manifest_dir.join("src/lib.rs"))?;
+    for policy_type in [
+        "Body",
+        "Backend",
+        "HttpFuture",
+        "RequestBuilder",
+        "ResponsePart",
+        "ResponseStream",
+    ] {
+        assert!(
+            !source.contains(policy_type),
+            "shared/http-client must not expose Agent transport type {policy_type}"
         );
     }
     Ok(())

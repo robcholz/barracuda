@@ -22,6 +22,7 @@ use barracuda_agent_tool::{
 use barracuda_model_api::{ChatRequest, ModelApiFactory, RetryPolicy, ToolCall};
 use barracuda_runtime_utils::{Cancel, CancellationFlag};
 use futures_lite::StreamExt as _;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -48,13 +49,24 @@ enum ResolutionDecision {
     Other,
 }
 
-pub(crate) struct LlmApprovalResolver {
+pub(crate) struct LlmApprovalResolver<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     api_manager: SharedApiManager,
-    llm_factory: ModelApiFactory,
+    llm_factory: ModelApiFactory<Tcp, Resolver>,
 }
 
-impl LlmApprovalResolver {
-    pub(crate) fn new(api_manager: SharedApiManager, llm_factory: ModelApiFactory) -> Self {
+impl<Tcp, Resolver> LlmApprovalResolver<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    pub(crate) fn new(
+        api_manager: SharedApiManager,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> Self {
         Self {
             api_manager,
             llm_factory,
@@ -62,7 +74,11 @@ impl LlmApprovalResolver {
     }
 }
 
-impl ApprovalResolver for LlmApprovalResolver {
+impl<Tcp, Resolver> ApprovalResolver for LlmApprovalResolver<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     async fn resolve(
         self: Rc<Self>,
         tool_call: ToolCall,
@@ -155,14 +171,12 @@ impl ToolHandler for ResolvePermissionReplyTool {
 
 async fn resolve_permission_reply(
     api_manager: &SharedApiManager,
-    llm_factory: &ModelApiFactory,
+    llm_factory: &ModelApiFactory<impl TcpConnect + 'static, impl Dns + 'static>,
     tool_call: &ToolCall,
     reason: &str,
     user_reply: &str,
     cancelled: &CancellationFlag,
-) -> Result<ApprovalDecision, ApprovalResolverError>
-where
-{
+) -> Result<ApprovalDecision, ApprovalResolverError> {
     let mut llm = llm_factory.create();
     if let Some(config) = api_manager.borrow().get_api(ApiPurpose::RootAgent) {
         llm.set_config(config)?;

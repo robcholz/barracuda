@@ -6,8 +6,8 @@ extern crate alloc;
 use alloc::{
     boxed::Box,
     format,
-    rc::Rc,
     string::{String, ToString},
+    vec::Vec,
 };
 use core::cell::Cell;
 
@@ -16,7 +16,8 @@ use gateway::{
     ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
     TextBody,
 };
-use http_client::{HttpClient, Request as HttpRequest, Response};
+use gateway_http::{Method, Response};
+use http_client::ClientFactory;
 use serde_json::{json, Value};
 
 const DEFAULT_API_BASE: &str = "https://ilinkai.weixin.qq.com";
@@ -47,16 +48,20 @@ impl WechatConfig {
 }
 
 /// Outbound WeChat provider backed by the iLink bot API.
-pub struct Wechat {
-    http: Rc<dyn HttpClient>,
+pub struct Wechat<'net, T = http_client::Tcp, D = http_client::Resolver> {
+    http_clients: ClientFactory<'net, T, D>,
     config: WechatConfig,
     next_client_id: Cell<u64>,
 }
 
-impl Wechat {
-    pub fn new(http: Rc<dyn HttpClient>, config: WechatConfig) -> Self {
+impl<'net, T, D> Wechat<'net, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+{
+    pub fn new(http_clients: ClientFactory<'net, T, D>, config: WechatConfig) -> Self {
         Self {
-            http,
+            http_clients,
             config,
             next_client_id: Cell::new(0),
         }
@@ -130,30 +135,36 @@ impl Wechat {
         let bytes = serde_json::to_vec(&payload).map_err(|error| ChannelError::InvalidRequest {
             message: error.to_string(),
         })?;
-        let mut request = HttpRequest::post(format!(
+        let url = format!(
             "{}/ilink/bot/sendmessage",
             self.config.api_base.trim_end_matches('/')
-        ))
-        .content_type("application/json")
-        .header("iLink-App-Id", self.config.app_id.clone())
-        .header(
-            "iLink-App-ClientVersion",
-            self.config.client_version.clone(),
-        )
-        .header("X-WECHAT-UIN", self.config.x_wechat_uin.clone())
-        .header("AuthorizationType", "ilink_bot_token")
-        .header("Authorization", format!("Bearer {}", self.config.token))
-        .bytes(bytes);
+        );
+        let authorization = format!("Bearer {}", self.config.token);
+        let mut headers = Vec::from([
+            ("Content-Type", "application/json"),
+            ("iLink-App-Id", self.config.app_id.as_str()),
+            (
+                "iLink-App-ClientVersion",
+                self.config.client_version.as_str(),
+            ),
+            ("X-WECHAT-UIN", self.config.x_wechat_uin.as_str()),
+            ("AuthorizationType", "ilink_bot_token"),
+            ("Authorization", authorization.as_str()),
+        ]);
         if let Some(route_tag) = &self.config.route_tag {
-            request = request.header("SKRouteTag", route_tag.clone());
+            headers.push(("SKRouteTag", route_tag));
         }
-        let response =
-            self.http
-                .execute(request)
-                .await
-                .map_err(|error| ChannelError::Transport {
-                    message: error.to_string(),
-                })?;
+        let response = gateway_http::send(
+            &self.http_clients,
+            Method::POST,
+            &url,
+            &headers,
+            bytes.as_slice(),
+        )
+        .await
+        .map_err(|error| ChannelError::Transport {
+            message: error.to_string(),
+        })?;
         parse_response(response)?;
         Ok(SendReceipt::new(client_id))
     }
@@ -172,7 +183,11 @@ impl Wechat {
     }
 }
 
-impl MessageChannel for Wechat {
+impl<T, D> MessageChannel for Wechat<'static, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect + 'static,
+    D: http_client::embedded_nal_async::Dns + 'static,
+{
     fn channel(&self) -> &str {
         "wechat"
     }

@@ -15,15 +15,10 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
-    assert!(system.contains("mount(\"/\", backend.clone(), MountOptions::read_write())"));
-    assert!(system.contains("create_dir_all(\"/system/.builtin/skills\")"));
-    assert!(system.contains("\"/system/skills\","));
-    assert!(system.contains("\"/system/.builtin/skills\","));
+    assert!(system.contains("mount(\"/\", backend, MountOptions::read_write())"));
     assert!(system.contains("EventRouter::new(lanes)"));
     assert!(!system.contains("filesystem.scoped(\"/system/event-router\")"));
-    assert!(system.contains("let namespace = global_namespace().await"));
-    assert!(system.contains("plugins.install_vfs(namespace.clone())"));
-    assert!(system.contains("FilePlugin::new(namespace.scoped(\"/system\")?)"));
+    assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
     assert!(!system.contains("StorageNotConstructed"));
     let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;
     assert!(resources.contains("SYSTEM_PARTITION: &str = \"system\""));
@@ -33,6 +28,43 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(!application.contains("mod selected"));
     assert!(!application.contains("SelectedPlatform::initialize"));
     assert!(!system.contains("P::initialize(spawner, board)"));
+    Ok(())
+}
+
+#[test]
+fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let plugin_api = std::fs::read_to_string(root.join("core/plugin-api/src/lib.rs"))?;
+    let system = std::fs::read_to_string(root.join("core/system/src/lib.rs"))?;
+
+    assert!(plugin_api.contains("pub struct PluginContext"));
+    assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
+    assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
+    assert!(system.contains("let plugin_context = PluginContext"));
+
+    for plugin in [
+        "FilePlugin",
+        "WebServerPlugin",
+        "VmPlugin",
+        "TimePlugin",
+        "SchedulerPlugin",
+        "AgentPlugin",
+        "CaptivePortalPlugin",
+        "IMessageGatewayPlugin",
+        "IMessageBlueBubblePlugin",
+        "IMessageInkboxPlugin",
+        "IMessageQQPlugin",
+        "IMessageTelegramPlugin",
+        "IMessageWechatPlugin",
+        "IMessageWebPlugin",
+        "GatewayAgentPlugin",
+    ] {
+        assert!(
+            system.contains(&format!("{plugin}::new(&plugin_context)")),
+            "{plugin} is not constructed from the shared PluginContext",
+        );
+    }
+
     Ok(())
 }
 

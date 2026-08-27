@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-imessage-inkbox-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "IMessage Inkbox provider Plugin"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
+gateway = { path = "../../../imessage-gateway/crates/gateway" }
+http-client = { path = "../../../../shared/http-client" }
+inkbox = { path = "../provider" }
+log = "0.4"
+serde = { version = "1", default-features = false, features = ["derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

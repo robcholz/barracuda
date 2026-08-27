@@ -16,4 +16,4 @@ methods are unary and carry `#[rpc_dynamic]` metadata.
 - Errors: `InvalidRequest`, `NotFound`, `PermissionDenied`, `TooLarge`, `Io`
 
 Paths are UTF-8 and at most 255 bytes. They resolve inside the File Plugin's
-`/system` scope; `/skills/...` therefore reaches the mounted skills alias.
+private filesystem namespace and cannot escape into another Plugin's files.

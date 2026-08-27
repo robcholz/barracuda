@@ -6,18 +6,18 @@ extern crate alloc;
 use alloc::{
     boxed::Box,
     format,
-    rc::Rc,
     string::{String, ToString},
 };
 use core::cell::Cell;
 
 use futures_lite::StreamExt as _;
 use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
+    ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SetTypingRequest, TextBody,
+    SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use http_client::{Body, BodyError, HttpClient, Multipart, Request as HttpRequest, Response};
+use gateway_http::{Method, Multipart, RequestBody, Response};
+use http_client::ClientFactory;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
 
@@ -51,16 +51,20 @@ impl BlueBubblesConfig {
 }
 
 /// Outbound iMessage provider backed by a BlueBubbles server.
-pub struct BlueBubbles {
-    http: Rc<dyn HttpClient>,
+pub struct BlueBubbles<'net, T = http_client::Tcp, D = http_client::Resolver> {
+    http_clients: ClientFactory<'net, T, D>,
     config: BlueBubblesConfig,
     next_local_id: Cell<u64>,
 }
 
-impl BlueBubbles {
-    pub fn new(http: Rc<dyn HttpClient>, config: BlueBubblesConfig) -> Self {
+impl<'net, T, D> BlueBubbles<'net, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect,
+    D: http_client::embedded_nal_async::Dns,
+{
+    pub fn new(http_clients: ClientFactory<'net, T, D>, config: BlueBubblesConfig) -> Self {
         Self {
-            http,
+            http_clients,
             config,
             next_local_id: Cell::new(0),
         }
@@ -85,14 +89,18 @@ impl BlueBubbles {
         )
     }
 
-    async fn call(&self, request: HttpRequest) -> Result<Value, ChannelError> {
-        let response =
-            self.http
-                .execute(request)
-                .await
-                .map_err(|error| ChannelError::Transport {
-                    message: error.to_string(),
-                })?;
+    async fn call<B: RequestBody>(
+        &self,
+        method: Method,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: B,
+    ) -> Result<Value, ChannelError> {
+        let response = gateway_http::send(&self.http_clients, method, url, headers, body)
+            .await
+            .map_err(|error| ChannelError::Transport {
+                message: error.to_string(),
+            })?;
         parse_response(response)
     }
 
@@ -101,9 +109,10 @@ impl BlueBubbles {
             message: error.to_string(),
         })?;
         self.call(
-            HttpRequest::post(self.endpoint(path))
-                .content_type("application/json")
-                .bytes(bytes),
+            Method::POST,
+            &self.endpoint(path),
+            &[("Content-Type", "application/json")],
+            bytes.as_slice(),
         )
         .await
     }
@@ -249,25 +258,25 @@ impl BlueBubbles {
         if let Some(reply_to) = request.reply_to {
             multipart = multipart.text("selectedMessageGuid", reply_to);
         }
-        multipart = multipart.file(
-            "attachment",
-            filename,
-            mime_type,
-            map_binary_body(request.body),
-        );
+        multipart = multipart.file("attachment", filename, mime_type, request.body);
         let (content_type, body) =
             multipart
                 .finish()
                 .map_err(|error| ChannelError::InvalidRequest {
                     message: error.to_string(),
                 })?;
+        let body_probe = body.clone();
         let root = self
             .call(
-                HttpRequest::post(self.endpoint("message/attachment"))
-                    .content_type(content_type)
-                    .body(body),
+                Method::POST,
+                &self.endpoint("message/attachment"),
+                &[("Content-Type", content_type.as_str())],
+                body,
             )
             .await?;
+        if let Some(message) = body_probe.failure() {
+            return Err(ChannelError::Stream(StreamError::failed(message)));
+        }
         receipt_from_response(&root, Some(temp_guid))
     }
 
@@ -280,7 +289,11 @@ impl BlueBubbles {
     }
 }
 
-impl MessageChannel for BlueBubbles {
+impl<T, D> MessageChannel for BlueBubbles<'static, T, D>
+where
+    T: http_client::embedded_nal_async::TcpConnect + 'static,
+    D: http_client::embedded_nal_async::Dns + 'static,
+{
     fn channel(&self) -> &str {
         "imessage"
     }
@@ -349,12 +362,13 @@ impl MessageChannel for BlueBubbles {
         Box::pin(async move {
             self.require_private_api(Operation::SetTyping)?;
             let path = format!("chat/{}/typing", encode(&request.target.conversation_id));
-            let http_request = if request.typing {
-                HttpRequest::post(self.endpoint(&path))
+            let method = if request.typing {
+                Method::POST
             } else {
-                HttpRequest::delete(self.endpoint(&path))
+                Method::DELETE
             };
-            self.call(http_request).await?;
+            self.call(method, &self.endpoint(&path), &[], &[][..])
+                .await?;
             Ok(())
         })
     }
@@ -380,17 +394,6 @@ fn insert_json_field(root: &mut Value, key: &str, value: Value) -> Result<(), Ch
 
 fn encode(value: &str) -> String {
     utf8_percent_encode(value, URL_COMPONENT).to_string()
-}
-
-fn map_binary_body(body: BinaryBody) -> Body {
-    match body {
-        BinaryBody::Bytes(bytes) => Body::Bytes(bytes),
-        BinaryBody::Stream(stream) => {
-            Body::stream(Box::pin(stream.map(|chunk| {
-                chunk.map_err(|error| BodyError::failed(error.to_string()))
-            })))
-        }
-    }
 }
 
 const fn default_mime(kind: MediaKind) -> &'static str {

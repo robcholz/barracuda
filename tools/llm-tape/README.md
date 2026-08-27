@@ -30,7 +30,7 @@ Start the recorder with the real provider as its upstream:
 uv run --package llm-tape llm-tape record \
   --listen 0.0.0.0:8787 \
   --upstream https://api.anthropic.com \
-  --output plugins/agent/bench/tapes/run.jsonl
+  --output bench/tapes/run.jsonl
 ```
 
 Point the agent at the recorder. An agent running on another machine or device
@@ -55,7 +55,7 @@ stores the request body or authentication header values.
 ```bash
 uv run --package llm-tape llm-tape replay \
   --listen 0.0.0.0:8787 \
-  plugins/agent/bench/tapes/run.jsonl
+  bench/tapes/run.jsonl
 ```
 
 Point the agent at the replay server using the same base URL. Incoming requests
@@ -81,7 +81,7 @@ timestamp of every recorded or replayed byte chunk:
 uv run --package llm-tape llm-tape replay \
   --log-level DEBUG \
   --listen 0.0.0.0:8787 \
-  plugins/agent/bench/tapes/run.jsonl
+  bench/tapes/run.jsonl
 ```
 
 ## Tape format
@@ -109,8 +109,8 @@ does not consume a replay interaction.
 ## Verification
 
 ```bash
-uv run --package llm-tape ruff check plugins/agent/tools/llm-tape
-uv run --package llm-tape ruff format --check plugins/agent/tools/llm-tape
+uv run --package llm-tape ruff check tools/llm-tape
+uv run --package llm-tape ruff format --check tools/llm-tape
 uv run --package llm-tape \
-  pytest -c plugins/agent/tools/llm-tape/pyproject.toml plugins/agent/tools/llm-tape/tests
+  pytest -c tools/llm-tape/pyproject.toml tools/llm-tape/tests
 ```

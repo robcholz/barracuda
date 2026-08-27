@@ -9,6 +9,7 @@ use barracuda_agent_skill::SkillRegistry;
 use barracuda_agent_tool::ToolRegistry;
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use barracuda_agent_skill::{FsSkillRegistry, SkillError};
 
@@ -17,7 +18,11 @@ use super::layout::AgentManagerLayout;
 use super::long_term::LongTermDeps;
 use super::AgentManager;
 
-impl AgentManager {
+impl<Tcp, Resolver> AgentManager<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
     /// The manager owns the memory layout below `persistence_dir`: transcripts,
     /// editable profile documents, and long-term memory. All durable stores
     /// explicitly share the supplied filesystem instance.
@@ -33,7 +38,7 @@ impl AgentManager {
         memory_directory: String,
         skill_roots: Vec<String>,
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
     ) -> Result<Self, AgentManagerError> {
         let span = tracing::info_span!("agent.manager");
         let _enter = span.enter();

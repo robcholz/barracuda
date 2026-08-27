@@ -3,6 +3,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use futures_core::Stream;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use barracuda_agent::Message;
 use barracuda_agent::{
@@ -11,7 +12,7 @@ use barracuda_agent::{
     ToolCallId,
 };
 
-pub(super) type AgentSlots = BTreeMap<AgentId, AgentSlot>;
+pub(super) type AgentSlots<Tcp, Resolver> = BTreeMap<AgentId, AgentSlot<Tcp, Resolver>>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InFlightLifecycle {
@@ -21,8 +22,12 @@ enum InFlightLifecycle {
     Reaping,
 }
 
-struct InFlight {
-    stream: AgentStream,
+struct InFlight<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    stream: AgentStream<Tcp, Resolver>,
     control: AgentHandle,
     span: Option<tracing::Span>,
     lifecycle: InFlightLifecycle,
@@ -32,9 +37,13 @@ struct InFlight {
 // `Agent` is intentionally stored inline in its owning slot. Boxing it only to
 // equalize enum variants adds one allocation to every resident Agent.
 #[allow(clippy::large_enum_variant)]
-enum Execution {
-    Resident(Agent),
-    InFlight(InFlight),
+enum Execution<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    Resident(Agent<Tcp, Resolver>),
+    InFlight(InFlight<Tcp, Resolver>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,13 +63,24 @@ pub(super) enum AgentSlotUpdate {
 ///
 /// A resident slot owns the Agent directly. While it is running, the slot owns
 /// the AgentStream and its control capability.
-pub(super) struct AgentSlot {
-    execution: Option<Execution>,
+pub(super) struct AgentSlot<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    execution: Option<Execution<Tcp, Resolver>>,
     reasoning_effort: ReasoningEffortHandle,
 }
 
-impl AgentSlot {
-    pub(super) fn new(agent: Agent, reasoning_effort: ReasoningEffortHandle) -> Self {
+impl<Tcp, Resolver> AgentSlot<Tcp, Resolver>
+where
+    Tcp: TcpConnect + 'static,
+    Resolver: Dns + 'static,
+{
+    pub(super) fn new(
+        agent: Agent<Tcp, Resolver>,
+        reasoning_effort: ReasoningEffortHandle,
+    ) -> Self {
         Self {
             execution: Some(Execution::Resident(agent)),
             reasoning_effort,

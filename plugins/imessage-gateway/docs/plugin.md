@@ -18,3 +18,5 @@ Built-in provider Plugins:
 - `imessage-telegram`
 - `imessage-wechat`
 - `imessage-bluebubble`
+- `imessage-inkbox`
+- `imessage-qq`

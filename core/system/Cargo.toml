@@ -7,9 +7,11 @@ description = "Barracuda system composition root that registers the fixed Plugin
 [features]
 default = []
 tokio = [
+# BEGIN GENERATED PLUGIN FEATURES
     "barracuda-agent-plugin/std",
-    "barracuda-vfs/std",
     "barracuda-webserver-plugin/std",
+# END GENERATED PLUGIN FEATURES
+    "barracuda-vfs/std",
 ]
 
 [lib]
@@ -17,23 +19,31 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-event-router = { path = "../event-router" }
-barracuda-file-plugin = { path = "../../plugins/file/crates/plugin" }
+# BEGIN GENERATED PLUGINS
 barracuda-agent-plugin = { path = "../../plugins/agent/crates/plugin" }
 barracuda-captive-portal-plugin = { path = "../../plugins/captive-portal/crates/plugin" }
+barracuda-file-plugin = { path = "../../plugins/file/crates/plugin" }
 barracuda-gateway-agent-plugin = { path = "../../plugins/gateway-agent/crates/plugin" }
+barracuda-imessage-bluebubble-plugin = { path = "../../plugins/imessage-bluebubble/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "../../plugins/imessage-gateway/crates/plugin" }
+barracuda-imessage-inkbox-plugin = { path = "../../plugins/imessage-inkbox/crates/plugin" }
+barracuda-imessage-qq-plugin = { path = "../../plugins/imessage-qq/crates/plugin" }
+barracuda-imessage-telegram-plugin = { path = "../../plugins/imessage-telegram/crates/plugin" }
 barracuda-imessage-web-plugin = { path = "../../plugins/imessage-web/crates/plugin" }
+barracuda-imessage-wechat-plugin = { path = "../../plugins/imessage-wechat/crates/plugin" }
+barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
+barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
+barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
+barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
+# END GENERATED PLUGINS
+barracuda-plugin-api = { path = "../plugin-api" }
 barracuda-plugin-manager = { path = "../plugin-manager" }
 barracuda-platform = { path = "../../platforms/api" }
 barracuda-target-api = { path = "../../composition/api" }
 barracuda-tls = { path = "../../shared/tls" }
 http-client = { path = "../../shared/http-client", features = ["mbedtls"] }
-barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
-barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
 barracuda-vfs = { path = "../../shared/vfs" }
 barracuda-vfs-littlefs = { path = "../../shared/vfs-littlefs" }
-barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
-barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.5.0"
 embassy-net.workspace = true
@@ -46,6 +56,9 @@ barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
 barracuda-platform-test = { path = "../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
+
+[build-dependencies]
+barracuda-plugin-tool = { path = "../../tools/plugin-tool" }
 
 [lints.rust]
 unsafe_code = "forbid"

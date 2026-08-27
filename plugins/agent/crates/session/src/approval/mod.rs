@@ -15,7 +15,7 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use barracuda_agent_tool::ToolSetError;
-use barracuda_model_api::{ChatError, InitError, ToolCall};
+use barracuda_model_api::{Error as ModelError, InitError, ToolCall};
 use tracing::Instrument as _;
 
 use barracuda_agent::{AgentId, ApprovalDecision, ToolCallId};
@@ -39,7 +39,7 @@ pub(super) trait ApprovalResolver {
     ) -> Result<ApprovalDecision, ApprovalResolverError>;
 }
 
-pub(super) type SharedApprovalResolver = Rc<LlmApprovalResolver>;
+pub(super) type SharedApprovalResolver<Tcp, Resolver> = Rc<LlmApprovalResolver<Tcp, Resolver>>;
 
 struct ApprovalRequest {
     agent: AgentId,
@@ -254,7 +254,7 @@ pub enum ApprovalResolverError {
     #[error(transparent)]
     ToolSet(#[from] ToolSetError),
     #[error(transparent)]
-    Chat(#[from] ChatError),
+    Chat(#[from] ModelError),
     #[error("approval resolver returned a malformed tool call")]
     MalformedToolCall,
 }

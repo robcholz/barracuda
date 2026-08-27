@@ -6,9 +6,10 @@ this as design guidance rather than a prohibition: choose the mechanism that
 best matches the Plugin's ownership, lifecycle, and contract requirements.
 
 System-owned Platform and HAL resources are fixed construction inputs. System
-passes them directly when constructing the concrete Plugin that owns their
-use. `PluginContext` capability lookup is reserved for capabilities published
-by declared Plugin dependencies.
+assembles shared construction resources in `PluginContext` and passes the same
+context reference to every concrete Plugin constructor. Typed capability lookup
+through `PluginRegisterContext` is reserved for capabilities published by
+declared Plugin dependencies.
 
 Communication mechanism and execution ownership are separate decisions. See
 [`execution-ownership.md`](execution-ownership.md) before placing a long-lived

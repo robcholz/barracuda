@@ -16,6 +16,7 @@ use crate::engine::AgentStorage;
 use barracuda_agent_context::{BlockKind, ContextSink};
 use barracuda_agent_memory::{CompactError, Compactor, Transcript, Turn, TurnId};
 use barracuda_model_api::ModelApiFactory;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 use serde_json::Value;
 use tracing::Instrument as _;
 
@@ -87,13 +88,17 @@ impl ConversationHistoryContextProvider {
 
     /// Build the configured LLM-backed conversation projection used by Agent
     /// AgentManager without exposing its compactor implementation or policy type.
-    pub(crate) fn with_llm_compaction(
+    pub(crate) fn with_llm_compaction<Tcp, Resolver>(
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
         trigger_tokens: usize,
         keep_recent_tokens: usize,
         segment_token_budget: usize,
-    ) -> Self {
+    ) -> Self
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         Self::new(
             Box::new(LlmCompactor::new(api_manager, &llm_factory)),
             CompactionPolicy::new(trigger_tokens, keep_recent_tokens, segment_token_budget),

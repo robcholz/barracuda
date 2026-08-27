@@ -5,44 +5,77 @@
     clippy::unwrap_used
 )]
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{boxed::Box, rc::Rc};
 
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{MessageChannel, MessageTarget, SendMessageRequest};
-use http_client::{Body, Error, HttpClient, HttpFuture, Request, Response};
+use http_client::ClientFactory;
 use wechat::{Wechat, WechatConfig};
 
-#[derive(Default)]
-struct MockHttp {
-    requests: RefCell<Vec<Request>>,
-    responses: RefCell<VecDeque<Response>>,
+struct Header {
+    name: String,
+    value: String,
 }
 
-impl MockHttp {
-    fn responding(count: usize) -> Self {
+impl Header {
+    fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            requests: RefCell::new(Vec::new()),
-            responses: RefCell::new(
-                (0..count)
-                    .map(|_| Response {
-                        status: 200,
-                        body: br#"{"ret":0}"#.to_vec(),
-                    })
-                    .collect(),
-            ),
+            name: name.into(),
+            value: value.into(),
         }
     }
 }
 
-impl HttpClient for MockHttp {
-    fn execute(&self, request: Request) -> HttpFuture<'_> {
-        Box::pin(async move {
-            self.requests.borrow_mut().push(request);
-            self.responses
-                .borrow_mut()
-                .pop_front()
-                .ok_or(Error::ConnectionAborted)
-        })
+struct MockHttp {
+    network: &'static ScriptedStack,
+}
+
+impl MockHttp {
+    fn responding(count: usize) -> Self {
+        let steps = (0..count).map(|_| ScriptStep::json(200, r#"{"ret":0}"#));
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
+        }
+    }
+
+    fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
+        ClientFactory::from_network(self.network, self.network)
+    }
+
+    fn requests(&self) -> Vec<RecordedRequest> {
+        self.network
+            .requests()
+            .into_iter()
+            .map(RecordedRequest::parse)
+            .collect()
+    }
+}
+
+struct RecordedRequest {
+    url: String,
+    headers: Vec<Header>,
+    body: Vec<u8>,
+}
+
+impl RecordedRequest {
+    fn parse(raw: String) -> Self {
+        let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((&raw, ""));
+        let mut lines = head.split("\r\n");
+        let url = lines
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or_default()
+            .to_owned();
+        let headers = lines
+            .filter_map(|line| line.split_once(":"))
+            .map(|(name, value)| Header::new(name, value.trim_start()))
+            .collect();
+        Self {
+            url,
+            headers,
+            body: body.as_bytes().to_vec(),
+        }
     }
 }
 
@@ -52,21 +85,21 @@ fn target() -> MessageTarget {
     target
 }
 
-fn body_json(request: &Request) -> serde_json::Value {
-    let Body::Bytes(bytes) = &request.body else {
-        panic!("expected JSON bytes");
-    };
-    serde_json::from_slice(bytes).expect("valid JSON request")
+fn body_json(request: &RecordedRequest) -> serde_json::Value {
+    serde_json::from_slice(&request.body).expect("valid JSON request")
+}
+
+fn config(token: &str) -> WechatConfig {
+    let mut config = WechatConfig::new(token);
+    config.api_base = "http://wechat.test".to_owned();
+    config
 }
 
 #[test]
 fn registers_and_maps_text_to_the_ilink_api() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(1));
-        let channel = Wechat::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            WechatConfig::new("secret-token"),
-        );
+        let channel = Wechat::new(http.factory(), config("secret-token"));
 
         let receipt = channel
             .send_message(SendMessageRequest::text(target(), "hello"))
@@ -75,12 +108,9 @@ fn registers_and_maps_text_to_the_ilink_api() {
 
         assert_eq!(channel.channel(), "wechat");
         assert!(receipt.message_id.starts_with("espwx-"));
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         let request = requests.first().expect("one request");
-        assert_eq!(
-            request.url,
-            "https://ilinkai.weixin.qq.com/ilink/bot/sendmessage"
-        );
+        assert_eq!(request.url, "/ilink/bot/sendmessage");
         assert!(request.headers.iter().any(|header| {
             header.name == "Authorization" && header.value == "Bearer secret-token"
         }));
@@ -99,10 +129,7 @@ fn registers_and_maps_text_to_the_ilink_api() {
 fn buffers_an_async_text_stream_into_one_wechat_message() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(1));
-        let channel = Wechat::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            WechatConfig::new("token"),
-        );
+        let channel = Wechat::new(http.factory(), config("token"));
         let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
 
         channel
@@ -110,7 +137,7 @@ fn buffers_an_async_text_stream_into_one_wechat_message() {
             .await
             .expect("send succeeds");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 1);
         assert_eq!(
             body_json(requests.first().expect("request"))["msg"]["item_list"][0]["text_item"]
@@ -124,10 +151,7 @@ fn buffers_an_async_text_stream_into_one_wechat_message() {
 fn splits_long_text_only_on_utf8_boundaries() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(2));
-        let channel = Wechat::new(
-            Rc::clone(&http) as Rc<dyn HttpClient>,
-            WechatConfig::new("token"),
-        );
+        let channel = Wechat::new(http.factory(), config("token"));
         let text = format!("{}好", "a".repeat(3999));
 
         channel
@@ -135,7 +159,7 @@ fn splits_long_text_only_on_utf8_boundaries() {
             .await
             .expect("send succeeds");
 
-        let requests = http.requests.borrow();
+        let requests = http.requests();
         assert_eq!(requests.len(), 2);
         let first = body_json(requests.first().expect("first"));
         let second = body_json(requests.get(1).expect("second"));

@@ -424,6 +424,7 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-model-api",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "embassy-time",
  "futures-lite",
@@ -439,9 +440,12 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-profile",
+ "barracuda-runtime-utils",
+ "base64 0.22.1",
  "embassy-time",
  "futures-lite",
  "http-client",
+ "serde_json",
 ]
 
 [[package]]
@@ -494,6 +498,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-lite",
+ "http-client",
  "json-validator",
  "log",
  "serde",
@@ -584,6 +589,7 @@ name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "clap",
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",
@@ -596,6 +602,7 @@ dependencies = [
  "barracuda-agent-plugin",
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "embassy-net",
@@ -682,6 +689,7 @@ name = "barracuda-file-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vfs",
  "serde",
@@ -717,6 +725,7 @@ dependencies = [
  "barracuda-gateway-agent-component",
  "barracuda-imessage-gateway-plugin",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "futures-lite",
 ]
@@ -726,10 +735,15 @@ name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "bluebubbles",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -753,9 +767,42 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-imessage-gateway-component",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "futures-lite",
  "gateway",
+]
+
+[[package]]
+name = "barracuda-imessage-inkbox-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
+ "gateway",
+ "http-client",
+ "inkbox",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-imessage-qq-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
+ "gateway",
+ "http-client",
+ "log",
+ "qq",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -763,9 +810,14 @@ name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
  "telegram",
 ]
 
@@ -774,6 +826,7 @@ name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
@@ -785,9 +838,14 @@ name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
  "gateway",
  "http-client",
+ "log",
+ "serde",
+ "serde_json",
  "wechat",
 ]
 
@@ -826,10 +884,14 @@ dependencies = [
  "embassy-futures",
  "embassy-time",
  "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "embedded-nal-async",
  "eventsource-stream",
  "futures-core",
  "futures-lite",
  "http-client",
+ "ouroboros",
+ "reqwless",
  "serde",
  "serde_json",
  "strum 0.28.0",
@@ -976,6 +1038,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-api"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "embassy-net",
+ "http-client",
+]
+
+[[package]]
 name = "barracuda-plugin-manager"
 version = "0.1.0"
 dependencies = [
@@ -989,6 +1060,18 @@ dependencies = [
  "futures-lite",
  "getset",
  "log",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-plugin-tool"
+version = "0.1.0"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap",
+ "dialoguer",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 
@@ -1089,6 +1172,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-scheduler-component",
  "barracuda-time-plugin",
@@ -1105,12 +1189,19 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-file-plugin",
  "barracuda-gateway-agent-plugin",
+ "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
+ "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
+ "barracuda-imessage-wechat-plugin",
  "barracuda-model-api",
  "barracuda-platform",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-plugin-tool",
  "barracuda-scheduler-plugin",
  "barracuda-target-api",
  "barracuda-time-plugin",
@@ -1169,6 +1260,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-time-component",
  "embassy-net",
@@ -1287,6 +1379,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
@@ -1304,6 +1397,7 @@ dependencies = [
  "async-channel",
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "embassy-executor",
  "embassy-futures",
@@ -1502,8 +1596,10 @@ dependencies = [
 name = "bluebubbles"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "percent-encoding",
  "serde_json",
@@ -1674,6 +1770,46 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
 ]
+
+[[package]]
+name = "clap"
+version = "4.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "473c7e07f409a8d772161724aa8db6a765a2532a70f9667eeb7b49d3d02fbdca"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.6.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b48fea5a88e9ae728a2dcbedbfc0e730f7d60da42e1cb049a83c9fb8b789889"
+dependencies = [
+ "anstream",
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d012d2b9d65aca7f18f4d9878a045bc17899bba951561ba5ec3c2ba1eed9a061"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
+]
+
+[[package]]
+name = "clap_lex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "clipboard-win"
@@ -3208,6 +3344,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "gateway-http"
+version = "0.1.0"
+dependencies = [
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "gateway",
+ "http-client",
+ "reqwless",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "gcd"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3528,18 +3677,9 @@ dependencies = [
 name = "http-client"
 version = "0.1.0"
 dependencies = [
- "barracuda-platform-test",
- "barracuda-runtime-utils",
  "embassy-net",
- "embassy-sync 0.7.2",
- "embedded-io 0.7.1",
- "embedded-io-async 0.7.0",
  "embedded-nal-async",
- "futures-core",
- "futures-lite",
- "ouroboros",
  "reqwless",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3652,6 +3792,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "inkbox"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "futures-lite",
+ "gateway",
+ "gateway-http",
+ "http-client",
+ "serde_json",
 ]
 
 [[package]]
@@ -4414,6 +4566,18 @@ dependencies = [
  "syn 2.0.118",
  "version_check",
  "yansi",
+]
+
+[[package]]
+name = "qq"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-test",
+ "futures-lite",
+ "gateway",
+ "gateway-http",
+ "http-client",
+ "serde_json",
 ]
 
 [[package]]
@@ -5268,8 +5432,10 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 name = "telegram"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "serde_json",
 ]
@@ -5751,8 +5917,10 @@ dependencies = [
 name = "wechat"
 version = "0.1.0"
 dependencies = [
+ "barracuda-platform-test",
  "futures-lite",
  "gateway",
+ "gateway-http",
  "http-client",
  "serde_json",
 ]

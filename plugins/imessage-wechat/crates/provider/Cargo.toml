@@ -8,10 +8,12 @@ license = "Apache-2.0"
 [dependencies]
 futures-lite = { version = "2.6.1", default-features = false, features = ["alloc"] }
 gateway = { path = "../../../imessage-gateway/crates/gateway" }
+gateway-http = { path = "../../../imessage-gateway/crates/http" }
 http-client = { path = "../../../../shared/http-client" }
 serde_json = { version = "1.0.145", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 futures-lite = { version = "2.6.1", default-features = true }
 
 [lints.rust]

@@ -54,8 +54,14 @@ plugins/<my-plugin>/
   whether the Plugin also owns an Event Router Component.
 - Put additional implementation crates, such as `wire`, under
   `plugins/<my-plugin>/crates/` beside `plugin`.
-- Register the Plugin directory in the root workspace with
-  `plugins/<my-plugin>/crates/*`.
+- The root workspace discovers `plugins/*/crates/*` automatically. After
+  creating the Plugin, run `cargo plugin sync`; this discovers its package and
+  entry type, then adds it to System. Plugin Manager scans the complete
+  `Plugin::DEPENDS_ON` graph and chooses the registration order at runtime.
+  Never edit the generated Plugin blocks by hand. `barracuda-system` watches
+  `plugins/` from its build script and rejects a stale registry with this same
+  command. The build script deliberately validates rather than rewriting the
+  manifest because Cargo resolves dependencies before running build scripts.
 
 ## Plugin implementation
 
@@ -72,17 +78,18 @@ Give every Plugin a stable `&'static str` identity. In `lib.rs`:
   `PluginStartContext` deliberately cannot load Components or publish
   capabilities, but exposes the System-installed Embassy spawner for starting
   Plugin-owned tasks;
-- use `PluginContext::require` and `provide` for typed cross-Plugin
+- use `PluginRegisterContext::require` and `provide` for typed cross-Plugin
   capabilities;
 - use the Plugin's scoped storage directly when persistent state is needed;
-- retain registration guards with `PluginContext::retain` so unload reverses
+- retain registration guards with `PluginRegisterContext::retain` so unload reverses
   external registrations;
 - never defer capability publication, route registration, or Component loading
   to `start`.
 
-`barracuda-system` first calls `PluginManager::register` for the complete
-Plugin set in dependency order, then calls `PluginManager::start` once. Never
-start one Plugin between registrations. Both lifecycle phases are synchronous:
+`barracuda-system` first adds the complete Plugin set, then calls
+`PluginManager::register_all` so Plugin Manager scans the dependency DAG and
+registers it in dependency order. System calls `PluginManager::start` once
+afterward. Never start one Plugin between registrations. Both lifecycle phases are synchronous:
 `register` atomically mutates the capability and Component graph, while `start`
 synchronously starts owner-managed tasks. Async I/O and long-running work do
 not run inside either lifecycle method. A long-running future belongs in an
@@ -91,10 +98,11 @@ contract. Other service futures run as Plugin-owned Embassy tasks started
 through `PluginStartContext::task_spawner`. Follow
 [execution-ownership.md](../../docs/execution-ownership.md) for this boundary.
 
-The Plugin owns construction and defaults for its Components. The selected
-Platform initializes system capability handles; Plugins obtain their declared
-portable capabilities through the system/Plugin context boundary. A Plugin
-must not receive or construct concrete platform implementations.
+The Plugin owns construction and defaults for its Components. Every Plugin
+constructor receives the shared `PluginContext` assembled by System and takes
+or clones the public semantic handles it owns. The selected Platform initializes
+those handles; a Plugin must not receive or construct concrete Platform
+implementations.
 `barracuda-system` registers the fixed Plugin set and must not assemble
 Component internals.
 

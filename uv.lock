@@ -335,7 +335,7 @@ wheels = [
 [[package]]
 name = "llm-tape"
 version = "0.1.0"
-source = { editable = "plugins/agent/tools/llm-tape" }
+source = { editable = "tools/llm-tape" }
 dependencies = [
     { name = "aiohttp" },
     { name = "loguru" },

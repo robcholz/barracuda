@@ -11,6 +11,7 @@ use barracuda_agent_memory::{LongTermInitError, LongTermMemory, Transcript, Turn
 use barracuda_agent_tool::{Tool, ToolGroup};
 use barracuda_model_api::ModelApiFactory;
 use barracuda_vfs::ScopedVfs;
+use http_client::embedded_nal_async::{Dns, TcpConnect};
 
 use crate::config::SharedApiManager;
 use crate::engine::{ContextProvider, ContextProviderFuture, ContextProviderResult};
@@ -97,10 +98,14 @@ impl LongTermMemoryContextProvider {
     }
 
     /// Build the shared LLM-backed provider constructor used by AgentManager.
-    pub(crate) fn llm_builder(
+    pub(crate) fn llm_builder<Tcp, Resolver>(
         api_manager: SharedApiManager,
-        llm_factory: ModelApiFactory,
-    ) -> Arc<ProviderBuilder> {
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+    ) -> Arc<ProviderBuilder>
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         let extractor = LlmExtractor::shared(api_manager, &llm_factory);
         Arc::new(move |agent, global| Self::new(agent, global, Arc::clone(&extractor)))
     }
