@@ -22,6 +22,7 @@ members = [
     "plugins/imessage-web/crates/*",
     "plugins/gateway-agent/crates/*",
     "plugins/time/crates/*",
+    "plugins/tavily/crates/*",
     "plugins/scheduler/crates/*",
     "plugins/vm/crates/*",
     "plugins/webserver/crates/*",

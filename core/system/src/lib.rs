@@ -31,6 +31,7 @@ use barracuda_plugin_manager::{
 };
 use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_target_api::TargetResources;
+use barracuda_tavily_plugin::TavilyPlugin;
 use barracuda_time_plugin::TimePlugin;
 use barracuda_tls::ClientTls;
 use barracuda_vfs::{global_namespace, mount, FsError, MountOptions};
@@ -130,6 +131,7 @@ where
         plugins.register(&mut router, WebServerPlugin::new(&plugin_context))?;
         plugins.register(&mut router, VmPlugin::new(&plugin_context))?;
         plugins.register(&mut router, TimePlugin::new(&plugin_context))?;
+        plugins.register(&mut router, TavilyPlugin::new(&plugin_context))?;
         plugins.register(&mut router, SchedulerPlugin::new(&plugin_context))?;
         plugins.register(&mut router, AgentPlugin::new(&plugin_context))?;
         plugins.register(&mut router, CaptivePortalPlugin::new(&plugin_context))?;

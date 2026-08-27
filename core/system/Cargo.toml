@@ -34,6 +34,7 @@ barracuda-tls = { path = "../../shared/tls" }
 http-client = { path = "../../shared/http-client", features = ["mbedtls"] }
 barracuda-scheduler-plugin = { path = "../../plugins/scheduler/crates/plugin" }
 barracuda-time-plugin = { path = "../../plugins/time/crates/plugin" }
+barracuda-tavily-plugin = { path = "../../plugins/tavily/crates/plugin" }
 barracuda-vfs = { path = "../../shared/vfs" }
 barracuda-vfs-littlefs = { path = "../../shared/vfs-littlefs" }
 barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
