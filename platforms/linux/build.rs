@@ -80,13 +80,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-changed={}", board_path.display());
     let board = parse(&fs::read_to_string(board_path)?)?;
     if board.hardware().chip() != "linux" {
-        render_layout(
-            &mut generated,
-            FileLayoutDocument {
-                capacity: 0,
-                regions: Vec::new(),
-            },
-        );
+        render_inactive_layout(&mut generated);
         render_log_level(&mut generated)?;
         let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
         fs::write(output.join("linux_config.rs"), generated)?;
@@ -102,6 +96,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     fs::write(output.join("linux_config.rs"), generated)?;
     Ok(())
+}
+
+fn render_inactive_layout(generated: &mut String) {
+    generated.push_str(
+        "\nconst BOARD_FILE_REGIONS: &[FileRegion] = &[];\n\
+         /// Inactive projection: the selected Board targets another Platform.\n\
+         pub const BOARD_FILE_LAYOUT: FileLayout = FileLayout::new(0, BOARD_FILE_REGIONS);\n",
+    );
 }
 
 fn render_log_level(generated: &mut String) -> Result<(), Box<dyn Error>> {

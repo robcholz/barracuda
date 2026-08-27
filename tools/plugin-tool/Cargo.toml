@@ -1,21 +1,22 @@
 [package]
-name = "barracuda-board-tool"
+name = "barracuda-plugin-tool"
 version = "0.1.0"
 edition = "2021"
-description = "Workspace command for selecting a Barracuda Board"
-
-[[bin]]
-name = "barracuda-board"
-path = "src/main.rs"
+description = "Barracuda Plugin workspace synchronization tool"
 
 [dependencies]
-barracuda-board-config = { path = "../config" }
+anstream = "1"
+anstyle = "1"
 clap = { version = "4", features = ["derive"] }
-dialoguer = { version = "0.12", default-features = false, features = ["fuzzy-select"] }
+dialoguer = { version = "0.12", default-features = false }
 thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "cargo-plugin"
+path = "src/main.rs"
 
 [lints.rust]
 unsafe_code = "forbid"

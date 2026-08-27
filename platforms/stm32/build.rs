@@ -26,8 +26,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Board bundle directory and Board name differ".into());
     }
     if board.hardware().chip() != "stm32f429zi" {
+        let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
         let mut generated = String::from(
-            "/// Returns the empty projection while the STM32 Platform is inactive.\n\
+            "/// Resolves the inactive STM32 Platform to an empty partition table.\n\
              pub fn board_partition_table(\n\
                  _flash_base: usize,\n\
              ) -> Result<Stm32PartitionTable<0>, LinkerRegionError> {\n\
@@ -35,7 +36,6 @@ fn main() -> Result<(), Box<dyn Error>> {
              }\n",
         );
         render_log_level(&mut generated)?;
-        let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
         fs::write(output.join("stm32_layout.rs"), generated)?;
         return Ok(());
     }

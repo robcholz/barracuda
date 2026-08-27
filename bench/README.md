@@ -1,4 +1,4 @@
-# Host profiling
+# Project profiling and deterministic workloads
 
 Run commands from the repository root.
 
@@ -24,12 +24,26 @@ cargo run --profile profiling -p barracuda-agent-profile -- \
   agent-init target/profiles/custom.dhat.json
 ```
 
-[`barracuda-profile`](../../../shared/profile/) is the shared profiling library;
+Replay every recorded response in the long `overall-capabilities` tape through
+the production OpenAI-compatible streaming parser under DHAT:
+
+```bash
+cargo run --profile profiling -p barracuda-agent-profile -- tape-replay
+```
+
+This scenario deliberately uses seven-byte network reads to expose allocation
+churn at chunk/parser boundaries. The report is written to
+`target/profiles/tape-replay.dhat.json`. Open it in DHAT's viewer and sort
+allocation points by **Total blocks** to find frequent allocate/free sites, or
+by **Total bytes** and **At t-gmax** to find high-volume and peak-live sites.
+The latest checked analysis is in [`results/tape-replay.md`](results/tape-replay.md).
+
+[`barracuda-profile`](../shared/profile/) is the shared profiling library;
 it has no standalone command and is not owned by the Agent component.
 
 ## LLM API byte recording and replay
 
-[`llm-tape`](llm-tape/README.md) is an independent Python reverse proxy for
+[`llm-tape`](../tools/llm-tape/README.md) is an independent Python reverse proxy for
 recording uninterpreted LLM HTTP response chunks and replaying them with their
 original timing. It is intended for deterministic agent trajectory benchmarks;
 it does not parse SSE or model output.
@@ -49,7 +63,7 @@ sections. The command does not calculate a delta against an older build.
 ## Stack usage
 
 Run Clippy's static stack-frame estimate with the 4 KiB threshold configured in
-`plugins/agent/bench/clippy.toml`:
+`bench/clippy.toml`:
 
 ```bash
 CLIPPY_CONF_DIR=bench cargo clippy -p barracuda-agent-profile --all-targets -- \
