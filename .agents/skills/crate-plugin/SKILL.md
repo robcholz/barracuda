@@ -22,6 +22,7 @@ Create this fixed structure for `<my-plugin>`:
 
 ```text
 plugins/<my-plugin>/
+├── plugin.toml                  # required selection metadata
 ├── crates/
 │   ├── plugin/
 │   │   ├── Cargo.toml
@@ -40,6 +41,10 @@ plugins/<my-plugin>/
 
 - `crates/plugin` is the Plugin implementation crate. Its package name is
   `barracuda-<my-plugin>-plugin`.
+- `plugin.toml` is required and contains one concise, non-empty description of
+  at most 80 characters: `description = "..."`. `cargo plugin select` shows it
+  beside the Plugin name, and discovery fails when the file is missing or
+  invalid.
 - `crates/plugin/src/lib.rs` defines `XxxPlugin` and implements
   `barracuda_plugin_manager::Plugin`.
 - Put a small Component in `crates/plugin/src/component.rs`. Keep a substantial
@@ -55,8 +60,8 @@ plugins/<my-plugin>/
 - Put additional implementation crates, such as `wire`, under
   `plugins/<my-plugin>/crates/` beside `plugin`.
 - The root workspace discovers `plugins/*/crates/*` automatically. After
-  creating the Plugin, run `cargo plugin sync`; this discovers its package and
-  entry type, then adds it to System. Plugin Manager scans the complete
+  creating the Plugin, run `cargo plugin sync`; this discovers its metadata,
+  package, and entry type, then adds it to System. Plugin Manager scans the complete
   `Plugin::DEPENDS_ON` graph and chooses the registration order at runtime.
   Never edit the generated Plugin blocks by hand. `barracuda-system` watches
   `plugins/` from its build script and rejects a stale registry with this same
