@@ -128,6 +128,7 @@ where
         register_plugins!(plugins, router;
             barracuda_agent_plugin::AgentPlugin::new(&plugin_context),
             barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&plugin_context),
+            barracuda_file_plugin::FilePlugin::new(&plugin_context),
             barracuda_gateway_agent_plugin::GatewayAgentPlugin::new(&plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&plugin_context),

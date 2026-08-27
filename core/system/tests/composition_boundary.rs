@@ -43,6 +43,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(system.contains("let plugin_context = PluginContext"));
 
     for plugin in [
+        "FilePlugin",
         "WebServerPlugin",
         "VmPlugin",
         "TimePlugin",
