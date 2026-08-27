@@ -1,0 +1,21 @@
+[package]
+name = "barracuda-plugin-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Plugin workspace synchronization tool"
+
+[[bin]]
+name = "cargo-plugin"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
