@@ -137,7 +137,7 @@ jobs:
         run: uv run --package barracuda-trace pytest
 
       - name: Test llm-tape
-        working-directory: plugins/agent/tools/llm-tape
+        working-directory: tools/llm-tape
         run: uv run --package llm-tape pytest
 
       - name: Test serial-log

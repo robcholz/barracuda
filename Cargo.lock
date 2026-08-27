@@ -440,9 +440,12 @@ dependencies = [
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-profile",
+ "barracuda-runtime-utils",
+ "base64 0.22.1",
  "embassy-time",
  "futures-lite",
  "http-client",
+ "serde_json",
 ]
 
 [[package]]
