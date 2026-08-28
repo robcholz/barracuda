@@ -1,0 +1,3 @@
+name: esp32p4
+crate: barracuda_platform_esp32p4
+type: Esp32P4Platform

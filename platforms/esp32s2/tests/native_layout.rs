@@ -2,39 +2,39 @@
 
 #![allow(clippy::expect_used)]
 
-use barracuda_platform_esp32c6::{Esp32c6RegionAccess, BOARD_ESP32C6_PARTITION_TABLE};
+use barracuda_platform_esp32s2::{Esp32S2RegionAccess, BOARD_ESP32S2_PARTITION_TABLE};
 
 #[test]
 fn native_csv_supplies_the_complete_partition_table() {
-    assert_eq!(BOARD_ESP32C6_PARTITION_TABLE.chip(), "esp32c6");
-    if BOARD_ESP32C6_PARTITION_TABLE.regions().is_empty() {
-        assert_eq!(BOARD_ESP32C6_PARTITION_TABLE.ota_slot_count(), 0);
+    assert_eq!(BOARD_ESP32S2_PARTITION_TABLE.chip(), "esp32s2");
+    if BOARD_ESP32S2_PARTITION_TABLE.regions().is_empty() {
+        assert_eq!(BOARD_ESP32S2_PARTITION_TABLE.ota_slot_count(), 0);
         return;
     }
-    assert_eq!(BOARD_ESP32C6_PARTITION_TABLE.ota_slot_count(), 2);
-    assert_eq!(BOARD_ESP32C6_PARTITION_TABLE.regions().len(), 8);
-    assert!(BOARD_ESP32C6_PARTITION_TABLE.get("nvs").is_some());
-    assert!(BOARD_ESP32C6_PARTITION_TABLE.get("ota_0").is_some());
+    assert_eq!(BOARD_ESP32S2_PARTITION_TABLE.ota_slot_count(), 2);
+    assert_eq!(BOARD_ESP32S2_PARTITION_TABLE.regions().len(), 8);
+    assert!(BOARD_ESP32S2_PARTITION_TABLE.get("nvs").is_some());
+    assert!(BOARD_ESP32S2_PARTITION_TABLE.get("ota_0").is_some());
     assert_eq!(
-        BOARD_ESP32C6_PARTITION_TABLE
+        BOARD_ESP32S2_PARTITION_TABLE
             .get("kv_database")
             .expect("KV database region")
             .offset(),
-        0x42_0000
+        0x2e_0000
     );
     assert_eq!(
-        BOARD_ESP32C6_PARTITION_TABLE
+        BOARD_ESP32S2_PARTITION_TABLE
             .get("system")
             .expect("System region")
             .offset(),
-        0x52_0000
+        0x32_0000
     );
 
-    let assets = BOARD_ESP32C6_PARTITION_TABLE
+    let assets = BOARD_ESP32S2_PARTITION_TABLE
         .get("web_assets")
         .expect("Web asset region");
     assert_eq!(assets.name(), "web_assets");
-    assert_eq!(assets.access(), Esp32c6RegionAccess::ReadOnly);
+    assert_eq!(assets.access(), Esp32S2RegionAccess::ReadOnly);
 }
 
 #[test]

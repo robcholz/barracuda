@@ -1,0 +1,7 @@
+name: esp32p4-function-ev-board
+hardware:
+  chip: esp32p4
+toolchain:
+  target: riscv32imafc-unknown-none-elf
+native-layout:
+  artifact: partitions.csv
