@@ -130,6 +130,7 @@ where
             barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&plugin_context),
             barracuda_file_plugin::FilePlugin::new(&plugin_context),
             barracuda_gateway_agent_plugin::GatewayAgentPlugin::new(&plugin_context),
+            barracuda_http_plugin::HttpPlugin::new(&plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&plugin_context),
             barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&plugin_context),

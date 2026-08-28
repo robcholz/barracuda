@@ -732,6 +732,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-http-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-http-wire",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
+ "http-client",
+ "zerocopy",
+]
+
+[[package]]
+name = "barracuda-http-wire"
+version = "0.1.0"
+dependencies = [
+ "barracuda-rpc",
+ "barracuda-rpc-schema",
+ "schemars",
+ "serde",
+ "zerocopy",
+]
+
+[[package]]
 name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1293,6 +1318,7 @@ dependencies = [
  "barracuda-event-router",
  "barracuda-file-plugin",
  "barracuda-gateway-agent-plugin",
+ "barracuda-http-plugin",
  "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",

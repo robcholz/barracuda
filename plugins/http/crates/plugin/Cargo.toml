@@ -1,0 +1,32 @@
+[package]
+name = "barracuda-http-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Dynamic outbound HTTP RPC Plugin for Barracuda"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-http-wire = { path = "../wire" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+http-client = { path = "../../../../shared/http-client" }
+
+[build-dependencies]
+barracuda-event-router = { path = "../../../../core/event-router", features = ["schema"] }
+barracuda-http-wire = { path = "../wire", features = ["schema"] }
+
+[dev-dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
