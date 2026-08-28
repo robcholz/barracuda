@@ -42,11 +42,31 @@ impl<const N: usize> HttpText<N> {
         Ok(Self(bytes))
     }
 
-    /// Returns the contained string.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        let end = self.0.iter().position(|byte| *byte == 0).unwrap_or(N);
-        core::str::from_utf8(self.0.get(..end).unwrap_or_default()).unwrap_or_default()
+    /// Decodes the canonical UTF-8 C string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HttpTextError::InvalidTerminator`] when the buffer has no NUL
+    /// or has non-zero bytes after the first NUL, or
+    /// [`HttpTextError::InvalidUtf8`] when the bytes before the terminator are
+    /// not UTF-8.
+    pub fn as_str(&self) -> Result<&str, HttpTextError> {
+        let end = self
+            .0
+            .iter()
+            .position(|byte| *byte == 0)
+            .ok_or(HttpTextError::InvalidTerminator)?;
+        if self
+            .0
+            .get(end..)
+            .ok_or(HttpTextError::InvalidTerminator)?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(HttpTextError::InvalidTerminator);
+        }
+        core::str::from_utf8(self.0.get(..end).ok_or(HttpTextError::InvalidTerminator)?)
+            .map_err(|_error| HttpTextError::InvalidUtf8)
     }
 }
 
@@ -57,7 +77,7 @@ impl<const N: usize> Default for HttpText<N> {
 }
 impl<const N: usize> Serialize for HttpText<N> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(self.as_str())
+        serializer.serialize_str(self.as_str().map_err(serde::ser::Error::custom)?)
     }
 }
 impl<'de, const N: usize> Deserialize<'de> for HttpText<N> {
@@ -80,19 +100,25 @@ impl<const N: usize> schemars::JsonSchema for HttpText<N> {
     }
 }
 
-/// Failure constructing fixed HTTP text.
+/// Failure constructing or decoding fixed HTTP text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HttpTextError {
     /// Text exceeds its capacity.
     TooLong,
     /// Text contains a NUL byte.
     EmbeddedNul,
+    /// Wire text is not canonically NUL-terminated.
+    InvalidTerminator,
+    /// Wire text is not valid UTF-8.
+    InvalidUtf8,
 }
 impl fmt::Display for HttpTextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::TooLong => "text exceeds capacity",
             Self::EmbeddedNul => "text contains NUL",
+            Self::InvalidTerminator => "text is not canonically NUL-terminated",
+            Self::InvalidUtf8 => "text is not valid UTF-8",
         })
     }
 }
@@ -164,7 +190,7 @@ pub struct HttpRequest {
     pub method: HttpMethod,
     /// Absolute HTTP or HTTPS URL.
     pub url: HttpText<{ URL_CAPACITY + 1 }>,
-    /// Request headers. Empty-name entries are ignored.
+    /// Request headers. Unused slots are empty name and empty value.
     pub headers: [HttpHeader; HEADER_CAPACITY],
     /// UTF-8 request body; use an empty string when absent.
     pub body: HttpText<{ REQUEST_BODY_CAPACITY + 1 }>,
@@ -214,11 +240,11 @@ impl HttpResponse {
     TryFromBytes,
 )]
 pub enum HttpRpcError {
-    /// URL scheme is unsupported.
+    /// URL scheme is unsupported or the URL text is not canonical UTF-8.
     InvalidUrl,
     /// HTTPS was requested without Platform TLS.
     TlsNotConfigured,
-    /// Header metadata is invalid.
+    /// A header name or value is not legal HTTP.
     InvalidHeader,
     /// Network or HTTP protocol operation failed.
     Transport,
@@ -226,4 +252,58 @@ pub enum HttpRpcError {
     InvalidResponseText,
     /// Response exceeds the fixed buffer.
     ResponseTooLarge,
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use zerocopy::TryFromBytes;
+
+    fn from_bytes<const N: usize>(bytes: [u8; N]) -> HttpText<N> {
+        HttpText::<N>::try_read_from_bytes(&bytes).expect("HttpText accepts every byte pattern")
+    }
+
+    #[test]
+    fn new_accepts_text_with_terminator_space() {
+        let text = HttpText::<8>::new("hello").unwrap();
+        assert_eq!(text.as_str(), Ok("hello"));
+    }
+
+    #[test]
+    fn new_rejects_embedded_nul() {
+        assert_eq!(HttpText::<8>::new("a\0b"), Err(HttpTextError::EmbeddedNul));
+    }
+
+    #[test]
+    fn new_rejects_overflow() {
+        assert_eq!(HttpText::<4>::new("abcd"), Err(HttpTextError::TooLong));
+        assert_eq!(HttpText::<4>::new("abc").unwrap().as_str(), Ok("abc"));
+    }
+
+    #[test]
+    fn as_str_rejects_missing_terminator() {
+        assert_eq!(
+            from_bytes(*b"abcd").as_str(),
+            Err(HttpTextError::InvalidTerminator)
+        );
+    }
+
+    #[test]
+    fn as_str_rejects_nul_followed_by_payload() {
+        assert_eq!(
+            from_bytes([b'a', 0, b'b', 0]).as_str(),
+            Err(HttpTextError::InvalidTerminator)
+        );
+    }
+
+    #[test]
+    fn as_str_rejects_invalid_utf8() {
+        assert_eq!(
+            from_bytes([0xff, 0, 0, 0]).as_str(),
+            Err(HttpTextError::InvalidUtf8)
+        );
+    }
 }
