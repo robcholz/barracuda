@@ -246,6 +246,8 @@ pub enum HttpRpcError {
     TlsNotConfigured,
     /// A header name or value is not legal HTTP.
     InvalidHeader,
+    /// Request body text is not canonical UTF-8.
+    InvalidRequestBody,
     /// Network or HTTP protocol operation failed.
     Transport,
     /// Response body is not UTF-8.
@@ -304,6 +306,22 @@ mod tests {
         assert_eq!(
             from_bytes([0xff, 0, 0, 0]).as_str(),
             Err(HttpTextError::InvalidUtf8)
+        );
+    }
+
+    #[test]
+    fn response_text_accepts_capacity_and_rejects_one_extra_byte() {
+        type ResponseText = HttpText<{ RESPONSE_BODY_CAPACITY + 1 }>;
+        let at_capacity = "a".repeat(RESPONSE_BODY_CAPACITY);
+        assert_eq!(
+            ResponseText::new(&at_capacity)
+                .expect("508-byte body fits")
+                .as_str(),
+            Ok(at_capacity.as_str())
+        );
+        assert_eq!(
+            ResponseText::new(&"a".repeat(RESPONSE_BODY_CAPACITY + 1)),
+            Err(HttpTextError::TooLong)
         );
     }
 }

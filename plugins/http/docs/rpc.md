@@ -27,6 +27,7 @@ Method errors:
 | `InvalidUrl` | The URL text is not canonical UTF-8, or the scheme is not `http`/`https`. |
 | `TlsNotConfigured` | HTTPS was requested without Platform TLS. |
 | `InvalidHeader` | A header name or value is not legal HTTP: empty name with a value, control characters or `:` in the name, CR/LF in the value, or undecodable wire text. |
+| `InvalidRequestBody` | The request body is not canonical UTF-8 wire text. |
 | `Transport` | DNS, TCP, TLS, HTTP, or response-body reading failed. |
 | `InvalidResponseText` | The response body is not UTF-8, or contains a NUL. |
-| `ResponseTooLarge` | The response exceeds the fixed buffer. |
+| `ResponseTooLarge` | The response exceeds the fixed 508-byte buffer. |

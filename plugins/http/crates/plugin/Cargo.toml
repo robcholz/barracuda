@@ -18,6 +18,9 @@ http-client = { path = "../../../../shared/http-client" }
 barracuda-event-router = { path = "../../../../core/event-router", features = ["schema"] }
 barracuda-http-wire = { path = "../wire", features = ["schema"] }
 
+[dev-dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"

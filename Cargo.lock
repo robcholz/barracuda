@@ -742,6 +742,7 @@ dependencies = [
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "http-client",
+ "zerocopy",
 ]
 
 [[package]]

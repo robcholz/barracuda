@@ -84,7 +84,7 @@ async fn execute<T: TcpConnect, D: Dns>(
         return Err(HttpRpcError::InvalidUrl);
     }
     let headers = request_headers(input)?;
-    let body = request_text(&input.body, HttpRpcError::Transport)?;
+    let body = request_text(&input.body, HttpRpcError::InvalidRequestBody)?;
     let (mut client, tls) = clients.create();
     if url.starts_with("https://") && !tls {
         return Err(HttpRpcError::TlsNotConfigured);
@@ -109,30 +109,42 @@ async fn execute<T: TcpConnect, D: Dns>(
         .map_err(|_| HttpRpcError::Transport)?;
     let status = response.status.0;
     let mut reader = response.body().reader();
+    let bytes = collect_response_body(&mut reader).await?;
+    let text = core::str::from_utf8(&bytes).map_err(|_| HttpRpcError::InvalidResponseText)?;
+    Ok(HttpResponse::new(status, response_body(text)?))
+}
+
+async fn collect_response_body<R: embedded_io_async::Read>(
+    reader: &mut R,
+) -> Result<alloc::vec::Vec<u8>, HttpRpcError> {
     let mut bytes = vec![0; RESPONSE_BODY_CAPACITY];
     let mut used = 0;
     loop {
-        let read = embedded_io_async::Read::read(
-            &mut reader,
-            bytes
-                .get_mut(used..)
-                .ok_or(HttpRpcError::ResponseTooLarge)?,
-        )
-        .await
-        .map_err(|_| HttpRpcError::Transport)?;
+        let dest = bytes
+            .get_mut(used..)
+            .ok_or(HttpRpcError::ResponseTooLarge)?;
+        if dest.is_empty() {
+            let mut extra = [0; 1];
+            let more = embedded_io_async::Read::read(reader, &mut extra)
+                .await
+                .map_err(|_| HttpRpcError::Transport)?;
+            if more == 0 {
+                break;
+            }
+            return Err(HttpRpcError::ResponseTooLarge);
+        }
+        let read = embedded_io_async::Read::read(reader, dest)
+            .await
+            .map_err(|_| HttpRpcError::Transport)?;
         if read == 0 {
             break;
         }
         used = used
             .checked_add(read)
             .ok_or(HttpRpcError::ResponseTooLarge)?;
-        if used == RESPONSE_BODY_CAPACITY {
-            return Err(HttpRpcError::ResponseTooLarge);
-        }
     }
-    let text = core::str::from_utf8(bytes.get(..used).ok_or(HttpRpcError::Transport)?)
-        .map_err(|_| HttpRpcError::InvalidResponseText)?;
-    Ok(HttpResponse::new(status, response_body(text)?))
+    bytes.truncate(used);
+    Ok(bytes)
 }
 
 /// Event Router Component serving the dynamic `http.request` RPC.
@@ -173,9 +185,10 @@ mod tests {
         task::{Context, Poll, Waker},
     };
 
-    use barracuda_http_wire::HttpHeader;
+    use barracuda_http_wire::{HttpHeader, REQUEST_BODY_CAPACITY};
     use embedded_io::{ErrorKind, ErrorType};
     use http_client::embedded_nal_async::AddrType;
+    use zerocopy::TryFromBytes;
 
     use super::*;
 
@@ -271,6 +284,30 @@ mod tests {
         }
     }
 
+    struct SliceReader<'a> {
+        remaining: &'a [u8],
+    }
+
+    impl ErrorType for SliceReader<'_> {
+        type Error = ErrorKind;
+    }
+
+    impl embedded_io_async::Read for SliceReader<'_> {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
+            let n = self.remaining.len().min(buf.len());
+            let (src, rest) = self.remaining.split_at(n);
+            let dest = buf.get_mut(..n).ok_or(ErrorKind::Other)?;
+            dest.copy_from_slice(src);
+            self.remaining = rest;
+            Ok(n)
+        }
+    }
+
+    fn collect_now(bytes: &[u8]) -> Result<alloc::vec::Vec<u8>, HttpRpcError> {
+        let mut reader = SliceReader { remaining: bytes };
+        ready(collect_response_body(&mut reader))
+    }
+
     #[test]
     fn unused_header_slots_are_skipped() {
         let request = request_with_headers([HttpHeader::default(), header("Accept", "text/plain")]);
@@ -308,5 +345,35 @@ mod tests {
         let request = request_with_headers([header("X-Test", "a\r\nb"), HttpHeader::default()]);
         assert_eq!(request_headers(&request), Err(HttpRpcError::InvalidHeader));
         assert_eq!(execute_now(&request), Err(HttpRpcError::InvalidHeader));
+    }
+
+    #[test]
+    fn response_body_at_capacity_is_accepted() {
+        let data = alloc::vec![b'a'; RESPONSE_BODY_CAPACITY];
+        let body = collect_now(&data).expect("508-byte body fits");
+        assert_eq!(body.len(), RESPONSE_BODY_CAPACITY);
+    }
+
+    #[test]
+    fn response_body_one_byte_over_capacity_is_too_large() {
+        let data = alloc::vec![b'a'; RESPONSE_BODY_CAPACITY + 1];
+        assert_eq!(collect_now(&data), Err(HttpRpcError::ResponseTooLarge));
+    }
+
+    #[test]
+    fn corrupt_request_body_is_not_transport() {
+        let mut bytes = [0_u8; REQUEST_BODY_CAPACITY + 1];
+        *bytes.first_mut().expect("request body buffer is non-empty") = 0xff;
+        let body =
+            HttpText::try_read_from_bytes(&bytes).expect("HttpText accepts every byte pattern");
+        let request = HttpRequest {
+            method: HttpMethod::Get,
+            url: HttpText::new("http://example.com").unwrap(),
+            headers: [HttpHeader::default(), HttpHeader::default()],
+            body,
+        };
+        let error = execute_now(&request).expect_err("corrupt body is rejected");
+        assert_ne!(error, HttpRpcError::Transport);
+        assert_eq!(error, HttpRpcError::InvalidRequestBody);
     }
 }
