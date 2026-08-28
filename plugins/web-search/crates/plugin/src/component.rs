@@ -5,9 +5,9 @@ use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RpcFrame, RpcHandler, RpcMethod,
     RpcStream, RunContext, Streaming, Unary, UnregisterContext, rpc_dynamic,
 };
-use barracuda_tavily_wire::{
-    CONTENT_CAPACITY, TITLE_CAPACITY, TavilySearchError, TavilySearchRequest, TavilySearchResult,
-    URL_CAPACITY,
+use barracuda_web_search_wire::{
+    CONTENT_CAPACITY, TITLE_CAPACITY, URL_CAPACITY, WebSearchError, WebSearchRequest,
+    WebSearchResult,
 };
 use futures_lite::stream;
 use http_client::ClientFactory;
@@ -25,25 +25,25 @@ pub(crate) struct TavilyConfig {
 }
 
 /// Searches the public web through Tavily.
-pub struct TavilySearch;
+pub struct WebSearch;
 
 #[rpc_dynamic]
-impl RpcMethod for TavilySearch {
-    const ADDRESS: &'static str = "tavily.search";
-    type Request = TavilySearchRequest;
-    type Response = TavilySearchResult;
-    type Error = TavilySearchError;
+impl RpcMethod for WebSearch {
+    const ADDRESS: &'static str = "web_search.search";
+    type Request = WebSearchRequest;
+    type Response = WebSearchResult;
+    type Error = WebSearchError;
     type Input = Unary;
     type Output = Streaming;
 }
 
-/// Event Router Component serving Tavily's Agent-facing RPC.
-pub struct TavilyComponent {
+/// Event Router Component serving the Agent-facing web-search RPC.
+pub struct WebSearchComponent {
     config: Rc<RefCell<Option<TavilyConfig>>>,
     http_clients: ClientFactory<'static>,
 }
 
-impl TavilyComponent {
+impl WebSearchComponent {
     pub(crate) fn new(
         config: Rc<RefCell<Option<TavilyConfig>>>,
         http_clients: ClientFactory<'static>,
@@ -55,9 +55,9 @@ impl TavilyComponent {
     }
 }
 
-impl<const M: usize> Component<M> for TavilyComponent {
+impl<const M: usize> Component<M> for WebSearchComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<TavilySearch, _>(search_handler(
+        context.register_rpc::<WebSearch, _>(search_handler(
             Rc::clone(&self.config),
             self.http_clients.clone(),
         ))
@@ -75,14 +75,14 @@ impl<const M: usize> Component<M> for TavilyComponent {
 fn search_handler(
     config: Rc<RefCell<Option<TavilyConfig>>>,
     http_clients: ClientFactory<'static>,
-) -> impl RpcHandler<TavilySearch> {
-    move |_context, frame: RpcFrame<TavilySearchRequest>| {
+) -> impl RpcHandler<WebSearch> {
+    move |_context, frame: RpcFrame<WebSearchRequest>| {
         let config = config.borrow().clone();
         let http_clients = http_clients.clone();
         async move {
             let outcome = match config {
                 Some(config) => search(&http_clients, &config, &frame).await,
-                None => Err(TavilySearchError::NotConfigured),
+                None => Err(WebSearchError::NotConfigured),
             };
             let items = match outcome {
                 Ok(results) => results.into_iter().map(|result| Ok(Ok(result))).collect(),
@@ -117,16 +117,16 @@ struct ApiResult {
 async fn search(
     http_clients: &ClientFactory<'static>,
     config: &TavilyConfig,
-    frame: &RpcFrame<TavilySearchRequest>,
-) -> Result<Vec<TavilySearchResult>, TavilySearchError> {
+    frame: &RpcFrame<WebSearchRequest>,
+) -> Result<Vec<WebSearchResult>, WebSearchError> {
     let request = frame
         .view()
-        .map_err(|_error| TavilySearchError::InvalidRequest)?;
+        .map_err(|_error| WebSearchError::InvalidRequest)?;
     let query = request
         .query()
-        .map_err(|_error| TavilySearchError::InvalidRequest)?;
+        .map_err(|_error| WebSearchError::InvalidRequest)?;
     if query.trim().is_empty() || !(1..=10).contains(&request.max_results) {
-        return Err(TavilySearchError::InvalidRequest);
+        return Err(WebSearchError::InvalidRequest);
     }
     let body = serde_json::to_vec(&ApiRequest {
         api_key: &config.api_key,
@@ -134,16 +134,16 @@ async fn search(
         search_depth: "advanced",
         max_results: request.max_results,
     })
-    .map_err(|_error| TavilySearchError::InvalidRequest)?;
+    .map_err(|_error| WebSearchError::InvalidRequest)?;
     let url = format!("{}/search", config.api_base.trim_end_matches('/'));
     let (mut client, tls_configured) = http_clients.create();
     if url.starts_with("https://") && !tls_configured {
-        return Err(TavilySearchError::Transport);
+        return Err(WebSearchError::Transport);
     }
     let request = client
         .request(http_client::reqwless::request::Method::POST, &url)
         .await
-        .map_err(|_error| TavilySearchError::Transport)?;
+        .map_err(|_error| WebSearchError::Transport)?;
     let mut header_buffer = vec![0; HEADER_BUFFER_SIZE];
     let mut request = request
         .content_type(http_client::reqwless::headers::ContentType::ApplicationJson)
@@ -151,10 +151,10 @@ async fn search(
     let response = request
         .send(&mut header_buffer)
         .await
-        .map_err(|_error| TavilySearchError::Transport)?;
+        .map_err(|_error| WebSearchError::Transport)?;
     if !(200..300).contains(&response.status.0) {
         log::warn!("Tavily search returned HTTP {}", response.status.0);
-        return Err(TavilySearchError::Service);
+        return Err(WebSearchError::Service);
     }
     let mut reader = response.body().reader();
     let mut read_buffer = vec![0; READ_BUFFER_SIZE];
@@ -162,32 +162,32 @@ async fn search(
     loop {
         let read = embedded_io_async::Read::read(&mut reader, &mut read_buffer)
             .await
-            .map_err(|_error| TavilySearchError::Transport)?;
+            .map_err(|_error| WebSearchError::Transport)?;
         if read == 0 {
             break;
         }
         if bytes.len().saturating_add(read) > MAX_RESPONSE_SIZE {
-            return Err(TavilySearchError::InvalidResponse);
+            return Err(WebSearchError::InvalidResponse);
         }
         bytes.extend_from_slice(
             read_buffer
                 .get(..read)
-                .ok_or(TavilySearchError::InvalidResponse)?,
+                .ok_or(WebSearchError::InvalidResponse)?,
         );
     }
     let response: ApiResponse =
-        serde_json::from_slice(&bytes).map_err(|_error| TavilySearchError::InvalidResponse)?;
+        serde_json::from_slice(&bytes).map_err(|_error| WebSearchError::InvalidResponse)?;
     response
         .results
         .into_iter()
         .map(|result| {
-            TavilySearchResult::new(
+            WebSearchResult::new(
                 truncate(&result.title, TITLE_CAPACITY - 1),
                 truncate(&result.url, URL_CAPACITY - 1),
                 truncate(&result.content, CONTENT_CAPACITY - 1),
                 result.score,
             )
-            .map_err(|_error| TavilySearchError::InvalidResponse)
+            .map_err(|_error| WebSearchError::InvalidResponse)
         })
         .collect()
 }

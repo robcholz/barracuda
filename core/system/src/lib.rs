@@ -138,9 +138,9 @@ where
             barracuda_imessage_web_plugin::IMessageWebPlugin::new(&plugin_context),
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&plugin_context),
-            barracuda_tavily_plugin::TavilyPlugin::new(&plugin_context),
             barracuda_time_plugin::TimePlugin::new(&plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&plugin_context),
+            barracuda_web_search_plugin::WebSearchPlugin::new(&plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&plugin_context),
         );
         // END GENERATED PLUGINS

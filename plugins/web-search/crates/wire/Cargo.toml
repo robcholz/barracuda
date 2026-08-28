@@ -1,8 +1,8 @@
 [package]
-name = "barracuda-tavily-wire"
+name = "barracuda-web-search-wire"
 version = "0.1.0"
 edition = "2024"
-description = "Fixed-layout RPC wire types for the Barracuda Tavily Plugin"
+description = "Fixed-layout RPC wire types for the Barracuda Web Search Plugin"
 license = "Apache-2.0"
 
 [features]

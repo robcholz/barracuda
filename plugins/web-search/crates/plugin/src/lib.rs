@@ -1,4 +1,4 @@
-//! Tavily web-search Plugin with dynamic Agent RPC and HTTP configuration.
+//! Web Search Plugin backed by Tavily with dynamic Agent RPC configuration.
 #![no_std]
 
 extern crate alloc;
@@ -14,27 +14,27 @@ use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse,
     PLUGIN_ID as WEBSERVER_PLUGIN_ID, WebServer,
 };
-use component::{TavilyComponent, TavilyConfig};
+use component::{TavilyConfig, WebSearchComponent};
 use http_client::ClientFactory;
 use serde::Deserialize;
 
-pub use barracuda_tavily_wire::{TavilySearchError, TavilySearchRequest, TavilySearchResult};
-pub use component::TavilySearch;
+pub use barracuda_web_search_wire::{WebSearchError, WebSearchRequest, WebSearchResult};
+pub use component::WebSearch;
 
-/// Stable Tavily Plugin identity.
-pub const PLUGIN_ID: &str = "tavily";
+/// Stable Web Search Plugin identity.
+pub const PLUGIN_ID: &str = "web-search";
 /// HTTP endpoint accepting Tavily credentials.
 pub const CONFIG_API_PATH: &str = "/api/tavily";
 const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_API_BASE: &str = "https://api.tavily.com";
 
-/// Plugin providing Tavily search to Agents through Event Router.
-pub struct TavilyPlugin {
+/// Plugin providing web search to Agents through Event Router.
+pub struct WebSearchPlugin {
     http_clients: ClientFactory<'static>,
 }
 
-impl TavilyPlugin {
-    /// Creates a Tavily Plugin using the shared Platform HTTP service.
+impl WebSearchPlugin {
+    /// Creates a Web Search Plugin using the shared Platform HTTP service.
     #[must_use]
     pub fn new(context: &PluginContext) -> Self {
         Self {
@@ -43,7 +43,7 @@ impl TavilyPlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for TavilyPlugin {
+impl<const M: usize> Plugin<M> for WebSearchPlugin {
     const DEPENDS_ON: &'static [&'static str] = &[WEBSERVER_PLUGIN_ID];
 
     fn id(&self) -> &'static str {
@@ -59,7 +59,7 @@ impl<const M: usize> Plugin<M> for TavilyPlugin {
     {
         let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
         let config = Rc::new(RefCell::new(None));
-        context.event_router.load(TavilyComponent::new(
+        context.event_router.load(WebSearchComponent::new(
             Rc::clone(&config),
             self.http_clients.clone(),
         ))?;
@@ -112,7 +112,7 @@ impl HttpEndpoint for ConfigEndpoint {
                 api_key: request.api_key,
                 api_base: request.api_base,
             }));
-            log::info!("configured Tavily web search");
+            log::info!("configured Tavily provider for web search");
             Self::response(204, b"")
         })
     }
@@ -122,6 +122,13 @@ impl HttpEndpoint for ConfigEndpoint {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use barracuda_event_router::RpcMethod;
+
+    #[test]
+    fn exposes_web_search_identity() {
+        assert_eq!(PLUGIN_ID, "web-search");
+        assert_eq!(WebSearch::ADDRESS, "web_search.search");
+    }
 
     #[test]
     fn config_defaults_to_tavily_api() {

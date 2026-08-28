@@ -1,6 +1,6 @@
-//! Bakes Tavily dynamic RPC schemas.
+//! Bakes Web Search dynamic RPC schemas.
 
-use barracuda_tavily_wire as _;
+use barracuda_web_search_wire as _;
 
 fn main() -> std::io::Result<()> {
     let out = std::env::var_os("OUT_DIR")
