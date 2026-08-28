@@ -1,0 +1,7 @@
+name: m5stack-tough
+hardware:
+  chip: esp32
+toolchain:
+  target: xtensa-esp32-none-elf
+native-layout:
+  artifact: partitions.csv
