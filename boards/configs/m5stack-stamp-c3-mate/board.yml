@@ -1,0 +1,7 @@
+name: m5stack-stamp-c3-mate
+hardware:
+  chip: esp32c3
+toolchain:
+  target: riscv32imc-unknown-none-elf
+native-layout:
+  artifact: partitions.csv

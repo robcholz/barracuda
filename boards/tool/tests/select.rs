@@ -202,6 +202,41 @@ fn normal_cargo_build_reaches_the_selected_target_composition() {
 }
 
 #[test]
+fn repository_board_catalog_ids_are_unique() {
+    let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../boards/configs");
+    let mut ids = Vec::new();
+    for entry in fs::read_dir(&configs).expect("read Board catalog") {
+        let entry = entry.expect("read Board catalog entry");
+        if !entry.file_type().expect("Board entry type").is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .expect("Board directory name is UTF-8");
+        ids.push(name);
+    }
+    ids.sort_unstable();
+    assert!(
+        !ids.is_empty(),
+        "Board catalog under boards/configs must not be empty"
+    );
+
+    let mut normalized = std::collections::BTreeMap::<String, String>::new();
+    for id in ids {
+        let key: String = id
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .collect();
+        assert_eq!(
+            normalized.insert(key, id.clone()),
+            None,
+            "Board catalog ids must stay unique after removing separators; `{id}` collides"
+        );
+    }
+}
+
+#[test]
 fn every_board_consumer_reads_the_persisted_selection() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for relative in [
