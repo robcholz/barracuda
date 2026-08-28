@@ -1,0 +1,7 @@
+name: m5stack-unit-c6l
+hardware:
+  chip: esp32c6
+toolchain:
+  target: riscv32imac-unknown-none-elf
+native-layout:
+  artifact: partitions.csv

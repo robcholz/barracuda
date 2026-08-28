@@ -1,0 +1,36 @@
+[package]
+name = "barracuda-platform-esp32s2"
+version = "0.1.0"
+edition = "2021"
+description = "ESP32-S2 Platform implementation for Barracuda"
+
+[dependencies]
+barracuda-board = { path = "../../boards/api" }
+barracuda-platform = { path = "../api" }
+log.workspace = true
+
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+barracuda-tls = { path = "../../shared/tls" }
+embassy-executor.workspace = true
+embassy-embedded-hal = "0.6.0"
+embassy-net.workspace = true
+embassy-sync = { version = "0.8.0", default-features = false }
+esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32s2"] }
+esp-println = { version = "0.18.0", default-features = false, features = ["esp32s2", "uart", "log-04"] }
+esp-storage = { version = "0.10.0", default-features = false, features = ["esp32s2", "embedded-storage"] }
+
+[build-dependencies]
+barracuda-board-config = { path = "../../boards/config" }
+esp-idf-part = "0.6.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

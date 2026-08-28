@@ -20,10 +20,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let root = manifest.join("../..");
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
-    let default = default_platform(&target_os, &target_arch)?;
+    let target = env::var("TARGET")?;
+    let default = default_platform(&target_os, &target_arch, &target)?;
     let platform_name = env::var("BARRACUDA_PLATFORM").unwrap_or_else(|_| default.into());
     validate_name(&platform_name)?;
-    validate_target(&platform_name, &target_os, &target_arch)?;
+    validate_target(&platform_name, &target_os, &target_arch, &target)?;
 
     let platform_path = root
         .join("platforms")
@@ -54,11 +55,20 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn default_platform(target_os: &str, target_arch: &str) -> Result<&'static str, Box<dyn Error>> {
+fn default_platform(
+    target_os: &str,
+    target_arch: &str,
+    target: &str,
+) -> Result<&'static str, Box<dyn Error>> {
     match (target_os, target_arch) {
         ("macos", _) => Ok("macos"),
         ("linux", _) => Ok("linux"),
-        (_, "riscv32") => Ok("esp32c6"),
+        (_, "xtensa") if target.starts_with("xtensa-esp32s2-") => Ok("esp32s2"),
+        (_, "xtensa") if target.starts_with("xtensa-esp32s3-") => Ok("esp32s3"),
+        (_, "xtensa") if target.starts_with("xtensa-esp32-") => Ok("esp32"),
+        (_, "riscv32") if target.starts_with("riscv32imafc-") => Ok("esp32p4"),
+        (_, "riscv32") if target.starts_with("riscv32imac-") => Ok("esp32c6"),
+        (_, "riscv32") if target.starts_with("riscv32imc-") => Ok("esp32c3"),
         (_, "arm") => Ok("stm32"),
         _ => Err(format!(
             "no Barracuda Platform is registered for OS `{target_os}` and architecture `{target_arch}`"
@@ -67,11 +77,21 @@ fn default_platform(target_os: &str, target_arch: &str) -> Result<&'static str, 
     }
 }
 
-fn validate_target(name: &str, target_os: &str, target_arch: &str) -> Result<(), Box<dyn Error>> {
+fn validate_target(
+    name: &str,
+    target_os: &str,
+    target_arch: &str,
+    target: &str,
+) -> Result<(), Box<dyn Error>> {
     let valid = match name {
         "macos" => target_os == "macos",
         "linux" => target_os == "linux",
-        "esp32c6" => target_arch == "riscv32",
+        "esp32" => target == "xtensa-esp32-none-elf",
+        "esp32s2" => target == "xtensa-esp32s2-none-elf",
+        "esp32s3" => target == "xtensa-esp32s3-none-elf",
+        "esp32c3" => target == "riscv32imc-unknown-none-elf",
+        "esp32c6" => target == "riscv32imac-unknown-none-elf",
+        "esp32p4" => target == "riscv32imafc-unknown-none-elf",
         "stm32" => target_arch == "arm",
         _ => false,
     };
