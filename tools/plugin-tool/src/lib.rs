@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use dialoguer::{console::Style, theme::ColorfulTheme, MultiSelect};
 use serde::Deserialize;
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
@@ -166,9 +166,12 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
 pub fn configure(root: &Path) -> Result<(), CommandError> {
     let plugins = discover(root)?;
     let disabled = read_disabled(root)?;
+    let description_style = Style::new().for_stderr().black().bright();
     let items = plugins
         .iter()
-        .map(|plugin| format!("{} — {}", plugin.directory, plugin.description))
+        .map(|plugin| {
+            format_select_item(&plugin.directory, &plugin.description, &description_style)
+        })
         .collect::<Vec<_>>();
     let defaults = plugins
         .iter()
@@ -187,6 +190,13 @@ pub fn configure(root: &Path) -> Result<(), CommandError> {
         .map(|(_, plugin)| plugin.directory.clone())
         .collect::<Vec<_>>();
     write_disabled(root, &disabled)
+}
+
+fn format_select_item(directory: &str, description: &str, description_style: &Style) -> String {
+    format!(
+        "{directory} {}",
+        description_style.apply_to(format!("— {description}"))
+    )
 }
 
 fn read_disabled(root: &Path) -> Result<Vec<String>, CommandError> {
@@ -451,6 +461,20 @@ mod tests {
         package_name, parse_metadata, plugin_entry, replace_block, sync_with_report, SyncStatus,
         MAX_DESCRIPTION_CHARS,
     };
+
+    #[test]
+    fn renders_plugin_description_in_gray() {
+        let gray = dialoguer::console::Style::new()
+            .black()
+            .bright()
+            .force_styling(true);
+
+        assert_eq!(
+            super::format_select_item("demo", "Demonstrates Plugin discovery.", &gray),
+            "demo \u{1b}[38;5;8m— Demonstrates Plugin discovery.\u{1b}[0m"
+        );
+    }
+
     #[test]
     fn reads_plugin_metadata() {
         assert_eq!(
