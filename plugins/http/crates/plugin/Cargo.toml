@@ -13,7 +13,6 @@ barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 http-client = { path = "../../../../shared/http-client" }
-reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 
 [build-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router", features = ["schema"] }

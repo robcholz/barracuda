@@ -12,8 +12,8 @@ use barracuda_http_wire::{
 use http_client::{
     ClientFactory,
     embedded_nal_async::{Dns, TcpConnect},
+    reqwless::request::{Method, RequestBuilder as _},
 };
-use reqwless::request::{Method, RequestBuilder as _};
 
 const HEADER_BUFFER_SIZE: usize = 16 * 1024;
 
