@@ -6,6 +6,7 @@ use std::{
 };
 
 use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use serde::Deserialize;
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
 const MANIFEST_END: &str = "# END GENERATED PLUGINS";
@@ -14,14 +15,23 @@ const FEATURES_END: &str = "# END GENERATED PLUGIN FEATURES";
 const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
 const SOURCE_END: &str = "// END GENERATED PLUGINS";
 const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
+const PLUGIN_MANIFEST: &str = "plugin.toml";
+const MAX_DESCRIPTION_CHARS: usize = 80;
 
 #[derive(Debug)]
 struct Plugin {
     directory: String,
+    description: String,
     package: String,
     crate_name: String,
     entry: String,
     has_std_feature: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginMetadata {
+    description: String,
 }
 
 /// Whether synchronization changed generated files.
@@ -156,9 +166,9 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
 pub fn configure(root: &Path) -> Result<(), CommandError> {
     let plugins = discover(root)?;
     let disabled = read_disabled(root)?;
-    let names = plugins
+    let items = plugins
         .iter()
-        .map(|plugin| plugin.directory.as_str())
+        .map(|plugin| format!("{} — {}", plugin.directory, plugin.description))
         .collect::<Vec<_>>();
     let defaults = plugins
         .iter()
@@ -166,7 +176,7 @@ pub fn configure(root: &Path) -> Result<(), CommandError> {
         .collect::<Vec<_>>();
     let selected = MultiSelect::with_theme(&ColorfulTheme::default())
         .with_prompt("Select Plugins to enable — Space toggles, Enter saves")
-        .items(&names)
+        .items(&items)
         .defaults(&defaults)
         .interact()
         .map_err(CommandError::Prompt)?;
@@ -242,6 +252,8 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         if !manifest_path.is_file() {
             continue;
         }
+        let metadata_path = entry.path().join(PLUGIN_MANIFEST);
+        let metadata = parse_metadata(&metadata_path, &read(&metadata_path)?)?;
         let package = package_name(&read(&manifest_path)?).ok_or_else(|| {
             CommandError::Metadata(format!(
                 "missing package name in {}",
@@ -257,6 +269,7 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         })?;
         plugins.push(Plugin {
             directory,
+            description: metadata.description,
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
@@ -265,6 +278,32 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
     }
     plugins.sort_by(|left, right| left.directory.cmp(&right.directory));
     Ok(plugins)
+}
+
+fn parse_metadata(path: &Path, contents: &str) -> Result<PluginMetadata, CommandError> {
+    let metadata = toml::from_str::<PluginMetadata>(contents).map_err(|error| {
+        CommandError::Metadata(format!(
+            "invalid Plugin metadata in {}: {error}",
+            path.display()
+        ))
+    })?;
+    let description = metadata.description.trim();
+    let length = description.chars().count();
+    if description.is_empty() {
+        return Err(CommandError::Metadata(format!(
+            "Plugin description in {} must not be empty",
+            path.display()
+        )));
+    }
+    if length > MAX_DESCRIPTION_CHARS {
+        return Err(CommandError::Metadata(format!(
+            "Plugin description in {} is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}",
+            path.display()
+        )));
+    }
+    Ok(PluginMetadata {
+        description: description.to_owned(),
+    })
 }
 
 fn read(path: &Path) -> Result<String, CommandError> {
@@ -408,7 +447,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{package_name, plugin_entry, replace_block, sync_with_report, SyncStatus};
+    use super::{
+        package_name, parse_metadata, plugin_entry, replace_block, sync_with_report, SyncStatus,
+        MAX_DESCRIPTION_CHARS,
+    };
     #[test]
     fn reads_plugin_metadata() {
         assert_eq!(
@@ -419,6 +461,20 @@ mod tests {
             plugin_entry("impl<const M: usize> Plugin<M> for DemoPlugin {\n}"),
             Some(String::from("DemoPlugin"))
         );
+        let metadata = parse_metadata(
+            std::path::Path::new("plugin.toml"),
+            "description = \"A concise description.\"\n",
+        )
+        .expect("valid Plugin metadata");
+        assert_eq!(metadata.description, "A concise description.");
+    }
+
+    #[test]
+    fn rejects_invalid_plugin_descriptions() {
+        let path = std::path::Path::new("plugin.toml");
+        assert!(parse_metadata(path, "description = \"   \"\n").is_err());
+        let long = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
+        assert!(parse_metadata(path, &format!("description = \"{long}\"\n")).is_err());
     }
     #[test]
     fn replaces_an_indented_generated_block() {
@@ -441,6 +497,11 @@ mod tests {
             "[package]\nname = \"barracuda-demo-plugin\"\n",
         )
         .expect("Plugin manifest");
+        fs::write(
+            root.path().join("plugins/demo/plugin.toml"),
+            "description = \"Demonstrates Plugin discovery.\"\n",
+        )
+        .expect("Plugin metadata");
         fs::write(
             plugin.join("src/lib.rs"),
             "impl<const M: usize> Plugin<M> for DemoPlugin {}\n",
