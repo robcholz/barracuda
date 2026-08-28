@@ -8,6 +8,7 @@ description = "Barracuda Plugin workspace synchronization tool"
 anstream = "1"
 anstyle = "1"
 clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
