@@ -20,6 +20,7 @@ use embassy_executor::{Executor, Spawner};
 use futures_lite::future::block_on;
 
 const FRAME_SIZE: usize = 64;
+const EXECUTOR_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 fn plugin_context() -> PluginContext {
     let stack = never_embassy_stack();
@@ -127,14 +128,18 @@ async fn start_webserver_task(spawner: Spawner, completed: SyncSender<Result<(),
 #[test]
 fn plugin_starts_its_embassy_server_task() {
     let (completed, result) = sync_channel(1);
-    std::thread::spawn(move || {
-        let executor = Box::leak(Box::new(Executor::new()));
-        executor.run(|spawner| {
-            spawner
-                .spawn(start_webserver_task(spawner, completed))
-                .expect("spawn WebServer Plugin test");
-        });
-    });
+    std::thread::Builder::new()
+        .name(String::from("webserver-plugin-test"))
+        .stack_size(EXECUTOR_THREAD_STACK_SIZE)
+        .spawn(move || {
+            let executor = Box::leak(Box::new(Executor::new()));
+            executor.run(|spawner| {
+                spawner
+                    .spawn(start_webserver_task(spawner, completed))
+                    .expect("spawn WebServer Plugin test");
+            });
+        })
+        .expect("spawn WebServer Plugin executor thread");
 
     result
         .recv_timeout(Duration::from_secs(5))
