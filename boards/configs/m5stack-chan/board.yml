@@ -1,0 +1,7 @@
+name: m5stack-chan
+hardware:
+  chip: esp32s3
+toolchain:
+  target: xtensa-esp32s3-none-elf
+native-layout:
+  artifact: partitions.csv
