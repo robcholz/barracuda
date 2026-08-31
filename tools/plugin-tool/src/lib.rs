@@ -29,6 +29,12 @@ struct Plugin {
     has_std_feature: bool,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct CascadeDependency {
+    dependent: String,
+    disabled_dependencies: Vec<String>,
+}
+
 /// Whether synchronization changed generated files.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyncStatus {
@@ -249,8 +255,13 @@ pub fn configure(root: &Path) -> Result<(), CommandError> {
         .with_prompt("Select Plugins to enable — Space toggles, Enter saves")
         .items(&items)
         .defaults(&defaults)
+        .report(false)
         .interact()
         .map_err(CommandError::Prompt)?;
+    eprintln!(
+        "{}",
+        format_selection_summary(selected.len(), plugins.len())
+    );
     let disabled = plugins
         .iter()
         .enumerate()
@@ -258,24 +269,35 @@ pub fn configure(root: &Path) -> Result<(), CommandError> {
         .map(|(_, plugin)| plugin.directory.clone())
         .collect::<Vec<_>>();
     let (disabled, cascade_reasons) = cascade_disabled(&plugins, disabled);
-    if !cascade_reasons.is_empty() {
-        let prompt = format!(
-            "{}. Disable the dependent Plugins too?",
-            cascade_reasons.join("; ")
-        );
-        if !Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt(prompt)
+    let accepted = if cascade_reasons.is_empty() {
+        true
+    } else {
+        eprintln!("{}", format_cascade_dependencies(&cascade_reasons));
+        Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Disable these dependent Plugins too?")
             .default(false)
             .interact()
             .map_err(CommandError::Prompt)?
-        {
-            return Ok(());
-        }
-    }
-    write_disabled(root, &disabled)
+    };
+    persist_disabled_selection(root, &disabled, accepted)
 }
 
-fn cascade_disabled(plugins: &[Plugin], mut disabled: Vec<String>) -> (Vec<String>, Vec<String>) {
+fn persist_disabled_selection(
+    root: &Path,
+    disabled: &[String],
+    accepted: bool,
+) -> Result<(), CommandError> {
+    if accepted {
+        write_disabled(root, disabled)
+    } else {
+        Ok(())
+    }
+}
+
+fn cascade_disabled(
+    plugins: &[Plugin],
+    mut disabled: Vec<String>,
+) -> (Vec<String>, Vec<CascadeDependency>) {
     disabled.sort_unstable();
     disabled.dedup();
     let mut reasons = Vec::new();
@@ -289,16 +311,21 @@ fn cascade_disabled(plugins: &[Plugin], mut disabled: Vec<String>) -> (Vec<Strin
             .iter()
             .filter(|plugin| disabled.binary_search(&plugin.directory).is_err())
             .filter_map(|plugin| {
-                plugin
+                let disabled_dependencies = plugin
                     .dependencies
                     .iter()
-                    .find(|dependency| disabled_ids.contains(&dependency.as_str()))
-                    .map(|dependency| {
-                        (
-                            plugin.directory.clone(),
-                            format!("`{}` depends on `{dependency}`", plugin.id),
-                        )
-                    })
+                    .filter(|dependency| disabled_ids.contains(&dependency.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (!disabled_dependencies.is_empty()).then(|| {
+                    (
+                        plugin.directory.clone(),
+                        CascadeDependency {
+                            dependent: plugin.id.clone(),
+                            disabled_dependencies,
+                        },
+                    )
+                })
             })
             .collect::<Vec<_>>();
         if additions.is_empty() {
@@ -312,6 +339,21 @@ fn cascade_disabled(plugins: &[Plugin], mut disabled: Vec<String>) -> (Vec<Strin
         disabled.dedup();
     }
     (disabled, reasons)
+}
+
+fn format_selection_summary(selected: usize, total: usize) -> String {
+    format!("Selected {selected} of {total} Plugins.")
+}
+
+fn format_cascade_dependencies(dependencies: &[CascadeDependency]) -> String {
+    let mut output = String::from("The following enabled Plugins depend on Plugins you disabled:");
+    for dependency in dependencies {
+        output.push_str("\n  ");
+        output.push_str(&dependency.dependent);
+        output.push_str(" → ");
+        output.push_str(&dependency.disabled_dependencies.join(", "));
+    }
+    output
 }
 
 fn format_select_item(directory: &str, description: &str, description_style: &Style) -> String {
@@ -631,8 +673,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        cascade_disabled, info, package_name, parse_metadata, plugin_entry, replace_block,
-        sync_with_report, validate_dependency_graph, Plugin, SyncStatus,
+        cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
+        package_name, parse_metadata, persist_disabled_selection, plugin_entry, replace_block,
+        sync_with_report, validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -739,7 +782,121 @@ mod tests {
         assert_eq!(disabled, ["base", "leaf", "middle"]);
         assert_eq!(
             reasons,
-            ["`middle` depends on `base`", "`leaf` depends on `middle`"]
+            [
+                CascadeDependency {
+                    dependent: String::from("middle"),
+                    disabled_dependencies: vec![String::from("base")],
+                },
+                CascadeDependency {
+                    dependent: String::from("leaf"),
+                    disabled_dependencies: vec![String::from("middle")],
+                },
+            ]
+        );
+        assert_eq!(
+            format_cascade_dependencies(&reasons),
+            "The following enabled Plugins depend on Plugins you disabled:\n  middle → base\n  leaf → middle"
+        );
+    }
+
+    #[test]
+    fn formats_one_dependent_per_line() {
+        let dependencies = [
+            CascadeDependency {
+                dependent: String::from("gpio"),
+                disabled_dependencies: vec![String::from("vm")],
+            },
+            CascadeDependency {
+                dependent: String::from("i2c"),
+                disabled_dependencies: vec![String::from("vm")],
+            },
+        ];
+
+        let output = format_cascade_dependencies(&dependencies);
+
+        assert_eq!(
+            output,
+            "The following enabled Plugins depend on Plugins you disabled:\n  gpio → vm\n  i2c → vm"
+        );
+        assert!(!output.contains(';'));
+    }
+
+    #[test]
+    fn cascade_reports_every_disabled_dependency_in_manifest_order() {
+        let plugins = [
+            plugin("agent", "agent", &[]),
+            plugin("imessage-gateway", "imessage-gateway", &[]),
+            plugin(
+                "gateway-agent",
+                "gateway-agent",
+                &["agent", "imessage-gateway"],
+            ),
+        ];
+
+        let (disabled, reasons) = cascade_disabled(
+            &plugins,
+            vec![String::from("imessage-gateway"), String::from("agent")],
+        );
+
+        assert_eq!(disabled, ["agent", "gateway-agent", "imessage-gateway"]);
+        assert_eq!(
+            reasons,
+            [CascadeDependency {
+                dependent: String::from("gateway-agent"),
+                disabled_dependencies: vec![
+                    String::from("agent"),
+                    String::from("imessage-gateway"),
+                ],
+            }]
+        );
+        assert!(format_cascade_dependencies(&reasons)
+            .ends_with("  gateway-agent → agent, imessage-gateway"));
+    }
+
+    #[test]
+    fn cascade_disabled_is_deduplicated_and_stably_sorted() {
+        let plugins = [
+            plugin("z-dependent", "z-dependent", &["base"]),
+            plugin("base", "base", &[]),
+            plugin("a-dependent", "a-dependent", &["base"]),
+        ];
+
+        let (disabled, reasons) =
+            cascade_disabled(&plugins, vec![String::from("base"), String::from("base")]);
+
+        assert_eq!(disabled, ["a-dependent", "base", "z-dependent"]);
+        assert_eq!(
+            reasons
+                .iter()
+                .map(|reason| reason.dependent.as_str())
+                .collect::<Vec<_>>(),
+            ["z-dependent", "a-dependent"]
+        );
+    }
+
+    #[test]
+    fn selection_summary_is_short_and_omits_descriptions() {
+        let description = "A description that must only appear in the interactive list.";
+
+        let summary = format_selection_summary(19, 20);
+
+        assert_eq!(summary, "Selected 19 of 20 Plugins.");
+        assert!(!summary.contains(description));
+    }
+
+    #[test]
+    fn rejecting_cascade_does_not_modify_disabled_file() {
+        let root = tempdir().expect("temporary root");
+        let path = root.path().join(".barracuda/disabled-plugins");
+        fs::create_dir(root.path().join(".barracuda")).expect("state directory");
+        fs::write(&path, "existing\n").expect("existing disabled state");
+
+        persist_disabled_selection(root.path(), &[String::from("new")], false)
+            .expect("declined selection");
+
+        assert_eq!(
+            fs::read_to_string(path).expect("disabled state"),
+            "existing\n"
         );
     }
 
