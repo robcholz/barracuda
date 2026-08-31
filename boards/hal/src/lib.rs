@@ -5,11 +5,20 @@
 
 #![no_std]
 
+extern crate alloc;
+
 use core::{convert::Infallible, future::Future};
 
 use barracuda_board::Board;
 use embassy_executor::Spawner;
 use embedded_hal::digital::{InputPin, StatefulOutputPin};
+
+mod io;
+
+pub use io::{
+    GpioService, HardwareServices, I2cService, IntoHardwareServices, IoServiceError,
+    IoServiceResult, ServiceFuture, SpiService,
+};
 
 /// Input bias selected while a GPIO operates as a digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -143,6 +152,12 @@ pub struct NoBuiltinCapabilities;
 /// Explicit absence of exposed Board I/O capabilities.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;
+
+impl IntoHardwareServices for NoExposedIo {
+    fn into_hardware_services(self) -> HardwareServices {
+        HardwareServices::new()
+    }
+}
 
 /// Complete empty Board hardware surface.
 pub type NoBoardCapabilities = BoardHalResources<NoBuiltinCapabilities, NoExposedIo>;

@@ -13,17 +13,21 @@ unary JSON operation.
 
 ## Plugin setup
 
-`VmPlugin::register` fixes the built-in package installation plan and loads the
-Component before any Plugin startup hook runs. `VmPlugin::start` then gives the
-Component runtime the System-owned Embassy spawner. The Component creates a
-fresh Lua state and fresh package instances for every RPC call. Host does not
-assemble or replace this configuration.
+`VmPlugin::register` publishes `LuaPackageRegistry`, fixes the built-in package
+installation plan, and loads the Component before any Plugin startup hook
+runs. Dependent Plugins register packages during the same unified registration
+phase. `VmPlugin::start` then gives the Component runtime the System-owned
+Embassy spawner. The Component creates a fresh Lua state for every RPC call and
+installs the built-ins plus the packages registered by enabled Plugins.
 
 ```rust,ignore
 use barracuda_vm_component::{BuiltinPackages, VmComponent, VmRuntime};
+use barracuda_vm_package_api::LuaPackageRegistry;
 
 let runtime = VmRuntime::new()?;
-let component = VmComponent::with_runtime(BuiltinPackages::all(), runtime.clone());
+let packages = LuaPackageRegistry::new();
+let component = VmComponent::with_runtime(BuiltinPackages::all(), runtime.clone())
+    .with_package_registry(packages);
 context.event_router.load(component)?;
 runtime.start(system_spawner)?;
 ```
@@ -32,8 +36,8 @@ Direct Component construction is intended for tests and embedding. Normal
 system composition loads it through `VmPlugin`.
 
 There is no RPC for installing libraries or changing sandbox policy. Scripts
-can only access a library installed by the VM crate, for example
-`local gpio = require("gpio")`.
+can only access built-ins and packages registered by enabled Plugins, for
+example `local gpio = require("gpio")`.
 
 The exact globals, data-flow functions, native-module policy, and current
 resource-limit gaps are documented in [environment.md](environment.md).

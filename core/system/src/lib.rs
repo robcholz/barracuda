@@ -15,6 +15,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use barracuda_board_hal::{BoardHalResources, IntoHardwareServices};
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin_api::PluginContext;
@@ -49,14 +50,14 @@ pub struct System<
     const M: usize,
     const Q: usize,
     Region: NorFlash + Send + 'static,
-    BoardHal,
+    Builtins,
     const P: usize,
 > {
     router: EventRouter<N, M, Q>,
     _plugins: PluginManager<M, BlockingAsync<Region>>,
     _web_assets: Region,
     _remaining_partitions: Partitions<Region, P>,
-    _board_hal: BoardHal,
+    _board_hal: Builtins,
 }
 
 /// Failure while constructing the System or registering its fixed Plugins.
@@ -83,12 +84,12 @@ pub enum SystemCreateError {
     PluginManager(#[from] PluginManagerInitError),
 }
 
-impl<const N: usize, const M: usize, const Q: usize, Region, BoardHal, const P: usize>
-    System<N, M, Q, Region, BoardHal, P>
+impl<const N: usize, const M: usize, const Q: usize, Region, Builtins, const P: usize>
+    System<N, M, Q, Region, Builtins, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    BoardHal: Unpin,
+    Builtins: Unpin,
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///
@@ -101,13 +102,17 @@ where
     ///
     /// Returns [`SystemCreateError`] when Event Router initialization or Plugin
     /// registration or startup fails.
-    pub async fn new<Tls: ClientTls>(
+    pub async fn new<Tls: ClientTls, Io: IntoHardwareServices>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
-        resources: TargetResources<PlatformResources<Tls, Partitions<Region, P>>, BoardHal>,
+        resources: TargetResources<
+            PlatformResources<Tls, Partitions<Region, P>>,
+            BoardHalResources<Builtins, Io>,
+        >,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
         let prepared = resources::prepare(resources)?;
+        let (board_hal, hardware_services) = resources::prepare_board_hal(prepared.board_hal);
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/", backend, MountOptions::read_write()).await?;
@@ -122,7 +127,8 @@ where
 
         let http_clients =
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
-        let plugin_context = PluginContext::new(prepared.ip_stack, http_clients);
+        let plugin_context = PluginContext::new(prepared.ip_stack, http_clients)
+            .with_hardware_services(hardware_services);
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins, router;
@@ -130,7 +136,9 @@ where
             barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&plugin_context),
             barracuda_file_plugin::FilePlugin::new(&plugin_context),
             barracuda_gateway_agent_plugin::GatewayAgentPlugin::new(&plugin_context),
+            barracuda_gpio_plugin::GpioPlugin::new(&plugin_context),
             barracuda_http_plugin::HttpPlugin::new(&plugin_context),
+            barracuda_i2c_plugin::I2cPlugin::new(&plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&plugin_context),
             barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&plugin_context),
@@ -139,6 +147,7 @@ where
             barracuda_imessage_web_plugin::IMessageWebPlugin::new(&plugin_context),
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&plugin_context),
+            barracuda_spi_plugin::SpiPlugin::new(&plugin_context),
             barracuda_time_plugin::TimePlugin::new(&plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&plugin_context),
             barracuda_web_search_plugin::WebSearchPlugin::new(&plugin_context),
@@ -153,17 +162,17 @@ where
             _plugins: plugins,
             _web_assets: prepared.partitions.web_assets,
             _remaining_partitions: prepared.partitions.remaining,
-            _board_hal: prepared.board_hal,
+            _board_hal: board_hal,
         })
     }
 }
 
-impl<const N: usize, const M: usize, const Q: usize, Region, BoardHal, const P: usize> Future
-    for System<N, M, Q, Region, BoardHal, P>
+impl<const N: usize, const M: usize, const Q: usize, Region, Builtins, const P: usize> Future
+    for System<N, M, Q, Region, Builtins, P>
 where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
-    BoardHal: Unpin,
+    Builtins: Unpin,
 {
     type Output = Result<(), RouterError>;
 

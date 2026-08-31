@@ -342,6 +342,17 @@ and Plugins. Arbitration, access control, and dynamic device attachment belong
 to that owner. Any physical overlap already declared by the Board remains a
 property of the concrete Board composition.
 
+The Lua GPIO, I2C, and SPI Plugins are such owners. System consumes the
+Board-specific concrete exposed-I/O bundle and hands those Plugins named,
+object-safe service handles through `PluginContext`. This type erasure is at
+the dynamic scripting boundary, after Board composition and ownership have
+already been fixed; it does not turn `embedded-hal` or `embedded-hal-async`
+traits into trait objects. The concrete Board adapter behind each handle keeps
+its pin and controller storage statically allocated and delegates to the
+upstream HAL contracts with static dispatch. Lua performs a logical-name
+lookup because names are script data, not because Platform, Board, or Driver
+implementations are discovered at runtime.
+
 ## Peripheral Drivers and HAL
 
 Drivers implement reusable peripheral behavior. The Board matrix supplies the

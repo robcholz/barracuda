@@ -8,6 +8,7 @@ use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
+use barracuda_vm_package_api::LuaPackageRegistry;
 use getset::CopyGetters;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -359,9 +360,27 @@ impl RpcMethod for Run {
 
 /// Builds the reusable `vm.run` handler.
 pub fn run_handler(limits: VmLimits, builtin_packages: BuiltinPackages) -> impl RpcHandler<Run> {
-    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| async move {
-        let stream = run_stream(requests, limits, builtin_packages, None, None);
-        Ok(RpcStream::new(stream))
+    run_handler_with_registry(limits, builtin_packages, LuaPackageRegistry::new())
+}
+
+pub(crate) fn run_handler_with_registry(
+    limits: VmLimits,
+    builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
+) -> impl RpcHandler<Run> {
+    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| {
+        let package_registry = package_registry.clone();
+        async move {
+            let stream = run_stream(
+                requests,
+                limits,
+                builtin_packages,
+                package_registry,
+                None,
+                None,
+            );
+            Ok(RpcStream::new(stream))
+        }
     }
 }
 
@@ -371,6 +390,7 @@ pub(crate) fn run_stream(
     requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
     yield_signal: Option<crate::runtime::VmYieldSignal>,
     memory: Option<crate::memory::VmMemoryLease>,
 ) -> impl futures_core::Stream<Item = RpcResult<RunItem>> + 'static {
@@ -380,6 +400,7 @@ pub(crate) fn run_stream(
             requests,
             limits,
             builtin_packages,
+            package_registry,
             yield_signal,
             memory,
         )
@@ -392,6 +413,7 @@ async fn drive_run(
     mut requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
     yield_signal: Option<crate::runtime::VmYieldSignal>,
     memory: Option<crate::memory::VmMemoryLease>,
 ) -> RpcResult<()> {
@@ -419,6 +441,13 @@ async fn drive_run(
             .await;
         }
     };
+    if let Err(error) = package_registry.install(&mut lua) {
+        return emit_error(
+            &yielder,
+            RunError::new(RunErrorKind::VmConfigure, error.message()),
+        )
+        .await;
+    }
     if let Some(yield_signal) = yield_signal
         && let Err(error) =
             lua.set_instruction_hook(limits.instruction_hook_interval(), move || {

@@ -44,12 +44,16 @@ operations:
 let mut lua = Lua::new()?;
 let packages = barracuda_vm_builtin_packages::BuiltinPackages::all();
 let (input, output) = packages.install(&mut lua)?.into_io();
+lua_package_registry.install(&mut lua)?;
 let completion = lua.run(source);
 ```
 
 During Plugin registration, the VM selects the complete built-in package plan
 from `barracuda-vm-builtin-packages`. Each `vm.run` call applies that immutable
-plan to its own Lua state. The current plan installs `io`, which provides:
+plan to its own Lua state. The VM Plugin also provides `LuaPackageRegistry`;
+dependent Plugins register their packages into it during the same unified
+Plugin registration phase, and every new Lua state installs those registered
+packages. The built-in plan installs `io`, which provides:
 
 - `require("io").input()` asynchronously waits for one complete input message.
   After the caller closes input and queued messages are consumed, it returns
@@ -81,12 +85,16 @@ searchers are not supported. The `package` table is not exposed, and the
 bootstrap entries for `_G` and `package` are removed from the loaded-module
 cache, so `require("_G")` and `require("package")` fail.
 
-The VM currently composes one built-in native package: `io`. It is our
+The VM composes one built-in native package: `io`. It is our
 message-based package, not Lua's filesystem and process-oriented standard
-`io` library. It is require-only: no global `io` table is installed. Calls such
-as `require("gpio")`, `require("time")`, or `require("net")` still fail today.
-Future VM-owned built-ins belong in `plugins/vm/crates/builtin-packages` and are
-selected with additional `with_package` calls.
+`io` library. It is require-only: no global `io` table is installed.
+
+The `gpio`, `i2c`, and `spi` Plugins register the require-only modules of the
+same names through `LuaPackageRegistry`. Their visible logical resource names
+come only from the selected Board's explicit exposed-I/O config. Other module
+names still fail unless another enabled Plugin registers them. VM-owned
+built-ins belong in `plugins/vm/crates/builtin-packages`; optional Plugin-owned
+packages belong in their owning Plugin and register through the VM capability.
 
 Repeated `require` calls for a registered module return the cached module table
 for that Lua state.
@@ -115,10 +123,12 @@ The following Lua standard-library surfaces are not available:
 - `collectgarbage` and `warn`;
 - `getmetatable`, `setmetatable`, `rawequal`, `rawget`, `rawlen`, and `rawset`.
 
-Consequently, a script currently has no direct filesystem, network, clock,
-process, terminal, dynamic-code-loading, hardware, registry, metatable, or
-debug-reflection capability. Such access must arrive through an explicitly
-registered Rust module.
+Consequently, a script has no ambient filesystem, network, clock, process,
+terminal, dynamic-code-loading, hardware-registry, metatable, or
+debug-reflection capability. Hardware access is limited to the logical
+resources explicitly exposed through the registered `gpio`, `i2c`, and `spi`
+modules. Any other access must arrive through an explicitly registered Rust
+module.
 
 The full `debug` library is intentionally excluded because it can expose the
 Lua registry, recover private upvalues such as `require`'s package state,

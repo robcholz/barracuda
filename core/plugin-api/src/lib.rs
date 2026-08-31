@@ -15,6 +15,8 @@ pub struct PluginContext {
     /// Factory for constructing HTTP clients over the Platform network and TLS
     /// capabilities.
     pub http_clients: ClientFactory<'static>,
+    /// Board-exposed hardware services assigned to hardware-owning Plugins.
+    pub hardware_services: barracuda_board_hal::HardwareServices,
 }
 
 impl PluginContext {
@@ -24,6 +26,17 @@ impl PluginContext {
         Self {
             ip_stack,
             http_clients,
+            hardware_services: barracuda_board_hal::HardwareServices::new(),
         }
+    }
+
+    /// Installs the exposed-I/O services produced by the selected Board HAL.
+    #[must_use]
+    pub fn with_hardware_services(
+        mut self,
+        hardware_services: barracuda_board_hal::HardwareServices,
+    ) -> Self {
+        self.hardware_services = hardware_services;
+        self
     }
 }

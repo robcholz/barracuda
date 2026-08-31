@@ -11,6 +11,7 @@ use crate::VmLimits;
 use crate::memory::{VmMemoryLease, VmMemoryPool, VmMemoryPoolError};
 use crate::run::{Run, RunError, RunErrorKind, RunItem, RunRequestFrame, run_stream};
 use barracuda_vm_builtin_packages::BuiltinPackages;
+use barracuda_vm_package_api::LuaPackageRegistry;
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
 pub const VM_TASK_SLOTS: usize = 4;
@@ -85,6 +86,7 @@ impl VmRuntime {
         requests: RpcStream<RpcFrame<RunRequestFrame>>,
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
+        package_registry: LuaPackageRegistry,
     ) -> RpcStream<RunItem> {
         let Some(spawner) = self.spawner.get() else {
             return error_stream(
@@ -102,6 +104,7 @@ impl VmRuntime {
                 requests,
                 limits,
                 builtin_packages,
+                package_registry,
                 sender,
                 memory,
             ))
@@ -129,10 +132,12 @@ pub(crate) fn task_run_handler(
     runtime: VmRuntime,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
 ) -> impl RpcHandler<Run> {
     move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| {
         let runtime = runtime.clone();
-        async move { Ok(runtime.dispatch(requests, limits, builtin_packages)) }
+        let package_registry = package_registry.clone();
+        async move { Ok(runtime.dispatch(requests, limits, builtin_packages, package_registry)) }
     }
 }
 
@@ -141,6 +146,7 @@ async fn vm_execution_task(
     requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
     responses: Sender<RpcResult<RunItem>>,
     memory: VmMemoryLease,
 ) {
@@ -149,6 +155,7 @@ async fn vm_execution_task(
         requests,
         limits,
         builtin_packages,
+        package_registry,
         Some(yield_signal.clone()),
         Some(memory),
     ));
