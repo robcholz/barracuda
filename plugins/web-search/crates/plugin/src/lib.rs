@@ -11,8 +11,7 @@ use core::cell::RefCell;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse,
-    PLUGIN_ID as WEBSERVER_PLUGIN_ID, WebServer,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
 use component::{TavilyConfig, WebSearchComponent};
 use http_client::ClientFactory;
@@ -21,8 +20,6 @@ use serde::Deserialize;
 pub use barracuda_web_search_wire::{WebSearchError, WebSearchRequest, WebSearchResult};
 pub use component::WebSearch;
 
-/// Stable Web Search Plugin identity.
-pub const PLUGIN_ID: &str = "web-search";
 /// HTTP endpoint accepting Tavily credentials.
 pub const CONFIG_API_PATH: &str = "/api/tavily";
 const JSON_CONTENT_TYPE: &str = "application/json";
@@ -43,13 +40,8 @@ impl WebSearchPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for WebSearchPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[WEBSERVER_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -57,7 +49,7 @@ impl<const M: usize> Plugin<M> for WebSearchPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
         let config = Rc::new(RefCell::new(None));
         context.event_router.load(WebSearchComponent::new(
             Rc::clone(&config),
@@ -126,7 +118,11 @@ mod tests {
 
     #[test]
     fn exposes_web_search_identity() {
-        assert_eq!(PLUGIN_ID, "web-search");
+        let plugin = WebSearchPlugin::new(&mut PluginContext::new(
+            barracuda_platform_test::never_embassy_stack(),
+            ClientFactory::plaintext(barracuda_platform_test::never_embassy_stack()),
+        ));
+        assert_eq!(Plugin::<512>::id(&plugin), "web-search");
         assert_eq!(WebSearch::ADDRESS, "web_search.search");
     }
 

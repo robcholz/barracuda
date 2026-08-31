@@ -5,12 +5,8 @@
 extern crate alloc;
 
 use barracuda_gateway_agent_component::component::GatewayAgentBridge;
-use barracuda_imessage_gateway_plugin::PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
-
-/// Stable identity of the Gateway-Agent Plugin.
-pub const PLUGIN_ID: &str = "gateway-agent";
 
 /// Plugin that owns the Gateway-Agent Bridge Component.
 pub struct GatewayAgentPlugin;
@@ -23,13 +19,8 @@ impl GatewayAgentPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for GatewayAgentPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &["agent", IMESSAGE_GATEWAY_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,

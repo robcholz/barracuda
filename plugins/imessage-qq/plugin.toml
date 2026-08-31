@@ -1,1 +1,3 @@
+id = "imessage-qq"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds QQ Bot as an iMessage Gateway channel."

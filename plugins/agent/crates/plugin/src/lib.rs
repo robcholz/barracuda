@@ -21,8 +21,6 @@ pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
 pub use barracuda_model_api::{BackendKind, InitError};
 
 const PERSISTENCE_ROOT: &str = "/";
-/// Stable identity of the Agent Plugin.
-pub const PLUGIN_ID: &str = "agent";
 
 type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
 
@@ -72,13 +70,10 @@ impl AgentPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for AgentPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
 
     fn register<Storage>(
         &mut self,

@@ -4,12 +4,11 @@
 extern crate alloc;
 
 use alloc::{boxed::Box, rc::Rc, string::String, vec::Vec};
-use barracuda_imessage_gateway_plugin::{IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID};
+use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
-    PLUGIN_ID as WEBSERVER_PLUGIN_ID,
 };
 use core::cell::RefCell;
 use gateway::{MessageChannel, MessageChannelRegistration};
@@ -17,8 +16,6 @@ use http_client::ClientFactory;
 use qq::{QQConfig, QQ};
 use serde::Deserialize;
 
-/// Stable identity of the IMessage QQ Plugin.
-pub const PLUGIN_ID: &str = "imessage-qq";
 /// HTTP path accepting QQ configuration.
 pub const CONFIG_API_PATH: &str = "/api/gateway/qq";
 const JSON_CONTENT_TYPE: &str = "application/json";
@@ -38,12 +35,8 @@ impl IMessageQQPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageQQPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[IMESSAGE_GATEWAY_PLUGIN_ID, WEBSERVER_PLUGIN_ID];
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -52,11 +45,11 @@ impl<const M: usize> Plugin<M> for IMessageQQPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         let endpoint = ConfigEndpoint {
-            gateway: context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?,
+            gateway: context.require::<IMessageGateway>(<Self as Plugin<M>>::DEPENDS_ON[0])?,
             http_clients: self.http_clients.clone(),
             channel_registration: RefCell::new(None),
         };
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
         let registration = webserver
             .serve_http(CONFIG_API_PATH, endpoint)
             .map_err(PluginError::registration)?;

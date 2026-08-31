@@ -10,20 +10,17 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use barracuda_imessage_gateway_plugin::{IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID};
+use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
-    PLUGIN_ID as WEBSERVER_PLUGIN_ID,
 };
 use gateway::{MessageChannel, MessageChannelRegistration};
 use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
 use serde::Deserialize;
 
-/// Stable identity of the IMessage Inkbox Plugin.
-pub const PLUGIN_ID: &str = "imessage-inkbox";
 /// HTTP path accepting Inkbox configuration.
 pub const CONFIG_API_PATH: &str = "/api/gateway/inkbox";
 
@@ -44,13 +41,8 @@ impl IMessageInkboxPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageInkboxPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[IMESSAGE_GATEWAY_PLUGIN_ID, WEBSERVER_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -58,8 +50,8 @@ impl<const M: usize> Plugin<M> for IMessageInkboxPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let gateway = context.require::<IMessageGateway>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
+        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),

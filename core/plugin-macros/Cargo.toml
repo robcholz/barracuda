@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-plugin-macros"
+version = "0.1.0"
+edition = "2021"
+description = "Compile-time manifest macros for Barracuda Plugins"
+license = "Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+quote = "1"
+syn = { version = "2", features = ["full"] }
+toml = "0.9"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

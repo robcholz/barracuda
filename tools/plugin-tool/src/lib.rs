@@ -21,6 +21,8 @@ const MAX_DESCRIPTION_CHARS: usize = 80;
 #[derive(Debug)]
 struct Plugin {
     directory: String,
+    id: String,
+    dependencies: Vec<String>,
     description: String,
     package: String,
     crate_name: String,
@@ -31,6 +33,9 @@ struct Plugin {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PluginMetadata {
+    id: String,
+    #[serde(rename = "depends-on")]
+    dependencies: Vec<String>,
     description: String,
 }
 
@@ -280,6 +285,10 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         plugins.push(Plugin {
             directory,
             description: metadata.description,
+            // Parsing validates the baked identity even though registry rendering only needs
+            // the directory, package, and entry point.
+            id: metadata.id,
+            dependencies: metadata.dependencies,
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
@@ -287,6 +296,31 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         });
     }
     plugins.sort_by(|left, right| left.directory.cmp(&right.directory));
+    for (index, plugin) in plugins.iter().enumerate() {
+        if let Some(duplicate) = plugins[..index]
+            .iter()
+            .find(|candidate| candidate.id == plugin.id)
+        {
+            return Err(CommandError::Metadata(format!(
+                "Plugin ID `{}` is declared by both `{}` and `{}`",
+                plugin.id, duplicate.directory, plugin.directory
+            )));
+        }
+        for dependency in &plugin.dependencies {
+            if dependency == &plugin.id {
+                return Err(CommandError::Metadata(format!(
+                    "Plugin `{}` cannot depend on itself",
+                    plugin.id
+                )));
+            }
+            if !plugins.iter().any(|candidate| &candidate.id == dependency) {
+                return Err(CommandError::Metadata(format!(
+                    "Plugin `{}` declares unknown dependency `{dependency}`",
+                    plugin.id
+                )));
+            }
+        }
+    }
     Ok(plugins)
 }
 
@@ -297,6 +331,34 @@ fn parse_metadata(path: &Path, contents: &str) -> Result<PluginMetadata, Command
             path.display()
         ))
     })?;
+    let id = metadata.id.trim();
+    if id.is_empty() {
+        return Err(CommandError::Metadata(format!(
+            "Plugin ID in {} must not be empty",
+            path.display()
+        )));
+    }
+    let dependencies = metadata
+        .dependencies
+        .iter()
+        .map(|dependency| dependency.trim())
+        .collect::<Vec<_>>();
+    if dependencies.iter().any(|dependency| dependency.is_empty()) {
+        return Err(CommandError::Metadata(format!(
+            "Plugin dependencies in {} must not be empty",
+            path.display()
+        )));
+    }
+    if dependencies
+        .iter()
+        .enumerate()
+        .any(|(index, dependency)| dependencies[..index].contains(dependency))
+    {
+        return Err(CommandError::Metadata(format!(
+            "Plugin dependencies in {} must not contain duplicates",
+            path.display()
+        )));
+    }
     let description = metadata.description.trim();
     let length = description.chars().count();
     if description.is_empty() {
@@ -312,6 +374,8 @@ fn parse_metadata(path: &Path, contents: &str) -> Result<PluginMetadata, Command
         )));
     }
     Ok(PluginMetadata {
+        id: id.to_owned(),
+        dependencies: dependencies.into_iter().map(String::from).collect(),
         description: description.to_owned(),
     })
 }
@@ -487,18 +551,43 @@ mod tests {
         );
         let metadata = parse_metadata(
             std::path::Path::new("plugin.toml"),
-            "description = \"A concise description.\"\n",
+            "id = \"demo\"\ndepends-on = []\ndescription = \"A concise description.\"\n",
         )
         .expect("valid Plugin metadata");
+        assert_eq!(metadata.id, "demo");
+        assert!(metadata.dependencies.is_empty());
         assert_eq!(metadata.description, "A concise description.");
     }
 
     #[test]
     fn rejects_invalid_plugin_descriptions() {
         let path = std::path::Path::new("plugin.toml");
-        assert!(parse_metadata(path, "description = \"   \"\n").is_err());
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = []\ndescription = \"   \"\n"
+        )
+        .is_err());
         let long = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
-        assert!(parse_metadata(path, &format!("description = \"{long}\"\n")).is_err());
+        assert!(parse_metadata(
+            path,
+            &format!("id = \"demo\"\ndepends-on = []\ndescription = \"{long}\"\n")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_plugin_dependencies() {
+        let path = std::path::Path::new("plugin.toml");
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = [\"\"]\ndescription = \"Demo.\"\n"
+        )
+        .is_err());
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = [\"base\", \"base\"]\ndescription = \"Demo.\"\n"
+        )
+        .is_err());
     }
     #[test]
     fn replaces_an_indented_generated_block() {
@@ -523,7 +612,7 @@ mod tests {
         .expect("Plugin manifest");
         fs::write(
             root.path().join("plugins/demo/plugin.toml"),
-            "description = \"Demonstrates Plugin discovery.\"\n",
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates Plugin discovery.\"\n",
         )
         .expect("Plugin metadata");
         fs::write(

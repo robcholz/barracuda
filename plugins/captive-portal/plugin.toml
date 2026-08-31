@@ -1,1 +1,3 @@
+id = "captive-portal"
+depends-on = ["agent", "webserver"]
 description = "Exposes agent model configuration through a captive portal."

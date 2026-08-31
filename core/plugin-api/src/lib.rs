@@ -7,6 +7,7 @@ extern crate alloc;
 mod hardware;
 
 use barracuda_board_hal::{BoardHalResources, NoBuiltinCapabilities, NoExposedIo};
+pub use barracuda_plugin_macros::plugin;
 pub use embassy_net::Stack;
 pub use hardware::{
     LuaGpioHardware, LuaHardwareError, LuaHardwareFuture, LuaHardwareResult, LuaI2cHardware, LuaIo,

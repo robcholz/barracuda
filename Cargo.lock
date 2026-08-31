@@ -1199,9 +1199,20 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-platform-test",
+ "barracuda-plugin-macros",
  "embassy-net",
  "embassy-time",
  "http-client",
+]
+
+[[package]]
+name = "barracuda-plugin-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "serde",
+ "syn 2.0.118",
+ "toml",
 ]
 
 [[package]]

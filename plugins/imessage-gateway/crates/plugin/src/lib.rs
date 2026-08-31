@@ -15,9 +15,6 @@ pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
 pub use barracuda_imessage_gateway_component::gateway_message_received::GatewayInboundMessage;
 pub use barracuda_imessage_gateway_component::route::GatewayRoute;
 
-/// Stable identity of the IMessage Gateway Plugin.
-pub const PLUGIN_ID: &str = "imessage-gateway";
-
 const GATEWAY_INGRESS_CAPACITY: usize = 16;
 
 /// Typed capability used by IMessage provider Plugins.
@@ -68,11 +65,8 @@ impl IMessageGatewayPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,

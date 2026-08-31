@@ -13,9 +13,6 @@ use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_component::{VmComponent, VmRuntime};
 use barracuda_vm_package_api::LuaPackageRegistry;
 
-/// Stable identity of the VM Plugin.
-pub const PLUGIN_ID: &str = "vm";
-
 /// Registers the VM Component and starts its owner-managed Embassy runtime.
 pub struct VmPlugin {
     runtime: Option<VmRuntime>,
@@ -33,11 +30,8 @@ impl VmPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for VmPlugin {
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -125,7 +119,7 @@ mod tests {
     }
 
     impl Plugin<512> for PackageConsumer {
-        const DEPENDS_ON: &'static [&'static str] = &[super::PLUGIN_ID];
+        const DEPENDS_ON: &'static [&'static str] = &["vm"];
 
         fn id(&self) -> &'static str {
             "package-consumer"
@@ -138,7 +132,7 @@ mod tests {
         where
             Storage: barracuda_plugin_manager::PluginStorage,
         {
-            let registry = context.require::<LuaPackageRegistry>(super::PLUGIN_ID)?;
+            let registry = context.require::<LuaPackageRegistry>(Self::DEPENDS_ON[0])?;
             let registration = registry
                 .register(MarkerPackage)
                 .map_err(barracuda_plugin_manager::PluginError::registration)?;

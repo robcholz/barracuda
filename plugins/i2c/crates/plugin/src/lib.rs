@@ -9,12 +9,8 @@ use barracuda_lua::{Error, Lua, Package, Result};
 use barracuda_plugin_api::{LuaHardwareFuture, LuaI2cHardware, LuaIo, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
-use barracuda_vm_plugin::PLUGIN_ID as VM_PLUGIN_ID;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
-
-/// Stable identity of the I2C Plugin.
-pub const PLUGIN_ID: &str = "i2c";
 
 /// Takes the Board-exposed I2C value and registers the `i2c` Lua package.
 pub struct I2cPlugin {
@@ -31,13 +27,8 @@ impl I2cPlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for I2cPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[VM_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -45,7 +36,7 @@ impl<const M: usize> Plugin<M> for I2cPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let registry = context.require::<LuaPackageRegistry>(VM_PLUGIN_ID)?;
+        let registry = context.require::<LuaPackageRegistry>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
         let registration = registry
             .register(I2cPackage::new(self.hardware.take()))
             .map_err(PluginError::registration)?;

@@ -18,9 +18,6 @@ const RETRY_DELAY_MILLIS: u64 = 30_000;
 const RESYNC_INTERVAL_MILLIS: u64 = 3_600_000;
 const MAX_HOLDOVER_MILLIS: u64 = 86_400_000;
 
-/// Stable identity of the Time Plugin.
-pub const PLUGIN_ID: &str = "time";
-
 /// Plugin that owns the network-synchronized Time Component.
 pub struct TimePlugin {
     network: Stack<'static>,
@@ -36,11 +33,8 @@ impl TimePlugin {
     }
 }
 
+#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for TimePlugin {
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,

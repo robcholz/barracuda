@@ -8,9 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use barracuda_agent_plugin::{
-    AgentSetApi, ApiPurpose, ModelApiConfig, PLUGIN_ID as AGENT_PLUGIN_ID,
-};
+use barracuda_agent_plugin::{AgentSetApi, ApiPurpose, ModelApiConfig};
 use barracuda_captive_portal_plugin::{CaptivePortalPlugin, SET_API_PATH};
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{
@@ -18,7 +16,7 @@ use barracuda_platform_test::{
 };
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginManager, PluginRegisterContext, PluginResult};
-use barracuda_webserver_plugin::{WebServer, PLUGIN_ID as WEBSERVER_PLUGIN_ID};
+use barracuda_webserver_plugin::WebServer;
 use embassy_net::{tcp::TcpSocket, Ipv4Address};
 use embedded_io_async::Write as _;
 use picoserve::time::EmbassyTimer;
@@ -31,7 +29,7 @@ struct AgentProvider {
 
 impl Plugin<FRAME_SIZE> for AgentProvider {
     fn id(&self) -> &'static str {
-        AGENT_PLUGIN_ID
+        "agent"
     }
 
     fn register<Storage>(
@@ -53,7 +51,7 @@ struct WebServerProvider {
 
 impl Plugin<FRAME_SIZE> for WebServerProvider {
     fn id(&self) -> &'static str {
-        WEBSERVER_PLUGIN_ID
+        "webserver"
     }
 
     fn register<Storage>(

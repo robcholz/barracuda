@@ -1,1 +1,3 @@
+id = "webserver"
+depends-on = []
 description = "Provides shared HTTP and WebSocket route hosting."

@@ -8,6 +8,7 @@ members = [
     "composition/*",
     "core/event-router",
     "core/plugin-api",
+    "core/plugin-macros",
     "core/plugin-manager",
     "core/system",
     "core/event-router/crates/*",

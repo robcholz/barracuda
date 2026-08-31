@@ -6,7 +6,7 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginRegisterError};
-use barracuda_scheduler_plugin::{PLUGIN_ID, SchedulerPlugin};
+use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_time_plugin::TimePlugin;
 use futures_lite::future::block_on;
 
@@ -31,10 +31,7 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
             Plugin::<512>::id(&SchedulerPlugin::new(&mut context)),
             "scheduler"
         );
-        assert_eq!(
-            <SchedulerPlugin as Plugin<512>>::DEPENDS_ON,
-            &[barracuda_time_plugin::PLUGIN_ID],
-        );
+        assert_eq!(<SchedulerPlugin as Plugin<512>>::DEPENDS_ON, &["time"],);
         let error = manager
             .register(&mut router, SchedulerPlugin::new(&mut context))
             .expect_err("reject Scheduler before Time");
@@ -50,7 +47,7 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
             .expect("register Scheduler Plugin");
         manager.start(&mut router).expect("start Plugins");
 
-        let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
+        let id = PluginId::try_from("scheduler").expect("valid Plugin ID");
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
     });
 }

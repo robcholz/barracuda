@@ -1,1 +1,3 @@
+id = "scheduler"
+depends-on = ["time"]
 description = "Runs persistent schedules and emits events when they become due."
