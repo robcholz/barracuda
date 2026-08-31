@@ -7,8 +7,8 @@ license = "Apache-2.0"
 
 [dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 barracuda-vfs = { path = "../../../../shared/vfs" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde-big-array = "0.5"

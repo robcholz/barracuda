@@ -8,13 +8,13 @@ description = "Construction context shared by Barracuda Plugins"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-board-hal = { path = "../../boards/hal" }
-barracuda-plugin-macros = { path = "../plugin-macros" }
+barracuda-board-hal = { path = "../../../../boards/hal" }
+barracuda-plugin-macros = { path = "../macros" }
 embassy-net.workspace = true
-http-client = { path = "../../shared/http-client" }
+http-client = { path = "../../../../shared/http-client" }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../platforms/test" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

@@ -7,7 +7,7 @@ description = "Barracuda Plugin workspace synchronization tool"
 [dependencies]
 anstream = "1"
 anstyle = "1"
-barracuda-plugin-manifest = { path = "../../core/plugin-manifest" }
+barracuda-plugin-manifest = { path = "../../core/plugin/crates/manifest" }
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false }

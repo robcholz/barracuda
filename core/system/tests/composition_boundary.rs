@@ -35,7 +35,7 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
 #[test]
 fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let plugin_api = std::fs::read_to_string(root.join("core/plugin-api/src/lib.rs"))?;
+    let plugin_api = std::fs::read_to_string(root.join("core/plugin/crates/api/src/lib.rs"))?;
     let system = std::fs::read_to_string(root.join("core/system/src/lib.rs"))?;
 
     assert!(plugin_api.contains("pub struct PluginContext"));

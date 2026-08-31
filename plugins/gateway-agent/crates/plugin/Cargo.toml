@@ -7,8 +7,8 @@ description = "Barracuda Plugin that owns the Gateway-Agent Bridge Component"
 [dependencies]
 barracuda-gateway-agent-component = { path = "../component" }
 barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }

@@ -9,7 +9,7 @@ license = "Apache-2.0"
 proc-macro = true
 
 [dependencies]
-barracuda-plugin-manifest = { path = "../plugin-manifest" }
+barracuda-plugin-manifest = { path = "../manifest" }
 quote = "1"
 syn = { version = "2", features = ["full"] }
 
