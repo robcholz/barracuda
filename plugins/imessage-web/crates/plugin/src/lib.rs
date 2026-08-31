@@ -55,7 +55,7 @@ pub struct IMessageWebPlugin;
 impl IMessageWebPlugin {
     /// Creates the IMessage Web Plugin.
     #[must_use]
-    pub const fn new(_context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }

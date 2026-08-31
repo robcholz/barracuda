@@ -1,6 +1,4 @@
-use barracuda_board_hal::BoardHalResources;
 use barracuda_platform::{PartitionAccess, Partitions, PlatformResources};
-use barracuda_plugin_api::{IntoLuaHardwareResources, LuaHardwareResources};
 use barracuda_target_api::TargetResources;
 use embassy_net::Stack;
 
@@ -84,18 +82,6 @@ pub(super) fn prepare<Region, Tls, BoardHal, const P: usize>(
     })
 }
 
-pub(super) fn prepare_board_hal<Builtins, Io>(
-    resources: BoardHalResources<Builtins, Io>,
-) -> (Builtins, LuaHardwareResources)
-where
-    Io: IntoLuaHardwareResources,
-{
-    (
-        resources.builtins,
-        resources.io.into_lua_hardware_resources(),
-    )
-}
-
 fn take_partition<Region, const P: usize>(
     partitions: &mut Partitions<Region, P>,
     name: &'static str,
@@ -123,7 +109,7 @@ mod tests {
     use barracuda_platform_test::never_embassy_stack;
     use barracuda_target_api::TargetResources;
 
-    use super::{prepare, prepare_board_hal, SystemResourceError};
+    use super::{prepare, SystemResourceError};
 
     #[derive(Debug, PartialEq, Eq)]
     struct BoardHal(u8);
@@ -179,19 +165,6 @@ mod tests {
                 .map(NamedPartition::region),
             Some(&4)
         );
-    }
-
-    #[test]
-    fn moves_exposed_io_into_lua_hardware_resources() {
-        let resources =
-            barracuda_board_hal::BoardHalResources::new(7_u8, barracuda_board_hal::NoExposedIo);
-
-        let (builtins, mut hardware) = prepare_board_hal(resources);
-
-        assert_eq!(builtins, 7);
-        assert!(hardware.take_gpio().is_none());
-        assert!(hardware.take_i2c().is_none());
-        assert!(hardware.take_spi().is_none());
     }
 
     #[test]

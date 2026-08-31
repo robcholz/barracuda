@@ -6,12 +6,11 @@ extern crate alloc;
 
 mod hardware;
 
-use core::cell::RefCell;
-
+use barracuda_board_hal::{BoardHalResources, NoBuiltinCapabilities, NoExposedIo};
 pub use embassy_net::Stack;
 pub use hardware::{
-    IntoLuaHardwareResources, LuaGpioHardware, LuaHardwareError, LuaHardwareFuture,
-    LuaHardwareResources, LuaHardwareResult, LuaI2cHardware, LuaSpiHardware,
+    LuaGpioHardware, LuaHardwareError, LuaHardwareFuture, LuaHardwareResult, LuaI2cHardware, LuaIo,
+    LuaSpiHardware,
 };
 pub use http_client::ClientFactory;
 
@@ -19,45 +18,40 @@ pub use http_client::ClientFactory;
 ///
 /// Plugins move owned resources or copy shared capabilities during `new` and
 /// do not retain a reference to the context itself.
-pub struct PluginContext {
+pub struct PluginContext<Builtins = NoBuiltinCapabilities, Io = NoExposedIo> {
     /// Platform IP stack shared by network consumers.
     pub ip_stack: Stack<'static>,
     /// Factory for constructing HTTP clients over the Platform network and TLS
     /// capabilities.
     pub http_clients: ClientFactory<'static>,
-    lua_hardware: RefCell<LuaHardwareResources>,
+    /// Complete HAL produced by the selected Board composition.
+    pub hal: BoardHalResources<Builtins, Io>,
 }
 
-impl PluginContext {
-    /// Creates the unified Plugin construction context.
+impl<Builtins, Io> PluginContext<Builtins, Io> {
+    /// Creates the unified Plugin construction context with the selected HAL.
     #[must_use]
-    pub const fn new(ip_stack: Stack<'static>, http_clients: ClientFactory<'static>) -> Self {
+    pub const fn from_hal(
+        ip_stack: Stack<'static>,
+        http_clients: ClientFactory<'static>,
+        hal: BoardHalResources<Builtins, Io>,
+    ) -> Self {
         Self {
             ip_stack,
             http_clients,
-            lua_hardware: RefCell::new(LuaHardwareResources::new()),
+            hal,
         }
     }
+}
 
-    /// Installs move-only hardware values adapted by selected-target composition.
+impl PluginContext {
+    /// Creates a construction context carrying an explicitly empty HAL.
     #[must_use]
-    pub fn with_lua_hardware(self, hardware: LuaHardwareResources) -> Self {
-        *self.lua_hardware.borrow_mut() = hardware;
-        self
-    }
-
-    /// Moves the Board-exposed GPIO value to its owning Plugin once.
-    pub fn take_gpio(&self) -> Option<alloc::boxed::Box<dyn LuaGpioHardware>> {
-        self.lua_hardware.borrow_mut().take_gpio()
-    }
-
-    /// Moves the Board-exposed I2C value to its owning Plugin once.
-    pub fn take_i2c(&self) -> Option<alloc::boxed::Box<dyn LuaI2cHardware>> {
-        self.lua_hardware.borrow_mut().take_i2c()
-    }
-
-    /// Moves the Board-exposed SPI value to its owning Plugin once.
-    pub fn take_spi(&self) -> Option<alloc::boxed::Box<dyn LuaSpiHardware>> {
-        self.lua_hardware.borrow_mut().take_spi()
+    pub const fn new(ip_stack: Stack<'static>, http_clients: ClientFactory<'static>) -> Self {
+        Self::from_hal(
+            ip_stack,
+            http_clients,
+            BoardHalResources::new(NoBuiltinCapabilities, NoExposedIo),
+        )
     }
 }

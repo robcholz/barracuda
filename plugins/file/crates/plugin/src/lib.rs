@@ -82,7 +82,7 @@ pub struct FilePlugin;
 impl FilePlugin {
     /// Creates the Plugin from shared System construction resources.
     #[must_use]
-    pub const fn new(_context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }

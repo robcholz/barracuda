@@ -25,7 +25,7 @@ pub struct VmPlugin {
 impl VmPlugin {
     /// Creates the VM Plugin from the shared construction context.
     #[must_use]
-    pub fn new(_context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             runtime: None,
             package_registry: LuaPackageRegistry::new(),
@@ -156,7 +156,7 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
         let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         let id = PluginId::try_from("vm").expect("valid Plugin ID");
-        let plugin = VmPlugin::new(&plugin_context());
+        let plugin = VmPlugin::new(&mut plugin_context());
         assert_eq!(Plugin::<512>::id(&plugin), "vm");
 
         manager
@@ -180,7 +180,7 @@ mod tests {
             })
             .expect("queue package consumer");
         manager
-            .add(VmPlugin::new(&plugin_context()))
+            .add(VmPlugin::new(&mut plugin_context()))
             .expect("queue VM Plugin");
         manager
             .register_all(&mut router)
@@ -200,7 +200,7 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
         let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         manager
-            .register(&mut router, VmPlugin::new(&plugin_context()))
+            .register(&mut router, VmPlugin::new(&mut plugin_context()))
             .expect("register VM Plugin");
 
         let error = manager
@@ -228,7 +228,7 @@ mod tests {
                 .map_err(|error| error.to_string())?;
             manager.install_task_spawner(spawner);
             manager
-                .register(&mut router, VmPlugin::new(&plugin_context()))
+                .register(&mut router, VmPlugin::new(&mut plugin_context()))
                 .map_err(|error| error.to_string())?;
             manager
                 .start(&mut router)

@@ -1,13 +1,32 @@
-//! Move-only Lua hardware values flow through the shared Plugin context.
+//! The shared Plugin context carries the complete HAL without splitting it.
 
 use std::boxed::Box;
 
+use barracuda_board_hal::BoardHalResources;
 use barracuda_platform_test::never_embassy_stack;
 use barracuda_plugin_api::{
-    ClientFactory, LuaGpioHardware, LuaHardwareFuture, LuaHardwareResources, PluginContext,
+    ClientFactory, LuaGpioHardware, LuaHardwareFuture, LuaIo, PluginContext,
 };
 
 struct TestGpio;
+
+struct TestIo {
+    gpio: Option<Box<dyn LuaGpioHardware>>,
+}
+
+impl LuaIo for TestIo {
+    fn take_gpio(&mut self) -> Option<Box<dyn LuaGpioHardware>> {
+        self.gpio.take()
+    }
+
+    fn take_i2c(&mut self) -> Option<Box<dyn barracuda_plugin_api::LuaI2cHardware>> {
+        None
+    }
+
+    fn take_spi(&mut self) -> Option<Box<dyn barracuda_plugin_api::LuaSpiHardware>> {
+        None
+    }
+}
 
 impl LuaGpioHardware for TestGpio {
     fn contains(&self, name: &str) -> bool {
@@ -44,14 +63,21 @@ impl LuaGpioHardware for TestGpio {
 }
 
 #[test]
-fn plugin_context_allows_exactly_one_plugin_to_take_each_hardware_value() {
+fn plugin_context_carries_the_complete_hal_and_its_move_only_io() {
     let stack = never_embassy_stack();
-    let hardware = LuaHardwareResources::new().with_gpio(Box::new(TestGpio));
-    let context =
-        PluginContext::new(stack, ClientFactory::plaintext(stack)).with_lua_hardware(hardware);
+    let hal = BoardHalResources::new(
+        7_u8,
+        TestIo {
+            gpio: Some(Box::new(TestGpio)),
+        },
+    );
+    let mut context = PluginContext::from_hal(stack, ClientFactory::plaintext(stack), hal);
 
+    assert_eq!(context.hal.builtins, 7);
     assert!(context
+        .hal
+        .io
         .take_gpio()
         .is_some_and(|gpio| gpio.contains("user-control")));
-    assert!(context.take_gpio().is_none());
+    assert!(context.hal.io.take_gpio().is_none());
 }

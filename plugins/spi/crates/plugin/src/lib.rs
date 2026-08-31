@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use barracuda_lua::{Error, Lua, Package, Result};
-use barracuda_plugin_api::{LuaHardwareFuture, LuaSpiHardware, PluginContext};
+use barracuda_plugin_api::{LuaHardwareFuture, LuaIo, LuaSpiHardware, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 use barracuda_vm_plugin::PLUGIN_ID as VM_PLUGIN_ID;
@@ -24,9 +24,9 @@ pub struct SpiPlugin {
 impl SpiPlugin {
     /// Takes exclusive ownership of the SPI value from shared construction resources.
     #[must_use]
-    pub fn new(context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io: LuaIo>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
-            hardware: context.take_spi(),
+            hardware: context.hal.io.take_spi(),
         }
     }
 }

@@ -5,9 +5,9 @@
 - Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
 - Provided typed capabilities: none
 
-During unified Plugin registration, this Plugin registers the require-only
-`spi` Lua package with the VM registry. It takes exclusive ownership of the SPI
-value explicitly exposed and adapted for Lua by the selected Target.
+During unified Plugin construction, this Plugin takes the SPI value directly
+from `PluginContext::hal.io`. During registration it installs the require-only
+`spi` Lua package in the VM registry.
 
 Lua API:
 

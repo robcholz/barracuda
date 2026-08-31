@@ -18,7 +18,7 @@ pub struct GatewayAgentPlugin;
 impl GatewayAgentPlugin {
     /// Creates the self-contained Gateway-Agent Plugin.
     #[must_use]
-    pub const fn new(_context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }
@@ -82,15 +82,15 @@ mod tests {
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("gateway-agent").expect("valid Plugin ID");
             let stack = never_embassy_stack();
-            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-            let plugin = GatewayAgentPlugin::new(&context);
+            let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = GatewayAgentPlugin::new(&mut context);
             assert_eq!(Plugin::<512>::id(&plugin), "gateway-agent");
 
             manager
                 .register(&mut router, Dependency("agent"))
                 .expect("register Agent dependency");
             manager
-                .register(&mut router, IMessageGatewayPlugin::new(&context))
+                .register(&mut router, IMessageGatewayPlugin::new(&mut context))
                 .expect("register IMessage Gateway dependency");
             manager
                 .register(&mut router, plugin)

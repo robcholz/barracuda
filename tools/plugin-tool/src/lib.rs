@@ -407,7 +407,7 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
         .iter()
         .map(|plugin| {
             format!(
-                "            {}::{}::new(&plugin_context),",
+                "            {}::{}::new(&mut plugin_context),",
                 plugin.crate_name, plugin.entry
             )
         })

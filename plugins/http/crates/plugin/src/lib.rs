@@ -19,7 +19,7 @@ pub struct HttpPlugin {
 impl HttpPlugin {
     /// Creates a Plugin from System's shared HTTP client factory.
     #[must_use]
-    pub fn new(context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             clients: context.http_clients.clone(),
         }

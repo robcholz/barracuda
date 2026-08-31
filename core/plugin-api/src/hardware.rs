@@ -109,73 +109,32 @@ pub trait LuaSpiHardware: Send {
         -> LuaHardwareFuture<'_, Vec<u8>>;
 }
 
-/// Move-only hardware values waiting for their owning Lua Plugins to take them.
-#[derive(Default)]
-pub struct LuaHardwareResources {
-    gpio: Option<Box<dyn LuaGpioHardware>>,
-    i2c: Option<Box<dyn LuaI2cHardware>>,
-    spi: Option<Box<dyn LuaSpiHardware>>,
-}
-
-impl LuaHardwareResources {
-    /// Creates an empty value bundle.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            gpio: None,
-            i2c: None,
-            spi: None,
-        }
-    }
-
-    /// Adds the GPIO value produced by selected-target composition.
-    #[must_use]
-    pub fn with_gpio(mut self, hardware: Box<dyn LuaGpioHardware>) -> Self {
-        self.gpio = Some(hardware);
-        self
-    }
-
-    /// Adds the I2C value produced by selected-target composition.
-    #[must_use]
-    pub fn with_i2c(mut self, hardware: Box<dyn LuaI2cHardware>) -> Self {
-        self.i2c = Some(hardware);
-        self
-    }
-
-    /// Adds the SPI value produced by selected-target composition.
-    #[must_use]
-    pub fn with_spi(mut self, hardware: Box<dyn LuaSpiHardware>) -> Self {
-        self.spi = Some(hardware);
-        self
-    }
-
-    /// Moves the GPIO value to its owning Plugin exactly once.
-    pub fn take_gpio(&mut self) -> Option<Box<dyn LuaGpioHardware>> {
-        self.gpio.take()
-    }
-
-    /// Moves the I2C value to its owning Plugin exactly once.
-    pub fn take_i2c(&mut self) -> Option<Box<dyn LuaI2cHardware>> {
-        self.i2c.take()
-    }
-
-    /// Moves the SPI value to its owning Plugin exactly once.
-    pub fn take_spi(&mut self) -> Option<Box<dyn LuaSpiHardware>> {
-        self.spi.take()
-    }
-}
-
-/// Selected-target adaptation from raw Board I/O values into Lua-owned values.
+/// Lua-facing ownership access implemented by one concrete exposed-I/O value.
 ///
-/// Concrete implementations belong to target composition rather than the
-/// Board HAL contract so Lua naming and async adaptation remain outside HAL.
-pub trait IntoLuaHardwareResources {
-    /// Consumes the selected Board values into the Lua construction boundary.
-    fn into_lua_hardware_resources(self) -> LuaHardwareResources;
+/// This is a construction adapter, not a Board HAL operation contract. The
+/// complete HAL stays in [`crate::PluginContext`]; each Lua hardware Plugin
+/// moves only its value out of the HAL before installing its package.
+pub trait LuaIo {
+    /// Moves the Board-exposed GPIO value to its owning Plugin once.
+    fn take_gpio(&mut self) -> Option<Box<dyn LuaGpioHardware>>;
+
+    /// Moves the Board-exposed I2C value to its owning Plugin once.
+    fn take_i2c(&mut self) -> Option<Box<dyn LuaI2cHardware>>;
+
+    /// Moves the Board-exposed SPI value to its owning Plugin once.
+    fn take_spi(&mut self) -> Option<Box<dyn LuaSpiHardware>>;
 }
 
-impl IntoLuaHardwareResources for NoExposedIo {
-    fn into_lua_hardware_resources(self) -> LuaHardwareResources {
-        LuaHardwareResources::new()
+impl LuaIo for NoExposedIo {
+    fn take_gpio(&mut self) -> Option<Box<dyn LuaGpioHardware>> {
+        None
+    }
+
+    fn take_i2c(&mut self) -> Option<Box<dyn LuaI2cHardware>> {
+        None
+    }
+
+    fn take_spi(&mut self) -> Option<Box<dyn LuaSpiHardware>> {
+        None
     }
 }

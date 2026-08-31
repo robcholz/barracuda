@@ -33,7 +33,7 @@ pub struct CaptivePortalPlugin;
 impl CaptivePortalPlugin {
     /// Creates the Captive Portal Plugin.
     #[must_use]
-    pub const fn new(_context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }
@@ -211,8 +211,8 @@ mod tests {
     #[test]
     fn plugin_identity_and_dependencies_are_stable() {
         let stack = never_embassy_stack();
-        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-        let plugin = CaptivePortalPlugin::new(&context);
+        let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let plugin = CaptivePortalPlugin::new(&mut context);
 
         assert_eq!(Plugin::<512>::id(&plugin), PLUGIN_ID);
         assert_eq!(

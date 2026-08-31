@@ -5,9 +5,9 @@
 - Required typed capability: `barracuda_vm_package_api::LuaPackageRegistry` from `vm`
 - Provided typed capabilities: none
 
-During unified Plugin registration, this Plugin registers the require-only
-`gpio` Lua package with the VM registry. It takes exclusive ownership of the
-GPIO value explicitly exposed and adapted for Lua by the selected Target.
+During unified Plugin construction, this Plugin takes the GPIO value directly
+from `PluginContext::hal.io`. During registration it installs the require-only
+`gpio` Lua package in the VM registry.
 
 Lua API:
 
