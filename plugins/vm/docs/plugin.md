@@ -2,7 +2,7 @@
 
 - Plugin ID: `vm`
 - Direct Plugin dependencies: none
-- Provided typed capabilities: none
+- Provided typed capabilities: `VmPackageRegistry`
 
 During registration, the VM Plugin selects its built-in Lua package
 installation plan and explicitly loads the standalone Lua VM Component with
@@ -14,6 +14,14 @@ The Component creates fresh package instances for each isolated execution and
 exposes the VM RPC and Event contracts documented in this directory. Its Lua
 instruction hook only yields execution; the owning Embassy task performs the
 100 ms async wait before polling Lua again.
+
+The Plugin publishes `VmPackageRegistry` for dependent Plugins. A consumer
+registers a per-execution package factory during its own registration phase and
+retains the returned `VmPackageRegistration`. Every `vm.run` installs fresh
+instances of those external packages after the VM-owned built-ins. Dropping the
+registration removes the package factory. External packages therefore extend
+the VM without becoming built-ins or creating a dependency from VM back to the
+provider.
 
 Owned resources:
 

@@ -10,6 +10,7 @@ use barracuda_plugin_manager::{
 };
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_component::{VmComponent, VmRuntime};
+pub use barracuda_vm_package_api::VmPackageRegistry;
 
 /// Stable identity of the VM Plugin.
 pub const PLUGIN_ID: &str = "vm";
@@ -40,10 +41,15 @@ impl<const M: usize> Plugin<M> for VmPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         let runtime = VmRuntime::new().map_err(PluginError::registration)?;
-        context.event_router.load(VmComponent::with_runtime(
-            BuiltinPackages::all(),
-            runtime.clone(),
-        ))?;
+        let packages = alloc::rc::Rc::new(VmPackageRegistry::default());
+        context.provide(alloc::rc::Rc::clone(&packages))?;
+        context
+            .event_router
+            .load(VmComponent::with_runtime_and_packages(
+                BuiltinPackages::all(),
+                runtime.clone(),
+                packages.as_ref().clone(),
+            ))?;
         self.runtime = Some(runtime);
         Ok(())
     }

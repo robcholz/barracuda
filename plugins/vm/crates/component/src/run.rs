@@ -8,6 +8,7 @@ use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
+use barracuda_vm_package_api::VmPackageRegistry;
 use getset::CopyGetters;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -359,9 +360,29 @@ impl RpcMethod for Run {
 
 /// Builds the reusable `vm.run` handler.
 pub fn run_handler(limits: VmLimits, builtin_packages: BuiltinPackages) -> impl RpcHandler<Run> {
-    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| async move {
-        let stream = run_stream(requests, limits, builtin_packages, None, None);
-        Ok(RpcStream::new(stream))
+    run_handler_with_packages(limits, builtin_packages, VmPackageRegistry::default())
+}
+
+pub(crate) fn run_handler_with_packages(
+    limits: VmLimits,
+    builtin_packages: BuiltinPackages,
+    external_packages: VmPackageRegistry,
+) -> impl RpcHandler<Run> {
+    move |context: barracuda_event_router::RpcContext,
+          requests: RpcStream<RpcFrame<RunRequestFrame>>| {
+        let external_packages = external_packages.clone();
+        async move {
+            let stream = run_stream(
+                requests,
+                limits,
+                builtin_packages,
+                external_packages,
+                context.client().clone(),
+                None,
+                None,
+            );
+            Ok(RpcStream::new(stream))
+        }
     }
 }
 
@@ -371,6 +392,8 @@ pub(crate) fn run_stream(
     requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    external_packages: VmPackageRegistry,
+    rpc: barracuda_event_router::RpcClient,
     yield_signal: Option<crate::runtime::VmYieldSignal>,
     memory: Option<crate::memory::VmMemoryLease>,
 ) -> impl futures_core::Stream<Item = RpcResult<RunItem>> + 'static {
@@ -380,6 +403,8 @@ pub(crate) fn run_stream(
             requests,
             limits,
             builtin_packages,
+            external_packages,
+            rpc,
             yield_signal,
             memory,
         )
@@ -392,6 +417,8 @@ async fn drive_run(
     mut requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    external_packages: VmPackageRegistry,
+    rpc: barracuda_event_router::RpcClient,
     yield_signal: Option<crate::runtime::VmYieldSignal>,
     memory: Option<crate::memory::VmMemoryLease>,
 ) -> RpcResult<()> {
@@ -419,6 +446,13 @@ async fn drive_run(
             .await;
         }
     };
+    if let Err(error) = external_packages.install(&mut lua, rpc) {
+        return emit_error(
+            &yielder,
+            RunError::new(RunErrorKind::VmConfigure, error.message()),
+        )
+        .await;
+    }
     if let Some(yield_signal) = yield_signal
         && let Err(error) =
             lua.set_instruction_hook(limits.instruction_hook_interval(), move || {

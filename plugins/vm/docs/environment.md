@@ -88,6 +88,21 @@ as `require("gpio")`, `require("time")`, or `require("net")` still fail today.
 Future VM-owned built-ins belong in `plugins/vm/crates/builtin-packages` and are
 selected with additional `with_package` calls.
 
+## Externally registered packages
+
+The VM Plugin publishes `VmPackageRegistry` as a typed Plugin capability.
+Dependent Plugins may register package factories during `Plugin::register` and
+retain the scoped registration for their lifetime. Each factory receives the
+current execution's `RpcClient`, allowing its package to call the provider's
+RPC contracts without sharing a Lua state. Every execution receives a fresh
+package object, and externally registered packages are installed after the
+VM-owned built-ins.
+
+External registration does not make a package a builtin. The provider Plugin
+owns its package implementation, authorization, backing state, and RPCs; VM
+only owns the bounded registry and installation mechanism. The registry accepts
+at most 16 external package names by default and rejects duplicate names.
+
 Repeated `require` calls for a registered module return the cached module table
 for that Lua state.
 

@@ -1495,6 +1495,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
+ "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
@@ -1509,6 +1510,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-vm-package-api"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-lua",
+ "futures-lite",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-vm-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1518,6 +1529,7 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
+ "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",

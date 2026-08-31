@@ -11,6 +11,7 @@ use crate::VmLimits;
 use crate::memory::{VmMemoryLease, VmMemoryPool, VmMemoryPoolError};
 use crate::run::{Run, RunError, RunErrorKind, RunItem, RunRequestFrame, run_stream};
 use barracuda_vm_builtin_packages::BuiltinPackages;
+use barracuda_vm_package_api::VmPackageRegistry;
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
 pub const VM_TASK_SLOTS: usize = 4;
@@ -85,6 +86,8 @@ impl VmRuntime {
         requests: RpcStream<RpcFrame<RunRequestFrame>>,
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
+        external_packages: VmPackageRegistry,
+        rpc: barracuda_event_router::RpcClient,
     ) -> RpcStream<RunItem> {
         let Some(spawner) = self.spawner.get() else {
             return error_stream(
@@ -102,6 +105,8 @@ impl VmRuntime {
                 requests,
                 limits,
                 builtin_packages,
+                external_packages,
+                rpc,
                 sender,
                 memory,
             ))
@@ -129,10 +134,21 @@ pub(crate) fn task_run_handler(
     runtime: VmRuntime,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    external_packages: VmPackageRegistry,
 ) -> impl RpcHandler<Run> {
-    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| {
+    move |context: barracuda_event_router::RpcContext,
+          requests: RpcStream<RpcFrame<RunRequestFrame>>| {
         let runtime = runtime.clone();
-        async move { Ok(runtime.dispatch(requests, limits, builtin_packages)) }
+        let external_packages = external_packages.clone();
+        async move {
+            Ok(runtime.dispatch(
+                requests,
+                limits,
+                builtin_packages,
+                external_packages,
+                context.client().clone(),
+            ))
+        }
     }
 }
 
@@ -141,6 +157,8 @@ async fn vm_execution_task(
     requests: RpcStream<RpcFrame<RunRequestFrame>>,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    external_packages: VmPackageRegistry,
+    rpc: barracuda_event_router::RpcClient,
     responses: Sender<RpcResult<RunItem>>,
     memory: VmMemoryLease,
 ) {
@@ -149,6 +167,8 @@ async fn vm_execution_task(
         requests,
         limits,
         builtin_packages,
+        external_packages,
+        rpc,
         Some(yield_signal.clone()),
         Some(memory),
     ));

@@ -9,6 +9,7 @@ barracuda-plugin-api = { path = "../../../../core/plugin-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-component = { path = "../component", features = ["vendored"] }
+barracuda-vm-package-api = { path = "../package-api" }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

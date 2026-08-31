@@ -6,10 +6,11 @@ use barracuda_event_router::{
 };
 use barracuda_lua::Lua;
 use barracuda_vm_builtin_packages::BuiltinPackages;
+use barracuda_vm_package_api::VmPackageRegistry;
 use getset::CopyGetters;
 
 use crate::VmRuntime;
-use crate::run::{Run, run_handler};
+use crate::run::{Run, run_handler_with_packages};
 use crate::runtime::task_run_handler;
 
 /// Default maximum Lua source size accepted by one `vm.run` call.
@@ -67,6 +68,7 @@ pub struct VmComponent {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     runtime: Option<VmRuntime>,
+    external_packages: VmPackageRegistry,
 }
 
 impl VmComponent {
@@ -77,6 +79,7 @@ impl VmComponent {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
             runtime: None,
+            external_packages: VmPackageRegistry::default(),
         }
     }
 
@@ -87,6 +90,22 @@ impl VmComponent {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
             runtime: Some(runtime),
+            external_packages: VmPackageRegistry::default(),
+        }
+    }
+
+    /// Creates the Component with the externally published package registry.
+    #[must_use]
+    pub fn with_runtime_and_packages(
+        builtin_packages: BuiltinPackages,
+        runtime: VmRuntime,
+        external_packages: VmPackageRegistry,
+    ) -> Self {
+        Self {
+            limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
+            builtin_packages,
+            runtime: Some(runtime),
+            external_packages,
         }
     }
 
@@ -105,8 +124,13 @@ impl<const M: usize> Component<M> for VmComponent {
                 runtime.clone(),
                 self.limits,
                 self.builtin_packages,
+                self.external_packages.clone(),
             )),
-            None => context.register_rpc::<Run, _>(run_handler(self.limits, self.builtin_packages)),
+            None => context.register_rpc::<Run, _>(run_handler_with_packages(
+                self.limits,
+                self.builtin_packages,
+                self.external_packages.clone(),
+            )),
         }
     }
 
