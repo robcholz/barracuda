@@ -1,0 +1,3 @@
+id = "message-queue"
+depends-on = ["vm"]
+description = "Registers a bounded shared message queue Lua package."

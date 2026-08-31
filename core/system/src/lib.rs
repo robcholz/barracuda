@@ -157,6 +157,7 @@ where
             barracuda_imessage_telegram_plugin::IMessageTelegramPlugin::new(&mut plugin_context),
             barracuda_imessage_web_plugin::IMessageWebPlugin::new(&mut plugin_context),
             barracuda_imessage_wechat_plugin::IMessageWechatPlugin::new(&mut plugin_context),
+            barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
             barracuda_spi_plugin::SpiPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),

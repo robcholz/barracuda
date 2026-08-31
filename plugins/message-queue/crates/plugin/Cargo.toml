@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-message-queue-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin providing shared bounded queues to Lua"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-lua = { path = "../../../vm/crates/lua" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-vm-package-api = { path = "../../../vm/crates/package-api" }
+barracuda-vm-plugin = { path = "../../../vm/crates/plugin" }
+embassy-sync.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+
+[dev-dependencies]
+barracuda-lua = { path = "../../../vm/crates/lua", features = ["vendored"] }
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

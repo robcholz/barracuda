@@ -958,6 +958,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-message-queue-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-vm-package-api",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
+ "futures-lite",
+ "futures-util",
+ "spin 0.10.1",
+]
+
+[[package]]
 name = "barracuda-model-api"
 version = "0.1.0"
 dependencies = [
@@ -1428,6 +1444,7 @@ dependencies = [
  "barracuda-imessage-telegram-plugin",
  "barracuda-imessage-web-plugin",
  "barracuda-imessage-wechat-plugin",
+ "barracuda-message-queue-plugin",
  "barracuda-model-api",
  "barracuda-platform",
  "barracuda-platform-test",
