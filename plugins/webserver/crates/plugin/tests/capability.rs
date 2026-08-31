@@ -62,7 +62,7 @@ fn plugin_provides_webserver_to_dependent_plugins() {
         barracuda_plugin_manager::PluginId::try_from(PLUGIN_ID).expect("valid WebServer Plugin ID");
 
     manager
-        .register(&mut router, WebServerPlugin::new(&plugin_context()))
+        .register(&mut router, WebServerPlugin::new(&mut plugin_context()))
         .expect("register WebServer Plugin");
     manager
         .register(
@@ -86,7 +86,7 @@ fn plugin_requires_a_system_task_spawner_during_startup() {
     let mut router = block_on(EventRouter::new(lanes)).expect("create router");
 
     manager
-        .register(&mut router, WebServerPlugin::new(&plugin_context()))
+        .register(&mut router, WebServerPlugin::new(&mut plugin_context()))
         .expect("register WebServer Plugin");
 
     let error = manager
@@ -115,7 +115,7 @@ async fn start_webserver_task(spawner: Spawner, completed: SyncSender<Result<(),
 
         manager.install_task_spawner(spawner);
         manager
-            .register(&mut router, WebServerPlugin::new(&plugin_context()))
+            .register(&mut router, WebServerPlugin::new(&mut plugin_context()))
             .map_err(|error| error.to_string())?;
         manager
             .start(&mut router)

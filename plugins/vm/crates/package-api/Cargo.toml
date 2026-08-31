@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-vm-package-api"
+version = "0.1.0"
+edition = "2021"
+description = "Registration API for Lua packages exposed by the Barracuda VM Plugin"
+
+[dependencies]
+barracuda-lua = { path = "../../../../shared/lua" }
+spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-lua = { path = "../../../../shared/lua", features = ["vendored"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

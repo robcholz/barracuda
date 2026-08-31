@@ -45,34 +45,37 @@ selects its Platform through a Rust associated type, Cargo dependency, or YAML
 reference.
 
 ~~~text
-selected Platform YAML -------------------------+
-                                                 |
-selected Board YAML -> Board matrix              |
-                         |                       |
-                         v                       v
-               peripheral Drivers -> HAL     Platform
-                         |                       |
-                         +-----------+-----------+
-                                     |
-                                     v
-                                   Target
-                                     |
-                                     v
-                          barracuda_target::resources
-                                     |
-                                     v
-                                   System
-                                     |
-                                     v
-                                  Plugins
+one hardware bootstrap --------+------------------------------+
+                               |                              |
+selected Platform -------------+-> Platform bindings -> Platform
+                                                              |
+selected Board config -> generated Board composition          |
+  +-- built-in Driver + wiring -> built-in capabilities       |
+  `-- explicitly exposed I/O  -> GPIO/I2C/SPI capabilities    |
+                               |                              |
+                               +------------> HAL ------------+
+                                                              |
+                                                              v
+                                                            Target
+                                                              |
+                                                              v
+                                                   barracuda_target::resources
+                                                              |
+                                                              v
+                                                            System
+                                                              |
+                                                              v
+                                                           Plugins
 ~~~
 
 The selected-target composition root validates that the independently selected
-Platform and Board can form one Target. It invokes Platform initialization and
-the Board HAL composition independently, then returns their resources to
-System without flattening one axis into the other. Application
-entries do not parse YAML, import a concrete Platform, instantiate peripheral
-Drivers, or wire Board peripherals.
+Platform and Board can form one Target. At boot it acquires the hardware
+singleton, invokes the generated Platform and Board constructors, and returns
+their resources to System without flattening one axis into the other. The
+composition follows the selected Board declarations; it does not infer an I/O
+surface from hardware that the Board config omitted. Application entries do not
+parse YAML, import a concrete Platform, acquire chip peripherals, instantiate
+peripheral Drivers, or wire Board peripherals.
 
 ~~~rust,ignore
 let resources = barracuda_target::resources(spawner).await?;
@@ -131,6 +134,7 @@ A Board describes one concrete product hardware matrix:
 - exact chip and package;
 - buses, pins, DMA channels, interrupts, and clocks;
 - attached peripheral models and their fixed wiring;
+- explicitly exposed GPIO, I2C, and SPI connectors;
 - external memories and storage devices;
 - native boot and physical layout artifacts;
 - product-specific hardware feature presence.
@@ -159,6 +163,203 @@ Target composition must not infer a default Board or activate a Board feature
 from them. A missing selection is a build error that points back to the select
 command. This keeps target policy out of Board parsing and code generation
 while preserving Board and Platform as independent inputs.
+
+## Board-declared hardware surface
+
+The selected Board config is the source of truth for the hardware surface that
+Barracuda constructs. It contains two independent sets of declarations:
+
+- built-in peripherals name a Driver and the pins, bus, geometry, polarity,
+  and other fixed inputs used to construct it;
+- exposed I/O names each digital GPIO, analog channel, PWM channel, I2C, or SPI
+  capability and the concrete pins and controller used to construct it.
+
+The generated Board composition constructs exactly those declarations. It does
+not expose unused pins or peripheral instances automatically. A physical
+resource omitted from `exposed-io` is absent from the Barracuda I/O surface even
+when the chip could otherwise use it.
+
+The common Board model does not assign conflict or mux semantics to references
+shared by declarations. A concrete Board config may deliberately describe
+hardware muxing or overlapping uses when its hardware and adapter support them.
+Barracuda neither promises that those uses can operate simultaneously nor
+rejects the configuration solely because the same physical identifier appears
+more than once. Electrical correctness, mode transitions, and runtime
+coordination remain properties of that concrete Board composition.
+
+Generic validation covers the Board schema, referenced Driver identifiers,
+required wiring fields, and whether the selected adapter can construct the
+declaration. It does not certify the resulting product wiring or resource-use
+policy.
+
+## Exposed I/O and built-in peripherals
+
+Board configuration distinguishes fixed product hardware from connectors that
+Barracuda intentionally makes available to application-level consumers. The
+shape is conceptually:
+
+~~~yaml
+builtin-peripherals:
+  status-indicator:
+    driver: gpio-output-indicator
+    bindings:
+      pin: gpio10
+    parameters:
+      active-low: true
+  display:
+    driver: mipidsi-st7789
+    bindings:
+      spi: spi2
+      chip-select: gpio8
+      data-command: gpio9
+    parameters:
+      width: 320
+      height: 240
+
+exposed-io:
+  gpio:
+    user-button:
+      pin: gpio2
+  analog-input:
+    sensor-voltage:
+      peripheral: adc1
+      pin: gpio3
+      channel: 2
+  pwm:
+    actuator:
+      peripheral: ledc0
+      pin: gpio4
+      channel: 0
+  i2c:
+    expansion:
+      peripheral: i2c0
+      scl: gpio4
+      sda: gpio5
+      frequency-hz: 400000
+  spi:
+    expansion:
+      peripheral: spi0
+      sck: gpio18
+      mosi: gpio19
+      miso: gpio20
+      frequency-hz: 20000000
+~~~
+
+The concrete schema may use chip-native names, but it stores hardware facts,
+Driver identifiers, electrical configuration, safe boot state, and stable
+connector names. Rust crate paths, Platform types, Plugin identities, and
+application policy do not belong in the Board matrix. A Driver identifier
+selects registered composition code; the YAML does not name a Rust type or
+crate path.
+
+Board HAL resources retain the distinction between the two classes:
+
+~~~rust,ignore
+BoardHalResources {
+    builtins: BuiltinCapabilities { /* display, indicator, ... */ },
+    io: ExposedIo { gpio, i2c, spi },
+}
+~~~
+
+`BoardHalResources<Builtins, Io>` is the common ownership envelope. Its generic
+fields preserve the concrete, statically composed capability types for each
+selected Board. Built-in Drivers return semantic capabilities such as Display
+or Indicator. Exposed declarations return I/O capabilities. The envelope does
+not imply that the underlying physical resources are disjoint. System routes
+each resulting capability to the subsystem or Plugin that owns its behavior.
+
+`ExposedIo` is an ownership and naming envelope, not a parallel I/O trait
+family. Its entries retain concrete, statically dispatched values implementing
+the upstream contracts:
+
+| Hardware use | Upstream contract |
+| --- | --- |
+| dynamically configured digital GPIO | Barracuda `ConfigurableDigitalPin`, with operations from `embedded_hal::digital` |
+| asynchronous GPIO edge wait | `embedded_hal_async::digital::Wait` |
+| analog input or output | Barracuda `AnalogInput` or `AnalogOutput` |
+| PWM output | `embedded_hal::pwm::SetDutyCycle` |
+| I2C controller or shared handle | `embedded_hal::i2c::I2c` or `embedded_hal_async::i2c::I2c` |
+| exclusively owned SPI controller | `embedded_hal::spi::SpiBus` or `embedded_hal_async::spi::SpiBus` |
+| one device on an SPI controller | `embedded_hal::spi::SpiDevice` or `embedded_hal_async::spi::SpiDevice` |
+
+Barracuda does not replace the digital GPIO, PWM, I2C, or SPI operations that
+`embedded-hal` already defines. `ConfigurableDigitalPin` adds the missing
+runtime transition between disabled, input, and output states; the configured
+value continues to implement `InputPin`, `OutputPin`, and
+`StatefulOutputPin`. `AnalogInput` and `AnalogOutput` cover ADC and DAC because
+`embedded-hal` 1.0 has no corresponding contracts. Initialization, pin mux,
+stable Board names, and static construction come from the concrete Board
+adapter. Cross-declaration conflict policy is not part of this common layer.
+
+Exposed I/O returns capabilities with stable Board-level names. A digital GPIO
+owner selects input bias or output drive and initial level at runtime. An analog
+capability binds one controller channel and pin. An I2C capability owns its
+controller and signal pins. An SPI capability owns its controller and signal
+pins; a separately exposed GPIO supplies application-managed chip select when
+needed. When another Board declaration references the same physical resource,
+the concrete Board composition defines how those logical capabilities relate.
+
+Reusable Drivers consume the standard `embedded-hal` and
+`embedded-hal-async` contracts where those contracts express the operation.
+The chip HAL's own type erasure is used when a bounded collection needs a
+uniform concrete type: for example, ESP and Embassy STM32 provide type-erased
+pin representations and erase peripheral instance identity inside their I2C
+and SPI drivers. Barracuda adapters do not reproduce that machinery. The
+selected build keeps concrete storage and dispatch statically allocated;
+consumers do not look up a Platform, Board, or Driver implementation at
+runtime, and async HAL traits are not converted into `dyn` trait objects.
+
+`embedded-hal` does not standardize changing a GPIO between input and output
+modes. Every exposed digital GPIO therefore implements the small Barracuda
+configuration contract in addition to the upstream operation traits. Protocol
+alternate functions are established by constructing the declared controller;
+they are not another mode on this common digital API. Each chip adapter maps
+the configuration contract to its stable flexible-pin mechanism.
+
+Built-in buses use the existing upstream sharing adapters. HAL-owned buses use
+the blocking or async `embassy-embedded-hal` shared I2C/SPI devices appropriate
+for the concrete Driver and Embassy mutexes. Devices with different bus
+configurations use its per-device configuration support when the chip HAL
+provides `SetConfig`; otherwise a small chip adapter delegates configuration to
+the vendor driver's stable API. The corresponding `embedded-hal-bus` adapters
+are also used where their ownership and execution model is the closer fit.
+Driver code receives `SpiDevice` when it addresses a CS-selected device and
+`SpiBus` only when it truly owns the whole bus.
+
+A built-in display uses an existing controller Driver when available. For a
+blocking MIPI DCS transport, controllers such as ST7789 are composed with
+`mipidsi`: its SPI interface consumes `embedded_hal::spi::SpiDevice`, and
+drawing consumers use the resulting
+`embedded-graphics-core::DrawTarget` implementation. A DMA or async display
+path selects an existing Driver that exposes that execution model, or isolates
+a blocking Driver behind its HAL-owned task. A Barracuda Display facade is
+introduced only when System needs lifecycle, power, backlight, framebuffer, or
+concurrency semantics that those upstream contracts do not express.
+
+System assigns every exposed port collection to one owner. That owner may
+publish a higher-level typed capability or Event Router contract for scripts
+and Plugins. Arbitration, access control, and dynamic device attachment belong
+to that owner. Any physical overlap already declared by the Board remains a
+property of the concrete Board composition.
+
+The Lua GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
+concrete, move-only `BoardHalResources` value; it has no scripting service
+contract and adds no shared ownership or lock. System puts that complete HAL
+directly in `PluginContext` without splitting it into per-Plugin fields or
+constructing a Lua hardware bundle. During unified Plugin construction, each
+hardware Plugin mutably accesses `context.hal.io`, takes its corresponding
+explicitly exposed value once, and becomes that value's sole owner. Built-in
+capabilities and any untaken exposed I/O remain in the HAL stored by System.
+
+The Plugin then places its owned value behind an Embassy async mutex inside
+the Lua package. Cloned `Arc`s share only that Lua-layer lock so concurrent Lua
+callbacks can reach the same package-owned value; they do not clone or
+reconstruct hardware. Adapter operations take `&mut self`, and the mutex guard
+is held across the returned future, making the exclusivity required by the
+underlying `embedded-hal` or `embedded-hal-async` value explicit. This dynamic
+adapter exists only because logical names and Lua callbacks are runtime data.
+HAL, Board composition, built-in peripheral Drivers, and non-Lua consumers
+remain concrete and statically dispatched.
 
 ## Peripheral Drivers and HAL
 
@@ -199,6 +400,29 @@ or PlatformResources.
 Driver tasks and interrupt-facing state are owned by the HAL composition that
 instantiated the Driver. System and Plugins receive handles or semantic
 capabilities; they do not own the Driver runner.
+
+Board HAL initialization consumes generated owned bindings rather than finding
+hardware by number or acquiring the chip singleton itself. Its conceptual
+contract is:
+
+~~~rust,ignore
+trait BoardHal {
+    type Bindings;
+    type Resources;
+    type Error;
+
+    async fn initialize(
+        spawner: Spawner,
+        bindings: Self::Bindings,
+    ) -> Result<Self::Resources, Self::Error>;
+}
+~~~
+
+The runtime `Board` descriptor remains useful for identity, diagnostics, and
+native-layout selection. It is not a second source of peripheral ownership.
+The selected Target composition produces both `Platform::Bindings` and
+`BoardHal::Bindings`, so compatibility is checked at the only layer that
+imports both selected axes. Neither axis names or selects the other.
 
 ## Partitions
 
@@ -448,6 +672,7 @@ drivers/
 boards/
 +-- api/
 +-- hal/
++-- chips/<chip>/      # vendor-HAL token vocabulary and package catalog
 +-- config/
 +-- configs/<board>/
 +-- selected/          # selects only Board + Board HAL
@@ -455,7 +680,7 @@ boards/
 
 composition/
 +-- api/               # separate Platform and Board HAL resource fields
-+-- selected/          # thin orchestration of both selected axes
++-- selected/          # generated allocation and orchestration of both axes
 
 core/
 +-- system/
@@ -478,6 +703,12 @@ composition. Board-related crates remain under boards/; peripheral Drivers
 remain under drivers/; the selected Target composition root remains outside an
 individual Platform implementation.
 
+A chip/package adapter supplies the vendor-HAL token vocabulary and
+constructors used by generated composition. It contains neither product wiring
+nor peripheral Driver behavior. It is an implementation dependency shared by
+the selected Platform and Board HAL, not a third selection axis and not a
+runtime capability exposed to System.
+
 ## Static composition requirements
 
 - Platform and Board are independently selected at build time.
@@ -485,6 +716,19 @@ individual Platform implementation.
 - The concrete Platform and HAL are monomorphized for one Target.
 - Runtime Platform lookup and a dyn Platform registry are unnecessary.
 - Peripheral Driver calls remain statically dispatched.
+- The selected Target acquires the hardware singleton and invokes the generated
+  constructors for the selected Platform and Board.
+- Board HAL initialization consumes owned bindings; it does not reacquire
+  peripherals or resolve pin numbers at runtime.
+- The Board HAL constructs only the built-in peripherals and exposed I/O
+  explicitly declared by the Board config.
+- The common framework defines no conflict, disjointness, or mux policy between
+  those declarations.
+- Digital GPIO, PWM, I2C, and SPI operations use `embedded-hal` ecosystem
+  contracts. Barracuda adds only GPIO mode configuration and analog conversion
+  contracts that `embedded-hal` 1.0 does not provide.
+- Shared I2C/SPI buses use upstream bus-device adapters and one statically
+  allocated owner.
 - Platform runners and Driver runners stay with their respective owners.
 - System and Plugin hot paths do not perform Platform, Board, or Driver lookup.
 - Adding a Plugin does not change Platform API.
@@ -516,3 +760,15 @@ Before changing target-sensitive code, verify:
     composition crate without performing the wiring itself?
 13. Does Platform initialize TLS from Platform-owned randomness and trust
     roots, while all HTTP consumers use `shared/http-client`?
+14. Does selected-target composition acquire the hardware singleton and invoke
+    the generated constructors before returning Target resources?
+15. Are built-in Drivers and their wiring declared by the Board config?
+16. Are exposed digital GPIO, analog, PWM, I2C, and SPI capabilities explicitly
+    declared instead of inferred from unused hardware?
+17. Does the common layer avoid imposing conflict or mux policy on declarations
+    that reference the same physical resource?
+18. Can the capability expose an `embedded-hal`, `embedded-hal-async`, or
+    domain ecosystem contract directly instead of introducing a Barracuda
+    operation trait?
+19. Does an SPI Driver receive `SpiDevice` when it owns a CS-selected device,
+    with sharing and per-device configuration handled by an upstream adapter?

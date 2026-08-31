@@ -12,9 +12,9 @@ their channels through its typed capability.
 
 ```rust
 manager
-    .register(&mut router, IMessageGatewayPlugin::new(&plugin_context))?;
+    .register(&mut router, IMessageGatewayPlugin::new(&mut plugin_context))?;
 manager
-    .register(&mut router, IMessageWebPlugin::new(&plugin_context))?;
+    .register(&mut router, IMessageWebPlugin::new(&mut plugin_context))?;
 manager.start(&mut router)?;
 ```
 

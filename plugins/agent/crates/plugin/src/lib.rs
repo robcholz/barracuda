@@ -65,7 +65,7 @@ pub struct AgentPlugin {
 impl AgentPlugin {
     /// Creates the Plugin with Platform HTTP resources.
     #[must_use]
-    pub fn new(context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
         }
@@ -144,8 +144,8 @@ mod tests {
             let id = PluginId::try_from("agent").expect("valid Plugin ID");
 
             let stack = never_embassy_stack();
-            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-            let plugin = AgentPlugin::new(&context);
+            let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = AgentPlugin::new(&mut context);
             assert_eq!(Plugin::<512>::id(&plugin), "agent");
 
             manager

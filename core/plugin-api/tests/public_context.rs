@@ -11,4 +11,5 @@ fn construction_resources_are_public_fields() {
 
     let _ip_stack = context.ip_stack;
     let _http_clients = context.http_clients;
+    let _hal = context.hal;
 }

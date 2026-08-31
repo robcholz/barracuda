@@ -5,6 +5,7 @@
 
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::{Component, Path, PathBuf},
 };
@@ -97,6 +98,10 @@ pub struct BoardDefinition {
     toolchain: Option<ToolchainDefinition>,
     #[serde(rename = "native-layout")]
     native_layout: NativeLayoutDefinition,
+    #[serde(default, rename = "exposed-io")]
+    exposed_io: ExposedIoDefinition,
+    #[serde(default, rename = "builtin-peripherals")]
+    builtin_peripherals: BTreeMap<String, BuiltinPeripheralDefinition>,
 }
 
 impl BoardDefinition {
@@ -130,6 +135,24 @@ impl BoardDefinition {
         &self.native_layout
     }
 
+    /// Returns the I/O capabilities explicitly exposed by this Board.
+    #[must_use]
+    pub const fn exposed_io(&self) -> &ExposedIoDefinition {
+        &self.exposed_io
+    }
+
+    /// Finds a built-in peripheral declaration by its Board-level name.
+    #[must_use]
+    pub fn builtin_peripheral(&self, name: &str) -> Option<&BuiltinPeripheralDefinition> {
+        self.builtin_peripherals.get(name)
+    }
+
+    /// Returns whether this Board declares any built-in or exposed hardware.
+    #[must_use]
+    pub fn has_hardware_surface(&self) -> bool {
+        !self.builtin_peripherals.is_empty() || !self.exposed_io.is_empty()
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         if self.hardware.chip.trim().is_empty() {
             return Err(ConfigError::EmptyChip);
@@ -151,6 +174,361 @@ impl BoardDefinition {
         {
             return Err(ConfigError::InvalidNativeLayoutArtifact);
         }
+        self.exposed_io.validate()?;
+        for (name, peripheral) in &self.builtin_peripherals {
+            validate_resource_name("builtin-peripherals", name)?;
+            validate_identifier(name, "driver", &peripheral.driver)?;
+            for (binding, identifier) in &peripheral.bindings {
+                validate_resource_name("builtin binding", binding)?;
+                validate_identifier(name, "binding", identifier)?;
+            }
+            for parameter in peripheral.parameters.keys() {
+                validate_resource_name("builtin parameter", parameter)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// I/O declarations that become visible outside built-in peripheral Drivers.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExposedIoDefinition {
+    #[serde(default)]
+    gpio: BTreeMap<String, GpioDefinition>,
+    #[serde(default, rename = "analog-input")]
+    analog_input: BTreeMap<String, AnalogChannelDefinition>,
+    #[serde(default, rename = "analog-output")]
+    analog_output: BTreeMap<String, AnalogChannelDefinition>,
+    #[serde(default)]
+    pwm: BTreeMap<String, PwmDefinition>,
+    #[serde(default)]
+    i2c: BTreeMap<String, I2cDefinition>,
+    #[serde(default)]
+    spi: BTreeMap<String, SpiDefinition>,
+}
+
+impl ExposedIoDefinition {
+    /// Finds a dynamically configurable digital GPIO by its Board-level name.
+    #[must_use]
+    pub fn gpio(&self, name: &str) -> Option<&GpioDefinition> {
+        self.gpio.get(name)
+    }
+
+    /// Finds an analog input channel by its Board-level name.
+    #[must_use]
+    pub fn analog_input(&self, name: &str) -> Option<&AnalogChannelDefinition> {
+        self.analog_input.get(name)
+    }
+
+    /// Finds an analog output channel by its Board-level name.
+    #[must_use]
+    pub fn analog_output(&self, name: &str) -> Option<&AnalogChannelDefinition> {
+        self.analog_output.get(name)
+    }
+
+    /// Finds a PWM output by its Board-level name.
+    #[must_use]
+    pub fn pwm(&self, name: &str) -> Option<&PwmDefinition> {
+        self.pwm.get(name)
+    }
+
+    /// Finds an I2C controller by its Board-level name.
+    #[must_use]
+    pub fn i2c(&self, name: &str) -> Option<&I2cDefinition> {
+        self.i2c.get(name)
+    }
+
+    /// Finds an SPI controller by its Board-level name.
+    #[must_use]
+    pub fn spi(&self, name: &str) -> Option<&SpiDefinition> {
+        self.spi.get(name)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.gpio.is_empty()
+            && self.analog_input.is_empty()
+            && self.analog_output.is_empty()
+            && self.pwm.is_empty()
+            && self.i2c.is_empty()
+            && self.spi.is_empty()
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (name, gpio) in &self.gpio {
+            validate_resource_name("gpio", name)?;
+            validate_identifier(name, "pin", &gpio.pin)?;
+        }
+        for (section, channels) in [
+            ("analog-input", &self.analog_input),
+            ("analog-output", &self.analog_output),
+        ] {
+            for (name, channel) in channels {
+                validate_resource_name(section, name)?;
+                validate_identifier(name, "peripheral", &channel.peripheral)?;
+                validate_identifier(name, "pin", &channel.pin)?;
+            }
+        }
+        for (name, pwm) in &self.pwm {
+            validate_resource_name("pwm", name)?;
+            validate_identifier(name, "peripheral", &pwm.peripheral)?;
+            validate_identifier(name, "pin", &pwm.pin)?;
+        }
+        for (name, i2c) in &self.i2c {
+            validate_resource_name("i2c", name)?;
+            validate_identifier(name, "peripheral", &i2c.peripheral)?;
+            validate_identifier(name, "scl", &i2c.scl)?;
+            validate_identifier(name, "sda", &i2c.sda)?;
+            validate_frequency(name, i2c.frequency_hz)?;
+        }
+        for (name, spi) in &self.spi {
+            validate_resource_name("spi", name)?;
+            validate_identifier(name, "peripheral", &spi.peripheral)?;
+            validate_identifier(name, "sck", &spi.sck)?;
+            if let Some(mosi) = &spi.mosi {
+                validate_identifier(name, "mosi", mosi)?;
+            }
+            if let Some(miso) = &spi.miso {
+                validate_identifier(name, "miso", miso)?;
+            }
+            validate_frequency(name, spi.frequency_hz)?;
+        }
+        Ok(())
+    }
+}
+
+/// One exposed digital GPIO declaration.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GpioDefinition {
+    pin: String,
+}
+
+impl GpioDefinition {
+    /// Returns the chip-native pin identifier.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+}
+
+/// One ADC or DAC channel declaration.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AnalogChannelDefinition {
+    peripheral: String,
+    pin: String,
+    channel: u8,
+}
+
+impl AnalogChannelDefinition {
+    /// Returns the chip-native ADC or DAC peripheral identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the chip-native pin identifier.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+
+    /// Returns the peripheral channel number.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+}
+
+/// One PWM channel declaration.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PwmDefinition {
+    peripheral: String,
+    pin: String,
+    channel: u8,
+}
+
+impl PwmDefinition {
+    /// Returns the chip-native PWM peripheral identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the chip-native pin identifier.
+    #[must_use]
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+
+    /// Returns the peripheral channel number.
+    #[must_use]
+    pub const fn channel(&self) -> u8 {
+        self.channel
+    }
+}
+
+/// One exposed I2C controller and its signal pins.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct I2cDefinition {
+    peripheral: String,
+    scl: String,
+    sda: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl I2cDefinition {
+    /// Returns the chip-native I2C peripheral identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the chip-native clock pin identifier.
+    #[must_use]
+    pub fn scl(&self) -> &str {
+        &self.scl
+    }
+
+    /// Returns the chip-native data pin identifier.
+    #[must_use]
+    pub fn sda(&self) -> &str {
+        &self.sda
+    }
+
+    /// Returns the initial controller frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+}
+
+/// One exposed SPI controller and its signal pins.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpiDefinition {
+    peripheral: String,
+    sck: String,
+    #[serde(default)]
+    mosi: Option<String>,
+    #[serde(default)]
+    miso: Option<String>,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl SpiDefinition {
+    /// Returns the chip-native SPI peripheral identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the chip-native clock pin identifier.
+    #[must_use]
+    pub fn sck(&self) -> &str {
+        &self.sck
+    }
+
+    /// Returns the optional controller-output pin identifier.
+    #[must_use]
+    pub fn mosi(&self) -> Option<&str> {
+        self.mosi.as_deref()
+    }
+
+    /// Returns the optional controller-input pin identifier.
+    #[must_use]
+    pub fn miso(&self) -> Option<&str> {
+        self.miso.as_deref()
+    }
+
+    /// Returns the initial controller frequency.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+}
+
+/// One fixed Board peripheral and the Driver bindings used to construct it.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltinPeripheralDefinition {
+    driver: String,
+    #[serde(default)]
+    bindings: BTreeMap<String, String>,
+    #[serde(default)]
+    parameters: BTreeMap<String, PeripheralParameter>,
+}
+
+impl BuiltinPeripheralDefinition {
+    /// Returns the stable peripheral Driver identifier.
+    #[must_use]
+    pub fn driver(&self) -> &str {
+        &self.driver
+    }
+
+    /// Finds one chip-native binding by its Driver-defined role.
+    #[must_use]
+    pub fn binding(&self, role: &str) -> Option<&str> {
+        self.bindings.get(role).map(String::as_str)
+    }
+
+    /// Finds one Driver-defined construction parameter.
+    #[must_use]
+    pub fn parameter(&self, name: &str) -> Option<&PeripheralParameter> {
+        self.parameters.get(name)
+    }
+}
+
+/// Build-time value passed to a built-in peripheral Driver constructor.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum PeripheralParameter {
+    /// Boolean setting.
+    Boolean(bool),
+    /// Signed integer setting.
+    Integer(i64),
+    /// Text setting or chip-native identifier interpreted by the Driver.
+    String(String),
+    /// Ordered collection of settings.
+    Sequence(Vec<PeripheralParameter>),
+    /// Named collection of nested settings.
+    Mapping(BTreeMap<String, PeripheralParameter>),
+}
+
+fn validate_resource_name(section: &'static str, name: &str) -> Result<(), ConfigError> {
+    if name.trim().is_empty() {
+        Err(ConfigError::EmptyHardwareResourceName { section })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_identifier(
+    resource: &str,
+    field: &'static str,
+    identifier: &str,
+) -> Result<(), ConfigError> {
+    if identifier.trim().is_empty() {
+        Err(ConfigError::EmptyHardwareIdentifier {
+            resource: resource.to_owned(),
+            field,
+        })
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_frequency(resource: &str, frequency_hz: u32) -> Result<(), ConfigError> {
+    if frequency_hz == 0 {
+        Err(ConfigError::ZeroProtocolFrequency {
+            resource: resource.to_owned(),
+        })
+    } else {
         Ok(())
     }
 }
@@ -221,6 +599,26 @@ pub enum ConfigError {
     /// A native-layout artifact is absolute or escapes the Board bundle.
     #[error("Board native-layout artifact must remain inside its Board bundle")]
     InvalidNativeLayoutArtifact,
+    /// A map contains an empty Board-level resource name.
+    #[error("Board `{section}` resource name must not be empty")]
+    EmptyHardwareResourceName {
+        /// Section containing the invalid name.
+        section: &'static str,
+    },
+    /// A declared resource contains an empty chip-native identifier.
+    #[error("Board resource `{resource}` field `{field}` must not be empty")]
+    EmptyHardwareIdentifier {
+        /// Board-level resource name.
+        resource: String,
+        /// Field containing the invalid identifier.
+        field: &'static str,
+    },
+    /// An I2C or SPI controller was configured with a zero frequency.
+    #[error("Board protocol resource `{resource}` frequency must be greater than zero")]
+    ZeroProtocolFrequency {
+        /// Board-level resource name.
+        resource: String,
+    },
 }
 
 /// Parses and validates exactly one platform-neutral Board YAML document.

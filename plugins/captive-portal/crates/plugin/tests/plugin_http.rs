@@ -107,12 +107,12 @@ async fn plugin_exposes_agent_set_api_over_http() {
         )
         .expect("register WebServer provider");
     let construction_stack = never_embassy_stack();
-    let context = PluginContext::new(
+    let mut context = PluginContext::new(
         construction_stack,
         ClientFactory::plaintext(construction_stack),
     );
     manager
-        .register(&mut router, CaptivePortalPlugin::new(&context))
+        .register(&mut router, CaptivePortalPlugin::new(&mut context))
         .expect("register Captive Portal Plugin");
     manager.start(&mut router).expect("start Plugins");
 

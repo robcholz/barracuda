@@ -6,10 +6,11 @@ use barracuda_event_router::{
 };
 use barracuda_lua::Lua;
 use barracuda_vm_builtin_packages::BuiltinPackages;
+use barracuda_vm_package_api::LuaPackageRegistry;
 use getset::CopyGetters;
 
 use crate::VmRuntime;
-use crate::run::{Run, run_handler};
+use crate::run::{Run, run_handler_with_registry};
 use crate::runtime::task_run_handler;
 
 /// Default maximum Lua source size accepted by one `vm.run` call.
@@ -66,6 +67,7 @@ impl Default for VmLimits {
 pub struct VmComponent {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
+    package_registry: LuaPackageRegistry,
     runtime: Option<VmRuntime>,
 }
 
@@ -76,6 +78,7 @@ impl VmComponent {
         Self {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
+            package_registry: LuaPackageRegistry::new(),
             runtime: None,
         }
     }
@@ -86,8 +89,16 @@ impl VmComponent {
         Self {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
+            package_registry: LuaPackageRegistry::new(),
             runtime: Some(runtime),
         }
+    }
+
+    /// Uses the registry whose current packages are installed into each new Lua state.
+    #[must_use]
+    pub fn with_package_registry(mut self, package_registry: LuaPackageRegistry) -> Self {
+        self.package_registry = package_registry;
+        self
     }
 
     /// Replaces the limits used by this Component.
@@ -105,8 +116,13 @@ impl<const M: usize> Component<M> for VmComponent {
                 runtime.clone(),
                 self.limits,
                 self.builtin_packages,
+                self.package_registry.clone(),
             )),
-            None => context.register_rpc::<Run, _>(run_handler(self.limits, self.builtin_packages)),
+            None => context.register_rpc::<Run, _>(run_handler_with_registry(
+                self.limits,
+                self.builtin_packages,
+                self.package_registry.clone(),
+            )),
         }
     }
 

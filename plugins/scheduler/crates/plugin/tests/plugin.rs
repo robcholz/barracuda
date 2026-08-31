@@ -25,26 +25,28 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
             .expect("install global test VFS");
         let mut router = EventRouter::new(lanes).await.expect("create router");
         let stack = never_embassy_stack();
-        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-        let scheduler = || SchedulerPlugin::new(&context);
+        let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
 
-        assert_eq!(Plugin::<512>::id(&scheduler()), "scheduler");
+        assert_eq!(
+            Plugin::<512>::id(&SchedulerPlugin::new(&mut context)),
+            "scheduler"
+        );
         assert_eq!(
             <SchedulerPlugin as Plugin<512>>::DEPENDS_ON,
             &[barracuda_time_plugin::PLUGIN_ID],
         );
         let error = manager
-            .register(&mut router, scheduler())
+            .register(&mut router, SchedulerPlugin::new(&mut context))
             .expect_err("reject Scheduler before Time");
         assert!(
             matches!(error, PluginRegisterError::MissingDependency(id) if id.as_str() == "time")
         );
 
         manager
-            .register(&mut router, TimePlugin::new(&context))
+            .register(&mut router, TimePlugin::new(&mut context))
             .expect("register Time Plugin");
         manager
-            .register(&mut router, scheduler())
+            .register(&mut router, SchedulerPlugin::new(&mut context))
             .expect("register Scheduler Plugin");
         manager.start(&mut router).expect("start Plugins");
 

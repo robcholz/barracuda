@@ -29,7 +29,7 @@ pub struct TimePlugin {
 impl TimePlugin {
     /// Creates the Plugin with the IP stack used by its SNTP source.
     #[must_use]
-    pub const fn new(context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             network: context.ip_stack,
         }

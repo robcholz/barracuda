@@ -1,0 +1,31 @@
+[package]
+name = "barracuda-i2c-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Barracuda Plugin exposing Board I2C resources to Lua"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-lua = { path = "../../../../shared/lua" }
+barracuda-plugin-api = { path = "../../../../core/plugin-api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-vm-package-api = { path = "../../../vm/crates/package-api" }
+barracuda-vm-plugin = { path = "../../../vm/crates/plugin" }
+embassy-sync.workspace = true
+
+[dev-dependencies]
+barracuda-lua = { path = "../../../../shared/lua", features = ["vendored"] }
+critical-section = { version = "1", features = ["std"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

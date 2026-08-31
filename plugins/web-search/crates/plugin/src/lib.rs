@@ -36,7 +36,7 @@ pub struct WebSearchPlugin {
 impl WebSearchPlugin {
     /// Creates a Web Search Plugin using the shared Platform HTTP service.
     #[must_use]
-    pub fn new(context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
         }

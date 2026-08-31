@@ -572,6 +572,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "embassy-executor",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -732,6 +733,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-gpio-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-lua",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-vm-package-api",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-http-plugin"
 version = "0.1.0"
 dependencies = [
@@ -754,6 +770,20 @@ dependencies = [
  "schemars",
  "serde",
  "zerocopy",
+]
+
+[[package]]
+name = "barracuda-i2c-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-vm-package-api",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
+ "futures-lite",
 ]
 
 [[package]]
@@ -1167,8 +1197,10 @@ dependencies = [
 name = "barracuda-plugin-api"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-platform-test",
  "embassy-net",
+ "embassy-time",
  "http-client",
 ]
 
@@ -1310,15 +1342,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-spi-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "barracuda-vm-package-api",
+ "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-system"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-board-hal",
  "barracuda-captive-portal-plugin",
  "barracuda-event-router",
  "barracuda-file-plugin",
  "barracuda-gateway-agent-plugin",
+ "barracuda-gpio-plugin",
  "barracuda-http-plugin",
+ "barracuda-i2c-plugin",
  "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",
@@ -1333,6 +1382,7 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-plugin-tool",
  "barracuda-scheduler-plugin",
+ "barracuda-spi-plugin",
  "barracuda-target-api",
  "barracuda-time-plugin",
  "barracuda-tls",
@@ -1491,6 +1541,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-runtime-utils",
  "barracuda-vm-builtin-packages",
+ "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
@@ -1505,15 +1556,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-vm-package-api"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "spin 0.10.1",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-vm-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
+ "barracuda-lua",
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
+ "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
