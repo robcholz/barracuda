@@ -15,10 +15,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_board_hal::{BoardHalResources, IntoHardwareServices};
+use barracuda_board_hal::BoardHalResources;
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
-use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_api::{IntoLuaHardwareResources, PluginContext};
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
 };
@@ -102,7 +102,7 @@ where
     ///
     /// Returns [`SystemCreateError`] when Event Router initialization or Plugin
     /// registration or startup fails.
-    pub async fn new<Tls: ClientTls, Io: IntoHardwareServices>(
+    pub async fn new<Tls: ClientTls, Io: IntoLuaHardwareResources>(
         lanes: &'static RpcLaneStorage<N, M, Q>,
         resources: TargetResources<
             PlatformResources<Tls, Partitions<Region, P>>,
@@ -112,7 +112,7 @@ where
     ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
         let prepared = resources::prepare(resources)?;
-        let (board_hal, hardware_services) = resources::prepare_board_hal(prepared.board_hal);
+        let (board_hal, lua_hardware) = resources::prepare_board_hal(prepared.board_hal);
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/", backend, MountOptions::read_write()).await?;
@@ -127,8 +127,8 @@ where
 
         let http_clients =
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
-        let plugin_context = PluginContext::new(prepared.ip_stack, http_clients)
-            .with_hardware_services(hardware_services);
+        let plugin_context =
+            PluginContext::new(prepared.ip_stack, http_clients).with_lua_hardware(lua_hardware);
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins, router;

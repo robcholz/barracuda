@@ -742,6 +742,8 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-vm-package-api",
  "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
  "futures-lite",
 ]
 
@@ -774,12 +776,13 @@ dependencies = [
 name = "barracuda-i2c-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-board-hal",
  "barracuda-lua",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vm-package-api",
  "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
  "futures-lite",
 ]
 
@@ -1342,12 +1345,13 @@ dependencies = [
 name = "barracuda-spi-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-board-hal",
  "barracuda-lua",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vm-package-api",
  "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-sync 0.7.2",
  "futures-lite",
 ]
 

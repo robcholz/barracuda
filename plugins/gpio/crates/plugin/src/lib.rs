@@ -1,33 +1,33 @@
-//! Lua package for the GPIO resources explicitly exposed by the selected Board.
+//! Lua package for the GPIO values explicitly exposed by the selected Board.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::{string::String, sync::Arc};
-use barracuda_board_hal::{
-    DigitalLevel, GpioService, InputConfig, OutputConfig, OutputDrive, Pull,
-};
+use alloc::{boxed::Box, string::String, sync::Arc};
+use barracuda_board_hal::{DigitalLevel, InputConfig, OutputConfig, OutputDrive, Pull};
 use barracuda_lua::{Error, Lua, Package, Result};
-use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_api::{LuaGpioHardware, LuaHardwareFuture, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 use barracuda_vm_plugin::PLUGIN_ID as VM_PLUGIN_ID;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::mutex::Mutex;
 
 /// Stable identity of the GPIO Plugin.
 pub const PLUGIN_ID: &str = "gpio";
 
-/// Registers the `gpio` Lua package with the VM Plugin.
+/// Takes the Board-exposed GPIO value and registers the `gpio` Lua package.
 pub struct GpioPlugin {
-    service: Option<Arc<dyn GpioService>>,
+    hardware: Option<Box<dyn LuaGpioHardware>>,
 }
 
 impl GpioPlugin {
-    /// Creates the Plugin from Board hardware resources.
+    /// Takes exclusive ownership of the GPIO value from shared construction resources.
     #[must_use]
     pub fn new(context: &PluginContext) -> Self {
         Self {
-            service: context.hardware_services.gpio(),
+            hardware: context.take_gpio(),
         }
     }
 }
@@ -48,48 +48,64 @@ impl<const M: usize> Plugin<M> for GpioPlugin {
     {
         let registry = context.require::<LuaPackageRegistry>(VM_PLUGIN_ID)?;
         let registration = registry
-            .register(GpioPackage {
-                service: self.service.clone(),
-            })
+            .register(GpioPackage::new(self.hardware.take()))
             .map_err(PluginError::registration)?;
         context.retain(registration);
         Ok(())
     }
 }
 
+type SharedGpio = Arc<Mutex<CriticalSectionRawMutex, Box<dyn LuaGpioHardware>>>;
+
 struct GpioPackage {
-    service: Option<Arc<dyn GpioService>>,
+    hardware: Option<SharedGpio>,
+}
+
+impl GpioPackage {
+    fn new(hardware: Option<Box<dyn LuaGpioHardware>>) -> Self {
+        Self {
+            hardware: hardware.map(|hardware| Arc::new(Mutex::new(hardware))),
+        }
+    }
 }
 
 impl Package for GpioPackage {
     fn install(&self, lua: &mut Lua) -> Result<()> {
-        let available = self.service.clone();
-        let input = self.service.clone();
-        let output = self.service.clone();
-        let disable = self.service.clone();
-        let read = self.service.clone();
-        let write = self.service.clone();
+        let available = self.hardware.clone();
+        let input = self.hardware.clone();
+        let output = self.hardware.clone();
+        let disable = self.hardware.clone();
+        let read = self.hardware.clone();
+        let write = self.hardware.clone();
 
         lua.register_lib("gpio", move |package| {
-            package.register("available", move |name: String| {
-                Some(Ok(available
-                    .as_ref()
-                    .is_some_and(|service| service.contains(&name))))
+            package.register_async("available", move |name: String| {
+                let hardware = available.clone();
+                async move {
+                    let exists = match hardware {
+                        Some(hardware) => hardware.lock().await.contains(&name),
+                        None => false,
+                    };
+                    Some(Ok(exists))
+                }
             })?;
             package.register_async("input", move |(name, pull): (String, String)| {
-                let service = input.clone();
+                let hardware = input.clone();
                 async move {
                     let config = match parse_pull(&pull) {
                         Ok(pull) => InputConfig { pull },
                         Err(error) => return Some(Err(error)),
                     };
-                    Some(call_gpio(service, |service| service.configure_input(name, config)).await)
+                    Some(
+                        call_gpio(hardware, |hardware| hardware.configure_input(name, config))
+                            .await,
+                    )
                 }
             })?;
             package.register_async(
                 "output",
                 move |(name, initial, drive): (String, bool, String)| {
-                    let service = output.clone();
+                    let hardware = output.clone();
                     async move {
                         let drive = match parse_drive(&drive) {
                             Ok(drive) => drive,
@@ -104,23 +120,25 @@ impl Package for GpioPackage {
                             drive,
                         };
                         Some(
-                            call_gpio(service, |service| service.configure_output(name, config))
+                            call_gpio(hardware, |hardware| hardware.configure_output(name, config))
                                 .await,
                         )
                     }
                 },
             )?;
             package.register_async("disable", move |name: String| {
-                let service = disable.clone();
-                async move { Some(call_gpio(service, |service| service.disable(name)).await) }
+                let hardware = disable.clone();
+                async move { Some(call_gpio(hardware, |hardware| hardware.disable(name)).await) }
             })?;
             package.register_async("read", move |name: String| {
-                let service = read.clone();
-                async move { Some(call_gpio(service, |service| service.read(name)).await) }
+                let hardware = read.clone();
+                async move { Some(call_gpio(hardware, |hardware| hardware.read(name)).await) }
             })?;
             package.register_async("write", move |(name, high): (String, bool)| {
-                let service = write.clone();
-                async move { Some(call_gpio(service, |service| service.write(name, high)).await) }
+                let hardware = write.clone();
+                async move {
+                    Some(call_gpio(hardware, |hardware| hardware.write(name, high)).await)
+                }
             })
         })
     }
@@ -133,11 +151,12 @@ impl LuaPackage for GpioPackage {
 }
 
 async fn call_gpio<T>(
-    service: Option<Arc<dyn GpioService>>,
-    operation: impl for<'a> FnOnce(&'a dyn GpioService) -> barracuda_board_hal::ServiceFuture<'a, T>,
+    hardware: Option<SharedGpio>,
+    operation: impl for<'a> FnOnce(&'a mut dyn LuaGpioHardware) -> LuaHardwareFuture<'a, T>,
 ) -> Result<T> {
-    let service = service.ok_or_else(|| Error::runtime("GPIO is not exposed by this Board"))?;
-    operation(service.as_ref())
+    let hardware = hardware.ok_or_else(|| Error::runtime("GPIO is not exposed by this Board"))?;
+    let mut hardware = hardware.lock().await;
+    operation(hardware.as_mut())
         .await
         .map_err(|error| Error::runtime(error.message()))
 }
@@ -165,42 +184,50 @@ mod tests {
 
     extern crate std;
 
-    use alloc::{boxed::Box, sync::Arc};
-    use barracuda_board_hal::{IoServiceResult, ServiceFuture};
+    use alloc::boxed::Box;
+    use barracuda_plugin_api::{LuaHardwareFuture, LuaHardwareResult};
     use futures_lite::future::block_on;
-    use std::sync::Mutex;
+    use std::sync::Mutex as StdMutex;
 
     use super::*;
 
     struct TestGpio {
-        high: Mutex<bool>,
+        high: StdMutex<bool>,
     }
 
-    impl GpioService for TestGpio {
+    impl LuaGpioHardware for TestGpio {
         fn contains(&self, name: &str) -> bool {
             name == "status"
         }
 
-        fn configure_input(&self, _name: String, _config: InputConfig) -> ServiceFuture<'_, ()> {
+        fn configure_input(
+            &mut self,
+            _name: String,
+            _config: InputConfig,
+        ) -> LuaHardwareFuture<'_, ()> {
             Box::pin(async { Ok(()) })
         }
 
-        fn configure_output(&self, _name: String, config: OutputConfig) -> ServiceFuture<'_, ()> {
+        fn configure_output(
+            &mut self,
+            _name: String,
+            config: OutputConfig,
+        ) -> LuaHardwareFuture<'_, ()> {
             Box::pin(async move {
                 *self.high.lock().expect("lock GPIO") = config.initial == DigitalLevel::High;
                 Ok(())
             })
         }
 
-        fn disable(&self, _name: String) -> ServiceFuture<'_, ()> {
+        fn disable(&mut self, _name: String) -> LuaHardwareFuture<'_, ()> {
             Box::pin(async { Ok(()) })
         }
 
-        fn read(&self, _name: String) -> ServiceFuture<'_, bool> {
+        fn read(&mut self, _name: String) -> LuaHardwareFuture<'_, bool> {
             Box::pin(async move { Ok(*self.high.lock().expect("lock GPIO")) })
         }
 
-        fn write(&self, _name: String, high: bool) -> ServiceFuture<'_, ()> {
+        fn write(&mut self, _name: String, high: bool) -> LuaHardwareFuture<'_, ()> {
             Box::pin(async move {
                 *self.high.lock().expect("lock GPIO") = high;
                 Ok(())
@@ -209,12 +236,10 @@ mod tests {
     }
 
     #[test]
-    fn lua_can_change_gpio_mode_and_level() -> IoServiceResult<()> {
-        let package = GpioPackage {
-            service: Some(Arc::new(TestGpio {
-                high: Mutex::new(false),
-            })),
-        };
+    fn lua_can_change_gpio_mode_and_level() -> LuaHardwareResult<()> {
+        let package = GpioPackage::new(Some(Box::new(TestGpio {
+            high: StdMutex::new(false),
+        })));
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install GPIO package");
 
@@ -236,7 +261,7 @@ mod tests {
 
     #[test]
     fn missing_board_gpio_is_reported_to_lua() {
-        let package = GpioPackage { service: None };
+        let package = GpioPackage::new(None);
         let mut lua = Lua::new().expect("create Lua");
         package.install(&mut lua).expect("install GPIO package");
         let unavailable: bool = block_on(

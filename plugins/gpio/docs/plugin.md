@@ -6,8 +6,8 @@
 - Provided typed capabilities: none
 
 During unified Plugin registration, this Plugin registers the require-only
-`gpio` Lua package with the VM registry. It uses only the logical GPIO names
-explicitly exposed by the selected Board through `PluginContext`.
+`gpio` Lua package with the VM registry. It takes exclusive ownership of the
+GPIO value explicitly exposed and adapted for Lua by the selected Target.
 
 Lua API:
 
@@ -18,6 +18,7 @@ Lua API:
 - `gpio.read(name) -> boolean`
 - `gpio.write(name, high)`
 
-The mode-changing calls are intentionally dynamic. The Board adapter owns the
-actual pin driver and reports invalid names, unsupported electrical modes, or
-hardware failures through the conventional Lua `nil, error` result.
+The mode-changing calls are intentionally dynamic. The Plugin wraps its taken
+value in an Embassy async mutex, and every Lua operation holds that lock while
+mutably borrowing the adapter. Invalid names, unsupported electrical modes,
+and hardware failures use the conventional Lua `nil, error` result.

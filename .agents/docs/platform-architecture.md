@@ -342,16 +342,23 @@ and Plugins. Arbitration, access control, and dynamic device attachment belong
 to that owner. Any physical overlap already declared by the Board remains a
 property of the concrete Board composition.
 
-The Lua GPIO, I2C, and SPI Plugins are such owners. System consumes the
-Board-specific concrete exposed-I/O bundle and hands those Plugins named,
-object-safe service handles through `PluginContext`. This type erasure is at
-the dynamic scripting boundary, after Board composition and ownership have
-already been fixed; it does not turn `embedded-hal` or `embedded-hal-async`
-traits into trait objects. The concrete Board adapter behind each handle keeps
-its pin and controller storage statically allocated and delegates to the
-upstream HAL contracts with static dispatch. Lua performs a logical-name
-lookup because names are script data, not because Platform, Board, or Driver
-implementations are discovered at runtime.
+The Lua GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
+concrete, move-only exposed-I/O value; it has no scripting service contract and
+adds no shared ownership or lock. Selected-target composition consumes that
+value and adapts only the explicitly exposed resources at the Lua boundary.
+`PluginContext` is a construction-time handoff: each hardware Plugin calls its
+corresponding `take_*` operation once and becomes the sole owner of that boxed
+adapter value.
+
+The Plugin then places its owned value behind an Embassy async mutex inside
+the Lua package. Cloned `Arc`s share only that Lua-layer lock so concurrent Lua
+callbacks can reach the same package-owned value; they do not clone or
+reconstruct hardware. Adapter operations take `&mut self`, and the mutex guard
+is held across the returned future, making the exclusivity required by the
+underlying `embedded-hal` or `embedded-hal-async` value explicit. This dynamic
+adapter exists only because logical names and Lua callbacks are runtime data.
+HAL, Board composition, built-in peripheral Drivers, and non-Lua consumers
+remain concrete and statically dispatched.
 
 ## Peripheral Drivers and HAL
 

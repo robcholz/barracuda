@@ -40,7 +40,12 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(plugin_api.contains("pub struct PluginContext"));
     assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
     assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
-    assert!(system.contains("let plugin_context = PluginContext"));
+    assert!(system.contains("let plugin_context"));
+    assert!(system.contains("PluginContext::new(prepared.ip_stack, http_clients)"));
+    assert!(system.contains(".with_lua_hardware(lua_hardware)"));
+    assert!(plugin_api.contains("pub fn take_gpio(&self)"));
+    assert!(plugin_api.contains("pub fn take_i2c(&self)"));
+    assert!(plugin_api.contains("pub fn take_spi(&self)"));
 
     for plugin in [
         "FilePlugin",

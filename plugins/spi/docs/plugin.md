@@ -6,8 +6,8 @@
 - Provided typed capabilities: none
 
 During unified Plugin registration, this Plugin registers the require-only
-`spi` Lua package with the VM registry. Bus names are the logical names
-explicitly exposed by the selected Board.
+`spi` Lua package with the VM registry. It takes exclusive ownership of the SPI
+value explicitly exposed and adapted for Lua by the selected Target.
 
 Lua API:
 
@@ -17,5 +17,8 @@ Lua API:
 - `spi.transfer(name, write_binary_string, read_length) -> binary string`
 - `spi.transfer_in_place(name, binary_string) -> binary string`
 
-The Board adapter owns chip-select policy, bus configuration, and transaction
-serialization. Adapter failures use the conventional Lua `nil, error` result.
+The Plugin wraps its taken value in an Embassy async mutex. Every Lua
+transaction holds that lock while mutably borrowing the adapter, so async
+operations on the owned bus are serialized. The adapter still defines
+chip-select policy and bus configuration. Adapter failures use the conventional
+Lua `nil, error` result.
