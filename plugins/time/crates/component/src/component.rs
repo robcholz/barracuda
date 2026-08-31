@@ -1,5 +1,9 @@
 use alloc::{boxed::Box, rc::Rc};
-use core::{cell::RefCell, future::Future, pin::Pin};
+use core::{
+    cell::RefCell,
+    future::{Future, pending},
+    pin::Pin,
+};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
@@ -152,53 +156,60 @@ impl ClockState {
     }
 }
 
-/// Event Router Component maintaining a network-synchronized RTC.
-pub struct TimeComponent<Source> {
-    source: Source,
+/// Event Router Component exposing a network-synchronized RTC through RPC.
+pub struct TimeComponent {
     state: Rc<RefCell<ClockState>>,
 }
 
-impl<Source> TimeComponent<Source> {
-    /// Creates an unsynchronized Component around one network time source.
+impl TimeComponent {
+    /// Creates an unsynchronized RPC Component.
     #[must_use]
-    pub fn new(source: Source, config: TimeConfig) -> Self {
+    pub fn new(config: TimeConfig) -> Self {
         Self {
-            source,
             state: Rc::new(RefCell::new(ClockState::new(config))),
         }
     }
+
+    /// Clones the clock state handle used by the Plugin-owned sync task.
+    #[must_use]
+    pub fn shared_state(&self) -> Rc<RefCell<ClockState>> {
+        Rc::clone(&self.state)
+    }
 }
 
-impl<Source, const M: usize> Component<M> for TimeComponent<Source>
-where
-    Source: TimeSource + 'static,
-{
+impl<const M: usize> Component<M> for TimeComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<Now, _>(now_handler(Rc::clone(&self.state)))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            loop {
-                let synchronized = match self.source.synchronize().await {
-                    Ok(sample) => {
-                        self.state.borrow_mut().synchronize(sample);
-                        true
-                    }
-                    Err(_error) => false,
-                };
-                let config = self.state.borrow().config;
-                let delay = if synchronized {
-                    config.resync_interval_millis
-                } else {
-                    config.retry_delay_millis
-                };
-                Timer::after(Duration::from_millis(delay.max(1))).await;
-            }
-        })
+        Box::pin(pending())
     }
 
     fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
         Ok(())
+    }
+}
+
+/// Runs the network synchronization loop owned by the Time Plugin task.
+pub async fn synchronize_clock<Source>(mut source: Source, state: Rc<RefCell<ClockState>>)
+where
+    Source: TimeSource,
+{
+    loop {
+        let synchronized = match source.synchronize().await {
+            Ok(sample) => {
+                state.borrow_mut().synchronize(sample);
+                true
+            }
+            Err(_error) => false,
+        };
+        let config = state.borrow().config;
+        let delay = if synchronized {
+            config.resync_interval_millis
+        } else {
+            config.retry_delay_millis
+        };
+        Timer::after(Duration::from_millis(delay.max(1))).await;
     }
 }

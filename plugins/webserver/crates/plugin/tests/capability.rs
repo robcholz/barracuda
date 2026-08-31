@@ -13,7 +13,7 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{
-    Plugin, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
+    Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
 };
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
 use embassy_executor::{Executor, Spawner};
@@ -31,13 +31,12 @@ struct Consumer {
     observed: Rc<RefCell<Option<Rc<WebServer>>>>,
 }
 
-impl Plugin<FRAME_SIZE> for Consumer {
+impl PluginDeclaration for Consumer {
+    const ID: &'static str = "consumer";
     const DEPENDS_ON: &'static [&'static str] = &["webserver"];
+}
 
-    fn id() -> &'static str {
-        "consumer"
-    }
-
+impl Plugin<FRAME_SIZE> for Consumer {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -45,7 +44,8 @@ impl Plugin<FRAME_SIZE> for Consumer {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        *self.observed.borrow_mut() = Some(context.require::<WebServer>(Self::DEPENDS_ON[0])?);
+        *self.observed.borrow_mut() =
+            Some(context.require::<WebServer>(<Self as PluginDeclaration>::DEPENDS_ON[0])?);
         Ok(())
     }
 }

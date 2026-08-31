@@ -9,6 +9,7 @@ use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
 
 /// Plugin that owns the Gateway-Agent Bridge Component.
+#[barracuda_plugin_api::plugin]
 pub struct GatewayAgentPlugin;
 
 impl GatewayAgentPlugin {
@@ -19,7 +20,6 @@ impl GatewayAgentPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for GatewayAgentPlugin {
     fn register<Storage>(
         &mut self,
@@ -44,18 +44,18 @@ mod tests {
         install_global_memory_vfs, memory_partition, never_embassy_stack,
     };
     use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
+    use barracuda_plugin_manager::{Plugin, PluginDeclaration, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     use super::GatewayAgentPlugin;
 
     struct Dependency;
 
-    impl<const M: usize> Plugin<M> for Dependency {
-        fn id() -> &'static str {
-            "agent"
-        }
+    impl PluginDeclaration for Dependency {
+        const ID: &'static str = "agent";
     }
+
+    impl<const M: usize> Plugin<M> for Dependency {}
 
     #[test]
     fn plugin_loads_its_bridge_component() {
@@ -75,7 +75,10 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = GatewayAgentPlugin::new(&mut context);
-            assert_eq!(GatewayAgentPlugin::id(), "gateway-agent");
+            assert_eq!(
+                <GatewayAgentPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+                "gateway-agent"
+            );
 
             manager
                 .register(&mut router, Dependency)

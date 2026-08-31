@@ -12,5 +12,5 @@ pub mod sntp;
 
 pub use component::{
     ClockState, SyncSample, TimeComponent, TimeConfig, TimeSource, TimeSourceError,
-    TimeSourceFuture,
+    TimeSourceFuture, synchronize_clock,
 };

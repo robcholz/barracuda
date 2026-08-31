@@ -55,6 +55,7 @@ impl IMessageGateway {
 }
 
 /// Plugin that owns the shared IMessage Gateway Component and capability.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageGatewayPlugin;
 
 impl IMessageGatewayPlugin {
@@ -65,7 +66,6 @@ impl IMessageGatewayPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
     fn register<Storage>(
         &mut self,
@@ -94,7 +94,7 @@ mod tests {
         install_global_memory_vfs, memory_partition, never_embassy_stack,
     };
     use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
+    use barracuda_plugin_manager::{PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     #[test]
@@ -115,7 +115,10 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = IMessageGatewayPlugin::new(&mut context);
-            assert_eq!(IMessageGatewayPlugin::id(), "imessage-gateway");
+            assert_eq!(
+                <IMessageGatewayPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+                "imessage-gateway"
+            );
 
             manager
                 .register(&mut router, plugin)

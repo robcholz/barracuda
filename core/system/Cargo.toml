@@ -56,6 +56,8 @@ embassy-net.workspace = true
 log.workspace = true
 thiserror = { version = "2", default-features = false }
 embedded-storage = "0.3"
+embedded-hal.workspace = true
+embedded-hal-async.workspace = true
 
 [dev-dependencies]
 barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }

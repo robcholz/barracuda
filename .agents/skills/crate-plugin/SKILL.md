@@ -41,10 +41,11 @@ plugins/<my-plugin>/
 
 - `crates/plugin` is the Plugin implementation crate. Its package name is
   `barracuda-<my-plugin>-plugin`.
-- `plugin.toml` is required and contains one concise, non-empty description of
-  at most 80 characters: `description = "..."`. `cargo plugin select` shows it
-  beside the Plugin name, and discovery fails when the file is missing or
-  invalid.
+- `plugin.toml` is required and is the single source of truth for the stable
+  Plugin ID, direct Plugin dependencies, and one concise non-empty description
+  of at most 80 characters. IDs and dependencies must not contain leading or
+  trailing whitespace. `cargo plugin select` shows the description beside the
+  Plugin name, and discovery fails when the file is missing or invalid.
 - `crates/plugin/src/lib.rs` defines `XxxPlugin` and implements
   `barracuda_plugin_manager::Plugin`.
 - Put a small Component in `crates/plugin/src/component.rs`. Keep a substantial
@@ -62,7 +63,7 @@ plugins/<my-plugin>/
 - The root workspace discovers `plugins/*/crates/*` automatically. After
   creating the Plugin, run `cargo plugin sync`; this discovers its metadata,
   package, and entry type, then adds it to System. Plugin Manager scans the complete
-  `Plugin::DEPENDS_ON` graph and chooses the registration order at runtime.
+  `PluginDeclaration::DEPENDS_ON` graph and chooses the registration order at runtime.
   Never edit the generated Plugin blocks by hand. `barracuda-system` watches
   `plugins/` from its build script and rejects a stale registry with this same
   command. The build script deliberately validates rather than rewriting the
@@ -70,10 +71,12 @@ plugins/<my-plugin>/
 
 ## Plugin implementation
 
-Give every Plugin a stable `&'static str` identity. In `lib.rs`:
+Give every Plugin a stable static declaration. In `lib.rs`:
 
 - define and document `XxxPlugin`;
-- declare `Plugin::DEPENDS_ON` when other Plugins must register first;
+- apply `#[barracuda_plugin_api::plugin]` to the `XxxPlugin` type so its
+  `PluginDeclaration` implementation is baked from `plugin.toml`;
+- never duplicate the ID or dependency list in Rust constants;
 - implement the synchronous `register` phase to construct the Plugin's complete
   capability and Component graph; keep the default no-op only when the Plugin
   owns no registration-time resources;
@@ -133,8 +136,8 @@ surface and match existing naming and message shapes.
 Create Plugin and contract documentation with the Plugin:
 
 - `plugins/<my-plugin>/docs/plugin.md` is required. It states the stable Plugin
-  ID exactly as returned by `Plugin::id()`, lists the direct Plugin dependencies
-  exactly as declared by `Plugin::DEPENDS_ON` (write `none` when empty), lists
+  ID exactly as declared by `PluginDeclaration::ID`, lists the direct Plugin dependencies
+  exactly as declared by `PluginDeclaration::DEPENDS_ON` (write `none` when empty), lists
   every provided typed capability by its exact public Rust type name (write
   `none` when empty), and explains the Plugin's purpose and responsibilities.
   When applicable, also list its owned Components and required typed

@@ -1,12 +1,15 @@
 # Boards
 
-`boards/` owns concrete product bundles and the build-time tooling that turns
-their common YAML into static Rust data.
+`boards/` owns concrete product bundles, reusable built-in peripheral Drivers,
+Board HAL adapters, and the build-time tooling that turns their common YAML
+into static Rust data.
 
 ```text
 boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
 |-- config/       # std-only YAML parsing, validation, and Rust generation
+|-- drivers/      # reusable semantic built-in peripheral Drivers
+|-- <board>/      # concrete Board HAL adapter when the Board has hardware
 `-- configs/
     `-- <board>/
         |-- board.yml
@@ -77,9 +80,10 @@ watches and reads the state file, so changing the selection invalidates the
 relevant generated build output. A build with no selection stops with the
 command needed to select one; it never guesses a Board from the Rust target.
 
-`boards/selected` does not inspect the target OS or architecture. Platform
-selection remains independent in `platforms/selected`; the Rust target chooses
-the Platform, and Target composition rejects incompatible Board/Platform pairs.
+`boards/selected` does not infer a Board from the target OS or architecture.
+Platform selection remains independent in `platforms/selected`; the Rust target
+chooses the Platform. Device entry code constructs the exact typed Platform and
+Board bindings, and concrete binding constructors validate chip compatibility.
 Platform YAML remains beside its implementation at
 `platforms/<name>/platform.yml`.
 
@@ -95,6 +99,13 @@ as the native layout and records the chip-specific Rust target in
 Boards that use the same module are still separate Board bundles: add their
 exact fixed wiring to that bundle as the Board schema grows rather than treating
 one development kit as an alias for every product built around the chip.
+
+`stm32f429zi-nucleo` is the first bundle with a registered concrete Board HAL.
+Its config builds the active-high green LD1 on PB0 as the semantic
+`IndicatorLed` builtin and explicitly exposes the PC13 user-button pin as the
+runtime-configurable GPIO name `user-button`. The pins follow the default
+Nucleo-144 solder-bridge setup; the common schema does not infer or reserve
+either resource.
 
 ## M5Stack Board coverage
 

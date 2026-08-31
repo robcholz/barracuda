@@ -17,6 +17,9 @@ pub use selected::BOARD;
 /// Board HAL capability bundle for the selected Board.
 pub type Resources = <SelectedBoardHal as BoardHal>::Resources;
 
+/// Move-only chip bindings required by the selected Board HAL.
+pub type Bindings = <SelectedBoardHal as BoardHal>::Bindings;
+
 /// Board HAL initialization error for the selected Board.
 pub type Error = <SelectedBoardHal as BoardHal>::Error;
 
@@ -25,6 +28,9 @@ pub type Error = <SelectedBoardHal as BoardHal>::Error;
 /// # Errors
 ///
 /// Returns the selected Board HAL's peripheral initialization error.
-pub async fn resources(spawner: Spawner) -> BoardHalInitResult<SelectedBoardHal> {
-    SelectedBoardHal::initialize(spawner, &BOARD).await
+pub async fn resources(
+    spawner: Spawner,
+    bindings: Bindings,
+) -> BoardHalInitResult<SelectedBoardHal> {
+    SelectedBoardHal::initialize(spawner, bindings).await
 }

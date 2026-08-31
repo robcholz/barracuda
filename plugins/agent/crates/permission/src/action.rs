@@ -5,6 +5,7 @@
 use alloc::format;
 use alloc::string::String;
 use core::fmt;
+use getset::CopyGetters;
 
 /// How dangerous an [`Action`] is, ordered low → high. Policies threshold on it
 /// (e.g. "ask at or above [`Moderate`](Self::Moderate)").
@@ -81,10 +82,11 @@ impl fmt::Display for Resource {
 ///     .with_resource(Resource::Path("/data/notes.txt".into()));
 /// assert_eq!(action.signature(), "write_file:path:/data/notes.txt");
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, CopyGetters, Debug, PartialEq, Eq)]
 pub struct Action {
     verb: String,
     resource: Option<Resource>,
+    #[getset(get_copy = "pub")]
     risk: RiskClass,
 }
 
@@ -112,11 +114,6 @@ impl Action {
     /// The resource this action targets, if any.
     pub fn resource(&self) -> Option<&Resource> {
         self.resource.as_ref()
-    }
-
-    /// The action's risk class.
-    pub fn risk(&self) -> RiskClass {
-        self.risk
     }
 
     /// A stable key identifying *this verb on this resource*, used to scope a

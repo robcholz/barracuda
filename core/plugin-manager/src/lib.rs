@@ -15,10 +15,10 @@ mod storage;
 pub use barracuda_kv::Value;
 pub use filesystem::PluginVfs;
 pub use lifecycle::{
-    CapabilityError, Plugin, PluginComponentCleanupFailure, PluginError, PluginEventRouterContext,
-    PluginFilesystem, PluginId, PluginIdError, PluginManager, PluginManagerInitError,
-    PluginRegisterContext, PluginRegisterError, PluginRequirements, PluginResult,
-    PluginStartContext, PluginStartError, PluginUnloadError,
+    CapabilityError, Plugin, PluginComponentCleanupFailure, PluginDeclaration, PluginError,
+    PluginEventRouterContext, PluginFilesystem, PluginId, PluginIdError, PluginManager,
+    PluginManagerInitError, PluginRegisterContext, PluginRegisterError, PluginRequirements,
+    PluginResult, PluginStartContext, PluginStartError, PluginTaskToken, PluginUnloadError,
 };
 pub use storage::{
     PluginReadTransaction, PluginStorage, PluginWriteTransaction, StorageError, StorageResult,

@@ -16,6 +16,8 @@ portable WebSocket routes with `serve` and ordinary HTTP routes with
 for their lifetime. Registration publishes the capability and installs every
 route before startup. The WebServer startup hook then obtains the System-owned
 Embassy spawner and starts the server task; Event Router does not poll it.
+Plugin unload or startup rollback cancels the task and drops all pending
+accept/connection futures.
 
 Normal Platform initialization separately starts the Embassy Net runner. The
 WebServer task concurrently polls four fixed connection workers, each with its

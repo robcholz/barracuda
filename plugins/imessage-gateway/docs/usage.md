@@ -30,7 +30,9 @@ A provider Plugin declares `imessage-gateway` in `DEPENDS_ON`, requires the
 capability during registration, and retains its channel registration:
 
 ```rust
-let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
+let gateway = context.require::<IMessageGateway>(
+    <Self as PluginDeclaration>::DEPENDS_ON[0],
+)?;
 let channel: Rc<dyn MessageChannel> = provider.clone();
 let registration = gateway
     .register(channel)

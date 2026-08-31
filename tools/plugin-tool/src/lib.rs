@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use barracuda_plugin_manifest::{parse, PluginManifest};
 use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
-use serde::Deserialize;
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
 const MANIFEST_END: &str = "# END GENERATED PLUGINS";
@@ -16,7 +16,6 @@ const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
 const SOURCE_END: &str = "// END GENERATED PLUGINS";
 const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
 const PLUGIN_MANIFEST: &str = "plugin.toml";
-const MAX_DESCRIPTION_CHARS: usize = 80;
 
 #[derive(Debug)]
 struct Plugin {
@@ -28,15 +27,6 @@ struct Plugin {
     crate_name: String,
     entry: String,
     has_std_feature: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PluginMetadata {
-    id: String,
-    #[serde(rename = "depends-on")]
-    dependencies: Vec<String>,
-    description: String,
 }
 
 /// Whether synchronization changed generated files.
@@ -411,11 +401,11 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         })?;
         plugins.push(Plugin {
             directory,
-            description: metadata.description,
+            description: metadata.description().to_owned(),
             // Parsing validates the baked identity even though registry rendering only needs
             // the directory, package, and entry point.
-            id: metadata.id,
-            dependencies: metadata.dependencies,
+            id: metadata.id().to_owned(),
+            dependencies: metadata.dependencies().to_owned(),
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
@@ -423,6 +413,11 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         });
     }
     plugins.sort_by(|left, right| left.directory.cmp(&right.directory));
+    validate_dependency_graph(&plugins)?;
+    Ok(plugins)
+}
+
+fn validate_dependency_graph(plugins: &[Plugin]) -> Result<(), CommandError> {
     for (index, plugin) in plugins.iter().enumerate() {
         if let Some(duplicate) = plugins[..index]
             .iter()
@@ -448,62 +443,42 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
             }
         }
     }
-    Ok(plugins)
+    let mut resolved = Vec::with_capacity(plugins.len());
+    loop {
+        let before = resolved.len();
+        for plugin in plugins {
+            if !resolved.contains(&plugin.id.as_str())
+                && plugin
+                    .dependencies
+                    .iter()
+                    .all(|dependency| resolved.contains(&dependency.as_str()))
+            {
+                resolved.push(plugin.id.as_str());
+            }
+        }
+        if resolved.len() == plugins.len() {
+            return Ok(());
+        }
+        if resolved.len() == before {
+            let cycle = plugins
+                .iter()
+                .filter(|plugin| !resolved.contains(&plugin.id.as_str()))
+                .map(|plugin| plugin.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(CommandError::Metadata(format!(
+                "Plugin dependency graph contains a cycle involving: {cycle}"
+            )));
+        }
+    }
 }
 
-fn parse_metadata(path: &Path, contents: &str) -> Result<PluginMetadata, CommandError> {
-    let metadata = toml::from_str::<PluginMetadata>(contents).map_err(|error| {
+fn parse_metadata(path: &Path, contents: &str) -> Result<PluginManifest, CommandError> {
+    parse(contents).map_err(|error| {
         CommandError::Metadata(format!(
             "invalid Plugin metadata in {}: {error}",
             path.display()
         ))
-    })?;
-    let id = metadata.id.trim();
-    if id.is_empty() {
-        return Err(CommandError::Metadata(format!(
-            "Plugin ID in {} must not be empty",
-            path.display()
-        )));
-    }
-    let dependencies = metadata
-        .dependencies
-        .iter()
-        .map(|dependency| dependency.trim())
-        .collect::<Vec<_>>();
-    if dependencies.iter().any(|dependency| dependency.is_empty()) {
-        return Err(CommandError::Metadata(format!(
-            "Plugin dependencies in {} must not be empty",
-            path.display()
-        )));
-    }
-    if dependencies
-        .iter()
-        .enumerate()
-        .any(|(index, dependency)| dependencies[..index].contains(dependency))
-    {
-        return Err(CommandError::Metadata(format!(
-            "Plugin dependencies in {} must not contain duplicates",
-            path.display()
-        )));
-    }
-    let description = metadata.description.trim();
-    let length = description.chars().count();
-    if description.is_empty() {
-        return Err(CommandError::Metadata(format!(
-            "Plugin description in {} must not be empty",
-            path.display()
-        )));
-    }
-    if length > MAX_DESCRIPTION_CHARS {
-        return Err(CommandError::Metadata(format!(
-            "Plugin description in {} is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}",
-            path.display()
-        )));
-    }
-    Ok(PluginMetadata {
-        id: id.to_owned(),
-        dependencies: dependencies.into_iter().map(String::from).collect(),
-        description: description.to_owned(),
     })
 }
 
@@ -540,11 +515,17 @@ fn package_name(manifest: &str) -> Option<String> {
 }
 
 fn plugin_entry(source: &str) -> Option<String> {
-    const PREFIX: &str = "impl<const M: usize> Plugin<M> for ";
     let entries = source
         .lines()
-        .filter_map(|line| line.trim().strip_prefix(PREFIX))
-        .filter_map(|rest| rest.split_whitespace().next())
+        .filter_map(|line| {
+            let line = line.trim();
+            line.starts_with("impl<")
+                .then(|| line.split_once(" Plugin<M> for "))
+                .flatten()
+                .map(|(_parameters, implementation)| implementation)
+        })
+        .filter_map(|implementation| implementation.split_whitespace().next())
+        .filter_map(|implementation| implementation.split('<').next())
         .filter(|entry| *entry != "Dependency")
         .map(String::from)
         .collect::<Vec<_>>();
@@ -646,11 +627,12 @@ mod tests {
 
     use std::fs;
 
+    use barracuda_plugin_manifest::MAX_DESCRIPTION_CHARS;
     use tempfile::tempdir;
 
     use super::{
         cascade_disabled, info, package_name, parse_metadata, plugin_entry, replace_block,
-        sync_with_report, Plugin, SyncStatus, MAX_DESCRIPTION_CHARS,
+        sync_with_report, validate_dependency_graph, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -692,14 +674,24 @@ mod tests {
             plugin_entry("impl<const M: usize> Plugin<M> for DemoPlugin {\n}"),
             Some(String::from("DemoPlugin"))
         );
+        assert_eq!(
+            plugin_entry(
+                "impl<Hardware, const M: usize> Plugin<M> for HardwarePlugin<Hardware>\n\
+                 where\n\
+                     Hardware: Send,\n\
+                 {\n\
+                 }",
+            ),
+            Some(String::from("HardwarePlugin"))
+        );
         let metadata = parse_metadata(
             std::path::Path::new("plugin.toml"),
             "id = \"demo\"\ndepends-on = []\ndescription = \"A concise description.\"\n",
         )
         .expect("valid Plugin metadata");
-        assert_eq!(metadata.id, "demo");
-        assert!(metadata.dependencies.is_empty());
-        assert_eq!(metadata.description, "A concise description.");
+        assert_eq!(metadata.id(), "demo");
+        assert!(metadata.dependencies().is_empty());
+        assert_eq!(metadata.description(), "A concise description.");
     }
 
     #[test]
@@ -750,6 +742,28 @@ mod tests {
             ["`middle` depends on `base`", "`leaf` depends on `middle`"]
         );
     }
+
+    #[test]
+    fn rejects_dependency_cycles_during_discovery() {
+        let plugins = [
+            plugin("first", "first", &["second"]),
+            plugin("second", "second", &["first"]),
+        ];
+
+        assert!(validate_dependency_graph(&plugins).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_unknown_and_self_referential_declarations() {
+        let duplicate_ids = [plugin("first", "same", &[]), plugin("second", "same", &[])];
+        let unknown = [plugin("consumer", "consumer", &["missing"])];
+        let self_referential = [plugin("self", "self", &["self"])];
+
+        assert!(validate_dependency_graph(&duplicate_ids).is_err());
+        assert!(validate_dependency_graph(&unknown).is_err());
+        assert!(validate_dependency_graph(&self_referential).is_err());
+    }
+
     #[test]
     fn replaces_an_indented_generated_block() {
         let source = "fn register() {\n    // BEGIN\n    old();\n    // END\n}\n";

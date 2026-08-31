@@ -5,9 +5,9 @@ edition = "2021"
 description = "Board HAL composition contract for Barracuda"
 
 [dependencies]
-barracuda-board = { path = "../api" }
 embassy-executor.workspace = true
 embedded-hal.workspace = true
+embedded-hal-async.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

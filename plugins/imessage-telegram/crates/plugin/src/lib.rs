@@ -27,6 +27,7 @@ pub const CONFIG_API_PATH: &str = "/api/gateway/telegram";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes Telegram configuration and registers the resulting channel.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageTelegramPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -41,7 +42,6 @@ impl IMessageTelegramPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageTelegramPlugin {
     fn register<Storage>(
         &mut self,
@@ -50,8 +50,12 @@ impl<const M: usize> Plugin<M> for IMessageTelegramPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
-        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),

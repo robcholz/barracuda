@@ -15,7 +15,9 @@ use barracuda_platform_test::{
     install_global_memory_vfs, loopback_network, memory_partition, never_embassy_stack,
 };
 use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{Plugin, PluginManager, PluginRegisterContext, PluginResult};
+use barracuda_plugin_manager::{
+    Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
+};
 use barracuda_webserver_plugin::WebServer;
 use embassy_net::{tcp::TcpSocket, Ipv4Address};
 use embedded_io_async::Write as _;
@@ -27,11 +29,11 @@ struct AgentProvider {
     capability: Option<AgentSetApi>,
 }
 
-impl Plugin<FRAME_SIZE> for AgentProvider {
-    fn id() -> &'static str {
-        "agent"
-    }
+impl PluginDeclaration for AgentProvider {
+    const ID: &'static str = "agent";
+}
 
+impl Plugin<FRAME_SIZE> for AgentProvider {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -49,11 +51,11 @@ struct WebServerProvider {
     server: Rc<WebServer>,
 }
 
-impl Plugin<FRAME_SIZE> for WebServerProvider {
-    fn id() -> &'static str {
-        "webserver"
-    }
+impl PluginDeclaration for WebServerProvider {
+    const ID: &'static str = "webserver";
+}
 
+impl Plugin<FRAME_SIZE> for WebServerProvider {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,

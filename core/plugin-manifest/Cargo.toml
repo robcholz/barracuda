@@ -1,0 +1,23 @@
+[package]
+name = "barracuda-plugin-manifest"
+version = "0.1.0"
+edition = "2021"
+description = "Canonical parser for Barracuda Plugin manifests"
+license = "Apache-2.0"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.9"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

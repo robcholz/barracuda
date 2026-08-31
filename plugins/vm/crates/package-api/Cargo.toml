@@ -5,12 +5,12 @@ edition = "2021"
 description = "Registration API for Lua packages exposed by the Barracuda VM Plugin"
 
 [dependencies]
-barracuda-lua = { path = "../../../../shared/lua" }
+barracuda-lua = { path = "../lua" }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-lua = { path = "../../../../shared/lua", features = ["vendored"] }
+barracuda-lua = { path = "../lua", features = ["vendored"] }
 
 [lints.rust]
 unsafe_code = "forbid"

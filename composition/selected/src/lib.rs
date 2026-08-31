@@ -2,7 +2,11 @@
 
 #![no_std]
 
-pub use barracuda_target_api::TargetResources;
+pub use barracuda_target_api::{TargetBindings, TargetResources};
+
+/// Complete move-only bindings required by the selected target axes.
+pub type Bindings =
+    TargetBindings<barracuda_platform_selected::Bindings, barracuda_board_selected::Bindings>;
 
 /// Resources produced for the independently selected target axes.
 pub type Resources =
@@ -24,19 +28,35 @@ pub enum Error {
 /// # Errors
 ///
 /// Returns the error from the axis whose initialization failed.
-pub async fn resources(spawner: embassy_executor::Spawner) -> Result<Resources, Error> {
+pub async fn resources_with_bindings(
+    spawner: embassy_executor::Spawner,
+    bindings: Bindings,
+) -> Result<Resources, Error> {
     barracuda_platform_selected::prepare().map_err(Error::Platform)?;
-    let board_hal = barracuda_board_selected::resources(spawner)
+    let (platform_bindings, board_bindings) = bindings.split();
+    let board_hal = barracuda_board_selected::resources(spawner, board_bindings)
         .await
         .map_err(Error::BoardHal)?;
-    let platform =
-        barracuda_platform_selected::resources(spawner, &barracuda_board_selected::BOARD)
-            .await
-            .map_err(Error::Platform)?;
+    let platform = barracuda_platform_selected::resources(spawner, platform_bindings)
+        .await
+        .map_err(Error::Platform)?;
     Ok(TargetResources {
         platform,
         board_hal,
     })
+}
+
+/// Constructs resources for the local host Target.
+///
+/// Host Platforms do not own a chip peripheral singleton. Device entry points
+/// call [`resources_with_bindings`] after splitting their singleton instead.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub async fn resources(spawner: embassy_executor::Spawner) -> Result<Resources, Error> {
+    resources_with_bindings(
+        spawner,
+        TargetBindings::new(&barracuda_board_selected::BOARD, ()),
+    )
+    .await
 }
 
 /// Board selected independently from Platform.

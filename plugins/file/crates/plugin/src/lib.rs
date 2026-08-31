@@ -74,6 +74,7 @@ impl FileSystem {
 }
 
 /// Plugin that publishes [`FileSystem`] and exposes its RPC harness.
+#[barracuda_plugin_api::plugin]
 pub struct FilePlugin;
 
 impl FilePlugin {
@@ -84,7 +85,6 @@ impl FilePlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for FilePlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);

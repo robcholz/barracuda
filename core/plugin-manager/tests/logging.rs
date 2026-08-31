@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
-use barracuda_plugin_manager::{Plugin, PluginManager};
+use barracuda_plugin_manager::{Plugin, PluginDeclaration, PluginManager};
 use futures_lite::future::block_on;
 use log::{LevelFilter, Log, Metadata, Record};
 
@@ -39,11 +39,11 @@ impl Log for CaptureLogger {
 
 struct IdentifiedPlugin;
 
-impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id() -> &'static str {
-        "identified"
-    }
+impl PluginDeclaration for IdentifiedPlugin {
+    const ID: &'static str = "identified";
 }
+
+impl Plugin<FRAME_SIZE> for IdentifiedPlugin {}
 
 #[test]
 fn manager_logs_every_plugin_registration_and_start_boundary() {

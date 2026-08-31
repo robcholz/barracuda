@@ -12,6 +12,7 @@ const SCHEDULE_CAPACITY: usize = 16;
 const MAX_RECHECK_MILLIS: u64 = 1_000;
 
 /// Plugin that owns the RTC-authoritative Scheduler Component.
+#[barracuda_plugin_api::plugin]
 pub struct SchedulerPlugin;
 
 impl SchedulerPlugin {
@@ -22,7 +23,6 @@ impl SchedulerPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for SchedulerPlugin {
     fn register<Storage>(
         &mut self,

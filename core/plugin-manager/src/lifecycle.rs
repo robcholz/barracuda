@@ -5,6 +5,7 @@ use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::any::{type_name, Any, TypeId};
 use core::error::Error;
@@ -14,6 +15,8 @@ use barracuda_event_router::{Component, ComponentId, EventRouter, LoadError, Unl
 use barracuda_kv::Database;
 use barracuda_vfs::{FsError, Vfs};
 use embassy_executor::Spawner;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::signal::Signal;
 use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
 
@@ -131,16 +134,19 @@ impl PluginError {
     }
 }
 
-/// One system-managed Plugin that may register multiple Components.
-pub trait Plugin<const M: usize> {
+/// Static identity and dependency declaration shared by every frame size.
+pub trait PluginDeclaration {
+    /// Stable identity used for lifecycle tracking and storage.
+    const ID: &'static str;
+
     /// Stable identities that must register before this Plugin.
     const DEPENDS_ON: &'static [&'static str] = &[];
+}
 
+/// One system-managed Plugin that may register multiple Components.
+pub trait Plugin<const M: usize>: PluginDeclaration {
     /// Resources that Plugin Manager must prepare before registration.
     const REQUIREMENTS: PluginRequirements = PluginRequirements::new();
-
-    /// Returns the stable identity used for lifecycle tracking and storage.
-    fn id() -> &'static str;
 
     /// Registers the Plugin's capabilities and Event Router Components.
     ///
@@ -185,7 +191,7 @@ where
     Storage: PluginStorage,
 {
     fn identity(&self) -> &'static str {
-        <T as Plugin<M>>::id()
+        T::ID
     }
 
     fn dependencies(&self) -> &'static [&'static str] {
@@ -309,7 +315,7 @@ impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storag
     /// # Errors
     ///
     /// Returns an error when the provider identity is invalid, was not declared
-    /// in [`Plugin::DEPENDS_ON`], or did not publish this concrete type.
+    /// in [`PluginDeclaration::DEPENDS_ON`], or did not publish this concrete type.
     pub fn require<T>(&self, provider: &'static str) -> PluginResult<Rc<T>>
     where
         T: Any,
@@ -353,6 +359,70 @@ pub struct PluginStartContext<'a, Storage: PluginStorage> {
     capabilities: &'a CapabilityRegistry,
     task_spawner: Option<Spawner>,
     retained_resources: &'a mut Vec<Box<dyn Any>>,
+    task_cancellations: &'a mut Vec<PluginTaskCancellation>,
+}
+
+/// Cooperative cancellation signal tied to one Plugin-owned Embassy task.
+///
+/// A Plugin obtains this token during `start`, moves it into exactly one task,
+/// and races [`Self::cancelled`] with that task's owner loop. Plugin Manager
+/// signals the token when the Plugin unloads or startup rolls back.
+pub struct PluginTaskToken {
+    state: Arc<PluginTaskState>,
+}
+
+impl PluginTaskToken {
+    /// Waits until Plugin Manager ends this task's lifecycle.
+    pub async fn cancelled(&self) {
+        self.state.cancellation.wait().await;
+    }
+
+    /// Returns whether cancellation has already been requested.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.state.cancellation.signaled()
+    }
+}
+
+impl Drop for PluginTaskToken {
+    fn drop(&mut self) {
+        self.state.completion.signal(());
+    }
+}
+
+struct PluginTaskState {
+    cancellation: Signal<CriticalSectionRawMutex, ()>,
+    completion: Signal<CriticalSectionRawMutex, ()>,
+}
+
+struct PluginTaskCancellation {
+    state: Arc<PluginTaskState>,
+}
+
+impl PluginTaskCancellation {
+    async fn cancel_and_wait(self) {
+        self.state.cancellation.signal(());
+        self.state.completion.wait().await;
+    }
+}
+
+impl Drop for PluginTaskCancellation {
+    fn drop(&mut self) {
+        self.state.cancellation.signal(());
+    }
+}
+
+fn plugin_task_cancellation() -> (PluginTaskCancellation, PluginTaskToken) {
+    let state = Arc::new(PluginTaskState {
+        cancellation: Signal::new(),
+        completion: Signal::new(),
+    });
+    (
+        PluginTaskCancellation {
+            state: Arc::clone(&state),
+        },
+        PluginTaskToken { state },
+    )
 }
 
 impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
@@ -391,6 +461,16 @@ impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
     /// install the executor spawner.
     pub fn task_spawner(&self) -> PluginResult<Spawner> {
         self.task_spawner.ok_or(PluginError::TaskSpawnerUnavailable)
+    }
+
+    /// Creates cancellation for one task and retains its owner with the Plugin.
+    ///
+    /// Call this once per permanent task, then move the returned token into that
+    /// task. Dropping the Plugin lifecycle signals every token created here.
+    pub fn task_token(&mut self) -> PluginTaskToken {
+        let (owner, token) = plugin_task_cancellation();
+        self.task_cancellations.push(owner);
+        token
     }
 
     /// Retains a resource for exactly the lifetime of the current Plugin.
@@ -540,6 +620,7 @@ struct LoadedPlugin<const M: usize, Storage: PluginStorage> {
     dependencies: Vec<PluginId>,
     provided_capabilities: Vec<CapabilityKey>,
     retained_resources: Vec<Box<dyn Any>>,
+    task_cancellations: Vec<PluginTaskCancellation>,
     filesystem: Option<PluginVfs>,
 }
 
@@ -733,7 +814,7 @@ where
     ///
     /// Returns an error for an invalid, duplicate, or self-dependent identity.
     pub fn add<T: Plugin<M> + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
-        let id = PluginId::try_from(<T as Plugin<M>>::id())?;
+        let id = PluginId::try_from(T::ID)?;
         if self.loaded.contains_key(&id) || self.pending.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));
@@ -855,6 +936,7 @@ where
                         dependencies,
                         provided_capabilities,
                         retained_resources,
+                        task_cancellations: Vec::new(),
                         filesystem,
                     },
                 );
@@ -877,6 +959,7 @@ where
                             dependencies,
                             provided_capabilities,
                             retained_resources,
+                            task_cancellations: Vec::new(),
                             filesystem,
                         },
                     );
@@ -916,6 +999,7 @@ where
                     capabilities: &self.capabilities,
                     task_spawner: self.task_spawner,
                     retained_resources: &mut plugin.retained_resources,
+                    task_cancellations: &mut plugin.task_cancellations,
                 };
                 plugin.plugin.start(&mut context)
             };
@@ -928,6 +1012,7 @@ where
                 }
                 Err(source) => {
                     log::error!("Plugin {id} start failed: {source}");
+                    plugin.task_cancellations.clear();
                     let (remaining, cleanup) = rollback_components(router, plugin.component_ids);
                     if cleanup.is_empty() {
                         self.capabilities.remove_all(&plugin.provided_capabilities);
@@ -948,13 +1033,15 @@ where
     /// Unloads every Component owned by one Plugin in reverse registration order.
     ///
     /// The Plugin's `ekv` namespace remains durable and will be reused if the
-    /// same stable identity is loaded again.
+    /// same stable identity is loaded again. After Component cleanup succeeds,
+    /// this signals every Plugin task and waits for its token to be dropped
+    /// before releasing capabilities and retained resources.
     ///
     /// # Errors
     ///
     /// Returns an error when the Plugin is unknown or Component cleanup is
     /// incomplete. Failed Component identities remain tracked for retry.
-    pub fn unload<const N: usize, const Q: usize>(
+    pub async fn unload<const N: usize, const Q: usize>(
         &mut self,
         router: &mut EventRouter<N, M, Q>,
         id: &PluginId,
@@ -982,10 +1069,14 @@ where
             dependencies,
             provided_capabilities,
             retained_resources,
+            task_cancellations,
             filesystem,
         } = plugin;
         let (remaining, cleanup) = rollback_components(router, component_ids);
         if cleanup.is_empty() {
+            for cancellation in task_cancellations {
+                cancellation.cancel_and_wait().await;
+            }
             self.capabilities.remove_all(&provided_capabilities);
             drop(retained_resources);
             self.registration_order
@@ -1002,6 +1093,7 @@ where
                     dependencies,
                     provided_capabilities,
                     retained_resources,
+                    task_cancellations,
                     filesystem,
                 },
             );
@@ -1079,4 +1171,19 @@ fn rollback_components<const N: usize, const M: usize, const Q: usize>(
         }
     }
     (remaining, cleanup)
+}
+
+#[cfg(test)]
+mod tests {
+    use futures_lite::future::block_on;
+
+    use super::plugin_task_cancellation;
+
+    #[test]
+    fn dropping_a_plugin_task_owner_wakes_its_task() {
+        let (owner, token) = plugin_task_cancellation();
+        drop(owner);
+
+        block_on(token.cancelled());
+    }
 }

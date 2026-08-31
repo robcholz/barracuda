@@ -7,9 +7,11 @@
 
 use core::{convert::Infallible, future::Future};
 
-use barracuda_board::Board;
 use embassy_executor::Spawner;
-use embedded_hal::digital::{InputPin, StatefulOutputPin};
+use embedded_hal::{
+    digital::{InputPin, OutputPin, StatefulOutputPin},
+    i2c, spi,
+};
 
 /// Input bias selected while a GPIO operates as a digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -99,6 +101,100 @@ pub trait AnalogOutput: AnalogErrorType {
     fn write(&mut self, value: u32) -> Result<(), Self::Error>;
 }
 
+/// A fixed-capacity set of concrete hardware values addressable by Board name.
+///
+/// Naming is the only abstraction added here. Each stored value keeps its
+/// concrete type and implements the corresponding `embedded-hal` trait
+/// directly.
+pub struct NamedResources<T, const N: usize> {
+    entries: [Option<NamedResource<T>>; N],
+}
+
+struct NamedResource<T> {
+    name: &'static str,
+    resource: T,
+}
+
+impl<T, const N: usize> NamedResources<T, N> {
+    /// Creates a named set from Board-generated entries.
+    #[must_use]
+    pub fn new(entries: [(&'static str, T); N]) -> Self {
+        Self {
+            entries: entries.map(|(name, resource)| Some(NamedResource { name, resource })),
+        }
+    }
+}
+
+impl<T> NamedResources<T, 0> {
+    /// Creates an empty typed resource set.
+    #[must_use]
+    pub const fn empty() -> Self {
+        Self { entries: [] }
+    }
+}
+
+/// Runtime name lookup over a set of otherwise concrete hardware values.
+pub trait ResourceSet {
+    /// Concrete hardware value stored in this set.
+    type Resource;
+
+    /// Returns whether the Board exposed `name` in this set.
+    fn contains(&self, name: &str) -> bool;
+
+    /// Borrows one exposed resource by Board name.
+    fn get(&self, name: &str) -> Option<&Self::Resource>;
+
+    /// Mutably borrows one exposed resource by Board name.
+    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource>;
+}
+
+impl<T, const N: usize> ResourceSet for NamedResources<T, N> {
+    type Resource = T;
+
+    fn contains(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    fn get(&self, name: &str) -> Option<&Self::Resource> {
+        self.entries
+            .iter()
+            .filter_map(Option::as_ref)
+            .find(|entry| entry.name == name)
+            .map(|entry| &entry.resource)
+    }
+
+    fn get_mut(&mut self, name: &str) -> Option<&mut Self::Resource> {
+        self.entries
+            .iter_mut()
+            .filter_map(Option::as_mut)
+            .find(|entry| entry.name == name)
+            .map(|entry| &mut entry.resource)
+    }
+}
+
+/// Move-only ownership access to the I/O explicitly exposed by one Board.
+///
+/// Implementations normally store each set in an `Option`. Calling a `take_*`
+/// method transfers the concrete set to its sole consumer and subsequent calls
+/// return `None`.
+pub trait ExposedIo {
+    /// Concrete named GPIO set.
+    type Gpio: ResourceSet;
+    /// Concrete named I2C set.
+    type I2c: ResourceSet;
+    /// Concrete named SPI set.
+    type Spi: ResourceSet;
+
+    /// Moves the Board-exposed GPIO set to its owner once.
+    fn take_gpio(&mut self) -> Option<Self::Gpio>;
+
+    /// Moves the Board-exposed I2C set to its owner once.
+    fn take_i2c(&mut self) -> Option<Self::I2c>;
+
+    /// Moves the Board-exposed SPI set to its owner once.
+    fn take_spi(&mut self) -> Option<Self::Spi>;
+}
+
 /// Resources produced by one selected Board HAL.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BoardHalResources<Builtins, Io> {
@@ -121,6 +217,8 @@ pub type BoardHalInitResult<H> = Result<<H as BoardHal>::Resources, <H as BoardH
 
 /// Statically composed Board matrix and peripheral Drivers.
 pub trait BoardHal: Sized + 'static {
+    /// Move-only chip resources assigned to this Board HAL by Target.
+    type Bindings;
     /// Semantic hardware capabilities exposed to System or Plugins.
     type Resources;
     /// Board HAL initialization failure.
@@ -129,7 +227,7 @@ pub trait BoardHal: Sized + 'static {
     /// Initializes peripheral Drivers for one concrete Board matrix.
     fn initialize(
         spawner: Spawner,
-        board: &'static Board,
+        bindings: Self::Bindings,
     ) -> impl Future<Output = BoardHalInitResult<Self>>;
 }
 
@@ -144,14 +242,154 @@ pub struct NoBuiltinCapabilities;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct NoExposedIo;
 
+/// Uninhabited GPIO value that makes an empty I/O surface fully typed.
+pub struct UnavailableGpio {
+    never: Infallible,
+}
+
+impl UnavailableGpio {
+    fn unreachable<T>(&self) -> T {
+        match self.never {}
+    }
+}
+
+impl embedded_hal::digital::ErrorType for UnavailableGpio {
+    type Error = Infallible;
+}
+
+impl InputPin for UnavailableGpio {
+    fn is_high(&mut self) -> Result<bool, Self::Error> {
+        self.unreachable()
+    }
+
+    fn is_low(&mut self) -> Result<bool, Self::Error> {
+        self.unreachable()
+    }
+}
+
+impl OutputPin for UnavailableGpio {
+    fn set_low(&mut self) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+}
+
+impl StatefulOutputPin for UnavailableGpio {
+    fn is_set_high(&mut self) -> Result<bool, Self::Error> {
+        self.unreachable()
+    }
+
+    fn is_set_low(&mut self) -> Result<bool, Self::Error> {
+        self.unreachable()
+    }
+}
+
+impl ConfigurableDigitalPin for UnavailableGpio {
+    fn configure_input(&mut self, _config: InputConfig) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    fn configure_output(&mut self, _config: OutputConfig) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    fn disable(&mut self) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+}
+
+/// Uninhabited I2C value that makes an empty I/O surface fully typed.
+pub struct UnavailableI2c {
+    never: Infallible,
+}
+
+impl UnavailableI2c {
+    fn unreachable<T>(&self) -> T {
+        match self.never {}
+    }
+}
+
+impl i2c::ErrorType for UnavailableI2c {
+    type Error = Infallible;
+}
+
+impl embedded_hal_async::i2c::I2c for UnavailableI2c {
+    async fn transaction(
+        &mut self,
+        _address: u8,
+        _operations: &mut [i2c::Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+}
+
+/// Uninhabited SPI value that makes an empty I/O surface fully typed.
+pub struct UnavailableSpi {
+    never: Infallible,
+}
+
+impl UnavailableSpi {
+    fn unreachable<T>(&self) -> T {
+        match self.never {}
+    }
+}
+
+impl spi::ErrorType for UnavailableSpi {
+    type Error = Infallible;
+}
+
+impl embedded_hal_async::spi::SpiBus for UnavailableSpi {
+    async fn read(&mut self, _words: &mut [u8]) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    async fn write(&mut self, _words: &[u8]) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    async fn transfer(&mut self, _read: &mut [u8], _write: &[u8]) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    async fn transfer_in_place(&mut self, _words: &mut [u8]) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+
+    async fn flush(&mut self) -> Result<(), Self::Error> {
+        self.unreachable()
+    }
+}
+
+impl ExposedIo for NoExposedIo {
+    type Gpio = NamedResources<UnavailableGpio, 0>;
+    type I2c = NamedResources<UnavailableI2c, 0>;
+    type Spi = NamedResources<UnavailableSpi, 0>;
+
+    fn take_gpio(&mut self) -> Option<Self::Gpio> {
+        None
+    }
+
+    fn take_i2c(&mut self) -> Option<Self::I2c> {
+        None
+    }
+
+    fn take_spi(&mut self) -> Option<Self::Spi> {
+        None
+    }
+}
+
 /// Complete empty Board hardware surface.
 pub type NoBoardCapabilities = BoardHalResources<NoBuiltinCapabilities, NoExposedIo>;
 
 impl BoardHal for EmptyBoardHal {
+    type Bindings = ();
     type Resources = NoBoardCapabilities;
     type Error = Infallible;
 
-    async fn initialize(_spawner: Spawner, _board: &'static Board) -> BoardHalInitResult<Self> {
+    async fn initialize(_spawner: Spawner, _bindings: ()) -> BoardHalInitResult<Self> {
         Ok(BoardHalResources::new(NoBuiltinCapabilities, NoExposedIo))
     }
 }

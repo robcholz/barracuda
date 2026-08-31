@@ -4,6 +4,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use getset::CopyGetters;
 
 mod anthropic;
 mod openai_compatible;
@@ -60,11 +61,13 @@ impl BackendKind {
     }
 }
 
+#[derive(CopyGetters)]
 pub(crate) struct Backend {
     kind: BackendKind,
     model: String,
     endpoint: String,
     headers: Vec<(String, String)>,
+    #[getset(get_copy = "pub(crate)")]
     timeout_ms: u32,
     max_tokens: u32,
     image_max_bytes: usize,
@@ -113,10 +116,6 @@ impl Backend {
         body.insert("model".to_string(), Value::String(self.model.clone()));
         body.insert("max_tokens".to_string(), Value::from(self.max_tokens));
         body
-    }
-
-    pub(crate) fn timeout_ms(&self) -> u32 {
-        self.timeout_ms
     }
 
     pub(crate) async fn chat(

@@ -3,11 +3,14 @@ resolver = "2"
 members = [
     "boards/api",
     "boards/config",
+    "boards/drivers/indicator-led",
     "boards/tool",
+    "boards/stm32f429zi-nucleo",
     "bench/crates/*",
     "composition/*",
     "core/event-router",
     "core/plugin-api",
+    "core/plugin-manifest",
     "core/plugin-macros",
     "core/plugin-manager",
     "core/system",
@@ -32,6 +35,7 @@ embassy-net = { version = "0.9.1", default-features = false, features = ["dns", 
 embassy-net-driver-channel = { version = "0.4.0", default-features = false }
 embedded-storage-async = "0.4.1"
 embedded-hal = "1.0.0"
+embedded-hal-async = "1.0.0"
 log = { version = "0.4", default-features = false }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so

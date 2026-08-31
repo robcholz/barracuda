@@ -10,6 +10,7 @@ use http_client::ClientFactory;
 use component::HttpComponent;
 
 /// Plugin exposing the shared HTTP client through a dynamic RPC.
+#[barracuda_plugin_api::plugin]
 pub struct HttpPlugin {
     clients: ClientFactory<'static>,
 }
@@ -22,7 +23,6 @@ impl HttpPlugin {
         }
     }
 }
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for HttpPlugin {
     fn register<S: barracuda_plugin_manager::PluginStorage>(
         &mut self,

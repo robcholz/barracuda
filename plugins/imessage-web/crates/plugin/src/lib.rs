@@ -45,6 +45,7 @@ impl IMessageWebRoute {
 }
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageWebPlugin;
 
 impl IMessageWebPlugin {
@@ -55,7 +56,6 @@ impl IMessageWebPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageWebPlugin {
     fn register<Storage>(
         &mut self,
@@ -64,8 +64,12 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
-        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let web = Rc::new(WebChannel::new());
         let channel: Rc<dyn MessageChannel> = web.clone();
         let channel_registration: MessageChannelRegistration = gateway

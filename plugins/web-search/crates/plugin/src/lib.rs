@@ -26,6 +26,7 @@ const JSON_CONTENT_TYPE: &str = "application/json";
 const DEFAULT_API_BASE: &str = "https://api.tavily.com";
 
 /// Plugin providing web search to Agents through Event Router.
+#[barracuda_plugin_api::plugin]
 pub struct WebSearchPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -40,7 +41,6 @@ impl WebSearchPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for WebSearchPlugin {
     fn register<Storage>(
         &mut self,
@@ -49,7 +49,9 @@ impl<const M: usize> Plugin<M> for WebSearchPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
         let config = Rc::new(RefCell::new(None));
         context.event_router.load(WebSearchComponent::new(
             Rc::clone(&config),
@@ -118,11 +120,10 @@ mod tests {
 
     #[test]
     fn exposes_web_search_identity() {
-        let plugin = WebSearchPlugin::new(&mut PluginContext::new(
-            barracuda_platform_test::never_embassy_stack(),
-            ClientFactory::plaintext(barracuda_platform_test::never_embassy_stack()),
-        ));
-        assert_eq!(WebSearchPlugin::id(), "web-search");
+        assert_eq!(
+            <WebSearchPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            "web-search"
+        );
         assert_eq!(WebSearch::ADDRESS, "web_search.search");
     }
 

@@ -76,7 +76,7 @@ continues to own construction and runner lifecycle for its IP service.
 ## System and Plugin Manager
 
 Plugin Manager contains provider-qualified Plugin capabilities declared through
-`Plugin::DEPENDS_ON`. This path expresses Plugin graph ownership and supports
+`PluginDeclaration::DEPENDS_ON`. This path expresses Plugin graph ownership and supports
 registration rollback and unload. System supplies fixed construction inputs
 directly when it constructs each concrete Plugin.
 

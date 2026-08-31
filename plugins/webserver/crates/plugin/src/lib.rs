@@ -36,6 +36,7 @@ pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 ///     let _server = plugin.webserver();
 /// }
 /// ```
+#[barracuda_plugin_api::plugin]
 pub struct WebServerPlugin {
     stack: Stack<'static>,
     runtime: Option<Rc<WebServer>>,
@@ -52,7 +53,6 @@ impl WebServerPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for WebServerPlugin {
     fn register<Storage>(
         &mut self,
@@ -75,9 +75,10 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
             .runtime
             .take()
             .ok_or_else(|| PluginError::registration(WebServerRuntimeUnavailable))?;
-        context
-            .task_spawner()?
-            .spawn(task::web_server(webserver, self.stack))
+        let spawner = context.task_spawner()?;
+        let cancellation = context.task_token();
+        spawner
+            .spawn(task::web_server(webserver, self.stack, cancellation))
             .map_err(PluginError::registration)?;
         Ok(())
     }

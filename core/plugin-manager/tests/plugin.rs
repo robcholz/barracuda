@@ -16,13 +16,27 @@ use barracuda_event_router::{
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    CapabilityError, Plugin, PluginError, PluginId, PluginIdError, PluginManager,
-    PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext, PluginStartError,
-    PluginUnloadError, PluginWriteTransaction,
+    CapabilityError, Plugin, PluginDeclaration, PluginError, PluginId, PluginIdError,
+    PluginManager, PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext,
+    PluginStartError, PluginTaskToken, PluginUnloadError, PluginWriteTransaction,
 };
 use futures_lite::future::block_on;
 
 const FRAME_SIZE: usize = 64;
+
+macro_rules! declare_plugin {
+    ($plugin:ty, $id:literal) => {
+        impl PluginDeclaration for $plugin {
+            const ID: &'static str = $id;
+        }
+    };
+    ($plugin:ty, $id:literal, [$($dependency:literal),+ $(,)?]) => {
+        impl PluginDeclaration for $plugin {
+            const ID: &'static str = $id;
+            const DEPENDS_ON: &'static [&'static str] = &[$($dependency),+];
+        }
+    };
+}
 
 fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
     block_on(async {
@@ -76,19 +90,15 @@ struct StatefulPlugin<const KIND: u8> {
 
 struct IdentifiedPlugin;
 
-impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id() -> &'static str {
-        "identified"
-    }
-}
+declare_plugin!(IdentifiedPlugin, "identified");
+
+impl Plugin<FRAME_SIZE> for IdentifiedPlugin {}
 
 struct InvalidIdentityPlugin;
 
-impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {
-    fn id() -> &'static str {
-        ""
-    }
-}
+declare_plugin!(InvalidIdentityPlugin, "");
+
+impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {}
 
 #[test]
 fn register_uses_the_identity_declared_by_the_plugin() {
@@ -101,16 +111,16 @@ fn register_uses_the_identity_declared_by_the_plugin() {
     assert!(manager.is_loaded(&id));
 }
 
-impl<const KIND: u8> Plugin<FRAME_SIZE> for StatefulPlugin<KIND> {
-    fn id() -> &'static str {
-        match KIND {
-            0 => "scheduler",
-            1 => "other",
-            2 => "multi",
-            _ => "duplicate",
-        }
-    }
+impl<const KIND: u8> PluginDeclaration for StatefulPlugin<KIND> {
+    const ID: &'static str = match KIND {
+        0 => "scheduler",
+        1 => "other",
+        2 => "multi",
+        _ => "duplicate",
+    };
+}
 
+impl<const KIND: u8> Plugin<FRAME_SIZE> for StatefulPlugin<KIND> {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -167,7 +177,7 @@ fn unloading_an_unknown_plugin_is_rejected() {
     let mut router = router();
     let id = PluginId::try_from("unknown").unwrap();
 
-    let error = manager.unload(&mut router, &id).unwrap_err();
+    let error = block_on(manager.unload(&mut router, &id)).unwrap_err();
 
     assert!(matches!(
         error,
@@ -213,9 +223,7 @@ fn plugins_have_isolated_durable_scopes() {
     assert_eq!(*scheduler_observed.borrow(), None);
     assert_eq!(*other_observed.borrow(), None);
 
-    manager
-        .unload(&mut router, &PluginId::try_from("scheduler").unwrap())
-        .unwrap();
+    block_on(manager.unload(&mut router, &PluginId::try_from("scheduler").unwrap())).unwrap();
     let restored = Rc::new(RefCell::new(None));
     manager
         .register(
@@ -258,7 +266,7 @@ fn one_plugin_can_register_multiple_components() {
 
     assert_eq!(registered.get(), 3);
     assert_eq!(manager.component_ids(&id).unwrap().len(), 3);
-    manager.unload(&mut router, &id).unwrap();
+    block_on(manager.unload(&mut router, &id)).unwrap();
     assert_eq!(unregistered.get(), 3);
 }
 
@@ -290,11 +298,9 @@ struct FailingPlugin {
     unregistered: Rc<Cell<usize>>,
 }
 
-impl Plugin<FRAME_SIZE> for FailingPlugin {
-    fn id() -> &'static str {
-        "failure"
-    }
+declare_plugin!(FailingPlugin, "failure");
 
+impl Plugin<FRAME_SIZE> for FailingPlugin {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -343,17 +349,98 @@ fn failed_plugin_start_rolls_back_loaded_components() {
     assert!(!manager.is_loaded(&id));
 }
 
+struct TaskStartingFailure {
+    token: Rc<RefCell<Option<PluginTaskToken>>>,
+}
+
+declare_plugin!(TaskStartingFailure, "task-starting-failure");
+
+impl Plugin<FRAME_SIZE> for TaskStartingFailure {
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        self.token.replace(Some(context.task_token()));
+        Err(PluginError::registration(RegistrationFailure))
+    }
+}
+
+#[test]
+fn failed_plugin_start_cancels_tasks_started_by_that_hook() {
+    let mut manager = manager();
+    let mut router = router();
+    let token = Rc::new(RefCell::new(None));
+
+    manager
+        .register(
+            &mut router,
+            TaskStartingFailure {
+                token: Rc::clone(&token),
+            },
+        )
+        .expect("register Plugin");
+    let error = manager.start(&mut router).expect_err("startup must fail");
+
+    assert!(matches!(error, PluginStartError::Start(_)));
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
+}
+
+struct TaskTokenPlugin {
+    token: Rc<RefCell<Option<PluginTaskToken>>>,
+}
+
+declare_plugin!(TaskTokenPlugin, "task-token");
+
+impl Plugin<FRAME_SIZE> for TaskTokenPlugin {
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        self.token.replace(Some(context.task_token()));
+        Ok(())
+    }
+}
+
+#[test]
+fn dropping_the_manager_cancels_its_task_tokens() {
+    let mut manager = manager();
+    let mut router = router();
+    let token = Rc::new(RefCell::new(None));
+
+    manager
+        .register(
+            &mut router,
+            TaskTokenPlugin {
+                token: Rc::clone(&token),
+            },
+        )
+        .expect("register Plugin");
+    manager.start(&mut router).expect("start Plugin");
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(|token| !token.is_cancelled()));
+
+    drop(manager);
+
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
+}
+
 type ObservedPair = Rc<RefCell<(Option<u32>, Option<u32>)>>;
 
 struct AtomicPlugin {
     observed: ObservedPair,
 }
 
-impl Plugin<FRAME_SIZE> for AtomicPlugin {
-    fn id() -> &'static str {
-        "atomic"
-    }
+declare_plugin!(AtomicPlugin, "atomic");
 
+impl Plugin<FRAME_SIZE> for AtomicPlugin {
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -398,11 +485,9 @@ struct CapabilityProvider {
     capability: Rc<TestCapability>,
 }
 
-impl Plugin<FRAME_SIZE> for CapabilityProvider {
-    fn id() -> &'static str {
-        "provider"
-    }
+declare_plugin!(CapabilityProvider, "provider");
 
+impl Plugin<FRAME_SIZE> for CapabilityProvider {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -419,13 +504,9 @@ struct CapabilityConsumer {
     observed: Rc<RefCell<Option<Rc<TestCapability>>>>,
 }
 
+declare_plugin!(CapabilityConsumer, "consumer", ["provider"]);
+
 impl Plugin<FRAME_SIZE> for CapabilityConsumer {
-    const DEPENDS_ON: &'static [&'static str] = &["provider"];
-
-    fn id() -> &'static str {
-        "consumer"
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -493,23 +574,15 @@ fn queued_plugins_register_in_dependency_order() {
 
 struct CycleA;
 
-impl Plugin<FRAME_SIZE> for CycleA {
-    const DEPENDS_ON: &'static [&'static str] = &["cycle-b"];
+declare_plugin!(CycleA, "cycle-a", ["cycle-b"]);
 
-    fn id() -> &'static str {
-        "cycle-a"
-    }
-}
+impl Plugin<FRAME_SIZE> for CycleA {}
 
 struct CycleB;
 
-impl Plugin<FRAME_SIZE> for CycleB {
-    const DEPENDS_ON: &'static [&'static str] = &["cycle-a"];
+declare_plugin!(CycleB, "cycle-b", ["cycle-a"]);
 
-    fn id() -> &'static str {
-        "cycle-b"
-    }
-}
+impl Plugin<FRAME_SIZE> for CycleB {}
 
 #[test]
 fn queued_plugin_cycle_is_rejected() {
@@ -544,11 +617,9 @@ fn declared_dependency_must_be_registered_before_consumer() {
 
 struct UndeclaredConsumer;
 
-impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
-    fn id() -> &'static str {
-        "undeclared"
-    }
+declare_plugin!(UndeclaredConsumer, "undeclared");
 
+impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -588,13 +659,9 @@ fn require_rejects_an_undeclared_dependency() {
 
 struct MissingCapabilityConsumer;
 
+declare_plugin!(MissingCapabilityConsumer, "consumer", ["provider"]);
+
 impl Plugin<FRAME_SIZE> for MissingCapabilityConsumer {
-    const DEPENDS_ON: &'static [&'static str] = &["provider"];
-
-    fn id() -> &'static str {
-        "consumer"
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -656,15 +723,15 @@ fn provider_cannot_unload_while_a_dependent_is_loaded() {
         .unwrap();
     manager.start(&mut router).unwrap();
 
-    let error = manager.unload(&mut router, &provider).unwrap_err();
+    let error = block_on(manager.unload(&mut router, &provider)).unwrap_err();
     assert!(matches!(
         error,
         PluginUnloadError::HasDependents { plugin, dependents }
             if plugin == provider && dependents == vec![consumer.clone()]
     ));
 
-    manager.unload(&mut router, &consumer).unwrap();
-    manager.unload(&mut router, &provider).unwrap();
+    block_on(manager.unload(&mut router, &consumer)).unwrap();
+    block_on(manager.unload(&mut router, &provider)).unwrap();
 }
 
 struct RetainedResource {
@@ -682,15 +749,15 @@ struct RetainingPlugin<const FAILING: bool> {
     fail: bool,
 }
 
-impl<const FAILING: bool> Plugin<FRAME_SIZE> for RetainingPlugin<FAILING> {
-    fn id() -> &'static str {
-        if FAILING {
-            "failing-retain"
-        } else {
-            "retained"
-        }
-    }
+impl<const FAILING: bool> PluginDeclaration for RetainingPlugin<FAILING> {
+    const ID: &'static str = if FAILING {
+        "failing-retain"
+    } else {
+        "retained"
+    };
+}
 
+impl<const FAILING: bool> Plugin<FRAME_SIZE> for RetainingPlugin<FAILING> {
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: barracuda_plugin_manager::PluginStorage,
@@ -723,7 +790,7 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
         .unwrap();
     manager.start(&mut router).unwrap();
     assert_eq!(dropped.get(), 0);
-    manager.unload(&mut router, &retained).unwrap();
+    block_on(manager.unload(&mut router, &retained)).unwrap();
     assert_eq!(dropped.get(), 1);
 
     manager
@@ -742,11 +809,9 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
 
 struct DuplicateCapabilityProvider;
 
-impl Plugin<FRAME_SIZE> for DuplicateCapabilityProvider {
-    fn id() -> &'static str {
-        "provider"
-    }
+declare_plugin!(DuplicateCapabilityProvider, "provider");
 
+impl Plugin<FRAME_SIZE> for DuplicateCapabilityProvider {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -790,11 +855,9 @@ struct RegisterPhasePlugin {
     phases: Rc<RefCell<Vec<&'static str>>>,
 }
 
-impl Plugin<FRAME_SIZE> for RegisterPhasePlugin {
-    fn id() -> &'static str {
-        "register-phase"
-    }
+declare_plugin!(RegisterPhasePlugin, "register-phase");
 
+impl Plugin<FRAME_SIZE> for RegisterPhasePlugin {
     fn register<Storage>(
         &mut self,
         _context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
@@ -819,13 +882,9 @@ struct DependentPhasePlugin {
     phases: Rc<RefCell<Vec<&'static str>>>,
 }
 
+declare_plugin!(DependentPhasePlugin, "dependent-phase", ["register-phase"]);
+
 impl Plugin<FRAME_SIZE> for DependentPhasePlugin {
-    const DEPENDS_ON: &'static [&'static str] = &["register-phase"];
-
-    fn id() -> &'static str {
-        "dependent-phase"
-    }
-
     fn register<Storage>(
         &mut self,
         _context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,

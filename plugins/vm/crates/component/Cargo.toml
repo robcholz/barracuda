@@ -15,7 +15,7 @@ vendored = [
 [dependencies]
 async-channel = { version = "2", default-features = false }
 barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-lua = { path = "../../../../shared/lua" }
+barracuda-lua = { path = "../lua" }
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-package-api = { path = "../package-api" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }

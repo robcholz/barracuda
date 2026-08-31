@@ -22,6 +22,7 @@ pub const SET_API_PATH: &str = "/api/model-api";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that mounts Agent model API configuration on the shared WebServer.
+#[barracuda_plugin_api::plugin]
 pub struct CaptivePortalPlugin;
 
 impl CaptivePortalPlugin {
@@ -32,7 +33,6 @@ impl CaptivePortalPlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
     fn register<Storage>(
         &mut self,
@@ -41,8 +41,12 @@ impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let agent = context.require::<AgentSetApi>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
-        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
+        let agent = context.require::<AgentSetApi>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let registration = webserver
             .serve_http(SET_API_PATH, SetApiEndpoint::new(agent))
             .map_err(PluginError::registration)?;
@@ -163,9 +167,6 @@ mod tests {
     use core::cell::RefCell;
 
     use barracuda_agent_plugin::{AgentSetApi, InitError};
-    use barracuda_platform_test::never_embassy_stack;
-    use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::Plugin;
     use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
 
     use super::{ApiPurpose, CaptivePortalPlugin, SetApiEndpoint, SET_API_PATH};
@@ -197,13 +198,12 @@ mod tests {
 
     #[test]
     fn plugin_identity_and_dependencies_are_stable() {
-        let stack = never_embassy_stack();
-        let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-        let plugin = CaptivePortalPlugin::new(&mut context);
-
-        assert_eq!(CaptivePortalPlugin::id(), "captive-portal");
         assert_eq!(
-            <CaptivePortalPlugin as Plugin<512>>::DEPENDS_ON,
+            <CaptivePortalPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            "captive-portal"
+        );
+        assert_eq!(
+            <CaptivePortalPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON,
             &["agent", "webserver"]
         );
         assert_eq!(SET_API_PATH, "/api/model-api");

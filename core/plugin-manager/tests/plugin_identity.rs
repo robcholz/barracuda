@@ -8,7 +8,7 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    Plugin, PluginId, PluginIdError, PluginManager, PluginRegisterError,
+    Plugin, PluginDeclaration, PluginId, PluginIdError, PluginManager, PluginRegisterError,
 };
 use futures_lite::future::block_on;
 
@@ -16,27 +16,27 @@ const FRAME_SIZE: usize = 64;
 
 struct IdentifiedPlugin;
 
-impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id() -> &'static str {
-        "identified"
-    }
+impl PluginDeclaration for IdentifiedPlugin {
+    const ID: &'static str = "identified";
 }
+
+impl Plugin<FRAME_SIZE> for IdentifiedPlugin {}
 
 struct InvalidIdentityPlugin;
 
-impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {
-    fn id() -> &'static str {
-        ""
-    }
+impl PluginDeclaration for InvalidIdentityPlugin {
+    const ID: &'static str = "";
 }
+
+impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {}
 
 struct DuplicatePlugin;
 
-impl Plugin<FRAME_SIZE> for DuplicatePlugin {
-    fn id() -> &'static str {
-        "duplicate"
-    }
+impl PluginDeclaration for DuplicatePlugin {
+    const ID: &'static str = "duplicate";
 }
+
+impl Plugin<FRAME_SIZE> for DuplicatePlugin {}
 
 fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
     block_on(async {

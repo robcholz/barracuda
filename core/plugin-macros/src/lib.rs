@@ -2,21 +2,15 @@
 
 use std::{env, fs, path::PathBuf};
 
-use serde::Deserialize;
-use syn::{parse_macro_input, ItemImpl};
-
-#[derive(Deserialize)]
-struct PluginManifest {
-    id: String,
-    #[serde(rename = "depends-on")]
-    depends_on: Vec<String>,
-}
+use barracuda_plugin_manifest::{parse, PluginManifest};
+use syn::{parse_macro_input, ItemStruct};
 
 /// Bakes a Plugin's identity and dependencies from its `plugin.toml`.
 ///
 /// The calling crate must use the standard `plugins/<name>/crates/plugin`
 /// layout. Apply this attribute to its [`Plugin`](barracuda_plugin_manager::Plugin)
-/// implementation; the attribute supplies `Plugin::DEPENDS_ON` and `Plugin::id`.
+/// type; the attribute implements
+/// [`PluginDeclaration`](barracuda_plugin_manager::PluginDeclaration).
 /// Invalid or missing manifests produce a compile error.
 #[proc_macro_attribute]
 pub fn plugin(
@@ -27,23 +21,30 @@ pub fn plugin(
         return compile_error("plugin does not accept arguments");
     }
 
-    let mut implementation = parse_macro_input!(input as ItemImpl);
+    let item = parse_macro_input!(input as ItemStruct);
 
     match read_plugin_manifest() {
         Ok((manifest, path)) => {
-            let id = manifest.id;
-            let dependencies = manifest.depends_on;
+            let id = manifest.id();
+            let dependencies = manifest.dependencies();
             let path = path.to_string_lossy().into_owned();
-            implementation.items.push(syn::parse_quote! {
-                const DEPENDS_ON: &'static [&'static str] = &[#(#dependencies),*];
-            });
-            implementation.items.push(syn::parse_quote! {
-                fn id() -> &'static str {
-                    const _: &str = include_str!(#path);
-                    #id
+            let name = &item.ident;
+            let (implementation_generics, type_generics, where_clause) =
+                item.generics.split_for_impl();
+            quote::quote! {
+                #item
+
+                impl #implementation_generics ::barracuda_plugin_manager::PluginDeclaration
+                    for #name #type_generics #where_clause
+                {
+                    const ID: &'static str = {
+                        const _: &str = include_str!(#path);
+                        #id
+                    };
+                    const DEPENDS_ON: &'static [&'static str] = &[#(#dependencies),*];
                 }
-            });
-            quote::quote!(#implementation).into()
+            }
+            .into()
         }
         Err(error) => compile_error(&error),
     }
@@ -56,21 +57,8 @@ fn read_plugin_manifest() -> Result<(PluginManifest, PathBuf), String> {
     let path = crate_dir.join("../../plugin.toml");
     let contents = fs::read_to_string(&path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    let manifest = toml::from_str::<PluginManifest>(&contents)
+    let manifest = parse(&contents)
         .map_err(|error| format!("invalid Plugin manifest {}: {error}", path.display()))?;
-    if manifest.id.trim().is_empty() {
-        return Err(format!("Plugin ID in {} must not be empty", path.display()));
-    }
-    if manifest
-        .depends_on
-        .iter()
-        .any(|dependency| dependency.trim().is_empty())
-    {
-        return Err(format!(
-            "Plugin dependencies in {} must not be empty",
-            path.display()
-        ));
-    }
     Ok((manifest, path))
 }
 

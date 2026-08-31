@@ -68,6 +68,7 @@ poll.
 | Peripheral Driver runner | HAL composition | Embassy task |
 | WebServer accept loop | WebServer Plugin | Embassy task |
 | WebServer connection workers | WebServer Plugin | WebServer-owned Embassy task |
+| Network time synchronization | Time Plugin | cancellable Embassy task |
 | Scheduler loop that emits scheduled Events | Scheduler Component | Event Router |
 | Workflow event ingress and execution | Workflow Component | Event Router |
 | Event Router RPC adapter | Contract-owning Component | Event Router |
@@ -125,6 +126,14 @@ through System startup. Event Router failure and completion govern Event Router
 Components only; they do not silently become the lifecycle of independent
 servers or Drivers.
 
+Each permanent Plugin task receives one manager-owned cancellation token.
+After Component cleanup succeeds, unload signals every task and waits for each
+token to be dropped before releasing capabilities and retained resources. This
+makes an immediate unload/reload safe for Embassy's fixed task pools. Startup
+failure cancels every task started by that hook immediately. Dropping Plugin
+Manager also signals all remaining task tokens. Task code races its owner loop
+with the token and must be cancellation-safe at every await point.
+
 ## Invariants
 
 - `Component::run` is reserved for Event Router-facing runtime work.
@@ -137,6 +146,8 @@ servers or Drivers.
 - Fixed long-lived tasks use Embassy's static task allocation and declared pool
   sizes.
 - Plugin registration finishes before Plugin tasks accept external work.
+- Permanent Plugin tasks stop cooperatively on unload, startup rollback, or
+  Plugin Manager teardown.
 - Event Router Components and owner-managed tasks have separate failure and
   lifecycle boundaries.
 

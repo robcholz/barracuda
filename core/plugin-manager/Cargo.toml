@@ -14,6 +14,7 @@ barracuda-event-router = { path = "../event-router" }
 barracuda-kv = { path = "../../shared/kv" }
 barracuda-vfs = { path = "../../shared/vfs" }
 embassy-executor.workspace = true
+embassy-sync.workspace = true
 embedded-storage-async.workspace = true
 getset = "0.1.7"
 log.workspace = true

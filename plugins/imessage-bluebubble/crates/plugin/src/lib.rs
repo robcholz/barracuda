@@ -27,6 +27,7 @@ pub const CONFIG_API_PATH: &str = "/api/gateway/bluebubbles";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes BlueBubbles configuration and registers the resulting channel.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageBlueBubblePlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -41,7 +42,6 @@ impl IMessageBlueBubblePlugin {
     }
 }
 
-#[barracuda_plugin_api::plugin]
 impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
     fn register<Storage>(
         &mut self,
@@ -50,8 +50,12 @@ impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(<Self as Plugin<M>>::DEPENDS_ON[0])?;
-        let webserver = context.require::<WebServer>(<Self as Plugin<M>>::DEPENDS_ON[1])?;
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),

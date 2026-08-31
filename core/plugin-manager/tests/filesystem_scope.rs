@@ -10,7 +10,7 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    Plugin, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
+    Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
     PluginRequirements, PluginResult, PluginStorage, PluginVfs,
 };
 use barracuda_vfs::{MountOptions, Vfs};
@@ -50,17 +50,13 @@ struct FilesystemPlugin<const KIND: u8> {
     filesystem: Rc<RefCell<Option<PluginVfs>>>,
 }
 
+impl<const KIND: u8> PluginDeclaration for FilesystemPlugin<KIND> {
+    const ID: &'static str = if KIND == 0 { "first" } else { "second" };
+}
+
 impl<const KIND: u8> Plugin<FRAME_SIZE> for FilesystemPlugin<KIND> {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
-
-    fn id() -> &'static str {
-        if KIND == 0 {
-            "first"
-        } else {
-            "second"
-        }
-    }
 
     fn register<Storage>(
         &mut self,
@@ -78,11 +74,11 @@ struct KvOnlyPlugin {
     filesystem_rejected: Rc<Cell<bool>>,
 }
 
-impl Plugin<FRAME_SIZE> for KvOnlyPlugin {
-    fn id() -> &'static str {
-        "kv-only"
-    }
+impl PluginDeclaration for KvOnlyPlugin {
+    const ID: &'static str = "kv-only";
+}
 
+impl Plugin<FRAME_SIZE> for KvOnlyPlugin {
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,

@@ -9,6 +9,9 @@ barracuda-board = { path = "../api" }
 barracuda-board-hal = { path = "../hal" }
 embassy-executor.workspace = true
 
+[target.'cfg(target_arch = "arm")'.dependencies]
+barracuda-board-stm32f429zi-nucleo = { path = "../stm32f429zi-nucleo" }
+
 [build-dependencies]
 barracuda-board-config = { path = "../config" }
 

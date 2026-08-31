@@ -2,15 +2,15 @@
 
 extern crate alloc;
 
-use barracuda_plugin_manager::Plugin;
+use barracuda_plugin_manager::{Plugin, PluginDeclaration};
 
 struct StorageAgnosticPlugin;
 
-impl<const M: usize> Plugin<M> for StorageAgnosticPlugin {
-    fn id() -> &'static str {
-        "storage-agnostic"
-    }
+impl PluginDeclaration for StorageAgnosticPlugin {
+    const ID: &'static str = "storage-agnostic";
 }
+
+impl<const M: usize> Plugin<M> for StorageAgnosticPlugin {}
 
 #[test]
 fn plugin_contract_is_generic_over_semantic_storage_not_flash() {

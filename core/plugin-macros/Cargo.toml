@@ -9,10 +9,9 @@ license = "Apache-2.0"
 proc-macro = true
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+barracuda-plugin-manifest = { path = "../plugin-manifest" }
 quote = "1"
 syn = { version = "2", features = ["full"] }
-toml = "0.9"
 
 [lints.rust]
 unsafe_code = "forbid"
