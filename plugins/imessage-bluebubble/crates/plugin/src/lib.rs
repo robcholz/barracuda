@@ -37,7 +37,7 @@ pub struct IMessageBlueBubblePlugin {
 impl IMessageBlueBubblePlugin {
     /// Creates an unconfigured provider using Platform HTTP resources.
     #[must_use]
-    pub fn new(context: &PluginContext) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
         }

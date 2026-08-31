@@ -63,7 +63,7 @@ pub struct IMessageGatewayPlugin;
 impl IMessageGatewayPlugin {
     /// Creates the base IMessage Gateway Plugin.
     #[must_use]
-    pub const fn new(_context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
         Self
     }
 }
@@ -119,8 +119,8 @@ mod tests {
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("imessage-gateway").expect("valid Plugin ID");
             let stack = never_embassy_stack();
-            let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-            let plugin = IMessageGatewayPlugin::new(&context);
+            let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+            let plugin = IMessageGatewayPlugin::new(&mut context);
             assert_eq!(Plugin::<512>::id(&plugin), "imessage-gateway");
 
             manager

@@ -47,7 +47,7 @@ pub struct WebServerPlugin {
 impl WebServerPlugin {
     /// Creates the Plugin with the IP stack used by its owned server task.
     #[must_use]
-    pub const fn new(context: &PluginContext) -> Self {
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             stack: context.ip_stack,
             runtime: None,

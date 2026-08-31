@@ -40,7 +40,11 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(plugin_api.contains("pub struct PluginContext"));
     assert!(plugin_api.contains("pub ip_stack: Stack<'static>"));
     assert!(plugin_api.contains("pub http_clients: ClientFactory<'static>"));
-    assert!(system.contains("let plugin_context = PluginContext"));
+    assert!(system.contains("let mut plugin_context"));
+    assert!(system.contains("PluginContext::from_hal("));
+    assert!(system.contains("prepared.board_hal"));
+    assert!(!system.contains("with_lua_hardware"));
+    assert!(plugin_api.contains("pub hal: BoardHalResources<Builtins, Io>"));
 
     for plugin in [
         "FilePlugin",
@@ -60,7 +64,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         "GatewayAgentPlugin",
     ] {
         assert!(
-            system.contains(&format!("{plugin}::new(&plugin_context)")),
+            system.contains(&format!("{plugin}::new(&mut plugin_context)")),
             "{plugin} is not constructed from the shared PluginContext",
         );
     }

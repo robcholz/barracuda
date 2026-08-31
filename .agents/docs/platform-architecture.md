@@ -342,6 +342,25 @@ and Plugins. Arbitration, access control, and dynamic device attachment belong
 to that owner. Any physical overlap already declared by the Board remains a
 property of the concrete Board composition.
 
+The Lua GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
+concrete, move-only `BoardHalResources` value; it has no scripting service
+contract and adds no shared ownership or lock. System puts that complete HAL
+directly in `PluginContext` without splitting it into per-Plugin fields or
+constructing a Lua hardware bundle. During unified Plugin construction, each
+hardware Plugin mutably accesses `context.hal.io`, takes its corresponding
+explicitly exposed value once, and becomes that value's sole owner. Built-in
+capabilities and any untaken exposed I/O remain in the HAL stored by System.
+
+The Plugin then places its owned value behind an Embassy async mutex inside
+the Lua package. Cloned `Arc`s share only that Lua-layer lock so concurrent Lua
+callbacks can reach the same package-owned value; they do not clone or
+reconstruct hardware. Adapter operations take `&mut self`, and the mutex guard
+is held across the returned future, making the exclusivity required by the
+underlying `embedded-hal` or `embedded-hal-async` value explicit. This dynamic
+adapter exists only because logical names and Lua callbacks are runtime data.
+HAL, Board composition, built-in peripheral Drivers, and non-Lua consumers
+remain concrete and statically dispatched.
+
 ## Peripheral Drivers and HAL
 
 Drivers implement reusable peripheral behavior. The Board matrix supplies the

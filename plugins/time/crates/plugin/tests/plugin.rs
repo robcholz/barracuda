@@ -25,8 +25,8 @@ fn plugin_loads_the_time_component() {
         let mut router = EventRouter::new(lanes).await.expect("create router");
         let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
         let stack = never_embassy_stack();
-        let context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-        let plugin = TimePlugin::new(&context);
+        let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        let plugin = TimePlugin::new(&mut context);
 
         assert_eq!(Plugin::<512>::id(&plugin), "time");
         assert!(<TimePlugin as Plugin<512>>::DEPENDS_ON.is_empty());
