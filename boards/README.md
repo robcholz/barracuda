@@ -14,9 +14,41 @@ boards/
 ```
 
 One directory under `configs/` describes one concrete product. `board.yml`
-contains the maximum common denominator: identity, canonical chip name, and
-logical storage mappings. It must not contain a Rust Platform type or select
-`macos`, `linux`, `esp32`, or another Platform implementation.
+contains the maximum common denominator: identity, canonical chip name, the
+explicit Board hardware surface, and native-layout binding. It must not contain
+a Rust Platform type or select `macos`, `linux`, `esp32`, or another Platform
+implementation.
+
+The optional hardware surface has two sections. `exposed-io` names only the
+digital GPIO, analog, PWM, I2C, and SPI capabilities made available above the
+Board layer. `builtin-peripherals` names a Driver, its chip-native bindings,
+and typed construction parameters. Repeating a physical identifier is accepted
+because overlap and mux behavior belong to the concrete Board adapter.
+
+```yaml
+exposed-io:
+  gpio:
+    user-control:
+      pin: gpio2
+  i2c:
+    expansion:
+      peripheral: i2c0
+      scl: gpio6
+      sda: gpio7
+      frequency-hz: 400000
+
+builtin-peripherals:
+  indicator:
+    driver: gpio-indicator
+    bindings:
+      pin: gpio10
+    parameters:
+      active-low: true
+```
+
+A Board that declares this surface must register a concrete Board HAL adapter
+in the selected composition. The build rejects declarations that would
+otherwise be silently reduced to the empty HAL.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's
 native format:
