@@ -14,7 +14,7 @@ mod line_editor;
 mod local_native;
 mod protocol;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{bail, Result};
 use embassy_executor::Spawner;
 
 const DEFAULT_URL: &str = "ws://10.42.0.2:8787";
@@ -27,10 +27,14 @@ enum RunMode<'a> {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    if let Err(error) = run(spawner).await {
-        eprintln!("error: {error}");
-        std::process::exit(1);
-    }
+    let exit_code = match run(spawner).await {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("error: {error}");
+            1
+        }
+    };
+    std::process::exit(exit_code);
 }
 
 async fn run(spawner: Spawner) -> Result<()> {
@@ -53,16 +57,7 @@ fn mode_from_args<'a>(args: &'a [&'a str]) -> Result<RunMode<'a>> {
 }
 
 async fn run_local(spawner: Spawner) -> Result<()> {
-    let system = local_native::build(spawner).await?;
-    tokio::pin!(system);
-
-    tokio::select! {
-        result = &mut system => match result {
-            Ok(()) => bail!("local Barracuda System stopped"),
-            Err(error) => Err(anyhow!("local Barracuda System stopped: {error}")),
-        },
-        result = client::run_when_available(DEFAULT_URL) => result,
-    }
+    local_native::run(spawner).await
 }
 
 #[cfg(test)]

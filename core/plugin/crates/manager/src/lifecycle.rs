@@ -1101,6 +1101,26 @@ where
         }
     }
 
+    /// Unloads the complete Plugin graph in reverse dependency order.
+    ///
+    /// Each Plugin follows the same Component cleanup, task cancellation, and
+    /// retained-resource release path as [`Self::unload`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the first Plugin unload failure. Plugins already unloaded before
+    /// that failure remain unloaded.
+    pub async fn shutdown<const N: usize, const Q: usize>(
+        &mut self,
+        router: &mut EventRouter<N, M, Q>,
+    ) -> Result<(), PluginUnloadError> {
+        let order = self.registration_order.clone();
+        for id in order.iter().rev() {
+            self.unload(router, id).await?;
+        }
+        Ok(())
+    }
+
     /// Returns whether a Plugin identity is currently loaded.
     #[must_use]
     pub fn is_loaded(&self, id: &PluginId) -> bool {

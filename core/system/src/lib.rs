@@ -20,7 +20,7 @@ use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, R
 use barracuda_platform::{Partitions, PlatformResources};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
-    PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
+    PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
 use barracuda_target_api::TargetResources;
 use barracuda_tls::ClientTls;
@@ -55,7 +55,7 @@ pub struct System<
     const P: usize,
 > {
     router: EventRouter<N, M, Q>,
-    _plugins: PluginManager<M, BlockingAsync<Region>>,
+    plugins: PluginManager<M, BlockingAsync<Region>>,
     _web_assets: Region,
     _remaining_partitions: Partitions<Region, P>,
     _plugin_context: PluginContext<Builtins, Io>,
@@ -171,11 +171,24 @@ where
 
         Ok(Self {
             router,
-            _plugins: plugins,
+            plugins,
             _web_assets: prepared.partitions.web_assets,
             _remaining_partitions: prepared.partitions.remaining,
             _plugin_context: plugin_context,
         })
+    }
+
+    /// Stops every Plugin in reverse dependency order and waits for its tasks.
+    ///
+    /// Consuming the System prevents its Event Router from being polled again
+    /// after shutdown. Remaining System-owned resources are released normally
+    /// when this method returns.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first Plugin unload failure.
+    pub async fn shutdown(mut self) -> Result<(), PluginUnloadError> {
+        self.plugins.shutdown(&mut self.router).await
     }
 }
 

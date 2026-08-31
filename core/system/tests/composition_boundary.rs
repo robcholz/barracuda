@@ -11,7 +11,8 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(target.contains("barracuda_board_selected::resources(spawner, board_bindings)"));
     assert!(target.contains("bindings.split()"));
     assert!(application.contains("barracuda_target::resources(spawner)"));
-    assert!(application.contains("System::new(lanes, resources, spawner)"));
+    assert!(application.contains("System::new(lanes(), target_resources(spawner).await?, spawner)"));
+    assert!(application.contains(".shutdown()"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));

@@ -20,7 +20,7 @@ use barracuda_plugin_manager::{
     PluginManager, PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext,
     PluginStartError, PluginTaskToken, PluginUnloadError, PluginWriteTransaction,
 };
-use futures_lite::future::block_on;
+use futures_lite::future::{block_on, poll_once};
 
 const FRAME_SIZE: usize = 64;
 
@@ -432,6 +432,33 @@ fn dropping_the_manager_cancels_its_task_tokens() {
         .is_some_and(PluginTaskToken::is_cancelled));
 }
 
+#[test]
+fn shutdown_waits_for_plugin_task_completion() {
+    let mut manager = manager();
+    let mut router = router();
+    let token = Rc::new(RefCell::new(None));
+
+    manager
+        .register(
+            &mut router,
+            TaskTokenPlugin {
+                token: Rc::clone(&token),
+            },
+        )
+        .expect("register Plugin");
+    manager.start(&mut router).expect("start Plugin");
+
+    let mut shutdown = Box::pin(manager.shutdown(&mut router));
+    assert!(block_on(poll_once(shutdown.as_mut())).is_none());
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
+
+    drop(token.borrow_mut().take());
+    block_on(shutdown).expect("shutdown Plugin graph");
+}
+
 type ObservedPair = Rc<RefCell<(Option<u32>, Option<u32>)>>;
 
 struct AtomicPlugin {
@@ -732,6 +759,36 @@ fn provider_cannot_unload_while_a_dependent_is_loaded() {
 
     block_on(manager.unload(&mut router, &consumer)).unwrap();
     block_on(manager.unload(&mut router, &provider)).unwrap();
+}
+
+#[test]
+fn shutdown_unloads_the_complete_graph_in_reverse_dependency_order() {
+    let mut manager = manager();
+    let mut router = router();
+    let provider = PluginId::try_from("provider").unwrap();
+    let consumer = PluginId::try_from("consumer").unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityProvider {
+                capability: Rc::new(TestCapability(1)),
+            },
+        )
+        .unwrap();
+    manager
+        .register(
+            &mut router,
+            CapabilityConsumer {
+                observed: Rc::new(RefCell::new(None)),
+            },
+        )
+        .unwrap();
+    manager.start(&mut router).unwrap();
+
+    block_on(manager.shutdown(&mut router)).unwrap();
+
+    assert!(!manager.is_loaded(&provider));
+    assert!(!manager.is_loaded(&consumer));
 }
 
 struct RetainedResource {
