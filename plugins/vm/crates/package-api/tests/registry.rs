@@ -2,6 +2,10 @@
 
 use barracuda_lua::{Lua, Package, Result};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry, LuaPackageRegistryError};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 struct Marker {
     name: &'static str,
@@ -92,4 +96,39 @@ fn rejects_empty_package_names() {
         .err()
         .expect("empty name must fail");
     assert_eq!(error, LuaPackageRegistryError::EmptyName);
+}
+
+struct RevocableMarker {
+    revoked: Arc<AtomicBool>,
+}
+
+impl Package for RevocableMarker {
+    fn install(&self, _lua: &mut Lua) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl LuaPackage for RevocableMarker {
+    fn name(&self) -> &'static str {
+        "revocable"
+    }
+
+    fn revoke(&self) {
+        self.revoked.store(true, Ordering::Release);
+    }
+}
+
+#[test]
+fn dropping_registration_revokes_the_registered_package() {
+    let registry = LuaPackageRegistry::new();
+    let revoked = Arc::new(AtomicBool::new(false));
+    let registration = registry
+        .register(RevocableMarker {
+            revoked: Arc::clone(&revoked),
+        })
+        .expect("register package");
+
+    drop(registration);
+
+    assert!(revoked.load(Ordering::Acquire));
 }

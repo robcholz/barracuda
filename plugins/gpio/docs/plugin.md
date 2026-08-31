@@ -18,7 +18,13 @@ Lua API:
 - `gpio.read(name) -> boolean`
 - `gpio.write(name, high)`
 
-The mode-changing calls are intentionally dynamic. The Plugin wraps its taken
-value in an Embassy async mutex, and every Lua operation holds that lock while
-mutably borrowing the adapter. Invalid names, unsupported electrical modes,
-and hardware failures use the conventional Lua `nil, error` result.
+The mode-changing calls are intentionally dynamic. The Plugin takes a concrete
+named resource set whose pin type implements `ConfigurableDigitalPin` and the
+standard `embedded_hal::digital` traits. It adds no GPIO operation trait or
+hardware trait object. The package wraps that set in an Embassy async mutex,
+and every Lua operation holds the lock while mutably borrowing the selected
+pin. Invalid names, unsupported electrical modes, and pin failures use the
+conventional Lua `nil, error` result.
+
+Dropping the package registration revokes callbacks already installed in Lua
+states, so they cannot retain GPIO access after the Plugin unloads.

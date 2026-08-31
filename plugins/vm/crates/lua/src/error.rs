@@ -1,5 +1,6 @@
 use alloc::{string::String, vec::Vec};
 use core::fmt;
+use getset::CopyGetters;
 
 pub type Result<T> = core::result::Result<T, Error>;
 
@@ -13,8 +14,9 @@ pub enum ErrorKind {
     UnexpectedYield,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, CopyGetters, Debug, Eq, PartialEq)]
 pub struct Error {
+    #[getset(get_copy = "pub")]
     kind: ErrorKind,
     message: String,
 }
@@ -29,10 +31,6 @@ impl Error {
 
     pub fn runtime(message: impl Into<String>) -> Self {
         Self::new(ErrorKind::Runtime, message)
-    }
-
-    pub fn kind(&self) -> ErrorKind {
-        self.kind
     }
 
     pub fn message(&self) -> &str {

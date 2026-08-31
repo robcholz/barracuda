@@ -5,14 +5,18 @@ use alloc::{
 };
 
 use barracuda_agent::{AgentId, AgentKind};
+use getset::{CopyGetters, Getters};
 
 use super::model::{SubagentSnapshot, SubagentStatus, SubagentTimeout};
 
-#[derive(Clone)]
+#[derive(Clone, CopyGetters, Getters)]
 pub(crate) struct NodeMeta {
+    #[getset(get_copy = "pub(crate)")]
     parent: Option<AgentId>,
+    #[getset(get = "pub(crate)")]
     kind: AgentKind,
     name: Option<String>,
+    #[getset(get_copy = "pub(crate)")]
     timeout: Option<SubagentTimeout>,
     status: SubagentStatus,
 }
@@ -41,18 +45,6 @@ impl NodeMeta {
             timeout: Some(timeout),
             status: SubagentStatus::Ready,
         }
-    }
-
-    pub(crate) fn parent(&self) -> Option<AgentId> {
-        self.parent
-    }
-
-    pub(crate) fn kind(&self) -> &AgentKind {
-        &self.kind
-    }
-
-    pub(crate) fn timeout(&self) -> Option<SubagentTimeout> {
-        self.timeout
     }
 
     fn snapshot(&self, id: AgentId, depth: u16) -> SubagentSnapshot {

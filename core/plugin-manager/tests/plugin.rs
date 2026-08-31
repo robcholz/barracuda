@@ -18,7 +18,7 @@ use barracuda_platform_test::{install_global_memory_vfs, memory_partition, Memor
 use barracuda_plugin_manager::{
     CapabilityError, Plugin, PluginError, PluginId, PluginIdError, PluginManager,
     PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext, PluginStartError,
-    PluginUnloadError, PluginWriteTransaction,
+    PluginTaskToken, PluginUnloadError, PluginWriteTransaction,
 };
 use futures_lite::future::block_on;
 
@@ -157,7 +157,7 @@ fn unloading_an_unknown_plugin_is_rejected() {
     let mut router = router();
     let id = PluginId::try_from("unknown").unwrap();
 
-    let error = manager.unload(&mut router, &id).unwrap_err();
+    let error = block_on(manager.unload(&mut router, &id)).unwrap_err();
 
     assert!(matches!(
         error,
@@ -205,9 +205,7 @@ fn plugins_have_isolated_durable_scopes() {
     assert_eq!(*scheduler_observed.borrow(), None);
     assert_eq!(*other_observed.borrow(), None);
 
-    manager
-        .unload(&mut router, &PluginId::try_from("scheduler").unwrap())
-        .unwrap();
+    block_on(manager.unload(&mut router, &PluginId::try_from("scheduler").unwrap())).unwrap();
     let restored = Rc::new(RefCell::new(None));
     manager
         .register(
@@ -252,7 +250,7 @@ fn one_plugin_can_register_multiple_components() {
 
     assert_eq!(registered.get(), 3);
     assert_eq!(manager.component_ids(&id).unwrap().len(), 3);
-    manager.unload(&mut router, &id).unwrap();
+    block_on(manager.unload(&mut router, &id)).unwrap();
     assert_eq!(unregistered.get(), 3);
 }
 
@@ -336,6 +334,93 @@ fn failed_plugin_start_rolls_back_loaded_components() {
     assert_eq!(registered.get(), 1);
     assert_eq!(unregistered.get(), 1);
     assert!(!manager.is_loaded(&id));
+}
+
+struct TaskStartingFailure {
+    token: Rc<RefCell<Option<PluginTaskToken>>>,
+}
+
+impl Plugin<FRAME_SIZE> for TaskStartingFailure {
+    fn id(&self) -> &'static str {
+        "task-starting-failure"
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        self.token.replace(Some(context.task_token()));
+        Err(PluginError::registration(RegistrationFailure))
+    }
+}
+
+#[test]
+fn failed_plugin_start_cancels_tasks_started_by_that_hook() {
+    let mut manager = manager();
+    let mut router = router();
+    let token = Rc::new(RefCell::new(None));
+
+    manager
+        .register(
+            &mut router,
+            TaskStartingFailure {
+                token: Rc::clone(&token),
+            },
+        )
+        .expect("register Plugin");
+    let error = manager.start(&mut router).expect_err("startup must fail");
+
+    assert!(matches!(error, PluginStartError::Start(_)));
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
+}
+
+struct TaskTokenPlugin {
+    token: Rc<RefCell<Option<PluginTaskToken>>>,
+}
+
+impl Plugin<FRAME_SIZE> for TaskTokenPlugin {
+    fn id(&self) -> &'static str {
+        "task-token"
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        self.token.replace(Some(context.task_token()));
+        Ok(())
+    }
+}
+
+#[test]
+fn dropping_the_manager_cancels_its_task_tokens() {
+    let mut manager = manager();
+    let mut router = router();
+    let token = Rc::new(RefCell::new(None));
+
+    manager
+        .register(
+            &mut router,
+            TaskTokenPlugin {
+                token: Rc::clone(&token),
+            },
+        )
+        .expect("register Plugin");
+    manager.start(&mut router).expect("start Plugin");
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(|token| !token.is_cancelled()));
+
+    drop(manager);
+
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
 }
 
 type ObservedPair = Rc<RefCell<(Option<u32>, Option<u32>)>>;
@@ -651,15 +736,15 @@ fn provider_cannot_unload_while_a_dependent_is_loaded() {
         .unwrap();
     manager.start(&mut router).unwrap();
 
-    let error = manager.unload(&mut router, &provider).unwrap_err();
+    let error = block_on(manager.unload(&mut router, &provider)).unwrap_err();
     assert!(matches!(
         error,
         PluginUnloadError::HasDependents { plugin, dependents }
             if plugin == provider && dependents == vec![consumer.clone()]
     ));
 
-    manager.unload(&mut router, &consumer).unwrap();
-    manager.unload(&mut router, &provider).unwrap();
+    block_on(manager.unload(&mut router, &consumer)).unwrap();
+    block_on(manager.unload(&mut router, &provider)).unwrap();
 }
 
 struct RetainedResource {
@@ -716,7 +801,7 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
         .unwrap();
     manager.start(&mut router).unwrap();
     assert_eq!(dropped.get(), 0);
-    manager.unload(&mut router, &retained).unwrap();
+    block_on(manager.unload(&mut router, &retained)).unwrap();
     assert_eq!(dropped.get(), 1);
 
     manager

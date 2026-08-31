@@ -15,9 +15,7 @@ use barracuda_event_router::{
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_scheduler_component::event::Triggered;
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
-use barracuda_time_component::{
-    SyncSample, TimeComponent, TimeConfig, TimeSource, TimeSourceFuture,
-};
+use barracuda_time_component::{SyncSample, TimeComponent, TimeConfig};
 use embassy_time::Instant;
 use serde_json::json;
 
@@ -27,14 +25,6 @@ const WORKFLOW: &str = r#"{
     "match":{"event":"scheduler.triggered","topic":"typed-time-flow"},
     "steps":[{"call":"scheduler-test.record"}]
 }"#;
-
-struct ImmediateNetworkTime;
-
-impl TimeSource for ImmediateNetworkTime {
-    fn synchronize(&mut self) -> TimeSourceFuture<'_> {
-        Box::pin(async { Ok(SyncSample::new(1_800_000_000_000, Instant::now())) })
-    }
-}
 
 struct Record;
 
@@ -107,12 +97,11 @@ fn scheduler_calls_typed_time_rpc_and_routes_trigger_event() {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<8, FRAME_SIZE, 8>::new()));
     let mut router =
         futures_lite::future::block_on(EventRouter::new(lanes)).expect("create Event Router");
-    router
-        .load(Box::new(TimeComponent::new(
-            ImmediateNetworkTime,
-            TimeConfig::new(10, 60_000, 120_000),
-        )))
-        .expect("load time Component");
+    let time = TimeComponent::new(TimeConfig::new(10, 60_000, 120_000));
+    time.shared_state()
+        .borrow_mut()
+        .synchronize(SyncSample::new(1_800_000_000_000, Instant::now()));
+    router.load(Box::new(time)).expect("load time Component");
     router
         .load(Box::new(SchedulerComponent::new(SchedulerConfig::new(
             8, 10,

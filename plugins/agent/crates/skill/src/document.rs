@@ -7,6 +7,7 @@ use alloc::string::{String, ToString};
 use core::fmt;
 
 use barracuda_vfs::FsError;
+use getset::Getters;
 use serde::Deserialize;
 use thiserror::Error;
 
@@ -42,12 +43,16 @@ impl fmt::Display for SkillName {
 }
 
 /// Discovery metadata for one standard Agent Skill.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Getters, PartialEq, Eq)]
 pub struct Skill {
+    /// The `name` declared in frontmatter and matched to the parent directory.
+    #[getset(get = "pub")]
     name: SkillName,
     description: String,
     license: Option<String>,
     compatibility: Option<String>,
+    /// Optional implementation-specific string metadata.
+    #[getset(get = "pub")]
     metadata: BTreeMap<String, String>,
     allowed_tools: Option<String>,
     directory: Option<String>,
@@ -69,11 +74,6 @@ impl Skill {
         })
     }
 
-    /// The `name` declared in frontmatter and matched to the parent directory.
-    pub fn name(&self) -> &SkillName {
-        &self.name
-    }
-
     /// What the skill does and when an agent should use it.
     pub fn description(&self) -> &str {
         &self.description
@@ -87,11 +87,6 @@ impl Skill {
     /// Optional environment requirements.
     pub fn compatibility(&self) -> Option<&str> {
         self.compatibility.as_deref()
-    }
-
-    /// Optional implementation-specific string metadata.
-    pub fn metadata(&self) -> &BTreeMap<String, String> {
-        &self.metadata
     }
 
     /// Optional experimental space-separated pre-approved tool declaration.

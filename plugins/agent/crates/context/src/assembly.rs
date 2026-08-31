@@ -24,6 +24,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cmp::Ordering;
 
+use getset::CopyGetters;
 use serde_json::Value;
 
 use crate::block::{Block, BlockKind, Scope};
@@ -353,10 +354,16 @@ impl<'a> ContextSink<'a> {
 /// The tail is a **two-segment view** — persisted `history` plus ephemeral
 /// `reminders` — kept separate so appending a reminder never clones the
 /// transcript; the backend iterates `history` then `reminders`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, CopyGetters, Debug)]
 pub struct RequestContext<'a> {
+    /// The rendered system-prompt prefix.
+    #[getset(get_copy = "pub")]
     system: &'a str,
+    /// The persisted conversation history (a JSON array of messages).
+    #[getset(get_copy = "pub")]
     history: &'a [Value],
+    /// The ephemeral trailing reminders (never persisted), in order.
+    #[getset(get_copy = "pub")]
     reminders: &'a [Value],
 }
 
@@ -368,20 +375,5 @@ impl<'a> RequestContext<'a> {
             history,
             reminders,
         }
-    }
-
-    /// The rendered system-prompt prefix.
-    pub fn system(&self) -> &'a str {
-        self.system
-    }
-
-    /// The persisted conversation history (a JSON array of messages).
-    pub fn history(&self) -> &'a [Value] {
-        self.history
-    }
-
-    /// The ephemeral trailing reminders (never persisted), in order.
-    pub fn reminders(&self) -> &'a [Value] {
-        self.reminders
     }
 }

@@ -9,6 +9,7 @@ use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use barracuda_vfs::{FsError, ScopedVfs};
+use getset::CopyGetters;
 
 use super::document::{frontmatter_sections, parse_frontmatter, Skill, SkillError, SkillName};
 use super::skill_set::SkillSet;
@@ -18,8 +19,10 @@ pub(crate) type SkillFuture<'a, T> =
     core::pin::Pin<alloc::boxed::Box<dyn core::future::Future<Output = T> + 'a>>;
 
 /// Immutable point-in-time catalog view.
-#[derive(Debug)]
+#[derive(CopyGetters, Debug)]
 pub struct CatalogSnapshot {
+    /// Snapshot version, bumped by every successful registry reload.
+    #[getset(get_copy = "pub")]
     version: SkillRegistryVersion,
     skills: Arc<[Skill]>,
 }
@@ -38,11 +41,6 @@ impl CatalogSnapshot {
             version,
             skills: Arc::from(skills),
         }
-    }
-
-    /// Snapshot version, bumped by every successful registry reload.
-    pub fn version(&self) -> SkillRegistryVersion {
-        self.version
     }
 
     /// Skills sorted by id, with root priority already resolved.

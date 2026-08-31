@@ -1,6 +1,8 @@
 use alloc::rc::Rc;
 
+use barracuda_plugin_manager::PluginTaskToken;
 use embassy_futures::join::join_array;
+use embassy_futures::select::select;
 use embassy_net::{tcp::TcpSocket, Stack};
 use picoserve::time::EmbassyTimer;
 
@@ -10,13 +12,18 @@ const TCP_BUFFER_BYTES: usize = 4 * 1024;
 const HTTP_BUFFER_BYTES: usize = 8 * 1024;
 
 #[embassy_executor::task]
-pub(crate) async fn web_server(webserver: Rc<WebServer>, stack: Stack<'static>) {
+pub(crate) async fn web_server(
+    webserver: Rc<WebServer>,
+    stack: Stack<'static>,
+    cancellation: PluginTaskToken,
+) {
     log::info!(
         "starting WebServer on port {WEB_SERVER_PORT} with {WEB_SERVER_CONNECTION_SLOTS} connection workers"
     );
     let workers: [_; WEB_SERVER_CONNECTION_SLOTS] =
         core::array::from_fn(|worker| serve_worker(Rc::clone(&webserver), stack, worker));
-    join_array(workers).await;
+    let _completed = select(cancellation.cancelled(), join_array(workers)).await;
+    log::info!("stopped WebServer task");
 }
 
 async fn serve_worker(webserver: Rc<WebServer>, stack: Stack<'static>, worker: usize) {

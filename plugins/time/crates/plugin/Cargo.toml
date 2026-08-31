@@ -9,11 +9,16 @@ license = "Apache-2.0"
 barracuda-plugin-api = { path = "../../../../core/plugin-api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
 barracuda-time-component = { path = "../component" }
+embassy-executor.workspace = true
+embassy-futures.workspace = true
 embassy-net.workspace = true
+log.workspace = true
+thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

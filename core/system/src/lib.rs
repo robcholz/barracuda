@@ -15,10 +15,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use barracuda_board_hal::BoardHalResources;
+use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
-use barracuda_plugin_api::{LuaIo, PluginContext};
+use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError,
 };
@@ -91,7 +91,17 @@ where
     Region: NorFlash + Send + Unpin + 'static,
     Region::Error: core::fmt::Debug,
     Builtins: Unpin,
-    Io: LuaIo + Unpin,
+    Io: ExposedIo + Unpin,
+    Io::Gpio: ResourceSet + Send + 'static,
+    <Io::Gpio as ResourceSet>::Resource: ConfigurableDigitalPin + Send,
+    <<Io::Gpio as ResourceSet>::Resource as embedded_hal::digital::ErrorType>::Error:
+        core::fmt::Debug,
+    Io::I2c: ResourceSet + Send + 'static,
+    <Io::I2c as ResourceSet>::Resource: embedded_hal_async::i2c::I2c + Send,
+    <<Io::I2c as ResourceSet>::Resource as embedded_hal::i2c::ErrorType>::Error: core::fmt::Debug,
+    Io::Spi: ResourceSet + Send + 'static,
+    <Io::Spi as ResourceSet>::Resource: embedded_hal_async::spi::SpiBus + Send,
+    <<Io::Spi as ResourceSet>::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
     /// Constructs, registers, and starts the fixed Plugin set.
     ///

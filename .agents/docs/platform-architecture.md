@@ -69,18 +69,23 @@ selected Board config -> generated Board composition          |
 ~~~
 
 The selected-target composition root validates that the independently selected
-Platform and Board can form one Target. At boot it acquires the hardware
-singleton, invokes the generated Platform and Board constructors, and returns
-their resources to System without flattening one axis into the other. The
-composition follows the selected Board declarations; it does not infer an I/O
-surface from hardware that the Board config omitted. Application entries do not
-parse YAML, import a concrete Platform, acquire chip peripherals, instantiate
-peripheral Drivers, or wire Board peripherals.
+Platform and Board can form one Target. A device entry point acquires the chip
+HAL's singleton exactly once and constructs the selected Target's typed
+`TargetBindings`; the common Target composition then splits those bindings,
+invokes the Platform and Board constructors, and returns their resources to
+System without flattening one axis into the other. The composition follows the
+selected Board declarations; it does not infer an I/O surface from hardware
+that the Board config omitted. Application entries do not parse YAML,
+instantiate peripheral Drivers, or wire individual Board peripherals.
 
 ~~~rust,ignore
-let resources = barracuda_target::resources(spawner).await?;
+let bindings = selected_device_bindings(chip_hal_singleton);
+let resources = barracuda_target::resources_with_bindings(spawner, bindings).await?;
 let system = System::new(lanes, resources).await?;
 ~~~
+
+Host Targets have no chip peripheral singleton and retain the shorter
+`barracuda_target::resources(spawner)` convenience path.
 
 The returned shape preserves ownership:
 
@@ -342,24 +347,24 @@ and Plugins. Arbitration, access control, and dynamic device attachment belong
 to that owner. Any physical overlap already declared by the Board remains a
 property of the concrete Board composition.
 
-The Lua GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
+The GPIO, I2C, and SPI Plugins are such owners. Board HAL still returns a
 concrete, move-only `BoardHalResources` value; it has no scripting service
 contract and adds no shared ownership or lock. System puts that complete HAL
 directly in `PluginContext` without splitting it into per-Plugin fields or
-constructing a Lua hardware bundle. During unified Plugin construction, each
-hardware Plugin mutably accesses `context.hal.io`, takes its corresponding
-explicitly exposed value once, and becomes that value's sole owner. Built-in
-capabilities and any untaken exposed I/O remain in the HAL stored by System.
+constructing a consumer-specific hardware bundle. During unified Plugin
+construction, each hardware Plugin mutably accesses `context.hal.io`, takes its
+corresponding explicitly exposed value once, and becomes that value's sole
+owner. Built-in capabilities and any untaken exposed I/O remain in the HAL
+stored by System.
 
-The Plugin then places its owned value behind an Embassy async mutex inside
-the Lua package. Cloned `Arc`s share only that Lua-layer lock so concurrent Lua
-callbacks can reach the same package-owned value; they do not clone or
-reconstruct hardware. Adapter operations take `&mut self`, and the mutex guard
-is held across the returned future, making the exclusivity required by the
-underlying `embedded-hal` or `embedded-hal-async` value explicit. This dynamic
-adapter exists only because logical names and Lua callbacks are runtime data.
-HAL, Board composition, built-in peripheral Drivers, and non-Lua consumers
-remain concrete and statically dispatched.
+Each Plugin decides how its package synchronizes that owned value. The current
+GPIO, I2C, and SPI packages place the concrete named set behind an Embassy
+async mutex. Cloned `Arc`s share only that package-layer lock; they do not clone
+or reconstruct hardware. GPIO calls the concrete pin's configuration and
+`embedded-hal` operations directly. I2C and SPI hold the mutex guard across the
+concrete `embedded-hal-async` future. Runtime dispatch is limited to Board-name
+lookup inside `NamedResources`; HAL operations, Board composition, and built-in
+peripheral Drivers remain statically dispatched.
 
 ## Peripheral Drivers and HAL
 
@@ -420,9 +425,12 @@ trait BoardHal {
 
 The runtime `Board` descriptor remains useful for identity, diagnostics, and
 native-layout selection. It is not a second source of peripheral ownership.
-The selected Target composition produces both `Platform::Bindings` and
-`BoardHal::Bindings`, so compatibility is checked at the only layer that
-imports both selected axes. Neither axis names or selects the other.
+The device entry acquires its chip singleton and constructs one
+`TargetBindings<PlatformBindings, BoardHalBindings>` value. Selected Target
+composition consumes and splits that value before invoking the two
+initializers. Rust types enforce which binding values can reach each axis;
+chip compatibility validation remains in the concrete binding constructors.
+Neither axis names or selects the other.
 
 ## Partitions
 
@@ -716,8 +724,9 @@ runtime capability exposed to System.
 - The concrete Platform and HAL are monomorphized for one Target.
 - Runtime Platform lookup and a dyn Platform registry are unnecessary.
 - Peripheral Driver calls remain statically dispatched.
-- The selected Target acquires the hardware singleton and invokes the generated
-  constructors for the selected Platform and Board.
+- A device entry acquires the hardware singleton once, constructs the selected
+  Target bindings, and invokes selected Target composition. Host Targets
+  construct their binding pair without a hardware singleton.
 - Board HAL initialization consumes owned bindings; it does not reacquire
   peripherals or resolve pin numbers at runtime.
 - The Board HAL constructs only the built-in peripherals and exposed I/O
@@ -760,8 +769,9 @@ Before changing target-sensitive code, verify:
     composition crate without performing the wiring itself?
 13. Does Platform initialize TLS from Platform-owned randomness and trust
     roots, while all HTTP consumers use `shared/http-client`?
-14. Does selected-target composition acquire the hardware singleton and invoke
-    the generated constructors before returning Target resources?
+14. Does the device entry acquire the hardware singleton exactly once and pass
+    the resulting binding pair through selected-target composition before
+    returning Target resources?
 15. Are built-in Drivers and their wiring declared by the Board config?
 16. Are exposed digital GPIO, analog, PWM, I2C, and SPI capabilities explicitly
     declared instead of inferred from unused hardware?

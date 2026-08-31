@@ -349,11 +349,17 @@ fn package_name(manifest: &str) -> Option<String> {
 }
 
 fn plugin_entry(source: &str) -> Option<String> {
-    const PREFIX: &str = "impl<const M: usize> Plugin<M> for ";
     let entries = source
         .lines()
-        .filter_map(|line| line.trim().strip_prefix(PREFIX))
-        .filter_map(|rest| rest.split_whitespace().next())
+        .filter_map(|line| {
+            let line = line.trim();
+            line.starts_with("impl<")
+                .then(|| line.split_once(" Plugin<M> for "))
+                .flatten()
+                .map(|(_parameters, implementation)| implementation)
+        })
+        .filter_map(|implementation| implementation.split_whitespace().next())
+        .filter_map(|implementation| implementation.split('<').next())
         .filter(|entry| *entry != "Dependency")
         .map(String::from)
         .collect::<Vec<_>>();
@@ -484,6 +490,16 @@ mod tests {
         assert_eq!(
             plugin_entry("impl<const M: usize> Plugin<M> for DemoPlugin {\n}"),
             Some(String::from("DemoPlugin"))
+        );
+        assert_eq!(
+            plugin_entry(
+                "impl<Hardware, const M: usize> Plugin<M> for HardwarePlugin<Hardware>\n\
+                 where\n\
+                     Hardware: Send,\n\
+                 {\n\
+                 }",
+            ),
+            Some(String::from("HardwarePlugin"))
         );
         let metadata = parse_metadata(
             std::path::Path::new("plugin.toml"),

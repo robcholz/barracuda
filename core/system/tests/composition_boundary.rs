@@ -8,7 +8,8 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     let application = std::fs::read_to_string(root.join("apps/barracuda-cli/src/local_native.rs"))?;
 
     assert!(target.contains("barracuda_platform_selected::prepare()"));
-    assert!(target.contains("barracuda_board_selected::resources(spawner)"));
+    assert!(target.contains("barracuda_board_selected::resources(spawner, board_bindings)"));
+    assert!(target.contains("bindings.split()"));
     assert!(application.contains("barracuda_target::resources(spawner)"));
     assert!(application.contains("System::new(lanes, resources, spawner)"));
     assert!(system.contains("TargetResources<"));
@@ -43,8 +44,18 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     assert!(system.contains("let mut plugin_context"));
     assert!(system.contains("PluginContext::from_hal("));
     assert!(system.contains("prepared.board_hal"));
-    assert!(!system.contains("with_lua_hardware"));
     assert!(plugin_api.contains("pub hal: BoardHalResources<Builtins, Io>"));
+    assert!(!plugin_api.contains("Lua"));
+    assert!(!system.contains("Lua"));
+
+    for duplicate_hal in [
+        "GpioHardware",
+        "I2cHardware",
+        "SpiHardware",
+        "HardwareFuture",
+    ] {
+        assert!(!plugin_api.contains(duplicate_hal));
+    }
 
     for plugin in [
         "FilePlugin",

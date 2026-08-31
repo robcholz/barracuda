@@ -1,13 +1,12 @@
 [package]
-name = "barracuda-board-hal"
+name = "barracuda-indicator-led"
 version = "0.1.0"
-edition = "2021"
-description = "Board HAL composition contract for Barracuda"
+edition = "2024"
+description = "Board built-in indicator LED driver over embedded-hal"
+license = "Apache-2.0"
 
 [dependencies]
-embassy-executor.workspace = true
 embedded-hal.workspace = true
-embedded-hal-async.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

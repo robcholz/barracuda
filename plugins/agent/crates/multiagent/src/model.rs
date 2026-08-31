@@ -5,6 +5,7 @@ use alloc::{
 };
 use core::num::NonZeroU32;
 
+use getset::{CopyGetters, Getters};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::Serialize;
 use strum::IntoStaticStr;
@@ -13,8 +14,9 @@ use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};
 
 /// Everything the Multiagent component needs to materialize one child Agent.
-#[derive(Clone)]
+#[derive(Clone, Getters)]
 pub struct SubagentSpec {
+    #[getset(get = "pub")]
     kind: AgentKind,
     name: Option<String>,
     goal: Message,
@@ -39,10 +41,6 @@ impl SubagentSpec {
     pub fn into_parts(self) -> (AgentKind, Option<String>, Message, SubagentTimeout) {
         (self.kind, self.name, self.goal, self.timeout)
     }
-
-    pub fn kind(&self) -> &AgentKind {
-        &self.kind
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,20 +60,17 @@ pub(crate) trait TranscriptText {
     fn text(&self) -> String;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, CopyGetters, Debug, PartialEq, Eq)]
 pub(crate) struct SubagentResult {
     id: AgentId,
     text: String,
+    #[getset(get_copy = "pub(crate)")]
     ok: bool,
 }
 
 impl SubagentResult {
     pub(crate) fn new(id: AgentId, text: String, ok: bool) -> Self {
         Self { id, text, ok }
-    }
-
-    pub(crate) fn ok(&self) -> bool {
-        self.ok
     }
 }
 

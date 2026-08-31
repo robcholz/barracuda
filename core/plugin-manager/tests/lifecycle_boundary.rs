@@ -72,7 +72,7 @@ fn embassy_task_spawner_is_available_only_during_startup() {
 }
 
 #[test]
-fn plugin_lifecycle_is_synchronous() {
+fn plugin_registration_and_start_hooks_are_synchronous() {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lifecycle.rs"),
     )
@@ -82,6 +82,7 @@ fn plugin_lifecycle_is_synchronous() {
     assert!(!source.contains("pub type PluginStartFuture"));
     assert!(!source.contains("pub async fn register"));
     assert!(!source.contains("pub async fn start"));
+    assert!(source.contains("pub async fn unload"));
 
     let plugin_trait = source
         .split("pub trait Plugin")

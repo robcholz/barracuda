@@ -18,7 +18,7 @@ pub use lifecycle::{
     CapabilityError, Plugin, PluginComponentCleanupFailure, PluginError, PluginEventRouterContext,
     PluginFilesystem, PluginId, PluginIdError, PluginManager, PluginManagerInitError,
     PluginRegisterContext, PluginRegisterError, PluginRequirements, PluginResult,
-    PluginStartContext, PluginStartError, PluginUnloadError,
+    PluginStartContext, PluginStartError, PluginTaskToken, PluginUnloadError,
 };
 pub use storage::{
     PluginReadTransaction, PluginStorage, PluginWriteTransaction, StorageError, StorageResult,
