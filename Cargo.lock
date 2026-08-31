@@ -572,6 +572,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board",
  "embassy-executor",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

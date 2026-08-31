@@ -21,11 +21,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Board bundle directory and Board name differ".into());
     }
 
-    // The current Board schema declares no peripheral matrix yet. Therefore
-    // every current Board has an explicitly empty Board HAL, independent of
-    // which Platform is selected. When a Board gains peripherals, its generated
-    // HAL type will be selected from those Board declarations rather than from
-    // a Platform name or family.
+    if board.has_hardware_surface() {
+        return Err(format!(
+            "Board `{board_name}` declares hardware resources but has no registered Board HAL adapter"
+        )
+        .into());
+    }
+
+    // Every current Board has an explicitly empty hardware surface. A Board
+    // with declarations must select its concrete adapter above rather than
+    // silently dropping those declarations.
     let hal_type = "::barracuda_board_hal::EmptyBoardHal";
     let mut generated = render_rust(&board);
     generated.push_str(&format!(
