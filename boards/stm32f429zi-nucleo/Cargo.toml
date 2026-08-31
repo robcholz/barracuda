@@ -1,19 +1,18 @@
 [package]
-name = "barracuda-board-selected"
+name = "barracuda-board-stm32f429zi-nucleo"
 version = "0.1.0"
-edition = "2021"
-description = "Compile-time selected Barracuda Board HAL"
+edition = "2024"
+description = "Board HAL adapter for the STM32F429ZI Nucleo-144"
+license = "Apache-2.0"
 
 [dependencies]
-barracuda-board = { path = "../api" }
 barracuda-board-hal = { path = "../hal" }
+barracuda-indicator-led = { path = "../drivers/indicator-led" }
 embassy-executor.workspace = true
+embedded-hal.workspace = true
 
 [target.'cfg(target_arch = "arm")'.dependencies]
-barracuda-board-stm32f429zi-nucleo = { path = "../stm32f429zi-nucleo" }
-
-[build-dependencies]
-barracuda-board-config = { path = "../config" }
+embassy-stm32 = { version = "0.6.0", default-features = false, features = ["stm32f429zi"] }
 
 [lints.rust]
 unsafe_code = "forbid"

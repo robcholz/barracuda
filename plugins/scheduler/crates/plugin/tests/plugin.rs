@@ -8,24 +8,29 @@ use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginRegisterError};
 use barracuda_scheduler_plugin::{PLUGIN_ID, SchedulerPlugin};
 use barracuda_time_plugin::TimePlugin;
-use futures_lite::future::block_on;
+use embassy_executor::{Executor, Spawner};
+use std::sync::mpsc::{SyncSender, sync_channel};
+use std::time::Duration;
 
-#[test]
-fn plugin_requires_time_and_loads_the_scheduler_component() {
-    block_on(async {
+#[embassy_executor::task]
+async fn start_scheduler_with_time(spawner: Spawner, completed: SyncSender<Result<(), String>>) {
+    let result = async {
         let partition = memory_partition(64 * 1024)
             .await
-            .expect("create database partition");
+            .map_err(|error| error.to_string())?;
         let mut manager = PluginManager::open(partition)
             .await
-            .expect("open Plugin storage");
+            .map_err(|error| error.to_string())?;
         let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
         install_global_memory_vfs()
             .await
-            .expect("install global test VFS");
-        let mut router = EventRouter::new(lanes).await.expect("create router");
+            .map_err(|error| error.to_string())?;
+        let mut router = EventRouter::new(lanes)
+            .await
+            .map_err(|error| error.to_string())?;
         let stack = never_embassy_stack();
         let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
+        manager.install_task_spawner(spawner);
 
         assert_eq!(
             Plugin::<512>::id(&SchedulerPlugin::new(&mut context)),
@@ -44,13 +49,45 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
 
         manager
             .register(&mut router, TimePlugin::new(&mut context))
-            .expect("register Time Plugin");
+            .map_err(|error| error.to_string())?;
         manager
             .register(&mut router, SchedulerPlugin::new(&mut context))
-            .expect("register Scheduler Plugin");
-        manager.start(&mut router).expect("start Plugins");
+            .map_err(|error| error.to_string())?;
+        manager
+            .start(&mut router)
+            .map_err(|error| error.to_string())?;
 
         let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+        manager
+            .unload(&mut router, &id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let time_id =
+            PluginId::try_from(barracuda_time_plugin::PLUGIN_ID).expect("valid Time Plugin ID");
+        manager
+            .unload(&mut router, &time_id)
+            .await
+            .map_err(|error| error.to_string())
+    }
+    .await;
+    let _result = completed.send(result);
+}
+
+#[test]
+fn plugin_requires_time_and_loads_the_scheduler_component() {
+    let (completed, result) = sync_channel(1);
+    std::thread::spawn(move || {
+        let executor = Box::leak(Box::new(Executor::new()));
+        executor.run(|spawner| {
+            spawner
+                .spawn(start_scheduler_with_time(spawner, completed))
+                .expect("spawn Scheduler Plugin test");
+        });
     });
+
+    result
+        .recv_timeout(Duration::from_secs(5))
+        .expect("Scheduler Plugin startup timed out")
+        .expect("Scheduler Plugin startup failed");
 }

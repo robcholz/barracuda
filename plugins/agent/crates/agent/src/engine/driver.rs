@@ -86,6 +86,7 @@ where
     Tcp: TcpConnect + 'static,
     Resolver: Dns + 'static,
 {
+    #[getset(get = "pub(crate)")]
     state: DurableState<AgentEngineState>,
     llm: ModelApi<'static, Tcp, Resolver>,
     api_manager: SharedApiManager,
@@ -486,10 +487,6 @@ where
     Tcp: TcpConnect + 'static,
     Resolver: Dns + 'static,
 {
-    pub(crate) fn state(&self) -> &DurableState<AgentEngineState> {
-        &self.state
-    }
-
     pub(crate) fn is_stopped(&self) -> bool {
         matches!(self.run_state, RunState::Stopped(_))
     }

@@ -17,8 +17,16 @@ Lua API:
 - `spi.transfer(name, write_binary_string, read_length) -> binary string`
 - `spi.transfer_in_place(name, binary_string) -> binary string`
 
-The Plugin wraps its taken value in an Embassy async mutex. Every Lua
-transaction holds that lock while mutably borrowing the adapter, so async
-operations on the owned bus are serialized. The adapter still defines
-chip-select policy and bus configuration. Adapter failures use the conventional
-Lua `nil, error` result.
+The Plugin takes a concrete named resource set whose bus type implements
+`embedded_hal_async::spi::SpiBus`; it does not define a parallel SPI operation
+trait. The package wraps that set in an Embassy async mutex. Every Lua
+transaction holds the lock across the complete async HAL transaction, so
+operations on the owned bus are serialized. This API exposes a raw bus and
+therefore performs no chip-select operation; a Board must expose a separate
+GPIO for application-managed chip select, while built-in devices should use a
+Board-composed `SpiDevice`. HAL failures use the conventional Lua `nil, error`
+result. A single read result is limited to 65,536 bytes so an untrusted script
+cannot request an unbounded Rust-side allocation.
+
+Dropping the package registration revokes callbacks already installed in Lua
+states, so they cannot retain SPI access after the Plugin unloads.

@@ -147,6 +147,12 @@ impl BoardDefinition {
         self.builtin_peripherals.get(name)
     }
 
+    /// Returns the number of built-in peripheral declarations.
+    #[must_use]
+    pub fn builtin_peripheral_count(&self) -> usize {
+        self.builtin_peripherals.len()
+    }
+
     /// Returns whether this Board declares any built-in or exposed hardware.
     #[must_use]
     pub fn has_hardware_surface(&self) -> bool {
@@ -209,6 +215,23 @@ pub struct ExposedIoDefinition {
 }
 
 impl ExposedIoDefinition {
+    /// Returns the total number of explicitly exposed I/O resources.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.gpio.len()
+            + self.analog_input.len()
+            + self.analog_output.len()
+            + self.pwm.len()
+            + self.i2c.len()
+            + self.spi.len()
+    }
+
+    /// Returns whether no I/O resources are exposed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Finds a dynamically configurable digital GPIO by its Board-level name.
     #[must_use]
     pub fn gpio(&self, name: &str) -> Option<&GpioDefinition> {
@@ -243,15 +266,6 @@ impl ExposedIoDefinition {
     #[must_use]
     pub fn spi(&self, name: &str) -> Option<&SpiDefinition> {
         self.spi.get(name)
-    }
-
-    fn is_empty(&self) -> bool {
-        self.gpio.is_empty()
-            && self.analog_input.is_empty()
-            && self.analog_output.is_empty()
-            && self.pwm.is_empty()
-            && self.i2c.is_empty()
-            && self.spi.is_empty()
     }
 
     fn validate(&self) -> Result<(), ConfigError> {

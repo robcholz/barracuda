@@ -5,6 +5,7 @@
 
 use alloc::{borrow::Cow, string::String};
 use core::fmt;
+use getset::{CopyGetters, Getters};
 
 /// Which baked agent template to instantiate from `resources/agents/<kind>/`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -30,72 +31,39 @@ impl fmt::Display for AgentKind {
     }
 }
 
+#[derive(CopyGetters, Getters)]
 pub struct AgentCatalogEntry {
+    #[getset(get = "pub")]
     kind: AgentKind,
     #[cfg(feature = "multiagent")]
+    #[getset(get_copy = "pub")]
     description: &'static str,
+    #[getset(get = "pub")]
     runtime: AgentRuntimeManifest,
     #[cfg(feature = "multiagent")]
+    #[getset(get = "pub")]
     multiagent: MultiagentManifest,
 }
 
-impl AgentCatalogEntry {
-    pub fn kind(&self) -> &AgentKind {
-        &self.kind
-    }
-
-    #[cfg(feature = "multiagent")]
-    pub fn description(&self) -> &'static str {
-        self.description
-    }
-
-    pub fn runtime(&self) -> &AgentRuntimeManifest {
-        &self.runtime
-    }
-
-    #[cfg(feature = "multiagent")]
-    pub fn multiagent(&self) -> &MultiagentManifest {
-        &self.multiagent
-    }
-}
-
 /// Configuration needed to construct one agent in isolation.
+#[derive(CopyGetters)]
 pub struct AgentRuntimeManifest {
+    #[getset(get_copy = "pub")]
     retries: u32,
+    #[getset(get_copy = "pub")]
     tool_blacklist: &'static [&'static str],
+    #[getset(get_copy = "pub")]
     instructions: &'static str,
-}
-
-impl AgentRuntimeManifest {
-    pub fn retries(&self) -> u32 {
-        self.retries
-    }
-
-    pub fn tool_blacklist(&self) -> &'static [&'static str] {
-        self.tool_blacklist
-    }
-
-    pub fn instructions(&self) -> &'static str {
-        self.instructions
-    }
 }
 
 /// Static orchestration metadata attached to one baked Agent kind.
 #[cfg(feature = "multiagent")]
+#[derive(CopyGetters)]
 pub struct MultiagentManifest {
+    #[getset(get_copy = "pub")]
     spawn_enabled: bool,
+    #[getset(get_copy = "pub")]
     allowed_kinds: &'static [AgentKind],
-}
-
-#[cfg(feature = "multiagent")]
-impl MultiagentManifest {
-    pub fn spawn_enabled(&self) -> bool {
-        self.spawn_enabled
-    }
-
-    pub fn allowed_kinds(&self) -> &'static [AgentKind] {
-        self.allowed_kinds
-    }
 }
 
 pub fn find(kind: &AgentKind) -> Option<&'static AgentCatalogEntry> {

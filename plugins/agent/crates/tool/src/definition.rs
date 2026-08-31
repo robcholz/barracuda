@@ -7,6 +7,7 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_agent_permission::{Action, RiskClass};
+use getset::CopyGetters;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
@@ -401,9 +402,10 @@ macro_rules! tool_validator {
     };
 }
 
-#[derive(Clone)]
+#[derive(Clone, CopyGetters)]
 pub struct Tool {
     inner: Arc<ToolInner>,
+    #[getset(get_copy = "pub")]
     config: ToolConfig,
 }
 
@@ -430,10 +432,6 @@ impl Tool {
     pub fn with_config(mut self, config: ToolConfig) -> Self {
         self.config = config;
         self
-    }
-
-    pub fn config(&self) -> ToolConfig {
-        self.config
     }
 
     pub fn name(&self) -> &str {

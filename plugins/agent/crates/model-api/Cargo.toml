@@ -26,6 +26,7 @@ base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+getset = "0.1.7"
 ouroboros = { version = "0.18.5", default-features = false }
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 eventsource-stream = { version = "0.2.3", default-features = false }

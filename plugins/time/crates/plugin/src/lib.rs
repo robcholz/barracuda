@@ -4,12 +4,18 @@
 
 extern crate alloc;
 
+use alloc::rc::Rc;
 use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
-use barracuda_time_component::{
-    TimeComponent, TimeConfig,
-    sntp::{SntpConfig, SntpSource},
+use barracuda_plugin_manager::{
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+use barracuda_time_component::{
+    ClockState, TimeComponent, TimeConfig,
+    sntp::{SntpConfig, SntpSource},
+    synchronize_clock,
+};
+use core::cell::RefCell;
+use embassy_futures::select::select;
 use embassy_net::Stack;
 
 const SNTP_SERVER: &str = "pool.ntp.org";
@@ -24,6 +30,12 @@ pub const PLUGIN_ID: &str = "time";
 /// Plugin that owns the network-synchronized Time Component.
 pub struct TimePlugin {
     network: Stack<'static>,
+    runtime: Option<TimeRuntime>,
+}
+
+struct TimeRuntime {
+    source: SntpSource,
+    state: Rc<RefCell<ClockState>>,
 }
 
 impl TimePlugin {
@@ -32,6 +44,7 @@ impl TimePlugin {
     pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             network: context.ip_stack,
+            runtime: None,
         }
     }
 }
@@ -57,9 +70,40 @@ impl<const M: usize> Plugin<M> for TimePlugin {
             RESYNC_INTERVAL_MILLIS,
             MAX_HOLDOVER_MILLIS,
         );
-        context
-            .event_router
-            .load(TimeComponent::new(source, config))?;
+        let component = TimeComponent::new(config);
+        let state = component.shared_state();
+        context.event_router.load(component)?;
+        self.runtime = Some(TimeRuntime { source, state });
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(TimeRuntimeUnavailable))?;
+        let spawner = context.task_spawner()?;
+        let cancellation = context.task_token();
+        spawner
+            .spawn(time_sync_task(runtime.source, runtime.state, cancellation))
+            .map_err(PluginError::registration)?;
         Ok(())
     }
 }
+
+#[embassy_executor::task]
+async fn time_sync_task(
+    source: SntpSource,
+    state: Rc<RefCell<ClockState>>,
+    cancellation: PluginTaskToken,
+) {
+    let _completed = select(cancellation.cancelled(), synchronize_clock(source, state)).await;
+    log::info!("stopped Time synchronization task");
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Time runtime was not prepared during Plugin registration")]
+struct TimeRuntimeUnavailable;

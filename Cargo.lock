@@ -353,6 +353,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures-util",
+ "getset",
  "serde",
  "serde_json",
  "tokio",
@@ -386,6 +387,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-lite",
+ "getset",
  "json-validator",
  "log",
  "serde",
@@ -399,6 +401,7 @@ dependencies = [
 name = "barracuda-agent-permission"
 version = "0.1.0"
 dependencies = [
+ "getset",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -516,6 +519,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-vfs",
  "futures-lite",
+ "getset",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -534,6 +538,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "futures-util",
+ "getset",
  "json-validator",
  "serde",
  "serde_json",
@@ -570,9 +575,9 @@ dependencies = [
 name = "barracuda-board-hal"
 version = "0.1.0"
 dependencies = [
- "barracuda-board",
  "embassy-executor",
  "embedded-hal 1.0.0",
+ "embedded-hal-async",
 ]
 
 [[package]]
@@ -582,7 +587,19 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-board-stm32f429zi-nucleo",
  "embassy-executor",
+]
+
+[[package]]
+name = "barracuda-board-stm32f429zi-nucleo"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-indicator-led",
+ "embassy-executor",
+ "embassy-stm32",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -744,6 +761,7 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-sync 0.7.2",
+ "embedded-hal 1.0.0",
  "futures-lite",
 ]
 
@@ -776,6 +794,7 @@ dependencies = [
 name = "barracuda-i2c-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-lua",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
@@ -783,6 +802,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-sync 0.7.2",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "futures-lite",
 ]
 
@@ -906,6 +927,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-indicator-led"
+version = "0.1.0"
+dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-kv"
 version = "0.1.0"
 dependencies = [
@@ -925,6 +953,7 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "futures-lite",
+ "getset",
  "lunka",
 ]
 
@@ -945,6 +974,7 @@ dependencies = [
  "eventsource-stream",
  "futures-core",
  "futures-lite",
+ "getset",
  "http-client",
  "ouroboros",
  "reqwless",
@@ -1214,6 +1244,7 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "embassy-executor",
+ "embassy-sync 0.7.2",
  "embedded-storage-async",
  "futures-lite",
  "getset",
@@ -1337,6 +1368,7 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-scheduler-component",
  "barracuda-time-plugin",
+ "embassy-executor",
  "embassy-time",
  "futures-lite",
 ]
@@ -1345,6 +1377,7 @@ dependencies = [
 name = "barracuda-spi-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-board-hal",
  "barracuda-lua",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
@@ -1352,6 +1385,8 @@ dependencies = [
  "barracuda-vm-plugin",
  "critical-section",
  "embassy-sync 0.7.2",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "futures-lite",
 ]
 
@@ -1395,6 +1430,8 @@ dependencies = [
  "embassy-executor",
  "embassy-net",
  "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
  "embedded-storage",
  "futures-lite",
  "http-client",
@@ -1444,9 +1481,13 @@ dependencies = [
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-time-component",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-time",
  "futures-lite",
+ "log",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

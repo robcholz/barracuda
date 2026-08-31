@@ -81,9 +81,10 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
             .runtime
             .take()
             .ok_or_else(|| PluginError::registration(WebServerRuntimeUnavailable))?;
-        context
-            .task_spawner()?
-            .spawn(task::web_server(webserver, self.stack))
+        let spawner = context.task_spawner()?;
+        let cancellation = context.task_token();
+        spawner
+            .spawn(task::web_server(webserver, self.stack, cancellation))
             .map_err(PluginError::registration)?;
         Ok(())
     }

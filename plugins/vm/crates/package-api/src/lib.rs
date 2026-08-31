@@ -13,6 +13,13 @@ use spin::Mutex;
 pub trait LuaPackage: Package + Send + Sync {
     /// Returns the stable name accepted by Lua's `require` function.
     fn name(&self) -> &'static str;
+
+    /// Revokes resources captured by callbacks already installed into a Lua state.
+    ///
+    /// Stateless packages may keep the default no-op implementation. Packages
+    /// that expose owned resources must make installed callbacks reject future
+    /// calls after revocation.
+    fn revoke(&self) {}
 }
 
 /// Registry capability published by the VM Plugin.
@@ -56,11 +63,15 @@ impl LuaPackageRegistry {
         }
         let id = state.next_id;
         state.next_id = state.next_id.wrapping_add(1);
-        state.entries.push(RegistryEntry { id, package });
+        state.entries.push(RegistryEntry {
+            id,
+            package: Arc::clone(&package),
+        });
 
         Ok(LuaPackageRegistration {
             state: Arc::downgrade(&self.state),
             id,
+            package,
         })
     }
 
@@ -102,10 +113,12 @@ struct RegistryEntry {
 pub struct LuaPackageRegistration {
     state: Weak<Mutex<RegistryState>>,
     id: u64,
+    package: Arc<dyn LuaPackage>,
 }
 
 impl Drop for LuaPackageRegistration {
     fn drop(&mut self) {
+        self.package.revoke();
         let Some(state) = self.state.upgrade() else {
             return;
         };

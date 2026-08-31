@@ -11,7 +11,7 @@ vendored = ["barracuda-lua/vendored"]
 
 [dependencies]
 async-channel = { version = "2.5", default-features = false }
-barracuda-lua = { path = "../../../../shared/lua" }
+barracuda-lua = { path = "../lua" }
 
 [dev-dependencies]
 futures-lite = "2"
