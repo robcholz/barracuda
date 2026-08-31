@@ -50,8 +50,8 @@ fn plugin_context_allows_exactly_one_plugin_to_take_each_hardware_value() {
     let context =
         PluginContext::new(stack, ClientFactory::plaintext(stack)).with_lua_hardware(hardware);
 
-    let gpio = context.take_gpio().expect("first take owns GPIO");
-
-    assert!(gpio.contains("user-control"));
+    assert!(context
+        .take_gpio()
+        .is_some_and(|gpio| gpio.contains("user-control")));
     assert!(context.take_gpio().is_none());
 }
