@@ -6,8 +6,8 @@ description = "Base IMessage Gateway Plugin and provider-registration capability
 
 [dependencies]
 barracuda-imessage-gateway-component = { path = "../component" }
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 gateway = { path = "../gateway" }
 
 [dev-dependencies]

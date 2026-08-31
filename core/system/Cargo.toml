@@ -42,8 +42,8 @@ barracuda-vm-plugin = { path = "../../plugins/vm/crates/plugin" }
 barracuda-web-search-plugin = { path = "../../plugins/web-search/crates/plugin" }
 barracuda-webserver-plugin = { path = "../../plugins/webserver/crates/plugin" }
 # END GENERATED PLUGINS
-barracuda-plugin-api = { path = "../plugin-api" }
-barracuda-plugin-manager = { path = "../plugin-manager" }
+barracuda-plugin-api = { path = "../plugin/crates/api" }
+barracuda-plugin-manager = { path = "../plugin/crates/manager" }
 barracuda-platform = { path = "../../platforms/api" }
 barracuda-target-api = { path = "../../composition/api" }
 barracuda-tls = { path = "../../shared/tls" }

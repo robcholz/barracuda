@@ -10,9 +10,9 @@ readme = "README.md"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-event-router = { path = "../event-router" }
-barracuda-kv = { path = "../../shared/kv" }
-barracuda-vfs = { path = "../../shared/vfs" }
+barracuda-event-router = { path = "../../../event-router" }
+barracuda-kv = { path = "../../../../shared/kv" }
+barracuda-vfs = { path = "../../../../shared/vfs" }
 embassy-executor.workspace = true
 embassy-sync.workspace = true
 embedded-storage-async.workspace = true
@@ -21,8 +21,8 @@ log.workspace = true
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../platforms/test" }
-barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
+barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-vfs-memfs = { path = "../../../../shared/vfs-memfs" }
 futures-lite = "2"
 
 [lints.rust]

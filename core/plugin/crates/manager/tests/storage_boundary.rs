@@ -21,7 +21,7 @@ fn plugin_contract_is_generic_over_semantic_storage_not_flash() {
 
 #[test]
 fn production_plugins_do_not_reference_flash_contracts() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let plugin_files = [
         "plugins/agent/crates/plugin/src/lib.rs",
         "plugins/captive-portal/crates/plugin/src/lib.rs",

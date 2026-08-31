@@ -10,8 +10,8 @@ std = ["picoserve/std"]
 
 [dependencies]
 async-channel = { version = "2", default-features = false }
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-net.workspace = true

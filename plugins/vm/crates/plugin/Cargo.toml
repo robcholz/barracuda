@@ -5,8 +5,8 @@ edition = "2021"
 description = "Barracuda Plugin that owns the Lua VM Component"
 
 [dependencies]
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-component = { path = "../component", features = ["vendored"] }
 barracuda-vm-package-api = { path = "../package-api" }

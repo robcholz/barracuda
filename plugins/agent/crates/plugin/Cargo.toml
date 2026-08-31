@@ -12,8 +12,8 @@ std = ["barracuda-agent-runtime/std"]
 barracuda-agent-component = { path = "../component" }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
-barracuda-plugin-api = { path = "../../../../core/plugin-api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin-manager" }
+barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
+barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
 
 [dev-dependencies]

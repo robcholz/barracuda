@@ -691,8 +691,14 @@ composition/
 +-- selected/          # generated allocation and orchestration of both axes
 
 core/
++-- event-router/
++-- plugin/
+|   +-- crates/
+|       +-- api/
+|       +-- manager/
+|       +-- macros/
+|       +-- manifest/
 +-- system/
-+-- plugin-manager/
 
 plugins/
 +-- <plugin>/
