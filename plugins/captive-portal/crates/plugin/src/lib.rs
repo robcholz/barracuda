@@ -16,18 +16,13 @@ use barracuda_webserver_plugin::{
 };
 use serde::Deserialize;
 
-/// Stable identity of the Agent Plugin dependency.
-pub const AGENT_PLUGIN_ID: &str = barracuda_agent_plugin::PLUGIN_ID;
-/// Stable identity of the WebServer Plugin dependency.
-pub const WEBSERVER_PLUGIN_ID: &str = barracuda_webserver_plugin::PLUGIN_ID;
-/// Stable identity of the Captive Portal Plugin.
-pub const PLUGIN_ID: &str = "captive-portal";
 /// HTTP path accepting Agent model API configurations.
 pub const SET_API_PATH: &str = "/api/model-api";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that mounts Agent model API configuration on the shared WebServer.
+#[barracuda_plugin_api::plugin]
 pub struct CaptivePortalPlugin;
 
 impl CaptivePortalPlugin {
@@ -39,12 +34,6 @@ impl CaptivePortalPlugin {
 }
 
 impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[AGENT_PLUGIN_ID, WEBSERVER_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -52,8 +41,12 @@ impl<const M: usize> Plugin<M> for CaptivePortalPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let agent = context.require::<AgentSetApi>(AGENT_PLUGIN_ID)?;
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let agent = context.require::<AgentSetApi>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let registration = webserver
             .serve_http(SET_API_PATH, SetApiEndpoint::new(agent))
             .map_err(PluginError::registration)?;
@@ -174,14 +167,9 @@ mod tests {
     use core::cell::RefCell;
 
     use barracuda_agent_plugin::{AgentSetApi, InitError};
-    use barracuda_platform_test::never_embassy_stack;
-    use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::Plugin;
     use barracuda_webserver_plugin::{HttpEndpoint, HttpMethod, HttpRequest};
 
-    use super::{
-        ApiPurpose, CaptivePortalPlugin, SetApiEndpoint, AGENT_PLUGIN_ID, PLUGIN_ID, SET_API_PATH,
-    };
+    use super::{ApiPurpose, CaptivePortalPlugin, SetApiEndpoint, SET_API_PATH};
 
     const VALID_JSON: &[u8] = br#"[
         {
@@ -210,14 +198,13 @@ mod tests {
 
     #[test]
     fn plugin_identity_and_dependencies_are_stable() {
-        let stack = never_embassy_stack();
-        let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-        let plugin = CaptivePortalPlugin::new(&mut context);
-
-        assert_eq!(Plugin::<512>::id(&plugin), PLUGIN_ID);
         assert_eq!(
-            <CaptivePortalPlugin as Plugin<512>>::DEPENDS_ON,
-            &[AGENT_PLUGIN_ID, "webserver"]
+            <CaptivePortalPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            "captive-portal"
+        );
+        assert_eq!(
+            <CaptivePortalPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON,
+            &["agent", "webserver"]
         );
         assert_eq!(SET_API_PATH, "/api/model-api");
     }

@@ -42,7 +42,7 @@ owns that work. Lifecycle methods may clone storage handles into those owners,
 but do not block or await I/O themselves. `PluginManager::open` remains async
 because mounting the shared database performs real storage I/O.
 
-The manager validates `Plugin::id()`, derives one namespace-restricted storage
+The manager validates `PluginDeclaration::ID`, derives one namespace-restricted storage
 implementation from that stable identity, and passes it through
 `PluginRegisterContext` as the `PluginStorage` contract. A Plugin may clone its
 storage capability into any number of Components. Keys are UTF-8 strings and
@@ -51,7 +51,7 @@ serialization format of its own.
 
 Plugins can also exchange runtime-only typed capabilities. A provider calls
 `PluginRegisterContext::provide(Rc<T>)` during registration; a consumer
-declares the provider in `Plugin::DEPENDS_ON` and calls
+declares the provider in `PluginDeclaration::DEPENDS_ON` and calls
 `PluginRegisterContext::require::<T>(provider)`. The manager stores the value as
 `Rc<dyn Any>` under `(provider PluginId, TypeId)`. It has no knowledge of
 concrete capability types, and these entries are never persisted to `ekv`.

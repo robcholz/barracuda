@@ -1,1 +1,3 @@
+id = "imessage-web"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds a WebSocket conversation channel to the iMessage Gateway."

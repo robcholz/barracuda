@@ -1,1 +1,3 @@
+id = "gpio"
+depends-on = ["vm"]
 description = "Registers the Board-exposed GPIO Lua package."

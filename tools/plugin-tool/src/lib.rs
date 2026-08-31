@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use dialoguer::{console::Style, theme::ColorfulTheme, MultiSelect};
-use serde::Deserialize;
+use barracuda_plugin_manifest::{parse, PluginManifest};
+use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
 const MANIFEST_END: &str = "# END GENERATED PLUGINS";
@@ -16,22 +16,17 @@ const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
 const SOURCE_END: &str = "// END GENERATED PLUGINS";
 const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
 const PLUGIN_MANIFEST: &str = "plugin.toml";
-const MAX_DESCRIPTION_CHARS: usize = 80;
 
 #[derive(Debug)]
 struct Plugin {
     directory: String,
+    id: String,
+    dependencies: Vec<String>,
     description: String,
     package: String,
     crate_name: String,
     entry: String,
     has_std_feature: bool,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PluginMetadata {
-    description: String,
 }
 
 /// Whether synchronization changed generated files.
@@ -49,6 +44,49 @@ pub struct SyncReport {
     status: SyncStatus,
     enabled: Vec<String>,
     disabled: Vec<String>,
+}
+
+/// Caller-facing metadata for one discovered Plugin.
+#[derive(Debug, Eq, PartialEq)]
+pub struct PluginInfo {
+    id: String,
+    directory: String,
+    description: String,
+    dependencies: Vec<String>,
+    dependents: Vec<String>,
+    enabled: bool,
+}
+
+impl PluginInfo {
+    /// Returns the stable manifest identity.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// Returns the directory name under `plugins/`.
+    pub fn directory(&self) -> &str {
+        &self.directory
+    }
+
+    /// Returns the concise manifest description.
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the direct Plugin dependencies by identity.
+    pub fn dependencies(&self) -> &[String] {
+        &self.dependencies
+    }
+
+    /// Returns the direct dependent Plugins by identity.
+    pub fn dependents(&self) -> &[String] {
+        &self.dependents
+    }
+
+    /// Returns whether the Plugin is currently enabled.
+    pub const fn enabled(&self) -> bool {
+        self.enabled
+    }
 }
 
 impl SyncReport {
@@ -92,6 +130,36 @@ pub enum CommandError {
     /// Interactive selection failed.
     #[error("interactive Plugin selection failed: {0}")]
     Prompt(#[source] dialoguer::Error),
+    /// The requested Plugin does not exist.
+    #[error("unknown Plugin `{0}`")]
+    NotFound(String),
+}
+
+/// Loads display metadata for one Plugin, addressed by identity or directory.
+///
+/// # Errors
+/// Returns an error when discovery fails or the Plugin does not exist.
+pub fn info(root: &Path, name: &str) -> Result<PluginInfo, CommandError> {
+    let plugins = discover(root)?;
+    let disabled = read_disabled(root)?;
+    let plugin = plugins
+        .iter()
+        .find(|plugin| plugin.id == name || plugin.directory == name)
+        .ok_or_else(|| CommandError::NotFound(name.to_owned()))?;
+    let mut dependents = plugins
+        .iter()
+        .filter(|candidate| candidate.dependencies.contains(&plugin.id))
+        .map(|candidate| candidate.id.clone())
+        .collect::<Vec<_>>();
+    dependents.sort_unstable();
+    Ok(PluginInfo {
+        id: plugin.id.clone(),
+        directory: plugin.directory.clone(),
+        description: plugin.description.clone(),
+        dependencies: plugin.dependencies.clone(),
+        dependents,
+        enabled: disabled.binary_search(&plugin.directory).is_err(),
+    })
 }
 
 /// Synchronizes or validates the System registry against `plugins/`.
@@ -189,7 +257,61 @@ pub fn configure(root: &Path) -> Result<(), CommandError> {
         .filter(|(index, _)| !selected.contains(index))
         .map(|(_, plugin)| plugin.directory.clone())
         .collect::<Vec<_>>();
+    let (disabled, cascade_reasons) = cascade_disabled(&plugins, disabled);
+    if !cascade_reasons.is_empty() {
+        let prompt = format!(
+            "{}. Disable the dependent Plugins too?",
+            cascade_reasons.join("; ")
+        );
+        if !Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt(prompt)
+            .default(false)
+            .interact()
+            .map_err(CommandError::Prompt)?
+        {
+            return Ok(());
+        }
+    }
     write_disabled(root, &disabled)
+}
+
+fn cascade_disabled(plugins: &[Plugin], mut disabled: Vec<String>) -> (Vec<String>, Vec<String>) {
+    disabled.sort_unstable();
+    disabled.dedup();
+    let mut reasons = Vec::new();
+    loop {
+        let disabled_ids = plugins
+            .iter()
+            .filter(|plugin| disabled.binary_search(&plugin.directory).is_ok())
+            .map(|plugin| plugin.id.as_str())
+            .collect::<Vec<_>>();
+        let additions = plugins
+            .iter()
+            .filter(|plugin| disabled.binary_search(&plugin.directory).is_err())
+            .filter_map(|plugin| {
+                plugin
+                    .dependencies
+                    .iter()
+                    .find(|dependency| disabled_ids.contains(&dependency.as_str()))
+                    .map(|dependency| {
+                        (
+                            plugin.directory.clone(),
+                            format!("`{}` depends on `{dependency}`", plugin.id),
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
+        if additions.is_empty() {
+            break;
+        }
+        for (directory, reason) in additions {
+            disabled.push(directory);
+            reasons.push(reason);
+        }
+        disabled.sort_unstable();
+        disabled.dedup();
+    }
+    (disabled, reasons)
 }
 
 fn format_select_item(directory: &str, description: &str, description_style: &Style) -> String {
@@ -279,7 +401,11 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         })?;
         plugins.push(Plugin {
             directory,
-            description: metadata.description,
+            description: metadata.description().to_owned(),
+            // Parsing validates the baked identity even though registry rendering only needs
+            // the directory, package, and entry point.
+            id: metadata.id().to_owned(),
+            dependencies: metadata.dependencies().to_owned(),
             crate_name: package.replace('-', "_"),
             package,
             entry: entry_name,
@@ -287,32 +413,72 @@ fn discover(root: &Path) -> Result<Vec<Plugin>, CommandError> {
         });
     }
     plugins.sort_by(|left, right| left.directory.cmp(&right.directory));
+    validate_dependency_graph(&plugins)?;
     Ok(plugins)
 }
 
-fn parse_metadata(path: &Path, contents: &str) -> Result<PluginMetadata, CommandError> {
-    let metadata = toml::from_str::<PluginMetadata>(contents).map_err(|error| {
+fn validate_dependency_graph(plugins: &[Plugin]) -> Result<(), CommandError> {
+    for (index, plugin) in plugins.iter().enumerate() {
+        if let Some(duplicate) = plugins[..index]
+            .iter()
+            .find(|candidate| candidate.id == plugin.id)
+        {
+            return Err(CommandError::Metadata(format!(
+                "Plugin ID `{}` is declared by both `{}` and `{}`",
+                plugin.id, duplicate.directory, plugin.directory
+            )));
+        }
+        for dependency in &plugin.dependencies {
+            if dependency == &plugin.id {
+                return Err(CommandError::Metadata(format!(
+                    "Plugin `{}` cannot depend on itself",
+                    plugin.id
+                )));
+            }
+            if !plugins.iter().any(|candidate| &candidate.id == dependency) {
+                return Err(CommandError::Metadata(format!(
+                    "Plugin `{}` declares unknown dependency `{dependency}`",
+                    plugin.id
+                )));
+            }
+        }
+    }
+    let mut resolved = Vec::with_capacity(plugins.len());
+    loop {
+        let before = resolved.len();
+        for plugin in plugins {
+            if !resolved.contains(&plugin.id.as_str())
+                && plugin
+                    .dependencies
+                    .iter()
+                    .all(|dependency| resolved.contains(&dependency.as_str()))
+            {
+                resolved.push(plugin.id.as_str());
+            }
+        }
+        if resolved.len() == plugins.len() {
+            return Ok(());
+        }
+        if resolved.len() == before {
+            let cycle = plugins
+                .iter()
+                .filter(|plugin| !resolved.contains(&plugin.id.as_str()))
+                .map(|plugin| plugin.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(CommandError::Metadata(format!(
+                "Plugin dependency graph contains a cycle involving: {cycle}"
+            )));
+        }
+    }
+}
+
+fn parse_metadata(path: &Path, contents: &str) -> Result<PluginManifest, CommandError> {
+    parse(contents).map_err(|error| {
         CommandError::Metadata(format!(
             "invalid Plugin metadata in {}: {error}",
             path.display()
         ))
-    })?;
-    let description = metadata.description.trim();
-    let length = description.chars().count();
-    if description.is_empty() {
-        return Err(CommandError::Metadata(format!(
-            "Plugin description in {} must not be empty",
-            path.display()
-        )));
-    }
-    if length > MAX_DESCRIPTION_CHARS {
-        return Err(CommandError::Metadata(format!(
-            "Plugin description in {} is {length} characters; maximum is {MAX_DESCRIPTION_CHARS}",
-            path.display()
-        )));
-    }
-    Ok(PluginMetadata {
-        description: description.to_owned(),
     })
 }
 
@@ -461,12 +627,29 @@ mod tests {
 
     use std::fs;
 
+    use barracuda_plugin_manifest::MAX_DESCRIPTION_CHARS;
     use tempfile::tempdir;
 
     use super::{
-        package_name, parse_metadata, plugin_entry, replace_block, sync_with_report, SyncStatus,
-        MAX_DESCRIPTION_CHARS,
+        cascade_disabled, info, package_name, parse_metadata, plugin_entry, replace_block,
+        sync_with_report, validate_dependency_graph, Plugin, SyncStatus,
     };
+
+    fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
+        Plugin {
+            directory: directory.to_owned(),
+            id: id.to_owned(),
+            dependencies: dependencies
+                .iter()
+                .map(|dependency| (*dependency).to_owned())
+                .collect(),
+            description: String::from("Test Plugin."),
+            package: format!("barracuda-{directory}-plugin"),
+            crate_name: format!("barracuda_{directory}_plugin"),
+            entry: String::from("TestPlugin"),
+            has_std_feature: false,
+        }
+    }
 
     #[test]
     fn renders_plugin_description_in_gray() {
@@ -503,19 +686,84 @@ mod tests {
         );
         let metadata = parse_metadata(
             std::path::Path::new("plugin.toml"),
-            "description = \"A concise description.\"\n",
+            "id = \"demo\"\ndepends-on = []\ndescription = \"A concise description.\"\n",
         )
         .expect("valid Plugin metadata");
-        assert_eq!(metadata.description, "A concise description.");
+        assert_eq!(metadata.id(), "demo");
+        assert!(metadata.dependencies().is_empty());
+        assert_eq!(metadata.description(), "A concise description.");
     }
 
     #[test]
     fn rejects_invalid_plugin_descriptions() {
         let path = std::path::Path::new("plugin.toml");
-        assert!(parse_metadata(path, "description = \"   \"\n").is_err());
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = []\ndescription = \"   \"\n"
+        )
+        .is_err());
         let long = "x".repeat(MAX_DESCRIPTION_CHARS + 1);
-        assert!(parse_metadata(path, &format!("description = \"{long}\"\n")).is_err());
+        assert!(parse_metadata(
+            path,
+            &format!("id = \"demo\"\ndepends-on = []\ndescription = \"{long}\"\n")
+        )
+        .is_err());
     }
+
+    #[test]
+    fn rejects_invalid_plugin_dependencies() {
+        let path = std::path::Path::new("plugin.toml");
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = [\"\"]\ndescription = \"Demo.\"\n"
+        )
+        .is_err());
+        assert!(parse_metadata(
+            path,
+            "id = \"demo\"\ndepends-on = [\"base\", \"base\"]\ndescription = \"Demo.\"\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn disabling_a_plugin_cascades_through_dependent_dag() {
+        let plugins = [
+            plugin("base", "base", &[]),
+            plugin("middle", "middle", &["base"]),
+            plugin("leaf", "leaf", &["middle"]),
+            plugin("other", "other", &[]),
+        ];
+
+        let (disabled, reasons) = cascade_disabled(&plugins, vec![String::from("base")]);
+
+        assert_eq!(disabled, ["base", "leaf", "middle"]);
+        assert_eq!(
+            reasons,
+            ["`middle` depends on `base`", "`leaf` depends on `middle`"]
+        );
+    }
+
+    #[test]
+    fn rejects_dependency_cycles_during_discovery() {
+        let plugins = [
+            plugin("first", "first", &["second"]),
+            plugin("second", "second", &["first"]),
+        ];
+
+        assert!(validate_dependency_graph(&plugins).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_unknown_and_self_referential_declarations() {
+        let duplicate_ids = [plugin("first", "same", &[]), plugin("second", "same", &[])];
+        let unknown = [plugin("consumer", "consumer", &["missing"])];
+        let self_referential = [plugin("self", "self", &["self"])];
+
+        assert!(validate_dependency_graph(&duplicate_ids).is_err());
+        assert!(validate_dependency_graph(&unknown).is_err());
+        assert!(validate_dependency_graph(&self_referential).is_err());
+    }
+
     #[test]
     fn replaces_an_indented_generated_block() {
         let source = "fn register() {\n    // BEGIN\n    old();\n    // END\n}\n";
@@ -539,7 +787,7 @@ mod tests {
         .expect("Plugin manifest");
         fs::write(
             root.path().join("plugins/demo/plugin.toml"),
-            "description = \"Demonstrates Plugin discovery.\"\n",
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates Plugin discovery.\"\n",
         )
         .expect("Plugin metadata");
         fs::write(
@@ -573,5 +821,11 @@ mod tests {
         let manifest = fs::read_to_string(root.path().join("core/system/Cargo.toml"))
             .expect("generated System manifest");
         assert!(!manifest.contains("barracuda-demo-plugin"));
+        let plugin = info(root.path(), "demo").expect("load Plugin info");
+        assert_eq!(plugin.id(), "demo");
+        assert_eq!(plugin.description(), "Demonstrates Plugin discovery.");
+        assert!(!plugin.enabled());
+        assert!(plugin.dependencies().is_empty());
+        assert!(plugin.dependents().is_empty());
     }
 }

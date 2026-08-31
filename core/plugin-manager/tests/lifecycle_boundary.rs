@@ -35,7 +35,7 @@ fn plugin_start_uses_the_hook_only_context() {
     .expect("read Plugin lifecycle source");
 
     let plugin_trait = source
-        .split("pub trait Plugin")
+        .split("pub trait Plugin<const M: usize>")
         .nth(1)
         .expect("Plugin trait")
         .split("trait ManagedPlugin")
@@ -85,7 +85,7 @@ fn plugin_registration_and_start_hooks_are_synchronous() {
     assert!(source.contains("pub async fn unload"));
 
     let plugin_trait = source
-        .split("pub trait Plugin")
+        .split("pub trait Plugin<const M: usize>")
         .nth(1)
         .expect("Plugin trait")
         .split("trait ManagedPlugin")

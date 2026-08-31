@@ -1,1 +1,3 @@
+id = "imessage-telegram"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds Telegram Bot as an iMessage Gateway channel."

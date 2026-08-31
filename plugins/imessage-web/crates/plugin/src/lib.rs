@@ -8,17 +8,12 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
-use barracuda_imessage_gateway_plugin::{
-    GatewayInboundMessage, GatewayRoute, IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID,
-};
+use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_webserver_plugin::{WebServer, PLUGIN_ID as WEBSERVER_PLUGIN_ID};
+use barracuda_webserver_plugin::WebServer;
 use gateway::{MessageChannel, MessageChannelRegistration};
 use web::{InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web, WebBridge};
-
-/// Stable identity of the IMessage Web Plugin.
-pub const PLUGIN_ID: &str = "imessage-web";
 
 /// Stable name of the Web message channel.
 pub const WEB_CHANNEL: &str = "web";
@@ -50,6 +45,7 @@ impl IMessageWebRoute {
 }
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageWebPlugin;
 
 impl IMessageWebPlugin {
@@ -61,12 +57,6 @@ impl IMessageWebPlugin {
 }
 
 impl<const M: usize> Plugin<M> for IMessageWebPlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[IMESSAGE_GATEWAY_PLUGIN_ID, WEBSERVER_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -74,8 +64,12 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let web = Rc::new(WebChannel::new());
         let channel: Rc<dyn MessageChannel> = web.clone();
         let channel_registration: MessageChannelRegistration = gateway

@@ -5,8 +5,8 @@
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginStartError};
-use barracuda_time_plugin::{PLUGIN_ID, TimePlugin};
+use barracuda_plugin_manager::{PluginId, PluginManager, PluginStartError};
+use barracuda_time_plugin::TimePlugin;
 use embassy_executor::{Executor, Spawner};
 use futures_lite::future::block_on;
 use std::sync::mpsc::{SyncSender, sync_channel};
@@ -26,13 +26,16 @@ fn plugin_loads_the_time_component() {
             .await
             .expect("install global test VFS");
         let mut router = EventRouter::new(lanes).await.expect("create router");
-        let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
+        let id = PluginId::try_from("time").expect("valid Plugin ID");
         let stack = never_embassy_stack();
         let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
         let plugin = TimePlugin::new(&mut context);
 
-        assert_eq!(Plugin::<512>::id(&plugin), "time");
-        assert!(<TimePlugin as Plugin<512>>::DEPENDS_ON.is_empty());
+        assert_eq!(
+            <TimePlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            "time"
+        );
+        assert!(<TimePlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON.is_empty());
         manager
             .register(&mut router, plugin)
             .expect("register Time Plugin");
@@ -71,7 +74,7 @@ async fn reload_time_plugin(spawner: Spawner, completed: SyncSender<Result<(), S
             .start(&mut router)
             .map_err(|error| error.to_string())?;
 
-        let id = PluginId::try_from(PLUGIN_ID).map_err(|error| error.to_string())?;
+        let id = PluginId::try_from("time").map_err(|error| error.to_string())?;
         manager
             .unload(&mut router, &id)
             .await

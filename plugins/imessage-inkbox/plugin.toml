@@ -1,1 +1,3 @@
+id = "imessage-inkbox"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds Inkbox as an iMessage Gateway channel."

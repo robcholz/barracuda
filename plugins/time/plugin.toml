@@ -1,1 +1,3 @@
+id = "time"
+depends-on = []
 description = "Synchronizes UTC time and provides the time RPC service."

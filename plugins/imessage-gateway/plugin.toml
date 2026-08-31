@@ -1,1 +1,3 @@
+id = "imessage-gateway"
+depends-on = []
 description = "Provides the shared gateway for inbound and outbound messages."

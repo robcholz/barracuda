@@ -21,9 +21,6 @@ pub use rpc::{
     FileBytes, FilePath, FileRead, FileReadRequest, FileRpcError, FileWrite, FileWriteRequest,
 };
 
-/// Stable identity of the File Plugin.
-pub const PLUGIN_ID: &str = "file";
-
 /// Cloneable API for files in the File Plugin's private namespace.
 #[derive(Clone)]
 pub struct FileSystem {
@@ -77,6 +74,7 @@ impl FileSystem {
 }
 
 /// Plugin that publishes [`FileSystem`] and exposes its RPC harness.
+#[barracuda_plugin_api::plugin]
 pub struct FilePlugin;
 
 impl FilePlugin {
@@ -90,10 +88,6 @@ impl FilePlugin {
 impl<const M: usize> Plugin<M> for FilePlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
 
     fn register<Storage>(
         &mut self,

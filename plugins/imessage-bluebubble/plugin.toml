@@ -1,1 +1,3 @@
+id = "imessage-bluebubble"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds BlueBubbles as an iMessage Gateway channel."

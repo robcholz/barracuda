@@ -1229,9 +1229,19 @@ version = "0.1.0"
 dependencies = [
  "barracuda-board-hal",
  "barracuda-platform-test",
+ "barracuda-plugin-macros",
  "embassy-net",
  "embassy-time",
  "http-client",
+]
+
+[[package]]
+name = "barracuda-plugin-macros"
+version = "0.1.0"
+dependencies = [
+ "barracuda-plugin-manifest",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -1253,18 +1263,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-manifest"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "toml",
+]
+
+[[package]]
 name = "barracuda-plugin-tool"
 version = "0.1.0"
 dependencies = [
  "anstream",
  "anstyle",
+ "barracuda-plugin-manifest",
  "clap",
  "ctrlc",
  "dialoguer",
- "serde",
  "tempfile",
  "thiserror 2.0.18",
- "toml",
 ]
 
 [[package]]

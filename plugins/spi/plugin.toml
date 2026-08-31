@@ -1,1 +1,3 @@
+id = "spi"
+depends-on = ["vm"]
 description = "Registers the Board-exposed SPI Lua package."

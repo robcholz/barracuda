@@ -134,16 +134,19 @@ impl PluginError {
     }
 }
 
-/// One system-managed Plugin that may register multiple Components.
-pub trait Plugin<const M: usize> {
+/// Static identity and dependency declaration shared by every frame size.
+pub trait PluginDeclaration {
+    /// Stable identity used for lifecycle tracking and storage.
+    const ID: &'static str;
+
     /// Stable identities that must register before this Plugin.
     const DEPENDS_ON: &'static [&'static str] = &[];
+}
 
+/// One system-managed Plugin that may register multiple Components.
+pub trait Plugin<const M: usize>: PluginDeclaration {
     /// Resources that Plugin Manager must prepare before registration.
     const REQUIREMENTS: PluginRequirements = PluginRequirements::new();
-
-    /// Returns the stable identity used for lifecycle tracking and storage.
-    fn id(&self) -> &'static str;
 
     /// Registers the Plugin's capabilities and Event Router Components.
     ///
@@ -174,7 +177,7 @@ pub trait Plugin<const M: usize> {
 }
 
 trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
-    fn id(&self) -> &'static str;
+    fn identity(&self) -> &'static str;
     fn dependencies(&self) -> &'static [&'static str];
     fn requirements(&self) -> PluginRequirements;
     fn register(&mut self, context: &mut PluginRegisterContext<'_, M, Storage>)
@@ -187,8 +190,8 @@ where
     T: Plugin<M>,
     Storage: PluginStorage,
 {
-    fn id(&self) -> &'static str {
-        Plugin::id(self)
+    fn identity(&self) -> &'static str {
+        T::ID
     }
 
     fn dependencies(&self) -> &'static [&'static str] {
@@ -312,7 +315,7 @@ impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storag
     /// # Errors
     ///
     /// Returns an error when the provider identity is invalid, was not declared
-    /// in [`Plugin::DEPENDS_ON`], or did not publish this concrete type.
+    /// in [`PluginDeclaration::DEPENDS_ON`], or did not publish this concrete type.
     pub fn require<T>(&self, provider: &'static str) -> PluginResult<Rc<T>>
     where
         T: Any,
@@ -811,7 +814,7 @@ where
     ///
     /// Returns an error for an invalid, duplicate, or self-dependent identity.
     pub fn add<T: Plugin<M> + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
-        let id = PluginId::try_from(plugin.id())?;
+        let id = PluginId::try_from(T::ID)?;
         if self.loaded.contains_key(&id) || self.pending.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));
@@ -876,7 +879,7 @@ where
         router: &mut EventRouter<N, M, Q>,
         mut plugin: Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>,
     ) -> Result<(), PluginRegisterError> {
-        let id = PluginId::try_from(plugin.id())?;
+        let id = PluginId::try_from(plugin.identity())?;
         if self.loaded.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));

@@ -9,10 +9,8 @@ use http_client::ClientFactory;
 
 use component::HttpComponent;
 
-/// Stable identity of the HTTP Plugin.
-pub const PLUGIN_ID: &str = "http";
-
 /// Plugin exposing the shared HTTP client through a dynamic RPC.
+#[barracuda_plugin_api::plugin]
 pub struct HttpPlugin {
     clients: ClientFactory<'static>,
 }
@@ -26,9 +24,6 @@ impl HttpPlugin {
     }
 }
 impl<const M: usize> Plugin<M> for HttpPlugin {
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
     fn register<S: barracuda_plugin_manager::PluginStorage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, S>,

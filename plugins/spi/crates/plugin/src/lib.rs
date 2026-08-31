@@ -10,18 +10,15 @@ use barracuda_lua::{Error, Lua, Package, Result};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
-use barracuda_vm_plugin::PLUGIN_ID as VM_PLUGIN_ID;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_hal_async::spi::SpiBus;
 
-/// Stable identity of the SPI Plugin.
-pub const PLUGIN_ID: &str = "spi";
-
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
 /// Takes the concrete Board-exposed SPI set and registers the `spi` package.
+#[barracuda_plugin_api::plugin]
 pub struct SpiPlugin<SpiSet> {
     hardware: Option<SpiSet>,
 }
@@ -45,12 +42,6 @@ where
     SpiSet::Resource: SpiBus + Send,
     <SpiSet::Resource as embedded_hal::spi::ErrorType>::Error: core::fmt::Debug,
 {
-    const DEPENDS_ON: &'static [&'static str] = &[VM_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -58,7 +49,9 @@ where
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let registry = context.require::<LuaPackageRegistry>(VM_PLUGIN_ID)?;
+        let registry = context.require::<LuaPackageRegistry>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
         let registration = registry
             .register(SpiPackage::new(self.hardware.take()))
             .map_err(PluginError::registration)?;

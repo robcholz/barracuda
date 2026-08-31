@@ -8,7 +8,7 @@ use std::{
 
 use anstream::{eprintln, println};
 use anstyle::{AnsiColor, Color, Style};
-use barracuda_plugin_tool::{configure, sync_with_report, SyncStatus};
+use barracuda_plugin_tool::{configure, info, sync_with_report, PluginInfo, SyncStatus};
 use clap::{Parser, Subcommand};
 use dialoguer::console::Term;
 
@@ -29,6 +29,11 @@ enum Command {
     },
     /// Interactively choose which Plugins are enabled.
     Select,
+    /// Show manifest and dependency information for one Plugin.
+    Info {
+        /// Plugin identity or directory name.
+        plugin: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -49,6 +54,7 @@ fn main() -> ExitCode {
             print_report(&report);
             Ok(())
         }),
+        Command::Info { plugin } => info(&root, &plugin).map(|plugin| print_info(&plugin)),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -64,6 +70,34 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn print_info(plugin: &PluginInfo) {
+    let cyan = Style::new()
+        .fg_color(Some(Color::Ansi(AnsiColor::Cyan)))
+        .bold();
+    let green = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green)));
+    let yellow = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
+    let dim = Style::new().dimmed();
+    let (status_style, status) = if plugin.enabled() {
+        (green, "enabled")
+    } else {
+        (yellow, "disabled")
+    };
+    println!("{cyan}{}{cyan:#}  {}", plugin.id(), plugin.description());
+    println!("  {dim}directory{dim:#}     {}", plugin.directory());
+    println!("  {dim}status{dim:#}        {status_style}{status}{status_style:#}");
+    print_list("depends on", plugin.dependencies(), &dim);
+    print_list("required by", plugin.dependents(), &dim);
+}
+
+fn print_list(label: &str, values: &[String], dim: &Style) {
+    let value = if values.is_empty() {
+        String::from("—")
+    } else {
+        values.join(", ")
+    };
+    println!("  {dim}{label:<13}{dim:#} {value}");
 }
 
 fn install_interrupt_handler() -> Result<(), ctrlc::Error> {

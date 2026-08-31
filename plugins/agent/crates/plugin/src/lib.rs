@@ -21,8 +21,6 @@ pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
 pub use barracuda_model_api::{BackendKind, InitError};
 
 const PERSISTENCE_ROOT: &str = "/";
-/// Stable identity of the Agent Plugin.
-pub const PLUGIN_ID: &str = "agent";
 
 type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
 
@@ -58,6 +56,7 @@ impl AgentSetApi {
 }
 
 /// Plugin that constructs and owns the Agent runtime and Component.
+#[barracuda_plugin_api::plugin]
 pub struct AgentPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -75,10 +74,6 @@ impl AgentPlugin {
 impl<const M: usize> Plugin<M> for AgentPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
 
     fn register<Storage>(
         &mut self,
@@ -119,7 +114,7 @@ mod tests {
         install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
     };
     use barracuda_plugin_api::PluginContext;
-    use barracuda_plugin_manager::{Plugin, PluginId, PluginManager};
+    use barracuda_plugin_manager::{PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     use http_client::ClientFactory;
@@ -146,7 +141,10 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = AgentPlugin::new(&mut context);
-            assert_eq!(Plugin::<512>::id(&plugin), "agent");
+            assert_eq!(
+                <AgentPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+                "agent"
+            );
 
             manager
                 .register(&mut router, plugin)

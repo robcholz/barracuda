@@ -5,8 +5,8 @@
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{Plugin, PluginId, PluginManager, PluginRegisterError};
-use barracuda_scheduler_plugin::{PLUGIN_ID, SchedulerPlugin};
+use barracuda_plugin_manager::{PluginId, PluginManager, PluginRegisterError};
+use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_time_plugin::TimePlugin;
 use embassy_executor::{Executor, Spawner};
 use std::sync::mpsc::{SyncSender, sync_channel};
@@ -33,12 +33,12 @@ async fn start_scheduler_with_time(spawner: Spawner, completed: SyncSender<Resul
         manager.install_task_spawner(spawner);
 
         assert_eq!(
-            Plugin::<512>::id(&SchedulerPlugin::new(&mut context)),
+            <SchedulerPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
             "scheduler"
         );
         assert_eq!(
-            <SchedulerPlugin as Plugin<512>>::DEPENDS_ON,
-            &[barracuda_time_plugin::PLUGIN_ID],
+            <SchedulerPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON,
+            &["time"],
         );
         let error = manager
             .register(&mut router, SchedulerPlugin::new(&mut context))
@@ -57,14 +57,15 @@ async fn start_scheduler_with_time(spawner: Spawner, completed: SyncSender<Resul
             .start(&mut router)
             .map_err(|error| error.to_string())?;
 
-        let id = PluginId::try_from(PLUGIN_ID).expect("valid Plugin ID");
+        let id = PluginId::try_from("scheduler").expect("valid Plugin ID");
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
         manager
             .unload(&mut router, &id)
             .await
             .map_err(|error| error.to_string())?;
         let time_id =
-            PluginId::try_from(barracuda_time_plugin::PLUGIN_ID).expect("valid Time Plugin ID");
+            PluginId::try_from(<TimePlugin as barracuda_plugin_manager::PluginDeclaration>::ID)
+                .expect("valid Time Plugin ID");
         manager
             .unload(&mut router, &time_id)
             .await

@@ -18,9 +18,6 @@ pub use webserver::*;
 mod task;
 mod webserver;
 
-/// Stable identity of the WebServer capability provider.
-pub const PLUGIN_ID: &str = "webserver";
-
 /// TCP port served by the WebServer Plugin.
 pub const WEB_SERVER_PORT: u16 = 8787;
 
@@ -39,6 +36,7 @@ pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 ///     let _server = plugin.webserver();
 /// }
 /// ```
+#[barracuda_plugin_api::plugin]
 pub struct WebServerPlugin {
     stack: Stack<'static>,
     runtime: Option<Rc<WebServer>>,
@@ -56,10 +54,6 @@ impl WebServerPlugin {
 }
 
 impl<const M: usize> Plugin<M> for WebServerPlugin {
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,

@@ -13,16 +13,13 @@ use barracuda_lua::{Error, Lua, Package, Result};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
-use barracuda_vm_plugin::PLUGIN_ID as VM_PLUGIN_ID;
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embedded_hal::digital::{InputPin, OutputPin};
 
-/// Stable identity of the GPIO Plugin.
-pub const PLUGIN_ID: &str = "gpio";
-
 /// Takes the Board-exposed GPIO value and registers the `gpio` Lua package.
+#[barracuda_plugin_api::plugin]
 pub struct GpioPlugin<Gpio> {
     hardware: Option<Gpio>,
 }
@@ -46,12 +43,6 @@ where
     Gpio::Resource: ConfigurableDigitalPin + Send,
     <Gpio::Resource as embedded_hal::digital::ErrorType>::Error: core::fmt::Debug,
 {
-    const DEPENDS_ON: &'static [&'static str] = &[VM_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -59,7 +50,9 @@ where
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let registry = context.require::<LuaPackageRegistry>(VM_PLUGIN_ID)?;
+        let registry = context.require::<LuaPackageRegistry>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
         let registration = registry
             .register(GpioPackage::new(self.hardware.take()))
             .map_err(PluginError::registration)?;

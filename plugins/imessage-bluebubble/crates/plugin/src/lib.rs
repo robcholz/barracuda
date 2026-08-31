@@ -10,26 +10,24 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use barracuda_imessage_gateway_plugin::{IMessageGateway, PLUGIN_ID as IMESSAGE_GATEWAY_PLUGIN_ID};
+use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
-    PLUGIN_ID as WEBSERVER_PLUGIN_ID,
 };
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
 use gateway::{MessageChannel, MessageChannelRegistration};
 use http_client::ClientFactory;
 use serde::Deserialize;
 
-/// Stable identity of the IMessage BlueBubbles Plugin.
-pub const PLUGIN_ID: &str = "imessage-bluebubble";
 /// HTTP path accepting BlueBubbles configuration.
 pub const CONFIG_API_PATH: &str = "/api/gateway/bluebubbles";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes BlueBubbles configuration and registers the resulting channel.
+#[barracuda_plugin_api::plugin]
 pub struct IMessageBlueBubblePlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -45,12 +43,6 @@ impl IMessageBlueBubblePlugin {
 }
 
 impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
-    const DEPENDS_ON: &'static [&'static str] = &[IMESSAGE_GATEWAY_PLUGIN_ID, WEBSERVER_PLUGIN_ID];
-
-    fn id(&self) -> &'static str {
-        PLUGIN_ID
-    }
-
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, Storage>,
@@ -58,8 +50,12 @@ impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(IMESSAGE_GATEWAY_PLUGIN_ID)?;
-        let webserver = context.require::<WebServer>(WEBSERVER_PLUGIN_ID)?;
+        let gateway = context.require::<IMessageGateway>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+        )?;
         let endpoint = ConfigEndpoint {
             gateway,
             http_clients: self.http_clients.clone(),

@@ -8,19 +8,35 @@ use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    Plugin, PluginId, PluginIdError, PluginManager, PluginRegisterError,
+    Plugin, PluginDeclaration, PluginId, PluginIdError, PluginManager, PluginRegisterError,
 };
 use futures_lite::future::block_on;
 
 const FRAME_SIZE: usize = 64;
 
-struct IdentifiedPlugin(&'static str);
+struct IdentifiedPlugin;
 
-impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id(&self) -> &'static str {
-        self.0
-    }
+impl PluginDeclaration for IdentifiedPlugin {
+    const ID: &'static str = "identified";
 }
+
+impl Plugin<FRAME_SIZE> for IdentifiedPlugin {}
+
+struct InvalidIdentityPlugin;
+
+impl PluginDeclaration for InvalidIdentityPlugin {
+    const ID: &'static str = "";
+}
+
+impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {}
+
+struct DuplicatePlugin;
+
+impl PluginDeclaration for DuplicatePlugin {
+    const ID: &'static str = "duplicate";
+}
+
+impl Plugin<FRAME_SIZE> for DuplicatePlugin {}
 
 fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
     block_on(async {
@@ -46,7 +62,7 @@ fn manager_uses_the_identity_declared_by_the_plugin() {
     let id = PluginId::try_from("identified").expect("valid Plugin ID");
 
     manager
-        .register(&mut router, IdentifiedPlugin("identified"))
+        .register(&mut router, IdentifiedPlugin)
         .expect("register Plugin");
 
     assert!(manager.is_loaded(&id));
@@ -58,7 +74,7 @@ fn manager_rejects_an_invalid_plugin_identity() {
     let mut router = router();
 
     let error = manager
-        .register(&mut router, IdentifiedPlugin(""))
+        .register(&mut router, InvalidIdentityPlugin)
         .expect_err("reject invalid Plugin ID");
 
     assert!(matches!(
@@ -74,10 +90,10 @@ fn manager_rejects_a_duplicate_plugin_identity() {
     let id = PluginId::try_from("duplicate").expect("valid Plugin ID");
 
     manager
-        .register(&mut router, IdentifiedPlugin("duplicate"))
+        .register(&mut router, DuplicatePlugin)
         .expect("register Plugin");
     let error = manager
-        .register(&mut router, IdentifiedPlugin("duplicate"))
+        .register(&mut router, DuplicatePlugin)
         .expect_err("reject duplicate Plugin ID");
 
     assert!(matches!(error, PluginRegisterError::AlreadyRegistered(found) if found == id));

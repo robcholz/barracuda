@@ -9,6 +9,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-board-hal = { path = "../../boards/hal" }
+barracuda-plugin-macros = { path = "../plugin-macros" }
 embassy-net.workspace = true
 http-client = { path = "../../shared/http-client" }
 

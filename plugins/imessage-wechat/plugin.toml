@@ -1,1 +1,3 @@
+id = "imessage-wechat"
+depends-on = ["imessage-gateway", "webserver"]
 description = "Adds WeChat iLink as an iMessage Gateway channel."
