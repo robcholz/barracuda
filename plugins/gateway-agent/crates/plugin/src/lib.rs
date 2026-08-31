@@ -49,11 +49,11 @@ mod tests {
 
     use super::GatewayAgentPlugin;
 
-    struct Dependency(&'static str);
+    struct Dependency;
 
     impl<const M: usize> Plugin<M> for Dependency {
-        fn id(&self) -> &'static str {
-            self.0
+        fn id() -> &'static str {
+            "agent"
         }
     }
 
@@ -75,10 +75,10 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = GatewayAgentPlugin::new(&mut context);
-            assert_eq!(Plugin::<512>::id(&plugin), "gateway-agent");
+            assert_eq!(GatewayAgentPlugin::id(), "gateway-agent");
 
             manager
-                .register(&mut router, Dependency("agent"))
+                .register(&mut router, Dependency)
                 .expect("register Agent dependency");
             manager
                 .register(&mut router, IMessageGatewayPlugin::new(&mut context))

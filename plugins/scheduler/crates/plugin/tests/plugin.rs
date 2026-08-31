@@ -27,10 +27,7 @@ fn plugin_requires_time_and_loads_the_scheduler_component() {
         let stack = never_embassy_stack();
         let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
 
-        assert_eq!(
-            Plugin::<512>::id(&SchedulerPlugin::new(&mut context)),
-            "scheduler"
-        );
+        assert_eq!(SchedulerPlugin::id(), "scheduler");
         assert_eq!(<SchedulerPlugin as Plugin<512>>::DEPENDS_ON, &["time"],);
         let error = manager
             .register(&mut router, SchedulerPlugin::new(&mut context))

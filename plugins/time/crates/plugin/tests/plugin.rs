@@ -28,7 +28,7 @@ fn plugin_loads_the_time_component() {
         let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
         let plugin = TimePlugin::new(&mut context);
 
-        assert_eq!(Plugin::<512>::id(&plugin), "time");
+        assert_eq!(TimePlugin::id(), "time");
         assert!(<TimePlugin as Plugin<512>>::DEPENDS_ON.is_empty());
         manager
             .register(&mut router, plugin)

@@ -121,7 +121,7 @@ mod tests {
     impl Plugin<512> for PackageConsumer {
         const DEPENDS_ON: &'static [&'static str] = &["vm"];
 
-        fn id(&self) -> &'static str {
+        fn id() -> &'static str {
             "package-consumer"
         }
 
@@ -151,7 +151,7 @@ mod tests {
         let mut router = block_on(EventRouter::new(lanes)).expect("create router");
         let id = PluginId::try_from("vm").expect("valid Plugin ID");
         let plugin = VmPlugin::new(&mut plugin_context());
-        assert_eq!(Plugin::<512>::id(&plugin), "vm");
+        assert_eq!(VmPlugin::id(), "vm");
 
         manager
             .register(&mut router, plugin)

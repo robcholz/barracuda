@@ -122,7 +122,7 @@ mod tests {
             barracuda_platform_test::never_embassy_stack(),
             ClientFactory::plaintext(barracuda_platform_test::never_embassy_stack()),
         ));
-        assert_eq!(Plugin::<512>::id(&plugin), "web-search");
+        assert_eq!(WebSearchPlugin::id(), "web-search");
         assert_eq!(WebSearch::ADDRESS, "web_search.search");
     }
 

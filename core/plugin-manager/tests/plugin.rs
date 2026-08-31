@@ -66,8 +66,7 @@ impl<Storage: barracuda_plugin_manager::PluginStorage> Component<FRAME_SIZE>
     }
 }
 
-struct StatefulPlugin {
-    id: &'static str,
+struct StatefulPlugin<const KIND: u8> {
     value: u32,
     observed: Rc<RefCell<Option<u32>>>,
     registered: Rc<Cell<usize>>,
@@ -75,11 +74,19 @@ struct StatefulPlugin {
     component_count: usize,
 }
 
-struct IdentifiedPlugin(&'static str);
+struct IdentifiedPlugin;
 
 impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id(&self) -> &'static str {
-        self.0
+    fn id() -> &'static str {
+        "identified"
+    }
+}
+
+struct InvalidIdentityPlugin;
+
+impl Plugin<FRAME_SIZE> for InvalidIdentityPlugin {
+    fn id() -> &'static str {
+        ""
     }
 }
 
@@ -89,16 +96,19 @@ fn register_uses_the_identity_declared_by_the_plugin() {
     let mut router = router();
     let id = PluginId::try_from("identified").unwrap();
 
-    manager
-        .register(&mut router, IdentifiedPlugin("identified"))
-        .unwrap();
+    manager.register(&mut router, IdentifiedPlugin).unwrap();
 
     assert!(manager.is_loaded(&id));
 }
 
-impl Plugin<FRAME_SIZE> for StatefulPlugin {
-    fn id(&self) -> &'static str {
-        self.id
+impl<const KIND: u8> Plugin<FRAME_SIZE> for StatefulPlugin<KIND> {
+    fn id() -> &'static str {
+        match KIND {
+            0 => "scheduler",
+            1 => "other",
+            2 => "multi",
+            _ => "duplicate",
+        }
     }
 
     fn register<Storage>(
@@ -142,7 +152,7 @@ fn registering_a_plugin_with_an_invalid_identity_is_rejected() {
     let mut router = router();
 
     let error = manager
-        .register(&mut router, IdentifiedPlugin(""))
+        .register(&mut router, InvalidIdentityPlugin)
         .unwrap_err();
 
     assert!(matches!(
@@ -177,8 +187,7 @@ fn plugins_have_isolated_durable_scopes() {
     manager
         .register(
             &mut router,
-            StatefulPlugin {
-                id: "scheduler",
+            StatefulPlugin::<0> {
                 value: 41,
                 observed: Rc::clone(&scheduler_observed),
                 registered: Rc::clone(&registered),
@@ -190,8 +199,7 @@ fn plugins_have_isolated_durable_scopes() {
     manager
         .register(
             &mut router,
-            StatefulPlugin {
-                id: "other",
+            StatefulPlugin::<1> {
                 value: 72,
                 observed: Rc::clone(&other_observed),
                 registered: Rc::clone(&registered),
@@ -212,8 +220,7 @@ fn plugins_have_isolated_durable_scopes() {
     manager
         .register(
             &mut router,
-            StatefulPlugin {
-                id: "scheduler",
+            StatefulPlugin::<0> {
                 value: 99,
                 observed: Rc::clone(&restored),
                 registered: Rc::clone(&registered),
@@ -238,8 +245,7 @@ fn one_plugin_can_register_multiple_components() {
     manager
         .register(
             &mut router,
-            StatefulPlugin {
-                id: "multi",
+            StatefulPlugin::<2> {
                 value: 1,
                 observed: Rc::new(RefCell::new(None)),
                 registered: Rc::clone(&registered),
@@ -261,8 +267,7 @@ fn duplicate_plugin_id_is_rejected() {
     let mut manager = manager();
     let mut router = router();
     let id = PluginId::try_from("duplicate").unwrap();
-    let make_plugin = || StatefulPlugin {
-        id: "duplicate",
+    let make_plugin = || StatefulPlugin::<3> {
         value: 1,
         observed: Rc::new(RefCell::new(None)),
         registered: Rc::new(Cell::new(0)),
@@ -286,7 +291,7 @@ struct FailingPlugin {
 }
 
 impl Plugin<FRAME_SIZE> for FailingPlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "failure"
     }
 
@@ -345,7 +350,7 @@ struct AtomicPlugin {
 }
 
 impl Plugin<FRAME_SIZE> for AtomicPlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "atomic"
     }
 
@@ -394,7 +399,7 @@ struct CapabilityProvider {
 }
 
 impl Plugin<FRAME_SIZE> for CapabilityProvider {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "provider"
     }
 
@@ -417,7 +422,7 @@ struct CapabilityConsumer {
 impl Plugin<FRAME_SIZE> for CapabilityConsumer {
     const DEPENDS_ON: &'static [&'static str] = &["provider"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "consumer"
     }
 
@@ -491,7 +496,7 @@ struct CycleA;
 impl Plugin<FRAME_SIZE> for CycleA {
     const DEPENDS_ON: &'static [&'static str] = &["cycle-b"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "cycle-a"
     }
 }
@@ -501,7 +506,7 @@ struct CycleB;
 impl Plugin<FRAME_SIZE> for CycleB {
     const DEPENDS_ON: &'static [&'static str] = &["cycle-a"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "cycle-b"
     }
 }
@@ -540,7 +545,7 @@ fn declared_dependency_must_be_registered_before_consumer() {
 struct UndeclaredConsumer;
 
 impl Plugin<FRAME_SIZE> for UndeclaredConsumer {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "undeclared"
     }
 
@@ -586,7 +591,7 @@ struct MissingCapabilityConsumer;
 impl Plugin<FRAME_SIZE> for MissingCapabilityConsumer {
     const DEPENDS_ON: &'static [&'static str] = &["provider"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "consumer"
     }
 
@@ -672,15 +677,18 @@ impl Drop for RetainedResource {
     }
 }
 
-struct RetainingPlugin {
-    id: &'static str,
+struct RetainingPlugin<const FAILING: bool> {
     dropped: Rc<Cell<usize>>,
     fail: bool,
 }
 
-impl Plugin<FRAME_SIZE> for RetainingPlugin {
-    fn id(&self) -> &'static str {
-        self.id
+impl<const FAILING: bool> Plugin<FRAME_SIZE> for RetainingPlugin<FAILING> {
+    fn id() -> &'static str {
+        if FAILING {
+            "failing-retain"
+        } else {
+            "retained"
+        }
     }
 
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
@@ -707,8 +715,7 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
     manager
         .register(
             &mut router,
-            RetainingPlugin {
-                id: "retained",
+            RetainingPlugin::<false> {
                 dropped: Rc::clone(&dropped),
                 fail: false,
             },
@@ -722,8 +729,7 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
     manager
         .register(
             &mut router,
-            RetainingPlugin {
-                id: "failing-retain",
+            RetainingPlugin::<true> {
                 dropped: Rc::clone(&dropped),
                 fail: true,
             },
@@ -737,7 +743,7 @@ fn retained_resources_follow_plugin_lifecycle_and_rollback() {
 struct DuplicateCapabilityProvider;
 
 impl Plugin<FRAME_SIZE> for DuplicateCapabilityProvider {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "provider"
     }
 
@@ -785,7 +791,7 @@ struct RegisterPhasePlugin {
 }
 
 impl Plugin<FRAME_SIZE> for RegisterPhasePlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "register-phase"
     }
 
@@ -816,7 +822,7 @@ struct DependentPhasePlugin {
 impl Plugin<FRAME_SIZE> for DependentPhasePlugin {
     const DEPENDS_ON: &'static [&'static str] = &["register-phase"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "dependent-phase"
     }
 

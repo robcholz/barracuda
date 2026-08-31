@@ -34,7 +34,7 @@ struct Consumer {
 impl Plugin<FRAME_SIZE> for Consumer {
     const DEPENDS_ON: &'static [&'static str] = &["webserver"];
 
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "consumer"
     }
 

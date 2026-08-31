@@ -38,7 +38,7 @@ pub fn plugin(
                 const DEPENDS_ON: &'static [&'static str] = &[#(#dependencies),*];
             });
             implementation.items.push(syn::parse_quote! {
-                fn id(&self) -> &'static str {
+                fn id() -> &'static str {
                     const _: &str = include_str!(#path);
                     #id
                 }

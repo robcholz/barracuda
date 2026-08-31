@@ -7,7 +7,7 @@ use barracuda_plugin_manager::Plugin;
 struct StorageAgnosticPlugin;
 
 impl<const M: usize> Plugin<M> for StorageAgnosticPlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "storage-agnostic"
     }
 }

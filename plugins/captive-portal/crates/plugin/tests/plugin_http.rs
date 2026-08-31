@@ -28,7 +28,7 @@ struct AgentProvider {
 }
 
 impl Plugin<FRAME_SIZE> for AgentProvider {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "agent"
     }
 
@@ -50,7 +50,7 @@ struct WebServerProvider {
 }
 
 impl Plugin<FRAME_SIZE> for WebServerProvider {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "webserver"
     }
 

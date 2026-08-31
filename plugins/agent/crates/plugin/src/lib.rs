@@ -141,7 +141,7 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = AgentPlugin::new(&mut context);
-            assert_eq!(Plugin::<512>::id(&plugin), "agent");
+            assert_eq!(AgentPlugin::id(), "agent");
 
             manager
                 .register(&mut router, plugin)

@@ -46,17 +46,20 @@ async fn manager() -> PluginManager<FRAME_SIZE, MemoryPartition> {
     manager
 }
 
-struct FilesystemPlugin {
-    id: &'static str,
+struct FilesystemPlugin<const KIND: u8> {
     filesystem: Rc<RefCell<Option<PluginVfs>>>,
 }
 
-impl Plugin<FRAME_SIZE> for FilesystemPlugin {
+impl<const KIND: u8> Plugin<FRAME_SIZE> for FilesystemPlugin<KIND> {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
 
-    fn id(&self) -> &'static str {
-        self.id
+    fn id() -> &'static str {
+        if KIND == 0 {
+            "first"
+        } else {
+            "second"
+        }
     }
 
     fn register<Storage>(
@@ -76,7 +79,7 @@ struct KvOnlyPlugin {
 }
 
 impl Plugin<FRAME_SIZE> for KvOnlyPlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "kv-only"
     }
 
@@ -107,8 +110,7 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         manager
             .register(
                 &mut router,
-                FilesystemPlugin {
-                    id: "first",
+                FilesystemPlugin::<0> {
                     filesystem: Rc::clone(&first),
                 },
             )
@@ -116,8 +118,7 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
         manager
             .register(
                 &mut router,
-                FilesystemPlugin {
-                    id: "second",
+                FilesystemPlugin::<1> {
                     filesystem: Rc::clone(&second),
                 },
             )

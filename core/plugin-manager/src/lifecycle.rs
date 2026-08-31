@@ -140,7 +140,7 @@ pub trait Plugin<const M: usize> {
     const REQUIREMENTS: PluginRequirements = PluginRequirements::new();
 
     /// Returns the stable identity used for lifecycle tracking and storage.
-    fn id(&self) -> &'static str;
+    fn id() -> &'static str;
 
     /// Registers the Plugin's capabilities and Event Router Components.
     ///
@@ -171,7 +171,7 @@ pub trait Plugin<const M: usize> {
 }
 
 trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
-    fn id(&self) -> &'static str;
+    fn identity(&self) -> &'static str;
     fn dependencies(&self) -> &'static [&'static str];
     fn requirements(&self) -> PluginRequirements;
     fn register(&mut self, context: &mut PluginRegisterContext<'_, M, Storage>)
@@ -184,8 +184,8 @@ where
     T: Plugin<M>,
     Storage: PluginStorage,
 {
-    fn id(&self) -> &'static str {
-        Plugin::id(self)
+    fn identity(&self) -> &'static str {
+        <T as Plugin<M>>::id()
     }
 
     fn dependencies(&self) -> &'static [&'static str] {
@@ -733,7 +733,7 @@ where
     ///
     /// Returns an error for an invalid, duplicate, or self-dependent identity.
     pub fn add<T: Plugin<M> + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
-        let id = PluginId::try_from(plugin.id())?;
+        let id = PluginId::try_from(<T as Plugin<M>>::id())?;
         if self.loaded.contains_key(&id) || self.pending.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));
@@ -798,7 +798,7 @@ where
         router: &mut EventRouter<N, M, Q>,
         mut plugin: Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>,
     ) -> Result<(), PluginRegisterError> {
-        let id = PluginId::try_from(plugin.id())?;
+        let id = PluginId::try_from(plugin.identity())?;
         if self.loaded.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
             return Err(PluginRegisterError::AlreadyRegistered(id));

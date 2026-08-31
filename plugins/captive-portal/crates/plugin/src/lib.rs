@@ -201,7 +201,7 @@ mod tests {
         let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
         let plugin = CaptivePortalPlugin::new(&mut context);
 
-        assert_eq!(Plugin::<512>::id(&plugin), "captive-portal");
+        assert_eq!(CaptivePortalPlugin::id(), "captive-portal");
         assert_eq!(
             <CaptivePortalPlugin as Plugin<512>>::DEPENDS_ON,
             &["agent", "webserver"]

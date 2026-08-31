@@ -40,7 +40,7 @@ impl Log for CaptureLogger {
 struct IdentifiedPlugin;
 
 impl Plugin<FRAME_SIZE> for IdentifiedPlugin {
-    fn id(&self) -> &'static str {
+    fn id() -> &'static str {
         "identified"
     }
 }

@@ -115,7 +115,7 @@ mod tests {
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = IMessageGatewayPlugin::new(&mut context);
-            assert_eq!(Plugin::<512>::id(&plugin), "imessage-gateway");
+            assert_eq!(IMessageGatewayPlugin::id(), "imessage-gateway");
 
             manager
                 .register(&mut router, plugin)
