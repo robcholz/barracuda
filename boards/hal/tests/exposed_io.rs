@@ -1,5 +1,7 @@
 //! Ownership and naming behavior of explicitly exposed Board I/O.
 
+#![allow(clippy::expect_used)]
+
 use barracuda_board_hal::{ExposedIo, NamedResources, NoExposedIo, ResourceSet};
 
 #[test]
