@@ -664,6 +664,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-e2e"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "barracuda-event-router",
+ "barracuda-indicator-led",
+ "barracuda-platform",
+ "barracuda-system",
+ "barracuda-target-api",
+ "barracuda-tls",
+ "barracuda-vfs",
+ "base64 0.22.1",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-net",
+ "embassy-net-driver-channel",
+ "embassy-time",
+ "embedded-hal 1.0.0",
+ "embedded-hal-async",
+ "embedded-io-async 0.7.0",
+ "embedded-storage",
+ "gateway",
+ "heapless 0.9.3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-event-router"
 version = "0.1.0"
 dependencies = [

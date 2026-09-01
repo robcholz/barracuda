@@ -18,6 +18,7 @@ members = [
     "shared/*",
     "tools/plugin-tool",
     "apps/barracuda-cli",
+    "e2e",
 ]
 default-members = [
     "apps/barracuda-cli",
