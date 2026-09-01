@@ -44,7 +44,7 @@ impl ToolSpec for TimeNowTool {
         include_str!("time_now.schema.json")
     }
 
-    fn arguments_validator(&self) -> &'static json_validator::Validator {
+    fn arguments_validator(&self) -> &dyn barracuda_agent_runtime::tools::ToolArgumentsValidator {
         const VALIDATOR: json_validator::Validator =
             json_validator::validator!("examples/time_now.schema.json");
         &VALIDATOR

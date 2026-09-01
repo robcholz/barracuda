@@ -11,7 +11,9 @@ use core::any::{type_name, Any, TypeId};
 use core::error::Error;
 use core::fmt::{self, Debug};
 
-use barracuda_event_router::{Component, ComponentId, EventRouter, LoadError, UnloadError};
+use barracuda_event_router::{
+    Component, ComponentId, EventRouter, LoadError, RpcClient, UnloadError,
+};
 use barracuda_kv::Database;
 use barracuda_vfs::{FsError, Vfs};
 use embassy_executor::Spawner;
@@ -215,6 +217,8 @@ where
 }
 
 trait ComponentRegistrar<const M: usize> {
+    fn rpc(&self) -> RpcClient;
+
     fn register_component(
         &mut self,
         component: Box<dyn Component<M>>,
@@ -228,6 +232,10 @@ struct EventRouterRegistrar<'a, const N: usize, const M: usize, const Q: usize> 
 impl<const N: usize, const M: usize, const Q: usize> ComponentRegistrar<M>
     for EventRouterRegistrar<'_, N, M, Q>
 {
+    fn rpc(&self) -> RpcClient {
+        self.router.rpc()
+    }
+
     fn register_component(
         &mut self,
         component: Box<dyn Component<M>>,
@@ -243,6 +251,12 @@ pub struct PluginEventRouterContext<'a, const M: usize> {
 }
 
 impl<const M: usize> PluginEventRouterContext<'_, M> {
+    /// Creates a read-only client for the shared Event Router RPC registry.
+    #[must_use]
+    pub fn rpc(&self) -> RpcClient {
+        self.registrar.rpc()
+    }
+
     /// Loads one Component owned by the registering Plugin.
     ///
     /// The manager records the returned identity for Plugin-wide rollback and

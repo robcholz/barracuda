@@ -24,7 +24,9 @@ use barracuda_agent_session::{
 };
 
 use crate::worker::{RuntimeCommand, RuntimeWorker, RuntimeWorkerInit};
-use crate::{RuntimeError, RuntimeStorageConfig, ToolGroup, ToolLifecycle};
+use crate::{
+    RuntimeError, RuntimeStorageConfig, SharedToolGroupProvider, ToolGroup, ToolLifecycle,
+};
 
 /// What can go wrong while building an [`AgentRuntime`](crate::AgentRuntime) and [`RuntimeService`].
 #[derive(Debug, thiserror::Error)]
@@ -93,6 +95,7 @@ impl RuntimeControl {
         storage: RuntimeStorageConfig,
         llm_factory: ModelApiFactory<Tcp, Resolver>,
         tool_groups: Vec<ToolGroup>,
+        tool_group_providers: Vec<SharedToolGroupProvider>,
         tool_lifecycle: Arc<ToolLifecycle>,
     ) -> (Self, RuntimeService)
     where
@@ -110,6 +113,11 @@ impl RuntimeControl {
                 let tools = Arc::new(ToolRegistry::new(Arc::clone(&persistence)).await?);
                 for group in tool_groups {
                     tools.register_group(group)?;
+                }
+                for provider in tool_group_providers {
+                    for group in provider.provide()? {
+                        tools.register_group(group)?;
+                    }
                 }
                 tool_lifecycle.install(Arc::clone(&tools))?;
                 RuntimeWorker::new(RuntimeWorkerInit {

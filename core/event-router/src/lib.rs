@@ -96,6 +96,12 @@ impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
         Ok(Self { router, workflow })
     }
 
+    /// Creates a read-only client for this Event Router's RPC registry.
+    #[must_use]
+    pub fn rpc(&self) -> RpcClient {
+        self.router.rpc()
+    }
+
     /// Returns an immutable snapshot of Workflow definitions and execution state.
     #[must_use]
     pub fn workflow_info(&self) -> WorkflowInfo {

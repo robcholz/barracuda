@@ -142,6 +142,7 @@ fn client_does_not_retain_the_registry() {
 #[test]
 fn registry_discovers_sorted_groups_and_rpcs_as_snapshots() {
     let registry = registry();
+    let client = registry.client();
     let unary = registry
         .register::<UnaryUnaryMethod, _>(|_context, request: RpcFrame<Number>| async move {
             Ok(Ok(Total {
@@ -167,11 +168,29 @@ fn registry_discovers_sorted_groups_and_rpcs_as_snapshots() {
         groups.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
         vec!["other", "typed"]
     );
+    assert_eq!(
+        client
+            .groups()
+            .expect("client discovers groups")
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&str>>(),
+        vec!["other", "typed"]
+    );
 
     let typed = RpcGroup::try_from("typed").expect("valid group");
     let typed_rpcs = registry.rpcs(&typed);
     assert_eq!(
         typed_rpcs.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+        vec!["typed.frame_lease", "typed.unary_unary"]
+    );
+    assert_eq!(
+        client
+            .rpcs(&typed)
+            .expect("client discovers RPCs")
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&str>>(),
         vec!["typed.frame_lease", "typed.unary_unary"]
     );
 

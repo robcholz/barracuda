@@ -13,7 +13,7 @@ extern crate alloc;
 mod service;
 mod worker;
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{rc::Rc, string::String, sync::Arc, vec::Vec};
 use core::cell::{Cell, RefCell};
 use http_client::embedded_nal_async::{Dns, TcpConnect};
 
@@ -41,14 +41,48 @@ pub use service::{RuntimeBuildError, RuntimeService};
 
 /// Types needed to define tools accepted by [`AgentRuntime::with_tool_groups`].
 pub mod tools {
+    pub use crate::{SharedToolGroupProvider, ToolGroupProvider, ToolGroupProviderError};
     pub use barracuda_agent_tool::{
-        tool_metadata, Action, EmptyArgs, Resource, RiskClass, Tool, ToolConfig, ToolError,
-        ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
-        ToolResult, ToolSpec,
+        tool_metadata, Action, EmptyArgs, Resource, RiskClass, Tool, ToolArgumentsValidator,
+        ToolConfig, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolInvokeError,
+        ToolOutput, ToolResult, ToolSpec,
     };
 }
 
 pub use tools::ToolGroup;
+
+/// Produces fixed Agent tool groups after System registration is complete.
+///
+/// Providers are supplied while constructing the Agent runtime and consumed
+/// exactly once when its service initializes. They are not runtime registries.
+pub trait ToolGroupProvider {
+    /// Builds this provider's immutable tool groups.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the fixed System graph cannot be projected.
+    fn provide(&self) -> Result<Vec<ToolGroup>, ToolGroupProviderError>;
+}
+
+/// Shared handle for one fixed [`ToolGroupProvider`].
+pub type SharedToolGroupProvider = Rc<dyn ToolGroupProvider>;
+
+/// Failure while building fixed Agent tool groups during service startup.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct ToolGroupProviderError {
+    message: String,
+}
+
+impl ToolGroupProviderError {
+    /// Creates an error with provider-specific context.
+    #[must_use]
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
 
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
 
@@ -74,6 +108,9 @@ pub enum RuntimeError {
     /// The tool registry failed.
     #[error(transparent)]
     Tool(#[from] ToolRegistryError),
+    /// Fixed tool groups could not be built during startup.
+    #[error(transparent)]
+    ToolGroupProvider(#[from] ToolGroupProviderError),
     /// Opening a session event stream failed.
     #[error(transparent)]
     OpenSession(#[from] OpenSessionError),
@@ -172,12 +209,42 @@ impl AgentRuntime {
         Tcp: TcpConnect + 'static,
         Resolver: Dns + 'static,
     {
+        Self::with_tool_groups_and_providers(
+            filesystem,
+            persistence,
+            llm_factory,
+            tool_groups,
+            core::iter::empty::<SharedToolGroupProvider>(),
+        )
+    }
+
+    /// Builds an Agent runtime with static groups and fixed startup providers.
+    ///
+    /// Providers are fixed during construction and each is consumed once when
+    /// the runtime service initializes after the complete System graph has
+    /// registered.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when persistence or runtime construction fails.
+    pub fn with_tool_groups_and_providers<Tcp, Resolver>(
+        filesystem: ScopedVfs,
+        persistence: RuntimeStorageConfig,
+        llm_factory: ModelApiFactory<Tcp, Resolver>,
+        tool_groups: impl IntoIterator<Item = ToolGroup>,
+        tool_group_providers: impl IntoIterator<Item = SharedToolGroupProvider>,
+    ) -> RuntimeResult<(Self, RuntimeService)>
+    where
+        Tcp: TcpConnect + 'static,
+        Resolver: Dns + 'static,
+    {
         let tool_lifecycle = Arc::new(ToolLifecycle::default());
         let (control, service) = RuntimeControl::new(
             filesystem,
             persistence,
             llm_factory,
             tool_groups.into_iter().collect(),
+            tool_group_providers.into_iter().collect(),
             Arc::clone(&tool_lifecycle),
         );
 

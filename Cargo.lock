@@ -432,6 +432,10 @@ dependencies = [
  "embassy-time",
  "futures-lite",
  "http-client",
+ "json-validator",
+ "serde",
+ "serde_json",
+ "zerocopy",
 ]
 
 [[package]]

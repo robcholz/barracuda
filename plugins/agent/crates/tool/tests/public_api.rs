@@ -432,7 +432,7 @@ impl ToolSpec for EchoTool {
         r#"{"type":"function","function":{"name":"echo"}}"#
     }
 
-    fn arguments_validator(&self) -> &'static json_validator::Validator {
+    fn arguments_validator(&self) -> &dyn barracuda_agent_tool::ToolArgumentsValidator {
         const VALIDATOR: json_validator::Validator =
             json_validator::validator!("tests/fixtures/object.json");
         &VALIDATOR
@@ -468,7 +468,7 @@ impl ToolSpec for OtherTool {
         r#"{"type":"function","function":{"name":"other"}}"#
     }
 
-    fn arguments_validator(&self) -> &'static json_validator::Validator {
+    fn arguments_validator(&self) -> &dyn barracuda_agent_tool::ToolArgumentsValidator {
         const VALIDATOR: json_validator::Validator =
             json_validator::validator!("tests/fixtures/object.json");
         &VALIDATOR

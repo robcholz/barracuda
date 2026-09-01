@@ -16,9 +16,9 @@ mod validate;
 
 pub use barracuda_agent_permission::{Action, Resource, RiskClass};
 pub use definition::{
-    DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolCompletionFuture,
-    ToolConfig, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolInvokeError, ToolOutput,
-    ToolResult, ToolSpec,
+    DetachedTool, DetachedToolFuture, DetachedToolHandler, EmptyArgs, Tool, ToolArgumentsValidator,
+    ToolCompletionFuture, ToolConfig, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+    ToolInvokeError, ToolOutput, ToolResult, ToolSpec,
 };
 pub use registry::{ToolGroup, ToolRegistry, ToolRegistryError, ToolRegistryVersion};
 pub use runner::{ToolDetachHandle, ToolJoinHandle, ToolRunner};

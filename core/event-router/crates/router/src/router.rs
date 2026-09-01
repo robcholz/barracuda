@@ -14,7 +14,9 @@ use getset::CopyGetters;
 use super::component::{
     Component, ComponentError, ComponentFuture, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_rpc::{RpcError, RpcLaneStorage, RpcRegistration, RpcRegistry, RpcRegistryApi};
+use barracuda_rpc::{
+    RpcClient, RpcError, RpcLaneStorage, RpcRegistration, RpcRegistry, RpcRegistryApi,
+};
 
 const FIRST_COMPONENT_ID: u64 = 1;
 
@@ -170,6 +172,12 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
             next_component_id: Some(FIRST_COMPONENT_ID),
             terminated: false,
         }
+    }
+
+    /// Creates a read-only client for the RPC registry owned by this Router.
+    #[must_use]
+    pub fn rpc(&self) -> RpcClient {
+        self.registry.client()
     }
 
     /// Registers and loads one Component without starting an executor.

@@ -143,7 +143,7 @@ mod tests {
             r#"{"type":"function","function":{"name":"hidden_test"}}"#
         }
 
-        fn arguments_validator(&self) -> &'static json_validator::Validator {
+        fn arguments_validator(&self) -> &dyn barracuda_agent_tool::ToolArgumentsValidator {
             const VALIDATOR: json_validator::Validator =
                 json_validator::validator!("resources/tools/plan_enter/schema.json");
             &VALIDATOR

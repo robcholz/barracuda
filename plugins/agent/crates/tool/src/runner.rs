@@ -281,7 +281,7 @@ mod tests {
             r#"{"type":"function","function":{"name":"echo","parameters":{"type":"object"}}}"#
         }
 
-        fn arguments_validator(&self) -> &'static json_validator::Validator {
+        fn arguments_validator(&self) -> &dyn crate::ToolArgumentsValidator {
             const VALIDATOR: json_validator::Validator =
                 json_validator::validator!("tests/fixtures/object.json");
             &VALIDATOR
@@ -312,7 +312,7 @@ mod tests {
             r#"{"type":"function","function":{"name":"dynamic","parameters":{"type":"object"}}}"#
         }
 
-        fn arguments_validator(&self) -> &'static json_validator::Validator {
+        fn arguments_validator(&self) -> &dyn crate::ToolArgumentsValidator {
             const VALIDATOR: json_validator::Validator =
                 json_validator::validator!("tests/fixtures/object.json");
             &VALIDATOR

@@ -108,7 +108,10 @@ mod invocation_tests {
     use alloc::string::String;
     use core::cell::Cell;
 
-    use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
+    use super::{
+        Tool, ToolArgumentsValidator, ToolError, ToolFuture, ToolHandler, ToolInvocation,
+        ToolOutput, ToolSpec,
+    };
     use futures_lite::future::block_on;
     use serde::Deserialize;
 
@@ -128,7 +131,7 @@ mod invocation_tests {
             ))
         }
 
-        fn arguments_validator(&self) -> &'static json_validator::Validator {
+        fn arguments_validator(&self) -> &dyn ToolArgumentsValidator {
             const VALIDATOR: json_validator::Validator =
                 json_validator::validator!("tests/fixtures/example.json");
             &VALIDATOR
@@ -268,7 +271,7 @@ pub trait ToolSpec {
 
     fn schema(&self) -> &str;
 
-    fn arguments_validator(&self) -> &'static json_validator::Validator;
+    fn arguments_validator(&self) -> &dyn ToolArgumentsValidator;
 
     fn usage(&self) -> Option<&str> {
         None
@@ -280,6 +283,25 @@ pub trait ToolSpec {
 
     fn classify(&self, _call: &ToolInvocation) -> Action {
         Action::new(self.name(), RiskClass::High)
+    }
+}
+
+/// Validates one already-parsed tool argument object.
+pub trait ToolArgumentsValidator {
+    /// Validates `arguments` before classification or invocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns a tool invocation error when the arguments do not match the
+    /// tool's canonical input contract.
+    fn validate(&self, arguments: &serde_json::Value) -> ToolResult<()>;
+}
+
+impl ToolArgumentsValidator for json_validator::Validator {
+    fn validate(&self, arguments: &serde_json::Value) -> ToolResult<()> {
+        json_validator::Validator::validate(self, arguments)
+            .map_err(ToolError::from)
+            .map_err(ToolInvokeError::from)
     }
 }
 
@@ -345,7 +367,7 @@ macro_rules! tool_metadata {
             ))
         }
 
-        fn arguments_validator(&self) -> &'static ::json_validator::Validator {
+        fn arguments_validator(&self) -> &dyn $crate::ToolArgumentsValidator {
             const VALIDATOR: ::json_validator::Validator =
                 ::json_validator::validator!("resources/tools/", $name, "/schema.json");
             &VALIDATOR
@@ -497,10 +519,7 @@ impl Tool {
             ToolInner::Handler(handler) => handler.arguments_validator(),
             ToolInner::Detached(handler) => handler.arguments_validator(),
         };
-        validator
-            .validate(call.arguments_value())
-            .map_err(ToolError::from)?;
-        Ok(())
+        validator.validate(call.arguments_value())
     }
 }
 

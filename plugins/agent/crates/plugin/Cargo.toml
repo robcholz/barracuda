@@ -11,17 +11,21 @@ std = ["barracuda-agent-runtime/std"]
 [dependencies]
 barracuda-agent-component = { path = "../component" }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
+barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
+json-validator = { path = "../../../../shared/json-validator" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
+serde = { version = "1", features = ["derive"] }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [lints.rust]
 unsafe_code = "forbid"

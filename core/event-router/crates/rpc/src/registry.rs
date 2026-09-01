@@ -194,7 +194,22 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// the new registry state.
     #[must_use]
     pub fn groups(&self) -> Vec<RpcGroup> {
-        let endpoints = self.core.endpoints.borrow();
+        self.core.groups()
+    }
+
+    /// Returns a sorted snapshot of RPC addresses in `group`.
+    ///
+    /// An unknown group produces an empty snapshot. Registering or
+    /// unregistering an RPC does not mutate a previously returned snapshot.
+    #[must_use]
+    pub fn rpcs(&self, group: &RpcGroup) -> Vec<RpcAddress> {
+        self.core.rpcs(group)
+    }
+}
+
+impl RegistryCore {
+    fn groups(&self) -> Vec<RpcGroup> {
+        let endpoints = self.endpoints.borrow();
         let mut groups = Vec::new();
         for address in endpoints.keys() {
             push_group(&mut groups, address);
@@ -208,9 +223,8 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// An unknown group produces an empty snapshot. Registering or
     /// unregistering an RPC does not mutate a previously returned snapshot.
     #[must_use]
-    pub fn rpcs(&self, group: &RpcGroup) -> Vec<RpcAddress> {
+    fn rpcs(&self, group: &RpcGroup) -> Vec<RpcAddress> {
         let mut addresses: Vec<_> = self
-            .core
             .endpoints
             .borrow()
             .keys()
@@ -220,7 +234,9 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
         addresses.sort_unstable();
         addresses
     }
+}
 
+impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// Registers a handler for method `M`.
     ///
     /// The method descriptor is retained with the endpoint so typed clients can
@@ -649,6 +665,13 @@ impl RpcMethodInfo {
         RpcCardinality::from_type_id(self.descriptor.output_mode_type_id())
     }
 
+    /// Returns the baked request schema when this method is runtime-dynamic
+    /// and its owning crate ran the schema pipeline.
+    #[must_use]
+    pub fn schema(&self) -> Option<&'static str> {
+        self.dynamic.as_ref().and_then(Dynamic::schema)
+    }
+
     /// Returns this method's wire field tables, when it is runtime-dynamic.
     #[must_use]
     pub fn wire(&self) -> Option<&WireSupport> {
@@ -744,6 +767,26 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
+    /// Returns a sorted snapshot of Event Router RPC groups.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone.
+    pub fn groups(&self) -> RpcResult<Vec<RpcGroup>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        Ok(registry.groups())
+    }
+
+    /// Returns a sorted snapshot of RPC addresses in `group`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone.
+    pub fn rpcs(&self, group: &RpcGroup) -> RpcResult<Vec<RpcAddress>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        Ok(registry.rpcs(group))
+    }
+
     /// Starts a typed call for method `M`.
     ///
     /// The one method selects its input and output shape through `M`; callers do
@@ -822,7 +865,7 @@ impl RpcClient {
 
         let request_bytes = codec.encode_request(request)?;
         let (mut writer, mut reader) = self.call_payload(address)?;
-        writer.write_all(&request_bytes).await?;
+        writer.write_frame(&request_bytes).await?;
         writer.close().await?;
 
         match reader.read().await? {

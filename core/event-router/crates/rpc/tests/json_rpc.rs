@@ -84,6 +84,26 @@ async fn set_level(
     Ok(Ok(()))
 }
 
+struct Ping;
+
+#[rpc_dynamic]
+impl RpcMethod for Ping {
+    const ADDRESS: &'static str = "system.ping";
+    type Request = ();
+    type Response = ();
+    type Error = ();
+    type Input = Unary;
+    type Output = Unary;
+}
+
+async fn ping(
+    _context: barracuda_rpc::RpcContext,
+    request: RpcFrame<()>,
+) -> RpcResult<Result<(), ()>> {
+    request.view()?;
+    Ok(Ok(()))
+}
+
 #[test]
 fn call_json_transcodes_a_structured_request_and_void_response() {
     let registry = registry::<1, 16, 1>();
@@ -99,6 +119,24 @@ fn call_json_transcodes_a_structured_request_and_void_response() {
             .await
             .expect("call_json succeeds");
         // Response is `()`, so the value is JSON null.
+        assert_eq!(response, json!({ "ok": true, "value": Value::Null }));
+    });
+}
+
+#[test]
+fn json_calls_publish_zero_sized_unit_request_frames() {
+    let registry = registry::<1, 1, 1>();
+    registry
+        .register::<Ping, _>(ping)
+        .expect("register endpoint");
+    let address = RpcAddress::try_from(Ping::ADDRESS).expect("valid address");
+    let client = registry.client();
+
+    block_on(async {
+        let response = client
+            .call_json(&address, &Value::Null)
+            .await
+            .expect("unary JSON call succeeds");
         assert_eq!(response, json!({ "ok": true, "value": Value::Null }));
     });
 }

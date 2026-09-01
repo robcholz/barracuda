@@ -4,11 +4,14 @@
 
 extern crate alloc;
 
+mod event_router_tools;
+
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 use barracuda_agent_component::component::AgentComponent;
+use barracuda_agent_runtime::tools::SharedToolGroupProvider;
 use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin_api::PluginContext;
@@ -16,6 +19,8 @@ use barracuda_plugin_manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
 use http_client::ClientFactory;
+
+use crate::event_router_tools::EventRouterToolProvider;
 
 pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
 pub use barracuda_model_api::{BackendKind, InitError};
@@ -89,8 +94,16 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
             persistence_root: PERSISTENCE_ROOT.into(),
             skill_roots: Vec::new(),
         };
-        let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
-            .map_err(PluginError::registration)?;
+        let rpc_tools: SharedToolGroupProvider =
+            Rc::new(EventRouterToolProvider::new(context.event_router.rpc()));
+        let (runtime, service) = AgentRuntime::with_tool_groups_and_providers(
+            filesystem,
+            storage,
+            model_api_factory,
+            core::iter::empty(),
+            core::iter::once(rpc_tools),
+        )
+        .map_err(PluginError::registration)?;
         runtime.start_all().map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
         let set_api_runtime = Rc::clone(&runtime);
