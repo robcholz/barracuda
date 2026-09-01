@@ -140,8 +140,10 @@ in-flight prepared calls from polling the handler, which reports
 
 Registration enforces the lane contract at compile time: the fixed request,
 response, and error messages must fit the lane frame capacity and align with
-the lane frames. The registry exposes sorted snapshots of groups and
-addresses (`groups`, `rpcs`) for discovery.
+the lane frames. Both the registry and its task-local clients expose sorted
+snapshots of groups and addresses (`groups`, `rpcs`) for discovery. A method
+snapshot exposes its baked request schema separately from the rest of its
+dynamic surface, allowing adapters to require `Dynamic + Some(schema)`.
 
 ## Invariants
 
