@@ -12,6 +12,29 @@ pub type Bindings =
 pub type Resources =
     TargetResources<barracuda_platform_selected::Resources, barracuda_board_selected::Resources>;
 
+/// Splits the ESP32-C5 peripheral singleton into the independently selected
+/// Platform and Board HAL bindings.
+///
+/// The selected C5 DevKit board currently declares no exposed GPIO, I2C, or
+/// SPI resources, so every chip mechanism is assigned to the Platform axis.
+///
+/// # Errors
+///
+/// Returns an error when the selected Board does not target ESP32-C5.
+#[cfg(all(target_arch = "riscv32", feature = "esp32c5"))]
+pub fn bindings_from_peripherals(
+    peripherals: esp_hal::peripherals::Peripherals,
+) -> Result<Bindings, barracuda_platform_selected::Error> {
+    let platform = barracuda_platform_selected::Bindings::new(
+        &BOARD,
+        peripherals.FLASH,
+        peripherals.WIFI,
+        peripherals.TIMG0,
+        peripherals.FROM_CPU_INTR0,
+    )?;
+    Ok(TargetBindings::new(platform, ()))
+}
+
 /// Failure while composing the independently selected target axes.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

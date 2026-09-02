@@ -21,7 +21,7 @@ barracuda-vm-package-api = { path = "../package-api" }
 barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
 embassy-executor.workspace = true
 embassy-time.workspace = true
-embedded-alloc = { version = "0.7", default-features = false, features = ["tlsf"] }
+embedded-alloc = { version = "0.7", default-features = false, features = ["llff"] }
 futures-core = { version = "0.3", default-features = false }
 getset = "0.1"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
@@ -31,7 +31,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }
 critical-section = { version = "1", features = ["std"] }
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 serde_json = "1"

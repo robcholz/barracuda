@@ -14,7 +14,7 @@ barracuda-time-plugin = { path = "../../../time/crates/plugin" }
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

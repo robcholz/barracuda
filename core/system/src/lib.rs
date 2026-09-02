@@ -18,7 +18,7 @@ use core::task::{Context, Poll};
 use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
-use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_api::{PluginContext, PluginResourceProfile, ScriptRuntimeBudget};
 use barracuda_plugin_manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
@@ -33,13 +33,51 @@ use embedded_storage::nor_flash::NorFlash;
 macro_rules! register_plugins {
     ($manager:ident, $router:ident; $($plugin:expr),* $(,)?) => {
         $(
+            log::info!("constructing System Plugin: {}", stringify!($plugin));
             $manager.add($plugin)?;
         )*
+        log::info!("registering complete System Plugin graph");
         $manager.register_all(&mut $router)?;
     };
 }
 
 pub use resources::SystemResourceError;
+
+/// Portable resource policy for the fixed System Plugin graph.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SystemConfig {
+    vm_slot_count: usize,
+    vm_memory_bytes_per_slot: usize,
+    plugin_resources: PluginResourceProfile,
+}
+
+impl SystemConfig {
+    /// Desktop/server defaults used by [`System::new`].
+    #[must_use]
+    pub const fn standard() -> Self {
+        Self {
+            vm_slot_count: 4,
+            vm_memory_bytes_per_slot: 64 * 1024,
+            plugin_resources: PluginResourceProfile::Standard,
+        }
+    }
+
+    /// Memory-bounded policy shared by embedded device applications.
+    #[must_use]
+    pub const fn embedded() -> Self {
+        Self {
+            vm_slot_count: 1,
+            vm_memory_bytes_per_slot: 8 * 1024,
+            plugin_resources: PluginResourceProfile::Embedded,
+        }
+    }
+}
+
+impl Default for SystemConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 /// Fully assembled portable Barracuda system.
 ///
@@ -122,6 +160,24 @@ where
         >,
         spawner: Spawner,
     ) -> Result<Self, SystemCreateError> {
+        Self::new_with_config(lanes, resources, spawner, SystemConfig::standard()).await
+    }
+
+    /// Constructs the fixed Plugin set with an explicit portable resource policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SystemCreateError`] when resource assignment, storage,
+    /// registration, or startup fails.
+    pub async fn new_with_config<Tls: ClientTls>(
+        lanes: &'static RpcLaneStorage<N, M, Q>,
+        resources: TargetResources<
+            PlatformResources<Tls, Partitions<Region, P>>,
+            BoardHalResources<Builtins, Io>,
+        >,
+        spawner: Spawner,
+        config: SystemConfig,
+    ) -> Result<Self, SystemCreateError> {
         log::info!("assembling Barracuda System");
         let prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
@@ -133,13 +189,22 @@ where
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
+        log::info!("installing System VFS in Plugin Manager");
         plugins.install_vfs(global_namespace().await);
+        log::info!("installing task spawner in Plugin Manager");
         plugins.install_task_spawner(spawner);
 
+        log::info!("constructing System HTTP client factory");
         let http_clients =
             http_client::ClientFactory::new(prepared.ip_stack, move || prepared.tls.config());
+        log::info!("constructing System Plugin context");
         let mut plugin_context =
-            PluginContext::from_hal(prepared.ip_stack, http_clients, prepared.board_hal);
+            PluginContext::from_hal(prepared.ip_stack, http_clients, prepared.board_hal)
+                .with_script_runtime(ScriptRuntimeBudget::new(
+                    config.vm_slot_count,
+                    config.vm_memory_bytes_per_slot,
+                ))
+                .with_resource_profile(config.plugin_resources);
 
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins, router;

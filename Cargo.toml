@@ -18,6 +18,7 @@ members = [
     "shared/*",
     "tools/plugin-tool",
     "apps/barracuda-cli",
+    "apps/barracuda-device",
 ]
 default-members = [
     "apps/barracuda-cli",
@@ -27,13 +28,29 @@ default-members = [
 embassy-time = { version = "0.5.1", default-features = false }
 embassy-futures = { version = "0.1.2", default-features = false }
 embassy-sync = { version = "0.7.2", default-features = false }
-embassy-executor = { version = "0.9.1", default-features = false }
-embassy-net = { version = "0.9.1", default-features = false, features = ["dns", "medium-ip", "proto-ipv4", "tcp", "udp"] }
+embassy-executor = { version = "0.10.0", default-features = false }
+embassy-net = { version = "0.9.1", default-features = false, features = ["dns", "medium-ethernet", "medium-ip", "proto-ipv4", "tcp", "udp"] }
 embassy-net-driver-channel = { version = "0.4.0", default-features = false }
 embedded-storage-async = "0.4.1"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 log = { version = "0.4", default-features = false }
+
+# ESP32-C5 Wi-Fi support currently lives on the official esp-hal mainline that
+# matches the 1.2.0-rc.0 HAL used by every ESP Platform crate in this workspace.
+# Pin the complete shared ESP substrate so Cargo never links registry and git
+# copies of the same low-level runtime into one image.
+[patch.crates-io]
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-config = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-hal-procmacros = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-metadata-generated = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-phy = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-radio-rtos-driver = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-rom-sys = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
+esp-sync = { git = "https://github.com/esp-rs/esp-hal.git", rev = "b06b604a419de88ae9105282f5d04b9e72b21985" }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
 # the std crates can be unit-tested on the host. LTO remains disabled so final

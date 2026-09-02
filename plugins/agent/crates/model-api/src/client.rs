@@ -241,6 +241,20 @@ where
         }
     }
 
+    /// Constructs an unconfigured model client with explicit reusable HTTP
+    /// buffer sizes. Buffers are allocated lazily on the first request.
+    #[must_use]
+    pub fn with_http_buffer_sizes(
+        http_clients: http_client::ClientFactory<'net, Tcp, Resolver>,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+    ) -> Self {
+        Self {
+            backend: None,
+            http: Transport::with_buffer_sizes(http_clients, header_buffer_size, read_buffer_size),
+        }
+    }
+
     /// Rebind this client to a new [`ModelApiConfig`] at runtime, keeping the
     /// existing Agent HTTP client and reusable buffers. Only the backend —
     /// provider, key, model, base URL — is rebuilt.

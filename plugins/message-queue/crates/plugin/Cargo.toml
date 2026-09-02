@@ -13,6 +13,7 @@ barracuda-vm-package-api = { path = "../../../vm/crates/package-api" }
 barracuda-vm-plugin = { path = "../../../vm/crates/plugin" }
 embassy-sync.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
+portable-atomic = { version = "1", default-features = false, features = ["critical-section"] }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
 
 [dev-dependencies]

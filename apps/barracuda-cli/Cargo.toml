@@ -19,7 +19,7 @@ tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-executor = { workspace = true, features = ["platform-std", "executor-thread"] }
 embassy-sync.workspace = true
 anstyle = "1"
 rustyline = { version = "18.0.1", default-features = false }

@@ -3,7 +3,6 @@
 use alloc::{
     boxed::Box,
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 use core::{future::Future, pin::Pin};
@@ -72,6 +71,8 @@ where
     connection_healthy: bool,
     header_buffer: Vec<u8>,
     read_buffer: Vec<u8>,
+    header_buffer_size: usize,
+    read_buffer_size: usize,
     tls_configured: bool,
 }
 
@@ -82,16 +83,35 @@ where
 {
     #[must_use]
     pub(crate) fn new(factory: http_client::ClientFactory<'net, Tcp, Resolver>) -> Self {
+        Self::with_buffer_sizes(factory, HEADER_BUFFER_SIZE, READ_BUFFER_SIZE)
+    }
+
+    #[must_use]
+    pub(crate) fn with_buffer_sizes(
+        factory: http_client::ClientFactory<'net, Tcp, Resolver>,
+        header_buffer_size: usize,
+        read_buffer_size: usize,
+    ) -> Self {
         let (client, tls_configured) = factory.create();
         Self {
             disconnected: Some(client),
             connected: None,
             connected_origin: None,
             connection_healthy: true,
-            header_buffer: vec![0; HEADER_BUFFER_SIZE],
-            read_buffer: vec![0; READ_BUFFER_SIZE],
+            // Agent construction creates independent clients for root,
+            // compaction, and memory roles. Allocate transport buffers only
+            // when one of those roles actually performs an HTTP request.
+            header_buffer: Vec::new(),
+            read_buffer: Vec::new(),
+            header_buffer_size,
+            read_buffer_size,
             tls_configured,
         }
+    }
+
+    fn prepare_buffers(&mut self) {
+        self.header_buffer.resize(self.header_buffer_size, 0);
+        self.read_buffer.resize(self.read_buffer_size, 0);
     }
 
     fn disconnect(&mut self) {
@@ -150,6 +170,7 @@ where
         let (origin, path) = split_url(url)?;
         let origin = origin.to_string();
         let path = path.to_string();
+        self.prepare_buffers();
         self.ensure_connected(&origin).await?;
         let Self {
             connected,
@@ -227,6 +248,7 @@ where
             let (origin, path) = split_url(&url)?;
             let origin = origin.to_string();
             let path = path.to_string();
+            self.prepare_buffers();
             self.ensure_connected(&origin).await?;
             let result = {
                 let Self {

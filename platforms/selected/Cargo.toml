@@ -7,6 +7,11 @@ description = "Compile-time selected Barracuda Platform"
 [lib]
 crate-type = ["rlib"]
 
+[features]
+default = []
+esp32c5 = ["dep:barracuda-platform-esp32c5"]
+esp32c6 = ["dep:barracuda-platform-esp32c6"]
+
 [dependencies]
 barracuda-platform = { path = "../api" }
 embassy-executor.workspace = true
@@ -24,7 +29,8 @@ barracuda-platform-esp32s3 = { path = "../esp32s3" }
 barracuda-platform-esp32c3 = { path = "../esp32c3" }
 
 [target.riscv32imac-unknown-none-elf.dependencies]
-barracuda-platform-esp32c6 = { path = "../esp32c6" }
+barracuda-platform-esp32c5 = { path = "../esp32c5", optional = true }
+barracuda-platform-esp32c6 = { path = "../esp32c6", optional = true }
 
 [target.riscv32imafc-unknown-none-elf.dependencies]
 barracuda-platform-esp32p4 = { path = "../esp32p4" }

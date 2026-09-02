@@ -6,7 +6,7 @@ description = "Linux Platform implementation for Barracuda"
 
 [features]
 default = []
-testing = ["embassy-executor/arch-std", "embassy-executor/executor-thread"]
+testing = ["embassy-executor/platform-std", "embassy-executor/executor-thread"]
 
 [dependencies]
 barracuda-board = { path = "../../boards/api" }

@@ -1,0 +1,7 @@
+name: esp32c5-devkitc-1
+hardware:
+  chip: esp32c5
+toolchain:
+  target: riscv32imac-unknown-none-elf
+native-layout:
+  artifact: partitions.csv

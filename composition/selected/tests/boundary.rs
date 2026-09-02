@@ -38,7 +38,23 @@ fn outer_composition_does_not_guess_a_board_from_the_target() -> Result<(), std:
     let manifest = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
     )?;
-    assert!(!manifest.contains("features = ["));
+    assert!(!manifest.contains("barracuda-board-selected/"));
     assert_eq!(manifest.matches("barracuda-board-selected").count(), 1);
+    Ok(())
+}
+
+#[test]
+fn shared_riscv_target_chip_selection_propagates_to_platform() -> Result<(), std::io::Error> {
+    let manifest = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"),
+    )?;
+
+    for chip in ["esp32c5", "esp32c6"] {
+        let feature = manifest
+            .lines()
+            .find(|line| line.starts_with(&format!("{chip} = [")))
+            .unwrap_or_else(|| panic!("missing {chip} target feature"));
+        assert!(feature.contains(&format!("\"barracuda-platform-selected/{chip}\"")));
+    }
     Ok(())
 }

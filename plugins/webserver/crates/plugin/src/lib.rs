@@ -76,10 +76,16 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(WebServerRuntimeUnavailable))?;
         let spawner = context.task_spawner()?;
-        let cancellation = context.task_token();
-        spawner
-            .spawn(task::web_server(webserver, self.stack, cancellation))
-            .map_err(PluginError::registration)?;
+        log::info!(
+            "starting WebServer on port {WEB_SERVER_PORT} with {WEB_SERVER_CONNECTION_SLOTS} connection workers"
+        );
+        for worker in 0..WEB_SERVER_CONNECTION_SLOTS {
+            let cancellation = context.task_token();
+            let task =
+                task::web_server_worker(Rc::clone(&webserver), self.stack, worker, cancellation)
+                    .map_err(PluginError::registration)?;
+            spawner.spawn(task);
+        }
         Ok(())
     }
 }

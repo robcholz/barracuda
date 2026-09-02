@@ -61,9 +61,9 @@ pub async fn initialize(
     let stack_resources = Box::leak(Box::new(StackResources::<STACK_SOCKET_CAPACITY>::new()));
     let (stack, network_runner) = embassy_net::new(device, config, stack_resources, rand::random());
 
-    spawner.spawn(network_task(network_runner))?;
-    spawner.spawn(tun_rx_task(Arc::clone(&tun), rx_runner))?;
-    spawner.spawn(tun_tx_task(tun, tx_runner))?;
+    spawner.spawn(network_task(network_runner)?);
+    spawner.spawn(tun_rx_task(Arc::clone(&tun), rx_runner)?);
+    spawner.spawn(tun_tx_task(tun, tx_runner)?);
     stack.wait_link_up().await;
     Ok(stack)
 }

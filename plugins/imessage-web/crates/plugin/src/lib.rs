@@ -9,7 +9,7 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
 use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
-use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_api::{PluginContext, PluginResourceProfile};
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::WebServer;
 use gateway::{MessageChannel, MessageChannelRegistration};
@@ -22,8 +22,14 @@ pub const WEB_CONVERSATION: &str = "conversation";
 
 const WEB_HISTORY: usize = 64;
 const WEB_SUBSCRIBERS: usize = 8;
+const EMBEDDED_WEB_HISTORY: usize = 8;
+const EMBEDDED_WEB_SUBSCRIBERS: usize = 2;
 
-type WebChannel = Web<WEB_HISTORY, WEB_SUBSCRIBERS>;
+#[derive(Clone, Copy)]
+enum WebResources {
+    Standard,
+    Embedded,
+}
 
 /// Route capability published for consumers of the built-in Web conversation.
 pub struct IMessageWebRoute {
@@ -46,13 +52,20 @@ impl IMessageWebRoute {
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
 #[barracuda_plugin_api::plugin]
-pub struct IMessageWebPlugin;
+pub struct IMessageWebPlugin {
+    resources: WebResources,
+}
 
 impl IMessageWebPlugin {
     /// Creates the IMessage Web Plugin.
     #[must_use]
-    pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self
+    pub const fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
+        Self {
+            resources: match context.resource_profile {
+                PluginResourceProfile::Standard => WebResources::Standard,
+                PluginResourceProfile::Embedded => WebResources::Embedded,
+            },
+        }
     }
 }
 
@@ -64,32 +77,48 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
-        )?;
-        let web = Rc::new(WebChannel::new());
-        let channel: Rc<dyn MessageChannel> = web.clone();
-        let channel_registration: MessageChannelRegistration = gateway
-            .register(channel)
-            .map_err(PluginError::registration)?;
-        let route = GatewayRoute::new(WEB_CHANNEL, WEB_CONVERSATION);
-        let sink: Rc<dyn InboundMessageSink> = Rc::new(GatewayInboundSink {
-            gateway,
-            channel: route.channel.clone(),
-        });
-        let bridge = WebBridge::new(web, sink, route.conversation_id.clone());
-        let web_registration = webserver
-            .serve("/", bridge)
-            .map_err(PluginError::registration)?;
-
-        context.retain(channel_registration);
-        context.retain(web_registration);
-        context.provide(Rc::new(IMessageWebRoute::new(route)))?;
-        Ok(())
+        match self.resources {
+            WebResources::Standard => {
+                register_web::<M, Storage, WEB_HISTORY, WEB_SUBSCRIBERS>(context)
+            }
+            WebResources::Embedded => {
+                register_web::<M, Storage, EMBEDDED_WEB_HISTORY, EMBEDDED_WEB_SUBSCRIBERS>(context)
+            }
+        }
     }
+}
+
+fn register_web<const M: usize, Storage, const HISTORY: usize, const SUBSCRIBERS: usize>(
+    context: &mut PluginRegisterContext<'_, M, Storage>,
+) -> PluginResult<()>
+where
+    Storage: barracuda_plugin_manager::PluginStorage,
+{
+    let gateway = context.require::<IMessageGateway>(
+        <IMessageWebPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+    )?;
+    let webserver = context.require::<WebServer>(
+        <IMessageWebPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+    )?;
+    let web = Rc::new(Web::<HISTORY, SUBSCRIBERS>::new());
+    let channel: Rc<dyn MessageChannel> = web.clone();
+    let channel_registration: MessageChannelRegistration = gateway
+        .register(channel)
+        .map_err(PluginError::registration)?;
+    let route = GatewayRoute::new(WEB_CHANNEL, WEB_CONVERSATION);
+    let sink: Rc<dyn InboundMessageSink> = Rc::new(GatewayInboundSink {
+        gateway,
+        channel: route.channel.clone(),
+    });
+    let bridge = WebBridge::new(web, sink, route.conversation_id.clone());
+    let web_registration = webserver
+        .serve("/", bridge)
+        .map_err(PluginError::registration)?;
+
+    context.retain(channel_registration);
+    context.retain(web_registration);
+    context.provide(Rc::new(IMessageWebRoute::new(route)))?;
+    Ok(())
 }
 
 struct GatewayInboundSink {

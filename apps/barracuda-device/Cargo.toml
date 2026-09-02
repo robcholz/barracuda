@@ -1,0 +1,27 @@
+[package]
+name = "barracuda-device"
+version = "0.1.0"
+edition = "2021"
+description = "Target-agnostic embedded Barracuda application"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+barracuda-event-router = { path = "../../core/event-router" }
+barracuda-system = { path = "../../core/system" }
+barracuda-target = { path = "../../composition/selected" }
+embassy-executor.workspace = true
+static_cell = "2.1.1"
+thiserror = { version = "2", default-features = false }
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

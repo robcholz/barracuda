@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 use barracuda_agent_component::component::AgentComponent;
 use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
-use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_api::{PluginContext, PluginResourceProfile};
 use barracuda_plugin_manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
@@ -59,6 +59,7 @@ impl AgentSetApi {
 #[barracuda_plugin_api::plugin]
 pub struct AgentPlugin {
     http_clients: ClientFactory<'static>,
+    resource_profile: PluginResourceProfile,
 }
 
 impl AgentPlugin {
@@ -67,6 +68,7 @@ impl AgentPlugin {
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            resource_profile: context.resource_profile,
         }
     }
 }
@@ -84,7 +86,13 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
     {
         let filesystem = context.filesystem()?.clone();
         let http_clients = self.http_clients.clone();
-        let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
+        let resource_profile = self.resource_profile;
+        let model_api_factory = ModelApiFactory::new(move || match resource_profile {
+            PluginResourceProfile::Standard => ModelApi::new(http_clients.clone()),
+            PluginResourceProfile::Embedded => {
+                ModelApi::with_http_buffer_sizes(http_clients.clone(), 2 * 1024, 2 * 1024)
+            }
+        });
         let storage = RuntimeStorageConfig {
             persistence_root: PERSISTENCE_ROOT.into(),
             skill_roots: Vec::new(),

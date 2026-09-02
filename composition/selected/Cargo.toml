@@ -4,12 +4,20 @@ version = "0.1.0"
 edition = "2021"
 description = "Selected Barracuda Platform and Board HAL composition"
 
+[features]
+default = []
+esp32c5 = ["barracuda-platform-selected/esp32c5", "dep:esp-hal"]
+esp32c6 = ["barracuda-platform-selected/esp32c6"]
+
 [dependencies]
 barracuda-board-selected = { path = "../../boards/selected" }
 barracuda-platform-selected = { path = "../../platforms/selected" }
 barracuda-target-api = { path = "../api" }
 embassy-executor.workspace = true
 thiserror = { version = "2", default-features = false }
+
+[target.riscv32imac-unknown-none-elf.dependencies]
+esp-hal = { version = "1.2.0-rc.0", optional = true, default-features = false, features = ["esp32c5", "unstable"] }
 
 [lints.rust]
 unsafe_code = "forbid"

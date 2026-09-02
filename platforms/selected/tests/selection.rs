@@ -57,7 +57,7 @@ fn additional_riscv_esp_chips_have_concrete_platform_identities() -> Result<(), 
     let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
     let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
 
-    for chip in ["esp32c3", "esp32p4"] {
+    for chip in ["esp32c3", "esp32c5", "esp32p4"] {
         let implementation =
             std::fs::read_to_string(root.join("platforms").join(chip).join("src/lib.rs"))?;
         assert!(manifest.contains(&format!("barracuda-platform-{chip}")));

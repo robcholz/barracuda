@@ -1,0 +1,64 @@
+[package]
+name = "lunka"
+description = "Barracuda's embedded-capable fork of thin Lua 5.4 bindings"
+authors = ["[aka]bomb"]
+license = "MIT"
+version = "0.14.0"
+edition = "2024"
+repository = "https://github.com/b0mbie/lunka"
+documentation = "https://docs.rs/lunka"
+keywords = ["lua"]
+rust-version = "1.95"
+
+[build-dependencies.lunka-src]
+version = "54.8.0"
+optional = true
+
+[[example]]
+name = "buffer"
+
+[[example]]
+name = "entrypoint"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "hello"
+
+[[example]]
+name = "hello_lib"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "interpreter"
+
+[[example]]
+name = "os2"
+crate-type = ["cdylib"]
+
+[features]
+default = ["alloc", "auxlib", "stdlibs", "link-vendored"]
+
+# Use Rust's `alloc` crate.
+alloc = []
+
+# Use definitions for 32 bits max.
+# This is analogous to the `LUA_32BITS` define, and should be set appropriately
+# depending on the compiled Lua settings.
+# It's usually set to `0`, so this is disabled by default.
+use-32-bits = []
+
+# Include and use stuff from `lauxlib.h`.
+auxlib = []
+
+# Include and use definitions for importing the standard libraries (in `lualib.h`).
+stdlibs = []
+
+# Build Lua from source, linking to it.
+link-vendored = ["dep:lunka-src"]
+
+# Link statically to the system library `lua54` on Windows, and `lua` on other platforms.
+link-system = []
+
+# Link *dynamically* to the system library `lua54` using `raw-dylib` on Windows,
+# and `lua` using `dylib` on other platforms.
+link-dynamic = ["link-system"]

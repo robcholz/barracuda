@@ -1,0 +1,42 @@
+[package]
+name = "barracuda-esp32c5-device"
+version = "0.1.0"
+edition = "2021"
+description = "ESP32-C5 Target composition executable for the portable Barracuda device app"
+
+[[bin]]
+name = "barracuda-device"
+path = "src/main.rs"
+test = false
+bench = false
+required-features = ["firmware"]
+
+[features]
+default = []
+firmware = [
+    "barracuda-target/esp32c5",
+]
+
+[dependencies]
+barracuda-device = { path = "../../apps/barracuda-device" }
+
+[target.'cfg(target_arch = "riscv32")'.dependencies]
+barracuda-target = { path = "../selected" }
+embassy-executor.workspace = true
+esp-alloc = { version = "0.11.0", features = ["esp32c5"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32c5"] }
+esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["esp32c5", "rt", "unstable"] }
+esp-println = { version = "0.18.0", default-features = false, features = ["esp32c5", "uart"] }
+esp-rtos = { version = "0.4.0", default-features = false, features = ["embassy", "esp-alloc", "esp-radio", "esp32c5"] }
+log.workspace = true
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

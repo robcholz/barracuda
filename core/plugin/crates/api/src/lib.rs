@@ -9,6 +9,36 @@ pub use barracuda_plugin_macros::plugin;
 pub use embassy_net::Stack;
 pub use http_client::ClientFactory;
 
+/// Portable capacity profile used by Plugins with bounded runtime queues.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PluginResourceProfile {
+    /// Server and desktop capacities.
+    #[default]
+    Standard,
+    /// Memory-bounded capacities for embedded System applications.
+    Embedded,
+}
+
+/// Portable resource budget for script-runtime Plugins.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScriptRuntimeBudget {
+    /// Maximum number of concurrent script executions.
+    pub slots: usize,
+    /// Fixed heap bytes reserved for each execution slot.
+    pub bytes_per_slot: usize,
+}
+
+impl ScriptRuntimeBudget {
+    /// Creates an explicit script runtime budget.
+    #[must_use]
+    pub const fn new(slots: usize, bytes_per_slot: usize) -> Self {
+        Self {
+            slots,
+            bytes_per_slot,
+        }
+    }
+}
+
 /// Fixed System resources available while constructing a Plugin.
 ///
 /// Plugins move owned resources or copy shared capabilities during `new` and
@@ -21,6 +51,10 @@ pub struct PluginContext<Builtins = NoBuiltinCapabilities, Io = NoExposedIo> {
     pub http_clients: ClientFactory<'static>,
     /// Complete HAL produced by the selected Board composition.
     pub hal: BoardHalResources<Builtins, Io>,
+    /// Application policy for script-runtime concurrency and memory.
+    pub script_runtime: ScriptRuntimeBudget,
+    /// Application policy for other bounded Plugin runtime resources.
+    pub resource_profile: PluginResourceProfile,
 }
 
 impl<Builtins, Io> PluginContext<Builtins, Io> {
@@ -35,7 +69,23 @@ impl<Builtins, Io> PluginContext<Builtins, Io> {
             ip_stack,
             http_clients,
             hal,
+            script_runtime: ScriptRuntimeBudget::new(4, 64 * 1024),
+            resource_profile: PluginResourceProfile::Standard,
         }
+    }
+
+    /// Replaces the default script-runtime budget.
+    #[must_use]
+    pub const fn with_script_runtime(mut self, budget: ScriptRuntimeBudget) -> Self {
+        self.script_runtime = budget;
+        self
+    }
+
+    /// Replaces the default bounded Plugin resource profile.
+    #[must_use]
+    pub const fn with_resource_profile(mut self, profile: PluginResourceProfile) -> Self {
+        self.resource_profile = profile;
+        self
     }
 }
 

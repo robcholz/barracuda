@@ -53,7 +53,7 @@ impl VmRuntime {
     ///
     /// Returns an error when backing storage for the memory pool cannot be reserved.
     pub fn new() -> Result<Self, VmMemoryPoolError> {
-        Self::with_memory_bytes(VM_MEMORY_BYTES_PER_SLOT)
+        Self::with_capacity(VM_TASK_SLOTS, VM_MEMORY_BYTES_PER_SLOT)
     }
 
     /// Creates an unstarted VM runtime with an explicit fixed Lua heap size per slot.
@@ -62,9 +62,26 @@ impl VmRuntime {
     ///
     /// Returns an error when the size is invalid or backing storage cannot be reserved.
     pub fn with_memory_bytes(bytes: usize) -> Result<Self, VmMemoryPoolError> {
+        Self::with_capacity(VM_TASK_SLOTS, bytes)
+    }
+
+    /// Creates an unstarted VM runtime with an explicit concurrency and
+    /// fixed-memory budget.
+    ///
+    /// The maximum remains bounded by [`VM_TASK_SLOTS`] because Embassy task
+    /// storage is allocated statically.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the slot count is zero, exceeds the static task
+    /// capacity, or the backing memory cannot be reserved.
+    pub fn with_capacity(slot_count: usize, bytes: usize) -> Result<Self, VmMemoryPoolError> {
+        if slot_count > VM_TASK_SLOTS {
+            return Err(VmMemoryPoolError::TooManySlots);
+        }
         Ok(Self {
             spawner: Rc::new(Cell::new(None)),
-            memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, bytes)?,
+            memory_pool: VmMemoryPool::new(slot_count, bytes)?,
         })
     }
 
@@ -94,26 +111,35 @@ impl VmRuntime {
                 "VM Embassy runtime has not started",
             );
         };
-        let Some(memory) = self.memory_pool.acquire() else {
-            return error_stream(RunErrorKind::Busy, "all VM memory slots are occupied");
+        let memory = match self.memory_pool.acquire() {
+            Ok(Some(memory)) => memory,
+            Ok(None) => {
+                return error_stream(RunErrorKind::Busy, "all VM memory slots are occupied");
+            }
+            Err(_error) => {
+                return error_stream(
+                    RunErrorKind::RuntimeUnavailable,
+                    "failed to prepare VM memory slot",
+                );
+            }
         };
         let (sender, receiver) = async_channel::bounded(RESPONSE_QUEUE_CAPACITY);
         let fallback = sender.clone();
-        if spawner
-            .spawn(vm_execution_task(
-                requests,
-                limits,
-                builtin_packages,
-                package_registry,
-                sender,
-                memory,
-            ))
-            .is_err()
-        {
-            let _result = fallback.try_send(Ok(Err(RunError::new(
-                RunErrorKind::Busy,
-                "all VM task slots are occupied",
-            ))));
+        match vm_execution_task(
+            requests,
+            limits,
+            builtin_packages,
+            package_registry,
+            sender,
+            memory,
+        ) {
+            Ok(task) => spawner.spawn(task),
+            Err(_error) => {
+                let _result = fallback.try_send(Ok(Err(RunError::new(
+                    RunErrorKind::Busy,
+                    "all VM task slots are occupied",
+                ))));
+            }
         }
         drop(fallback);
         RpcStream::new(receiver)

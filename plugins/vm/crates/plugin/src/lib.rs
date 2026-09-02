@@ -18,16 +18,28 @@ use barracuda_vm_package_api::LuaPackageRegistry;
 pub struct VmPlugin {
     runtime: Option<VmRuntime>,
     package_registry: LuaPackageRegistry,
+    runtime_capacity: Option<(usize, usize)>,
 }
 
 impl VmPlugin {
     /// Creates the VM Plugin from the shared construction context.
     #[must_use]
-    pub fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
+    pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             runtime: None,
             package_registry: LuaPackageRegistry::new(),
+            runtime_capacity: Some((
+                context.script_runtime.slots,
+                context.script_runtime.bytes_per_slot,
+            )),
         }
+    }
+
+    /// Selects the maximum concurrent VMs and bytes reserved for each VM.
+    #[must_use]
+    pub fn with_runtime_capacity(mut self, slot_count: usize, bytes_per_slot: usize) -> Self {
+        self.runtime_capacity = Some((slot_count, bytes_per_slot));
+        self
     }
 }
 
@@ -39,7 +51,13 @@ impl<const M: usize> Plugin<M> for VmPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        let runtime = VmRuntime::new().map_err(PluginError::registration)?;
+        let runtime = match self.runtime_capacity {
+            Some((slot_count, bytes_per_slot)) => {
+                VmRuntime::with_capacity(slot_count, bytes_per_slot)
+            }
+            None => VmRuntime::new(),
+        }
+        .map_err(PluginError::registration)?;
         context.provide(Rc::new(self.package_registry.clone()))?;
         context.event_router.load(
             VmComponent::with_runtime(BuiltinPackages::all(), runtime.clone())

@@ -1,3 +1,9 @@
 [alias]
 board = "run --quiet --package barracuda-board-tool --"
 plugin = "run --quiet --package barracuda-plugin-tool --"
+
+[target.riscv32imac-unknown-none-elf]
+rustflags = [
+    "-C",
+    "link-arg=-Tlinkall.x",
+]

@@ -81,9 +81,9 @@ impl<const M: usize> Plugin<M> for TimePlugin {
             .ok_or_else(|| PluginError::registration(TimeRuntimeUnavailable))?;
         let spawner = context.task_spawner()?;
         let cancellation = context.task_token();
-        spawner
-            .spawn(time_sync_task(runtime.source, runtime.state, cancellation))
+        let task = time_sync_task(runtime.source, runtime.state, cancellation)
             .map_err(PluginError::registration)?;
+        spawner.spawn(task);
         Ok(())
     }
 }

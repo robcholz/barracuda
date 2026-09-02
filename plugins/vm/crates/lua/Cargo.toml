@@ -12,7 +12,7 @@ vendored = ["lunka/link-vendored"]
 [dependencies]
 async-channel = { version = "2.5", default-features = false }
 getset = "0.1.7"
-lunka = { git = "https://github.com/robcholz/lunka.git", rev = "820b3d89a6ccfcdae3286f9b4548831dc568cf54", default-features = false, features = ["alloc", "auxlib", "stdlibs"] }
+lunka = { path = "../../../../shared/lunka", default-features = false, features = ["alloc", "auxlib", "stdlibs"] }
 
 [dev-dependencies]
 futures-lite = "2"

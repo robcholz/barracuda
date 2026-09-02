@@ -21,10 +21,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
     let target = env::var("TARGET")?;
-    let default = default_platform(&target_os, &target_arch, &target)?;
+    let esp32c5_enabled = env::var_os("CARGO_FEATURE_ESP32C5").is_some();
+    let esp32c6_enabled = env::var_os("CARGO_FEATURE_ESP32C6").is_some();
+    if esp32c5_enabled && esp32c6_enabled {
+        return Err("ESP32-C5 and ESP32-C6 Platform features are mutually exclusive".into());
+    }
+    let default = default_platform(&target_os, &target_arch, &target, esp32c5_enabled)?;
     let platform_name = env::var("BARRACUDA_PLATFORM").unwrap_or_else(|_| default.into());
     validate_name(&platform_name)?;
     validate_target(&platform_name, &target_os, &target_arch, &target)?;
+    validate_feature(&platform_name, esp32c5_enabled, esp32c6_enabled)?;
 
     let platform_path = root
         .join("platforms")
@@ -59,6 +65,7 @@ fn default_platform(
     target_os: &str,
     target_arch: &str,
     target: &str,
+    esp32c5_enabled: bool,
 ) -> Result<&'static str, Box<dyn Error>> {
     match (target_os, target_arch) {
         ("macos", _) => Ok("macos"),
@@ -67,6 +74,7 @@ fn default_platform(
         (_, "xtensa") if target.starts_with("xtensa-esp32s3-") => Ok("esp32s3"),
         (_, "xtensa") if target.starts_with("xtensa-esp32-") => Ok("esp32"),
         (_, "riscv32") if target.starts_with("riscv32imafc-") => Ok("esp32p4"),
+        (_, "riscv32") if target.starts_with("riscv32imac-") && esp32c5_enabled => Ok("esp32c5"),
         (_, "riscv32") if target.starts_with("riscv32imac-") => Ok("esp32c6"),
         (_, "riscv32") if target.starts_with("riscv32imc-") => Ok("esp32c3"),
         (_, "arm") => Ok("stm32"),
@@ -90,6 +98,7 @@ fn validate_target(
         "esp32s2" => target == "xtensa-esp32s2-none-elf",
         "esp32s3" => target == "xtensa-esp32s3-none-elf",
         "esp32c3" => target == "riscv32imc-unknown-none-elf",
+        "esp32c5" => target == "riscv32imac-unknown-none-elf",
         "esp32c6" => target == "riscv32imac-unknown-none-elf",
         "esp32p4" => target == "riscv32imafc-unknown-none-elf",
         "stm32" => target_arch == "arm",
@@ -100,6 +109,26 @@ fn validate_target(
     } else {
         Err(format!(
             "Platform `{name}` cannot be built for OS `{target_os}` and architecture `{target_arch}`"
+        )
+        .into())
+    }
+}
+
+fn validate_feature(
+    name: &str,
+    esp32c5_enabled: bool,
+    esp32c6_enabled: bool,
+) -> Result<(), Box<dyn Error>> {
+    let enabled = match name {
+        "esp32c5" => esp32c5_enabled,
+        "esp32c6" => esp32c6_enabled,
+        _ => true,
+    };
+    if enabled {
+        Ok(())
+    } else {
+        Err(format!(
+            "Platform `{name}` requires the matching barracuda-platform-selected Cargo feature"
         )
         .into())
     }
