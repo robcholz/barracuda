@@ -1,7 +1,9 @@
 //! Platform resource-boundary tests.
 #![allow(clippy::expect_used)]
 
-use barracuda_platform::{NamedPartition, PartitionAccess, Partitions, PlatformResources};
+use barracuda_platform::{
+    NamedPartition, PartitionAccess, Partitions, PartitionsInsertError, PlatformResources,
+};
 
 #[test]
 fn platform_resources_expose_exact_ip_tls_and_partition_capabilities() {
@@ -74,22 +76,40 @@ fn partitions_reject_empty_and_duplicate_native_names() {
 }
 
 #[test]
-fn platform_api_has_no_business_storage_fields() -> Result<(), std::io::Error> {
-    let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
-    )?;
-    for forbidden in [
-        "filesystem:",
-        "database_region:",
-        "web_assets",
-        "plugin_partition",
-        "type FileSystem",
-        "type DatabaseRegion",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "Platform API contains business storage concept `{forbidden}`"
-        );
-    }
-    Ok(())
+fn full_partition_collection_recovers_capacity_after_take() {
+    let mut partitions = Partitions::<u8, 2>::new();
+    partitions
+        .insert(NamedPartition::new("first", PartitionAccess::ReadWrite, 1))
+        .expect("insert first partition");
+    partitions
+        .insert(NamedPartition::new("second", PartitionAccess::ReadOnly, 2))
+        .expect("insert second partition");
+
+    assert_eq!(
+        partitions.insert(NamedPartition::new(
+            "overflow",
+            PartitionAccess::ReadWrite,
+            3,
+        )),
+        Err(PartitionsInsertError::Full)
+    );
+    assert_eq!(partitions.len(), 2);
+    assert_eq!(
+        partitions.take("first").map(NamedPartition::into_region),
+        Some(1)
+    );
+
+    partitions
+        .insert(NamedPartition::new(
+            "replacement",
+            PartitionAccess::ReadWrite,
+            4,
+        ))
+        .expect("reuse released slot");
+
+    assert_eq!(partitions.len(), 2);
+    assert_eq!(
+        partitions.get("replacement").map(NamedPartition::region),
+        Some(&4)
+    );
 }

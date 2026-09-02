@@ -27,6 +27,21 @@ enum RunMode<'a> {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
+    // Embassy owns the System task graph, while the terminal WebSocket client
+    // uses Tokio's native socket reactor. Keep that reactor alive for both the
+    // local and remote modes; entering a multi-thread runtime lets Tokio I/O
+    // wake this Embassy-owned top-level future without blocking System tasks.
+    let tokio_runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("error: failed to start native I/O runtime: {error}");
+            std::process::exit(1);
+        }
+    };
+    let _tokio_context = tokio_runtime.enter();
     let exit_code = match run(spawner).await {
         Ok(()) => 0,
         Err(error) => {

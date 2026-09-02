@@ -1182,10 +1182,15 @@ pub(super) enum SessionActorStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::StopReason;
+    use super::{ActorLifecycle, StopReason, Stopping};
+    use futures_channel::oneshot;
 
     #[test]
     fn stop_reason_escalation_is_explicit_and_monotonic() {
+        assert_eq!(
+            StopReason::Close.escalate(StopReason::Close),
+            StopReason::Close
+        );
         assert_eq!(
             StopReason::Close.escalate(StopReason::Shutdown),
             StopReason::Shutdown
@@ -1202,5 +1207,63 @@ mod tests {
             StopReason::Delete.escalate(StopReason::Close),
             StopReason::Delete
         );
+    }
+
+    #[test]
+    fn lifecycle_escalates_concurrent_close_requests_without_losing_completions() {
+        let (first_close, mut first_result) = oneshot::channel();
+        let (second_close, mut second_result) = oneshot::channel();
+        let (delete, mut delete_result) = oneshot::channel();
+
+        let mut lifecycle = ActorLifecycle::Running;
+        lifecycle.stop(StopReason::Close, Some(first_close), None);
+        lifecycle.stop(StopReason::Close, Some(second_close), None);
+        assert_eq!(lifecycle.reason(), Some(StopReason::Close));
+        lifecycle.stop(StopReason::Shutdown, None, None);
+        assert_eq!(lifecycle.reason(), Some(StopReason::Shutdown));
+        lifecycle.stop(StopReason::Delete, None, Some(delete));
+        assert_eq!(lifecycle.reason(), Some(StopReason::Delete));
+        assert!(lifecycle.is_deleting());
+
+        if let ActorLifecycle::Stopping(mut stopping) = lifecycle {
+            assert_eq!(stopping.close_acks.len(), 2);
+            for completion in stopping.close_acks.drain(..) {
+                let _result = completion.send(Ok(()));
+            }
+            let delete = stopping.delete_ack.take();
+            assert!(delete.is_some());
+            if let Some(delete) = delete {
+                let _result = delete.send(Ok(()));
+            }
+        } else {
+            assert!(false, "delete escalation must remain in the stopping state");
+        }
+        assert_eq!(first_result.try_recv(), Ok(Some(Ok(()))));
+        assert_eq!(second_result.try_recv(), Ok(Some(Ok(()))));
+        assert!(matches!(delete_result.try_recv(), Ok(Some(Ok(())))));
+    }
+
+    #[test]
+    fn delete_ready_accepts_a_late_close_completion_without_changing_phase() {
+        let (close, mut result) = oneshot::channel();
+        let mut lifecycle = ActorLifecycle::DeleteReady(Stopping {
+            reason: StopReason::Delete,
+            close_acks: alloc::vec::Vec::new(),
+            delete_ack: None,
+        });
+
+        lifecycle.stop(StopReason::Close, Some(close), None);
+        assert!(lifecycle.is_deleting());
+        assert_eq!(lifecycle.reason(), None);
+
+        if let ActorLifecycle::DeleteReady(mut stopping) = lifecycle {
+            assert_eq!(stopping.close_acks.len(), 1);
+            if let Some(completion) = stopping.close_acks.pop() {
+                let _result = completion.send(Ok(()));
+            }
+        } else {
+            assert!(false, "late close must preserve delete-ready state");
+        }
+        assert_eq!(result.try_recv(), Ok(Some(Ok(()))));
     }
 }

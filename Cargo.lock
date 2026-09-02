@@ -449,6 +449,7 @@ dependencies = [
  "futures-lite",
  "http-client",
  "serde_json",
+ "tempdir",
 ]
 
 [[package]]
@@ -553,6 +554,7 @@ dependencies = [
  "anyhow",
  "env_logger",
  "log",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]
@@ -708,11 +710,14 @@ name = "barracuda-file-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
+ "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vfs",
+ "futures-lite",
  "serde",
  "serde-big-array",
+ "serde_json",
  "zerocopy",
 ]
 
@@ -771,6 +776,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-http-wire",
+ "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "embedded-io 0.7.1",
@@ -886,27 +892,46 @@ dependencies = [
 name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-event-router",
+ "barracuda-imessage-bluebubble-plugin",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-imessage-inkbox-plugin",
+ "barracuda-imessage-qq-plugin",
+ "barracuda-imessage-wechat-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
  "gateway",
  "http-client",
  "log",
+ "picoserve",
  "serde",
  "serde_json",
  "telegram",
+ "tokio",
 ]
 
 [[package]]
 name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-event-router",
  "barracuda-imessage-gateway-plugin",
+ "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "gateway",
+ "picoserve",
+ "tokio",
  "web",
 ]
 
@@ -1494,6 +1519,7 @@ name = "barracuda-time-component"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
+ "barracuda-platform-test",
  "barracuda-time-wire",
  "embassy-net",
  "embassy-sync 0.7.2",
@@ -1505,6 +1531,7 @@ dependencies = [
  "static_cell",
  "thiserror 2.0.18",
  "time",
+ "tokio",
 ]
 
 [[package]]
@@ -1669,6 +1696,8 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-web-search-wire",
  "barracuda-webserver-plugin",
+ "embassy-net",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
  "futures-lite",
@@ -1677,6 +1706,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -1687,6 +1717,7 @@ dependencies = [
  "barracuda-rpc-schema",
  "schemars",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "zerocopy",
 ]

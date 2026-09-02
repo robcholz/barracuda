@@ -189,3 +189,68 @@ fn print_summary(scenario: Scenario, output_file: &Path, stats: AllocationStats)
     println!("current_bytes={}", stats.current_bytes);
     println!("current_allocations={}", stats.current_allocations);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scenarios_validate_names_paths_and_agent_initialization_profile() {
+        assert_eq!(Scenario::parse("agent-init"), Ok(Scenario::AgentInit));
+        assert_eq!(Scenario::parse("tape-replay"), Ok(Scenario::TapeReplay));
+        assert!(Scenario::parse("unknown").unwrap_err().contains("unknown"));
+        assert_eq!(Scenario::AgentInit.name(), "agent-init");
+        assert_eq!(Scenario::TapeReplay.name(), "tape-replay");
+        assert_eq!(
+            default_output(Scenario::TapeReplay),
+            Path::new("target/profiles/tape-replay.dhat.json")
+        );
+
+        let directory = tempdir::TempDir::new("agent-profile").expect("temporary directory");
+        let output = directory.path().join("nested/agent-init.json");
+        prepare_output(&output).expect("profile parent is created");
+        let stats = profile_agent_init(&output).expect("agent initialization profiles");
+        assert!(output.exists());
+        assert!(stats.total_allocations > 0);
+        assert!(stats.total_bytes > 0);
+    }
+
+    #[test]
+    fn tape_loader_reassembles_interleaved_chunks_and_rejects_invalid_records() {
+        let directory = tempdir::TempDir::new("agent-profile-tape").expect("temporary directory");
+        let tape = directory.path().join("tape.jsonl");
+        std::fs::write(
+            &tape,
+            concat!(
+                "{\"kind\":\"response_start\",\"interaction_id\":\"b\"}\n",
+                "{\"kind\":\"response_start\",\"interaction_id\":\"a\"}\n",
+                "{\"kind\":\"response_chunk\",\"interaction_id\":\"b\",\"data_b64\":\"d28=\"}\n",
+                "{\"kind\":\"ignored\"}\n",
+                "{\"kind\":\"response_chunk\",\"interaction_id\":\"a\",\"data_b64\":\"aGk=\"}\n",
+                "{\"kind\":\"response_chunk\",\"interaction_id\":\"b\",\"data_b64\":\"cmxk\"}\n",
+            ),
+        )
+        .expect("tape writes");
+        assert_eq!(
+            load_tape_responses(&tape).expect("tape loads"),
+            vec![b"hi".to_vec(), b"world".to_vec()]
+        );
+
+        std::fs::write(
+            &tape,
+            "{\"kind\":\"response_chunk\",\"interaction_id\":\"a\",\"data_b64\":\"eA==\"}\n",
+        )
+        .expect("invalid tape writes");
+        assert!(load_tape_responses(&tape)
+            .unwrap_err()
+            .to_string()
+            .contains("precedes response_start"));
+
+        std::fs::write(&tape, "{\"kind\":\"response_start\"}\n").expect("missing-id tape writes");
+        assert!(load_tape_responses(&tape)
+            .unwrap_err()
+            .to_string()
+            .contains("no interaction_id"));
+        assert_eq!(invalid_data("bad").kind(), io::ErrorKind::InvalidData);
+    }
+}

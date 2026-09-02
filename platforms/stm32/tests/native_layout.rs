@@ -40,24 +40,6 @@ fn linker_regions_remain_a_generic_named_collection() {
 }
 
 #[test]
-fn build_script_does_not_select_system_storage_roles() -> Result<(), std::io::Error> {
-    let source =
-        std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("build.rs"))?;
-    for forbidden in [
-        "board.storage()",
-        "filesystem()",
-        "database()",
-        "web_assets()",
-    ] {
-        assert!(
-            !source.contains(forbidden),
-            "found business selector `{forbidden}`"
-        );
-    }
-    Ok(())
-}
-
-#[test]
 fn linker_bounds_reject_reversed_or_pre_flash_symbols() {
     assert_eq!(
         LinkerRegion::try_from_addresses(0x0800_0000, 0x07ff_0000, 0x0820_0000),

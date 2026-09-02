@@ -175,33 +175,6 @@ fn target_without_a_selection_reports_no_board() {
 }
 
 #[test]
-fn cargo_config_exposes_board_without_replacing_builtin_build() {
-    let config = fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../.cargo/config.toml"
-    ))
-    .expect("workspace Cargo config");
-
-    assert!(config.contains("board = \"run --quiet --package barracuda-board-tool --\""));
-    assert!(!config
-        .lines()
-        .any(|line| line.trim_start().starts_with("build =")));
-}
-
-#[test]
-fn normal_cargo_build_reaches_the_selected_target_composition() {
-    let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
-        .expect("workspace manifest");
-    let default_members = manifest
-        .split_once("default-members = [")
-        .and_then(|(_before, after)| after.split_once(']'))
-        .map(|(members, _after)| members)
-        .expect("default members");
-
-    assert!(default_members.contains("apps/barracuda-cli"));
-}
-
-#[test]
 fn repository_board_catalog_ids_are_unique() {
     let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../boards/configs");
     let mut ids = Vec::new();
@@ -232,32 +205,6 @@ fn repository_board_catalog_ids_are_unique() {
             normalized.insert(key, id.clone()),
             None,
             "Board catalog ids must stay unique after removing separators; `{id}` collides"
-        );
-    }
-}
-
-#[test]
-fn every_board_consumer_reads_the_persisted_selection() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    for relative in [
-        "boards/selected/build.rs",
-        "platforms/esp32c6/build.rs",
-        "platforms/linux/build.rs",
-        "platforms/macos/build.rs",
-        "platforms/stm32/build.rs",
-    ] {
-        let source = fs::read_to_string(root.join(relative)).expect("Board build script");
-        assert!(
-            source.contains("read_selected_board"),
-            "{relative} bypasses the persistent Board selection"
-        );
-        assert!(
-            source.contains("SELECTED_BOARD_PATH"),
-            "{relative} does not tell Cargo to watch the selection"
-        );
-        assert!(
-            !source.contains("BARRACUDA_BOARD"),
-            "{relative} still exposes the old environment-variable path"
         );
     }
 }

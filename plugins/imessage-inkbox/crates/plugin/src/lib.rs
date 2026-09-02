@@ -130,3 +130,21 @@ impl HttpEndpoint for ConfigEndpoint {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_configuration_preserves_identity_and_inkbox_api_default() {
+        let request: ConfigRequest =
+            serde_json::from_slice(br#"{"api_key":"secret","identity_id":"identity"}"#).unwrap();
+        assert_eq!(request.api_base, "https://inkbox.ai");
+
+        let config: InkboxConfig = request.into();
+        assert_eq!(config.api_key, "secret");
+        assert_eq!(config.identity_id, "identity");
+        assert_eq!(config.api_base, "https://inkbox.ai");
+    }
+}

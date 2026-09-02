@@ -73,7 +73,6 @@ where
                 state: Some(persisted),
             },
         )?;
-        self.register_restored_agent(id, agent.state())?;
         Ok((agent, reasoning_effort_handle))
     }
 

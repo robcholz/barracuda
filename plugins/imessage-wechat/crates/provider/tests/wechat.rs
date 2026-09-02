@@ -9,7 +9,7 @@ use std::{boxed::Box, rc::Rc};
 
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
-use gateway::{MessageChannel, MessageTarget, SendMessageRequest};
+use gateway::{MessageChannel, MessageTarget, SendMessageRequest, StreamError};
 use http_client::ClientFactory;
 use wechat::{Wechat, WechatConfig};
 
@@ -34,6 +34,12 @@ struct MockHttp {
 impl MockHttp {
     fn responding(count: usize) -> Self {
         let steps = (0..count).map(|_| ScriptStep::json(200, r#"{"ret":0}"#));
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
+        }
+    }
+
+    fn scripted(steps: impl IntoIterator<Item = ScriptStep>) -> Self {
         Self {
             network: Box::leak(Box::new(ScriptedStack::new(steps))),
         }
@@ -168,5 +174,104 @@ fn splits_long_text_only_on_utf8_boundaries() {
             "a".repeat(3999)
         );
         assert_eq!(second["msg"]["item_list"][0]["text_item"]["text"], "好");
+    });
+}
+
+#[test]
+fn rejects_empty_replies_and_failed_streams_without_network_io() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding(0));
+        let channel = Wechat::new(http.factory(), config("token"));
+        assert!(channel
+            .send_message(SendMessageRequest::text(target(), ""))
+            .await
+            .is_err());
+        let mut reply = SendMessageRequest::text(target(), "hello");
+        reply.reply_to = Some("unsupported".into());
+        assert!(channel.send_message(reply).await.is_err());
+        let chunks = stream::iter([
+            Ok("partial".to_owned()),
+            Err(StreamError::failed("stopped")),
+        ]);
+        assert!(channel
+            .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
+            .await
+            .is_err());
+        assert!(http.requests().is_empty());
+    });
+}
+
+#[test]
+fn custom_headers_route_and_client_ids_are_stable_and_unique() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding(2));
+        let mut settings = config("token");
+        settings.app_id = "custom-app".into();
+        settings.client_version = "version".into();
+        settings.x_wechat_uin = "uin".into();
+        settings.route_tag = Some("route".into());
+        settings.api_base.push('/');
+        let channel = Wechat::new(http.factory(), settings);
+        let target = MessageTarget::new("wechat", "user");
+        let first = channel
+            .send_message(SendMessageRequest::text(target.clone(), "one"))
+            .await
+            .expect("first send");
+        let second = channel
+            .send_message(SendMessageRequest::text(target, "two"))
+            .await
+            .expect("second send");
+        assert_ne!(first.message_id, second.message_id);
+        for request in http.requests() {
+            for (name, value) in [
+                ("iLink-App-Id", "custom-app"),
+                ("iLink-App-ClientVersion", "version"),
+                ("X-WECHAT-UIN", "uin"),
+                ("SKRouteTag", "route"),
+            ] {
+                assert!(request
+                    .headers
+                    .iter()
+                    .any(|header| header.name == name && header.value == value));
+            }
+        }
+    });
+}
+
+#[test]
+fn maps_auth_rate_limit_platform_and_malformed_responses() {
+    block_on(async {
+        for (step, expected) in [
+            (ScriptStep::json(401, "{}"), "authentication"),
+            (ScriptStep::json(403, "{}"), "authentication"),
+            (ScriptStep::json(429, "{}"), "ratelimited"),
+            (ScriptStep::json(500, "{}"), "platform"),
+            (ScriptStep::json(200, "not-json"), "platform"),
+            (
+                ScriptStep::json(200, r#"{"ret":7,"errmsg":"bad"}"#),
+                "platform",
+            ),
+            (
+                ScriptStep::json(200, r#"{"errcode":8,"message":"bad"}"#),
+                "platform",
+            ),
+            (ScriptStep::json(200, r#"{"code":9}"#), "platform"),
+        ] {
+            let http = MockHttp::scripted([step]);
+            let error = Wechat::new(http.factory(), config("token"))
+                .send_message(SendMessageRequest::text(target(), "hello"))
+                .await
+                .expect_err("response must fail");
+            let debug = format!("{error:?}").to_lowercase();
+            assert!(debug.contains(expected), "{debug}");
+        }
+
+        for body in ["", r#"{"ret":0,"errcode":0,"code":0}"#] {
+            let http = MockHttp::scripted([ScriptStep::json(200, body)]);
+            Wechat::new(http.factory(), config("token"))
+                .send_message(SendMessageRequest::text(target(), "hello"))
+                .await
+                .expect("empty and zero-code responses succeed");
+        }
     });
 }

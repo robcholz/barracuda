@@ -6,7 +6,7 @@ use barracuda_rpc::{
     rpc_dynamic, RpcAddress, RpcContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
     RpcResult, RpcStream, RpcWire, Streaming, Unary,
 };
-use futures_lite::future::block_on;
+use futures_lite::{future::block_on, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::Cell;
@@ -178,6 +178,90 @@ fn call_json_stream_writes_every_json_value_as_one_request_frame() {
         }
         assert_eq!(values, vec![Ok(Value::Null)]);
         assert_eq!(count.get(), 3);
+    });
+}
+
+#[repr(C)]
+#[derive(
+    Serialize,
+    Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Immutable,
+    IntoBytes,
+    KnownLayout,
+    PartialEq,
+    Eq,
+    RpcWire,
+    TryFromBytes,
+)]
+struct LevelResponse {
+    level: u32,
+}
+
+struct WatchLevels;
+
+#[rpc_dynamic]
+impl RpcMethod for WatchLevels {
+    const ADDRESS: &'static str = "session.watch_levels";
+    type Request = SetLevelRequest;
+    type Response = LevelResponse;
+    type Error = SetLevelError;
+    type Input = Unary;
+    type Output = Streaming;
+}
+
+fn watch_levels(
+    _context: RpcContext,
+    request: RpcFrame<SetLevelRequest>,
+) -> impl std::future::Future<Output = RpcResult<RpcStream<Result<LevelResponse, SetLevelError>>>> {
+    let request = request.view().copied();
+    async move {
+        let request = request?;
+        let responses = if request.level == 0 {
+            vec![
+                Ok(LevelResponse { level: 1 }),
+                Err(SetLevelError::Denied),
+                Ok(LevelResponse { level: 2 }),
+            ]
+        } else {
+            vec![
+                Ok(LevelResponse {
+                    level: request.level,
+                }),
+                Ok(LevelResponse {
+                    level: request.level + 1,
+                }),
+            ]
+        };
+        Ok(RpcStream::new(stream::iter(responses.into_iter().map(Ok))))
+    }
+}
+
+#[test]
+fn call_json_stream_preserves_streaming_output_and_stops_at_a_method_error() {
+    let registry = registry::<1, 16, 1>();
+    registry
+        .register::<WatchLevels, _>(watch_levels)
+        .expect("register endpoint");
+    let address = RpcAddress::try_from(WatchLevels::ADDRESS).expect("valid address");
+    let client = registry.client();
+
+    block_on(async {
+        let mut successful = client
+            .call_json_stream(&address, [json!({ "session": 7, "level": 4 })])
+            .expect("open successful stream");
+        assert_eq!(successful.next().await, Some(Ok(Ok(json!({ "level": 4 })))));
+        assert_eq!(successful.next().await, Some(Ok(Ok(json!({ "level": 5 })))));
+        assert!(successful.next().await.is_none());
+
+        let mut failed = client
+            .call_json_stream(&address, [json!({ "session": 7, "level": 0 })])
+            .expect("open failing stream");
+        assert_eq!(failed.next().await, Some(Ok(Ok(json!({ "level": 1 })))));
+        assert_eq!(failed.next().await, Some(Ok(Err(json!("Denied")))));
+        assert!(failed.next().await.is_none());
     });
 }
 

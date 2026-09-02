@@ -193,3 +193,61 @@ pub enum WebSearchError {
     /// The search provider returned an invalid response.
     InvalidResponse,
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_request_and_result_text_round_trip_through_json() {
+        let request = WebSearchRequest::new("rust embedded", 3).unwrap();
+        assert_eq!(request.query(), Ok("rust embedded"));
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({"query":"rust embedded","max_results":3})
+        );
+        let decoded: WebSearchRequest = serde_json::from_value(serde_json::json!({
+            "query":"coverage",
+            "max_results":2
+        }))
+        .unwrap();
+        assert_eq!(decoded.query(), Ok("coverage"));
+
+        let result = WebSearchResult::new(
+            "Coverage report",
+            "https://example.test/report",
+            "Measured behavior",
+            0.9,
+        )
+        .unwrap();
+        assert_eq!(result.title(), Ok("Coverage report"));
+        assert_eq!(result.url(), Ok("https://example.test/report"));
+        assert_eq!(result.content(), Ok("Measured behavior"));
+    }
+
+    #[test]
+    fn bounded_text_rejects_ambiguous_and_noncanonical_wire_values() {
+        assert_eq!(
+            WebSearchText::<4>::new("four"),
+            Err(WebSearchWireError::TextTooLong)
+        );
+        assert_eq!(
+            WebSearchText::<8>::new("a\0b"),
+            Err(WebSearchWireError::EmbeddedNul)
+        );
+
+        let no_terminator = WebSearchText::<4>(*b"four");
+        assert_eq!(
+            no_terminator.as_str(),
+            Err(WebSearchWireError::InvalidTerminator)
+        );
+        let trailing_data = WebSearchText::<4>([b'a', 0, b'b', 0]);
+        assert_eq!(
+            trailing_data.as_str(),
+            Err(WebSearchWireError::InvalidTerminator)
+        );
+        let invalid_utf8 = WebSearchText::<4>([0xff, 0, 0, 0]);
+        assert_eq!(invalid_utf8.as_str(), Err(WebSearchWireError::InvalidUtf8));
+    }
+}

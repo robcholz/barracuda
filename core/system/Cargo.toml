@@ -63,6 +63,7 @@ embedded-hal-async.workspace = true
 [dev-dependencies]
 barracuda-model-api = { path = "../../plugins/agent/crates/model-api" }
 barracuda-platform-test = { path = "../../platforms/test" }
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

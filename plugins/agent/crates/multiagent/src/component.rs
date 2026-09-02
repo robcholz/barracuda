@@ -1382,6 +1382,158 @@ mod tests {
     }
 
     #[test]
+    fn followup_command_reports_each_public_target_state_and_dispatch_outcome() {
+        fn topology(status: SubagentStatus) -> (Multiagent, AgentId, AgentId) {
+            let root = AgentId(1);
+            let child = AgentId(2);
+            let mut multiagent = Multiagent::new();
+            assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+            multiagent.on_agent_started(root);
+            assert!(multiagent.state.insert_child(
+                root,
+                child,
+                AgentKind::from_static("worker"),
+                None,
+                timeout()
+            ));
+            multiagent.state.set_status(child, status);
+            (multiagent, root, child)
+        }
+
+        for (outcome, expected) in [
+            (DispatchOutcome::Busy, MultiagentCommandError::TargetBusy),
+            (
+                DispatchOutcome::Missing,
+                MultiagentCommandError::TargetNotControlled,
+            ),
+        ] {
+            let (mut multiagent, root, child) = topology(SubagentStatus::Idle);
+            let (completed, mut result) = oneshot::channel();
+            multiagent.prepare_followup(
+                root,
+                FollowupCommand {
+                    target: child,
+                    message: Message::text("continue"),
+                    completed,
+                },
+            );
+            let Some(MultiagentEffect::Dispatch {
+                id,
+                target,
+                message,
+            }) = multiagent.take_effect()
+            else {
+                panic!("idle target should receive the followup directly");
+            };
+            assert_eq!(target, child);
+            assert_eq!(message.as_str(), "continue");
+            multiagent.apply_result(MultiagentEffectResult::Dispatched { id, outcome });
+            assert_eq!(result.try_recv(), Ok(Some(Err(expected))));
+        }
+
+        let (mut accepted, root, child) = topology(SubagentStatus::Idle);
+        let (completed, mut result) = oneshot::channel();
+        accepted.prepare_followup(
+            root,
+            FollowupCommand {
+                target: child,
+                message: Message::text("continue"),
+                completed,
+            },
+        );
+        let Some(MultiagentEffect::Dispatch { id, .. }) = accepted.take_effect() else {
+            panic!("idle target should dispatch");
+        };
+        accepted.apply_result(MultiagentEffectResult::Dispatched {
+            id,
+            outcome: DispatchOutcome::Accepted,
+        });
+        assert_eq!(result.try_recv(), Ok(Some(Ok(()))));
+        assert_eq!(accepted.state.status(child), Some(SubagentStatus::Running));
+
+        let (mut missing_requester, _root, child) = topology(SubagentStatus::Idle);
+        let (completed, mut result) = oneshot::channel();
+        missing_requester.prepare_followup(
+            AgentId(999),
+            FollowupCommand {
+                target: child,
+                message: Message::text("continue"),
+                completed,
+            },
+        );
+        assert_eq!(
+            result.try_recv(),
+            Ok(Some(Err(MultiagentCommandError::RequesterMissing)))
+        );
+
+        for status in [
+            SubagentStatus::Ready,
+            SubagentStatus::Reaping,
+            SubagentStatus::CompletedPendingDelivery,
+        ] {
+            let (mut multiagent, root, child) = topology(status);
+            let (completed, mut result) = oneshot::channel();
+            multiagent.prepare_followup(
+                root,
+                FollowupCommand {
+                    target: child,
+                    message: Message::text("continue"),
+                    completed,
+                },
+            );
+            let expected = if status == SubagentStatus::Ready {
+                MultiagentCommandError::TargetBusy
+            } else {
+                MultiagentCommandError::TargetNotControlled
+            };
+            assert_eq!(result.try_recv(), Ok(Some(Err(expected))));
+        }
+
+        for (outcome, expected) in [
+            (
+                InterruptOutcome::Inactive,
+                MultiagentCommandError::TargetBusy,
+            ),
+            (
+                InterruptOutcome::Missing,
+                MultiagentCommandError::TargetNotControlled,
+            ),
+        ] {
+            let (mut multiagent, root, child) = topology(SubagentStatus::Running);
+            let (completed, mut result) = oneshot::channel();
+            multiagent.prepare_followup(
+                root,
+                FollowupCommand {
+                    target: child,
+                    message: Message::text("interrupt"),
+                    completed,
+                },
+            );
+            let Some(MultiagentEffect::Interrupt { id, .. }) = multiagent.take_effect() else {
+                panic!("running target should be interrupted");
+            };
+            multiagent.apply_result(MultiagentEffectResult::Interrupted { id, outcome });
+            assert_eq!(result.try_recv(), Ok(Some(Err(expected))));
+        }
+
+        let (mut unrelated, root, _child) = topology(SubagentStatus::Idle);
+        let outsider = AgentId(3);
+        let (completed, mut result) = oneshot::channel();
+        unrelated.prepare_followup(
+            root,
+            FollowupCommand {
+                target: outsider,
+                message: Message::text("not controlled"),
+                completed,
+            },
+        );
+        assert_eq!(
+            result.try_recv(),
+            Ok(Some(Err(MultiagentCommandError::TargetNotControlled)))
+        );
+    }
+
+    #[test]
     fn dropped_mutating_command_receivers_cancel_the_commands() {
         let root = AgentId(1);
         let child = AgentId(2);
@@ -1716,5 +1868,131 @@ mod tests {
             .expect("timeout result")
             .expect("timeout value")
             .ok());
+    }
+
+    #[test]
+    fn bridge_drives_followup_and_delete_through_the_component_boundary() {
+        use super::super::tool_port::SubagentControl;
+
+        let root = AgentId(1);
+        let child = AgentId(2);
+        let mut multiagent = Multiagent::new();
+        assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+        multiagent.on_agent_started(root);
+        assert!(multiagent.state.insert_child(
+            root,
+            child,
+            AgentKind::from_static("worker"),
+            None,
+            timeout()
+        ));
+        multiagent.state.set_status(child, SubagentStatus::Idle);
+
+        let control = SubagentControl::new(root, Arc::clone(&multiagent.bridge));
+        let (followup, ()) = future::block_on(future::zip(
+            control.followup(child, Message::text("continue")),
+            async {
+                let dispatch = future::poll_fn(|cx| multiagent.poll_effect(cx))
+                    .await
+                    .expect("followup dispatch effect");
+                let MultiagentEffect::Dispatch {
+                    id,
+                    target,
+                    message,
+                } = dispatch
+                else {
+                    panic!("followup command must dispatch");
+                };
+                assert_eq!(target, child);
+                assert_eq!(message.as_str(), "continue");
+                multiagent.apply_result(MultiagentEffectResult::Dispatched {
+                    id,
+                    outcome: DispatchOutcome::Accepted,
+                });
+            },
+        ));
+        assert_eq!(followup, Ok(()));
+
+        let (delete, ()) = future::block_on(future::zip(control.delete(child), async {
+            let removal = future::poll_fn(|cx| multiagent.poll_effect(cx))
+                .await
+                .expect("delete removal effect");
+            let MultiagentEffect::RemoveAgents { agents, .. } = removal else {
+                panic!("delete command must remove physical agents");
+            };
+            assert_eq!(agents, vec![child]);
+            multiagent.physical_agent_removed(child, Ok(()));
+        }));
+        assert_eq!(delete, Ok(()));
+        assert!(!multiagent.contains(child));
+    }
+
+    #[test]
+    fn public_agent_lifecycle_preserves_approval_and_parent_child_semantics() {
+        let root = AgentId(1);
+        let parent = AgentId(2);
+        let child = AgentId(3);
+        let mut multiagent = Multiagent::new();
+        assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+        multiagent.on_agent_started(root);
+        assert!(multiagent.state.insert_child(
+            root,
+            parent,
+            AgentKind::from_static("worker"),
+            None,
+            timeout()
+        ));
+        assert!(multiagent.state.insert_child(
+            parent,
+            child,
+            AgentKind::from_static("worker"),
+            None,
+            timeout()
+        ));
+
+        multiagent.on_agent_started(parent);
+        multiagent.on_agent_awaiting_approval(parent);
+        assert_eq!(
+            multiagent.state.status(parent),
+            Some(SubagentStatus::AwaitingApproval)
+        );
+        multiagent.on_approval_resolved(parent);
+        assert_eq!(
+            multiagent.state.status(parent),
+            Some(SubagentStatus::Running)
+        );
+        multiagent.on_agent_completed(parent, "waiting for child".to_owned(), true);
+        assert_eq!(multiagent.state.status(parent), Some(SubagentStatus::Idle));
+
+        multiagent.on_agent_started(parent);
+        multiagent.on_agent_completed(parent, "failed".to_owned(), false);
+        assert!(matches!(
+            multiagent.take_effect(),
+            Some(MultiagentEffect::RemoveAgents { agents, .. })
+                if agents == vec![parent, child]
+        ));
+    }
+
+    #[test]
+    fn root_completion_and_unknown_lifecycle_notifications_are_idempotent() {
+        let root = AgentId(1);
+        let unknown = AgentId(99);
+        let mut multiagent = Multiagent::default();
+        assert!(multiagent.register_root(root, AgentKind::from_static("conversation")));
+        multiagent.on_agent_started(root);
+        multiagent.on_agent_completed(root, "done".to_owned(), true);
+        assert_eq!(multiagent.state.status(root), Some(SubagentStatus::Idle));
+
+        multiagent.on_agent_started(unknown);
+        multiagent.on_agent_awaiting_approval(unknown);
+        multiagent.on_approval_resolved(unknown);
+        multiagent.on_agent_cancelled(unknown);
+        multiagent.timeout(unknown);
+        multiagent.on_agent_completed(unknown, "late".to_owned(), false);
+        assert_eq!(multiagent.agent_ids(), vec![root]);
+
+        multiagent.clear();
+        assert!(multiagent.agent_ids().is_empty());
+        assert!(multiagent.take_effect().is_none());
     }
 }

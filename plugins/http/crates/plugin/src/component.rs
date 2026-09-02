@@ -186,6 +186,7 @@ mod tests {
     };
 
     use barracuda_http_wire::{HttpHeader, REQUEST_BODY_CAPACITY};
+    use barracuda_platform_test::{ScriptStep, ScriptedStack};
     use embedded_io::{ErrorKind, ErrorType};
     use http_client::embedded_nal_async::AddrType;
     use zerocopy::TryFromBytes;
@@ -375,5 +376,110 @@ mod tests {
         let error = execute_now(&request).expect_err("corrupt body is rejected");
         assert_ne!(error, HttpRpcError::Transport);
         assert_eq!(error, HttpRpcError::InvalidRequestBody);
+    }
+
+    #[test]
+    fn real_http_execution_maps_every_method_status_headers_body_and_failures() {
+        for (index, method) in [
+            HttpMethod::Get,
+            HttpMethod::Post,
+            HttpMethod::Put,
+            HttpMethod::Patch,
+            HttpMethod::Delete,
+            HttpMethod::Head,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let body = alloc::format!("reply-{index}");
+            let network =
+                ScriptedStack::new([ScriptStep::response(200, "text/plain", body.as_bytes(), 2)]);
+            let clients = ClientFactory::from_network(&network, &network);
+            let request = HttpRequest {
+                method,
+                url: HttpText::new("http://example.com/resource").unwrap(),
+                headers: [header("X-Test", "yes"), HttpHeader::default()],
+                body: HttpText::new("payload").unwrap(),
+            };
+            let response = ready(execute(&clients, &request))
+                .unwrap_or_else(|error| panic!("HTTP method index {index} failed: {error:?}"));
+            assert_eq!(response.status, 200);
+            let expected_body = if index == 5 {
+                alloc::string::String::new()
+            } else {
+                alloc::format!("reply-{index}")
+            };
+            assert_eq!(
+                response.body.as_str().expect("UTF-8 response"),
+                expected_body
+            );
+            let requests = network.requests();
+            assert_eq!(requests.len(), 1);
+            let text = requests.first().expect("one request");
+            let method = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
+                .get(index)
+                .expect("method index");
+            assert!(text.starts_with(method));
+            assert!(text.contains("X-Test: yes"));
+            if index != 5 {
+                assert!(text.ends_with("payload"));
+            }
+        }
+
+        let base = request_with_headers([HttpHeader::default(), HttpHeader::default()]);
+        let invalid_utf8 = ScriptedStack::new([ScriptStep::response(
+            200,
+            "application/octet-stream",
+            &[0xff],
+            1,
+        )]);
+        assert_eq!(
+            ready(execute(
+                &ClientFactory::from_network(&invalid_utf8, &invalid_utf8),
+                &base
+            )),
+            Err(HttpRpcError::InvalidResponseText)
+        );
+
+        let oversized = ScriptedStack::new([ScriptStep::response(
+            200,
+            "text/plain",
+            &alloc::vec![b'x'; RESPONSE_BODY_CAPACITY + 1],
+            RESPONSE_BODY_CAPACITY,
+        )]);
+        assert_eq!(
+            ready(execute(
+                &ClientFactory::from_network(&oversized, &oversized),
+                &base
+            )),
+            Err(HttpRpcError::ResponseTooLarge)
+        );
+
+        let refused = ScriptedStack::new([ScriptStep::ConnectError(ErrorKind::ConnectionRefused)]);
+        assert_eq!(
+            ready(execute(
+                &ClientFactory::from_network(&refused, &refused),
+                &base
+            )),
+            Err(HttpRpcError::Transport)
+        );
+        let no_network = UnusedNetwork;
+        let clients = ClientFactory::from_network(&no_network, &no_network);
+        let https = HttpRequest {
+            url: HttpText::new("https://example.com").unwrap(),
+            ..base
+        };
+        assert_eq!(
+            ready(execute(&clients, &https)),
+            Err(HttpRpcError::TlsNotConfigured)
+        );
+        let invalid = HttpRequest {
+            url: HttpText::new("ftp://example.com").unwrap(),
+            ..base
+        };
+        assert_eq!(
+            ready(execute(&clients, &invalid)),
+            Err(HttpRpcError::InvalidUrl)
+        );
     }
 }

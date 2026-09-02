@@ -347,8 +347,13 @@ mod tests {
             lua.load(
                 "local spi = require('spi')\n\
                  spi.write('display-port', '12')\n\
+                 local read = spi.read('display-port', 2)\n\
+                 local transfer = spi.transfer('display-port', 'Q', 3)\n\
                  local data = spi.transfer_in_place('display-port', '34')\n\
-                 return spi.available('display-port') and data == '43'",
+                 return spi.available('display-port')\n\
+                    and #read == 2\n\
+                    and transfer == 'QQQ'\n\
+                    and data == '43'",
             )
             .eval_async(),
         )
@@ -364,6 +369,43 @@ mod tests {
         );
         assert!(parse_length(MAX_TRANSFER_BYTES as i64 + 1).is_err());
         assert!(parse_length(i64::MAX).is_err());
+    }
+
+    #[test]
+    fn lua_reports_absent_unknown_and_invalid_spi_requests() {
+        let absent = SpiPackage::<NamedResources<TestSpi, 0>>::new(None);
+        let mut lua = Lua::new().expect("create Lua");
+        absent.install(&mut lua).expect("install SPI package");
+        let absent_errors: bool = block_on(
+            lua.load(
+                "local spi = require('spi')\n\
+                 local read, read_err = spi.read('missing', 1)\n\
+                 local write, write_err = spi.write('missing', 'x')\n\
+                 return read == nil and type(read_err) == 'string'\n\
+                    and write == nil and type(write_err) == 'string'",
+            )
+            .eval_async(),
+        )
+        .expect("run absent SPI requests");
+        assert!(absent_errors);
+
+        let package = SpiPackage::new(Some(NamedResources::new([("display-port", TestSpi)])));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install SPI package");
+        let invalid_errors: bool = block_on(
+            lua.load(
+                "local spi = require('spi')\n\
+                 local missing, missing_err = spi.transfer_in_place('missing', 'x')\n\
+                 local negative, negative_err = spi.read('display-port', -1)\n\
+                 local huge, huge_err = spi.transfer('display-port', 'x', 65537)\n\
+                 return missing == nil and type(missing_err) == 'string'\n\
+                    and negative == nil and type(negative_err) == 'string'\n\
+                    and huge == nil and type(huge_err) == 'string'",
+            )
+            .eval_async(),
+        )
+        .expect("run invalid SPI requests");
+        assert!(invalid_errors);
     }
 
     #[test]

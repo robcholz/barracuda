@@ -420,4 +420,64 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn renderer_handles_extra_switches_empty_fields_and_malformed_frames() {
+        let actions = render_actions(&[
+            "not an sse frame",
+            "event: message.start\ndata: not-json\n\n",
+            "event: message.extra\ndata: {\"field\":\"reasoning\",\"boundary\":\"more\",\"content\":\"why\"}\n\n",
+            "event: message.extra\ndata: {\"field\":\"tool_output\",\"boundary\":\"more\",\"content\":\"run\"}\n\n",
+            "event: message.extra\ndata: {\"field\":\"effect_result\",\"boundary\":\"complete\",\"content\":\"done\"}\n\n",
+            "event: message.extra\ndata: {\"field\":\"unknown\",\"content\":\"ignored\"}\n\n",
+            "event: message.delta\ndata: {\"delta\":\"\"}\n\n",
+            "event: message.delta\ndata: {\"delta\":\"reply\"}\n\n",
+            "event: unknown\ndata: {}\n\n",
+            "event: message.end\ndata: {}\n\n",
+        ]);
+
+        assert_eq!(
+            actions,
+            vec![
+                RenderAction::Start(MessageKind::Reply),
+                RenderAction::Start(MessageKind::Reasoning),
+                RenderAction::Delta("why".into()),
+                RenderAction::End,
+                RenderAction::Start(MessageKind::Tool),
+                RenderAction::Delta("run".into()),
+                RenderAction::End,
+                RenderAction::Start(MessageKind::Reply),
+                RenderAction::Delta("done".into()),
+                RenderAction::End,
+                RenderAction::Delta("reply".into()),
+                RenderAction::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn every_terminal_role_has_the_expected_label_and_stream_prefix() {
+        assert_eq!(MessageKind::Reply.stream_prefix(), None);
+        for (kind, label) in [
+            (MessageKind::Reasoning, "think"),
+            (MessageKind::Tool, "tool"),
+            (MessageKind::Notice, "note"),
+        ] {
+            assert!(kind
+                .stream_prefix()
+                .expect("labeled prefix")
+                .contains(label));
+            assert!(kind.render("first\nsecond").contains("         second"));
+        }
+        assert_eq!(label("tag", "", Style::new()), "  tag    ");
+    }
+
+    #[test]
+    fn invalid_websocket_urls_report_the_attempted_endpoint() {
+        let runtime = tokio::runtime::Runtime::new().expect("Tokio runtime");
+        let error = runtime
+            .block_on(run("not a websocket URL"))
+            .expect_err("invalid URL is rejected");
+        assert!(error.to_string().contains("not a websocket URL"));
+    }
 }

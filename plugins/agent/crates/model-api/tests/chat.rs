@@ -111,6 +111,160 @@ fn anthropic_chat_uses_provider_headers_and_shape() {
 }
 
 #[test]
+fn anthropic_chat_preserves_reasoning_tools_and_cross_segment_tool_results() {
+    let stack = ScriptedStack::new([ScriptStep::json(
+        200,
+        r#"{"content":[{"type":"thinking","thinking":"check"},{"type":"text","text":"result "},{"type":"text","text":"ready"},{"type":"tool_use","id":"call-out","name":"finish","input":{"ok":true}}]}"#,
+    )]);
+    let mut api = configured(&stack, BackendKind::AnthropicCompatible);
+    let messages = [
+        json!({"role":"system","content":"ignored message role"}),
+        json!({"role":"user","content":"start"}),
+        json!({
+            "role":"assistant",
+            "content":[
+                {"type":"text","text":"working"},
+                {"type":"unknown","value":"drop me"}
+            ],
+            "reasoning_content":"private thought",
+            "tool_calls":[{
+                "id":"call-1",
+                "function":{"name":"lookup","arguments":"{\"key\":7}"}
+            }]
+        }),
+        json!({"role":"tool","tool_call_id":"call-1","content":"first","is_error":true}),
+    ];
+    let reminders = [
+        json!({"role":"tool","tool_call_id":"call-2","content":"second"}),
+        json!({"role":"assistant","content":""}),
+    ];
+    let tools = serde_json::to_string(&json!([
+        {
+            "type":"function",
+            "function":{
+                "name":"lookup",
+                "description":"find a value",
+                "parameters":{"type":"object"}
+            }
+        },
+        {"name":"finish","input_schema":{"type":"object"}},
+        {"description":"missing name"}
+    ]))
+    .unwrap();
+    let request = ChatRequest::new("system prompt", &messages)
+        .with_reminders(&reminders)
+        .with_tools(&tools);
+
+    let response = block_on(api.chat(&request, Cancel::never())).unwrap();
+
+    assert_eq!(response.text.as_deref(), Some("result ready"));
+    assert_eq!(response.reasoning_content.as_deref(), Some("check"));
+    assert_eq!(response.tool_calls.len(), 1);
+    assert_eq!(response.tool_calls[0].id, "call-out");
+    assert_eq!(response.tool_calls[0].name, "finish");
+    assert_eq!(response.tool_calls[0].arguments_json, r#"{"ok":true}"#);
+
+    let body = request_body(&stack);
+    assert_eq!(body["system"], "system prompt");
+    assert_eq!(body["messages"].as_array().unwrap().len(), 3);
+    assert_eq!(body["messages"][1]["content"][0]["type"], "thinking");
+    assert_eq!(body["messages"][1]["content"][2]["type"], "tool_use");
+    assert_eq!(body["messages"][1]["content"][2]["input"]["key"], 7);
+    assert_eq!(body["messages"][2]["content"].as_array().unwrap().len(), 2);
+    assert_eq!(body["messages"][2]["content"][0]["is_error"], true);
+    assert_eq!(body["messages"][2]["content"][1]["is_error"], false);
+    assert_eq!(body["tools"].as_array().unwrap().len(), 2);
+    assert_eq!(body["tool_choice"]["type"], "auto");
+}
+
+#[test]
+fn anthropic_structured_chat_uses_native_schema_and_strict_tools() {
+    let stack = ScriptedStack::new([ScriptStep::json(
+        200,
+        r#"{"content":[{"type":"text","text":"{\"answer\":42}"}]}"#,
+    )]);
+    let mut api = configured(&stack, BackendKind::AnthropicCompatible);
+    let messages = [json!({"role":"user","content":"answer"})];
+    let tools = r#"[{"name":"calculator","description":"calculate"}]"#;
+    let request = ChatRequest::new("", &messages).with_tools(tools);
+    let schema = StaticOutputSchema {
+        name: "answer",
+        json: r#"{"type":"object","properties":{"answer":{"type":"integer"}}}"#,
+    };
+
+    let response: barracuda_model_api::ChatJsonResponse<Value> =
+        block_on(api.chat_json(&request, schema, Cancel::never())).unwrap();
+
+    assert_eq!(response.output.unwrap()["answer"], 42);
+    let body = request_body(&stack);
+    assert!(body.get("system").is_none());
+    assert_eq!(body["output_config"]["format"]["type"], "json_schema");
+    assert_eq!(
+        body["output_config"]["format"]["schema"]["properties"]["answer"]["type"],
+        "integer"
+    );
+    assert_eq!(body["tools"][0]["strict"], true);
+    assert_eq!(body["tools"][0]["input_schema"], json!({}));
+}
+
+#[test]
+fn anthropic_rejects_malformed_history_before_network_io() {
+    let malformed_calls = [
+        json!({"role":"assistant","tool_calls":[null]}),
+        json!({"role":"assistant","tool_calls":[{"id":"","function":{"name":"x"}}]}),
+        json!({"role":"assistant","tool_calls":[{"id":"id","function":{"name":""}}]}),
+        json!({"role":"assistant","tool_calls":[{"id":"id","function":{"name":"x","arguments":"{"}}]}),
+    ];
+
+    for message in &malformed_calls {
+        let stack = ScriptedStack::default();
+        let mut api = configured(&stack, BackendKind::AnthropicCompatible);
+        let error = block_on(api.chat(
+            &ChatRequest::new("", core::slice::from_ref(message)),
+            Cancel::never(),
+        ))
+        .unwrap_err();
+        assert!(matches!(error, Error::Api(_)));
+        assert!(stack.requests().is_empty());
+    }
+}
+
+#[test]
+fn anthropic_reports_distinct_malformed_response_failures() {
+    let cases = [
+        ("not-json", "parse"),
+        (r#"{}"#, "missing"),
+        (r#"{"content":[]}"#, "empty"),
+        (
+            r#"{"content":[{"type":"tool_use","name":"lookup","input":{}}]}"#,
+            "tool",
+        ),
+        (
+            r#"{"content":[{"type":"tool_use","id":"call","input":{}}]}"#,
+            "tool",
+        ),
+    ];
+
+    for (body, expected) in cases {
+        let stack = ScriptedStack::new([ScriptStep::json(200, body)]);
+        let mut api = configured(&stack, BackendKind::AnthropicCompatible);
+        let messages = [json!({"role":"user","content":"hello"})];
+        let error =
+            block_on(api.chat(&ChatRequest::new("", &messages), Cancel::never())).unwrap_err();
+        match expected {
+            "parse" => assert!(matches!(error, Error::Parse)),
+            "missing" => assert!(matches!(error, Error::MalformedResponse(_))),
+            "empty" => assert!(matches!(error, Error::EmptyResponse)),
+            "tool" => assert!(matches!(
+                error,
+                Error::MalformedResponse("malformed tool call")
+            )),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn structured_chat_sends_schema_and_parses_output() {
     let stack = ScriptedStack::new([ScriptStep::json(
         200,

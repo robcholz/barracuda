@@ -134,3 +134,21 @@ impl HttpEndpoint for ConfigEndpoint {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_configuration_uses_provider_defaults() {
+        let request: ConfigRequest = serde_json::from_slice(br#"{"token":"secret"}"#).unwrap();
+        assert_eq!(request.api_base, "https://api.telegram.org");
+        assert_eq!(request.draft_min_delta_bytes, 24);
+
+        let config: TelegramConfig = request.into();
+        assert_eq!(config.token, "secret");
+        assert_eq!(config.api_base, "https://api.telegram.org");
+        assert_eq!(config.draft_min_delta_bytes, 24);
+    }
+}

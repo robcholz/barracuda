@@ -117,6 +117,7 @@ impl HttpEndpoint for ConfigEndpoint {
 mod tests {
     use super::*;
     use barracuda_event_router::RpcMethod;
+    use futures_lite::future::block_on;
 
     #[test]
     fn exposes_web_search_identity() {
@@ -128,8 +129,41 @@ mod tests {
     }
 
     #[test]
-    fn config_defaults_to_tavily_api() {
-        let request: ConfigRequest = serde_json::from_slice(br#"{"api_key":"secret"}"#).unwrap();
-        assert_eq!(request.api_base, DEFAULT_API_BASE);
+    fn configuration_endpoint_validates_and_atomically_updates_credentials() {
+        let config = Rc::new(RefCell::new(None));
+        let endpoint = ConfigEndpoint {
+            config: Rc::clone(&config),
+        };
+
+        let method = block_on(endpoint.handle(HttpRequest::new(HttpMethod::Get, Vec::new())));
+        assert_eq!(method.status(), 405);
+        let malformed = block_on(endpoint.handle(HttpRequest::new(
+            HttpMethod::Post,
+            br#"{"api_key":"secret","unknown":true}"#.to_vec(),
+        )));
+        assert_eq!(malformed.status(), 400);
+        let empty_key = block_on(endpoint.handle(HttpRequest::new(
+            HttpMethod::Post,
+            br#"{"api_key":"  "}"#.to_vec(),
+        )));
+        assert_eq!(empty_key.status(), 422);
+        let invalid_base = block_on(endpoint.handle(HttpRequest::new(
+            HttpMethod::Post,
+            br#"{"api_key":"secret","api_base":"ftp://example.test"}"#.to_vec(),
+        )));
+        assert_eq!(invalid_base.status(), 422);
+        assert!(config.borrow().is_none());
+
+        let configured = block_on(endpoint.handle(HttpRequest::new(
+            HttpMethod::Post,
+            br#"{"api_key":"secret"}"#.to_vec(),
+        )));
+        assert_eq!(configured.status(), 204);
+        assert_eq!(configured.content_type(), JSON_CONTENT_TYPE);
+        assert!(configured.body().is_empty());
+        let stored = config.borrow();
+        let stored = stored.as_ref().unwrap();
+        assert_eq!(stored.api_key, "secret");
+        assert_eq!(stored.api_base, DEFAULT_API_BASE);
     }
 }

@@ -38,6 +38,61 @@ fn mounted_backend_provides_normal_file_handles() {
 }
 
 #[test]
+fn open_modes_enforce_permissions_append_and_create_new_semantics() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        vfs.write("/record", b"abc").await.unwrap();
+
+        let mut read_only = vfs.open("/record").await.unwrap();
+        assert_eq!(read_only.write(b"x").await, Err(FsError::PermissionDenied));
+
+        let mut write_only_options = OpenOptions::new();
+        write_only_options.write(true);
+        let mut write_only = vfs.open_with("/record", &write_only_options).await.unwrap();
+        let mut byte = [0];
+        assert_eq!(
+            write_only.read(&mut byte).await,
+            Err(FsError::PermissionDenied)
+        );
+
+        let mut append_options = OpenOptions::new();
+        append_options.write(true).append(true);
+        let mut first = vfs.open_with("/record", &append_options).await.unwrap();
+        first.seek(SeekFrom::Start(0)).await.unwrap();
+        first.write_all(b"def").await.unwrap();
+        drop(first);
+        let mut second = vfs.open_with("/record", &append_options).await.unwrap();
+        second.write_all(b"ghi").await.unwrap();
+        drop(second);
+        assert_eq!(vfs.read("/record").await.unwrap(), b"abcdefghi");
+
+        let mut create_new = OpenOptions::new();
+        create_new.write(true).create_new(true);
+        assert_eq!(
+            vfs.open_with("/record", &create_new).await.unwrap_err(),
+            FsError::AlreadyExists
+        );
+        assert_eq!(vfs.open("/missing").await.unwrap_err(), FsError::NotFound);
+        assert_eq!(vfs.open("/").await.unwrap_err(), FsError::IsDirectory);
+
+        let mut seekable = vfs.open("/record").await.unwrap();
+        assert_eq!(
+            seekable.seek(SeekFrom::Current(-1)).await,
+            Err(FsError::InvalidInput)
+        );
+        assert_eq!(
+            seekable.seek(SeekFrom::End(-20)).await,
+            Err(FsError::InvalidInput)
+        );
+        assert_eq!(seekable.seek(SeekFrom::End(-3)).await.unwrap(), 6);
+        let mut tail = [0; 3];
+        seekable.read_exact(&mut tail).await.unwrap();
+        assert_eq!(&tail, b"ghi");
+        assert_eq!(seekable.read(&mut byte).await.unwrap(), 0);
+    });
+}
+
+#[test]
 fn longest_mount_point_wins() {
     embassy_futures::block_on(async {
         let root = MemFs::new();
@@ -229,5 +284,36 @@ fn scoped_vfs_accepts_paths_relative_to_its_private_root() {
                 .unwrap(),
             b"demo"
         );
+    });
+}
+
+#[test]
+fn scoped_vfs_handles_root_paths_explicit_options_and_directory_removal() {
+    embassy_futures::block_on(async {
+        let vfs = mounted("/").await;
+        let scope = vfs.scoped("/tenant").unwrap();
+        assert!(scope.metadata("/").await.unwrap().is_dir());
+
+        let mut created = scope.create("nested/file").await.unwrap();
+        created.write_all(b"abc").await.unwrap();
+        created.flush().await.unwrap();
+        drop(created);
+
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        let mut opened = scope.open_with("/nested/file", &options).await.unwrap();
+        opened.seek(SeekFrom::End(0)).await.unwrap();
+        opened.write_all(b"def").await.unwrap();
+        drop(opened);
+        scope.rename("nested/file", "nested/renamed").await.unwrap();
+        assert_eq!(scope.read("nested/renamed").await.unwrap(), b"abcdef");
+        assert_eq!(
+            scope.read_at("nested/renamed", 4, 3).await,
+            Err(FsError::Io)
+        );
+
+        scope.remove("nested/renamed").await.unwrap();
+        scope.remove("nested").await.unwrap();
+        assert!(!scope.exists("nested").await.unwrap());
     });
 }

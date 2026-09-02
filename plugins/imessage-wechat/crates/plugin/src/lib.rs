@@ -149,3 +149,27 @@ impl HttpEndpoint for ConfigEndpoint {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_configuration_preserves_token_and_wechat_protocol_defaults() {
+        let request: ConfigRequest = serde_json::from_slice(br#"{"token":"secret"}"#).unwrap();
+        assert_eq!(request.api_base, "https://ilinkai.weixin.qq.com");
+        assert_eq!(request.app_id, "bot");
+        assert_eq!(request.client_version, "131329");
+        assert_eq!(request.route_tag, None);
+        assert_eq!(request.x_wechat_uin, "MA==");
+
+        let config: WechatConfig = request.into();
+        assert_eq!(config.token, "secret");
+        assert_eq!(config.api_base, "https://ilinkai.weixin.qq.com");
+        assert_eq!(config.app_id, "bot");
+        assert_eq!(config.client_version, "131329");
+        assert_eq!(config.route_tag, None);
+        assert_eq!(config.x_wechat_uin, "MA==");
+    }
+}

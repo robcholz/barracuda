@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::cell::Cell;
+use std::io::{BufRead as _, IsTerminal as _, Write as _};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -44,31 +45,61 @@ pub(super) struct ChatLineEditor {
 
 impl ChatLineEditor {
     pub(super) fn new() -> Result<Self> {
-        let config = Config::builder().auto_add_history(true).build();
-        let mut editor = Editor::<CommandHelper, DefaultHistory>::with_config(config)?;
-        editor.set_helper(Some(CommandHelper));
-        let printer = Box::new(editor.create_external_printer()?);
         let (prompt_tx, prompt_rx) = mpsc::channel();
         let (input_tx, input_rx) = unbounded_channel();
+        let printer: Box<dyn ExternalPrinter + Send> = if std::io::stdin().is_terminal() {
+            let config = Config::builder().auto_add_history(true).build();
+            let mut editor = Editor::<CommandHelper, DefaultHistory>::with_config(config)?;
+            editor.set_helper(Some(CommandHelper));
+            let printer = Box::new(editor.create_external_printer()?);
 
-        // One thread owns the editor for its entire lifetime. The async loop
-        // sends one token whenever the REPL is ready for another input.
-        thread::Builder::new()
-            .name("barracuda-input".to_string())
-            .spawn(move || {
-                while prompt_rx.recv().is_ok() {
-                    let prompt = ChatPrompt::new(input_tx.clone());
-                    let (input, terminal) = match editor.readline(&prompt) {
-                        Ok(line) => (LineInput::Line(line), false),
-                        Err(ReadlineError::Interrupted) => (LineInput::Interrupted, false),
-                        Err(ReadlineError::Eof) => (LineInput::Eof, true),
-                        Err(error) => (LineInput::Failed(error), true),
-                    };
-                    if input_tx.send(input).is_err() || terminal {
-                        break;
+            // One thread owns the editor for its entire lifetime. The async loop
+            // sends one token whenever the REPL is ready for another input.
+            thread::Builder::new()
+                .name("barracuda-input".to_string())
+                .spawn(move || {
+                    while prompt_rx.recv().is_ok() {
+                        let prompt = ChatPrompt::new(input_tx.clone());
+                        let (input, terminal) = match editor.readline(&prompt) {
+                            Ok(line) => (LineInput::Line(line), false),
+                            Err(ReadlineError::Interrupted) => (LineInput::Interrupted, false),
+                            Err(ReadlineError::Eof) => (LineInput::Eof, true),
+                            Err(error) => (LineInput::Failed(error), true),
+                        };
+                        if input_tx.send(input).is_err() || terminal {
+                            break;
+                        }
                     }
-                }
-            })?;
+                })?;
+            printer
+        } else {
+            thread::Builder::new()
+                .name("barracuda-input".to_string())
+                .spawn(move || {
+                    let stdin = std::io::stdin();
+                    let mut stdin = stdin.lock();
+                    while prompt_rx.recv().is_ok() {
+                        if input_tx.send(LineInput::PromptReady).is_err() {
+                            break;
+                        }
+                        let mut line = String::new();
+                        let (input, terminal) = match stdin.read_line(&mut line) {
+                            Ok(0) => (LineInput::Eof, true),
+                            Ok(_) => {
+                                while line.ends_with(['\n', '\r']) {
+                                    line.pop();
+                                }
+                                (LineInput::Line(line), false)
+                            }
+                            Err(error) => (LineInput::Failed(ReadlineError::Io(error)), true),
+                        };
+                        if input_tx.send(input).is_err() || terminal {
+                            break;
+                        }
+                    }
+                })?;
+            Box::new(StderrPrinter)
+        };
 
         Ok(Self {
             prompt: prompt_tx,
@@ -191,6 +222,17 @@ impl ChatLineEditor {
                 .print(format!("{MOVE_UP_ONE}{CLEAR_LINE}\r\n"))?;
         }
         self.live_row_displayed = false;
+        Ok(())
+    }
+}
+
+struct StderrPrinter;
+
+impl ExternalPrinter for StderrPrinter {
+    fn print(&mut self, message: String) -> rustyline::Result<()> {
+        let mut stderr = std::io::stderr().lock();
+        stderr.write_all(message.as_bytes())?;
+        stderr.flush()?;
         Ok(())
     }
 }
@@ -445,6 +487,8 @@ impl Helper for CommandHelper {}
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use rustyline::highlight::Highlighter;
 
     use super::*;
@@ -533,5 +577,144 @@ mod tests {
             live_row_message(&second, true),
             format!("{MOVE_UP_ONE}{CLEAR_LINE}{second}\r\n")
         );
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingPrinter {
+        messages: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ExternalPrinter for RecordingPrinter {
+        fn print(&mut self, message: String) -> rustyline::Result<()> {
+            self.messages.lock().expect("recording lock").push(message);
+            Ok(())
+        }
+    }
+
+    fn test_editor(printer: RecordingPrinter) -> ChatLineEditor {
+        let (prompt, _prompts) = mpsc::channel();
+        let (_inputs, input) = unbounded_channel();
+        ChatLineEditor {
+            prompt,
+            input,
+            printer: Box::new(printer),
+            stream: LiveStream::default(),
+            live_row_displayed: false,
+            waiting_dots: None,
+        }
+    }
+
+    #[test]
+    fn editor_render_state_transitions_do_not_leave_stale_terminal_rows() {
+        let printer = RecordingPrinter::default();
+        let messages = Arc::clone(&printer.messages);
+        let mut editor = test_editor(printer);
+
+        editor.start_waiting().expect("waiting row starts");
+        editor
+            .start_waiting()
+            .expect("duplicate start is idempotent");
+        editor.advance_waiting().expect("waiting row advances");
+        editor.advance_waiting().expect("waiting row advances");
+        editor.advance_waiting().expect("waiting row wraps");
+        assert_eq!(editor.waiting_dots, Some(1));
+        editor
+            .print(String::from("server notice"))
+            .expect("ordinary output replaces waiting row");
+        assert_eq!(editor.waiting_dots, None);
+        assert!(!editor.live_row_displayed);
+
+        editor
+            .print_stream_fragment("hello")
+            .expect("stream fragment renders");
+        editor
+            .print_stream_fragment(" world\nnext")
+            .expect("completed and live rows render");
+        assert_eq!(editor.stream.current(), "next");
+        editor.finish_stream_line().expect("live row commits");
+        assert!(editor.stream.current().is_empty());
+
+        editor.start_waiting().expect("waiting restarts");
+        editor
+            .abandon_live_render(Some("typed input"))
+            .expect("committed input removes transient waiting row");
+        assert_eq!(editor.waiting_dots, None);
+        assert!(!editor.live_row_displayed);
+        editor.clear_waiting().expect("clearing idle state is safe");
+
+        let messages = messages.lock().expect("recording lock");
+        assert_eq!(messages.len(), 10);
+        assert!(messages[4].starts_with(MOVE_UP_ONE));
+        assert!(messages[4].contains("server notice\r\n"));
+        assert!(messages[9].contains("\u{1b}[M"));
+    }
+
+    #[test]
+    fn stream_layout_handles_tabs_wide_text_controls_and_carriage_returns() {
+        let mut stream = LiveStream::default();
+
+        let completed = stream.push("a\tb\rwide界\u{7}\n", 8);
+
+        assert_eq!(completed, ["a       ", "b", "wide界"]);
+        assert!(stream.current().is_empty());
+        stream.push("reset", 8);
+        stream.clear();
+        assert!(stream.current().is_empty());
+        assert_eq!(stream.column, 0);
+    }
+
+    #[test]
+    fn input_row_accounting_handles_wraps_newlines_tabs_and_wide_characters() {
+        assert_eq!(input_rows("", 80), 1);
+        assert_eq!(input_rows("ab", 4), 2);
+        assert_eq!(input_rows("abc", 4), 2);
+        assert_eq!(input_rows("a\nb", 10), 2);
+        assert_eq!(input_rows("\t", 8), 2);
+        assert_eq!(input_rows("界界", 5), 2);
+
+        let deletion = delete_waiting_after_input("a\nb");
+        assert!(deletion.starts_with("\u{1b}[3A"));
+        assert!(deletion.ends_with("\u{1b}[2B\r"));
+    }
+
+    #[test]
+    fn ansi_scanner_and_live_updates_cover_incomplete_and_empty_sequences() {
+        assert_eq!(ansi_sequence_end(b"x", usize::MAX), 1);
+        assert_eq!(ansi_sequence_end(b"\x1bX", 0), 1);
+        assert_eq!(ansi_sequence_end(b"\x1b[31", 0), 4);
+        assert_eq!(ansi_sequence_end(b"\x1b[31m", 0), 5);
+        assert_eq!(live_update_message(&[], "", false), "");
+        assert_eq!(
+            live_update_message(&[], "", true),
+            format!("{MOVE_UP_ONE}{CLEAR_LINE}\r\n")
+        );
+
+        let mut stream = LiveStream::default();
+        assert!(stream.push("\u{1b}X", 8).is_empty());
+        assert_eq!(stream.current(), "\u{1b}X");
+        assert_eq!(
+            render_columns(),
+            terminal_columns().saturating_sub(1).max(1)
+        );
+    }
+
+    #[test]
+    fn editor_noop_branches_preserve_idle_state() {
+        let printer = RecordingPrinter::default();
+        let messages = Arc::clone(&printer.messages);
+        let mut editor = test_editor(printer);
+
+        editor
+            .print_stream_fragment("")
+            .expect("empty stream fragment is ignored");
+        editor
+            .finish_stream_line()
+            .expect("empty stream line is already complete");
+        editor.advance_waiting().expect("idle advance is ignored");
+        editor.clear_waiting().expect("idle clear is ignored");
+        editor
+            .abandon_live_render(None)
+            .expect("idle abandonment is ignored");
+        assert!(messages.lock().expect("recording lock").is_empty());
     }
 }

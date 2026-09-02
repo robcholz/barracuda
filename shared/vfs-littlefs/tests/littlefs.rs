@@ -1,6 +1,6 @@
 //! LittleFS backend integration behavior.
 
-use barracuda_vfs::{MountOptions, OpenOptions, SeekFrom, Vfs};
+use barracuda_vfs::{FsError, MountOptions, OpenOptions, SeekFrom, Vfs};
 use barracuda_vfs_littlefs::{mount_or_format_partition, LittleFs, PartitionStorage};
 use embedded_io_async::{Read, Seek, Write};
 use embedded_storage::nor_flash::{ErrorType, NorFlash, NorFlashErrorKind, ReadNorFlash};
@@ -9,6 +9,7 @@ use typenum::{U1, U16};
 const CAPACITY: usize = 4096;
 const BLOCKS: usize = CAPACITY / MemoryFlash::ERASE_SIZE;
 
+#[derive(Clone)]
 struct MemoryFlash {
     bytes: [u8; CAPACITY],
 }
@@ -159,5 +160,88 @@ fn generic_partition_entry_mounts_the_complete_supported_region() {
             vfs.read("/state").await.unwrap(),
             b"mounted from a generic NOR partition"
         );
+    });
+}
+
+#[test]
+fn littlefs_enforces_open_modes_types_and_seek_boundaries() {
+    embassy_futures::block_on(async {
+        assert!(matches!(
+            LittleFs::mount(Storage::new(MemoryFlash::new()).unwrap()),
+            Err(FsError::Io)
+        ));
+
+        let littlefs = LittleFs::format(Storage::new(MemoryFlash::new()).unwrap()).unwrap();
+        let mut vfs = Vfs::new();
+        vfs.mount("/disk", littlefs.into_backend(), MountOptions::read_write())
+            .await
+            .unwrap();
+        assert!(vfs.metadata("/disk").await.unwrap().is_dir());
+        vfs.create_dir_all("/disk/dir").await.unwrap();
+        vfs.write("/disk/dir/file", b"abcdef").await.unwrap();
+
+        let mut read_only = OpenOptions::new();
+        read_only.read(true);
+        let mut reader = vfs.open_with("/disk/dir/file", &read_only).await.unwrap();
+        assert_eq!(reader.write(b"x").await, Err(FsError::PermissionDenied));
+        assert_eq!(reader.seek(SeekFrom::End(-2)).await.unwrap(), 4);
+        let mut tail = [0; 2];
+        reader.read_exact(&mut tail).await.unwrap();
+        assert_eq!(&tail, b"ef");
+        assert_eq!(
+            reader.seek(SeekFrom::Current(-7)).await,
+            Err(FsError::InvalidInput)
+        );
+        assert_eq!(reader.seek(SeekFrom::Start(99)).await.unwrap(), 99);
+        assert_eq!(reader.read(&mut tail).await.unwrap(), 0);
+
+        let mut write_only = OpenOptions::new();
+        write_only.write(true);
+        let mut writer = vfs.open_with("/disk/dir/file", &write_only).await.unwrap();
+        assert_eq!(writer.read(&mut tail).await, Err(FsError::PermissionDenied));
+        writer.seek(SeekFrom::Start(2)).await.unwrap();
+        writer.write_all(b"XY").await.unwrap();
+        writer.flush().await.unwrap();
+        assert_eq!(vfs.read("/disk/dir/file").await.unwrap(), b"abXYef");
+
+        let mut create_new = OpenOptions::new();
+        create_new.write(true).create_new(true);
+        assert!(matches!(
+            vfs.open_with("/disk/dir/file", &create_new).await,
+            Err(FsError::AlreadyExists)
+        ));
+        let mut truncate = OpenOptions::new();
+        truncate.write(true).truncate(true);
+        drop(vfs.open_with("/disk/dir/file", &truncate).await.unwrap());
+        assert!(vfs.read("/disk/dir/file").await.unwrap().is_empty());
+
+        assert!(matches!(
+            vfs.open_with("/disk/missing", &read_only).await,
+            Err(FsError::NotFound)
+        ));
+        assert!(matches!(
+            vfs.open_with("/disk/dir", &read_only).await,
+            Err(FsError::IsDirectory)
+        ));
+        assert_eq!(
+            vfs.create_dir_all("/disk/dir/file/child").await,
+            Err(FsError::NotDirectory)
+        );
+        assert_eq!(
+            vfs.remove_file("/disk/dir").await,
+            Err(FsError::IsDirectory)
+        );
+        assert_eq!(
+            vfs.remove_dir("/disk/dir/file").await,
+            Err(FsError::NotDirectory)
+        );
+        assert_eq!(
+            vfs.remove_dir("/disk/dir").await,
+            Err(FsError::DirectoryNotEmpty)
+        );
+        assert!(matches!(
+            vfs.rename("/disk/dir/file", "/disk/missing/file").await,
+            Err(FsError::NotFound | FsError::NotDirectory)
+        ));
     });
 }

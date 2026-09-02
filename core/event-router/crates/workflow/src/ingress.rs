@@ -636,6 +636,7 @@ mod tests {
 
     use alloc::boxed::Box;
     use alloc::rc::Rc;
+    use alloc::vec;
     use alloc::vec::Vec;
     use core::cell::{Cell, RefCell};
 
@@ -904,6 +905,126 @@ mod tests {
                 error,
                 EmitError::Rejected(EmitRejection::InvalidPayloadFrame)
             ));
+        });
+    }
+
+    #[test]
+    fn receiver_rejects_incomplete_misaligned_and_wrong_cardinality_envelopes() {
+        block_on(async {
+            let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 64, 1>::new()));
+            let registry = RpcRegistry::new(lanes);
+            registry
+                .register::<InternalEmit<64>, _>(
+                    |_context, frames: RpcStream<RpcFrame<InternalEmitFrame<64>>>| async move {
+                        let request = match InternalEmitRequest::accept(frames).await? {
+                            Ok(request) => request,
+                            Err(rejection) => return Ok(Err(rejection)),
+                        };
+                        request.discard().await
+                    },
+                )
+                .expect("register validating internal emit");
+            let client = registry.client();
+            let event = EventId::try_from("gateway.message").expect("valid event id");
+
+            async fn send(
+                client: &RpcClient,
+                frames: Vec<InternalEmitFrame<64>>,
+            ) -> Result<(), EmitRejection> {
+                let frames = RpcStream::new(stream::iter(frames.into_iter().map(Ok)));
+                match client
+                    .call::<InternalEmit<64>>(frames)
+                    .expect("call starts")
+                    .await
+                    .expect("transport succeeds")
+                {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.view().expect("error frame decodes").rejection()),
+                }
+            }
+
+            assert_eq!(
+                send(&client, vec![]).await,
+                Err(EmitRejection::InvalidHeader)
+            );
+
+            let unary = InternalEmitFrame::new_header(&event, false, EventCardinality::Unary, 4)
+                .expect("header encodes");
+            assert_eq!(
+                send(&client, vec![unary]).await,
+                Err(EmitRejection::InvalidUnaryMessageCount)
+            );
+            assert_eq!(
+                send(
+                    &client,
+                    vec![
+                        unary,
+                        InternalEmitFrame::new_payload(&[1, 2]).expect("payload encodes"),
+                    ],
+                )
+                .await,
+                Err(EmitRejection::TruncatedPayload)
+            );
+            assert_eq!(
+                send(
+                    &client,
+                    vec![
+                        InternalEmitFrame::new_header(&event, false, EventCardinality::Unary, 2,)
+                            .expect("header encodes"),
+                        InternalEmitFrame::new_payload(&[1, 2, 3]).expect("payload encodes"),
+                    ],
+                )
+                .await,
+                Err(EmitRejection::InvalidPayloadFrame)
+            );
+            assert_eq!(
+                send(
+                    &client,
+                    vec![
+                        InternalEmitFrame::new_header(&event, false, EventCardinality::Unary, 2,)
+                            .expect("header encodes"),
+                        InternalEmitFrame::new_payload(&[1, 2]).expect("payload encodes"),
+                        InternalEmitFrame::new_payload(&[3, 4]).expect("payload encodes"),
+                    ],
+                )
+                .await,
+                Err(EmitRejection::InvalidUnaryMessageCount)
+            );
+
+            let topic_header =
+                InternalEmitFrame::new_header(&event, true, EventCardinality::Unary, 2)
+                    .expect("topic header encodes");
+            assert_eq!(
+                send(&client, vec![topic_header]).await,
+                Err(EmitRejection::InvalidTopic)
+            );
+            assert_eq!(
+                send(
+                    &client,
+                    vec![
+                        topic_header,
+                        InternalEmitFrame::new_payload(&[1, 2]).expect("payload encodes"),
+                    ],
+                )
+                .await,
+                Err(EmitRejection::InvalidTopic)
+            );
+
+            let streaming =
+                InternalEmitFrame::new_header(&event, false, EventCardinality::Streaming, 2)
+                    .expect("stream header encodes");
+            assert_eq!(
+                send(
+                    &client,
+                    vec![
+                        streaming,
+                        InternalEmitFrame::new_payload(&[1, 2]).expect("payload encodes"),
+                        InternalEmitFrame::new_payload(&[3, 4]).expect("payload encodes"),
+                    ],
+                )
+                .await,
+                Ok(())
+            );
         });
     }
 

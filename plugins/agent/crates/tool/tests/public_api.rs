@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use barracuda_agent_persistence::{Persistence, SharedPersistence};
 use barracuda_agent_tool::{
     EmptyArgs, Tool, ToolError, ToolFuture, ToolGroup, ToolHandler, ToolInvocation, ToolOutput,
-    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetHandle, ToolSpec,
+    ToolRegistry, ToolRegistryError, ToolRunner, ToolSetError, ToolSetHandle, ToolSpec,
 };
 use barracuda_platform_test::memory_vfs;
 use futures_lite::{future::block_on, StreamExt as _};
@@ -405,6 +405,78 @@ fn durable_overrides_apply_to_a_rebuilt_registry() -> Result<()> {
 }
 
 #[test]
+fn registry_namespace_validation_and_lifecycle_versions_are_atomic() -> Result<()> {
+    let registry = registry()?;
+    assert_eq!(registry.tool_version(), 0);
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("", true, [Tool::new(EchoTool)])),
+        Err(ToolRegistryError::InvalidGroup(id)) if id.is_empty()
+    ));
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("empty", true, [])),
+        Err(ToolRegistryError::InvalidGroup(id)) if id == "empty"
+    ));
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("bad", true, [Tool::new(EmptyNameTool)])),
+        Err(ToolRegistryError::InvalidTool(name)) if name.is_empty()
+    ));
+    assert_eq!(registry.tool_version(), 0, "rejected groups are atomic");
+
+    let group = ToolGroup::new("core", true, [Tool::new(EchoTool)]);
+    assert_eq!(group.id(), "core");
+    registry.register_group(group)?;
+    assert_eq!(registry.tool_version(), 1);
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("core", true, [Tool::new(NamedTool("new"))])),
+        Err(ToolRegistryError::GroupAlreadyExists(id)) if id == "core"
+    ));
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("echo", true, [Tool::new(NamedTool("new"))])),
+        Err(ToolRegistryError::AmbiguousName(id)) if id == "echo"
+    ));
+    assert!(matches!(
+        registry.register_group(ToolGroup::new("second", true, [Tool::new(NamedTool("core"))])),
+        Err(ToolRegistryError::AmbiguousName(id)) if id == "core"
+    ));
+    assert!(
+        matches!(registry.enable("missing"), Err(ToolRegistryError::NotFound(name)) if name == "missing")
+    );
+    assert!(
+        matches!(registry.disable("missing"), Err(ToolRegistryError::NotFound(name)) if name == "missing")
+    );
+
+    registry.start_all()?;
+    assert_eq!(registry.tool_version(), 2);
+    registry.start_all()?;
+    assert_eq!(
+        registry.tool_version(),
+        2,
+        "idempotent start is not a change"
+    );
+    registry.disable("echo")?;
+    assert_eq!(registry.tool_version(), 3);
+    registry.disable("echo")?;
+    assert_eq!(registry.tool_version(), 3, "same override is idempotent");
+    registry.enable("echo")?;
+    assert_eq!(registry.tool_version(), 4);
+    registry.stop_all()?;
+    assert_eq!(registry.tool_version(), 5);
+    registry.stop_all()?;
+    assert_eq!(
+        registry.tool_version(),
+        5,
+        "idempotent stop is not a change"
+    );
+
+    let debug = format!("{registry:?}");
+    assert!(debug.contains("tools: 1"));
+    assert!(debug.contains("groups: 1"));
+    assert!(debug.contains("started: false"));
+    assert!(debug.contains("overrides: 1"));
+    Ok(())
+}
+
+#[test]
 fn invocation_normalizes_empty_arguments() {
     let call = ToolInvocation::try_new(None, "demo", "  ");
 
@@ -419,6 +491,112 @@ fn invocation_rejects_non_object_arguments() {
         call,
         Err(error) if matches!(error.error, ToolError::InvalidArgumentsJson(_))
     ));
+}
+
+#[test]
+fn local_tool_namespace_rejects_every_ambiguous_or_invalid_shape() -> Result<()> {
+    let registry = registry()?;
+    registry.register_group(ToolGroup::new("registered", true, [Tool::new(OtherTool)]))?;
+    let mut tools = registry.tool_set();
+
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("", true, [Tool::new(EchoTool)])),
+        Err(ToolSetError::InvalidGroup(id)) if id.is_empty()
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("empty", true, [])),
+        Err(ToolSetError::InvalidGroup(id)) if id == "empty"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("bad", true, [Tool::new(EmptyNameTool)])),
+        Err(ToolSetError::InvalidTool(name)) if name.is_empty()
+    ));
+    tools.add_group(ToolGroup::new("local", true, [Tool::new(EchoTool)]))?;
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("local", true, [Tool::new(NamedTool("third"))])),
+        Err(ToolSetError::GroupAlreadyExists(id)) if id == "local"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("echo", true, [Tool::new(NamedTool("third"))])),
+        Err(ToolSetError::AmbiguousName(id)) if id == "echo"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("third", true, [Tool::new(NamedTool("local"))])),
+        Err(ToolSetError::AmbiguousName(id)) if id == "local"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new(
+            "duplicates",
+            true,
+            [Tool::new(NamedTool("same")), Tool::new(NamedTool("same"))],
+        )),
+        Err(ToolSetError::AlreadyExists(name)) if name == "same"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("registered", true, [Tool::new(NamedTool("third"))])),
+        Err(ToolSetError::GroupAlreadyExists(id)) if id == "registered"
+    ));
+    assert!(matches!(
+        tools.add_group(ToolGroup::new("other", true, [Tool::new(NamedTool("third"))])),
+        Err(ToolSetError::AmbiguousName(id)) if id == "other"
+    ));
+    Ok(())
+}
+
+#[test]
+fn permanent_and_iteration_tool_visibility_transitions_are_composable() -> Result<()> {
+    let mut tools = barracuda_agent_tool::ToolSet::empty();
+    {
+        let empty = tools.begin()?;
+        assert_eq!(empty.static_schemas(), "no schemas");
+        assert_eq!(empty.static_context(), "no tool context");
+        assert_eq!(empty.deferred_context(), "");
+        assert_eq!(empty.reminders(), "no extra tool context");
+    }
+    for operation in [
+        tools.enable_tool("missing".into()),
+        tools.disable_tool("missing".into()),
+        tools.temporarily_enable_tool("missing".into()),
+        tools.temporarily_disable_tool("missing".into()),
+    ] {
+        assert!(matches!(operation, Err(ToolSetError::NotFound(name)) if name == "missing"));
+    }
+
+    tools.add_group(ToolGroup::new("visible", true, [Tool::new(EchoTool)]))?;
+    tools.add_group(ToolGroup::new("hidden", false, [Tool::new(OtherTool)]))?;
+    tools.enable_tool("echo".into())?;
+    tools.temporarily_enable_tool("echo".into())?;
+    tools.disable_tool("echo".into())?;
+    tools.disable_tool("echo".into())?;
+    tools.temporarily_disable_tool("echo".into())?;
+    tools.temporarily_enable_tool("echo".into())?;
+    assert!(tools.begin()?.reminders().contains("temporarily available"));
+    tools.temporarily_disable_tool("echo".into())?;
+    assert_eq!(tools.begin()?.static_schemas(), "no schemas");
+    tools.temporarily_enable_tool("echo".into())?;
+    tools.enable_tool("echo".into())?;
+
+    tools.enable_tool("other".into())?;
+    tools.temporarily_disable_tool("other".into())?;
+    {
+        let handle = tools.begin()?;
+        assert!(handle
+            .reminders()
+            .contains("Tool `other` is temporarily unavailable."));
+        assert!(handle.deferred_context().contains("other"));
+    }
+    tools.disable_tool("other".into())?;
+    tools.temporarily_enable_tool("other".into())?;
+    tools.clear_temporary_tools();
+    tools.clear_temporary_tools();
+    let handle = tools.begin()?;
+    assert_eq!(handle.reminders(), "no extra tool context");
+    assert!(matches!(
+        handle.classify(&invocation("other", "{}")?),
+        Err(error) if matches!(error.error, ToolError::NotFound(_))
+    ));
+    assert!(handle.classify(&invocation("echo", "{}")?).is_ok());
+    Ok(())
 }
 
 struct EchoTool;
@@ -472,6 +650,68 @@ impl ToolSpec for OtherTool {
         const VALIDATOR: json_validator::Validator =
             json_validator::validator!("tests/fixtures/object.json");
         &VALIDATOR
+    }
+}
+
+struct EmptyNameTool;
+
+impl ToolSpec for EmptyNameTool {
+    fn name(&self) -> &str {
+        ""
+    }
+
+    fn schema(&self) -> &str {
+        r#"{"type":"function","function":{"name":""}}"#
+    }
+
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("tests/fixtures/object.json");
+        &VALIDATOR
+    }
+}
+
+impl ToolHandler for EmptyNameTool {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async {
+            Ok(ToolOutput {
+                content: String::new(),
+                ok: true,
+            })
+        })
+    }
+}
+
+struct NamedTool(&'static str);
+
+impl ToolSpec for NamedTool {
+    fn name(&self) -> &str {
+        self.0
+    }
+
+    fn schema(&self) -> &str {
+        r#"{"type":"function","function":{"name":"named"}}"#
+    }
+
+    fn arguments_validator(&self) -> &'static json_validator::Validator {
+        const VALIDATOR: json_validator::Validator =
+            json_validator::validator!("tests/fixtures/object.json");
+        &VALIDATOR
+    }
+}
+
+impl ToolHandler for NamedTool {
+    type Args = EmptyArgs;
+
+    fn invoke<'a>(&'a self, _args: Self::Args) -> ToolFuture<'a> {
+        Box::pin(async {
+            Ok(ToolOutput {
+                content: String::new(),
+                ok: true,
+            })
+        })
     }
 }
 

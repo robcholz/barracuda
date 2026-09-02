@@ -3,7 +3,8 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use barracuda_agent_skill::{
-    CatalogSnapshot, FsSkillRegistry, Skill, SkillError, SkillName, SkillRegistry,
+    CatalogSnapshot, EmptySkillRegistry, FsSkillRegistry, Skill, SkillError, SkillName,
+    SkillRegistry,
 };
 use barracuda_platform_test::memory_vfs;
 use barracuda_vfs::ScopedVfs;
@@ -57,6 +58,76 @@ fn public_registry_trait_drives_skill_set() {
                 .content(),
             "body"
         );
+    });
+}
+
+#[test]
+fn empty_registry_and_live_filesystem_reload_have_explicit_catalog_semantics() {
+    block_on(async {
+        let empty: Arc<dyn SkillRegistry> = Arc::new(EmptySkillRegistry);
+        assert_eq!(empty.catalog().version(), 0);
+        assert!(empty.catalog().skills().is_empty());
+        empty.reload().await.unwrap();
+        assert!(matches!(
+            empty.read_document(&SkillName::new("missing")).await,
+            Err(SkillError::NotFound(name)) if name.as_str() == "missing"
+        ));
+        assert_eq!(empty.skill_set().list_skills(), "[]");
+
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(&filesystem, "system/shared", &skill_md("shared")).await;
+        write_skill(&filesystem, "system/system-only", &skill_md("system-only")).await;
+        write_skill(&filesystem, "data/shared", &skill_md("shared")).await;
+        filesystem
+            .write_atomic("skills/data/not-a-skill/readme.txt", b"ignored")
+            .await
+            .unwrap();
+
+        let registry = Arc::new(
+            FsSkillRegistry::new(filesystem.clone())
+                .set_root("skills/missing")
+                .await
+                .unwrap()
+                .set_root("skills/data")
+                .await
+                .unwrap()
+                .set_root("skills/system")
+                .await
+                .unwrap(),
+        );
+        let initial = registry.catalog();
+        assert_eq!(initial.version(), 3);
+        assert_eq!(
+            initial
+                .skills()
+                .iter()
+                .map(|skill| skill.name().as_str())
+                .collect::<Vec<_>>(),
+            vec!["shared", "system-only"]
+        );
+        assert_eq!(
+            initial.get(&SkillName::new("shared")).unwrap().directory(),
+            Some("skills/data/shared"),
+            "the first root wins duplicate skill names"
+        );
+
+        write_skill(&filesystem, "data/new-skill", &skill_md("new-skill")).await;
+        registry.reload().await.unwrap();
+        let reloaded = registry.catalog();
+        assert!(reloaded.version() > initial.version());
+        assert!(reloaded.get(&SkillName::new("new-skill")).is_some());
+
+        write_skill(&filesystem, "data/broken", "not frontmatter").await;
+        let stable_version = reloaded.version();
+        assert!(matches!(
+            registry.reload().await,
+            Err(SkillError::MissingOpeningFence(name)) if name.as_str() == "broken"
+        ));
+        assert_eq!(registry.catalog().version(), stable_version);
+        assert!(registry
+            .catalog()
+            .get(&SkillName::new("new-skill"))
+            .is_some());
     });
 }
 

@@ -354,3 +354,265 @@ fn web_service_rejects_invalid_or_empty_rest_messages_before_the_sink() {
         assert!(sink.messages.borrow().is_empty());
     });
 }
+
+#[test]
+fn complete_text_subscription_limits_and_live_lag_have_explicit_behavior() {
+    block_on(async {
+        let web = Web::<2, 1>::default();
+        assert!(matches!(
+            web.subscribe("   "),
+            Err(web::SubscribeError::InvalidConversation)
+        ));
+        let mut events = web.subscribe("chat-42").expect("first subscriber");
+        assert!(matches!(
+            web.subscribe("chat-42"),
+            Err(web::SubscribeError::MaximumSubscribersReached)
+        ));
+        assert!(web
+            .send_message(SendMessageRequest::text(target(), "complete"))
+            .await
+            .is_ok());
+        assert!(web
+            .set_typing(SetTypingRequest::new(target(), true))
+            .await
+            .is_ok());
+        assert!(web
+            .set_typing(SetTypingRequest::new(target(), false))
+            .await
+            .is_ok());
+
+        assert!(matches!(
+            events.next().await,
+            Some(WebDelivery::Lagged { missed }) if missed > 0
+        ));
+        loop {
+            let delivery = futures_lite::StreamExt::next(&mut events)
+                .await
+                .expect("stream trait yields buffered live events");
+            if matches!(
+                delivery,
+                WebDelivery::Event(event)
+                    if matches!(event.data, WebEventData::ConversationTyping { typing: false })
+            ) {
+                break;
+            }
+        }
+
+        assert!(matches!(
+            web.send_message(SendMessageRequest::text(target(), " \t "))
+                .await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+    });
+}
+
+#[test]
+fn binary_and_streaming_media_preserve_success_and_failure_boundaries() {
+    block_on(async {
+        let web = Web::<16, 1>::new();
+        let mut events = web.subscribe("chat-42").expect("subscriber");
+        let bytes = SendMediaRequest {
+            target: target(),
+            body: BinaryBody::Bytes(vec![9, 8]),
+            filename: None,
+            mime_type: None,
+            caption: None,
+            reply_to: None,
+        };
+        assert!(web.send_media(MediaKind::Video, bytes).await.is_ok());
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(event.data, WebEventData::Media { phase: MediaPhase::Start { .. }, .. }))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(event.data, WebEventData::Media { phase: MediaPhase::Delta { ref bytes }, .. } if bytes == &vec![9, 8]))
+        );
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(event.data, WebEventData::Media { phase: MediaPhase::End { error: None }, .. }))
+        );
+
+        let failed = SendMediaRequest {
+            target: target(),
+            body: BinaryBody::Stream(Box::pin(stream::iter([
+                Ok(Vec::new()),
+                Err(StreamError::failed("media source failed")),
+            ]))),
+            filename: None,
+            mime_type: None,
+            caption: None,
+            reply_to: None,
+        };
+        assert!(web.send_media(MediaKind::Audio, failed).await.is_err());
+        let _start = events.next().await.expect("failed media starts");
+        assert!(
+            matches!(events.next().await, Some(WebDelivery::Event(event)) if matches!(event.data, WebEventData::Media { phase: MediaPhase::End { error: Some(ref message) }, .. } if message == "media source failed"))
+        );
+    });
+}
+
+#[test]
+fn every_rich_stream_field_and_mutation_has_a_stable_sse_projection() {
+    block_on(async {
+        let web = Web::<32, 1>::new();
+        let mut events = web.subscribe("chat-42").expect("subscriber");
+        let fields = [
+            (SendStreamField::Text, "text"),
+            (SendStreamField::Reasoning, "reasoning"),
+            (SendStreamField::EffectResult, "effect_result"),
+            (SendStreamField::Notice, "notice"),
+            (SendStreamField::Event, "event"),
+            (SendStreamField::ToolResultStart, "tool_result_start"),
+            (SendStreamField::ToolCallId, "tool_call_id"),
+            (SendStreamField::ToolName, "tool_name"),
+            (SendStreamField::ToolArguments, "tool_arguments"),
+            (SendStreamField::ToolOutput, "tool_output"),
+            (SendStreamField::ToolSucceeded, "tool_succeeded"),
+            (SendStreamField::ToolFailed, "tool_failed"),
+            (SendStreamField::ToolResultEnd, "tool_result_end"),
+        ];
+        let frames = fields
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, (field, _))| {
+                Ok(SendStreamFrame::new(
+                    field,
+                    if index % 2 == 0 {
+                        StreamBoundary::More
+                    } else {
+                        StreamBoundary::Complete
+                    },
+                    if field == SendStreamField::Text {
+                        ""
+                    } else {
+                        "content"
+                    },
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert!(web
+            .send_stream(SendStreamRequest {
+                target: target(),
+                frames: Box::pin(stream::iter(frames)),
+                reply_to: None,
+            })
+            .await
+            .is_ok());
+        let start = events.next().await.expect("rich stream starts");
+        assert!(start
+            .to_sse()
+            .expect("serialize start")
+            .contains("message.start"));
+        for (_, expected) in fields.iter().skip(1) {
+            let frame = events
+                .next()
+                .await
+                .expect("extra frame")
+                .to_sse()
+                .expect("serialize extra frame");
+            assert!(frame.contains(&format!("\"field\":\"{expected}\"")));
+            assert!(frame.contains("\"boundary\":"));
+        }
+        let end = events.next().await.expect("rich stream ends");
+        assert!(end.to_sse().expect("serialize end").contains("message.end"));
+
+        assert!(web
+            .edit_message(EditMessageRequest::new(target(), "web-1", "new"))
+            .await
+            .is_ok());
+        assert!(web
+            .delete_message(DeleteMessageRequest::new(target(), "web-1"))
+            .await
+            .is_ok());
+        assert!(web
+            .react(ReactRequest::new(target(), "web-1", "heart"))
+            .await
+            .is_ok());
+        assert!(web
+            .set_typing(SetTypingRequest::new(target(), true))
+            .await
+            .is_ok());
+        for expected in [
+            "message.edit",
+            "message.delete",
+            "message.reaction",
+            "conversation.typing",
+        ] {
+            assert!(events
+                .next()
+                .await
+                .expect("mutation event")
+                .to_sse()
+                .expect("serialize mutation")
+                .contains(expected));
+        }
+        assert_eq!(
+            WebDelivery::Lagged { missed: 7 }
+                .to_sse()
+                .expect("serialize lag marker"),
+            "event: stream.lagged\ndata: {\"missed\":7}\n\n"
+        );
+    });
+}
+
+#[derive(Default)]
+struct TextOnlySink;
+
+impl InboundMessageSink for TextOnlySink {
+    fn receive_message(&self, _request: InboundMessage) -> InboundFuture<'_, ()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+#[test]
+fn web_service_validates_media_identity_and_uses_the_default_unsupported_sink() {
+    block_on(async {
+        let service = WebService::new(Rc::new(TextOnlySink));
+        assert!(matches!(
+            service
+                .receive_media(
+                    " ",
+                    MediaKind::File,
+                    "message",
+                    MessageBody::Bytes(vec![]),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await,
+            Err(InboundError::InvalidRequest { .. })
+        ));
+        assert!(matches!(
+            service
+                .receive_media(
+                    "chat",
+                    MediaKind::File,
+                    " ",
+                    MessageBody::Bytes(vec![]),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await,
+            Err(InboundError::InvalidRequest { .. })
+        ));
+        assert_eq!(
+            service
+                .receive_media(
+                    "chat",
+                    MediaKind::File,
+                    "message",
+                    MessageBody::Bytes(vec![]),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await,
+            Err(InboundError::Unsupported {
+                operation: "receive_media"
+            })
+        );
+    });
+}

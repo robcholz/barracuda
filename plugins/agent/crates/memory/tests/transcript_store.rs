@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use barracuda_agent_memory::{
-    AssistantFragment, Transcript, TranscriptStore, TurnError, TurnHandle, TurnId,
+    AssistantFragment, Transcript, TranscriptStore, TransientTranscript, TurnError, TurnHandle,
+    TurnId,
 };
 use barracuda_platform_test::memory_vfs;
 use futures_lite::future::block_on;
@@ -214,6 +215,107 @@ fn persisted_transcript_restores_turn_version() {
             .await
             .unwrap();
         assert_eq!(reloaded.turn_version(), 1);
+    });
+}
+
+#[test]
+fn transient_transcript_exposes_live_drafts_and_commits_without_filesystem_io() {
+    let transcript = TransientTranscript::new();
+    let turn = transcript.open_turn().unwrap();
+    let first = transcript.turns();
+    assert!(first.is_empty());
+    assert!(Arc::ptr_eq(&first, &transcript.turns()));
+
+    {
+        let mut tool = turn.tool("live-call", true).unwrap();
+        tool.append("partial");
+        let live = transcript.turns();
+        assert_eq!(live[0].id, None);
+        assert_eq!(live[0].messages[0]["tool_call_id"], "live-call");
+        assert_eq!(live[0].messages[0]["content"], "partial");
+        assert_eq!(live[0].messages[0]["is_error"], true);
+    }
+    drop(turn);
+
+    assert_eq!(transcript.turn_version(), 1);
+    assert_eq!(transcript.turns()[0].id, Some(TurnId::new(1)));
+    block_on(transcript.flush()).unwrap();
+}
+
+#[test]
+fn mismatched_manifest_is_rebuilt_from_the_append_only_log_and_advances_ids() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let dir = "/transcript-mismatch-recovery";
+        let store = TranscriptStore::new(filesystem.clone(), 3, dir)
+            .await
+            .unwrap();
+        {
+            let turn = store.open_turn().unwrap();
+            let mut user = turn.user().unwrap();
+            user.append("survives manifest mismatch");
+        }
+        store.flush().await.unwrap();
+        drop(store);
+
+        let data_path = format!("{dir}/3.jsonl");
+        let data = String::from_utf8(filesystem.read(&data_path).await.unwrap()).unwrap();
+        let changed = data.replace("turn-1", "turn-9");
+        assert_ne!(changed, data);
+        filesystem
+            .write(&data_path, changed.as_bytes())
+            .await
+            .unwrap();
+
+        let recovered = TranscriptStore::new(filesystem.clone(), 3, dir)
+            .await
+            .unwrap();
+        assert_eq!(recovered.turns()[0].id, Some(TurnId::new(9)));
+        assert_eq!(
+            recovered.turns()[0].messages[0]["content"],
+            "survives manifest mismatch"
+        );
+        {
+            let turn = recovered.open_turn().unwrap();
+            let mut user = turn.user().unwrap();
+            user.append("next turn");
+        }
+        recovered.flush().await.unwrap();
+        assert_eq!(recovered.turns()[1].id, Some(TurnId::new(10)));
+    });
+}
+
+#[test]
+fn rebuild_skips_corrupt_and_partial_tail_records_without_losing_valid_turns() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let dir = "/transcript-tail-recovery";
+        let store = TranscriptStore::new(filesystem.clone(), 5, dir)
+            .await
+            .unwrap();
+        {
+            let turn = store.open_turn().unwrap();
+            let mut user = turn.user().unwrap();
+            user.append("valid turn");
+        }
+        store.flush().await.unwrap();
+        drop(store);
+
+        let data_path = format!("{dir}/5.jsonl");
+        filesystem
+            .append(&data_path, b"not-json\n{\"incomplete\":true")
+            .await
+            .unwrap();
+        filesystem.remove(&format!("{dir}/5.json")).await.unwrap();
+
+        let recovered = TranscriptStore::new(filesystem.clone(), 5, dir)
+            .await
+            .unwrap();
+        assert_eq!(recovered.turns().len(), 1);
+        assert_eq!(recovered.turns()[0].messages[0]["content"], "valid turn");
+        let repaired = String::from_utf8(filesystem.read(&data_path).await.unwrap()).unwrap();
+        assert!(!repaired.contains("not-json"));
+        assert!(!repaired.contains("incomplete"));
     });
 }
 

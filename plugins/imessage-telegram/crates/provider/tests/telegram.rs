@@ -11,7 +11,7 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel, MessageTarget,
-    ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest,
+    ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, StreamError,
 };
 use http_client::ClientFactory;
 use telegram::{Telegram, TelegramConfig};
@@ -286,6 +286,163 @@ fn maps_telegram_authentication_and_rate_limit_errors() {
                 matches!(&error, gateway::ChannelError::RateLimited),
                 !expected_auth
             );
+        }
+    });
+}
+
+#[test]
+fn invalid_message_shapes_and_failed_streams_are_rejected_before_network_io() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding([]));
+        let channel = Telegram::new(http.factory(), config("token"));
+
+        assert!(matches!(
+            channel
+                .send_message(SendMessageRequest::text(target(), ""))
+                .await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        let mut reply = SendMessageRequest::text(target(), "hello");
+        reply.reply_to = Some("not-an-integer".into());
+        assert!(matches!(
+            channel.send_message(reply).await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        let failed = stream::iter([
+            Ok(String::new()),
+            Err(StreamError::failed("stream stopped")),
+        ]);
+        assert!(matches!(
+            channel
+                .send_message(SendMessageRequest::stream(target(), Box::pin(failed)))
+                .await,
+            Err(gateway::ChannelError::Stream(_))
+        ));
+        assert!(channel
+            .edit_message(EditMessageRequest::new(target(), "bad", "text"))
+            .await
+            .is_err());
+        assert!(channel
+            .delete_message(DeleteMessageRequest::new(target(), "bad"))
+            .await
+            .is_err());
+        assert!(channel
+            .react(ReactRequest::new(target(), "bad", "👍"))
+            .await
+            .is_err());
+        channel
+            .set_typing(SetTypingRequest::new(target(), false))
+            .await
+            .expect("typing stop is local");
+        assert!(http.requests().is_empty());
+    });
+}
+
+#[test]
+fn string_chat_ids_replies_empty_reactions_and_edit_fallbacks_map_to_api_json() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding([
+            response(r#"{"ok":true,"result":{"message_id":12}}"#),
+            response(r#"{"ok":true,"result":true}"#),
+            response(r#"{"ok":true,"result":true}"#),
+        ]));
+        let channel = Telegram::new(http.factory(), config("token"));
+        let target = MessageTarget::new("telegram", "named-chat");
+        let mut message = SendMessageRequest::text(target.clone(), "reply");
+        message.reply_to = Some("7".into());
+        channel.send_message(message).await.expect("reply sends");
+        channel
+            .react(ReactRequest::new(target.clone(), "7", ""))
+            .await
+            .expect("reaction clears");
+        let receipt = channel
+            .edit_message(EditMessageRequest::new(target, "7", "edited"))
+            .await
+            .expect("edit uses original ID when Telegram returns true");
+        assert_eq!(receipt.message_id, "7");
+
+        let requests = http.requests();
+        assert_eq!(body_json(&requests[0])["chat_id"], "named-chat");
+        assert_eq!(body_json(&requests[0])["reply_parameters"]["message_id"], 7);
+        assert_eq!(body_json(&requests[1])["reaction"], serde_json::json!([]));
+    });
+}
+
+#[test]
+fn every_media_kind_uses_its_telegram_method_and_default_metadata() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding((20..24).map(|id| {
+            response(&format!(r#"{{"ok":true,"result":{{"message_id":{id}}}}}"#))
+        })));
+        let channel = Telegram::new(http.factory(), config("token"));
+        for kind in [
+            MediaKind::File,
+            MediaKind::Image,
+            MediaKind::Audio,
+            MediaKind::Video,
+        ] {
+            let mut request = SendMediaRequest {
+                target: target(),
+                body: BinaryBody::Bytes(vec![1, 2]),
+                filename: None,
+                mime_type: None,
+                caption: None,
+                reply_to: None,
+            };
+            if kind == MediaKind::Video {
+                request.caption = Some("caption".into());
+                request.reply_to = Some("7".into());
+            }
+            channel
+                .send_media(kind, request)
+                .await
+                .expect("media sends");
+        }
+
+        let requests = http.requests();
+        assert_eq!(requests.len(), 4);
+        for (request, method) in
+            requests
+                .iter()
+                .zip(["sendDocument", "sendPhoto", "sendAudio", "sendVideo"])
+        {
+            assert!(request.url.ends_with(method));
+        }
+        let bodies = requests
+            .iter()
+            .map(|request| String::from_utf8_lossy(&request.body))
+            .collect::<Vec<_>>();
+        assert!(bodies[0].contains("filename=\"file.bin\""));
+        assert!(bodies[1].contains("filename=\"image.jpg\""));
+        assert!(bodies[2].contains("filename=\"audio.bin\""));
+        assert!(bodies[3].contains("filename=\"video.mp4\""));
+        assert!(bodies[3].contains("caption"));
+        assert!(bodies[3].contains("message_id"));
+    });
+}
+
+#[test]
+fn malformed_non_ok_and_incomplete_api_responses_are_platform_errors() {
+    block_on(async {
+        for response in [
+            Response {
+                status: 500,
+                body: br#"{"ok":false,"error_code":500,"description":"down"}"#.to_vec(),
+            },
+            Response {
+                status: 200,
+                body: b"not-json".to_vec(),
+            },
+            response(r#"{"ok":true}"#),
+            response(r#"{"ok":true,"result":{}}"#),
+        ] {
+            let http = Rc::new(MockHttp::responding([response]));
+            assert!(matches!(
+                Telegram::new(http.factory(), config("token"))
+                    .send_message(SendMessageRequest::text(target(), "hello"))
+                    .await,
+                Err(gateway::ChannelError::Platform { .. })
+            ));
         }
     });
 }

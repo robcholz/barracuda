@@ -7,7 +7,7 @@
 
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
-use gateway::{MessageChannel, MessageTarget, SendMessageRequest};
+use gateway::{MessageChannel, MessageTarget, SendMessageRequest, StreamError};
 use http_client::ClientFactory;
 use qq::{QQConfig, QQ};
 use std::{boxed::Box, rc::Rc};
@@ -21,6 +21,11 @@ impl MockHttp {
             network: Box::leak(Box::new(ScriptedStack::new(
                 (0..count).map(|_| ScriptStep::json(200, r#"{"id":"qq-message-1"}"#)),
             ))),
+        }
+    }
+    fn scripted(steps: impl IntoIterator<Item = ScriptStep>) -> Self {
+        Self {
+            network: Box::leak(Box::new(ScriptedStack::new(steps))),
         }
     }
     fn factory(&self) -> ClientFactory<'static, ScriptedStack, ScriptedStack> {
@@ -85,7 +90,7 @@ fn rejects_untyped_or_unsafe_destination() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(0));
         let channel = provider(&http);
-        for conversation in ["123", "c2c:", "group:a/b"] {
+        for conversation in ["123", "c2c:", "group:a/b", "channel:a?b", "c2c:a#b"] {
             let result = channel
                 .send_message(SendMessageRequest::text(
                     MessageTarget::new("qq", conversation),
@@ -95,5 +100,63 @@ fn rejects_untyped_or_unsafe_destination() {
             assert!(result.is_err());
         }
         assert!(http.network.requests().is_empty());
+    });
+}
+
+#[test]
+fn replies_and_stream_failures_have_explicit_wire_behavior() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding(1));
+        let channel = provider(&http);
+        let mut reply = SendMessageRequest::text(MessageTarget::new("qq", "channel:42"), "reply");
+        reply.reply_to = Some("original".into());
+        channel.send_message(reply).await.expect("reply sends");
+        assert!(http.network.requests()[0].contains(r#""msg_id":"original""#));
+
+        let no_network = Rc::new(MockHttp::responding(0));
+        let channel = provider(&no_network);
+        assert!(channel
+            .send_message(SendMessageRequest::text(
+                MessageTarget::new("qq", "c2c:user"),
+                "",
+            ))
+            .await
+            .is_err());
+        let chunks = stream::iter([
+            Ok("partial".to_owned()),
+            Err(StreamError::failed("stopped")),
+        ]);
+        assert!(channel
+            .send_message(SendMessageRequest::stream(
+                MessageTarget::new("qq", "c2c:user"),
+                Box::pin(chunks),
+            ))
+            .await
+            .is_err());
+        assert!(no_network.network.requests().is_empty());
+    });
+}
+
+#[test]
+fn maps_auth_rate_limit_platform_malformed_and_incomplete_responses() {
+    block_on(async {
+        for step in [
+            ScriptStep::json(401, "{}"),
+            ScriptStep::json(403, "{}"),
+            ScriptStep::json(429, "{}"),
+            ScriptStep::json(500, r#"{"code":77,"message":"bad"}"#),
+            ScriptStep::json(500, "{}"),
+            ScriptStep::json(200, "not-json"),
+            ScriptStep::json(200, "{}"),
+        ] {
+            let http = MockHttp::scripted([step]);
+            assert!(provider(&http)
+                .send_message(SendMessageRequest::text(
+                    MessageTarget::new("qq", "c2c:user"),
+                    "hello",
+                ))
+                .await
+                .is_err());
+        }
     });
 }

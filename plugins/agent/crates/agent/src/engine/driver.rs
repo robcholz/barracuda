@@ -1013,6 +1013,52 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reasoning_only_iteration_closes_both_streams_and_is_rejected_as_malformed() {
+        let transcript = transcript(4);
+        let turn = transcript.open_turn().expect("turn opens");
+        let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
+        consumer.consume_reasoning(StreamPart::Delta("thinking".to_owned()));
+
+        assert_eq!(
+            consumer.finish_content(),
+            vec![
+                AgentIterationEvent::Reasoning(StreamPart::End),
+                AgentIterationEvent::Output(StreamPart::End),
+            ]
+        );
+        assert!(matches!(
+            consumer.finish_iteration(),
+            Err(AgentError::MalformedAssistantMessage)
+        ));
+    }
+
+    #[test]
+    fn finishing_an_assistant_twice_does_not_duplicate_tool_calls() {
+        let transcript = transcript(5);
+        let turn = transcript.open_turn().expect("turn opens");
+        let mut consumer = IterationConsumer::new(&turn).expect("assistant message opens");
+        let call = ToolCall {
+            id: "call-1".to_owned(),
+            name: "search".to_owned(),
+            arguments_json: r#"{"query":"rust"}"#.to_owned(),
+        };
+
+        consumer
+            .finish_assistant(core::slice::from_ref(&call))
+            .expect("first finish succeeds");
+        consumer
+            .finish_assistant(core::slice::from_ref(&call))
+            .expect("repeated finish is idempotent");
+        drop(consumer);
+
+        let turns = transcript.turns();
+        assert_eq!(
+            turns[0].messages[0]["tool_calls"].as_array().map(Vec::len),
+            Some(1)
+        );
+    }
+
     fn transcript(id: u32) -> TranscriptStore {
         block_on(async {
             TranscriptStore::new(

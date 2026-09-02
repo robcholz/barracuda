@@ -11,7 +11,7 @@ use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
     Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginManager, PluginRegisterContext,
-    PluginRequirements, PluginResult, PluginStorage, PluginVfs,
+    PluginRequirements, PluginResult, PluginStartContext, PluginStorage, PluginVfs,
 };
 use barracuda_vfs::{MountOptions, Vfs};
 use futures_lite::future::block_on;
@@ -148,5 +148,89 @@ fn kv_is_always_available_but_filesystem_requires_declaration() {
             .unwrap();
 
         assert!(filesystem_rejected.get());
+    });
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct StartCapability(u32);
+
+struct StartProvider;
+
+impl PluginDeclaration for StartProvider {
+    const ID: &'static str = "start-provider";
+}
+
+impl Plugin<FRAME_SIZE> for StartProvider {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        context.provide(Rc::new(StartCapability(42)))
+    }
+}
+
+struct StartConsumer {
+    observed: Rc<RefCell<Option<(u32, Vec<u8>)>>>,
+}
+
+impl PluginDeclaration for StartConsumer {
+    const ID: &'static str = "start-consumer";
+    const DEPENDS_ON: &'static [&'static str] = &[StartProvider::ID];
+}
+
+impl Plugin<FRAME_SIZE> for StartConsumer {
+    const REQUIREMENTS: PluginRequirements =
+        PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
+
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        block_on(context.filesystem()?.write("/ready", b"registered"))
+            .map_err(PluginError::registration)?;
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        let capability = context.require::<StartCapability>(StartProvider::ID)?;
+        let bytes =
+            block_on(context.filesystem()?.read("/ready")).map_err(PluginError::registration)?;
+        *self.observed.borrow_mut() = Some((capability.0, bytes));
+        context.retain(capability);
+        Ok(())
+    }
+}
+
+#[test]
+fn startup_can_use_registered_capabilities_and_its_declared_filesystem() {
+    block_on(async {
+        let mut manager = manager().await;
+        let mut router = router().await;
+        let observed = Rc::new(RefCell::new(None));
+        manager.register(&mut router, StartProvider).unwrap();
+        manager
+            .register(
+                &mut router,
+                StartConsumer {
+                    observed: Rc::clone(&observed),
+                },
+            )
+            .unwrap();
+
+        assert!(observed.borrow().is_none());
+        manager.start(&mut router).unwrap();
+        assert_eq!(
+            observed.borrow().as_ref(),
+            Some(&(42, b"registered".to_vec()))
+        );
     });
 }

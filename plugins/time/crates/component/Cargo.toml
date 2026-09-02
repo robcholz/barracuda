@@ -21,10 +21,12 @@ barracuda-event-router = { path = "../../../../core/event-router", features = ["
 barracuda-time-wire = { path = "../wire", features = ["schema"] }
 
 [dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 serde_json = "1"
 static_cell = "2"
+tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"

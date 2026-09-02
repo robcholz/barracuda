@@ -142,3 +142,26 @@ impl HttpEndpoint for ConfigEndpoint {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_configuration_preserves_credentials_and_streaming_defaults() {
+        let request: ConfigRequest =
+            serde_json::from_slice(br#"{"server_url":"http://blue.test","password":"secret"}"#)
+                .unwrap();
+        assert!(request.use_private_api);
+        assert_eq!(request.stream_edit_min_delta_bytes, 128);
+        assert_eq!(request.stream_max_edits, 4);
+
+        let config: BlueBubblesConfig = request.into();
+        assert_eq!(config.server_url, "http://blue.test");
+        assert_eq!(config.password, "secret");
+        assert!(config.use_private_api);
+        assert_eq!(config.stream_edit_min_delta_bytes, 128);
+        assert_eq!(config.stream_max_edits, 4);
+    }
+}

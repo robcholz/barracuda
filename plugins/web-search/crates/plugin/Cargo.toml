@@ -27,6 +27,10 @@ barracuda-web-search-wire = { path = "../wire", features = ["schema"] }
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }
+embassy-net.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = { version = "2", features = ["std"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"

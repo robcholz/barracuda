@@ -232,3 +232,119 @@ pub(crate) fn write_handler(filesystem: Rc<FileSystem>) -> impl RpcHandler<FileW
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use alloc::boxed::Box;
+    use barracuda_event_router::{RpcLaneStorage, RpcRegistry};
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::future::block_on;
+
+    fn registry() -> (RpcRegistry<4, 1024, 4>, Rc<FileSystem>) {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 1024, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let filesystem = Rc::new(FileSystem::new(
+            block_on(memory_vfs()).expect("memory filesystem mounts"),
+        ));
+        registry
+            .register::<FileRead, _>(read_handler(Rc::clone(&filesystem)))
+            .expect("register read endpoint");
+        registry
+            .register::<FileWrite, _>(write_handler(Rc::clone(&filesystem)))
+            .expect("register write endpoint");
+        (registry, filesystem)
+    }
+
+    #[test]
+    fn file_rpc_round_trips_bytes_and_maps_storage_failures() {
+        block_on(async {
+            let (registry, filesystem) = registry();
+            let client = registry.client();
+
+            let written = client
+                .call::<FileWrite>(FileWriteRequest::new("/nested/message.bin", b"hello").unwrap())
+                .expect("start write")
+                .await
+                .expect("write transport")
+                .expect("write succeeds");
+            assert_eq!(written.view(), Ok(&()));
+            drop(written);
+
+            let read = client
+                .call::<FileRead>(FileReadRequest::new("/nested/message.bin").unwrap())
+                .expect("start read")
+                .await
+                .expect("read transport")
+                .expect("read succeeds");
+            assert_eq!(read.view().unwrap().as_bytes(), Ok(b"hello".as_slice()));
+            drop(read);
+
+            let missing = client
+                .call::<FileRead>(FileReadRequest::new("/missing").unwrap())
+                .expect("start missing read")
+                .await
+                .expect("missing read transport")
+                .expect_err("missing file is a method error");
+            assert_eq!(missing.view(), Ok(&FileRpcError::NotFound));
+            drop(missing);
+
+            filesystem
+                .write("/oversized", &[7; CONTENT_CAPACITY + 1])
+                .await
+                .expect("seed oversized file");
+            let oversized = client
+                .call::<FileRead>(FileReadRequest::new("/oversized").unwrap())
+                .expect("start oversized read")
+                .await
+                .expect("oversized read transport")
+                .expect_err("oversized file is a method error");
+            assert_eq!(oversized.view(), Ok(&FileRpcError::TooLarge));
+        });
+    }
+
+    #[test]
+    fn bounded_rpc_values_reject_ambiguous_or_oversized_inputs() {
+        assert_eq!(FilePath::new(""), Err(FileRpcError::InvalidRequest));
+        assert_eq!(FilePath::new("a\0b"), Err(FileRpcError::InvalidRequest));
+        assert_eq!(
+            FilePath::new(&"p".repeat(PATH_CAPACITY)),
+            Err(FileRpcError::InvalidRequest)
+        );
+        assert_eq!(
+            FileBytes::new(&[0; CONTENT_CAPACITY + 1]),
+            Err(FileRpcError::TooLarge)
+        );
+
+        let path = FilePath::new("/valid").unwrap();
+        assert_eq!(path.as_str(), Ok("/valid"));
+        assert_eq!(serde_json::to_string(&path).unwrap(), r#""/valid""#);
+        assert_eq!(
+            serde_json::from_str::<FilePath>(r#""/decoded""#)
+                .unwrap()
+                .as_str(),
+            Ok("/decoded")
+        );
+    }
+
+    #[test]
+    fn filesystem_errors_have_stable_rpc_categories() {
+        assert_eq!(
+            map_fs(barracuda_vfs::FsError::PermissionDenied),
+            FileRpcError::PermissionDenied
+        );
+        assert_eq!(
+            map_fs(barracuda_vfs::FsError::ReadOnly),
+            FileRpcError::PermissionDenied
+        );
+        assert_eq!(
+            map_fs(barracuda_vfs::FsError::NotFound),
+            FileRpcError::NotFound
+        );
+        assert_eq!(
+            map_fs(barracuda_vfs::FsError::InvalidPath),
+            FileRpcError::Io
+        );
+    }
+}

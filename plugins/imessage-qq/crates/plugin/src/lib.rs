@@ -120,3 +120,21 @@ impl HttpEndpoint for ConfigEndpoint {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimal_configuration_preserves_credentials_and_qq_api_default() {
+        let request: ConfigRequest =
+            serde_json::from_slice(br#"{"app_id":"app","access_token":"secret"}"#).unwrap();
+        assert_eq!(request.api_base, "https://api.sgroup.qq.com");
+
+        let config: QQConfig = request.into();
+        assert_eq!(config.app_id, "app");
+        assert_eq!(config.access_token, "secret");
+        assert_eq!(config.api_base, "https://api.sgroup.qq.com");
+    }
+}

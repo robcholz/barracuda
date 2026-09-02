@@ -518,11 +518,14 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use alloc::boxed::Box;
-    use alloc::vec::Vec;
+    use alloc::string::ToString;
+    use alloc::{vec, vec::Vec};
+
+    use futures_lite::future::block_on;
 
     use super::{
-        HttpEndpoint, HttpFuture, HttpRequest, HttpResponse, WebServer, WebServerError,
-        WebSocketConnection, WebSocketEndpoint, WebSocketFuture,
+        HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer, WebServerError,
+        WebSocketClosed, WebSocketConnection, WebSocketEndpoint, WebSocketFuture, WebSocketMessage,
     };
 
     struct EmptyEndpoint;
@@ -570,5 +573,82 @@ mod tests {
         let _replacement = server
             .serve("/second", EmptyEndpoint)
             .expect("register released endpoint");
+    }
+
+    #[test]
+    fn portable_http_values_preserve_every_method_body_and_response_field() {
+        for (wire, expected) in [
+            ("GET", HttpMethod::Get),
+            ("POST", HttpMethod::Post),
+            ("PUT", HttpMethod::Put),
+            ("DELETE", HttpMethod::Delete),
+            ("OPTIONS", HttpMethod::Options),
+            ("TRACE", HttpMethod::Trace),
+            ("PATCH", HttpMethod::Patch),
+            ("CONNECT", HttpMethod::Other),
+        ] {
+            assert_eq!(HttpMethod::from_request(wire), expected);
+        }
+
+        let request = HttpRequest::new(HttpMethod::Put, b"request".to_vec());
+        assert_eq!(request.method(), HttpMethod::Put);
+        assert_eq!(request.body(), b"request");
+        let response = HttpResponse::new(207, "application/test", b"response".to_vec());
+        assert_eq!(response.status(), 207);
+        assert_eq!(response.content_type(), "application/test");
+        assert_eq!(response.body(), b"response");
+        assert_eq!(
+            WebSocketClosed.to_string(),
+            "WebSocket connection is closed"
+        );
+    }
+
+    #[test]
+    fn portable_websocket_connection_transfers_messages_and_reports_both_closed_halves() {
+        block_on(async {
+            let (incoming_tx, incoming_rx) = async_channel::bounded(2);
+            let (outgoing_tx, outgoing_rx) = async_channel::bounded(2);
+            let connection = WebSocketConnection::new(incoming_rx, outgoing_tx);
+
+            incoming_tx
+                .send(WebSocketMessage::Text("hello".into()))
+                .await
+                .expect("text queues");
+            incoming_tx
+                .send(WebSocketMessage::Binary(vec![1, 2]))
+                .await
+                .expect("binary queues");
+            assert_eq!(
+                connection.receive().await.expect("text receives"),
+                WebSocketMessage::Text("hello".into())
+            );
+            assert_eq!(
+                connection.receive().await.expect("binary receives"),
+                WebSocketMessage::Binary(vec![1, 2])
+            );
+            connection
+                .send_text("reply")
+                .await
+                .expect("outgoing text queues");
+            assert_eq!(
+                outgoing_rx.recv().await.expect("outgoing receives"),
+                "reply"
+            );
+
+            drop(incoming_tx);
+            assert_eq!(connection.receive().await, Err(WebSocketClosed));
+            drop(outgoing_rx);
+            assert_eq!(connection.send_text("closed").await, Err(WebSocketClosed));
+        });
+    }
+
+    #[test]
+    fn route_registration_can_outlive_the_server_owner() {
+        let server = WebServer::default();
+        let route = server
+            .serve_http("/temporary", EmptyHttpEndpoint)
+            .expect("route");
+        drop(server);
+        drop(route);
     }
 }

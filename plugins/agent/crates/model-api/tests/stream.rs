@@ -13,15 +13,71 @@ use http_client::ClientFactory;
 use serde_json::json;
 
 fn configured<'a>(stack: &'a ScriptedStack) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
+    configured_backend(stack, BackendKind::OpenAiCompatible)
+}
+
+fn configured_backend<'a>(
+    stack: &'a ScriptedStack,
+    backend: BackendKind,
+) -> ModelApi<'a, ScriptedStack, ScriptedStack> {
     let mut api = ModelApi::new(ClientFactory::from_network(stack, stack));
     api.set_config(ModelApiConfig::new(
-        BackendKind::OpenAiCompatible,
+        backend,
         "secret",
         "model",
         "http://llm.test/v1",
     ))
     .unwrap();
     api
+}
+
+#[test]
+fn anthropic_stream_uses_messages_wire_contract_and_projects_all_content_kinds() {
+    let body = concat!(
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{}}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"check\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"lookup\",\"input\":{}}}\n\n",
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":1}\"}}\n\n",
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    );
+    let stack = ScriptedStack::new([ScriptStep::sse(200, &[body])]);
+    let mut api = configured_backend(&stack, BackendKind::AnthropicCompatible);
+    let messages = [json!({"role":"user","content":"hello"})];
+    let events = block_on(async {
+        api.chat_stream(&ChatRequest::new("system", &messages), Cancel::never())
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await
+    });
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(ChatStreamEvent::Reasoning(StreamPart::Delta(text))) if text == "check"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(ChatStreamEvent::Output(StreamPart::Delta(text))) if text == "answer"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Ok(ChatStreamEvent::ToolCalls(StreamPart::Delta(call)))
+            if call.id == "tool-1" && call.name == "lookup" && call.arguments_json == "{\"q\":1}"
+    )));
+    let request = stack.requests().pop().expect("stream request");
+    assert!(request.starts_with("POST /v1/messages HTTP/1.1\r\n"));
+    assert!(request.contains("x-api-key: secret\r\n"));
+    let body: serde_json::Value =
+        serde_json::from_str(request.split_once("\r\n\r\n").expect("HTTP body").1)
+            .expect("request JSON");
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["system"], "system");
 }
 
 fn sse(text: &str) -> String {

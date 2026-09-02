@@ -98,6 +98,45 @@ fn document_ids_use_canonical_labels() {
     assert_eq!(ProfileDocument::UserProfile.to_string(), "user_profile");
 }
 
+#[test]
+fn defaults_preserve_existing_documents_and_snapshot_reports_all_three() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let store = ProfileStore::new(filesystem, "profile/");
+        assert_eq!(store.dir(), "profile/");
+        assert!(store
+            .ensure_default(ProfileDocument::Soul, "Initial soul")
+            .await
+            .unwrap());
+        assert!(!store
+            .ensure_default(ProfileDocument::Soul, "Must not overwrite")
+            .await
+            .unwrap());
+        store
+            .replace(ProfileDocument::AssistantIdentity, "Barracuda")
+            .await
+            .unwrap();
+        store
+            .replace(ProfileDocument::UserProfile, "Prefers direct answers")
+            .await
+            .unwrap();
+
+        let snapshot = store.snapshot().await.unwrap();
+        assert_eq!(snapshot.soul.as_deref(), Some("Initial soul"));
+        assert_eq!(snapshot.assistant_identity.as_deref(), Some("Barracuda"));
+        assert_eq!(
+            snapshot.user_profile.as_deref(),
+            Some("Prefers direct answers")
+        );
+    });
+}
+
+#[test]
+fn unknown_document_ids_are_rejected_with_the_original_value() {
+    let error = "not-a-profile".parse::<ProfileDocument>().unwrap_err();
+    assert!(error.to_string().contains("not-a-profile"));
+}
+
 async fn store() -> ProfileStore {
     store_with_fs().await.1
 }

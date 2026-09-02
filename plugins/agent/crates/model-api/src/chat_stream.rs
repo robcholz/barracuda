@@ -170,3 +170,141 @@ where
     }
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use barracuda_runtime_utils::stream::StreamPart;
+    use futures_lite::{future::block_on, stream};
+
+    use super::*;
+    use crate::backends::sse::OpenAiSse;
+
+    #[test]
+    fn public_stream_requires_open_and_ignores_repeated_open_markers() {
+        block_on(async {
+            let Err(error) = ChatStream::open(Box::pin(stream::iter([DriverItem::Event(Ok(
+                ChatStreamEvent::Output(StreamPart::End),
+            ))])))
+            .await
+            else {
+                panic!("event before open must violate the driver contract");
+            };
+            assert!(matches!(
+                error,
+                Error::Api("stream driver ended before opening")
+            ));
+
+            let Err(error) = ChatStream::open(Box::pin(stream::empty())).await else {
+                panic!("empty driver must violate the driver contract");
+            };
+            assert!(matches!(
+                error,
+                Error::Api("stream driver ended before opening")
+            ));
+
+            let mut stream = ChatStream::open(Box::pin(stream::iter([
+                DriverItem::Opened,
+                DriverItem::Opened,
+                DriverItem::Event(Ok(ChatStreamEvent::Output(StreamPart::Delta(
+                    "answer".into(),
+                )))),
+            ])))
+            .await
+            .expect("driver opens");
+            assert!(matches!(
+                stream.next().await,
+                Some(Ok(ChatStreamEvent::Output(StreamPart::Delta(text)))) if text == "answer"
+            ));
+            assert!(stream.next().await.is_none());
+        });
+    }
+
+    #[test]
+    fn provider_stream_reports_transport_utf8_and_premature_eof_failures() {
+        block_on(async {
+            let mut duplicate_head = ProviderStream::new(
+                stream::iter([Ok(ResponsePart::Head(200))]),
+                ProviderSse::OpenAi(OpenAiSse::new()),
+            );
+            assert!(matches!(
+                duplicate_head.next().await,
+                Some(Err(Error::Api("HTTP response head was emitted twice")))
+            ));
+            assert!(duplicate_head.next().await.is_none());
+
+            let mut invalid_utf8 = ProviderStream::new(
+                stream::iter([Ok(ResponsePart::Data(vec![
+                    b'd', b'a', b't', b'a', b':', b' ', 0xff, b'\n', b'\n',
+                ]))]),
+                ProviderSse::OpenAi(OpenAiSse::new()),
+            );
+            assert!(matches!(invalid_utf8.next().await, Some(Err(Error::Parse))));
+            assert!(invalid_utf8.next().await.is_none());
+
+            let body = b"data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n";
+            let mut truncated = ProviderStream::new(
+                stream::iter([Ok(ResponsePart::Data(body.to_vec()))]),
+                ProviderSse::OpenAi(OpenAiSse::new()),
+            );
+            let mut saw_partial = false;
+            let mut saw_truncated = false;
+            while let Some(item) = truncated.next().await {
+                match item {
+                    Ok(ChatStreamEvent::Output(StreamPart::Delta(text))) => {
+                        saw_partial |= text == "partial";
+                    }
+                    Err(_) => saw_truncated = true,
+                    Ok(_) => {}
+                }
+            }
+            assert!(saw_partial);
+            assert!(saw_truncated);
+            assert!(truncated.next().await.is_none());
+        });
+    }
+
+    #[test]
+    fn completed_provider_stream_drains_http_tail_and_error_body_rejects_a_second_head() {
+        block_on(async {
+            let mut completed = ProviderStream::new(
+                stream::iter([
+                    Ok(ResponsePart::Data(
+                        concat!(
+                            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                            "data: [DONE]\n\n"
+                        )
+                        .as_bytes()
+                        .to_vec(),
+                    )),
+                    Ok(ResponsePart::Data(b"ignored HTTP tail".to_vec())),
+                ]),
+                ProviderSse::OpenAi(OpenAiSse::new()),
+            );
+            let mut items = Vec::new();
+            while let Some(item) = completed.next().await {
+                items.push(item.expect("completion boundaries decode"));
+            }
+            assert_eq!(items.len(), 4, "one delta and all three stream boundaries");
+            assert!(items.iter().any(|item| matches!(
+                item,
+                ChatStreamEvent::Output(StreamPart::Delta(text)) if text == "ok"
+            )));
+
+            let body = drain_body(stream::iter([
+                Ok(ResponsePart::Data(b"invalid-".to_vec())),
+                Ok(ResponsePart::Data(vec![0xff])),
+            ]))
+            .await
+            .expect("error bodies use lossy UTF-8");
+            assert!(body.starts_with("invalid-"));
+            assert!(body.ends_with('\u{fffd}'));
+
+            assert!(matches!(
+                drain_body(stream::iter([Ok(ResponsePart::Head(500))])).await,
+                Err(Error::HttpCodec)
+            ));
+        });
+    }
+}

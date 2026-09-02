@@ -326,7 +326,12 @@ mod tests {
                 "local gpio = require('gpio')\n\
                  gpio.output('status', true, 'push-pull')\n\
                  gpio.write('status', false)\n\
+                 gpio.write('status', true)\n\
+                 gpio.output('status', false, 'open-drain')\n\
+                 gpio.input('status', 'none')\n\
                  gpio.input('status', 'up')\n\
+                 gpio.input('status', 'down')\n\
+                 gpio.disable('status')\n\
                  return gpio.available('status') and not gpio.read('status')",
             )
             .eval_async(),
@@ -351,6 +356,30 @@ mod tests {
         )
         .expect("run unavailable GPIO script");
         assert!(unavailable);
+    }
+
+    #[test]
+    fn invalid_gpio_configuration_and_unknown_names_are_reported_to_lua() {
+        let package = GpioPackage::new(Some(NamedResources::new([(
+            "status",
+            TestGpio { high: false },
+        )])));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install GPIO package");
+        let rejected: bool = block_on(
+            lua.load(
+                "local gpio = require('gpio')\n\
+                 local pull, pull_err = gpio.input('status', 'sideways')\n\
+                 local drive, drive_err = gpio.output('status', false, 'tri-state')\n\
+                 local missing, missing_err = gpio.write('missing', true)\n\
+                 return pull == nil and type(pull_err) == 'string'\n\
+                    and drive == nil and type(drive_err) == 'string'\n\
+                    and missing == nil and type(missing_err) == 'string'",
+            )
+            .eval_async(),
+        )
+        .expect("run rejected GPIO requests");
+        assert!(rejected);
     }
 
     #[test]

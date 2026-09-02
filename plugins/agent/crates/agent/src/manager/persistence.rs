@@ -81,14 +81,6 @@ where
         Ok(())
     }
 
-    pub(super) fn register_restored_agent(
-        &self,
-        id: AgentId,
-        state: &DurableState<AgentEngineState>,
-    ) -> Result<(), AgentCreateError> {
-        self.register_agent(id, state)
-    }
-
     fn register_agent(
         &self,
         id: AgentId,

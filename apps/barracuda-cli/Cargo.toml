@@ -15,7 +15,7 @@ barracuda-event-router = { path = "../../core/event-router" }
 barracuda-target = { path = "../../composition/selected" }
 barracuda-system = { path = "../../core/system", features = ["tokio"] }
 anyhow = "1"
-tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

@@ -17,8 +17,9 @@ use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
     CapabilityError, Plugin, PluginDeclaration, PluginError, PluginId, PluginIdError,
-    PluginManager, PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext,
-    PluginStartError, PluginTaskToken, PluginUnloadError, PluginWriteTransaction,
+    PluginManager, PluginReadTransaction, PluginRegisterContext, PluginRegisterError, PluginResult,
+    PluginStartContext, PluginStartError, PluginStorage, PluginTaskToken, PluginUnloadError,
+    PluginWriteTransaction, StorageError,
 };
 use futures_lite::future::{block_on, poll_once};
 
@@ -324,6 +325,84 @@ impl Plugin<FRAME_SIZE> for FailingPlugin {
     }
 }
 
+struct RegisterFailingPlugin {
+    registered: Rc<Cell<usize>>,
+    unregistered: Rc<Cell<usize>>,
+    dropped: Rc<Cell<usize>>,
+}
+
+declare_plugin!(RegisterFailingPlugin, "registration-failure");
+
+impl Plugin<FRAME_SIZE> for RegisterFailingPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        context.event_router.load(PendingComponent {
+            registered: Rc::clone(&self.registered),
+            unregistered: Rc::clone(&self.unregistered),
+            storage: context.storage().clone(),
+        })?;
+        context.provide(Rc::new(TestCapability(1)))?;
+        context.retain(RetainedResource {
+            dropped: Rc::clone(&self.dropped),
+        });
+        Err(PluginError::registration(RegistrationFailure))
+    }
+}
+
+struct RegistrationRecoveryPlugin;
+
+declare_plugin!(RegistrationRecoveryPlugin, "registration-failure");
+
+impl Plugin<FRAME_SIZE> for RegistrationRecoveryPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        context.provide(Rc::new(TestCapability(2)))
+    }
+}
+
+#[test]
+fn failed_registration_rolls_back_every_owned_resource_and_allows_retry() {
+    let mut manager = manager();
+    let mut router = router();
+    let registered = Rc::new(Cell::new(0));
+    let unregistered = Rc::new(Cell::new(0));
+    let dropped = Rc::new(Cell::new(0));
+    let id = PluginId::try_from("registration-failure").unwrap();
+
+    let error = manager
+        .register(
+            &mut router,
+            RegisterFailingPlugin {
+                registered: Rc::clone(&registered),
+                unregistered: Rc::clone(&unregistered),
+                dropped: Rc::clone(&dropped),
+            },
+        )
+        .unwrap_err();
+
+    assert!(matches!(error, PluginRegisterError::Registration(_)));
+    assert_eq!(registered.get(), 1);
+    assert_eq!(unregistered.get(), 1);
+    assert_eq!(dropped.get(), 1);
+    assert!(!manager.is_loaded(&id));
+
+    manager
+        .register(&mut router, RegistrationRecoveryPlugin)
+        .expect("retry the same identity after complete rollback");
+    manager.start(&mut router).expect("start recovered Plugin");
+    assert!(manager.is_loaded(&id));
+}
+
 #[test]
 fn failed_plugin_start_rolls_back_loaded_components() {
     let mut manager = manager();
@@ -503,6 +582,69 @@ fn scoped_storage_preserves_ekv_write_transactions() {
     manager.start(&mut router).unwrap();
 
     assert_eq!(*observed.borrow(), (Some(1), Some(2)));
+}
+
+struct StorageContractPlugin {
+    verified: Rc<Cell<bool>>,
+}
+
+declare_plugin!(StorageContractPlugin, "storage-contract");
+
+impl Plugin<FRAME_SIZE> for StorageContractPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: PluginStorage,
+    {
+        block_on(async {
+            let storage = context.storage().clone();
+            assert_eq!(storage.get::<u32>("missing").await?, None);
+            storage.put("value", &7_u32).await?;
+            assert_eq!(storage.get::<u32>("value").await?, Some(7));
+
+            let read = storage.read_transaction().await;
+            assert_eq!(read.read::<u32>("value").await?, 7);
+            drop(read);
+
+            let mut rolled_back = storage.write_transaction().await;
+            rolled_back.write("temporary", &9_u32).await?;
+            drop(rolled_back);
+            assert_eq!(storage.get::<u32>("temporary").await?, None);
+
+            let mut delete = storage.write_transaction().await;
+            delete.delete("value").await?;
+            delete.commit().await?;
+            assert_eq!(storage.get::<u32>("value").await?, None);
+            storage.delete("missing").await?;
+
+            let maximum = storage.max_key_size();
+            let too_long = "k".repeat(maximum + 1);
+            assert!(matches!(
+                storage.put(&too_long, &1_u32).await,
+                Err(StorageError::KeyTooLong { max }) if max == maximum
+            ));
+            self.verified.set(true);
+            Ok::<(), PluginError>(())
+        })
+    }
+}
+
+#[test]
+fn scoped_storage_convenience_and_transaction_apis_share_one_namespace() {
+    let mut manager = manager();
+    let mut router = router();
+    let verified = Rc::new(Cell::new(false));
+    manager
+        .register(
+            &mut router,
+            StorageContractPlugin {
+                verified: Rc::clone(&verified),
+            },
+        )
+        .unwrap();
+    assert!(verified.get());
 }
 
 #[derive(Debug, PartialEq, Eq)]

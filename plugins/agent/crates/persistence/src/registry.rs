@@ -916,4 +916,60 @@ mod tests {
             assert!(error.to_string().contains(&path));
         });
     }
+
+    #[test]
+    fn clean_snapshots_and_singleton_removal_survive_repeated_flushes() {
+        block_on(async {
+            for root in ["/", "/state-root/"] {
+                let (filesystem, persistence) = fixture(root).await;
+                let singleton = persistence.singleton::<TestState>("state").unwrap();
+                let state = DurableState::new(TestState { value: 7 });
+                singleton.register(&state).unwrap();
+                persistence.maybe_persist().await.unwrap();
+                persistence.maybe_persist().await.unwrap();
+                assert_eq!(singleton.load().await.unwrap().unwrap().value, 7);
+
+                singleton.remove().unwrap();
+                persistence.maybe_persist().await.unwrap();
+                assert!(singleton.load().await.unwrap().is_none());
+                let path = if root == "/" {
+                    "/state.bin".to_string()
+                } else {
+                    format!("{root}state.bin")
+                };
+                assert!(!filesystem.exists(&path).await.unwrap());
+
+                let replacement = DurableState::new(TestState { value: 8 });
+                singleton.register(&replacement).unwrap();
+                persistence.maybe_persist().await.unwrap();
+                assert_eq!(singleton.load().await.unwrap().unwrap().value, 8);
+            }
+        });
+    }
+
+    #[test]
+    fn persisted_schema_and_payload_corruption_are_reported_on_reload() {
+        block_on(async {
+            let root = "/barracuda-agent-persistence-corrupt";
+            let path = format!("{root}/state.bin");
+            let (filesystem, persistence) = fixture(root).await;
+            let singleton = persistence.singleton::<TestState>("state").unwrap();
+
+            let mut unsupported = 99_u32.to_le_bytes().to_vec();
+            unsupported.extend_from_slice(&7_u32.to_le_bytes());
+            filesystem.write_atomic(&path, &unsupported).await.unwrap();
+            assert!(matches!(
+                singleton.load().await,
+                Err(PersistenceError::Codec { .. })
+            ));
+
+            let mut malformed = 1_u32.to_le_bytes().to_vec();
+            malformed.extend_from_slice(&[1, 2]);
+            filesystem.write_atomic(&path, &malformed).await.unwrap();
+            assert!(matches!(
+                singleton.load().await,
+                Err(PersistenceError::Codec { .. })
+            ));
+        });
+    }
 }

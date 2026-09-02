@@ -74,8 +74,14 @@ fn inbound_event_flows_through_exactly_two_workflow_steps_into_gateway_stream() 
             "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\n",
             "data: [DONE]\n\n"
         );
-        let network: &'static ScriptedStack =
-            NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[sse])]));
+        let second_sse = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"follow-up answer\"}}]}\n\n",
+            "data: [DONE]\n\n"
+        );
+        let network: &'static ScriptedStack = NETWORK.init(ScriptedStack::new([
+            ScriptStep::sse(200, &[sse]),
+            ScriptStep::sse(200, &[second_sse]),
+        ]));
         let factory = ModelApiFactory::new(move || {
             ModelApi::new(ClientFactory::from_network(network, network))
         });
@@ -166,6 +172,28 @@ fn inbound_event_flows_through_exactly_two_workflow_steps_into_gateway_stream() 
             .borrow()
             .iter()
             .any(|frame| frame.field == SendStreamField::Event));
+
+        delivery.frames.borrow_mut().clear();
+        delivery.completed.set(false);
+        ingress
+            .publish(GatewayInboundMessage {
+                route: GatewayRoute::new("test", "conversation-1").with_thread("thread-7"),
+                message_id: "incoming-2".into(),
+                text: "follow up".into(),
+            })
+            .await
+            .expect("publish follow-up message");
+        drive_until(&mut router, |_router| delivery.completed.get()).await;
+
+        assert_eq!(delivery.reply_to.borrow().as_deref(), Some("incoming-2"));
+        assert!(delivery.frames.borrow().iter().any(|frame| {
+            frame.field == SendStreamField::Text && frame.text == "follow-up answer"
+        }));
+        let requests = network.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .get(1)
+            .is_some_and(|request| request.contains("hello") && request.contains("answer")));
     });
 }
 

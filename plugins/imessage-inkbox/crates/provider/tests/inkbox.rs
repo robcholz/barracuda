@@ -6,7 +6,7 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, MediaKind, MessageChannel, MessageTarget, ReactRequest, SendMediaRequest,
-    SendMessageRequest, SetTypingRequest,
+    SendMessageRequest, SetTypingRequest, StreamError,
 };
 use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
@@ -234,5 +234,136 @@ fn maps_authentication_and_rate_limits() {
                 !authentication
             );
         }
+    });
+}
+
+#[test]
+fn rejects_unsupported_request_shapes_and_failed_text_streams_without_network_io() {
+    block_on(async {
+        let http = Rc::new(MockHttp::responding([]));
+        let channel = provider(&http);
+
+        assert!(matches!(
+            channel
+                .send_message(SendMessageRequest::text(target(), ""))
+                .await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        let mut reply = SendMessageRequest::text(target(), "hello");
+        reply.reply_to = Some("message-1".into());
+        assert!(matches!(
+            channel.send_message(reply).await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        let failed = stream::iter([Err(StreamError::failed("source stopped"))]);
+        assert!(matches!(
+            channel
+                .send_message(SendMessageRequest::stream(target(), Box::pin(failed)))
+                .await,
+            Err(gateway::ChannelError::Stream(_))
+        ));
+        assert!(matches!(
+            channel
+                .react(ReactRequest::new(target(), "message-1", "unknown"))
+                .await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        let mut media =
+            SendMediaRequest::bytes(target(), "file.bin", "application/octet-stream", vec![1]);
+        media.reply_to = Some("message-1".into());
+        assert!(matches!(
+            channel.send_media(MediaKind::File, media).await,
+            Err(gateway::ChannelError::InvalidRequest { .. })
+        ));
+        channel
+            .set_typing(SetTypingRequest::new(target(), false))
+            .await
+            .expect("typing stop is local");
+        assert!(http.requests().is_empty());
+    });
+}
+
+#[test]
+fn every_supported_tapback_maps_to_the_inkbox_reaction_name() {
+    block_on(async {
+        let reactions = [
+            ("❤️", "love"),
+            ("like", "like"),
+            ("👎", "dislike"),
+            ("laugh", "laugh"),
+            ("‼️", "emphasize"),
+            ("question", "question"),
+            ("👀", "eyes"),
+        ];
+        let http = Rc::new(MockHttp::responding(
+            reactions.iter().map(|_| response(r#"{}"#)),
+        ));
+        let channel = provider(&http);
+        for (input, _expected) in reactions {
+            channel
+                .react(ReactRequest::new(target(), "message-1", input))
+                .await
+                .expect("supported reaction");
+        }
+        let requests = http.requests();
+        assert_eq!(requests.len(), reactions.len());
+        for (request, (_input, expected)) in requests.iter().zip(reactions) {
+            assert_eq!(body_json(request)["reaction"], expected);
+            assert_eq!(body_json(request)["part_index"], 0);
+        }
+    });
+}
+
+#[test]
+fn platform_response_errors_and_default_media_metadata_remain_explicit() {
+    block_on(async {
+        for response in [
+            Response {
+                status: 403,
+                body: br#"{}"#.to_vec(),
+            },
+            Response {
+                status: 500,
+                body: br#"{"detail":"specific detail"}"#.to_vec(),
+            },
+            Response {
+                status: 502,
+                body: br#"{"message":"specific message"}"#.to_vec(),
+            },
+            Response {
+                status: 503,
+                body: br#"{}"#.to_vec(),
+            },
+            Response {
+                status: 200,
+                body: b"not-json".to_vec(),
+            },
+            response(r#"{"message":{}}"#),
+        ] {
+            let http = Rc::new(MockHttp::responding([response]));
+            assert!(provider(&http)
+                .send_message(SendMessageRequest::text(target(), "hello"))
+                .await
+                .is_err());
+        }
+
+        let http = Rc::new(MockHttp::responding([response(r#"{}"#)]));
+        let media = SendMediaRequest {
+            target: target(),
+            body: BinaryBody::Bytes(vec![1, 2]),
+            filename: None,
+            mime_type: None,
+            caption: None,
+            reply_to: None,
+        };
+        assert!(matches!(
+            provider(&http).send_media(MediaKind::Audio, media).await,
+            Err(gateway::ChannelError::Platform { .. })
+        ));
+        let requests = http.requests();
+        let upload = requests.first().expect("upload request");
+        let body = String::from_utf8_lossy(&upload.body);
+        assert!(body.contains("filename=\"audio.bin\""));
+        assert!(body.contains("Content-Type: application/octet-stream"));
     });
 }

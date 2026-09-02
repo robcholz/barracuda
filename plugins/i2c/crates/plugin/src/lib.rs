@@ -360,8 +360,9 @@ mod tests {
             lua.load(
                 "local i2c = require('i2c')\n\
                  i2c.write('sensors', 42, 'xy')\n\
+                 local read = i2c.read('sensors', 42, 2)\n\
                  local data = i2c.write_read('sensors', 42, 'z', 3)\n\
-                 return i2c.available('sensors') and data == '***'",
+                 return i2c.available('sensors') and read == '**' and data == '***'",
             )
             .eval_async(),
         )
@@ -402,6 +403,7 @@ mod tests {
 
     #[test]
     fn rejects_ten_bit_addresses_from_the_seven_bit_api() {
+        assert!(parse_address(-1).is_err());
         assert!(parse_address(0x80).is_err());
     }
 
@@ -432,5 +434,42 @@ mod tests {
         )
         .expect("run revoked I2C script");
         assert!(revoked);
+    }
+
+    #[test]
+    fn lua_reports_absent_unknown_and_invalid_i2c_requests() {
+        let absent = I2cPackage::<NamedResources<TestI2c, 0>>::new(None);
+        let mut lua = Lua::new().expect("create Lua");
+        absent.install(&mut lua).expect("install I2C package");
+        let absent_error: bool = block_on(
+            lua.load(
+                "local i2c = require('i2c')\n\
+                 local value, err = i2c.write('missing', 42, 'x')\n\
+                 return value == nil and type(err) == 'string'",
+            )
+            .eval_async(),
+        )
+        .expect("run absent I2C request");
+        assert!(absent_error);
+
+        let package = I2cPackage::new(Some(NamedResources::new([("sensors", TestI2c)])));
+        let mut lua = Lua::new().expect("create Lua");
+        package.install(&mut lua).expect("install I2C package");
+        let rejected: bool = block_on(
+            lua.load(
+                "local i2c = require('i2c')\n\
+                 local missing, missing_err = i2c.read('missing', 42, 1)\n\
+                 local address, address_err = i2c.write('sensors', 128, 'x')\n\
+                 local negative, negative_err = i2c.read('sensors', 42, -1)\n\
+                 local huge, huge_err = i2c.write_read('sensors', 42, 'x', 65537)\n\
+                 return missing == nil and type(missing_err) == 'string'\n\
+                    and address == nil and type(address_err) == 'string'\n\
+                    and negative == nil and type(negative_err) == 'string'\n\
+                    and huge == nil and type(huge_err) == 'string'",
+            )
+            .eval_async(),
+        )
+        .expect("run rejected I2C requests");
+        assert!(rejected);
     }
 }

@@ -227,3 +227,89 @@ pub fn init_tracing(
     }
     tracing::subscriber::set_global_default(subscriber)
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn logger_file_sink_formats_first_party_levels_and_rejects_reinstallation() {
+        let directory = tempfile::tempdir().expect("temporary directory creates");
+        let path = directory.path().join("agent.log");
+
+        init_logger(LevelFilter::Trace, LogOutput::File(path.clone()))
+            .expect("logger installs once");
+        log::error!(target: "barracuda_test", "failure");
+        log::warn!(target: "barracuda_test", "warning");
+        log::info!(target: "barracuda_test", "information");
+        log::debug!(target: "barracuda_test", "diagnostic");
+        log::trace!(target: "barracuda_test", "verbose");
+
+        let contents = fs::read_to_string(path).expect("log file is readable");
+        for (prefix, message) in [
+            ("E (", "barracuda_test: failure"),
+            ("W (", "barracuda_test: warning"),
+            ("I (", "barracuda_test: information"),
+            ("D (", "barracuda_test: diagnostic"),
+            ("V (", "barracuda_test: verbose"),
+        ] {
+            assert!(
+                contents.contains(prefix),
+                "missing prefix {prefix}: {contents}"
+            );
+            assert!(
+                contents.contains(message),
+                "missing message {message}: {contents}"
+            );
+        }
+        assert!(
+            !contents.contains("\u{1b}["),
+            "file output must not contain ANSI"
+        );
+        assert!(matches!(
+            init_logger(LevelFilter::Info, LogOutput::Stderr),
+            Err(InitLoggerError::SetLogger)
+        ));
+    }
+
+    #[test]
+    fn logger_reports_the_unopenable_file_path() {
+        let directory = tempfile::tempdir().expect("temporary directory creates");
+        let path = directory.path().join("missing").join("agent.log");
+        match install_logger(LevelFilter::Info, LogOutput::File(path.clone())) {
+            Err(InitLoggerError::OpenLogFile {
+                path: failed_path, ..
+            }) => assert_eq!(failed_path, path),
+            other => panic!("expected file-open error, received {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tracing_configuration_preserves_declared_group_order() {
+        let config = TracingConfig::default()
+            .with_context_group_keys("run", ["session", "turn"])
+            .with_context_group_keys("tool", ["name"]);
+        assert_eq!(
+            config.context_groups,
+            vec![("run", vec!["session", "turn"]), ("tool", vec!["name"])]
+        );
+    }
+
+    #[test]
+    fn level_mappings_cover_every_log_and_trace_level() {
+        assert_eq!(compact_style(Level::Error), ('E', Some("31")));
+        assert_eq!(compact_style(Level::Warn), ('W', Some("33")));
+        assert_eq!(compact_style(Level::Info), ('I', Some("32")));
+        assert_eq!(compact_style(Level::Debug), ('D', None));
+        assert_eq!(compact_style(Level::Trace), ('V', None));
+
+        assert_eq!(to_log_level(TraceLevel::ERROR), Level::Error);
+        assert_eq!(to_log_level(TraceLevel::WARN), Level::Warn);
+        assert_eq!(to_log_level(TraceLevel::INFO), Level::Info);
+        assert_eq!(to_log_level(TraceLevel::DEBUG), Level::Debug);
+        assert_eq!(to_log_level(TraceLevel::TRACE), Level::Trace);
+    }
+}

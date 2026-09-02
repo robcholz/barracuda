@@ -121,3 +121,63 @@ impl<const M: usize> Component<M> for FileComponent {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+    use alloc::{string::String, vec};
+    use barracuda_platform_test::memory_vfs;
+    use futures_lite::future::block_on;
+
+    #[test]
+    fn filesystem_capability_owns_complete_namespace_mutations() {
+        block_on(async {
+            let filesystem = FileSystem::new(memory_vfs().await.expect("memory filesystem mounts"));
+
+            filesystem
+                .create_dir_all("/documents/archive")
+                .await
+                .expect("nested directory creates");
+            filesystem
+                .write("/documents/note.txt", b"hello")
+                .await
+                .expect("file writes");
+            assert_eq!(
+                filesystem.read("/documents/note.txt").await,
+                Ok(b"hello".to_vec())
+            );
+            assert_eq!(
+                filesystem.list("/documents").await,
+                Ok(vec![String::from("archive"), String::from("note.txt")])
+            );
+            let metadata = filesystem
+                .metadata("/documents/note.txt")
+                .await
+                .expect("metadata reads");
+            assert!(metadata.is_file());
+            assert_eq!(metadata.len(), 5);
+
+            filesystem
+                .rename("/documents/note.txt", "/documents/archive/note.txt")
+                .await
+                .expect("file renames");
+            assert_eq!(
+                filesystem.read("/documents/archive/note.txt").await,
+                Ok(b"hello".to_vec())
+            );
+            assert_eq!(
+                filesystem.read("/documents/note.txt").await,
+                Err(FsError::NotFound)
+            );
+            filesystem
+                .remove("/documents/archive/note.txt")
+                .await
+                .expect("file removes");
+            filesystem
+                .remove("/documents/archive/note.txt")
+                .await
+                .expect("removing an absent file is idempotent");
+        });
+    }
+}

@@ -180,6 +180,96 @@ fn torn_trailing_journal_record_is_ignored_on_reload() {
     });
 }
 
+#[test]
+fn catalog_versions_and_compaction_preserve_the_live_memory_view() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        let memory = LongTermMemory::new(filesystem.clone(), "/m", "g-")
+            .await
+            .expect("load empty store");
+        assert_eq!(memory.version(), 0);
+
+        let first = memory
+            .store(
+                MemoryDraft::new("Prefers tea")
+                    .with_tags(["preference".to_string(), "drink".to_string()])
+                    .with_keywords(["oolong".to_string()])
+                    .with_source("manual"),
+            )
+            .await
+            .item()
+            .clone();
+        let second = memory
+            .store(draft("Lives in Berlin", &["location", "preference"]))
+            .await
+            .item()
+            .clone();
+        assert_eq!(memory.version(), 2);
+        assert_eq!(
+            memory.catalog(),
+            vec![
+                "drink".to_string(),
+                "location".to_string(),
+                "preference".to_string()
+            ]
+        );
+        assert_eq!(memory.recall(&[], Some("OOLONG"), 10), vec![first.clone()]);
+
+        memory
+            .update(
+                &first.id,
+                MemoryPatch {
+                    tags: Some(vec!["beverage".to_string()]),
+                    keywords: Some(vec!["sencha".to_string()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("update tags and keywords");
+        assert_eq!(memory.version(), 3);
+        assert_eq!(
+            memory.catalog(),
+            vec![
+                "beverage".to_string(),
+                "location".to_string(),
+                "preference".to_string()
+            ]
+        );
+        assert_eq!(memory.recall(&[], Some("sencha"), 10).len(), 1);
+
+        // Cross the dead-record threshold through real updates. The journal must
+        // be rewritten to its two live records and remain reloadable.
+        for revision in 0..31 {
+            memory
+                .update(
+                    &second.id,
+                    MemoryPatch {
+                        content: Some(format!("Lives in Berlin revision {revision}")),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .expect("update before compaction");
+        }
+        assert_eq!(memory.version(), 34);
+        assert_eq!(memory.last_persist_error(), None);
+        let journal = filesystem
+            .read("/m/memory_records.jsonl")
+            .await
+            .expect("read compacted journal");
+        assert_eq!(journal.split(|byte| *byte == b'\n').count(), 3);
+
+        let reloaded = LongTermMemory::new(filesystem, "/m", "g-")
+            .await
+            .expect("reload compacted store");
+        assert_eq!(reloaded.list().len(), 2);
+        assert_eq!(
+            reloaded.recall(&[], Some("revision 30"), 10)[0].id,
+            second.id
+        );
+    });
+}
+
 async fn memory() -> LongTermMemory {
     LongTermMemory::new(memory_vfs().await.unwrap(), "/m", "g-")
         .await

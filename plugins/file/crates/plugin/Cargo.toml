@@ -14,6 +14,11 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 serde-big-array = "0.5"
 zerocopy = { version = "0.8", features = ["derive"] }
 
+[dev-dependencies]
+barracuda-platform-test = { path = "../../../../platforms/test" }
+futures-lite = { version = "2", features = ["std"] }
+serde_json = { version = "1" }
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
