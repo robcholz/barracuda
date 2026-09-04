@@ -22,12 +22,13 @@ pub use barracuda_router::{
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    rpc_message, RpcAddress, RpcAddressError, RpcCallId, RpcCardinality, RpcClient, RpcContext,
-    RpcEndpointId, RpcError, RpcFrame, RpcGroup, RpcGroupError, RpcHandler, RpcHandlerFuture,
-    RpcHandlerInput, RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage, RpcMethod,
-    RpcMethodInfo, RpcMulticastBranch, RpcOutputMode, RpcPayloadFrame, RpcPayloadReader,
-    RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream,
-    RpcUnaryCall, Streaming, Unary,
+    json_schema, rpc_message, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef,
+    JsonRpcInfo, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId,
+    RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
+    RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
+    RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
+    RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration,
+    RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming, Unary,
 };
 /// Host-side JSON Schema bake pipeline, surfaced through the facade for
 /// `build.rs` and wire crates. Requires the `schema` feature and never ships to

@@ -1331,6 +1331,8 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "getset",
+ "serde",
+ "serde_json",
  "smallvec",
  "static_cell",
  "thiserror 2.0.18",
