@@ -19,6 +19,7 @@ extern crate alloc;
 mod address;
 mod context;
 mod frame;
+mod json;
 mod lane;
 mod payload;
 mod registry;
@@ -29,6 +30,10 @@ pub use address::{RpcAddress, RpcAddressError, RpcGroup, RpcGroupError};
 pub use barracuda_rpc_macros::rpc_message;
 pub use context::{RpcCallId, RpcContext, RpcEndpointId};
 pub use frame::RpcFrame;
+pub use json::{
+    JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef, JsonRpcInfo, JsonRpcSchema,
+    JsonSchema, JsonWriter,
+};
 pub use lane::RpcLaneStorage;
 pub use payload::{
     RpcMulticastBranch, RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter,
