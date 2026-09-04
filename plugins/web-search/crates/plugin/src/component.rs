@@ -57,10 +57,10 @@ impl WebSearchComponent {
 
 impl<const M: usize> Component<M> for WebSearchComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<WebSearch, _>(search_handler(
-            Rc::clone(&self.config),
-            self.http_clients.clone(),
-        ))
+        context.register_rpc::<WebSearch, _>(
+            "agent",
+            search_handler(Rc::clone(&self.config), self.http_clients.clone()),
+        )
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {

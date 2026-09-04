@@ -112,17 +112,23 @@ impl VmComponent {
 impl<const M: usize> Component<M> for VmComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         match &self.runtime {
-            Some(runtime) => context.register_rpc::<Run, _>(task_run_handler(
-                runtime.clone(),
-                self.limits,
-                self.builtin_packages,
-                self.package_registry.clone(),
-            )),
-            None => context.register_rpc::<Run, _>(run_handler_with_registry(
-                self.limits,
-                self.builtin_packages,
-                self.package_registry.clone(),
-            )),
+            Some(runtime) => context.register_rpc::<Run, _>(
+                "agent",
+                task_run_handler(
+                    runtime.clone(),
+                    self.limits,
+                    self.builtin_packages,
+                    self.package_registry.clone(),
+                ),
+            ),
+            None => context.register_rpc::<Run, _>(
+                "agent",
+                run_handler_with_registry(
+                    self.limits,
+                    self.builtin_packages,
+                    self.package_registry.clone(),
+                ),
+            ),
         }
     }
 

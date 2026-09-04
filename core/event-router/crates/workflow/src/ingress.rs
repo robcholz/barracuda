@@ -747,6 +747,7 @@ mod tests {
             let handler_received = Rc::clone(&received);
             registry
                 .register::<InternalEmit<256>, _>(
+                    "system",
                     move |_context, mut frames: RpcStream<RpcFrame<InternalEmitFrame<256>>>| {
                         let received = Rc::clone(&handler_received);
                         async move {
@@ -803,6 +804,7 @@ mod tests {
             let handler_received = Rc::clone(&received);
             registry
                 .register::<InternalEmit<256>, _>(
+                    "system",
                     move |_context, mut frames: RpcStream<RpcFrame<InternalEmitFrame<256>>>| {
                         let received = Rc::clone(&handler_received);
                         async move {
@@ -870,6 +872,7 @@ mod tests {
         let handler_called = Rc::clone(&called);
         registry
             .register::<InternalEmit<256>, _>(
+                "system",
                 move |_context, _frames: RpcStream<RpcFrame<InternalEmitFrame<256>>>| {
                     handler_called.set(true);
                     async { Ok(Ok(())) }
@@ -890,6 +893,7 @@ mod tests {
             let registry = RpcRegistry::new(lanes);
             registry
                 .register::<InternalEmit<256>, _>(
+                    "system",
                     |_context, _frames: RpcStream<RpcFrame<InternalEmitFrame<256>>>| async {
                         Ok(Err(EmitErrorFrame::new(EmitRejection::InvalidPayloadFrame)))
                     },
@@ -928,11 +932,11 @@ mod tests {
                 };
                 if address == WorkflowIngressA::ADDRESS {
                     registry
-                        .register::<WorkflowIngressA, _>(handler)
+                        .register::<WorkflowIngressA, _>("system", handler)
                         .expect("register workflow alpha");
                 } else {
                     registry
-                        .register::<WorkflowIngressB, _>(handler)
+                        .register::<WorkflowIngressB, _>("system", handler)
                         .expect("register workflow beta");
                 }
             }
@@ -948,7 +952,7 @@ mod tests {
                 ),
             ]);
             registry
-                .register::<InternalEmit<300>, _>(move |context: RpcContext, frames| {
+                .register::<InternalEmit<300>, _>("system", move |context: RpcContext, frames| {
                     let routes = Rc::clone(&routes);
                     async move {
                         let request = match InternalEmitRequest::accept(frames).await? {

@@ -39,36 +39,51 @@ impl AgentComponent {
 
 impl<const M: usize> Component<M> for AgentComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<NewSession, _>(new_session_handler(Rc::clone(&self.runtime)))?;
-        context.register_rpc::<ListSessions, _>(list_sessions_handler(Rc::clone(&self.runtime)))?;
-        context.register_rpc::<OpenSession, _>(open_session_handler(
-            Rc::clone(&self.runtime),
-            self.sessions.clone(),
-        ))?;
-        context
-            .register_rpc::<DeleteSession, _>(delete_session_handler(Rc::clone(&self.runtime)))?;
+        context.register_rpc::<NewSession, _>(
+            "system",
+            new_session_handler(Rc::clone(&self.runtime)),
+        )?;
+        context.register_rpc::<ListSessions, _>(
+            "system",
+            list_sessions_handler(Rc::clone(&self.runtime)),
+        )?;
+        context.register_rpc::<OpenSession, _>(
+            "system",
+            open_session_handler(Rc::clone(&self.runtime), self.sessions.clone()),
+        )?;
+        context.register_rpc::<DeleteSession, _>(
+            "system",
+            delete_session_handler(Rc::clone(&self.runtime)),
+        )?;
 
-        context.register_rpc::<session::append::Append, _>(session::append::append_handler(
-            self.sessions.clone(),
-        ))?;
-        context.register_rpc::<session::respond::Respond, _>(session::respond::respond_handler(
-            self.sessions.clone(),
-        ))?;
+        context.register_rpc::<session::append::Append, _>(
+            "system",
+            session::append::append_handler(self.sessions.clone()),
+        )?;
+        context.register_rpc::<session::respond::Respond, _>(
+            "system",
+            session::respond::respond_handler(self.sessions.clone()),
+        )?;
         context.register_rpc::<session::set_reasoning_effort::SetReasoningEffort, _>(
+            "system",
             session::set_reasoning_effort::set_reasoning_effort_handler(self.sessions.clone()),
         )?;
         context.register_rpc::<session::set_permission_level::SetPermissionLevel, _>(
+            "system",
             session::set_permission_level::set_permission_level_handler(self.sessions.clone()),
         )?;
         context.register_rpc::<session::interrupt::Interrupt, _>(
+            "system",
             session::interrupt::interrupt_handler(self.sessions.clone()),
         )?;
-        context.register_rpc::<session::cancel::Cancel, _>(session::cancel::cancel_handler(
-            self.sessions.clone(),
-        ))?;
-        context.register_rpc::<session::close::Close, _>(session::close::close_handler(
-            self.sessions.clone(),
-        ))
+        context.register_rpc::<session::cancel::Cancel, _>(
+            "system",
+            session::cancel::cancel_handler(self.sessions.clone()),
+        )?;
+        context.register_rpc::<session::close::Close, _>(
+            "system",
+            session::close::close_handler(self.sessions.clone()),
+        )
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {

@@ -156,6 +156,7 @@ async fn payload_multicast(registry: &RpcRegistry<2, 64, 4>) -> RpcResult<()> {
 
     let observed_pointer = Rc::clone(&echo_pointer);
     registry.register::<EchoChunks, _>(
+        "system",
         move |_context: RpcContext, requests: RpcStream<RpcFrame<[u8; 8]>>| {
             let pointer = Rc::clone(&observed_pointer);
             async move {
@@ -177,6 +178,7 @@ async fn payload_multicast(registry: &RpcRegistry<2, 64, 4>) -> RpcResult<()> {
 
     let observed_pointer = Rc::clone(&checksum_pointer);
     registry.register::<ChecksumChunks, _>(
+        "system",
         move |_context: RpcContext, requests: RpcStream<RpcFrame<[u8; 8]>>| {
             let pointer = Rc::clone(&observed_pointer);
             async move {
@@ -233,12 +235,12 @@ async fn payload_multicast(registry: &RpcRegistry<2, 64, 4>) -> RpcResult<()> {
 
 async fn run() -> RpcResult<()> {
     let registry = RpcRegistry::new(RPC_LANES.take());
-    registry.register::<Double, _>(|_context, request: RpcFrame<Number>| async move {
+    registry.register::<Double, _>("system", |_context, request: RpcFrame<Number>| async move {
         Ok(Ok(Doubled {
             value: request.view()?.value.saturating_mul(2),
         }))
     })?;
-    registry.register::<Square, _>(|_context, request: RpcFrame<Number>| async move {
+    registry.register::<Square, _>("system", |_context, request: RpcFrame<Number>| async move {
         let value = request.view()?.value;
         Ok(Ok(Squared {
             value: value.saturating_mul(value),

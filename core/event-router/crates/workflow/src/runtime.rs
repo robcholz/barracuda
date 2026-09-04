@@ -967,7 +967,7 @@ mod tests {
         registry: &RpcRegistry<N, M, Q>,
     ) {
         registry
-            .register::<InternalEmit<M>, _>(runtime.ingress_handler::<M>())
+            .register::<InternalEmit<M>, _>("system", runtime.ingress_handler::<M>())
             .expect("register Workflow Runtime ingress");
     }
 
@@ -1157,14 +1157,17 @@ mod tests {
         let recorded = Rc::new(RefCell::new(None));
 
         registry
-            .register::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-                let value = u32::from_le_bytes(*request.view()?);
-                Ok(Ok(value.saturating_add(1).to_le_bytes()))
-            })
+            .register::<AddOne, _>(
+                "system",
+                |_context, request: RpcFrame<[u8; 4]>| async move {
+                    let value = u32::from_le_bytes(*request.view()?);
+                    Ok(Ok(value.saturating_add(1).to_le_bytes()))
+                },
+            )
             .expect("register first Workflow step");
         let handler_recorded = Rc::clone(&recorded);
         registry
-            .register::<Record, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+            .register::<Record, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
                 let recorded = Rc::clone(&handler_recorded);
                 async move {
                     recorded.replace(Some(u32::from_le_bytes(*request.view()?)));
@@ -1234,7 +1237,7 @@ mod tests {
 
         let handler_alpha = Rc::clone(&alpha);
         registry
-            .register::<RecordAlpha, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+            .register::<RecordAlpha, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
                 let alpha = Rc::clone(&handler_alpha);
                 async move {
                     alpha.replace(Some(*request.view()?));
@@ -1244,7 +1247,7 @@ mod tests {
             .expect("register alpha Workflow");
         let handler_beta = Rc::clone(&beta);
         registry
-            .register::<RecordBeta, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+            .register::<RecordBeta, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
                 let beta = Rc::clone(&handler_beta);
                 async move {
                     beta.replace(Some(*request.view()?));
@@ -1304,6 +1307,7 @@ mod tests {
         let registry = RpcRegistry::new(lanes);
         registry
             .register::<Reject, _>(
+                "system",
                 |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Err([9])) },
             )
             .expect("register rejecting Workflow step");
@@ -1382,18 +1386,22 @@ mod tests {
         let collected = Rc::new(RefCell::new(alloc::vec::Vec::new()));
 
         registry
-            .register::<Expand, _>(|_context, request: RpcFrame<[u8; 1]>| async move {
-                let [first] = *request.view()?;
-                Ok(RpcStream::new(stream::iter([
-                    Ok(Ok([first])),
-                    Ok(Ok([first.saturating_add(1)])),
-                    Ok(Ok([first.saturating_add(2)])),
-                ])))
-            })
+            .register::<Expand, _>(
+                "system",
+                |_context, request: RpcFrame<[u8; 1]>| async move {
+                    let [first] = *request.view()?;
+                    Ok(RpcStream::new(stream::iter([
+                        Ok(Ok([first])),
+                        Ok(Ok([first.saturating_add(1)])),
+                        Ok(Ok([first.saturating_add(2)])),
+                    ])))
+                },
+            )
             .expect("register expanding Workflow step");
         let handler_collected = Rc::clone(&collected);
         registry
             .register::<Collect, _>(
+                "system",
                 move |_context, mut requests: RpcStream<RpcFrame<[u8; 1]>>| {
                     let collected = Rc::clone(&handler_collected);
                     async move {
@@ -1693,14 +1701,14 @@ mod link_tests {
         let recorded = Rc::new(RefCell::new(None));
 
         registry
-            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<Produce, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(Ok(Reply { token: seed.n }))
             })
             .expect("register produce");
         let handler_recorded = Rc::clone(&recorded);
         registry
-            .register::<Consume, _>(move |_context, request: RpcFrame<Deliver>| {
+            .register::<Consume, _>("system", move |_context, request: RpcFrame<Deliver>| {
                 let recorded = Rc::clone(&handler_recorded);
                 async move {
                     recorded.replace(Some(*request.view()?));
@@ -1724,7 +1732,10 @@ mod link_tests {
         .expect("valid mapping Workflow");
         runtime.control().load(definition).expect("load Workflow");
         registry
-            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .register::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<FRAME_SIZE>(),
+            )
             .expect("register ingress");
         runtime.start(registry.client());
 
@@ -1754,14 +1765,14 @@ mod link_tests {
         let touched = Rc::new(RefCell::new(false));
 
         registry
-            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<Produce, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(Ok(Reply { token: seed.n }))
             })
             .expect("register produce");
         let handler_touched = Rc::clone(&touched);
         registry
-            .register::<ConsumeSeed, _>(move |_context, _request: RpcFrame<Seed>| {
+            .register::<ConsumeSeed, _>("system", move |_context, _request: RpcFrame<Seed>| {
                 let touched = Rc::clone(&handler_touched);
                 async move {
                     touched.replace(true);
@@ -1784,7 +1795,10 @@ mod link_tests {
         .expect("valid Workflow");
         runtime.control().load(definition).expect("load Workflow");
         registry
-            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .register::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<FRAME_SIZE>(),
+            )
             .expect("register ingress");
         runtime.start(registry.client());
 
@@ -1815,20 +1829,21 @@ mod link_tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
         let registry = RpcRegistry::new(lanes);
         registry
-            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<Produce, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(Ok(Reply { token: seed.n }))
             })
             .expect("register produce");
         registry
             .register::<Consume, _>(
+                "system",
                 |_context, _request: RpcFrame<Deliver>| async move { Ok(Ok(())) },
             )
             .expect("register consume");
         registry
-            .register::<ConsumeSeed, _>(
-                |_context, _request: RpcFrame<Seed>| async move { Ok(Ok(())) },
-            )
+            .register::<ConsumeSeed, _>("system", |_context, _request: RpcFrame<Seed>| async move {
+                Ok(Ok(()))
+            })
             .expect("register consume-seed");
         let client = registry.client();
 
@@ -1901,7 +1916,7 @@ mod link_tests {
         let collected = Rc::new(RefCell::new(Vec::new()));
 
         registry
-            .register::<StreamSource, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<StreamSource, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(RpcStream::new(stream::iter([
                     Ok(Ok(Reply { token: seed.n })),
@@ -1914,6 +1929,7 @@ mod link_tests {
         let handler_collected = Rc::clone(&collected);
         registry
             .register::<ConsumeStream, _>(
+                "system",
                 move |_context, mut requests: RpcStream<RpcFrame<Deliver>>| {
                     let collected = Rc::clone(&handler_collected);
                     async move {
@@ -1941,7 +1957,10 @@ mod link_tests {
         .expect("valid mapping Workflow");
         runtime.control().load(definition).expect("load Workflow");
         registry
-            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .register::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<FRAME_SIZE>(),
+            )
             .expect("register ingress");
         runtime.start(registry.client());
 
@@ -1977,7 +1996,7 @@ mod link_tests {
         let collected = Rc::new(RefCell::new(Vec::new()));
 
         registry
-            .register::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<Produce, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(Ok(Reply { token: seed.n }))
             })
@@ -1985,6 +2004,7 @@ mod link_tests {
         let handler_collected = Rc::clone(&collected);
         registry
             .register::<ConsumeStream, _>(
+                "system",
                 move |_context, mut requests: RpcStream<RpcFrame<Deliver>>| {
                     let collected = Rc::clone(&handler_collected);
                     async move {
@@ -2012,7 +2032,10 @@ mod link_tests {
         .expect("valid mapping Workflow");
         runtime.control().load(definition).expect("load Workflow");
         registry
-            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .register::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<FRAME_SIZE>(),
+            )
             .expect("register ingress");
         runtime.start(registry.client());
 
@@ -2039,7 +2062,7 @@ mod link_tests {
         let touched = Rc::new(RefCell::new(false));
 
         registry
-            .register::<StreamSource, _>(|_context, request: RpcFrame<Seed>| async move {
+            .register::<StreamSource, _>("system", |_context, request: RpcFrame<Seed>| async move {
                 let seed = *request.view()?;
                 Ok(RpcStream::new(stream::iter([Ok(Ok(Reply {
                     token: seed.n,
@@ -2048,7 +2071,7 @@ mod link_tests {
             .expect("register stream source");
         let handler_touched = Rc::clone(&touched);
         registry
-            .register::<StreamSink, _>(move |_context, _request: RpcFrame<Reply>| {
+            .register::<StreamSink, _>("system", move |_context, _request: RpcFrame<Reply>| {
                 let touched = Rc::clone(&handler_touched);
                 async move {
                     touched.replace(true);
@@ -2072,7 +2095,10 @@ mod link_tests {
         .expect("valid Workflow");
         runtime.control().load(definition).expect("load Workflow");
         registry
-            .register::<InternalEmit<FRAME_SIZE>, _>(runtime.ingress_handler::<FRAME_SIZE>())
+            .register::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<FRAME_SIZE>(),
+            )
             .expect("register ingress");
         runtime.start(registry.client());
 

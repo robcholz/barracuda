@@ -19,10 +19,10 @@ fn run(limits: VmLimits, requests: Vec<RunRequestFrame>) -> Vec<Outcome> {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 64, 2>::new()));
         let registry = RpcRegistry::new(lanes);
         let _registration = registry
-            .register::<Run, _>(barracuda_vm_component::run::run_handler(
-                limits,
-                BuiltinPackages::all(),
-            ))
+            .register::<Run, _>(
+                "agent",
+                barracuda_vm_component::run::run_handler(limits, BuiltinPackages::all()),
+            )
             .expect("register vm.run");
         let input = RpcStream::new(stream::iter(requests.into_iter().map(Ok)));
         let mut output = registry.client().call::<Run>(input).expect("start vm.run");

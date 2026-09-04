@@ -52,50 +52,54 @@ impl WorkflowComponent {
 
 impl<const M: usize> Component<M> for WorkflowComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<InternalEmit<M>, _>(self.runtime.ingress_handler::<M>())?;
+        context
+            .register_rpc::<InternalEmit<M>, _>("system", self.runtime.ingress_handler::<M>())?;
 
         let load_control = self.runtime.control();
         let load_catalog = Rc::clone(&self.catalog);
-        context.register_rpc::<WorkflowLoad<M>, _>(move |context: RpcContext, frames| {
-            let control = load_control.clone();
-            let catalog = Rc::clone(&load_catalog);
-            async move {
-                let request = match WorkflowJsonRequest::accept(frames).await? {
-                    Ok(request) => request,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                let definition = match request.definition() {
-                    Ok(definition) => definition,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                if let Err(rejection) = validate_definition(context.client(), &definition) {
-                    return Ok(Err(rejection));
-                }
-                if control.contains(definition.id()) {
-                    return Ok(Err(WorkflowControlRejection::DuplicateId));
-                }
-
-                let mut next_catalog = catalog.borrow().clone();
-                next_catalog.push(PersistedWorkflow {
-                    id: definition.id().clone(),
-                    json: request.bytes().to_vec(),
-                });
-                if write_catalog(&next_catalog).await.is_err() {
-                    return Ok(Err(WorkflowControlRejection::Persistence));
-                }
-                match control.load(definition) {
-                    Ok(()) => {
-                        *catalog.borrow_mut() = next_catalog;
-                        Ok(Ok(()))
+        context.register_rpc::<WorkflowLoad<M>, _>(
+            "system",
+            move |context: RpcContext, frames| {
+                let control = load_control.clone();
+                let catalog = Rc::clone(&load_catalog);
+                async move {
+                    let request = match WorkflowJsonRequest::accept(frames).await? {
+                        Ok(request) => request,
+                        Err(rejection) => return Ok(Err(rejection)),
+                    };
+                    let definition = match request.definition() {
+                        Ok(definition) => definition,
+                        Err(rejection) => return Ok(Err(rejection)),
+                    };
+                    if let Err(rejection) = validate_definition(context.client(), &definition) {
+                        return Ok(Err(rejection));
                     }
-                    Err(_error) => Ok(Err(WorkflowControlRejection::DuplicateId)),
+                    if control.contains(definition.id()) {
+                        return Ok(Err(WorkflowControlRejection::DuplicateId));
+                    }
+
+                    let mut next_catalog = catalog.borrow().clone();
+                    next_catalog.push(PersistedWorkflow {
+                        id: definition.id().clone(),
+                        json: request.bytes().to_vec(),
+                    });
+                    if write_catalog(&next_catalog).await.is_err() {
+                        return Ok(Err(WorkflowControlRejection::Persistence));
+                    }
+                    match control.load(definition) {
+                        Ok(()) => {
+                            *catalog.borrow_mut() = next_catalog;
+                            Ok(Ok(()))
+                        }
+                        Err(_error) => Ok(Err(WorkflowControlRejection::DuplicateId)),
+                    }
                 }
-            }
-        })?;
+            },
+        )?;
 
         let unload_control = self.runtime.control();
         let unload_catalog = Rc::clone(&self.catalog);
-        context.register_rpc::<WorkflowUnload<M>, _>(move |_context, frames| {
+        context.register_rpc::<WorkflowUnload<M>, _>("system", move |_context, frames| {
             let control = unload_control.clone();
             let catalog = Rc::clone(&unload_catalog);
             async move {

@@ -45,13 +45,16 @@ struct TestDriver {
 impl Component<FRAME_SIZE> for TestDriver {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let recorded = Rc::clone(&self.recorded);
-        context.register_rpc::<Record, _>(move |_context, request: RpcFrame<Triggered>| {
-            let recorded = Rc::clone(&recorded);
-            async move {
-                recorded.replace(Some(*request.view()?));
-                Ok(Ok(()))
-            }
-        })
+        context.register_rpc::<Record, _>(
+            "system",
+            move |_context, request: RpcFrame<Triggered>| {
+                let recorded = Rc::clone(&recorded);
+                async move {
+                    recorded.replace(Some(*request.view()?));
+                    Ok(Ok(()))
+                }
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {

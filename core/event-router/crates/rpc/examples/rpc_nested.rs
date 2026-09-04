@@ -60,6 +60,7 @@ async fn run() -> RpcResult<()> {
     let registry = RpcRegistry::new(lanes);
 
     let increment_registration = registry.register::<Increment, _>(
+        "system",
         |context: RpcContext, request: RpcFrame<Number>| async move {
             println!(
                 "increment call={} root={} parent={:?} caller={:?} endpoint={}",
@@ -76,6 +77,7 @@ async fn run() -> RpcResult<()> {
     )?;
 
     let twice_registration = registry.register::<IncrementTwice, _>(
+        "system",
         |context: RpcContext, request: RpcFrame<Number>| async move {
             // RpcContext carries a client with the current endpoint and call
             // chain already attached. Nested calls therefore propagate root,
@@ -90,6 +92,7 @@ async fn run() -> RpcResult<()> {
     )?;
 
     registry.register::<CallsItself, _>(
+        "system",
         |context: RpcContext, request: RpcFrame<Number>| async move {
             // This resolves to DirectSelfCall before another handler future starts.
             let frame = success(

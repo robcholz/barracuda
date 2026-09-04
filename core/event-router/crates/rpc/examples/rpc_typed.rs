@@ -120,19 +120,23 @@ async fn run() -> RpcResult<()> {
     let lanes = RPC_LANES.take();
     let registry = RpcRegistry::new(lanes);
 
-    registry.register::<UnaryUnary, _>(AddOffset { offset: 1 })?;
+    registry.register::<UnaryUnary, _>("system", AddOffset { offset: 1 })?;
 
-    registry.register::<UnaryStream, _>(|_context, request: RpcFrame<Number>| async move {
-        let value = request.view()?.value;
-        Ok(RpcStream::new(stream::iter([
-            Ok(Ok(Total { value })),
-            Ok(Ok(Total {
-                value: value.saturating_add(1),
-            })),
-        ])))
-    })?;
+    registry.register::<UnaryStream, _>(
+        "system",
+        |_context, request: RpcFrame<Number>| async move {
+            let value = request.view()?.value;
+            Ok(RpcStream::new(stream::iter([
+                Ok(Ok(Total { value })),
+                Ok(Ok(Total {
+                    value: value.saturating_add(1),
+                })),
+            ])))
+        },
+    )?;
 
     registry.register::<StreamUnary, _>(
+        "system",
         |_context, mut requests: RpcStream<RpcFrame<Number>>| async move {
             let mut total = 0_u32;
             while let Some(request) = requests.next().await {
@@ -143,6 +147,7 @@ async fn run() -> RpcResult<()> {
     )?;
 
     registry.register::<StreamStream, _>(
+        "system",
         |_context, requests: RpcStream<RpcFrame<Number>>| async move {
             let responses = stream::unfold(requests, |mut requests| async move {
                 match requests.next().await {

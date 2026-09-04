@@ -95,15 +95,18 @@ impl Component<FRAME_SIZE> for WorkflowInstaller {
         }
         // Stub endpoints so load-time link validation can resolve the steps
         // these workflows persist.
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })?;
-        context.register_rpc::<Audit, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })
+        context.register_rpc::<AddOne, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )?;
+        context.register_rpc::<Record, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Ok(())) },
+        )?;
+        context.register_rpc::<Audit, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Ok(())) },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -133,12 +136,14 @@ impl Component<FRAME_SIZE> for WorkflowUninstaller {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         // Stub endpoints so load-time link validation can resolve the steps
         // this workflow loads.
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })
+        context.register_rpc::<AddOne, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )?;
+        context.register_rpc::<Record, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Ok(())) },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -323,12 +328,15 @@ struct SequentialExecution {
 
 impl Component<FRAME_SIZE> for SequentialExecution {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            let value = u32::from_le_bytes(*request.view()?);
-            Ok(Ok(value.saturating_add(1).to_le_bytes()))
-        })?;
+        context.register_rpc::<AddOne, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move {
+                let value = u32::from_le_bytes(*request.view()?);
+                Ok(Ok(value.saturating_add(1).to_le_bytes()))
+            },
+        )?;
         let recorded = Rc::clone(&self.recorded);
-        context.register_rpc::<Record, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+        context.register_rpc::<Record, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
             let recorded = Rc::clone(&recorded);
             async move {
                 recorded.set(Some(u32::from_le_bytes(*request.view()?)));
@@ -402,19 +410,23 @@ struct FanoutExecution {
 impl Component<FRAME_SIZE> for FanoutExecution {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let recorded = Rc::clone(&self.recorded);
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(move |_context, request: RpcFrame<[u8; 4]>| {
-            let recorded = Rc::clone(&recorded);
-            async move {
-                request.view()?;
-                recorded.set(true);
-                Ok(Ok(()))
-            }
-        })?;
+        context.register_rpc::<AddOne, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )?;
+        context.register_rpc::<Record, _>(
+            "system",
+            move |_context, request: RpcFrame<[u8; 4]>| {
+                let recorded = Rc::clone(&recorded);
+                async move {
+                    request.view()?;
+                    recorded.set(true);
+                    Ok(Ok(()))
+                }
+            },
+        )?;
         let audited = Rc::clone(&self.audited);
-        context.register_rpc::<Audit, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+        context.register_rpc::<Audit, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
             let audited = Rc::clone(&audited);
             async move {
                 request.view()?;
@@ -504,6 +516,7 @@ impl Component<FRAME_SIZE> for StreamingExecution {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let collected = Rc::clone(&self.collected);
         context.register_rpc::<Collect, _>(
+            "system",
             move |_context, mut requests: RpcStream<RpcFrame<[u8; 1]>>| {
                 let collected = Rc::clone(&collected);
                 async move {

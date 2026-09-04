@@ -23,9 +23,10 @@ fn registry<const N: usize, const M: usize, const Q: usize>() -> RpcRegistry<N, 
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, M, Q>::new()));
     let registry = RpcRegistry::new(lanes);
     registry
-        .register::<Echo, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<Echo, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 8]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register echo endpoint");
     registry
 }

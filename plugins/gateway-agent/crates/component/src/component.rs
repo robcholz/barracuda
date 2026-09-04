@@ -44,9 +44,10 @@ impl Default for GatewayAgentBridge {
 
 impl<const M: usize> Component<M> for GatewayAgentBridge {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<GatewayAgentRespond, _>(gateway_agent_respond_handler(Rc::clone(
-            &self.state,
-        )))
+        context.register_rpc::<GatewayAgentRespond, _>(
+            "system",
+            gateway_agent_respond_handler(Rc::clone(&self.state)),
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {

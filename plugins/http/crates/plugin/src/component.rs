@@ -162,7 +162,7 @@ impl<T: TcpConnect + 'static, D: Dns + 'static, const M: usize> Component<M>
     for HttpComponent<T, D>
 {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Request, _>(handler(self.clients.clone()))
+        context.register_rpc::<Request, _>("agent", handler(self.clients.clone()))
     }
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
         Box::pin(core::future::pending())

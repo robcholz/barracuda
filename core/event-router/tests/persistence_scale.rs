@@ -59,9 +59,10 @@ impl Component<FRAME_CAPACITY> for CatalogLoader {
         // Stub endpoint so load-time link validation can resolve the steps
         // the catalog persists. Response mirrors Request so chained Direct
         // links of the same method stay type-identical.
-        context.register_rpc::<Sink, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        context.register_rpc::<Sink, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 8]>| async move { Ok(Ok(*request.view()?)) },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_CAPACITY>) -> ComponentFuture<'a> {

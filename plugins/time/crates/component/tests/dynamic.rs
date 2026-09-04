@@ -16,7 +16,7 @@ fn time_now_accepts_dynamic_empty_object_calls() {
     let mut clock = ClockState::new(TimeConfig::new(1_000, 60_000, 120_000));
     clock.synchronize(SyncSample::new(1_800_000_000_000, Instant::now()));
     let _registration = registry
-        .register::<Now, _>(now_handler(Rc::new(RefCell::new(clock))))
+        .register::<Now, _>("agent", now_handler(Rc::new(RefCell::new(clock))))
         .expect("register time.now");
     let address = RpcAddress::try_from(Now::ADDRESS).expect("valid address");
 
