@@ -63,13 +63,18 @@ impl GatewayComponent {
 
 impl<const M: usize> Component<M> for GatewayComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<GatewaySend, _>(gateway_send_handler(Rc::clone(&self.gateway)))?;
-        context.register_rpc::<GatewaySendStream, _>(gateway_send_stream_handler(Rc::clone(
-            &self.gateway,
-        )))?;
-        context.register_rpc::<GatewaySendMedia, _>(gateway_send_media_handler(Rc::clone(
-            &self.gateway,
-        )))
+        context.register_rpc::<GatewaySend, _>(
+            "agent",
+            gateway_send_handler(Rc::clone(&self.gateway)),
+        )?;
+        context.register_rpc::<GatewaySendStream, _>(
+            "agent",
+            gateway_send_stream_handler(Rc::clone(&self.gateway)),
+        )?;
+        context.register_rpc::<GatewaySendMedia, _>(
+            "agent",
+            gateway_send_media_handler(Rc::clone(&self.gateway)),
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {

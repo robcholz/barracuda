@@ -105,6 +105,7 @@ struct PermissionService {
 impl Component<FRAME_SIZE> for PermissionService {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_rpc::<SetPermissionLevel, _>(
+            "system",
             |_context, request: RpcFrame<SetLevelRequest>| async move {
                 let request = *request.view()?;
                 if request.session == 0 {
@@ -117,6 +118,7 @@ impl Component<FRAME_SIZE> for PermissionService {
             },
         )?;
         context.register_rpc::<CloseSession, _>(
+            "system",
             |_context, _request: RpcFrame<SetLevelRequest>| async move { Ok(Ok(())) },
         )
     }

@@ -136,12 +136,15 @@ struct WorkflowDemo {
 
 impl Component<FRAME_SIZE> for WorkflowDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Produce, _>(|_context, request: RpcFrame<Seed>| async move {
-            let seed = *request.view()?;
-            Ok(Ok(Reply { token: seed.n }))
-        })?;
+        context.register_rpc::<Produce, _>(
+            "system",
+            |_context, request: RpcFrame<Seed>| async move {
+                let seed = *request.view()?;
+                Ok(Ok(Reply { token: seed.n }))
+            },
+        )?;
         let recorded = Rc::clone(&self.state.recorded);
-        context.register_rpc::<Consume, _>(move |_context, request: RpcFrame<Deliver>| {
+        context.register_rpc::<Consume, _>("system", move |_context, request: RpcFrame<Deliver>| {
             let recorded = Rc::clone(&recorded);
             async move {
                 recorded.replace(Some(*request.view()?));

@@ -58,9 +58,10 @@ struct FailureDemo {
 
 impl Component<FRAME_SIZE> for FailureDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Fail, _>(|_context, _request: RpcFrame<[u8; 1]>| async move {
-            Ok(Err(()))
-        })
+        context.register_rpc::<Fail, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Err(())) },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {

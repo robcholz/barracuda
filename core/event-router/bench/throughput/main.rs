@@ -68,7 +68,7 @@ impl<const N: usize, const M: usize, const P: usize> Component<M> for Producer<N
         }
         let state = Rc::clone(&self.state);
         let sink_yields = self.sink_yields;
-        context.register_rpc::<Sink<P>, _>(move |_context, request: RpcFrame<[u8; P]>| {
+        context.register_rpc::<Sink<P>, _>("system", move |_context, request: RpcFrame<[u8; P]>| {
             let state = Rc::clone(&state);
             async move {
                 let bytes = request.view()?;

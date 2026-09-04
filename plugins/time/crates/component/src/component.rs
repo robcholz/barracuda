@@ -179,7 +179,7 @@ impl TimeComponent {
 
 impl<const M: usize> Component<M> for TimeComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Now, _>(now_handler(Rc::clone(&self.state)))
+        context.register_rpc::<Now, _>("agent", now_handler(Rc::clone(&self.state)))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {

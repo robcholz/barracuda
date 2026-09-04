@@ -60,13 +60,16 @@ struct Gateway {
 impl Component<FRAME_SIZE> for Gateway {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let state = Rc::clone(&self.state);
-        context.register_rpc::<RecordMessage, _>(move |_context, request: RpcFrame<[u8; 4]>| {
-            let state = Rc::clone(&state);
-            async move {
-                state.recorded.set(Some(*request.view()?));
-                Ok(Ok(()))
-            }
-        })
+        context.register_rpc::<RecordMessage, _>(
+            "system",
+            move |_context, request: RpcFrame<[u8; 4]>| {
+                let state = Rc::clone(&state);
+                async move {
+                    state.recorded.set(Some(*request.view()?));
+                    Ok(Ok(()))
+                }
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {

@@ -51,9 +51,10 @@ struct WorkflowInstaller {
 impl Component<FRAME_SIZE> for WorkflowInstaller {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         // Register the step endpoint so `workflow.load` can validate the link.
-        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })
+        context.register_rpc::<Record, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Ok(())) },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {

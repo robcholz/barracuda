@@ -85,6 +85,7 @@ impl<'a, const M: usize> RegisterContext<'a, M> {
     ///
     /// fn register(context: &mut RegisterContext<'_, 64>) -> ComponentResult<()> {
     ///     context.register_rpc::<TooLarge, _>(
+    ///         "system",
     ///         |_context, _request: RpcFrame<[u8; 65]>| async move { Ok(Ok([0])) },
     ///     )
     /// }
@@ -97,12 +98,14 @@ impl<'a, const M: usize> RegisterContext<'a, M> {
     ///     let _ = register(context());
     /// }
     /// ```
-    pub fn register_rpc<Method, H>(&mut self, handler: H) -> ComponentResult<()>
+    pub fn register_rpc<Method, H>(&mut self, visibility: &str, handler: H) -> ComponentResult<()>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
-        let registration = self.registry.register_rpc::<Method, H>(handler)?;
+        let registration = self
+            .registry
+            .register_rpc::<Method, H>(visibility, handler)?;
         self.registrations.push(registration);
         Ok(())
     }
@@ -226,9 +229,12 @@ mod tests {
             &mut self,
             context: &mut RegisterContext<'_, 256>,
         ) -> Result<(), ComponentError> {
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(Number(request.view()?.0.saturating_add(1))))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move {
+                    Ok(Ok(Number(request.view()?.0.saturating_add(1))))
+                },
+            )
         }
 
         fn run<'a>(&'a mut self, context: RunContext<256>) -> ComponentFuture<'a> {

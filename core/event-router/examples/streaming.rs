@@ -61,6 +61,7 @@ impl Component<FRAME_SIZE> for StreamingDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let collected = Rc::clone(&self.state.collected);
         context.register_rpc::<Collect, _>(
+            "system",
             move |_context, mut requests: RpcStream<RpcFrame<[u8; 1]>>| {
                 let collected = Rc::clone(&collected);
                 async move {

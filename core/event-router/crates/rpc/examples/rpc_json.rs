@@ -132,8 +132,8 @@ fn counter_reset(total: Rc<Cell<i64>>) -> impl RpcHandler<CounterReset> {
 async fn run() -> RpcResult<()> {
     let registry = RpcRegistry::new(RPC_LANES.take());
     let total = Rc::new(Cell::new(0));
-    registry.register::<CounterAdd, _>(counter_add(Rc::clone(&total)))?;
-    registry.register::<CounterReset, _>(counter_reset(total))?;
+    registry.register::<CounterAdd, _>("system", counter_add(Rc::clone(&total)))?;
+    registry.register::<CounterReset, _>("system", counter_reset(total))?;
 
     let client = registry.client();
     let add = RpcAddress::try_from(CounterAdd::ADDRESS)?;

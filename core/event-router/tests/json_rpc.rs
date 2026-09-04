@@ -102,10 +102,10 @@ async fn close_session(
 fn permission_registry() -> RpcRegistry<1, 16, 1> {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<SetPermissionLevel, _>(set_permission_level)
+        .register::<SetPermissionLevel, _>("system", set_permission_level)
         .expect("register set_permission_level");
     registry
-        .register::<CloseSession, _>(close_session)
+        .register::<CloseSession, _>("system", close_session)
         .expect("register close_session");
     registry
 }

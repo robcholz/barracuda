@@ -84,10 +84,12 @@ fn registry() -> RpcRegistry<2, 64, 2> {
 
 fn register(registry: &RpcRegistry<2, 64, 2>) {
     registry
-        .register::<Produce, _>(|_context, _request| async { Ok(Ok(Reply::default())) })
+        .register::<Produce, _>("system", |_context, _request| async {
+            Ok(Ok(Reply::default()))
+        })
         .expect("register produce");
     registry
-        .register::<Consume, _>(|_context, _request| async { Ok(Ok(())) })
+        .register::<Consume, _>("system", |_context, _request| async { Ok(Ok(())) })
         .expect("register consume");
 }
 

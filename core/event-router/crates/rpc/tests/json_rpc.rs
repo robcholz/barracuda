@@ -88,7 +88,7 @@ async fn set_level(
 fn call_json_transcodes_a_structured_request_and_void_response() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<SetLevel, _>(set_level)
+        .register::<SetLevel, _>("system", set_level)
         .expect("register endpoint");
     let address = RpcAddress::try_from(SetLevel::ADDRESS).expect("valid address");
     let client = registry.client();
@@ -160,7 +160,7 @@ fn call_json_stream_writes_every_json_value_as_one_request_frame() {
     let registry = registry::<1, 16, 1>();
     let count = Rc::new(Cell::new(0));
     registry
-        .register::<Append, _>(append_handler(Rc::clone(&count)))
+        .register::<Append, _>("system", append_handler(Rc::clone(&count)))
         .expect("register endpoint");
     let address = RpcAddress::try_from(Append::ADDRESS).expect("valid address");
     let client = registry.client();
@@ -185,7 +185,7 @@ fn call_json_stream_writes_every_json_value_as_one_request_frame() {
 fn call_json_surfaces_a_typed_error_as_ok_false() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<SetLevel, _>(set_level)
+        .register::<SetLevel, _>("system", set_level)
         .expect("register endpoint");
     let address = RpcAddress::try_from(SetLevel::ADDRESS).expect("valid address");
     let client = registry.client();
@@ -209,7 +209,7 @@ fn call_json_surfaces_a_typed_error_as_ok_false() {
 fn call_json_rejects_a_mismatched_request_value() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<SetLevel, _>(set_level)
+        .register::<SetLevel, _>("system", set_level)
         .expect("register endpoint");
     let address = RpcAddress::try_from(SetLevel::ADDRESS).expect("valid address");
     let client = registry.client();

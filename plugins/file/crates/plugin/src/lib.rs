@@ -109,8 +109,10 @@ struct FileComponent {
 
 impl<const M: usize> Component<M> for FileComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<FileRead, _>(rpc::read_handler(Rc::clone(&self.filesystem)))?;
-        context.register_rpc::<FileWrite, _>(rpc::write_handler(Rc::clone(&self.filesystem)))
+        context
+            .register_rpc::<FileRead, _>("agent", rpc::read_handler(Rc::clone(&self.filesystem)))?;
+        context
+            .register_rpc::<FileWrite, _>("agent", rpc::write_handler(Rc::clone(&self.filesystem)))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {

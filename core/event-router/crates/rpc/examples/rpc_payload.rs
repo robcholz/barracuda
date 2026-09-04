@@ -58,7 +58,7 @@ async fn receive_image(mut reader: RpcPayloadReader) -> RpcResult<()> {
 
 async fn run() -> RpcResult<()> {
     let registry = RpcRegistry::new(RPC_LANES.take());
-    registry.register::<TransferImage, _>(transfer_image)?;
+    registry.register::<TransferImage, _>("system", transfer_image)?;
 
     // The two handles are independent so full-duplex Methods can apply
     // backpressure in both directions without requiring a background task.

@@ -36,6 +36,7 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
 
     let registry = RpcRegistry::new(RPC_LANES.take());
     registry.register::<SetLevel, _>(
+        "system",
         |_context, request: RpcFrame<SetLevelRequest>| async move {
             let request = *request.view()?;
             println!(

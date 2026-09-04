@@ -561,9 +561,12 @@ mod tests {
             &mut self,
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(Number(request.view()?.0.saturating_add(1))))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move {
+                    Ok(Ok(Number(request.view()?.0.saturating_add(1))))
+                },
+            )
         }
 
         fn run<'a>(&'a mut self, _context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -614,7 +617,7 @@ mod tests {
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             let handler_polls = Rc::clone(&self.handler_polls);
-            context.register_rpc::<Increment, _>(move |_context, _request| {
+            context.register_rpc::<Increment, _>("system", move |_context, _request| {
                 let handler_polls = Rc::clone(&handler_polls);
                 poll_fn(move |_context| {
                     handler_polls.set(handler_polls.get().saturating_add(1));
@@ -681,11 +684,13 @@ mod tests {
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             context.register_rpc::<Increment, _>(
+                "system",
                 |_context, request: RpcFrame<Number>| async move { Ok(Ok(*request.view()?)) },
             )?;
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(*request.view()?))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move { Ok(Ok(*request.view()?)) },
+            )
         }
 
         fn run<'a>(&'a mut self, _context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -1026,7 +1031,7 @@ mod tests {
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             let handler_dropped = Rc::clone(&self.handler_dropped);
-            context.register_rpc::<Increment, _>(move |_context, _request| {
+            context.register_rpc::<Increment, _>("system", move |_context, _request| {
                 let signal = HandlerDropSignal {
                     dropped: Rc::clone(&handler_dropped),
                 };

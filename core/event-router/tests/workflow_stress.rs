@@ -65,7 +65,7 @@ impl Component<FRAME_CAPACITY> for Producer {
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,
     ) -> ComponentResult<()> {
         let state = Rc::clone(&self.state);
-        context.register_rpc::<Sink, _>(move |_context, request: RpcFrame<[u8; 8]>| {
+        context.register_rpc::<Sink, _>("system", move |_context, request: RpcFrame<[u8; 8]>| {
             let state = Rc::clone(&state);
             async move {
                 request.view()?;

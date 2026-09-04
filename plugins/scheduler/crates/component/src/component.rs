@@ -82,8 +82,8 @@ impl SchedulerComponent {
 
 impl<const M: usize> Component<M> for SchedulerComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Schedule, _>(schedule_handler(self.control.clone()))?;
-        context.register_rpc::<Cancel, _>(cancel_handler(self.control.clone()))
+        context.register_rpc::<Schedule, _>("agent", schedule_handler(self.control.clone()))?;
+        context.register_rpc::<Cancel, _>("agent", cancel_handler(self.control.clone()))
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {

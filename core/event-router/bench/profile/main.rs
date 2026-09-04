@@ -131,9 +131,10 @@ fn profile_rpc(output: &Path) -> Report {
     let lanes = LANES.init(RpcLaneStorage::new());
     let registry = RpcRegistry::new(lanes);
     registry
-        .register::<Echo, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<Echo, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 8]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register echo");
     let client = registry.client();
     block_on(async {

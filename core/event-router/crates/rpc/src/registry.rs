@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::rc::{Rc, Weak};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::any::type_name;
 use core::cell::{Cell, RefCell};
@@ -54,13 +55,14 @@ pub(crate) trait ErasedRpcHandler {
 /// not need access to the erased handler or wire descriptor stored inside.
 pub struct RpcEndpoint<const M: usize> {
     address: RpcAddress,
+    visibility: String,
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
     dynamic: Option<Dynamic>,
 }
 
 impl<const M: usize> RpcEndpoint<M> {
-    pub(crate) fn typed<Method, H>(handler: H) -> RpcResult<Self>
+    pub(crate) fn typed<Method, H>(visibility: &str, handler: H) -> RpcResult<Self>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
@@ -82,6 +84,7 @@ impl<const M: usize> RpcEndpoint<M> {
         let descriptor = RpcMethodDescriptor::for_method::<Method>()?;
         Ok(Self {
             address: descriptor.address().clone(),
+            visibility: visibility.into(),
             handler: Rc::new(HandlerAdapter::<Method, H>::new(handler)),
             descriptor,
             dynamic: Method::dynamic(),
@@ -136,12 +139,16 @@ impl<const M: usize> dyn RpcRegistryApi<M> + '_ {
     /// # Errors
     ///
     /// Returns an RPC error when the method cannot be registered.
-    pub fn register_rpc<Method, H>(&self, handler: H) -> RpcResult<RpcRegistration>
+    pub fn register_rpc<Method, H>(
+        &self,
+        visibility: &str,
+        handler: H,
+    ) -> RpcResult<RpcRegistration>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
-        self.register_endpoint(RpcEndpoint::<M>::typed::<Method, H>(handler)?)
+        self.register_endpoint(RpcEndpoint::<M>::typed::<Method, H>(visibility, handler)?)
     }
 }
 
@@ -221,6 +228,16 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
         addresses
     }
 
+    /// Returns a sorted snapshot of RPC addresses with `visibility`.
+    ///
+    /// Visibility is independent of the address-derived [`RpcGroup`]. An
+    /// unknown visibility produces an empty snapshot. Registering or
+    /// unregistering an RPC does not mutate a previously returned snapshot.
+    #[must_use]
+    pub fn rpcs_by_visibility(&self, visibility: &str) -> Vec<RpcAddress> {
+        self.core.rpcs_by_visibility(visibility)
+    }
+
     /// Registers a handler for method `M`.
     ///
     /// The method descriptor is retained with the endpoint so typed clients can
@@ -251,6 +268,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     ///     ConstStaticCell::new(RpcLaneStorage::new());
     /// let registry = RpcRegistry::new(LANES.take());
     /// let _ = registry.register::<TooLargeError, _>(
+    ///     "system",
     ///     |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Ok([0])) },
     /// )?;
     /// # Ok::<(), barracuda_rpc::RpcError>(())
@@ -285,6 +303,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     ///     ConstStaticCell::new(RpcLaneStorage::new());
     /// let registry = RpcRegistry::new(LANES.take());
     /// let _ = registry.register::<InvalidAlignment, _>(
+    ///     "system",
     ///     |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Ok([0])) },
     /// )?;
     /// # Ok::<(), barracuda_rpc::RpcError>(())
@@ -298,13 +317,13 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// Compilation fails if the fixed request, response, or method-error type is
     /// larger than the registry's `M`-byte lane frames or requires stricter
     /// alignment than the lane frame provides.
-    pub fn register<Method, H>(&self, handler: H) -> RpcResult<RpcRegistration>
+    pub fn register<Method, H>(&self, visibility: &str, handler: H) -> RpcResult<RpcRegistration>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
         let registry: &dyn RpcRegistryApi<M> = self;
-        registry.register_rpc::<Method, H>(handler)
+        registry.register_rpc::<Method, H>(visibility, handler)
     }
 
     /// Unregisters the exact endpoint instance represented by `registration`.
@@ -353,6 +372,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
     fn register_endpoint(&self, endpoint: RpcEndpoint<M>) -> RpcResult<RpcRegistration> {
         self.core.insert_handler(
             endpoint.address,
+            endpoint.visibility,
             endpoint.handler,
             endpoint.descriptor,
             endpoint.dynamic,
@@ -369,9 +389,22 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
 }
 
 impl RegistryCore {
+    fn rpcs_by_visibility(&self, visibility: &str) -> Vec<RpcAddress> {
+        let mut addresses: Vec<_> = self
+            .endpoints
+            .borrow()
+            .iter()
+            .filter(|(_address, endpoint)| endpoint.visibility == visibility)
+            .map(|(address, _endpoint)| address.clone())
+            .collect();
+        addresses.sort_unstable();
+        addresses
+    }
+
     fn insert_handler(
         &self,
         address: RpcAddress,
+        visibility: String,
         handler: Rc<dyn ErasedRpcHandler>,
         descriptor: RpcMethodDescriptor,
         dynamic: Option<Dynamic>,
@@ -392,6 +425,7 @@ impl RegistryCore {
             address,
             EndpointEntry {
                 endpoint_id,
+                visibility,
                 handler,
                 descriptor,
                 lifecycle,
@@ -610,6 +644,7 @@ fn take_identifier(next: &Cell<u64>) -> RpcResult<u64> {
 #[derive(Clone)]
 struct EndpointEntry {
     endpoint_id: RpcEndpointId,
+    visibility: String,
     handler: Rc<dyn ErasedRpcHandler>,
     descriptor: RpcMethodDescriptor,
     lifecycle: Rc<EndpointLifecycle>,
@@ -744,6 +779,16 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
+    /// Returns a sorted snapshot of RPC addresses with `visibility`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone.
+    pub fn rpcs_by_visibility(&self, visibility: &str) -> RpcResult<Vec<RpcAddress>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        Ok(registry.rpcs_by_visibility(visibility))
+    }
+
     /// Starts a typed call for method `M`.
     ///
     /// The one method selects its input and output shape through `M`; callers do
@@ -1192,24 +1237,30 @@ mod tests {
 
             let handler_pointer = Rc::clone(&pointer_a);
             registry
-                .register::<MulticastUnaryA, _>(move |_context, request: RpcFrame<[u8; 8]>| {
-                    let pointer = Rc::clone(&handler_pointer);
-                    async move {
-                        pointer.set(request.view()?.as_ptr() as usize);
-                        Ok(Ok(*b"response"))
-                    }
-                })
+                .register::<MulticastUnaryA, _>(
+                    "system",
+                    move |_context, request: RpcFrame<[u8; 8]>| {
+                        let pointer = Rc::clone(&handler_pointer);
+                        async move {
+                            pointer.set(request.view()?.as_ptr() as usize);
+                            Ok(Ok(*b"response"))
+                        }
+                    },
+                )
                 .expect("register first multicast endpoint");
 
             let handler_pointer = Rc::clone(&pointer_b);
             registry
-                .register::<MulticastUnaryB, _>(move |_context, request: RpcFrame<[u8; 8]>| {
-                    let pointer = Rc::clone(&handler_pointer);
-                    async move {
-                        pointer.set(request.view()?.as_ptr() as usize);
-                        Ok(Ok(*b"done"))
-                    }
-                })
+                .register::<MulticastUnaryB, _>(
+                    "system",
+                    move |_context, request: RpcFrame<[u8; 8]>| {
+                        let pointer = Rc::clone(&handler_pointer);
+                        async move {
+                            pointer.set(request.view()?.as_ptr() as usize);
+                            Ok(Ok(*b"done"))
+                        }
+                    },
+                )
                 .expect("register second multicast endpoint");
 
             let addresses = [address::<MulticastUnaryA>(), address::<MulticastUnaryB>()];
@@ -1257,16 +1308,22 @@ mod tests {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 64, 2>::new()));
             let registry = RpcRegistry::new(lanes);
             registry
-                .register::<MulticastUnaryA, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-                    assert_eq!(request.view()?, b"request-");
-                    Ok(Ok(*b"response"))
-                })
+                .register::<MulticastUnaryA, _>(
+                    "system",
+                    |_context, request: RpcFrame<[u8; 8]>| async move {
+                        assert_eq!(request.view()?, b"request-");
+                        Ok(Ok(*b"response"))
+                    },
+                )
                 .expect("register first typed multicast endpoint");
             registry
-                .register::<MulticastUnaryB, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-                    assert_eq!(request.view()?, b"request-");
-                    Ok(Ok(*b"done"))
-                })
+                .register::<MulticastUnaryB, _>(
+                    "system",
+                    |_context, request: RpcFrame<[u8; 8]>| async move {
+                        assert_eq!(request.view()?, b"request-");
+                        Ok(Ok(*b"done"))
+                    },
+                )
                 .expect("register second typed multicast endpoint");
 
             let addresses = [address::<MulticastUnaryA>(), address::<MulticastUnaryB>()];
@@ -1304,14 +1361,16 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 64, 2>::new()));
         let registry = RpcRegistry::new(lanes);
         registry
-            .register::<MulticastUnaryA, _>(|_context, _request: RpcFrame<[u8; 8]>| async {
-                Ok(Ok(*b"response"))
-            })
+            .register::<MulticastUnaryA, _>(
+                "system",
+                |_context, _request: RpcFrame<[u8; 8]>| async { Ok(Ok(*b"response")) },
+            )
             .expect("register matching endpoint");
         registry
-            .register::<DifferentInput, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-                Ok(Ok(*request.view()?))
-            })
+            .register::<DifferentInput, _>(
+                "system",
+                |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+            )
             .expect("register mismatched endpoint");
 
         let addresses = [address::<MulticastUnaryA>(), address::<DifferentInput>()];
@@ -1330,6 +1389,7 @@ mod tests {
 
             registry
                 .register::<MulticastStreamA, _>(
+                    "system",
                     |_context, requests: RpcStream<RpcFrame<[u8; 8]>>| async move {
                         Ok(RpcStream::new(stream::unfold(
                             requests,
@@ -1347,6 +1407,7 @@ mod tests {
             let handler_gate = Rc::clone(&allow_second_reader);
             registry
                 .register::<MulticastStreamB, _>(
+                    "system",
                     move |_context, requests: RpcStream<RpcFrame<[u8; 8]>>| {
                         let gate = Rc::clone(&handler_gate);
                         async move {
