@@ -26,8 +26,6 @@ mod registry;
 mod typed;
 
 pub use address::{RpcAddress, RpcAddressError, RpcGroup, RpcGroupError};
-/// Bundles the standard derive set for a fixed-layout RPC message.
-pub use barracuda_rpc_macros::rpc_message;
 pub use context::{RpcCallId, RpcContext, RpcEndpointId};
 pub use frame::RpcFrame;
 pub use json::{

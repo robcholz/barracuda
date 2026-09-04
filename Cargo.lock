@@ -1326,7 +1326,6 @@ dependencies = [
 name = "barracuda-rpc"
 version = "0.1.0"
 dependencies = [
- "barracuda-rpc-macros",
  "futures-core",
  "futures-lite",
  "futures-util",
@@ -1338,14 +1337,6 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "zerocopy",
-]
-
-[[package]]
-name = "barracuda-rpc-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.118",
 ]
 
 [[package]]

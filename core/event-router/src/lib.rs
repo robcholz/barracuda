@@ -22,8 +22,8 @@ pub use barracuda_router::{
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    json_schema, rpc_message, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef,
-    JsonRpcInfo, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId,
+    json_schema, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef, JsonRpcInfo,
+    JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId,
     RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
     RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
     RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
