@@ -9,7 +9,6 @@ description = "Task-local typed RPC runtime for Barracuda"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-rpc-macros = { path = "../rpc-macros" }
 futures-core = { version = "0.3", default-features = false }
 getset = "0.1.7"
 serde = { version = "1", default-features = false }
