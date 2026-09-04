@@ -1331,8 +1331,6 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "getset",
- "serde",
- "serde_json",
  "smallvec",
  "static_cell",
  "thiserror 2.0.18",
@@ -1344,10 +1342,7 @@ dependencies = [
 name = "barracuda-rpc-macros"
 version = "0.1.0"
 dependencies = [
- "proc-macro-crate",
- "proc-macro2",
  "quote",
- "serde_derive_internals",
  "syn 2.0.118",
 ]
 
