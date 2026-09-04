@@ -226,7 +226,7 @@ version lives in `example-crates/schema-demo`.
 
 - `examples/components` — Component registration, typed RPCs, and lifecycle.
 - `examples/events` — single-step Workflow loading, Events, and durable state.
-- `examples/component_rpc_json` — `#[rpc_dynamic]` and `call_json` through the Event Router.
+- `crates/rpc/examples/rpc_json` — lane-native JSON RPC registration and invocation.
 - `examples/workflow` — a multi-step Workflow with a `$previous.output` mapping link.
 - `examples/persistence` — durable restore and `WorkflowClient::unload`.
 - `examples/streaming` — a streaming Event into a streaming Workflow step.
