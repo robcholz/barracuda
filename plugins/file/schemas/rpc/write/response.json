@@ -14,7 +14,6 @@
             "invalid_request",
             "not_found",
             "permission_denied",
-            "too_large",
             "io"
           ]
         }

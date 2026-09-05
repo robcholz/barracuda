@@ -1,9 +1,7 @@
 # File Plugin JSON RPC
 
 Both methods are unary JSON RPCs with visibility `"*"`. Paths and file contents
-are UTF-8. Paths contain 1 through 255 bytes and resolve inside the File
-Plugin's private filesystem namespace. File contents are limited to 240 UTF-8
-bytes.
+are UTF-8 and resolve inside the File Plugin's private filesystem namespace.
 
 ## `file.read`
 
@@ -43,10 +41,10 @@ Success has no result payload:
 {}
 ```
 
-The path and decoded content retain their independent 255-byte and 240-byte
-business limits. The complete encoded request must also fit the shared 512-byte
-RPC lane. JSON escapes are decoded before writing, so newlines, quotes,
-backslashes, and Unicode escapes behave as normal JSON strings.
+Path and content have no independent byte quotas. For `file.write`, both share
+one 512-byte request lane and one lane-sized decoding scratch buffer. JSON
+escapes are decoded before writing, so newlines, quotes, backslashes, and
+Unicode escapes behave as normal JSON strings.
 
 ## Business errors
 
@@ -56,7 +54,6 @@ Both methods may return:
 {"error":"invalid_request"}
 {"error":"not_found"}
 {"error":"permission_denied"}
-{"error":"too_large"}
 {"error":"io"}
 ```
 
@@ -64,10 +61,12 @@ Both methods may return:
 
 ```json
 {"error":"invalid_utf8"}
+{"error":"too_large"}
 ```
 
-`invalid_request` covers semantically invalid paths. `too_large` covers writes
-or stored files above 240 decoded bytes, and read responses whose JSON-escaped
-form cannot fit the response lane. Malformed JSON, a request exceeding the
-512-byte transport bound, lane exhaustion, and other Event Router framing
-failures are `RpcError` values rather than business documents.
+`invalid_request` covers semantically invalid paths. A read can return up to 498
+unescaped UTF-8 bytes, derived from the 512-byte response lane minus the
+`{"content":""}` envelope. `too_large` covers larger stored files and responses
+whose JSON-escaped form cannot fit the response lane. Malformed JSON, a request
+exceeding the 512-byte transport bound, lane exhaustion, and other Event Router
+framing failures are `RpcError` values rather than business documents.

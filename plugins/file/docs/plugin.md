@@ -14,5 +14,6 @@ and cannot access the process-wide mount table.
 
 `FileSystem` is the direct Plugin-to-Plugin API and retains the full VFS byte
 semantics. The Event Router Component separately exposes bounded UTF-8 JSON RPCs
-for Agents and Workflows. It has no independent runtime loop beyond serving
-those contracts.
+for Agents and Workflows. Request fields share one lane-sized decoding scratch;
+they do not reserve independent path or content buffers. The Component has no
+independent runtime loop beyond serving those contracts.

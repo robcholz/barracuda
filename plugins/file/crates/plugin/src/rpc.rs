@@ -10,10 +10,10 @@ use serde_json::value::RawValue;
 
 use crate::FileSystem;
 
-const PATH_CAPACITY: usize = 256;
-const CONTENT_CAPACITY: usize = 240;
 const REQUEST_CAPACITY: usize = 512;
 const READ_RESPONSE_CAPACITY: usize = 512;
+const READ_RESPONSE_OVERHEAD: usize = 14;
+const READ_CONTENT_CAPACITY: usize = READ_RESPONSE_CAPACITY - READ_RESPONSE_OVERHEAD;
 const WRITE_RESPONSE_CAPACITY: usize = 29;
 
 /// Filesystem operation rejection returned as a JSON response document.
@@ -98,7 +98,7 @@ struct WriteRequest<'a> {
 }
 
 fn validate_path(path: &str) -> Result<(), FileRpcError> {
-    if path.is_empty() || path.len() >= PATH_CAPACITY || path.as_bytes().contains(&0) {
+    if path.is_empty() || path.as_bytes().contains(&0) {
         Err(FileRpcError::InvalidRequest)
     } else {
         Ok(())
@@ -136,7 +136,7 @@ struct ReadResponse<'a> {
 
 impl JsonPayload for ReadResponse<'_> {
     fn encoded_len(&self) -> Result<usize, RpcError> {
-        let mut length = 14_usize;
+        let mut length = READ_RESPONSE_OVERHEAD;
         for character in self.content.chars() {
             let encoded = match character {
                 '"' | '\\' | '\n' | '\r' | '\t' | '\u{0008}' | '\u{000c}' => 2,
@@ -194,10 +194,7 @@ enum JsonStringError {
     TooLong,
 }
 
-fn decode_json_string<'a>(
-    raw: &RawValue,
-    destination: &'a mut [u8],
-) -> Result<&'a str, JsonStringError> {
+fn decode_json_string(raw: &RawValue, destination: &mut [u8]) -> Result<usize, JsonStringError> {
     let source = raw.get().as_bytes();
     let end = source
         .len()
@@ -270,7 +267,8 @@ fn decode_json_string<'a>(
             .get(..output)
             .ok_or(JsonStringError::InvalidJson)?,
     )
-    .map_err(|_error| JsonStringError::InvalidJson)
+    .map_err(|_error| JsonStringError::InvalidJson)?;
+    Ok(output)
 }
 
 fn decode_hex_quad(source: &[u8], start: usize, end: usize) -> Result<u16, JsonStringError> {
@@ -345,7 +343,7 @@ impl fmt::Write for SliceWriter<'_> {
 async fn read_bounded(
     filesystem: &FileSystem,
     path: &str,
-    output: &mut [u8; CONTENT_CAPACITY],
+    output: &mut [u8; READ_CONTENT_CAPACITY],
 ) -> Result<usize, FileRpcError> {
     let mut file = filesystem.filesystem.open(path).await.map_err(map_fs)?;
     let mut filled = 0_usize;
@@ -374,21 +372,23 @@ pub(crate) fn read_handler(filesystem: Rc<FileSystem>) -> impl JsonHandler {
         let filesystem = Rc::clone(&filesystem);
         async move {
             let request = request.deserialize::<ReadRequest<'_>>()?;
-            let mut path_buffer = [0_u8; PATH_CAPACITY - 1];
-            let path = match decode_json_string(request.path, &mut path_buffer) {
-                Ok(path) => path,
+            let mut request_scratch = [0_u8; REQUEST_CAPACITY];
+            let path_length = match decode_json_string(request.path, &mut request_scratch) {
+                Ok(length) => length,
                 Err(JsonStringError::InvalidJson) => return Err(RpcError::InvalidJson),
-                Err(JsonStringError::TooLong) => {
-                    return response
-                        .write(&ErrorResponse(FileRpcError::InvalidRequest))
-                        .await;
-                }
+                Err(JsonStringError::TooLong) => return Err(RpcError::InvalidFrameState),
             };
+            let path = core::str::from_utf8(
+                request_scratch
+                    .get(..path_length)
+                    .ok_or(RpcError::InvalidFrameState)?,
+            )
+            .map_err(|_error| RpcError::InvalidFrameState)?;
             if let Err(error) = validate_path(path) {
                 return response.write(&ErrorResponse(error)).await;
             }
 
-            let mut bytes = [0_u8; CONTENT_CAPACITY];
+            let mut bytes = [0_u8; READ_CONTENT_CAPACITY];
             match read_bounded(&filesystem, path, &mut bytes).await {
                 Ok(length) => match core::str::from_utf8(
                     bytes.get(..length).ok_or(RpcError::InvalidFrameState)?,
@@ -419,29 +419,36 @@ pub(crate) fn write_handler(filesystem: Rc<FileSystem>) -> impl JsonHandler {
         let filesystem = Rc::clone(&filesystem);
         async move {
             let request = request.deserialize::<WriteRequest<'_>>()?;
-            let mut path_buffer = [0_u8; PATH_CAPACITY - 1];
-            let path = match decode_json_string(request.path, &mut path_buffer) {
-                Ok(path) => path,
+            let mut request_scratch = [0_u8; REQUEST_CAPACITY];
+            let path_length = match decode_json_string(request.path, &mut request_scratch) {
+                Ok(length) => length,
                 Err(JsonStringError::InvalidJson) => return Err(RpcError::InvalidJson),
-                Err(JsonStringError::TooLong) => {
-                    return response
-                        .write(&ErrorResponse(FileRpcError::InvalidRequest))
-                        .await;
-                }
+                Err(JsonStringError::TooLong) => return Err(RpcError::InvalidFrameState),
             };
+            let content_destination = request_scratch
+                .get_mut(path_length..)
+                .ok_or(RpcError::InvalidFrameState)?;
+            let content_length = match decode_json_string(request.content, content_destination) {
+                Ok(length) => length,
+                Err(JsonStringError::InvalidJson) => return Err(RpcError::InvalidJson),
+                Err(JsonStringError::TooLong) => return Err(RpcError::InvalidFrameState),
+            };
+            let content_end = path_length
+                .checked_add(content_length)
+                .ok_or(RpcError::InvalidFrameState)?;
+            let path = core::str::from_utf8(
+                request_scratch
+                    .get(..path_length)
+                    .ok_or(RpcError::InvalidFrameState)?,
+            )
+            .map_err(|_error| RpcError::InvalidFrameState)?;
             if let Err(error) = validate_path(path) {
                 return response.write(&ErrorResponse(error)).await;
             }
-
-            let mut bytes = [0_u8; CONTENT_CAPACITY];
-            let content = match decode_json_string(request.content, &mut bytes) {
-                Ok(content) => content,
-                Err(JsonStringError::InvalidJson) => return Err(RpcError::InvalidJson),
-                Err(JsonStringError::TooLong) => {
-                    return response.write(&ErrorResponse(FileRpcError::TooLarge)).await;
-                }
-            };
-            match filesystem.write(path, content.as_bytes()).await {
+            let content = request_scratch
+                .get(path_length..content_end)
+                .ok_or(RpcError::InvalidFrameState)?;
+            match filesystem.write(path, content).await {
                 Ok(()) => response.write("{}").await,
                 Err(error) => response.write(&ErrorResponse(map_fs(error))).await,
             }
@@ -462,7 +469,7 @@ mod tests {
     use barracuda_vfs_memfs::MemFs;
     use futures_lite::future::block_on;
 
-    use super::{FileRead, FileWrite, read_handler, write_handler};
+    use super::{FileRead, FileWrite, READ_CONTENT_CAPACITY, read_handler, write_handler};
     use crate::FileSystem;
 
     const FRAME_SIZE: usize = 512;
@@ -509,23 +516,22 @@ mod tests {
         assert_eq!(FileRead::MAX_RESPONSE_BYTES, 512);
         assert!(FileRead::REQUEST_SCHEMA.as_str().contains(r#""path""#));
         assert!(FileRead::RESPONSE_SCHEMA.as_str().contains(r#""content""#));
+        assert!(!FileRead::REQUEST_SCHEMA.as_str().contains("maxLength"));
+        assert!(FileRead::RESPONSE_SCHEMA.as_str().contains("498"));
 
         assert_eq!(FileWrite::ADDRESS, "file.write");
         assert_eq!(FileWrite::MAX_REQUEST_BYTES, 512);
         assert_eq!(FileWrite::MAX_RESPONSE_BYTES, 29);
         assert!(FileWrite::REQUEST_SCHEMA.as_str().contains(r#""content""#));
-        for error in [
-            "invalid_request",
-            "not_found",
-            "permission_denied",
-            "too_large",
-            "io",
-        ] {
+        assert!(!FileWrite::REQUEST_SCHEMA.as_str().contains("maxLength"));
+        for error in ["invalid_request", "not_found", "permission_denied", "io"] {
             assert!(FileRead::RESPONSE_SCHEMA.as_str().contains(error));
             assert!(FileWrite::RESPONSE_SCHEMA.as_str().contains(error));
         }
         assert!(FileRead::RESPONSE_SCHEMA.as_str().contains("invalid_utf8"));
+        assert!(FileRead::RESPONSE_SCHEMA.as_str().contains("too_large"));
         assert!(!FileWrite::RESPONSE_SCHEMA.as_str().contains("invalid_utf8"));
+        assert!(!FileWrite::RESPONSE_SCHEMA.as_str().contains("too_large"));
     }
 
     #[test]
@@ -563,15 +569,6 @@ mod tests {
                 call(&registry, "file.read", r#"{"path":"missing"}"#),
                 r#"{"error":"not_found"}"#
             );
-            assert_eq!(
-                call(
-                    &registry,
-                    "file.write",
-                    &format!(r#"{{"path":"large","content":"{}"}}"#, "A".repeat(241)),
-                ),
-                r#"{"error":"too_large"}"#
-            );
-
             filesystem
                 .write("invalid", &[0xff])
                 .await
@@ -582,7 +579,7 @@ mod tests {
             );
 
             filesystem
-                .write("large", &vec![b'A'; 241])
+                .write("large", &vec![b'A'; READ_CONTENT_CAPACITY + 1])
                 .await
                 .expect("store oversized file");
             assert_eq!(
@@ -593,15 +590,62 @@ mod tests {
     }
 
     #[test]
+    fn request_fields_share_the_lane_budget() {
+        block_on(async {
+            let filesystem = filesystem().await;
+            let registry = registry(Rc::clone(&filesystem));
+
+            let content = "A".repeat(400);
+            let write = format!(r#"{{"path":"large","content":"{content}"}}"#);
+            assert_eq!(call(&registry, "file.write", &write), "{}");
+            assert_eq!(
+                filesystem.read("large").await.expect("stored large text"),
+                content.as_bytes()
+            );
+
+            let path = "p".repeat(300);
+            let write = format!(r#"{{"path":"{path}","content":"ok"}}"#);
+            assert_eq!(call(&registry, "file.write", &write), "{}");
+            assert_eq!(
+                call(&registry, "file.read", &format!(r#"{{"path":"{path}"}}"#)),
+                r#"{"content":"ok"}"#
+            );
+        });
+    }
+
+    #[test]
     fn maximum_file_size_fits_the_declared_response_bound() {
         block_on(async {
-            let registry = registry(filesystem().await);
-            let write = format!(r#"{{"path":"max","content":"{}"}}"#, "A".repeat(240));
-            assert_eq!(call(&registry, "file.write", &write), "{}");
+            let filesystem = filesystem().await;
+            filesystem
+                .write("max", &vec![b'A'; READ_CONTENT_CAPACITY])
+                .await
+                .expect("store maximum readable text");
+            let registry = registry(filesystem);
 
             let response = call(&registry, "file.read", r#"{"path":"max"}"#);
             assert!(response.len() <= FileRead::MAX_RESPONSE_BYTES);
-            assert_eq!(response, format!(r#"{{"content":"{}"}}"#, "A".repeat(240)));
+            assert_eq!(
+                response,
+                format!(r#"{{"content":"{}"}}"#, "A".repeat(READ_CONTENT_CAPACITY))
+            );
+        });
+    }
+
+    #[test]
+    fn escaped_read_response_must_still_fit_the_lane() {
+        block_on(async {
+            let filesystem = filesystem().await;
+            filesystem
+                .write("escaped", &vec![b'"'; 300])
+                .await
+                .expect("store escape-heavy text");
+            let registry = registry(filesystem);
+
+            assert_eq!(
+                call(&registry, "file.read", r#"{"path":"escaped"}"#),
+                r#"{"error":"too_large"}"#
+            );
         });
     }
 
