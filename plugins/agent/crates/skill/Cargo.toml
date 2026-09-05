@@ -12,7 +12,7 @@ default = []
 std = ["yaml-peg/std"]
 
 [dependencies]
-barracuda-vfs = { path = "../../../../shared/vfs" }
+barracuda-vfs.workspace = true
 getset = "0.1.7"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
@@ -20,7 +20,7 @@ yaml-peg = { version = "1.0.8", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 # Host tests copy data-driven fixtures into a mounted in-memory VFS.
-barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+barracuda-platform-test = { workspace = true, features = ["std"] }
 # Ergonomic error handling for host dev workflow examples; never in firmware.
 anyhow = "1"
 futures-lite = "2"

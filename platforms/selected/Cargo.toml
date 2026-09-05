@@ -8,35 +8,35 @@ description = "Compile-time selected Barracuda Platform"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-platform = { path = "../api" }
+barracuda-platform.workspace = true
 embassy-executor.workspace = true
 
 [target.xtensa-esp32-none-elf.dependencies]
-barracuda-platform-esp32 = { path = "../esp32" }
+barracuda-platform-esp32.workspace = true
 
 [target.xtensa-esp32s2-none-elf.dependencies]
-barracuda-platform-esp32s2 = { path = "../esp32s2" }
+barracuda-platform-esp32s2.workspace = true
 
 [target.xtensa-esp32s3-none-elf.dependencies]
-barracuda-platform-esp32s3 = { path = "../esp32s3" }
+barracuda-platform-esp32s3.workspace = true
 
 [target.riscv32imc-unknown-none-elf.dependencies]
-barracuda-platform-esp32c3 = { path = "../esp32c3" }
+barracuda-platform-esp32c3.workspace = true
 
 [target.riscv32imac-unknown-none-elf.dependencies]
-barracuda-platform-esp32c6 = { path = "../esp32c6" }
+barracuda-platform-esp32c6.workspace = true
 
 [target.riscv32imafc-unknown-none-elf.dependencies]
-barracuda-platform-esp32p4 = { path = "../esp32p4" }
+barracuda-platform-esp32p4.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-barracuda-platform-macos = { path = "../macos" }
+barracuda-platform-macos.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-barracuda-platform-linux = { path = "../linux" }
+barracuda-platform-linux.workspace = true
 
 [target.'cfg(target_arch = "arm")'.dependencies]
-barracuda-platform-stm32 = { path = "../stm32", features = ["stm32f429zi"] }
+barracuda-platform-stm32 = { workspace = true, features = ["stm32f429zi"] }
 
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }

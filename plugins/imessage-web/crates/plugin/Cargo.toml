@@ -5,13 +5,13 @@ edition = "2021"
 description = "IMessage Web provider Plugin"
 
 [dependencies]
-barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
-gateway = { path = "../../../imessage-gateway/crates/gateway" }
+barracuda-imessage-gateway-plugin.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+barracuda-webserver-plugin.workspace = true
+gateway.workspace = true
 log.workspace = true
-web = { path = "../provider", features = ["server"] }
+web = { workspace = true, features = ["server"] }
 
 [lints.rust]
 unsafe_code = "forbid"

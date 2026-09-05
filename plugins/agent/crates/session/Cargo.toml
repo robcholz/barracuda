@@ -10,16 +10,16 @@ cache_profile = ["barracuda-agent/cache_profile", "barracuda-model-api/cache_pro
 multiagent = ["dep:barracuda-agent-multiagent", "barracuda-agent/multiagent"]
 
 [dependencies]
-http-client = { path = "../../../../shared/http-client" }
-json-validator = { path = "../../../../shared/json-validator" }
-barracuda-agent = { path = "../agent" }
-barracuda-agent-multiagent = { path = "../multiagent", optional = true }
-barracuda-agent-permission = { path = "../permission" }
-barracuda-agent-persistence = { path = "../persistence" }
-barracuda-agent-tool = { path = "../tool" }
-barracuda-vfs = { path = "../../../../shared/vfs" }
-barracuda-model-api = { path = "../model-api" }
-barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
+http-client.workspace = true
+json-validator.workspace = true
+barracuda-agent.workspace = true
+barracuda-agent-multiagent = { workspace = true, optional = true }
+barracuda-agent-permission.workspace = true
+barracuda-agent-persistence.workspace = true
+barracuda-agent-tool.workspace = true
+barracuda-vfs.workspace = true
+barracuda-model-api.workspace = true
+barracuda-runtime-utils.workspace = true
 async-channel = { version = "2", default-features = false }
 embassy-time.workspace = true
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -33,7 +33,7 @@ thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+barracuda-platform-test = { workspace = true, features = ["std"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

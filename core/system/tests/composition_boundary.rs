@@ -121,7 +121,7 @@ fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), s
     assert!(!system_manifest.contains("target_os"));
     assert!(!system_manifest
         .contains("barracuda-webserver-plugin = { workspace = true, features = [\"std\"] }"));
-    assert!(application_manifest.contains("barracuda-system = { path = \"../../core/system\" }"));
+    assert!(application_manifest.contains("barracuda-system.workspace = true"));
     assert!(application_manifest.contains(
         "serde = { version = \"1\", default-features = false, features = [\"alloc\", \"derive\"] }"
     ));

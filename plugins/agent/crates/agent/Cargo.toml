@@ -28,14 +28,14 @@ intrusive-observability = [
 ]
 
 [dependencies]
-json-validator = { path = "../../../../shared/json-validator" }
-barracuda-vfs = { path = "../../../../shared/vfs" }
-barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
-barracuda-model-api = { path = "../model-api" }
-http-client = { path = "../../../../shared/http-client" }
+json-validator.workspace = true
+barracuda-vfs.workspace = true
+barracuda-runtime-utils.workspace = true
+barracuda-model-api.workspace = true
+http-client.workspace = true
 embassy-time.workspace = true
 embassy-sync.workspace = true
-barracuda-agent-persistence = { path = "../persistence" }
+barracuda-agent-persistence.workspace = true
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
 async-channel = { version = "2", default-features = false }
@@ -51,12 +51,12 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 getset = "0.1.7"
 # The runtime is exposed as an ordinary Future. The application chooses Embassy,
 # Tokio, or another executor and spawns that future at its own boundary.
-barracuda-agent-memory = { path = "../memory" }
-barracuda-agent-skill = { path = "../skill" }
-barracuda-agent-context = { path = "../context" }
-barracuda-agent-permission = { path = "../permission" }
+barracuda-agent-memory.workspace = true
+barracuda-agent-skill.workspace = true
+barracuda-agent-context.workspace = true
+barracuda-agent-permission.workspace = true
 # The tool runtime used by core agents.
-barracuda-agent-tool = { path = "../tool" }
+barracuda-agent-tool.workspace = true
 # Flat production diagnostics. Compile-time level ceilings are selected by the
 # final application through `log`'s max-level features.
 log = { version = "0.4", default-features = false }
@@ -81,13 +81,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quote = "1"
 proc-macro2 = "1"
-barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
+barracuda-agent-tool = { workspace = true, features = ["build-support"] }
 
 [dev-dependencies]
 # Host-only test generators; production streams use the internal no_std adapter.
 async-stream = "0.3"
 # Host-only mounted VFS helpers for tests.
-barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+barracuda-platform-test = { workspace = true, features = ["std"] }
 # `block_on` for tests (smol family; replaces the removed `barracuda_runtime_utils::block_on`).
 futures-lite = "2"
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

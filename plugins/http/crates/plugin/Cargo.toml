@@ -6,17 +6,17 @@ description = "Outbound HTTP JSON RPC Plugin for Barracuda"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
+barracuda-event-router.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
-http-client = { path = "../../../../shared/http-client" }
+http-client.workspace = true
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 

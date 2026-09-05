@@ -6,8 +6,8 @@ description = "Board HAL adapter for the STM32F429ZI Nucleo-144"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-board-hal = { path = "../hal" }
-barracuda-indicator-led = { path = "../drivers/indicator-led" }
+barracuda-board-hal.workspace = true
+barracuda-indicator-led.workspace = true
 embassy-executor.workspace = true
 embedded-hal.workspace = true
 

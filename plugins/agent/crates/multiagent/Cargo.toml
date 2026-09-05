@@ -6,10 +6,10 @@ edition = "2021"
 description = "Multiagent graph, policy, tools, and semantic effects"
 
 [dependencies]
-json-validator = { path = "../../../../shared/json-validator" }
-barracuda-agent = { path = "../agent", features = ["multiagent"] }
-barracuda-agent-permission = { path = "../permission" }
-barracuda-agent-tool = { path = "../tool" }
+json-validator.workspace = true
+barracuda-agent = { workspace = true, features = ["multiagent"] }
+barracuda-agent-permission.workspace = true
+barracuda-agent-tool.workspace = true
 async-channel = { version = "2", default-features = false }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }

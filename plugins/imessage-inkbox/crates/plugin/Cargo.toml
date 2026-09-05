@@ -6,13 +6,13 @@ description = "IMessage Inkbox provider Plugin"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-imessage-gateway-plugin = { path = "../../../imessage-gateway/crates/plugin" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
-gateway = { path = "../../../imessage-gateway/crates/gateway" }
-http-client = { path = "../../../../shared/http-client" }
-inkbox = { path = "../provider" }
+barracuda-imessage-gateway-plugin.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+barracuda-webserver-plugin.workspace = true
+gateway.workspace = true
+http-client.workspace = true
+inkbox.workspace = true
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

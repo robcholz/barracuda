@@ -9,7 +9,7 @@ name = "barracuda-board"
 path = "src/main.rs"
 
 [dependencies]
-barracuda-board-config = { path = "../config" }
+barracuda-board-config.workspace = true
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 dialoguer = { version = "0.12", default-features = false, features = ["fuzzy-select"] }

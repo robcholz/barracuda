@@ -13,13 +13,13 @@ path = "src/main.rs"
 
 [dependencies]
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-barracuda-agent-runtime = { path = "../../../plugins/agent/crates/runtime" }
-barracuda-agent-skill = { path = "../../../plugins/agent/crates/skill", features = ["std"] }
-barracuda-model-api = { path = "../../../plugins/agent/crates/model-api" }
-barracuda-platform-test = { path = "../../../platforms/test" }
-barracuda-profile = { path = "../../../shared/profile", features = ["dhat-heap"] }
-http-client = { path = "../../../shared/http-client" }
+barracuda-agent-runtime.workspace = true
+barracuda-agent-skill = { workspace = true, features = ["std"] }
+barracuda-model-api.workspace = true
+barracuda-platform-test.workspace = true
+barracuda-profile = { workspace = true, features = ["dhat-heap"] }
+http-client.workspace = true
 futures-lite = "2"
 base64 = "0.22"
 serde_json = "1"
-barracuda-runtime-utils = { path = "../../../shared/runtime-utils" }
+barracuda-runtime-utils.workspace = true
