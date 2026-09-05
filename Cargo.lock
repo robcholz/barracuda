@@ -1164,6 +1164,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-platform",
  "barracuda-platform-config",
+ "barracuda-platform-tool",
  "embassy-executor",
 ]
 
@@ -1202,6 +1203,16 @@ dependencies = [
  "embedded-io-async 0.7.0",
  "embedded-nal-async",
  "embedded-storage-async",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-platform-tool"
+version = "0.1.0"
+dependencies = [
+ "barracuda-platform-config",
+ "clap",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

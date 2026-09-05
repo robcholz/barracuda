@@ -26,6 +26,17 @@ default-members = [
 
 [workspace.dependencies]
 # Workspace crates
+# BEGIN GENERATED PLATFORM WORKSPACE DEPENDENCIES
+barracuda-platform-esp32 = { path = "platforms/esp32" }
+barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
+barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
+barracuda-platform-esp32p4 = { path = "platforms/esp32p4" }
+barracuda-platform-esp32s2 = { path = "platforms/esp32s2" }
+barracuda-platform-esp32s3 = { path = "platforms/esp32s3" }
+barracuda-platform-linux = { path = "platforms/linux" }
+barracuda-platform-macos = { path = "platforms/macos" }
+barracuda-platform-stm32 = { path = "platforms/stm32" }
+# END GENERATED PLATFORM WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
 barracuda-file-plugin = { path = "plugins/file/crates/plugin" }
