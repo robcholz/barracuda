@@ -41,7 +41,7 @@ fn resolves_system_region_from_selected_esp_partition_table() {
     select_board(
         root.path(),
         "esp-test",
-        "name: esp-test\nhardware:\n  chip: esp32c6\nnative-layout:\n  artifact: partitions.csv\n",
+        "name: esp-test\nhardware:\n  chip: esp32c6\ntoolchain:\n  target: riscv32imac-unknown-none-elf\nnative-layout:\n  artifact: partitions.csv\n",
         "partitions.csv",
         "# Name, Type, SubType, Offset, Size, Flags\nfactory, app, factory, 0x10000, 0x100000,\nsystem, data, littlefs, 0x320000, 0x80000,\n",
     );
@@ -58,7 +58,7 @@ fn resolves_system_region_from_selected_stm32_linker_layout() {
     select_board(
         root.path(),
         "stm-test",
-        "name: stm-test\nhardware:\n  chip: stm32f429zi\nnative-layout:\n  artifact: memory.x\n",
+        "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
         "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = 0x08120000, LENGTH = 256K\n}\n",
     );
@@ -139,7 +139,24 @@ fn rejects_mismatched_and_unsupported_board_bundles() {
     );
     assert!(selected_system_region(root.path())
         .expect_err("unsupported layout")
-        .contains("unsupported native layout"));
+        .contains("no Barracuda Platform supports Board chip"));
+}
+
+#[test]
+fn rejects_a_board_whose_toolchain_selects_an_incompatible_platform() {
+    let root = tempdir().expect("temporary workspace");
+    select_board(
+        root.path(),
+        "esp-test",
+        "name: esp-test\nhardware:\n  chip: esp32c6\ntoolchain:\n  target: riscv32imafc-unknown-none-elf\nnative-layout:\n  artifact: partitions.csv\n",
+        "partitions.csv",
+        "# Name, Type, SubType, Offset, Size, Flags\nsystem, data, littlefs, 0x320000, 0x80000,\n",
+    );
+
+    let error = selected_system_region(root.path()).expect_err("Platform mismatch must fail");
+
+    assert!(error.contains("esp32c6"));
+    assert!(error.contains("esp32p4"));
 }
 
 #[test]
@@ -176,7 +193,7 @@ fn rejects_invalid_stm32_system_values() {
     select_board(
         root.path(),
         "stm-test",
-        "name: stm-test\nhardware:\n  chip: stm32f429zi\nnative-layout:\n  artifact: memory.x\n",
+        "name: stm-test\nhardware:\n  chip: stm32f429zi\ntoolchain:\n  target: thumbv7em-none-eabihf\nnative-layout:\n  artifact: memory.x\n",
         "memory.x",
         "MEMORY\n{\n  SYSTEM (rw) : ORIGIN = nope, LENGTH = 256K\n}\n",
     );

@@ -21,16 +21,27 @@ fn selected_native_platform_matches_the_target_operating_system() {
 }
 
 #[test]
+fn selected_platform_uses_the_shared_host_resolver() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+
+    assert!(selection.contains("barracuda_platform_config::resolve_platform"));
+    assert!(!selection.contains("fn default_platform"));
+    assert!(!selection.contains("fn validate_target"));
+    Ok(())
+}
+
+#[test]
 fn esp32c6_is_a_concrete_platform_identity() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+    let registry = std::fs::read_to_string(root.join("platforms/config/src/lib.rs"))?;
     let implementation = std::fs::read_to_string(root.join("platforms/esp32c6/src/lib.rs"))?;
 
     assert!(manifest.contains("barracuda-platform-esp32c6"));
     assert!(!manifest.contains("features = [\"esp32c6\"]"));
     assert!(!manifest.contains("cfg(target_arch = \"riscv32\")"));
-    assert!(selection.contains("\"esp32c6\""));
+    assert!(registry.contains("\"esp32c6\""));
     assert!(!implementation.contains("feature = \"esp32c6\""));
     Ok(())
 }
@@ -39,13 +50,13 @@ fn esp32c6_is_a_concrete_platform_identity() -> Result<(), std::io::Error> {
 fn xtensa_esp_chips_have_concrete_platform_identities() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+    let registry = std::fs::read_to_string(root.join("platforms/config/src/lib.rs"))?;
 
     for chip in ["esp32", "esp32s2", "esp32s3"] {
         let implementation =
             std::fs::read_to_string(root.join("platforms").join(chip).join("src/lib.rs"))?;
         assert!(manifest.contains(&format!("barracuda-platform-{chip}")));
-        assert!(selection.contains(&format!("\"{chip}\"")));
+        assert!(registry.contains(&format!("\"{chip}\"")));
         assert!(!implementation.contains(&format!("feature = \"{chip}\"")));
     }
     Ok(())
@@ -55,13 +66,13 @@ fn xtensa_esp_chips_have_concrete_platform_identities() -> Result<(), std::io::E
 fn additional_riscv_esp_chips_have_concrete_platform_identities() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+    let registry = std::fs::read_to_string(root.join("platforms/config/src/lib.rs"))?;
 
     for chip in ["esp32c3", "esp32p4"] {
         let implementation =
             std::fs::read_to_string(root.join("platforms").join(chip).join("src/lib.rs"))?;
         assert!(manifest.contains(&format!("barracuda-platform-{chip}")));
-        assert!(selection.contains(&format!("\"{chip}\"")));
+        assert!(registry.contains(&format!("\"{chip}\"")));
         assert!(!implementation.contains(&format!("feature = \"{chip}\"")));
     }
     Ok(())

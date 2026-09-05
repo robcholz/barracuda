@@ -73,6 +73,7 @@ barracuda-kv = { path = "shared/kv" }
 barracuda-lua = { path = "plugins/vm/crates/lua" }
 barracuda-model-api = { path = "plugins/agent/crates/model-api" }
 barracuda-platform = { path = "platforms/api" }
+barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-esp32 = { path = "platforms/esp32" }
 barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
 barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }

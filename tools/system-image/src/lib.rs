@@ -6,6 +6,7 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board};
+use barracuda_platform_config::resolve_board_platform;
 use esp_idf_part::{Flags, PartitionTable};
 use generic_array::typenum::{U128, U8};
 use littlefs2::driver::Storage;
@@ -275,19 +276,15 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
     let layout_path = bundle.join(board.native_layout().artifact());
     let layout = read_text(&layout_path, "native layout")?;
     let chip = board.hardware().chip();
-    let (offset, size, platform_flash) = match chip {
+    let platform =
+        resolve_board_platform(chip, board.toolchain().map(|toolchain| toolchain.target()))
+            .map_err(|error| error.to_string())?;
+    let (offset, size, platform_flash) = match platform.as_str() {
         "macos" | "linux" => {
             let (offset, size, capacity) = file_layout_system_region(&layout)?;
-            (
-                offset,
-                size,
-                PlatformFlash::File {
-                    platform: chip.to_owned(),
-                    capacity,
-                },
-            )
+            (offset, size, PlatformFlash::File { platform, capacity })
         }
-        chip if chip.starts_with("esp32") => {
+        "esp32" | "esp32s2" | "esp32s3" | "esp32c3" | "esp32c6" | "esp32p4" => {
             let (offset, size) = esp_system_region(&layout)?;
             (
                 offset,
@@ -297,7 +294,7 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
                 },
             )
         }
-        chip if chip.starts_with("stm32") => {
+        "stm32" => {
             let (offset, size) = stm32_system_region(&layout)?;
             (
                 offset,
@@ -307,7 +304,7 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
                 },
             )
         }
-        chip => return Err(format!("unsupported native layout for Board chip `{chip}`")),
+        platform => return Err(format!("Platform `{platform}` has no System image flasher")),
     };
     Ok(SystemRegion {
         board: board_name,

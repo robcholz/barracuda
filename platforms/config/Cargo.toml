@@ -1,0 +1,20 @@
+[package]
+name = "barracuda-platform-config"
+version = "0.1.0"
+edition = "2021"
+description = "Host-side Barracuda Platform resolution"
+
+[lib]
+crate-type = ["rlib"]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

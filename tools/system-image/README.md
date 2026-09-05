@@ -14,7 +14,10 @@ Platform argument. `build` reads the Board's native physical layout and writes
 `target/barracuda-system.img`. `flash` requires that complete image to already
 exist and writes it only to the selected Board's native `system` partition.
 
-The selected Board's chip chooses the internal Platform flasher:
+The shared Platform resolver checks the selected Board's chip and declared
+toolchain target, then chooses the internal Platform flasher. The runtime
+Platform build uses the same target-to-Platform registry, so system-image does
+not maintain its own chip mapping or Platform selection state.
 
 - macOS and Linux update the file-backed flash configured by that Platform's
   `platform.yml`, preserving all other regions;

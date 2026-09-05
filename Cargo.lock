@@ -968,6 +968,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-platform-config"
+version = "0.1.0"
+
+[[package]]
 name = "barracuda-platform-esp32"
 version = "0.1.0"
 dependencies = [
@@ -1144,6 +1148,7 @@ name = "barracuda-platform-selected"
 version = "0.1.0"
 dependencies = [
  "barracuda-platform",
+ "barracuda-platform-config",
  "barracuda-platform-esp32",
  "barracuda-platform-esp32c3",
  "barracuda-platform-esp32c6",
@@ -1418,6 +1423,7 @@ name = "barracuda-system-image"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "barracuda-platform-config",
  "barracuda-vfs-littlefs",
  "clap",
  "embedded-storage",
