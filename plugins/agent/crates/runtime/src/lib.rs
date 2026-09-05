@@ -100,6 +100,7 @@ pub enum RuntimeError {
 #[derive(Default)]
 pub(crate) struct ToolLifecycle {
     loaded: RefCell<Option<Arc<ToolRegistry>>>,
+    pending: RefCell<Vec<ToolGroup>>,
     started: Cell<bool>,
 }
 
@@ -113,6 +114,9 @@ impl ToolLifecycle {
     }
 
     pub(crate) fn install(&self, tools: Arc<ToolRegistry>) -> RuntimeResult<()> {
+        for group in core::mem::take(&mut *self.pending.borrow_mut()) {
+            tools.register_group(group)?;
+        }
         if self.started.get() {
             tools.start_all()?;
         }
@@ -207,6 +211,23 @@ impl AgentRuntime {
     /// Returns [`RuntimeError::Tool`] when the tool is not registered.
     pub fn disable_tool(&self, name: &str) -> RuntimeResult<()> {
         self.tool_lifecycle.registry()?.disable(name)?;
+        Ok(())
+    }
+
+    /// Registers one tool group discovered during Component startup.
+    ///
+    /// If durable runtime state is still loading, the group is installed into
+    /// the Tool Registry as soon as it becomes available.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError::Tool`] when the Tool Registry rejects the group.
+    pub fn register_tool_group(&self, group: ToolGroup) -> RuntimeResult<()> {
+        if let Some(tools) = self.tool_lifecycle.loaded.borrow().as_ref() {
+            tools.register_group(group)?;
+        } else {
+            self.tool_lifecycle.pending.borrow_mut().push(group);
+        }
         Ok(())
     }
 

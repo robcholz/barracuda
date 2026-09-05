@@ -24,9 +24,10 @@ use serde_json::Value;
 use static_cell::StaticCell;
 
 const FRAME_SIZE: usize = 512;
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
-const EVENT_SCHEMA: JsonSchema = JsonSchema::new(r#"{"type":"object"}"#);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
+const EVENT_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(r#"{"type":"object"}"#);
 const WORKFLOW_JSON: &str = r#"{
     "id":"agent-session-event-test",
     "match":{"event":"session.event"},
@@ -147,9 +148,7 @@ async fn run_session_api(client: RpcClient, result: Rc<ResultState>) {
         .expect("discover public RPCs");
     for address in agent_rpcs {
         assert!(
-            !public_rpcs.contains(
-                &RpcAddress::try_from(address).expect("valid Agent RPC address")
-            ),
+            !public_rpcs.contains(&RpcAddress::try_from(address).expect("valid Agent RPC address")),
             "{address} must not be publicly visible"
         );
     }
@@ -346,6 +345,7 @@ fn system_json_rpcs_and_bounded_session_events_drive_the_agent() {
                 true,
             )
             .expect("configure model API");
+        runtime.start_all().expect("start Agent tools");
 
         let result = Rc::new(ResultState::default());
         install_global_memory_vfs()
@@ -363,6 +363,32 @@ fn system_json_rpcs_and_bounded_session_events_drive_the_agent() {
             .expect("load Session API client");
 
         drive_until(&mut router, &result).await;
+
+        let request = network
+            .requests()
+            .into_iter()
+            .next()
+            .expect("Agent sends one model request");
+        let request_body: Value = serde_json::from_str(
+            request
+                .split_once("\r\n\r\n")
+                .expect("HTTP request contains a body")
+                .1,
+        )
+        .expect("model request body is JSON");
+        let tool_names: Vec<_> = request_body
+            .get("tools")
+            .expect("model request contains tools")
+            .as_array()
+            .expect("model request tools are an array")
+            .iter()
+            .filter_map(|tool| tool.pointer("/function/name").and_then(Value::as_str))
+            .collect();
+        assert!(
+            tool_names.contains(&RecordSessionEvent::ADDRESS),
+            "missing RPC tool in model request: {request_body}"
+        );
+        assert!(!tool_names.contains(&"session.new"));
 
         let events = result.events.borrow();
         assert!(events.iter().any(|chunk| chunk.chunk.len() > 32));

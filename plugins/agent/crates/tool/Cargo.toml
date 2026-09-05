@@ -16,6 +16,7 @@ build-support = ["dep:anyhow"]
 anyhow = { version = "1", optional = true }
 barracuda-agent-permission.workspace = true
 barracuda-agent-persistence.workspace = true
+barracuda-rpc.workspace = true
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
