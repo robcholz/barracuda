@@ -6,7 +6,7 @@ region.
 
 ```sh
 cargo board select
-cargo system-image
+cargo system-image build
 ```
 
 The command reads `.barracuda/selected-board` and the Board's native physical
