@@ -1,0 +1,36 @@
+[package]
+name = "barracuda-system-image"
+version = "0.1.0"
+edition = "2021"
+description = "Host tool for building the selected Barracuda System image"
+
+[[bin]]
+name = "barracuda-system-image"
+path = "src/main.rs"
+
+[dependencies]
+barracuda-board-config.workspace = true
+clap = { version = "4", features = ["derive"] }
+esp-idf-part = "0.6.0"
+generic-array = "0.14"
+littlefs2 = { version = "0.8", default-features = false, features = ["alloc", "c-stubs"] }
+serde = { version = "1", features = ["derive"] }
+yaml-peg = { version = "1.0.8", features = ["serde"] }
+
+[dev-dependencies]
+barracuda-vfs-littlefs.workspace = true
+embedded-storage = "0.3"
+tempfile = "3"
+typenum = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

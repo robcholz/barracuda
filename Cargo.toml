@@ -16,6 +16,7 @@ members = [
     "platforms/*",
     "shared/*",
     "tools/plugin-tool",
+    "tools/system-image",
     "apps/barracuda-cli",
 ]
 default-members = [

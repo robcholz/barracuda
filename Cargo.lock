@@ -428,9 +428,17 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-webserver-plugin",
+ "embassy-net",
  "embassy-time",
+ "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
+ "log",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -614,26 +622,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-captive-portal-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-agent-plugin",
- "barracuda-event-router",
- "barracuda-platform-test",
- "barracuda-plugin-api",
- "barracuda-plugin-manager",
- "barracuda-webserver-plugin",
- "embassy-net",
- "embedded-io-async 0.7.0",
- "futures-lite",
- "log",
- "picoserve",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "barracuda-cli"
 version = "0.1.0"
 dependencies = [
@@ -666,39 +654,15 @@ dependencies = [
  "barracuda-profile",
  "barracuda-router",
  "barracuda-rpc",
- "barracuda-rpc-schema",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-workflow",
  "futures-lite",
- "futures-util",
  "serde",
  "serde_json",
  "static_cell",
  "thiserror 2.0.18",
  "tokio",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-event-router-schema-demo"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-event-router-schema-wire",
- "serde_json",
- "static_cell",
- "tokio",
-]
-
-[[package]]
-name = "barracuda-event-router-schema-wire"
-version = "0.1.0"
-dependencies = [
- "barracuda-rpc",
- "barracuda-rpc-schema",
- "schemars",
- "serde",
  "zerocopy",
 ]
 
@@ -1300,15 +1264,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-rpc-schema"
-version = "0.1.0"
-dependencies = [
- "inventory",
- "schemars",
- "serde_json",
-]
-
-[[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
@@ -1381,7 +1336,6 @@ version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
  "barracuda-board-hal",
- "barracuda-captive-portal-plugin",
  "barracuda-event-router",
  "barracuda-file-plugin",
  "barracuda-gpio-plugin",
@@ -1422,6 +1376,23 @@ dependencies = [
  "http-client",
  "log",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-system-image"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "barracuda-vfs-littlefs",
+ "clap",
+ "embedded-storage",
+ "esp-idf-part",
+ "generic-array",
+ "littlefs2",
+ "serde",
+ "tempfile",
+ "typenum",
+ "yaml-peg",
 ]
 
 [[package]]
@@ -1635,14 +1606,11 @@ name = "barracuda-workflow"
 version = "0.1.0"
 dependencies = [
  "barracuda-rpc",
- "futures-core",
  "futures-lite",
- "futures-util",
  "getset",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "zerocopy",
 ]
 
 [[package]]
@@ -2619,12 +2587,6 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
-
-[[package]]
-name = "dyn-clone"
-version = "1.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "ecdsa"
@@ -4206,15 +4168,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "inventory"
-version = "0.3.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4f0c30c76f2f4ccee3fe55a2435f691ca00c0e4bd87abe4f4a851b1d4dac39b"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5369,30 +5322,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "schemars"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
-dependencies = [
- "dyn-clone",
- "schemars_derive",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars_derive"
-version = "0.8.22"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32e265784ad618884abaea0600a9adf15393368d840e0222d101a072f3f7534d"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde_derive_internals",
- "syn 2.0.118",
-]
-
-[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5465,15 +5394,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-big-array"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11fc7cc2c76d73e0f27ee52abbd64eec84d46f370c88371120433196934e4b7f"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5487,17 +5407,6 @@ name = "serde_derive"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
-
-[[package]]
-name = "serde_derive_internals"
-version = "0.29.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2",
  "quote",
