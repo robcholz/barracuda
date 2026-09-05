@@ -1,48 +1,118 @@
 use alloc::rc::Rc;
-use core::cell::Cell;
+use core::cell::{Cell, RefCell};
+use core::task::{Poll, Waker};
 
-use async_channel::{Receiver, Sender};
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcResult, RpcStream};
-use embassy_executor::Spawner;
-use embassy_time::Timer;
-use futures_core::Stream;
-
-use crate::VmLimits;
-use crate::memory::{VmMemoryLease, VmMemoryPool, VmMemoryPoolError};
-use crate::run::{Run, RunError, RunErrorKind, RunItem, RunRequestFrame, run_stream};
+use barracuda_event_router::{EventEmitter, RpcClient};
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
+use embassy_executor::Spawner;
+
+use crate::VmLimits;
+use crate::component::DEFAULT_MAX_INPUT_BYTES;
+use crate::memory::{VmMemoryPool, VmMemoryPoolError};
+use crate::run::{ExecutionJob, OwnedSource, VM_JSON_REQUEST_BYTES, execute_run};
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
-pub const VM_TASK_SLOTS: usize = 4;
+pub(crate) const VM_TASK_SLOTS: usize = 4;
 /// Delay applied by the VM Embassy task after every instruction-hook yield.
-pub const VM_YIELD_DELAY_MILLIS: u64 = 100;
+pub(crate) const VM_YIELD_DELAY_MILLIS: u64 = 100;
 /// Default fixed Lua heap size owned by each VM memory-pool slot.
-pub const VM_MEMORY_BYTES_PER_SLOT: usize = 64 * 1024;
-
-const RESPONSE_QUEUE_CAPACITY: usize = 1;
+pub(crate) const VM_MEMORY_BYTES_PER_SLOT: usize = 64 * 1024;
 
 #[derive(Clone, Default)]
 pub(crate) struct VmYieldSignal(Rc<Cell<bool>>);
 
 impl VmYieldSignal {
-    fn new() -> Self {
-        Self::default()
-    }
-
     pub(crate) fn mark(&self) {
         self.0.set(true);
     }
 
-    fn take(&self) -> bool {
+    pub(crate) fn take(&self) -> bool {
         self.0.replace(false)
     }
 }
 
-/// Shared startup handle used by the VM Component to dispatch executions.
+pub(crate) struct InputMessage {
+    bytes: [u8; DEFAULT_MAX_INPUT_BYTES],
+    length: usize,
+}
+
+impl InputMessage {
+    fn new(input: &str) -> Option<Self> {
+        let mut bytes = [0_u8; DEFAULT_MAX_INPUT_BYTES];
+        bytes
+            .get_mut(..input.len())?
+            .copy_from_slice(input.as_bytes());
+        Some(Self {
+            bytes,
+            length: input.len(),
+        })
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
+    }
+}
+
+struct RunSlot {
+    active: Cell<bool>,
+    id: Cell<u32>,
+    input_open: Cell<bool>,
+    cancelled: Cell<bool>,
+    input: RefCell<Option<InputMessage>>,
+    waiter: RefCell<Option<Waker>>,
+}
+
+impl RunSlot {
+    fn new() -> Self {
+        Self {
+            active: Cell::new(false),
+            id: Cell::new(0),
+            input_open: Cell::new(false),
+            cancelled: Cell::new(false),
+            input: RefCell::new(None),
+            waiter: RefCell::new(None),
+        }
+    }
+
+    fn claim(&self, id: u32) {
+        self.id.set(id);
+        self.input_open.set(true);
+        self.cancelled.set(false);
+        *self.input.borrow_mut() = None;
+        *self.waiter.borrow_mut() = None;
+        self.active.set(true);
+    }
+
+    fn wake(&self) {
+        if let Some(waker) = self.waiter.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+
+    fn release(&self, id: u32) {
+        if self.active.get() && self.id.get() == id {
+            self.cancelled.set(true);
+            self.input_open.set(false);
+            *self.input.borrow_mut() = None;
+            *self.waiter.borrow_mut() = None;
+            self.id.set(0);
+            self.active.set(false);
+        }
+    }
+}
+
+struct RuntimeState {
+    spawner: Cell<Option<Spawner>>,
+    rpc: RefCell<Option<RpcClient>>,
+    slots: [RunSlot; VM_TASK_SLOTS],
+    next_run_id: Cell<u32>,
+}
+
+/// Shared startup and control handle for the fixed VM execution pool.
 #[derive(Clone)]
 pub struct VmRuntime {
-    spawner: Rc<Cell<Option<Spawner>>>,
+    state: Rc<RuntimeState>,
     memory_pool: VmMemoryPool,
 }
 
@@ -63,7 +133,12 @@ impl VmRuntime {
     /// Returns an error when the size is invalid or backing storage cannot be reserved.
     pub fn with_memory_bytes(bytes: usize) -> Result<Self, VmMemoryPoolError> {
         Ok(Self {
-            spawner: Rc::new(Cell::new(None)),
+            state: Rc::new(RuntimeState {
+                spawner: Cell::new(None),
+                rpc: RefCell::new(None),
+                slots: core::array::from_fn(|_index| RunSlot::new()),
+                next_run_id: Cell::new(1),
+            }),
             memory_pool: VmMemoryPool::new(VM_TASK_SLOTS, bytes)?,
         })
     }
@@ -74,49 +149,232 @@ impl VmRuntime {
     ///
     /// Returns [`VmRuntimeStartError::AlreadyStarted`] when called more than once.
     pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
-        if self.spawner.get().is_some() {
+        if self.state.spawner.get().is_some() {
             return Err(VmRuntimeStartError::AlreadyStarted);
         }
-        self.spawner.set(Some(spawner));
+        self.state.spawner.set(Some(spawner));
         Ok(())
     }
 
-    fn dispatch(
+    pub(crate) fn attach_router(&self, rpc: RpcClient) {
+        *self.state.rpc.borrow_mut() = Some(rpc);
+    }
+
+    pub(crate) fn detach_router(&self) {
+        *self.state.rpc.borrow_mut() = None;
+        for slot in &self.state.slots {
+            if slot.active.get() {
+                slot.cancelled.set(true);
+                slot.input_open.set(false);
+                slot.wake();
+            }
+        }
+    }
+
+    pub(crate) fn dispatch(
         &self,
-        requests: RpcStream<RpcFrame<RunRequestFrame>>,
+        source: &str,
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
         package_registry: LuaPackageRegistry,
-    ) -> RpcStream<RunItem> {
-        let Some(spawner) = self.spawner.get() else {
-            return error_stream(
-                RunErrorKind::RuntimeUnavailable,
-                "VM Embassy runtime has not started",
-            );
-        };
-        let Some(memory) = self.memory_pool.acquire() else {
-            return error_stream(RunErrorKind::Busy, "all VM memory slots are occupied");
-        };
-        let (sender, receiver) = async_channel::bounded(RESPONSE_QUEUE_CAPACITY);
-        let fallback = sender.clone();
+    ) -> Result<u32, DispatchError> {
+        let spawner = self
+            .state
+            .spawner
+            .get()
+            .ok_or(DispatchError::RuntimeUnavailable)?;
+        let rpc = self
+            .state
+            .rpc
+            .borrow()
+            .clone()
+            .ok_or(DispatchError::RuntimeUnavailable)?;
+        let source = OwnedSource::new(source).ok_or(DispatchError::SourceLimitExceeded)?;
+        let memory = self.memory_pool.acquire().ok_or(DispatchError::Busy)?;
+        let control = self.reserve_run()?;
+        let run_id = control.run_id;
         if spawner
-            .spawn(vm_execution_task(
-                requests,
+            .spawn(vm_execution_task(ExecutionJob {
+                emitter: EventEmitter::<VM_JSON_REQUEST_BYTES>::new(rpc),
+                run_id,
+                source,
+                control,
+                memory,
                 limits,
                 builtin_packages,
                 package_registry,
-                sender,
-                memory,
-            ))
+            }))
             .is_err()
         {
-            let _result = fallback.try_send(Ok(Err(RunError::new(
-                RunErrorKind::Busy,
-                "all VM task slots are occupied",
-            ))));
+            return Err(DispatchError::Busy);
         }
-        drop(fallback);
-        RpcStream::new(receiver)
+        Ok(run_id)
+    }
+
+    pub(crate) fn send_input(&self, run_id: u32, input: &str) -> Result<(), ControlError> {
+        let slot = self.active_slot(run_id)?;
+        if !slot.input_open.get() {
+            return Err(ControlError::InputClosed);
+        }
+        let input = InputMessage::new(input).ok_or(ControlError::InputLimitExceeded)?;
+        let mut queued = slot.input.borrow_mut();
+        if queued.is_some() {
+            return Err(ControlError::InputBackpressure);
+        }
+        *queued = Some(input);
+        drop(queued);
+        slot.wake();
+        Ok(())
+    }
+
+    pub(crate) fn close_input(&self, run_id: u32) -> Result<(), ControlError> {
+        let slot = self.active_slot(run_id)?;
+        slot.input_open.set(false);
+        slot.wake();
+        Ok(())
+    }
+
+    pub(crate) fn cancel(&self, run_id: u32) -> Result<(), ControlError> {
+        let slot = self.active_slot(run_id)?;
+        slot.cancelled.set(true);
+        slot.input_open.set(false);
+        slot.wake();
+        Ok(())
+    }
+
+    fn active_slot(&self, run_id: u32) -> Result<&RunSlot, ControlError> {
+        self.state
+            .slots
+            .iter()
+            .find(|slot| slot.active.get() && slot.id.get() == run_id)
+            .ok_or(ControlError::RunNotFound)
+    }
+
+    fn reserve_run(&self) -> Result<RunControl, DispatchError> {
+        let slot_index = self
+            .state
+            .slots
+            .iter()
+            .position(|slot| !slot.active.get())
+            .ok_or(DispatchError::Busy)?;
+        let mut run_id = self.state.next_run_id.get();
+        loop {
+            if run_id == 0 {
+                run_id = 1;
+            }
+            if !self
+                .state
+                .slots
+                .iter()
+                .any(|slot| slot.active.get() && slot.id.get() == run_id)
+            {
+                break;
+            }
+            run_id = run_id.wrapping_add(1);
+        }
+        self.state.next_run_id.set(run_id.wrapping_add(1));
+        let slot = self
+            .state
+            .slots
+            .get(slot_index)
+            .ok_or(DispatchError::Busy)?;
+        slot.claim(run_id);
+        Ok(RunControl {
+            state: Rc::clone(&self.state),
+            slot_index,
+            run_id,
+        })
+    }
+}
+
+pub(crate) struct RunControl {
+    state: Rc<RuntimeState>,
+    slot_index: usize,
+    run_id: u32,
+}
+
+impl RunControl {
+    fn slot(&self) -> Option<&RunSlot> {
+        self.state
+            .slots
+            .get(self.slot_index)
+            .filter(|slot| slot.active.get() && slot.id.get() == self.run_id)
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.slot().is_none_or(|slot| slot.cancelled.get())
+    }
+
+    pub(crate) async fn next_input(&self) -> Option<InputMessage> {
+        core::future::poll_fn(|context| {
+            let Some(slot) = self.slot() else {
+                return Poll::Ready(None);
+            };
+            if slot.cancelled.get() {
+                return Poll::Ready(None);
+            }
+            if let Some(input) = slot.input.borrow_mut().take() {
+                return Poll::Ready(Some(input));
+            }
+            if !slot.input_open.get() {
+                return Poll::Ready(None);
+            }
+            let mut waiter = slot.waiter.borrow_mut();
+            if waiter
+                .as_ref()
+                .is_none_or(|registered| !registered.will_wake(context.waker()))
+            {
+                *waiter = Some(context.waker().clone());
+            }
+            Poll::Pending
+        })
+        .await
+    }
+}
+
+impl Drop for RunControl {
+    fn drop(&mut self) {
+        if let Some(slot) = self.state.slots.get(self.slot_index) {
+            slot.release(self.run_id);
+        }
+    }
+}
+
+/// Business rejection returned by `vm.run` before a task is accepted.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DispatchError {
+    SourceLimitExceeded,
+    RuntimeUnavailable,
+    Busy,
+}
+
+impl DispatchError {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::SourceLimitExceeded => "source_limit_exceeded",
+            Self::RuntimeUnavailable => "runtime_unavailable",
+            Self::Busy => "busy",
+        }
+    }
+}
+
+/// Business rejection returned by `vm.input` and `vm.cancel`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlError {
+    RunNotFound,
+    InputLimitExceeded,
+    InputBackpressure,
+    InputClosed,
+}
+
+impl ControlError {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::RunNotFound => "run_not_found",
+            Self::InputLimitExceeded => "input_limit_exceeded",
+            Self::InputBackpressure => "input_backpressure",
+            Self::InputClosed => "input_closed",
+        }
     }
 }
 
@@ -128,77 +386,7 @@ pub enum VmRuntimeStartError {
     AlreadyStarted,
 }
 
-pub(crate) fn task_run_handler(
-    runtime: VmRuntime,
-    limits: VmLimits,
-    builtin_packages: BuiltinPackages,
-    package_registry: LuaPackageRegistry,
-) -> impl RpcHandler<Run> {
-    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| {
-        let runtime = runtime.clone();
-        let package_registry = package_registry.clone();
-        async move { Ok(runtime.dispatch(requests, limits, builtin_packages, package_registry)) }
-    }
-}
-
 #[embassy_executor::task(pool_size = VM_TASK_SLOTS)]
-async fn vm_execution_task(
-    requests: RpcStream<RpcFrame<RunRequestFrame>>,
-    limits: VmLimits,
-    builtin_packages: BuiltinPackages,
-    package_registry: LuaPackageRegistry,
-    responses: Sender<RpcResult<RunItem>>,
-    memory: VmMemoryLease,
-) {
-    let yield_signal = VmYieldSignal::new();
-    let mut stream = core::pin::pin!(run_stream(
-        requests,
-        limits,
-        builtin_packages,
-        package_registry,
-        Some(yield_signal.clone()),
-        Some(memory),
-    ));
-    loop {
-        let event = core::future::poll_fn(|context| {
-            if responses.is_closed() {
-                return core::task::Poll::Ready(VmTaskEvent::Closed);
-            }
-            match stream.as_mut().poll_next(context) {
-                core::task::Poll::Ready(Some(item)) => {
-                    core::task::Poll::Ready(VmTaskEvent::Item(item))
-                }
-                core::task::Poll::Ready(None) => core::task::Poll::Ready(VmTaskEvent::Complete),
-                core::task::Poll::Pending if yield_signal.take() => {
-                    core::task::Poll::Ready(VmTaskEvent::Yielded)
-                }
-                core::task::Poll::Pending => core::task::Poll::Pending,
-            }
-        })
-        .await;
-        match event {
-            VmTaskEvent::Item(item) => {
-                if responses.send(item).await.is_err() {
-                    return;
-                }
-            }
-            VmTaskEvent::Yielded => Timer::after_millis(VM_YIELD_DELAY_MILLIS).await,
-            VmTaskEvent::Complete | VmTaskEvent::Closed => return,
-        }
-    }
-}
-
-enum VmTaskEvent {
-    Item(RpcResult<RunItem>),
-    Yielded,
-    Complete,
-    Closed,
-}
-
-fn error_stream(kind: RunErrorKind, diagnostic: &str) -> RpcStream<RunItem> {
-    let (sender, receiver): (Sender<RpcResult<RunItem>>, Receiver<RpcResult<RunItem>>) =
-        async_channel::bounded(RESPONSE_QUEUE_CAPACITY);
-    let _result = sender.try_send(Ok(Err(RunError::new(kind, diagnostic))));
-    drop(sender);
-    RpcStream::new(receiver)
+async fn vm_execution_task(job: ExecutionJob) {
+    execute_run(job).await;
 }

@@ -1584,24 +1584,21 @@ dependencies = [
 name = "barracuda-vm-component"
 version = "0.1.0"
 dependencies = [
- "async-channel",
  "barracuda-event-router",
  "barracuda-lua",
  "barracuda-platform-test",
- "barracuda-runtime-utils",
+ "barracuda-rpc",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
- "futures-core",
  "futures-lite",
  "getset",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
- "zerocopy",
 ]
 
 [[package]]
