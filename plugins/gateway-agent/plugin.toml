@@ -1,3 +1,0 @@
-id = "gateway-agent"
-depends-on = ["agent", "imessage-gateway"]
-description = "Connects incoming gateway messages to conversational agents."

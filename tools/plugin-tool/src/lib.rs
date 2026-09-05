@@ -826,11 +826,7 @@ mod tests {
         let plugins = [
             plugin("agent", "agent", &[]),
             plugin("imessage-gateway", "imessage-gateway", &[]),
-            plugin(
-                "gateway-agent",
-                "gateway-agent",
-                &["agent", "imessage-gateway"],
-            ),
+            plugin("bridge", "bridge", &["agent", "imessage-gateway"]),
         ];
 
         let (disabled, reasons) = cascade_disabled(
@@ -838,19 +834,20 @@ mod tests {
             vec![String::from("imessage-gateway"), String::from("agent")],
         );
 
-        assert_eq!(disabled, ["agent", "gateway-agent", "imessage-gateway"]);
+        assert_eq!(disabled, ["agent", "bridge", "imessage-gateway"]);
         assert_eq!(
             reasons,
             [CascadeDependency {
-                dependent: String::from("gateway-agent"),
+                dependent: String::from("bridge"),
                 disabled_dependencies: vec![
                     String::from("agent"),
                     String::from("imessage-gateway"),
                 ],
             }]
         );
-        assert!(format_cascade_dependencies(&reasons)
-            .ends_with("  gateway-agent → agent, imessage-gateway"));
+        assert!(
+            format_cascade_dependencies(&reasons).ends_with("  bridge → agent, imessage-gateway")
+        );
     }
 
     #[test]

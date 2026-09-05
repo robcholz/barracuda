@@ -73,7 +73,6 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         "IMessageTelegramPlugin",
         "IMessageWechatPlugin",
         "IMessageWebPlugin",
-        "GatewayAgentPlugin",
     ] {
         assert!(
             system.contains(&format!("{plugin}::new(&mut plugin_context)")),
