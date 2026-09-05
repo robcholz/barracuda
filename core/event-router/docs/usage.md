@@ -180,6 +180,39 @@ calling another RPC:
 
 No operation may follow `return` in the same block.
 
+Use `if` to choose a dynamic execution path and then continue with the outer
+block:
+
+```json
+{
+  "id": "forward-agent-response",
+  "match": { "event": "agent.response.completed" },
+  "steps": [
+    { "call": "imessage_bridge.to_gateway" },
+    {
+      "if": "$previous.output.forward",
+      "then": [
+        {
+          "call": "imessage.send",
+          "arguments": { "message": "$previous.output.message" }
+        }
+      ],
+      "else": []
+    },
+    { "call": "audit.record", "arguments": { "status": "complete" } }
+  ]
+}
+```
+
+The condition must select a top-level boolean field from `$event.input` or
+`$previous.output`. Only the selected arm runs; arms may be empty or nested.
+After the arm, execution resumes with the following outer operation. A branch
+does not produce or merge an output: `$previous.output` always means the most
+recent RPC that actually completed on the selected path. Branch output schemas
+are not merged or compared at load time; missing fields, non-boolean
+conditions, and incompatible runtime request data fail that execution. A
+`return` inside an arm exits the entire Workflow successfully.
+
 `match.topic` is an optional exact selector within the 16-byte bound:
 
 ```json
@@ -201,9 +234,9 @@ including Events emitted with a Topic. An Event emitted without a Topic cannot
 match a Workflow that requires one. `*` is rejected in a Topic; omitting the
 field already expresses the wildcard behavior. All matching Workflows fan out.
 
-Step 0 is the ingress step: the Event payload becomes its request. Each later
-step describes how to build its request from the previous response, based on
-`arguments`:
+The first RPC actually executed is the ingress step: the Event payload becomes
+its request. Each later executed RPC describes how to build its request from
+the most recently executed RPC response, based on `arguments`:
 
 | `arguments` | Link |
 | --- | --- |

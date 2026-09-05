@@ -6,10 +6,12 @@ maintainers; callers should read the Event Router usage guide.
 
 ## Model
 
-A Workflow is an ordered block started by an Event. RPC step 0 is the
-**ingress**: the Event payload becomes its request. Every later RPC step is fed
-by the previous step's response through its **link**. A block ends through
-natural completion or an explicit successful `return`. Workflows are loaded
+A Workflow is an ordered control-flow block started by an Event. The first RPC
+actually executed is the **ingress**: the Event payload becomes its request.
+Every later RPC step is fed by the most recently executed RPC's response
+through its **link**. Conditional nodes choose the actual execution path but do
+not themselves produce an output. A block ends through natural completion or
+an explicit successful `return`. Workflows are loaded
 through the durable `workflow.load` control RPC or restored from disk at
 startup; a single `/system/workflows.json` catalog is authoritative on restart.
 The catalog is a JSON array whose objects are ordered Workflow definitions;
@@ -51,7 +53,10 @@ response becomes the next request. It is declared implicitly by the step's
 | present, with `$` | `Mapping` | Request built from literal arguments, then each referenced field is copied wire-to-wire from the previous response. |
 
 Reference grammar: `$event.input.<field>` selects the triggering Event and
-`$previous.output.<field>` selects the preceding RPC response.
+`$previous.output.<field>` selects the most recently executed RPC response on
+the actual path. An `if` node does not update `$previous`: an empty selected arm
+therefore leaves the last executed RPC as previous without any special merge or
+inheritance rule.
 `$previous.input`, `$previous.error`, and absolute step selectors are reserved.
 The field is mandatory and a single top-level JSON name (the serde name); a
 whole-document source reference is rejected with a hint to use a `Direct` link,
@@ -63,6 +68,21 @@ and nested paths are rejected.
 execution successfully. It invokes no RPC, produces no failure, and no step may
 follow it in the same block. A return-only Workflow is valid and can explicitly
 consume a matched Event without invoking an application endpoint.
+
+## Conditional execution
+
+An `if` operation selects `then` or `else` from a top-level boolean field in
+`$event.input.<field>` or `$previous.output.<field>`. The selected block may be
+empty, may contain nested conditionals, and may complete normally into the
+operations after the `if`. A `return` inside either arm terminates the entire
+Workflow successfully.
+
+Conditions and post-branch links are dynamic. Workflow loading validates the
+document structure, reference grammar, and every declared RPC address, but it
+does not require branch output schemas to agree or attempt to select a merged
+schema. At execution time a missing or non-boolean condition fails that
+execution, and each invoked RPC reports incompatible actual request data in the
+normal way.
 
 ## Unified frame-flow model
 
@@ -103,8 +123,8 @@ consumer that needs one value must be fed by a producer that emits one.
 
 ## Validation
 
-Every execution resolves each step's method projection and validates every
-link before any downstream RPC is invoked:
+Every execution resolves each step's method projection before any downstream
+RPC is invoked. Linear Workflows also validate every link before execution:
 
 - `Direct`: response type identity (source response and destination request
   are the same fixed-layout type).
@@ -112,16 +132,18 @@ link before any downstream RPC is invoked:
   resolve on both sides with `source_size <= dest_size`.
 - Cardinality: `Streaming → Unary` rejected for every link kind.
 
-Validation runs at two points with the same rule set:
+Validation runs at two points:
 
 - **Load time (primary gate).** `workflow.load` resolves every step against the
-  registry and validates all links — including a dry-run of the literal
-  arguments through the destination's JSON codec — before anything is
-  persisted. A workflow whose steps cannot be resolved or linked is rejected
-  with `UnknownMethod` / `InvalidLink` and never enters the catalog.
-- **Execution setup (backstop).** Every matched execution re-validates against
-  the current registry before any downstream RPC, covering startup restore
-  (no registry at restore time) and dynamic registration changes.
+  registry. Linear Workflows also validate all links, including literal request
+  shape. Conditional Workflows deliberately defer value compatibility to the
+  actual execution path and do not perform branch-schema merging. An unknown
+  method is rejected before persistence.
+- **Execution setup (backstop).** Every matched execution resolves all methods
+  again before any downstream RPC, covering startup restore (no registry at
+  restore time) and dynamic registration changes. Linear definitions also
+  repeat link validation; conditional definitions defer data compatibility to
+  the invoked path.
 
 Load-time validation ordering constraint: a workflow can only reference
 methods registered before it is loaded.
@@ -133,11 +155,13 @@ methods registered before it is loaded.
 - One frame-flow driver for every link kind: read → per-frame transform →
   write, source EOF closes the destination (u→u, u→s, and record-preserving
   s→s).
-- Link validation at execution setup (Direct type identity; mapping field
-  existence and `source_size <= dest_size`; literal arguments dry-run).
+- Linear link validation at execution setup (Direct type identity; mapping
+  field existence and `source_size <= dest_size`; literal arguments dry-run).
+- Conditional execution selects only the runtime path, keeps `$previous` bound
+  to the most recently completed RPC, and defers path-dependent request and
+  condition compatibility to execution.
 - Cardinality validation: `Streaming → Unary` rejected for every link kind
   (`RpcMethodInfo::input_mode` / `output_mode`).
-- Load-time validation as the primary gate (`workflow.load` resolves steps
-  against the registry, validates links and literal arguments, and rejects
-  with `UnknownMethod` / `InvalidLink` before persistence); execution setup
-  re-validates as the backstop.
+- Load-time validation as the primary gate (`workflow.load` resolves every
+  declared method and validates linear links, while conditional data flow stays
+  dynamic); execution setup re-resolves methods as the backstop.
