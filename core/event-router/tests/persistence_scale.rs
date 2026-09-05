@@ -19,8 +19,9 @@ use barracuda_vfs::{read, remove_file};
 use futures_lite::future::block_on;
 
 const FRAME_CAPACITY: usize = 256;
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn reset_global_vfs() -> MutexGuard<'static, ()> {

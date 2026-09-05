@@ -292,8 +292,9 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// Returns a sorted snapshot of RPC addresses with `visibility`.
     ///
     /// Visibility is independent of the address-derived [`RpcGroup`]. An
-    /// unknown visibility produces an empty snapshot. Registering or
-    /// unregistering an RPC does not mutate a previously returned snapshot.
+    /// Endpoints registered with `"*"` are included in every visibility
+    /// snapshot. Registering or unregistering an RPC does not mutate a
+    /// previously returned snapshot.
     #[must_use]
     pub fn rpcs_by_visibility(&self, visibility: &str) -> Vec<RpcAddress> {
         self.core.rpcs_by_visibility(visibility)
@@ -473,7 +474,9 @@ impl RegistryCore {
             .endpoints
             .borrow()
             .iter()
-            .filter(|(_address, endpoint)| endpoint.visibility == visibility)
+            .filter(|(_address, endpoint)| {
+                endpoint.visibility == visibility || endpoint.visibility == "*"
+            })
             .map(|(address, _endpoint)| address.clone())
             .collect();
         addresses.sort_unstable();
@@ -903,14 +906,17 @@ impl RpcClient {
 
     /// Starts a lane-native JSON call at `address`.
     ///
-    /// The raw document is validated without building a `serde_json::Value`.
-    /// Polling the returned call copies it directly into the request lane and
-    /// returns a [`JsonRef`] that retains the response lane.
+    /// The raw document is syntax-checked without building a
+    /// `serde_json::Value`. Polling the returned call copies it directly into
+    /// the request lane; the endpoint validates its request contract before
+    /// invoking the handler and returns a [`JsonRef`] retaining the response
+    /// lane.
     ///
     /// # Errors
     ///
     /// Returns an error when the JSON is invalid or too large, the endpoint is
-    /// absent or not a JSON endpoint, or call preparation fails.
+    /// absent or not a JSON endpoint, call preparation fails, or the polled
+    /// request or response violates the endpoint schema.
     pub fn call_json<'a, J>(&self, address: &RpcAddress, request: &'a J) -> RpcResult<JsonCall<'a>>
     where
         J: JsonPayload + ?Sized,
@@ -1060,6 +1066,22 @@ pub enum RpcError {
     /// A JSON document was syntactically invalid or not UTF-8.
     #[error("invalid JSON document")]
     InvalidJson,
+    /// A JSON request did not satisfy its registered method schema.
+    #[error("JSON RPC request does not match the schema for {address}: {source}")]
+    JsonRequestSchema {
+        /// Registered JSON RPC address.
+        address: &'static str,
+        /// Schema validation failure.
+        source: json_validator::ValidationError,
+    },
+    /// A JSON response did not satisfy its registered method schema.
+    #[error("JSON RPC response does not match the schema for {address}: {source}")]
+    JsonResponseSchema {
+        /// Registered JSON RPC address.
+        address: &'static str,
+        /// Schema validation failure.
+        source: json_validator::ValidationError,
+    },
     /// An endpoint attempted to synchronously invoke itself.
     #[error("direct RPC self-call is forbidden: {0}")]
     DirectSelfCall(RpcAddress),

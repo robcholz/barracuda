@@ -12,11 +12,12 @@ use serde_json::value::RawValue;
 
 use super::{EventId, Topic};
 
-const INTERNAL_EMIT_REQUEST_SCHEMA: JsonSchema = JsonSchema::new(
+const INTERNAL_EMIT_REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"event":{"type":"string"},"topic":{"type":"string"},"input":{}},"required":["event","input"],"additionalProperties":false}"#,
 );
-const EMPTY_RESPONSE_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EMPTY_RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 
 /// The unique JSON RPC used by all [`crate::EventEmitter`] instances.
 pub struct InternalEmit<const M: usize>;

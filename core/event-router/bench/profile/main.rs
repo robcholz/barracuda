@@ -241,8 +241,8 @@ struct CatalogSink;
 
 impl JsonRpcSchema for CatalogSink {
     const ADDRESS: &'static str = "scale.sink";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 2;
 }

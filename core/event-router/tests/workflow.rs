@@ -20,12 +20,13 @@ use serde::Deserialize;
 use serde_json::json;
 
 const FRAME_SIZE: usize = 512;
-const VALUE_SCHEMA: JsonSchema = JsonSchema::new(
+const VALUE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"],"additionalProperties":false}"#,
 );
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
-const DECISION_SCHEMA: JsonSchema = JsonSchema::new(
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
+const DECISION_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"forward":{"type":"boolean"},"value":{"type":"integer"}},"required":["forward","value"],"additionalProperties":false}"#,
 );
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());

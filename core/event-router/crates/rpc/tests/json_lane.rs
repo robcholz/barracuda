@@ -8,6 +8,8 @@ use barracuda_rpc::{
 use futures_lite::future::block_on;
 use serde::Deserialize;
 use serde_json::json;
+use std::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Deserialize)]
 struct EchoRequest<'a> {
@@ -29,8 +31,8 @@ struct Object;
 
 impl JsonRpcSchema for Object {
     const ADDRESS: &'static str = "tool.object";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 64;
     const MAX_RESPONSE_BYTES: usize = 4;
 }
@@ -39,8 +41,8 @@ struct Validate;
 
 impl JsonRpcSchema for Validate {
     const ADDRESS: &'static str = "tool.validate";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 16;
     const MAX_RESPONSE_BYTES: usize = 3;
 }
@@ -49,9 +51,10 @@ struct EmptyAck;
 
 impl JsonRpcSchema for EmptyAck {
     const ADDRESS: &'static str = "tool.empty_ack";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema =
-        JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{},"additionalProperties":false}"#
+    );
     const MAX_REQUEST_BYTES: usize = 16;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -60,8 +63,8 @@ struct ComplexValue;
 
 impl JsonRpcSchema for ComplexValue {
     const ADDRESS: &'static str = "tool.complex_value";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 128;
     const MAX_RESPONSE_BYTES: usize = 128;
 }
@@ -70,8 +73,8 @@ struct InvalidResponse;
 
 impl JsonRpcSchema for InvalidResponse {
     const ADDRESS: &'static str = "tool.invalid_response";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 16;
 }
@@ -80,8 +83,8 @@ struct MissingResponse;
 
 impl JsonRpcSchema for MissingResponse {
     const ADDRESS: &'static str = "tool.missing_response";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -90,8 +93,8 @@ struct TypedRequest;
 
 impl JsonRpcSchema for TypedRequest {
     const ADDRESS: &'static str = "tool.typed_request";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 32;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -100,8 +103,8 @@ struct DirectSelf;
 
 impl JsonRpcSchema for DirectSelf {
     const ADDRESS: &'static str = "tool.direct_self";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -110,8 +113,8 @@ struct DuplicateEcho;
 
 impl JsonRpcSchema for DuplicateEcho {
     const ADDRESS: &'static str = Echo::ADDRESS;
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -120,8 +123,8 @@ struct InvalidAddress;
 
 impl JsonRpcSchema for InvalidAddress {
     const ADDRESS: &'static str = "missing_group";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
     const MAX_REQUEST_BYTES: usize = 2;
     const MAX_RESPONSE_BYTES: usize = 2;
 }
@@ -206,6 +209,85 @@ fn raw_json_is_read_and_written_in_the_rpc_lane() {
     assert_eq!(info.max_response_bytes(), Echo::MAX_RESPONSE_BYTES);
     assert!(Echo::REQUEST_SCHEMA.as_str().contains("city"));
     assert!(Echo::RESPONSE_SCHEMA.as_str().contains("days"));
+    assert!(info
+        .request_schema()
+        .validate(r#"{"city":1,"days":3}"#)
+        .is_err());
+}
+
+#[test]
+fn rpc_enforces_request_and_response_schemas_around_the_handler() {
+    let registry = registry();
+    let calls = Rc::new(Cell::new(0_u8));
+    let handler_calls = Rc::clone(&calls);
+    registry
+        .register_json::<Echo, _>(
+            "agent",
+            move |_context, _request: JsonRef, response: JsonWriter| {
+                handler_calls.set(handler_calls.get().saturating_add(1));
+                async move { response.write("{}").await }
+            },
+        )
+        .expect("register schema-enforced endpoint");
+
+    let address = RpcAddress::try_from(Echo::ADDRESS).expect("valid address");
+    let client = registry.client();
+    let invalid_request = block_on(
+        client
+            .call_json(&address, r#"{"city":1,"days":3}"#)
+            .expect("start invalid request"),
+    );
+    assert!(matches!(
+        invalid_request,
+        Err(RpcError::JsonRequestSchema { address, .. }) if address == Echo::ADDRESS
+    ));
+    assert_eq!(calls.get(), 0);
+
+    let invalid_response = block_on(
+        client
+            .call_json(&address, r#"{"city":"Raleigh","days":3}"#)
+            .expect("start valid request"),
+    );
+    assert!(matches!(
+        invalid_response,
+        Err(RpcError::JsonResponseSchema { address, .. }) if address == Echo::ADDRESS
+    ));
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn raw_payload_calls_cannot_bypass_json_request_validation() {
+    let registry = registry();
+    let calls = Rc::new(Cell::new(0_u8));
+    let handler_calls = Rc::clone(&calls);
+    registry
+        .register_json::<Echo, _>(
+            "agent",
+            move |_context, _request: JsonRef, response: JsonWriter| {
+                handler_calls.set(handler_calls.get().saturating_add(1));
+                async move { response.write(r#"{"city":"Raleigh","days":3}"#).await }
+            },
+        )
+        .expect("register schema-enforced endpoint");
+    let address = RpcAddress::try_from(Echo::ADDRESS).expect("valid address");
+
+    block_on(async {
+        let (mut writer, mut reader) = registry
+            .client()
+            .call_payload(&address)
+            .expect("start raw payload call");
+        let payload = br#"{"city":1,"days":3}"#;
+        assert_eq!(writer.write(payload).await, Ok(payload.len()));
+        assert!(matches!(
+            writer.close().await,
+            Err(RpcError::JsonRequestSchema { address, .. }) if address == Echo::ADDRESS
+        ));
+        assert!(matches!(
+            reader.read().await,
+            Err(RpcError::JsonRequestSchema { address, .. }) if address == Echo::ADDRESS
+        ));
+    });
+    assert_eq!(calls.get(), 0);
 }
 
 #[test]
