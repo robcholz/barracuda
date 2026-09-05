@@ -29,8 +29,8 @@ pub use address::{RpcAddress, RpcAddressError, RpcGroup, RpcGroupError};
 pub use context::{RpcCallId, RpcContext, RpcEndpointId};
 pub use frame::RpcFrame;
 pub use json::{
-    JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef, JsonRpcInfo, JsonRpcSchema,
-    JsonSchema, JsonWriter,
+    JsonCall, JsonHandler, JsonHandlerFuture, JsonObjectFields, JsonObjectPayload,
+    JsonObjectWriter, JsonPayload, JsonRef, JsonRpcInfo, JsonRpcSchema, JsonSchema, JsonWriter,
 };
 pub use lane::RpcLaneStorage;
 pub use payload::{

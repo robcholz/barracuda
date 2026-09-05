@@ -8,7 +8,7 @@ use barracuda_rpc::RpcAddress;
 use getset::Getters;
 use serde_json::Value;
 
-use super::link::{classify, LinkError};
+use super::link::{classify, LinkError, LinkKind};
 use super::{Rule, Topic};
 
 /// Stable identifier of one Workflow definition.
@@ -79,10 +79,10 @@ pub enum WorkflowIdError {
 
 /// One ordered RPC step in a Workflow, with its optional link arguments.
 ///
-/// A step with no `arguments` is a `Link::Direct` edge from the previous step;
-/// `arguments` with `$` references is a `Link::Mapping` edge; `arguments`
-/// without references is a `Link::Literal` edge. The link itself is never named
-/// in the document — it is inferred from this shape.
+/// A step with no `arguments` is a `Link::Direct` edge from the Event input or
+/// previous step; `arguments` with `$` references is a `Link::Mapping` edge;
+/// `arguments` without references is a `Link::Literal` edge. The link itself is
+/// never named in the document — it is inferred from this shape.
 #[derive(Clone, Debug, Getters, PartialEq)]
 pub struct WorkflowStep {
     /// RPC address invoked by this step.
@@ -116,21 +116,19 @@ pub struct WorkflowDefinition {
     event: Rule,
     topic: Option<Topic>,
     steps: Vec<WorkflowStep>,
+    links: Vec<LinkKind>,
 }
 
 impl WorkflowDefinition {
     /// Creates a Workflow with at least one RPC step.
     ///
-    /// The first step is driven by the triggering Event and must not carry
-    /// `arguments`. Every later step's `arguments` is grammar-checked here, so a
-    /// malformed reference is rejected at load time rather than mid-execution.
+    /// Every step's `arguments` is grammar-checked here, so a malformed
+    /// reference is rejected at load time rather than mid-execution.
     ///
     /// # Errors
     ///
     /// Returns [`WorkflowDefinitionError::EmptySteps`] when no ingress RPC is
-    /// present, [`WorkflowDefinitionError::FirstStepHasArguments`] when the
-    /// ingress step carries arguments, or
-    /// [`WorkflowDefinitionError::InvalidReference`] when a later step's
+    /// present or [`WorkflowDefinitionError::InvalidReference`] when a step's
     /// arguments are malformed.
     pub fn new(
         id: WorkflowId,
@@ -156,20 +154,21 @@ impl WorkflowDefinition {
         topic: Option<Topic>,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
-        let Some((first, rest)) = steps.split_first() else {
+        if steps.is_empty() {
             return Err(WorkflowDefinitionError::EmptySteps);
-        };
-        if first.arguments().is_some() {
-            return Err(WorkflowDefinitionError::FirstStepHasArguments);
         }
-        for step in rest {
-            classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference)?;
+        let mut links = Vec::with_capacity(steps.len());
+        for step in &steps {
+            links.push(
+                classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference)?,
+            );
         }
         Ok(Self {
             id,
             event,
             topic,
             steps,
+            links,
         })
     }
 
@@ -184,6 +183,10 @@ impl WorkflowDefinition {
     pub fn steps(&self) -> &[WorkflowStep] {
         &self.steps
     }
+
+    pub(crate) fn link(&self, step: usize) -> Option<&LinkKind> {
+        self.links.get(step)
+    }
 }
 
 /// Failure while constructing a [`WorkflowDefinition`].
@@ -193,9 +196,6 @@ pub enum WorkflowDefinitionError {
     /// Every Workflow needs an ingress RPC.
     #[error("Workflow must contain at least one RPC step")]
     EmptySteps,
-    /// The ingress step is driven by the Event and cannot take arguments.
-    #[error("the first Workflow step cannot carry link arguments")]
-    FirstStepHasArguments,
     /// A step's `$` reference arguments were malformed.
     #[error("invalid Workflow step reference: {0}")]
     InvalidReference(#[source] LinkError),
@@ -226,7 +226,10 @@ mod tests {
 
     use alloc::vec;
 
-    use super::{WorkflowDefinition, WorkflowDefinitionError, WorkflowId};
+    use barracuda_rpc::RpcAddress;
+    use serde_json::json;
+
+    use super::{WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowStep};
     use crate::Rule;
 
     fn rule(value: &str) -> Rule {
@@ -242,5 +245,20 @@ mod tests {
         );
 
         assert!(matches!(result, Err(WorkflowDefinitionError::EmptySteps)));
+    }
+
+    #[test]
+    fn first_step_accepts_event_mapping_arguments() {
+        let definition = WorkflowDefinition::new(
+            WorkflowId::try_from("event-mapping").expect("valid Workflow ID"),
+            rule("gateway.*"),
+            vec![WorkflowStep::new(
+                RpcAddress::try_from("agent.run").expect("valid RPC address"),
+                Some(json!({ "prompt": "$event.input.message" })),
+            )],
+        )
+        .expect("first step accepts Event selector");
+
+        assert_eq!(definition.steps().len(), 1);
     }
 }

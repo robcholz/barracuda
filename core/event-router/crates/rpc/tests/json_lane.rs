@@ -2,8 +2,8 @@
 #![allow(missing_docs)]
 
 use barracuda_rpc::{
-    json_schema, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress,
-    RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, Unary,
+    json_schema, JsonObjectPayload, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
+    RpcAddress, RpcContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, Unary,
 };
 use futures_lite::future::block_on;
 use serde::Deserialize;
@@ -232,6 +232,39 @@ fn a_json_value_is_serialized_directly_into_the_lane() {
     .expect("call JSON object endpoint");
 
     assert_eq!(response.as_str().expect("valid response"), "true");
+}
+
+#[test]
+fn json_object_payload_writes_fields_without_an_intermediate_value() {
+    let fields = |writer: &mut barracuda_rpc::JsonObjectWriter<'_>| {
+        writer.field("mode", "\"quiet\"")?;
+        writer.field("count", "3")
+    };
+    let payload = JsonObjectPayload::new(&fields);
+    assert_eq!(payload.encoded_len(), Ok(26));
+    let mut output = [0_u8; 26];
+    let written = payload.write_json(&mut output).expect("write JSON object");
+
+    assert_eq!(written, output.len());
+    assert_eq!(
+        core::str::from_utf8(&output),
+        Ok(r#"{"mode":"quiet","count":3}"#)
+    );
+}
+
+#[test]
+fn json_object_payload_escapes_string_fields() {
+    let fields = |writer: &mut barracuda_rpc::JsonObjectWriter<'_>| {
+        writer.string_field("event", "gateway.\"received")
+    };
+    let payload = JsonObjectPayload::new(&fields);
+    let mut output = [0_u8; 31];
+    let written = payload.write_json(&mut output).expect("write JSON object");
+
+    assert_eq!(
+        core::str::from_utf8(output.get(..written).expect("written JSON prefix")),
+        Ok(r#"{"event":"gateway.\"received"}"#)
+    );
 }
 
 #[test]
