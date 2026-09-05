@@ -392,7 +392,12 @@ pub fn resolve_board_platform(
     )
 }
 
-fn discover_platforms(workspace: &Path) -> Result<Vec<PlatformDefinition>, ResolveError> {
+/// Discovers and validates every self-described Platform in stable directory order.
+///
+/// # Errors
+///
+/// Returns [`ResolveError`] when the Platform catalog or one of its manifests is invalid.
+pub fn discover_platforms(workspace: &Path) -> Result<Vec<PlatformDefinition>, ResolveError> {
     let catalog = workspace.join("platforms");
     let entries = fs::read_dir(&catalog).map_err(|source| ResolveError::Catalog {
         path: catalog.clone(),

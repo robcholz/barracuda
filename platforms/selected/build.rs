@@ -9,6 +9,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_GENERATED_BUILD");
 
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
+    let root = manifest.join("../..");
+    barracuda_platform_tool::sync(&root, true).map_err(|error| {
+        format!(
+            "{error}; Platform registries are source files, so run `cargo platform sync` before rebuilding"
+        )
+    })?;
     if env::var("BARRACUDA_GENERATED_BUILD").as_deref() != Ok("1") {
         fs::write(
             output.join("selected_platform.rs"),
@@ -20,8 +27,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
-    let root = manifest.join("../..");
     let target_os = env::var("CARGO_CFG_TARGET_OS")?;
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH")?;
     let target = env::var("TARGET")?;

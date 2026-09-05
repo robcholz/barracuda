@@ -1,19 +1,20 @@
 [package]
-name = "barracuda-platform-selected"
+name = "barracuda-platform-tool"
 version = "0.1.0"
 edition = "2021"
-description = "Compile-time selected Barracuda Platform"
-
-[lib]
-crate-type = ["rlib"]
+description = "Barracuda Platform workspace synchronization tool"
 
 [dependencies]
-barracuda-platform.workspace = true
-embassy-executor.workspace = true
-
-[build-dependencies]
 barracuda-platform-config.workspace = true
-barracuda-platform-tool = { path = "../tool" }
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "barracuda-platform"
+path = "src/main.rs"
 
 [lints.rust]
 unsafe_code = "forbid"
