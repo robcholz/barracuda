@@ -1414,6 +1414,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-system-image"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "barracuda-vfs-littlefs",
+ "clap",
+ "embedded-storage",
+ "esp-idf-part",
+ "generic-array",
+ "littlefs2",
+ "serde",
+ "tempfile",
+ "typenum",
+ "yaml-peg",
+]
+
+[[package]]
 name = "barracuda-target"
 version = "0.1.0"
 dependencies = [
