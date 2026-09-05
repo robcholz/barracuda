@@ -12,6 +12,7 @@ boards/
 `-- configs/
     `-- <board>/
         |-- board.yml
+        |-- hal/       # optional statically composed Board HAL crate
         `-- <Platform-native layout files>
 ```
 

@@ -299,8 +299,9 @@ fn renders_a_static_board_without_platform_or_system_types() {
 
 #[test]
 fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
-    let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../configs");
-    for entry in std::fs::read_dir(configs).expect("read Board bundles") {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let configs = workspace.join("boards/configs");
+    for entry in std::fs::read_dir(&configs).expect("read Board bundles") {
         let path = entry.expect("read Board bundle entry").path();
         if !path.is_dir() {
             continue;
@@ -312,5 +313,14 @@ fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
             path.file_name().and_then(|name| name.to_str()).unwrap()
         );
         assert!(path.join(board.native_layout().artifact()).is_file());
+        if let Some(board_hal) = board.board_hal() {
+            assert_eq!(
+                board_hal.path(),
+                path.join("hal")
+                    .strip_prefix(&workspace)
+                    .expect("Board HAL path below workspace")
+            );
+            assert!(path.join("hal/Cargo.toml").is_file());
+        }
     }
 }

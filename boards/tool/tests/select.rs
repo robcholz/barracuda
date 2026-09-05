@@ -242,6 +242,8 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
     assert!(default_members.contains("apps/barracuda-cli"));
     assert!(!default_members.contains("tools/barracuda-build"));
     assert!(!manifest.contains("\"tools/barracuda-build\","));
+    assert!(manifest.contains("\"boards/configs/*/hal\","));
+    assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
 }
 
 #[test]
