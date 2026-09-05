@@ -35,9 +35,10 @@ struct Sink<const P: usize>;
 
 impl<const P: usize> JsonRpcSchema for Sink<P> {
     const ADDRESS: &'static str = "s.x";
-    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new(r#"{"type":"string"}"#);
-    const RESPONSE_SCHEMA: JsonSchema =
-        JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(r#"{"type":"string"}"#);
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{},"additionalProperties":false}"#
+    );
     const MAX_REQUEST_BYTES: usize = P.saturating_add(2);
     const MAX_RESPONSE_BYTES: usize = 2;
 }

@@ -1009,8 +1009,8 @@ mod json_workflow_tests {
     use core::task::Poll;
 
     use barracuda_rpc::{
-        JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcFrame, RpcLaneStorage,
-        RpcMethod, RpcRegistry, Unary,
+        JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcError, RpcFrame,
+        RpcLaneStorage, RpcMethod, RpcRegistry, Unary,
     };
     use futures_lite::future::block_on;
     use serde_json::{json, Value};
@@ -1022,15 +1022,17 @@ mod json_workflow_tests {
         WorkflowExecutionError, WorkflowId, WorkflowStep,
     };
 
-    const EMPTY_SCHEMA: JsonSchema =
-        JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
-    const TOKEN_SCHEMA: JsonSchema = JsonSchema::new(
+    const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{},"additionalProperties":false}"#
+    );
+    const ANY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+    const TOKEN_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"],"additionalProperties":false}"#,
     );
-    const DELIVERY_SCHEMA: JsonSchema = JsonSchema::new(
+    const DELIVERY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"token":{"type":"integer"},"extra":{"type":"integer"}},"required":["token","extra"],"additionalProperties":false}"#,
     );
-    const MODE_SCHEMA: JsonSchema = JsonSchema::new(
+    const MODE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"mode":{"type":"string"}},"required":["mode"],"additionalProperties":false}"#,
     );
 
@@ -1038,7 +1040,7 @@ mod json_workflow_tests {
 
     impl JsonRpcSchema for Produce {
         const ADDRESS: &'static str = "workflow.produce";
-        const REQUEST_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+        const REQUEST_SCHEMA: JsonSchema = ANY_SCHEMA;
         const RESPONSE_SCHEMA: JsonSchema = TOKEN_SCHEMA;
         const MAX_REQUEST_BYTES: usize = 64;
         const MAX_RESPONSE_BYTES: usize = 64;
@@ -1405,7 +1407,7 @@ mod json_workflow_tests {
     }
 
     #[test]
-    fn mapping_fails_when_the_actual_response_omits_a_referenced_field() {
+    fn invalid_rpc_response_is_rejected_before_workflow_mapping() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 128, 2>::new()));
         let registry = RpcRegistry::new(lanes);
         register_producer(&registry, "{}");
@@ -1431,11 +1433,14 @@ mod json_workflow_tests {
 
         let event = event_input("{}");
         let error = block_on(execute_steps(&workflow, &event, client))
-            .expect_err("missing referenced field");
+            .expect_err("invalid response contract");
 
         assert!(matches!(
             error,
-            WorkflowExecutionError::MissingOutputField { step: 0, field } if field == "token"
+            WorkflowExecutionError::Rpc {
+                step: 0,
+                source: RpcError::JsonResponseSchema { .. },
+            }
         ));
     }
 

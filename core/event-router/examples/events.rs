@@ -16,11 +16,12 @@ use serde::Deserialize;
 use static_cell::ConstStaticCell;
 
 const FRAME_SIZE: usize = 256;
-const MESSAGE_SCHEMA: JsonSchema = JsonSchema::new(
+const MESSAGE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"bytes":{"type":"array","items":{"type":"integer"},"minItems":4,"maxItems":4}},"required":["bytes"],"additionalProperties":false}"#,
 );
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<3, FRAME_SIZE, 3>> =
     ConstStaticCell::new(RpcLaneStorage::new());

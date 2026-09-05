@@ -1330,6 +1330,7 @@ dependencies = [
  "futures-lite",
  "futures-util",
  "getset",
+ "json-validator",
  "serde",
  "serde_json",
  "smallvec",
@@ -4363,6 +4364,7 @@ name = "json-validator"
 version = "0.1.0"
 dependencies = [
  "json-validator-macros",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]

@@ -17,17 +17,18 @@ use serde_json::json;
 use static_cell::ConstStaticCell;
 
 const FRAME_SIZE: usize = 512;
-const SEED_SCHEMA: JsonSchema = JsonSchema::new(
+const SEED_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"],"additionalProperties":false}"#,
 );
-const REPLY_SCHEMA: JsonSchema = JsonSchema::new(
+const REPLY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"],"additionalProperties":false}"#,
 );
-const DELIVER_SCHEMA: JsonSchema = JsonSchema::new(
+const DELIVER_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
     r#"{"type":"object","properties":{"token":{"type":"integer"},"extra":{"type":"integer"}},"required":["token","extra"],"additionalProperties":false}"#,
 );
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());

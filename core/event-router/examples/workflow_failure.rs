@@ -15,8 +15,9 @@ use barracuda_platform_test::install_global_memory_vfs;
 use static_cell::ConstStaticCell;
 
 const FRAME_SIZE: usize = 256;
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());

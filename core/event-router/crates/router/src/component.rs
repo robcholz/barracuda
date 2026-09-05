@@ -236,8 +236,8 @@ mod tests {
 
     impl JsonRpcSchema for ComponentJson {
         const ADDRESS: &'static str = "component.json";
-        const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
-        const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+        const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+        const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
         const MAX_REQUEST_BYTES: usize = 64;
         const MAX_RESPONSE_BYTES: usize = 64;
     }

@@ -18,21 +18,31 @@ use super::payload::{RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriter};
 use super::registry::{ErasedRpcHandler, RpcFuture};
 use super::{RpcContext, RpcError, RpcResult};
 
-/// Static JSON Schema text included in the contract-owning Plugin crate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct JsonSchema(&'static str);
+/// Static JSON Schema source and compiled validator owned by a JSON RPC contract.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JsonSchema {
+    source: &'static str,
+    validator: json_validator::Validator,
+}
 
 impl JsonSchema {
-    /// Wraps JSON Schema source included at compile time.
+    #[doc(hidden)]
     #[must_use]
-    pub const fn new(source: &'static str) -> Self {
-        Self(source)
+    pub const fn from_parts(source: &'static str, validator: json_validator::Validator) -> Self {
+        Self { source, validator }
     }
 
     /// Returns the included JSON Schema source.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
-        self.0
+        self.source
+    }
+
+    /// Validates one raw JSON document against this schema.
+    ///
+    /// Validation borrows the document and does not construct a JSON value tree.
+    pub fn validate(&self, json: &str) -> Result<(), json_validator::ValidationError> {
+        self.validator.validate_str(json)
     }
 }
 
@@ -92,20 +102,50 @@ impl JsonRpcInfo {
 #[macro_export]
 macro_rules! json_schema {
     ($rpc:literal, request) => {
-        $crate::JsonSchema::new(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../schemas/rpc/",
-            $rpc,
-            "/request.json"
-        )))
+        $crate::JsonSchema::from_parts(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../schemas/rpc/",
+                $rpc,
+                "/request.json"
+            )),
+            $crate::__private::json_validator::rpc_validator!(
+                $crate::__private::json_validator;
+                "../../schemas/rpc/",
+                $rpc,
+                "/request.json"
+            ),
+        )
     };
     ($rpc:literal, response) => {
-        $crate::JsonSchema::new(include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../schemas/rpc/",
-            $rpc,
-            "/response.json"
-        )))
+        $crate::JsonSchema::from_parts(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../schemas/rpc/",
+                $rpc,
+                "/response.json"
+            )),
+            $crate::__private::json_validator::rpc_validator!(
+                $crate::__private::json_validator;
+                "../../schemas/rpc/",
+                $rpc,
+                "/response.json"
+            ),
+        )
+    };
+}
+
+#[macro_export]
+#[doc(hidden)]
+macro_rules! json_schema_inline {
+    ($source:literal $(,)?) => {
+        $crate::JsonSchema::from_parts(
+            $source,
+            $crate::__private::json_validator::rpc_validator_source!(
+                $crate::__private::json_validator;
+                $source
+            ),
+        )
     };
 }
 
@@ -385,18 +425,31 @@ impl core::fmt::Debug for JsonRef {
 pub struct JsonWriter {
     output: LaneWriter,
     max_bytes: usize,
+    address: &'static str,
+    schema: JsonSchema,
 }
 
 impl JsonWriter {
-    fn new(output: LaneWriter, max_bytes: usize) -> Self {
-        Self { output, max_bytes }
+    fn new(
+        output: LaneWriter,
+        max_bytes: usize,
+        address: &'static str,
+        schema: JsonSchema,
+    ) -> Self {
+        Self {
+            output,
+            max_bytes,
+            address,
+            schema,
+        }
     }
 
     /// Validates and writes one raw JSON document directly into the lane.
     ///
     /// # Errors
     ///
-    /// Returns [`RpcError::InvalidJson`] for invalid JSON or
+    /// Returns [`RpcError::InvalidJson`] for invalid JSON,
+    /// [`RpcError::JsonResponseSchema`] for a contract violation, or
     /// [`RpcError::FrameTooLarge`] when the document exceeds lane capacity.
     pub async fn write<J>(mut self, json: &J) -> RpcResult<()>
     where
@@ -419,6 +472,15 @@ impl JsonWriter {
         if written != length {
             return Err(RpcError::InvalidFrameState);
         }
+        let document =
+            core::str::from_utf8(output.get(..written).ok_or(RpcError::InvalidFrameState)?)
+                .map_err(|_| RpcError::InvalidJson)?;
+        self.schema
+            .validate(document)
+            .map_err(|source| RpcError::JsonResponseSchema {
+                address: self.address,
+                source,
+            })?;
         frame.commit(written, LaneFrameKind::Message)
     }
 }
@@ -528,11 +590,22 @@ where
                 return Err(RpcError::InvalidFrameState);
             }
             let request = JsonRef::from_payload(RpcPayloadFrame::from_frame(frame))?;
+            Method::REQUEST_SCHEMA
+                .validate(request.as_str()?)
+                .map_err(|source| RpcError::JsonRequestSchema {
+                    address: Method::ADDRESS,
+                    source,
+                })?;
             self.handler
                 .call(
                     context,
                     request,
-                    JsonWriter::new(output, Method::MAX_RESPONSE_BYTES),
+                    JsonWriter::new(
+                        output,
+                        Method::MAX_RESPONSE_BYTES,
+                        Method::ADDRESS,
+                        Method::RESPONSE_SCHEMA,
+                    ),
                 )
                 .await
         })

@@ -88,6 +88,17 @@ impl RpcMethod for OtherGroupMethod {
     type Output = Unary;
 }
 
+struct GlobalMethod;
+
+impl RpcMethod for GlobalMethod {
+    const ADDRESS: &'static str = "global.status";
+    type Request = Number;
+    type Response = Total;
+    type Error = MethodFailure;
+    type Input = Unary;
+    type Output = Unary;
+}
+
 fn number(value: u32) -> Number {
     Number {
         value,
@@ -233,6 +244,13 @@ fn group_and_visibility_discovery_are_independent() {
             },
         )
         .expect("register Agent-visible endpoint in another group");
+    registry
+        .register::<GlobalMethod, _>("*", |_context, request: RpcFrame<Number>| async move {
+            Ok(Ok(Total {
+                value: request.view()?.value,
+            }))
+        })
+        .expect("register globally visible endpoint");
 
     let typed = RpcGroup::try_from("typed").expect("valid group");
     assert_eq!(
@@ -249,7 +267,7 @@ fn group_and_visibility_discovery_are_independent() {
             .iter()
             .map(AsRef::as_ref)
             .collect::<Vec<&str>>(),
-        vec!["other.status", "typed.unary_unary"]
+        vec!["global.status", "other.status", "typed.unary_unary"]
     );
     assert_eq!(
         registry
@@ -259,7 +277,15 @@ fn group_and_visibility_discovery_are_independent() {
             .iter()
             .map(AsRef::as_ref)
             .collect::<Vec<&str>>(),
-        vec!["typed.frame_lease"]
+        vec!["global.status", "typed.frame_lease"]
+    );
+    assert_eq!(
+        registry
+            .rpcs_by_visibility("unknown")
+            .iter()
+            .map(AsRef::as_ref)
+            .collect::<Vec<&str>>(),
+        vec!["global.status"]
     );
 }
 
