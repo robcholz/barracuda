@@ -14,14 +14,22 @@ barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "m
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
+barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
 http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
+embassy-net.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+embedded-io-async = "0.7"
 futures-lite = "2"
+picoserve = { version = "0.19.0", default-features = false, features = ["embassy"] }
+tokio = { version = "1.52.3", features = ["macros", "rt", "time"] }
 
 [lints.rust]
 unsafe_code = "forbid"
