@@ -1,0 +1,6 @@
+interface:
+  display_name: "Barracuda Create Plugin"
+  short_description: "Create or migrate a Plugin using current architecture"
+  default_prompt: "Use $create-plugin to create or migrate a Barracuda Plugin with capabilities, JSON contracts, lifecycle ownership, and focused tests."
+policy:
+  allow_implicit_invocation: true
