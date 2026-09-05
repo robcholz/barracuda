@@ -1,6 +1,7 @@
 //! Board selection command support.
 
 use std::{
+    collections::BTreeMap,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -12,6 +13,46 @@ use barracuda_board_config::{
 };
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
+
+const WORKSPACE_BEGIN: &str = "# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES";
+const WORKSPACE_END: &str = "# END GENERATED BOARD WORKSPACE DEPENDENCIES";
+
+/// Whether Board registry synchronization changed generated files.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyncStatus {
+    /// The generated registry was rewritten.
+    Updated,
+    /// The generated registry was already current, or was only checked.
+    Current,
+}
+
+/// Summary of one Board registry synchronization.
+#[derive(Debug, Eq, PartialEq)]
+pub struct SyncReport {
+    status: SyncStatus,
+    boards: usize,
+    board_hals: usize,
+}
+
+impl SyncReport {
+    /// Returns whether generated source changed.
+    #[must_use]
+    pub const fn status(&self) -> SyncStatus {
+        self.status
+    }
+
+    /// Returns the number of discovered Board bundles.
+    #[must_use]
+    pub const fn boards(&self) -> usize {
+        self.boards
+    }
+
+    /// Returns the number of distinct registered Board HAL packages.
+    #[must_use]
+    pub const fn board_hals(&self) -> usize {
+        self.board_hals
+    }
+}
 
 /// Command-line interface for `cargo board`.
 #[derive(Debug, Parser)]
@@ -25,6 +66,12 @@ pub struct Cli {
 /// Operations supported by `cargo board`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Synchronize discovered Board HALs into the workspace registry.
+    Sync {
+        /// Check whether generated files are current without writing them.
+        #[arg(long)]
+        check: bool,
+    },
     /// Select a Board, interactively when no name is provided.
     Select {
         /// Board bundle name under `boards/configs`.
@@ -107,6 +154,22 @@ pub enum CommandError {
     /// Command output could not be written.
     #[error("failed to write command output: {0}")]
     Output(#[source] io::Error),
+    /// A generated registry block is malformed.
+    #[error("{0}")]
+    Generated(String),
+    /// Generated Board dependencies do not match the catalog.
+    #[error("Board registry is stale; run `cargo board sync`")]
+    StaleRegistry,
+    /// Two Board bundles disagree about one HAL package path.
+    #[error("Board HAL package `{package}` has conflicting paths `{first}` and `{second}`")]
+    ConflictingBoardHal {
+        /// Conflicting Cargo package.
+        package: String,
+        /// First declared workspace-relative path.
+        first: PathBuf,
+        /// Second declared workspace-relative path.
+        second: PathBuf,
+    },
 }
 
 /// Runs the workspace Board command against `workspace_root`.
@@ -153,6 +216,20 @@ where
     F: FnOnce(&[String], Option<usize>) -> Result<Option<usize>, CommandError>,
 {
     match cli.command {
+        Command::Sync { check } => {
+            let report = sync_with_report(workspace_root, check)?;
+            let action = match report.status() {
+                SyncStatus::Updated => "Synced",
+                SyncStatus::Current => "Checked",
+            };
+            writeln!(
+                output,
+                "{action} Board registry ({} Boards, {} HALs).",
+                report.boards(),
+                report.board_hals()
+            )
+            .map_err(CommandError::Output)
+        }
         Command::Select { name: None } => {
             let boards = discover_boards(workspace_root)?;
             let current = read_selected_board(workspace_root)?;
@@ -175,6 +252,107 @@ where
         }
         Command::Target { name: Some(name) } => print_target(workspace_root, &name, output),
     }
+}
+
+/// Synchronizes or validates the tracked Board HAL registry.
+///
+/// # Errors
+///
+/// Returns an error when Board discovery, generated markers, or file access fails.
+pub fn sync(workspace_root: &Path, check: bool) -> Result<(), CommandError> {
+    sync_with_report(workspace_root, check).map(|_report| ())
+}
+
+/// Synchronizes discovered Board HALs into the tracked workspace registry.
+///
+/// # Errors
+///
+/// Returns an error when Board discovery, generated markers, or file access fails.
+pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport, CommandError> {
+    let boards = discover_boards(workspace_root)?;
+    let mut board_hals = BTreeMap::<String, PathBuf>::new();
+    for name in &boards {
+        let board = read_board(workspace_root, name)?;
+        let Some(board_hal) = board.board_hal() else {
+            continue;
+        };
+        if let Some(first) = board_hals.get(board_hal.package()) {
+            if first != board_hal.path() {
+                return Err(CommandError::ConflictingBoardHal {
+                    package: board_hal.package().to_owned(),
+                    first: first.clone(),
+                    second: board_hal.path().to_owned(),
+                });
+            }
+        } else {
+            board_hals.insert(board_hal.package().to_owned(), board_hal.path().to_owned());
+        }
+    }
+
+    let manifest_path = workspace_root.join("Cargo.toml");
+    let old_manifest = fs::read_to_string(&manifest_path).map_err(|source| CommandError::Read {
+        path: manifest_path.clone(),
+        source,
+    })?;
+    let dependencies = board_hals
+        .iter()
+        .map(|(package, path)| format!("{package} = {{ path = {:?} }}", path.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let manifest = replace_block(&old_manifest, WORKSPACE_BEGIN, WORKSPACE_END, &dependencies)?;
+    let stale = manifest != old_manifest;
+    if check && stale {
+        return Err(CommandError::StaleRegistry);
+    }
+    if stale {
+        fs::write(&manifest_path, manifest).map_err(|source| CommandError::Read {
+            path: manifest_path,
+            source,
+        })?;
+    }
+    Ok(SyncReport {
+        status: if stale {
+            SyncStatus::Updated
+        } else {
+            SyncStatus::Current
+        },
+        boards: boards.len(),
+        board_hals: board_hals.len(),
+    })
+}
+
+fn replace_block(text: &str, begin: &str, end: &str, body: &str) -> Result<String, CommandError> {
+    let begin_offset = text.find(begin).ok_or_else(|| {
+        CommandError::Generated(format!("missing generated block marker `{begin}`"))
+    })?;
+    let line_start = text[..begin_offset]
+        .rfind('\n')
+        .map_or(0, |offset| offset + 1);
+    let indentation = &text[line_start..begin_offset];
+    if !indentation.bytes().all(|byte| matches!(byte, b' ' | b'\t')) {
+        return Err(CommandError::Generated(format!(
+            "invalid indentation before `{begin}`"
+        )));
+    }
+    let end_offset = text[begin_offset..]
+        .find(end)
+        .map(|offset| begin_offset + offset)
+        .ok_or_else(|| {
+            CommandError::Generated(format!("missing generated block marker `{end}`"))
+        })?;
+    let line_end = text[end_offset..]
+        .find('\n')
+        .map_or(text.len(), |offset| end_offset + offset);
+    Ok(format!(
+        "{}{}{}\n{}\n{}{}{}",
+        &text[..line_start],
+        indentation,
+        begin,
+        body,
+        indentation,
+        end,
+        &text[line_end..]
+    ))
 }
 
 #[cfg(test)]
@@ -322,7 +500,7 @@ mod tests {
     use barracuda_board_config::{read_selected_board, write_selected_board};
     use tempfile::tempdir;
 
-    use super::run_with_selector;
+    use super::{run_with_selector, sync_with_report, CommandError, SyncStatus};
 
     fn add_board(root: &Path, name: &str) {
         let directory = root.join("boards/configs").join(name);
@@ -335,6 +513,95 @@ mod tests {
         )
         .expect("Board YAML");
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
+    }
+
+    fn add_board_hal(root: &Path, name: &str, package: &str, path: &str) {
+        let directory = root.join("boards/configs").join(name);
+        fs::create_dir_all(&directory).expect("Board directory");
+        fs::write(
+            directory.join("board.yml"),
+            format!(
+                "name: {name}\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\nboard-hal:\n  package: {package}\n  path: {path}\n  type: TestBoardHal\n"
+            ),
+        )
+        .expect("Board YAML");
+        fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
+        let hal = root.join(path);
+        fs::create_dir_all(&hal).expect("Board HAL directory");
+        fs::write(
+            hal.join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
+        )
+        .expect("Board HAL manifest");
+    }
+
+    fn add_workspace(root: &Path) {
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace.dependencies]\n# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES\nold\n# END GENERATED BOARD WORKSPACE DEPENDENCIES\n",
+        )
+        .expect("workspace manifest");
+    }
+
+    #[test]
+    fn sync_registers_board_hals_once_in_package_order() {
+        let root = tempdir().expect("temporary workspace");
+        add_workspace(root.path());
+        add_board_hal(
+            root.path(),
+            "zeta-board",
+            "barracuda-board-zeta",
+            "boards/zeta",
+        );
+        add_board_hal(
+            root.path(),
+            "alpha-board",
+            "barracuda-board-alpha",
+            "boards/alpha",
+        );
+        add_board_hal(
+            root.path(),
+            "alpha-board-variant",
+            "barracuda-board-alpha",
+            "boards/alpha",
+        );
+
+        let report = sync_with_report(root.path(), false).expect("Board sync");
+
+        assert_eq!(report.status(), SyncStatus::Updated);
+        assert_eq!(report.boards(), 3);
+        assert_eq!(report.board_hals(), 2);
+        let workspace =
+            fs::read_to_string(root.path().join("Cargo.toml")).expect("workspace manifest");
+        assert_eq!(workspace.matches("barracuda-board-alpha =").count(), 1);
+        let alpha = workspace
+            .find("barracuda-board-alpha = { path = \"boards/alpha\" }")
+            .expect("alpha HAL");
+        let zeta = workspace
+            .find("barracuda-board-zeta = { path = \"boards/zeta\" }")
+            .expect("zeta HAL");
+        assert!(alpha < zeta);
+    }
+
+    #[test]
+    fn board_sync_check_rejects_stale_registry_without_writing() {
+        let root = tempdir().expect("temporary workspace");
+        add_workspace(root.path());
+        add_board_hal(
+            root.path(),
+            "alpha-board",
+            "barracuda-board-alpha",
+            "boards/alpha",
+        );
+        let before = fs::read_to_string(root.path().join("Cargo.toml")).expect("before");
+
+        let error = sync_with_report(root.path(), true).expect_err("stale registry");
+
+        assert!(matches!(error, CommandError::StaleRegistry));
+        assert_eq!(
+            fs::read_to_string(root.path().join("Cargo.toml")).expect("after"),
+            before
+        );
     }
 
     #[test]
