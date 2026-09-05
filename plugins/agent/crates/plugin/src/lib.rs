@@ -4,56 +4,24 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
+mod model_api_http;
+
 use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_runtime::{AgentRuntime, RuntimeStorageConfig};
+use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
+use barracuda_webserver_plugin::WebServer;
 use http_client::ClientFactory;
 
-pub use barracuda_agent_runtime::{ApiPurpose, ModelApiConfig, ModelApiFactory};
-pub use barracuda_model_api::{BackendKind, InitError};
+pub use model_api_http::SET_API_PATH;
 
 const PERSISTENCE_ROOT: &str = "/";
-
-type SetApiHandler = dyn Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError>;
-
-/// Typed capability for configuring the Agent's model APIs.
-pub struct AgentSetApi {
-    handler: Box<SetApiHandler>,
-}
-
-impl AgentSetApi {
-    /// Creates a model API configuration capability around one synchronous handler.
-    #[must_use]
-    pub fn new(
-        handler: impl Fn(ModelApiConfig, ApiPurpose, bool) -> Result<(), InitError> + 'static,
-    ) -> Self {
-        Self {
-            handler: Box::new(handler),
-        }
-    }
-
-    /// Applies one model API configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`InitError`] when the configuration is invalid.
-    pub fn set_api(
-        &self,
-        api: ModelApiConfig,
-        purpose: ApiPurpose,
-        default: bool,
-    ) -> Result<(), InitError> {
-        (self.handler)(api, purpose, default)
-    }
-}
 
 /// Plugin that constructs and owns the Agent runtime and Component.
 #[barracuda_plugin_api::plugin]
@@ -82,6 +50,9 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
+        let webserver = context.require::<WebServer>(
+            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+        )?;
         let filesystem = context.filesystem()?.clone();
         let http_clients = self.http_clients.clone();
         let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
@@ -93,10 +64,13 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
             .map_err(PluginError::registration)?;
         runtime.start_all().map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
-        let set_api_runtime = Rc::clone(&runtime);
-        context.provide(Rc::new(AgentSetApi::new(move |api, purpose, default| {
-            set_api_runtime.set_api(api, purpose, default)
-        })))?;
+        let registration = webserver
+            .serve_http(
+                SET_API_PATH,
+                model_api_http::SetApiEndpoint::new(Rc::clone(&runtime)),
+            )
+            .map_err(PluginError::registration)?;
+        context.retain(registration);
         context
             .event_router
             .load(AgentComponent::from_shared(runtime, service))?;
@@ -109,17 +83,40 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use alloc::boxed::Box;
+    use alloc::rc::Rc;
     use barracuda_event_router::{EventRouter, RpcLaneStorage};
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
     };
     use barracuda_plugin_api::PluginContext;
-    use barracuda_plugin_manager::{PluginId, PluginManager};
+    use barracuda_plugin_manager::{
+        Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
+    };
+    use barracuda_webserver_plugin::WebServer;
     use futures_lite::future::block_on;
 
     use http_client::ClientFactory;
 
     use super::AgentPlugin;
+
+    struct WebServerProvider(Rc<WebServer>);
+
+    impl PluginDeclaration for WebServerProvider {
+        const ID: &'static str = "webserver";
+    }
+
+    impl Plugin<512> for WebServerProvider {
+        fn register<Storage>(
+            &mut self,
+            context: &mut PluginRegisterContext<'_, 512, Storage>,
+        ) -> PluginResult<()>
+        where
+            Storage: barracuda_plugin_manager::PluginStorage,
+        {
+            context.provide(Rc::clone(&self.0))?;
+            Ok(())
+        }
+    }
 
     #[test]
     fn plugin_loads_its_agent_component() {
@@ -137,6 +134,10 @@ mod tests {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<16, 512, 8>::new()));
             let mut router = EventRouter::new(lanes).await.expect("create router");
             let id = PluginId::try_from("agent").expect("valid Plugin ID");
+
+            manager
+                .register(&mut router, WebServerProvider(Rc::new(WebServer::new())))
+                .expect("register WebServer provider");
 
             let stack = never_embassy_stack();
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
