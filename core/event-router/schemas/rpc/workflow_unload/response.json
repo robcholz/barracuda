@@ -1,0 +1,15 @@
+{
+  "oneOf": [
+    { "type": "object", "properties": {}, "additionalProperties": false },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": ["invalid_json", "invalid_workflow_id", "not_found", "persistence"]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

@@ -1,31 +1,26 @@
-//! Streaming JSON protocol for Workflow control RPCs.
+//! Lane-native JSON protocol for Workflow control RPCs.
 
-use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::mem::size_of;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
-use futures_core::Stream;
-use serde::Deserialize;
-use serde_json::Value;
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 use barracuda_rpc::{
-    RpcClient, RpcError, RpcFrame, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
+    json_schema, JsonObjectPayload, JsonPayload, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress,
+    RpcClient, RpcError,
 };
+use serde::Deserialize;
+use serde_json::Value;
 
 use crate::definition::WorkflowDefinitionError;
 use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
 
+const CONTROL_RESPONSE_MAX_BYTES: usize = 40;
+
 /// Receiver-side rejection returned by a Workflow control RPC.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum WorkflowControlRejection {
-    /// A request frame was malformed.
-    InvalidFrame,
-    /// The request body was empty or was not valid Workflow JSON.
+    /// The request was not a valid Workflow JSON document.
     InvalidJson,
     /// The JSON contained an invalid Workflow ID.
     InvalidWorkflowId,
@@ -51,6 +46,25 @@ pub enum WorkflowControlRejection {
     InvalidTopic,
 }
 
+impl WorkflowControlRejection {
+    const fn code(self) -> &'static str {
+        match self {
+            Self::InvalidJson => "invalid_json",
+            Self::InvalidWorkflowId => "invalid_workflow_id",
+            Self::InvalidRule => "invalid_rule",
+            Self::InvalidRpcAddress => "invalid_rpc_address",
+            Self::EmptySteps => "empty_steps",
+            Self::DuplicateId => "duplicate_id",
+            Self::NotFound => "not_found",
+            Self::Persistence => "persistence",
+            Self::InvalidArguments => "invalid_arguments",
+            Self::UnknownMethod => "unknown_method",
+            Self::InvalidLink => "invalid_link",
+            Self::InvalidTopic => "invalid_topic",
+        }
+    }
+}
+
 /// Failure returned by [`WorkflowClient`].
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -63,90 +77,26 @@ pub enum WorkflowControlError {
     Rejected(WorkflowControlRejection),
 }
 
-#[repr(C, packed)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-struct WorkflowJsonFrameHeader {
-    data_length: usize,
-}
-
-/// One fixed-layout frame in a streaming Workflow JSON request.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Immutable, IntoBytes, KnownLayout, PartialEq, Eq, TryFromBytes)]
-pub struct WorkflowJsonFrame<const M: usize> {
-    bytes: [u8; M],
-}
-
-impl<const M: usize> WorkflowJsonFrame<M> {
-    const fn data_capacity() -> usize {
-        M.saturating_sub(size_of::<WorkflowJsonFrameHeader>())
-    }
-
-    fn new(data: &[u8]) -> Result<Self, RpcError> {
-        if data.is_empty() || data.len() > Self::data_capacity() {
-            return Err(RpcError::InvalidFrameState);
-        }
-        let mut frame = Self { bytes: [0; M] };
-        let header_size = size_of::<WorkflowJsonFrameHeader>();
-        let header = WorkflowJsonFrameHeader {
-            data_length: data.len(),
-        };
-        frame
-            .bytes
-            .get_mut(..header_size)
-            .ok_or(RpcError::InvalidFrameState)?
-            .copy_from_slice(header.as_bytes());
-        let data_end = header_size
-            .checked_add(data.len())
-            .ok_or(RpcError::InvalidFrameState)?;
-        frame
-            .bytes
-            .get_mut(header_size..data_end)
-            .ok_or(RpcError::InvalidFrameState)?
-            .copy_from_slice(data);
-        Ok(frame)
-    }
-
-    fn data(&self) -> Result<&[u8], WorkflowControlRejection> {
-        let (header, remaining) = WorkflowJsonFrameHeader::try_read_from_prefix(&self.bytes)
-            .map_err(|_error| WorkflowControlRejection::InvalidFrame)?;
-        if header.data_length == 0 || header.data_length > remaining.len() {
-            return Err(WorkflowControlRejection::InvalidFrame);
-        }
-        let data = remaining
-            .get(..header.data_length)
-            .ok_or(WorkflowControlRejection::InvalidFrame)?;
-        if remaining
-            .get(header.data_length..)
-            .is_none_or(|padding| padding.iter().any(|byte| *byte != 0))
-        {
-            return Err(WorkflowControlRejection::InvalidFrame);
-        }
-        Ok(data)
-    }
-}
-
-/// Streaming RPC that validates and durably loads one Workflow JSON document.
+/// JSON RPC that validates and durably loads one Workflow document.
 pub struct WorkflowLoad<const M: usize>;
 
-impl<const M: usize> RpcMethod for WorkflowLoad<M> {
+impl<const M: usize> JsonRpcSchema for WorkflowLoad<M> {
     const ADDRESS: &'static str = "workflow.load";
-    type Request = WorkflowJsonFrame<M>;
-    type Response = ();
-    type Error = WorkflowControlRejection;
-    type Input = Streaming;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("workflow_load", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("workflow_load", response);
+    const MAX_REQUEST_BYTES: usize = M;
+    const MAX_RESPONSE_BYTES: usize = CONTROL_RESPONSE_MAX_BYTES;
 }
 
-/// Streaming RPC that durably unloads one Workflow selected by JSON ID.
+/// JSON RPC that durably unloads one Workflow selected by ID.
 pub struct WorkflowUnload<const M: usize>;
 
-impl<const M: usize> RpcMethod for WorkflowUnload<M> {
+impl<const M: usize> JsonRpcSchema for WorkflowUnload<M> {
     const ADDRESS: &'static str = "workflow.unload";
-    type Request = WorkflowJsonFrame<M>;
-    type Response = ();
-    type Error = WorkflowControlRejection;
-    type Input = Streaming;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("workflow_unload", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("workflow_unload", response);
+    const MAX_REQUEST_BYTES: usize = M;
+    const MAX_RESPONSE_BYTES: usize = CONTROL_RESPONSE_MAX_BYTES;
 }
 
 /// Client for Workflow Runtime's durable control RPCs.
@@ -159,108 +109,83 @@ impl<const M: usize> WorkflowClient<M> {
     /// Wraps an existing RPC client.
     #[must_use]
     pub const fn new(rpc: RpcClient) -> Self {
-        const { assert_frame_capacity::<M>() }
         Self { rpc }
     }
 
-    /// Streams one complete Workflow JSON document to `workflow.load`.
+    /// Loads one complete Workflow JSON document.
     ///
     /// # Errors
     ///
     /// Returns a transport error or the Runtime's validation, duplicate-ID, or
     /// persistence rejection.
     pub async fn load(&self, json: &str) -> Result<(), WorkflowControlError> {
-        self.call::<WorkflowLoad<M>>(json.as_bytes()).await
+        self.call::<WorkflowLoad<M>, _>(json).await
     }
 
-    /// Streams a JSON Workflow ID to `workflow.unload`.
+    /// Unloads one Workflow by ID.
     ///
     /// # Errors
     ///
     /// Returns a transport error, a not-found rejection, or a persistence
     /// rejection.
     pub async fn unload(&self, workflow_id: &WorkflowId) -> Result<(), WorkflowControlError> {
-        let json = format!(r#"{{"id":"{}"}}"#, workflow_id.as_str());
-        self.call::<WorkflowUnload<M>>(json.as_bytes()).await
+        let fields = |writer: &mut barracuda_rpc::JsonObjectWriter<'_>| {
+            writer.string_field("id", workflow_id.as_str())
+        };
+        self.call::<WorkflowUnload<M>, _>(&JsonObjectPayload::new(&fields))
+            .await
     }
 
-    async fn call<Method>(&self, json: &[u8]) -> Result<(), WorkflowControlError>
+    async fn call<Method, J>(&self, request: &J) -> Result<(), WorkflowControlError>
     where
-        Method: RpcMethod<
-            Request = WorkflowJsonFrame<M>,
-            Response = (),
-            Error = WorkflowControlRejection,
-            Input = Streaming,
-            Output = Unary,
-        >,
+        Method: JsonRpcSchema,
+        J: JsonPayload + ?Sized,
     {
-        let frames = RpcStream::new(WorkflowJsonStream::<M>::new(json.to_vec()));
-        let outcome = self.rpc.call::<Method>(frames)?.await?;
-        match outcome {
-            Ok(response) => {
-                response.view()?;
-                Ok(())
-            }
-            Err(rejection) => Err(WorkflowControlError::Rejected(*rejection.view()?)),
+        let address = RpcAddress::try_from(Method::ADDRESS).map_err(RpcError::from)?;
+        let response = self.rpc.call_json(&address, request)?.await?;
+        let response: WorkflowControlResponse = response.deserialize()?;
+        match response.error {
+            Some(rejection) => Err(WorkflowControlError::Rejected(rejection)),
+            None => Ok(()),
         }
     }
 }
 
-/// Fully collected JSON request accepted from the streaming control wire.
-pub struct WorkflowJsonRequest {
-    bytes: Vec<u8>,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowControlResponse {
+    #[serde(default)]
+    error: Option<WorkflowControlRejection>,
 }
 
-impl TryFrom<Vec<u8>> for WorkflowJsonRequest {
-    type Error = WorkflowControlRejection;
-
-    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
-        if bytes.is_empty() {
-            return Err(WorkflowControlRejection::InvalidJson);
-        }
-        Ok(Self { bytes })
-    }
-}
-
-impl WorkflowJsonRequest {
-    /// Collects and validates all request frames through EOF.
-    pub async fn accept<const M: usize>(
-        mut frames: RpcStream<RpcFrame<WorkflowJsonFrame<M>>>,
-    ) -> RpcResult<Result<Self, WorkflowControlRejection>> {
-        const { assert_frame_capacity::<M>() }
-        let mut bytes = Vec::new();
-        while let Some(frame) = frames.next().await {
-            let frame = frame?;
-            let frame = frame.view()?;
-            let data = match frame.data() {
-                Ok(data) => data,
-                Err(rejection) => return Ok(Err(rejection)),
+/// Writes `{}` for success or a stable JSON rejection code for failure.
+pub async fn write_control_response(
+    response: JsonWriter,
+    result: Result<(), WorkflowControlRejection>,
+) -> Result<(), RpcError> {
+    match result {
+        Ok(()) => response.write("{}").await,
+        Err(rejection) => {
+            let fields = |writer: &mut barracuda_rpc::JsonObjectWriter<'_>| {
+                writer.string_field("error", rejection.code())
             };
-            bytes.extend_from_slice(data);
+            response.write(&JsonObjectPayload::new(&fields)).await
         }
-        Ok(bytes.try_into())
     }
+}
 
-    /// Returns the original JSON bytes for durable storage.
-    #[must_use]
-    pub fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
+/// Parses one Workflow definition from its original JSON document.
+pub fn parse_definition(json: &str) -> Result<WorkflowDefinition, WorkflowControlRejection> {
+    let document: WorkflowDocument =
+        serde_json::from_str(json).map_err(|_error| WorkflowControlRejection::InvalidJson)?;
+    document.try_into()
+}
 
-    /// Parses and validates this request as one Workflow definition.
-    pub fn definition(&self) -> Result<WorkflowDefinition, WorkflowControlRejection> {
-        let document: WorkflowDocument = serde_json::from_slice(&self.bytes)
-            .map_err(|_error| WorkflowControlRejection::InvalidJson)?;
-        document.try_into()
-    }
-
-    /// Parses and validates this request as one Workflow ID document.
-    pub fn workflow_id(&self) -> Result<WorkflowId, WorkflowControlRejection> {
-        let document: WorkflowIdDocument = serde_json::from_slice(&self.bytes)
-            .map_err(|_error| WorkflowControlRejection::InvalidJson)?;
-        WorkflowId::try_from(document.id)
-            .map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)
-    }
+/// Parses one Workflow ID request document.
+pub fn parse_workflow_id(json: &str) -> Result<WorkflowId, WorkflowControlRejection> {
+    let document: WorkflowIdDocument =
+        serde_json::from_str(json).map_err(|_error| WorkflowControlRejection::InvalidJson)?;
+    WorkflowId::try_from(document.id).map_err(|_error| WorkflowControlRejection::InvalidWorkflowId)
 }
 
 #[derive(Deserialize)]
@@ -312,7 +237,7 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .steps
             .into_iter()
             .map(|step| {
-                let address = barracuda_rpc::RpcAddress::try_from(step.call.as_str())
+                let address = RpcAddress::try_from(step.call.as_str())
                     .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
                 Ok(WorkflowStep::new(address, step.arguments))
             })
@@ -330,70 +255,77 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
     }
 }
 
-struct WorkflowJsonStream<const M: usize> {
-    bytes: Vec<u8>,
-    offset: usize,
-}
-
-impl<const M: usize> WorkflowJsonStream<M> {
-    fn new(bytes: Vec<u8>) -> Self {
-        Self { bytes, offset: 0 }
-    }
-}
-
-impl<const M: usize> Stream for WorkflowJsonStream<M> {
-    type Item = RpcResult<WorkflowJsonFrame<M>>;
-
-    fn poll_next(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        let Some(remaining) = this.bytes.get(this.offset..) else {
-            return Poll::Ready(Some(Err(RpcError::InvalidFrameState)));
-        };
-        if remaining.is_empty() {
-            return Poll::Ready(None);
-        }
-        let length = remaining.len().min(WorkflowJsonFrame::<M>::data_capacity());
-        let Some(chunk) = remaining.get(..length) else {
-            return Poll::Ready(Some(Err(RpcError::InvalidFrameState)));
-        };
-        let frame = WorkflowJsonFrame::new(chunk);
-        this.offset = match this.offset.checked_add(length) {
-            Some(offset) => offset,
-            None => return Poll::Ready(Some(Err(RpcError::InvalidFrameState))),
-        };
-        Poll::Ready(Some(frame))
-    }
-}
-
-const fn assert_frame_capacity<const M: usize>() {
-    assert!(
-        M > size_of::<WorkflowJsonFrameHeader>(),
-        "Workflow control requires room for frame metadata and at least one JSON byte"
-    );
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
     #![allow(missing_docs)]
 
+    use alloc::boxed::Box;
     use alloc::vec::Vec;
 
-    use super::{WorkflowControlRejection, WorkflowJsonRequest};
+    use barracuda_rpc::{JsonRpcSchema, JsonWriter, RpcLaneStorage, RpcRegistry};
+    use futures_lite::future::block_on;
+
+    use super::{
+        parse_definition, WorkflowClient, WorkflowControlError, WorkflowControlRejection,
+        WorkflowLoad, WorkflowUnload,
+    };
+
+    #[test]
+    fn workflow_control_methods_are_lane_native_json() {
+        assert_eq!(WorkflowLoad::<256>::ADDRESS, "workflow.load");
+        assert_eq!(WorkflowLoad::<256>::MAX_REQUEST_BYTES, 256);
+        assert_eq!(WorkflowUnload::<256>::ADDRESS, "workflow.unload");
+        assert_eq!(WorkflowUnload::<256>::MAX_REQUEST_BYTES, 256);
+    }
+
+    #[test]
+    fn workflow_client_reads_json_success_and_rejection_responses() {
+        block_on(async {
+            let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+            let registry = RpcRegistry::new(lanes);
+            registry
+                .register_json::<WorkflowLoad<128>, _>(
+                    "system",
+                    |_context, _request, response: JsonWriter| async move {
+                        response.write("{}").await
+                    },
+                )
+                .expect("register load control");
+            registry
+                .register_json::<WorkflowUnload<128>, _>(
+                    "system",
+                    |_context, _request, response: JsonWriter| async move {
+                        response.write(r#"{"error":"not_found"}"#).await
+                    },
+                )
+                .expect("register unload control");
+            let client = WorkflowClient::<128>::new(registry.client());
+
+            client
+                .load(r#"{"id":"a","match":{"event":"a"},"steps":[{"call":"a.b"}]}"#)
+                .await
+                .expect("read empty success response");
+            let id = crate::WorkflowId::try_from("a").expect("valid Workflow ID");
+            assert_eq!(
+                client.unload(&id).await,
+                Err(WorkflowControlError::Rejected(
+                    WorkflowControlRejection::NotFound
+                ))
+            );
+        });
+    }
 
     #[test]
     fn workflow_json_uses_the_documented_match_and_step_shape() {
-        let request = WorkflowJsonRequest::try_from(
-            br#"{
+        let definition = parse_definition(
+            r#"{
                 "id":"gateway-to-agent",
                 "match":{"event":"gateway.*"},
                 "steps":[{"call":"adapter.gateway"},{"call":"agent.run"}]
-            }"#
-            .to_vec(),
+            }"#,
         )
-        .expect("non-empty JSON");
-
-        let definition = request.definition().expect("valid Workflow JSON");
+        .expect("valid Workflow JSON");
 
         assert_eq!(definition.id().as_str(), "gateway-to-agent");
         assert_eq!(definition.event().as_str(), "gateway.*");
@@ -410,39 +342,30 @@ mod tests {
 
     #[test]
     fn workflow_json_accepts_an_optional_exact_topic() {
-        let request = WorkflowJsonRequest::try_from(
-            br#"{
+        let definition = parse_definition(
+            r#"{
                 "id":"morning-alarm",
                 "match":{"event":"scheduler.triggered","topic":"morning"},
                 "steps":[{"call":"alarm.ring"}]
-            }"#
-            .to_vec(),
+            }"#,
         )
-        .expect("non-empty JSON");
-
-        let definition = request.definition().expect("valid Workflow JSON");
+        .expect("valid Workflow JSON");
         assert_eq!(
             definition.topic().map(crate::Topic::as_str),
             Some("morning")
         );
 
-        let invalid = WorkflowJsonRequest::try_from(
-            br#"{"id":"bad","match":{"event":"scheduler.triggered","topic":"topic-name-is-over-16"},"steps":[{"call":"alarm.ring"}]}"#
-                .to_vec(),
-        )
-        .expect("non-empty JSON")
-        .definition();
+        let invalid = parse_definition(
+            r#"{"id":"bad","match":{"event":"scheduler.triggered","topic":"topic-name-is-over-16"},"steps":[{"call":"alarm.ring"}]}"#,
+        );
         assert!(matches!(
             invalid,
             Err(WorkflowControlRejection::InvalidTopic)
         ));
 
-        let wildcard = WorkflowJsonRequest::try_from(
-            br#"{"id":"wildcard","match":{"event":"scheduler.triggered","topic":"*"},"steps":[{"call":"alarm.ring"}]}"#
-                .to_vec(),
-        )
-        .expect("non-empty JSON")
-        .definition();
+        let wildcard = parse_definition(
+            r#"{"id":"wildcard","match":{"event":"scheduler.triggered","topic":"*"},"steps":[{"call":"alarm.ring"}]}"#,
+        );
         assert!(matches!(
             wildcard,
             Err(WorkflowControlRejection::InvalidTopic)
@@ -451,19 +374,13 @@ mod tests {
 
     #[test]
     fn workflow_json_rejects_invalid_json_and_empty_steps() {
-        let malformed = WorkflowJsonRequest::try_from(b"{".to_vec())
-            .expect("non-empty malformed request")
-            .definition();
         assert!(matches!(
-            malformed,
+            parse_definition("{"),
             Err(WorkflowControlRejection::InvalidJson)
         ));
 
-        let empty_steps = WorkflowJsonRequest::try_from(
-            br#"{"id":"empty","match":{"event":"gateway.*"},"steps":[]}"#.to_vec(),
-        )
-        .expect("non-empty JSON")
-        .definition();
+        let empty_steps =
+            parse_definition(r#"{"id":"empty","match":{"event":"gateway.*"},"steps":[]}"#);
         assert!(matches!(
             empty_steps,
             Err(WorkflowControlRejection::EmptySteps)

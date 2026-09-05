@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, Router, RpcFrame,
-    RpcLaneStorage, RpcMethod, RpcRegistry, RunContext, Unary, UnregisterContext, WorkflowClient,
+    Component, ComponentFuture, ComponentResult, EventRouter, JsonRpcSchema, JsonSchema,
+    JsonWriter, RegisterContext, Router, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry,
+    RunContext, Unary, UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_profile::dhat::{AllocationStats, HeapProfile};
@@ -230,7 +231,17 @@ fn profile_router(output: &Path) -> Report {
     Report { live, after_drop }
 }
 
-const EVENT_FRAME: usize = 64;
+const EVENT_FRAME: usize = 128;
+
+struct CatalogSink;
+
+impl JsonRpcSchema for CatalogSink {
+    const ADDRESS: &'static str = "scale.sink";
+    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const MAX_REQUEST_BYTES: usize = 2;
+    const MAX_RESPONSE_BYTES: usize = 2;
+}
 
 #[derive(Default)]
 struct CatalogState {
@@ -244,8 +255,11 @@ struct CatalogLoader {
 }
 
 impl Component<EVENT_FRAME> for CatalogLoader {
-    fn register(&mut self, _context: &mut RegisterContext<'_, EVENT_FRAME>) -> ComponentResult<()> {
-        Ok(())
+    fn register(&mut self, context: &mut RegisterContext<'_, EVENT_FRAME>) -> ComponentResult<()> {
+        context.register_json::<CatalogSink, _>(
+            "*",
+            |_context, _request, response: JsonWriter| async move { response.write("{}").await },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<EVENT_FRAME>) -> ComponentFuture<'a> {

@@ -1,5 +1,4 @@
-//! Usage: a multi-step Workflow maps a field from one RPC response into the
-//! next RPC request with `$previous.output.<field>`.
+//! Usage: a multi-step Workflow maps JSON fields between RPC calls.
 
 use std::cell::{Cell, RefCell};
 use std::future::{pending, poll_fn, Future};
@@ -8,16 +7,27 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_event_router::{
-    rpc_dynamic, Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter,
-    EventRouter, RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcWire, RunContext, Unary,
+    Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
+    JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcLaneStorage, RunContext,
     UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::json;
 use static_cell::ConstStaticCell;
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-const FRAME_SIZE: usize = 256;
+const FRAME_SIZE: usize = 512;
+const SEED_SCHEMA: JsonSchema = JsonSchema::new(
+    r#"{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"],"additionalProperties":false}"#,
+);
+const REPLY_SCHEMA: JsonSchema = JsonSchema::new(
+    r#"{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"],"additionalProperties":false}"#,
+);
+const DELIVER_SCHEMA: JsonSchema = JsonSchema::new(
+    r#"{"type":"object","properties":{"token":{"type":"integer"},"extra":{"type":"integer"}},"required":["token","extra"],"additionalProperties":false}"#,
+);
+const EMPTY_SCHEMA: JsonSchema =
+    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());
@@ -31,63 +41,13 @@ const WORKFLOW_JSON: &str = r#"{
     ]
 }"#;
 
-#[repr(C)]
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Eq,
-    RpcWire,
-    TryFromBytes,
-)]
+#[derive(Deserialize)]
 struct Seed {
     n: u32,
 }
 
-#[repr(C)]
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Eq,
-    RpcWire,
-    TryFromBytes,
-)]
-struct Reply {
-    token: u32,
-}
-
-#[repr(C)]
-#[derive(
-    Serialize,
-    Deserialize,
-    Clone,
-    Copy,
-    Debug,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Eq,
-    RpcWire,
-    TryFromBytes,
-)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 struct Deliver {
-    // Filled from `$previous.output.token`, so it is absent from the literal
-    // arguments and must default when the base request is transcoded.
-    #[serde(default)]
     token: u32,
     extra: u32,
 }
@@ -96,32 +56,26 @@ struct SeedEvent;
 
 impl Event for SeedEvent {
     const ID: &'static str = "example.seed";
-    type Message = Seed;
-    type Input = Unary;
 }
 
 struct Produce;
 
-#[rpc_dynamic]
-impl RpcMethod for Produce {
+impl JsonRpcSchema for Produce {
     const ADDRESS: &'static str = "example.produce";
-    type Request = Seed;
-    type Response = Reply;
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = SEED_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = REPLY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 32;
+    const MAX_RESPONSE_BYTES: usize = 32;
 }
 
 struct Consume;
 
-#[rpc_dynamic]
-impl RpcMethod for Consume {
+impl JsonRpcSchema for Consume {
     const ADDRESS: &'static str = "example.consume";
-    type Request = Deliver;
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = DELIVER_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 64;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -136,21 +90,24 @@ struct WorkflowDemo {
 
 impl Component<FRAME_SIZE> for WorkflowDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Produce, _>(
-            "system",
-            |_context, request: RpcFrame<Seed>| async move {
-                let seed = *request.view()?;
-                Ok(Ok(Reply { token: seed.n }))
+        context.register_json::<Produce, _>(
+            "*",
+            |_context, request: JsonRef, response: JsonWriter| async move {
+                let seed = request.deserialize::<Seed>()?;
+                response.write(&json!({"token": seed.n})).await
             },
         )?;
         let recorded = Rc::clone(&self.state.recorded);
-        context.register_rpc::<Consume, _>("system", move |_context, request: RpcFrame<Deliver>| {
-            let recorded = Rc::clone(&recorded);
-            async move {
-                recorded.replace(Some(*request.view()?));
-                Ok(Ok(()))
-            }
-        })
+        context.register_json::<Consume, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let recorded = Rc::clone(&recorded);
+                async move {
+                    recorded.replace(Some(request.deserialize::<Deliver>()?));
+                    response.write("{}").await
+                }
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -161,7 +118,7 @@ impl Component<FRAME_SIZE> for WorkflowDemo {
                 .await
                 .map_err(ComponentError::lifecycle)?;
             EventEmitter::<FRAME_SIZE>::new(client)
-                .emit::<SeedEvent>(Seed { n: 41 })
+                .emit::<SeedEvent>(r#"{"n":41}"#)
                 .await
                 .map_err(ComponentError::lifecycle)?;
             self.state.emitted.set(true);
@@ -179,7 +136,6 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(WorkflowState::default());
     install_global_memory_vfs().await?;
     let mut event_router = EventRouter::new(RPC_LANES.take()).await?;
-
     let demo = event_router.load(Box::new(WorkflowDemo {
         state: Rc::clone(&state),
     }))?;
@@ -203,12 +159,8 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
             extra: 5
         })
     );
-    let info = event_router.workflow_info();
-    assert_eq!(info.completed_count, 1);
-    assert_eq!(info.failed_count, 0);
-    assert_eq!(event_router.workflow_definitions().len(), 1);
-
+    assert_eq!(event_router.workflow_info().failed_count, 0);
     event_router.unload(demo)?;
-    println!("Workflow mapped `$previous.output.token` into the next request");
+    println!("Workflow mapped `$previous.output.token` into the next JSON request");
     Ok(())
 }

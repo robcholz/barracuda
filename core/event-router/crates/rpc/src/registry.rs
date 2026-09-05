@@ -1135,6 +1135,14 @@ pub enum RpcError {
         /// Configured active lane count.
         limit: usize,
     },
+    /// A handler-owned fixed-capacity resource has no free slot.
+    #[error("{resource} capacity {limit} is exhausted")]
+    ResourceExhausted {
+        /// Stable name of the exhausted resource.
+        resource: &'static str,
+        /// Configured resource capacity.
+        limit: usize,
+    },
     /// The bounded root-call waiter table is full.
     #[error("RPC lane waiter capacity {limit} is exhausted")]
     LaneWaiterCapacityExceeded {

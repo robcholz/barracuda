@@ -1,6 +1,9 @@
 //! Private JSON RPC ingress used to deliver Events to Workflow Runtime.
 
-use core::ops::Range;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
+use core::cell::{Ref, RefCell};
 
 use barracuda_rpc::{JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, RpcError, RpcResult};
 use getset::Getters;
@@ -41,15 +44,74 @@ impl EmitHeader {
     }
 }
 
-/// One Event input retained in its internal RPC request lane.
+struct EventSlot {
+    bytes: Box<[u8]>,
+    len: usize,
+    occupied: bool,
+}
+
+/// Fixed Event-input storage allocated once by Event Router.
+pub(super) struct EventInputPool {
+    slots: Vec<RefCell<EventSlot>>,
+}
+
+impl EventInputPool {
+    pub(super) fn new(slot_count: usize, slot_capacity: usize) -> Self {
+        let slots = (0..slot_count)
+            .map(|_| {
+                RefCell::new(EventSlot {
+                    bytes: alloc::vec![0; slot_capacity].into_boxed_slice(),
+                    len: 0,
+                    occupied: false,
+                })
+            })
+            .collect();
+        Self { slots }
+    }
+
+    pub(super) fn store(self: &Rc<Self>, input: &str) -> RpcResult<EventInput> {
+        for (index, slot) in self.slots.iter().enumerate() {
+            let Ok(mut slot) = slot.try_borrow_mut() else {
+                continue;
+            };
+            if slot.occupied {
+                continue;
+            }
+            let capacity = slot.bytes.len();
+            let destination = slot
+                .bytes
+                .get_mut(..input.len())
+                .ok_or(RpcError::FrameTooLarge {
+                    size: input.len(),
+                    capacity,
+                })?;
+            destination.copy_from_slice(input.as_bytes());
+            slot.len = input.len();
+            slot.occupied = true;
+            return Ok(EventInput {
+                pool: Rc::clone(self),
+                slot: index,
+            });
+        }
+        Err(RpcError::ResourceExhausted {
+            resource: "Workflow Event inputs",
+            limit: self.slots.len(),
+        })
+    }
+}
+
+/// One Event input retained in Event Router's fixed buffer pool.
 pub(super) struct EventInput {
-    request: JsonRef,
-    input: Range<usize>,
+    pool: Rc<EventInputPool>,
+    slot: usize,
 }
 
 impl EventInput {
-    /// Validates the internal envelope and locates its borrowed input JSON.
-    pub(super) fn accept(request: JsonRef) -> RpcResult<(EmitHeader, Self)> {
+    /// Validates the internal envelope and copies its input into fixed storage.
+    pub(super) fn accept(
+        request: JsonRef,
+        pool: &Rc<EventInputPool>,
+    ) -> RpcResult<(EmitHeader, Self)> {
         let source = request.as_str()?;
         let document: EmitDocument<'_> =
             serde_json::from_str(source).map_err(|_error| RpcError::InvalidJson)?;
@@ -59,31 +121,36 @@ impl EventInput {
             .map(Topic::try_from)
             .transpose()
             .map_err(|_error| RpcError::InvalidJson)?;
-        let input = document.input.get();
-        let start = (input.as_ptr() as usize)
-            .checked_sub(source.as_ptr() as usize)
-            .ok_or(RpcError::InvalidFrameState)?;
-        let end = start
-            .checked_add(input.len())
-            .ok_or(RpcError::InvalidFrameState)?;
-        if source.get(start..end).is_none() {
-            return Err(RpcError::InvalidFrameState);
-        }
-        Ok((
-            EmitHeader { event_id, topic },
-            Self {
-                request,
-                input: start..end,
-            },
-        ))
+        let input = pool.store(document.input.get())?;
+        Ok((EmitHeader { event_id, topic }, input))
     }
 
-    /// Borrows the original Event input JSON directly from the request lane.
-    pub(super) fn as_str(&self) -> RpcResult<&str> {
-        self.request
-            .as_str()?
-            .get(self.input.clone())
-            .ok_or(RpcError::InvalidFrameState)
+    /// Borrows the Event input JSON from its fixed storage slot.
+    pub(super) fn as_str(&self) -> RpcResult<Ref<'_, str>> {
+        let slot = self
+            .pool
+            .slots
+            .get(self.slot)
+            .ok_or(RpcError::InvalidFrameState)?
+            .try_borrow()
+            .map_err(|_error| RpcError::InvalidFrameState)?;
+        Ref::filter_map(slot, |slot| {
+            let bytes = slot.bytes.get(..slot.len)?;
+            core::str::from_utf8(bytes).ok()
+        })
+        .map_err(|_slot| RpcError::InvalidFrameState)
+    }
+}
+
+impl Drop for EventInput {
+    fn drop(&mut self) {
+        let Some(slot) = self.pool.slots.get(self.slot) else {
+            return;
+        };
+        if let Ok(mut slot) = slot.try_borrow_mut() {
+            slot.len = 0;
+            slot.occupied = false;
+        }
     }
 }
 
@@ -120,7 +187,7 @@ mod tests {
     use barracuda_rpc::{JsonWriter, RpcLaneStorage, RpcRegistry};
     use futures_lite::future::block_on;
 
-    use super::{EventInput, InternalEmit};
+    use super::{EventInput, EventInputPool, InternalEmit};
     use crate::{EmitError, Event, EventEmitter, Topic};
 
     struct MessageReceived;
@@ -140,6 +207,7 @@ mod tests {
         block_on(async {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 256, 1>::new()));
             let registry = RpcRegistry::new(lanes);
+            let pool = Rc::new(EventInputPool::new(1, 256));
             let seen = Rc::new(RefCell::new(None));
             let handler_seen = Rc::clone(&seen);
             registry
@@ -147,8 +215,9 @@ mod tests {
                     "system",
                     move |_context, request, response: JsonWriter| {
                         let seen = Rc::clone(&handler_seen);
+                        let pool = Rc::clone(&pool);
                         async move {
-                            let (header, input) = EventInput::accept(request)?;
+                            let (header, input) = EventInput::accept(request, &pool)?;
                             seen.replace(Some((
                                 header.event_id().as_str().to_owned(),
                                 header.topic().map(|topic| topic.as_str().to_owned()),

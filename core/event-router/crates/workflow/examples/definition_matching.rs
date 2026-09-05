@@ -24,11 +24,7 @@ fn definition(
 fn main() -> Result<(), Box<dyn core::error::Error>> {
     // Iteration order models the runtime catalog's definition load order.
     let definitions = [
-        definition(
-            "all-gateway-messages",
-            "gateway.*",
-            &["message.normalize", "agent.run"],
-        )?,
+        definition("all-gateway-messages", "gateway.*", &["agent.run"])?,
         definition(
             "received-message-audit",
             "gateway.message.received",
@@ -55,7 +51,7 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
             .first()
             .and_then(|workflow| workflow.steps().first())
             .map(|step| step.address().as_ref()),
-        Some("message.normalize")
+        Some("agent.run")
     );
     assert_eq!(
         matched

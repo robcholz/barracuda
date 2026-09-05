@@ -12,7 +12,6 @@ members = [
     "core/plugin/crates/*",
     "core/system",
     "core/event-router/crates/*",
-    "core/event-router/example-crates/*",
     "plugins/*/crates/*",
     "platforms/*",
     "shared/*",

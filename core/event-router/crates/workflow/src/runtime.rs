@@ -10,7 +10,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
 
-use super::ingress::EventInput;
+use super::ingress::{EventInput, EventInputPool};
 use super::link::{FieldRef, LinkKind, SourceSelector};
 use barracuda_rpc::{
     JsonHandler, JsonObjectFields, JsonObjectPayload, JsonObjectWriter, JsonPayload, JsonRef,
@@ -340,11 +340,13 @@ impl WorkflowRuntime {
     }
 
     /// Creates the handler for Event Router's unique Event-ingress RPC.
-    pub fn ingress_handler<const M: usize>(&self) -> impl JsonHandler + 'static {
+    pub fn ingress_handler<const N: usize, const M: usize>(&self) -> impl JsonHandler + 'static {
         let shared = Rc::clone(&self.shared);
+        let event_inputs = Rc::new(EventInputPool::new(N, M));
         move |rpc_context: RpcContext, request: JsonRef, response: JsonWriter| {
             let shared = Rc::clone(&shared);
-            async move { handle_emit(shared, rpc_context, request, response).await }
+            let event_inputs = Rc::clone(&event_inputs);
+            async move { handle_emit(shared, event_inputs, rpc_context, request, response).await }
         }
     }
 
@@ -430,8 +432,7 @@ impl WorkflowExecution {
         let definition = Rc::clone(&plan.definition);
         let driver = Box::pin(async move {
             validation?;
-            let event_input = event.as_str().map_err(|source| step_error(0, source))?;
-            execute_steps(&definition, event_input, execution_client).await
+            execute_steps(&definition, &event, execution_client).await
         });
         Ok(Self {
             id: plan.definition.id().clone(),
@@ -454,7 +455,7 @@ fn step_error(step: usize, source: RpcError) -> WorkflowExecutionError {
 
 async fn execute_steps(
     definition: &WorkflowDefinition,
-    event_input: &str,
+    event_input: &EventInput,
     client: RpcClient,
 ) -> Result<(), WorkflowExecutionError> {
     let mut previous: Option<JsonRef> = None;
@@ -469,14 +470,16 @@ async fn execute_steps(
             .ok_or_else(|| internal_error(to_step))?;
         let response = match link {
             LinkKind::Direct => {
-                let request = match &previous {
-                    Some(previous) => previous
-                        .as_str()
-                        .map_err(|source| step_error(from_step, source))?,
-                    None => event_input,
+                let call = match &previous {
+                    Some(previous) => {
+                        let request = previous
+                            .as_str()
+                            .map_err(|source| step_error(from_step, source))?;
+                        client.call_json(step.address(), request)
+                    }
+                    None => client.call_json(step.address(), event_input),
                 };
-                let response = client
-                    .call_json(step.address(), request)
+                let response = call
                     .map_err(|source| step_error(to_step, source))?
                     .await
                     .map_err(|source| step_error(to_step, source))?;
@@ -515,13 +518,18 @@ async fn execute_steps(
 }
 
 fn mapped_request<'source, 'definition>(
-    event_input: &'source str,
+    event_input: &'source EventInput,
     previous_output: Option<&'source str>,
     to_step: usize,
     arguments: &'definition Value,
     references: &'definition [FieldRef],
 ) -> Result<MappedJson<'source, 'definition>, WorkflowExecutionError> {
-    validate_mapping_source(event_input, references, SourceSelector::EventInput, to_step)?;
+    {
+        let source = event_input
+            .as_str()
+            .map_err(|source| step_error(to_step, source))?;
+        validate_mapping_source(&source, references, SourceSelector::EventInput, to_step)?;
+    }
     if references
         .iter()
         .any(|reference| reference.selector == SourceSelector::PreviousOutput)
@@ -608,7 +616,7 @@ fn validate_mapping_source(
 }
 
 struct MappedJson<'source, 'definition> {
-    event_input: &'source str,
+    event_input: &'source EventInput,
     previous_output: Option<&'source str>,
     arguments: &'definition Map<alloc::string::String, Value>,
     references: &'definition [FieldRef],
@@ -629,9 +637,10 @@ impl JsonObjectFields for MappedJson<'_, '_> {
         for (name, value) in self.arguments {
             writer.field(name, value)?;
         }
+        let event_input = self.event_input.as_str()?;
         write_mapping_source(
             writer,
-            self.event_input,
+            &event_input,
             self.references,
             SourceSelector::EventInput,
         )?;
@@ -952,11 +961,12 @@ impl Drop for DispatchGuard {
 
 async fn handle_emit(
     shared: Rc<RuntimeShared>,
+    event_inputs: Rc<EventInputPool>,
     _context: RpcContext,
     request: JsonRef,
     response: JsonWriter,
 ) -> RpcResult<()> {
-    let (header, event) = EventInput::accept(request)?;
+    let (header, event) = EventInput::accept(request, &event_inputs)?;
     let plans = shared.matching_plans(header.event_id(), header.topic());
     if plans.is_empty() {
         return response.write("{}").await;
@@ -1006,7 +1016,7 @@ mod json_workflow_tests {
     use serde_json::{json, Value};
 
     use super::{execute_steps, validate_definition, WorkflowRuntime};
-    use crate::ingress::InternalEmit;
+    use crate::ingress::{EventInput, EventInputPool, InternalEmit};
     use crate::{
         Event, EventEmitter, Rule, WorkflowControlRejection, WorkflowDefinition,
         WorkflowExecutionError, WorkflowId, WorkflowStep,
@@ -1104,6 +1114,12 @@ mod json_workflow_tests {
         .expect("valid Workflow definition")
     }
 
+    fn event_input(json: &str) -> EventInput {
+        Rc::new(EventInputPool::new(1, 256))
+            .store(json)
+            .expect("store test Event input")
+    }
+
     fn register_producer<const N: usize, const M: usize, const Q: usize>(
         registry: &RpcRegistry<N, M, Q>,
         response: &'static str,
@@ -1147,7 +1163,8 @@ mod json_workflow_tests {
         );
 
         validate_definition(&client, &workflow).expect("compatible JSON link");
-        block_on(execute_steps(&workflow, "{}", client)).expect("execute direct link");
+        let event = event_input("{}");
+        block_on(execute_steps(&workflow, &event, client)).expect("execute direct link");
 
         assert_eq!(seen.take().as_deref(), Some(r#"{"token":41}"#));
     }
@@ -1189,7 +1206,69 @@ mod json_workflow_tests {
         registry
             .register_json::<InternalEmit<FRAME_SIZE>, _>(
                 "system",
-                runtime.ingress_handler::<FRAME_SIZE>(),
+                runtime.ingress_handler::<4, FRAME_SIZE>(),
+            )
+            .expect("register Event ingress");
+        runtime.start(registry.client());
+        let emitter = EventEmitter::<FRAME_SIZE>::new(registry.client());
+        let mut emit = Box::pin(emitter.emit::<JsonEvent>(r#"{"token":41}"#));
+        let mut emit_complete = false;
+
+        block_on(poll_fn(|context| {
+            assert!(Pin::new(&mut runtime).poll(context).is_pending());
+            if !emit_complete {
+                if let Poll::Ready(result) = emit.as_mut().poll(context) {
+                    result.expect("emit JSON Event");
+                    emit_complete = true;
+                }
+            }
+            if seen.borrow().is_some() {
+                Poll::Ready(())
+            } else {
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }));
+
+        assert_eq!(seen.take(), Some(json!({"token":41,"extra":5})));
+        assert_eq!(runtime.view().info().completed_count, 1);
+    }
+
+    #[test]
+    fn one_lane_can_emit_and_execute_a_matched_workflow() {
+        const FRAME_SIZE: usize = 128;
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, FRAME_SIZE, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let seen = Rc::new(RefCell::new(None));
+        let handler_seen = Rc::clone(&seen);
+        registry
+            .register_json::<MappingSink, _>(
+                "*",
+                move |_context, request: JsonRef, writer: JsonWriter| {
+                    let seen = Rc::clone(&handler_seen);
+                    async move {
+                        seen.replace(Some(request.deserialize::<Value>()?));
+                        writer.write("{}").await
+                    }
+                },
+            )
+            .expect("register mapping sink");
+        let mut runtime = WorkflowRuntime::new();
+        runtime
+            .control()
+            .load(definition(
+                "single-lane",
+                vec![WorkflowStep::new(
+                    address(MappingSink::ADDRESS),
+                    Some(json!({"token":"$event.input.token","extra":5})),
+                )],
+            ))
+            .expect("load Workflow");
+        registry
+            .register_json::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<1, FRAME_SIZE>(),
             )
             .expect("register Event ingress");
         runtime.start(registry.client());
@@ -1273,10 +1352,12 @@ mod json_workflow_tests {
         );
 
         validate_definition(&client, &mapping).expect("valid mapping");
-        block_on(execute_steps(&mapping, r#"{"extra":5}"#, client.clone()))
-            .expect("execute mapping");
+        let mapping_event = event_input(r#"{"extra":5}"#);
+        block_on(execute_steps(&mapping, &mapping_event, client.clone())).expect("execute mapping");
         validate_definition(&client, &literal_workflow).expect("valid literal");
-        block_on(execute_steps(&literal_workflow, "{}", client)).expect("execute literal");
+        let literal_event = event_input("{}");
+        block_on(execute_steps(&literal_workflow, &literal_event, client))
+            .expect("execute literal");
 
         assert_eq!(mapped.take(), Some(json!({"token":41,"extra":5})));
         assert_eq!(literal.take(), Some(json!({"mode":"quiet"})));
@@ -1348,8 +1429,9 @@ mod json_workflow_tests {
             ],
         );
 
-        let error =
-            block_on(execute_steps(&workflow, "{}", client)).expect_err("missing referenced field");
+        let event = event_input("{}");
+        let error = block_on(execute_steps(&workflow, &event, client))
+            .expect_err("missing referenced field");
 
         assert!(matches!(
             error,
@@ -1381,7 +1463,8 @@ mod json_workflow_tests {
             )],
         );
 
-        let error = block_on(execute_steps(&workflow, "{}", client))
+        let event = event_input("{}");
+        let error = block_on(execute_steps(&workflow, &event, client))
             .expect_err("missing Event input field");
 
         assert!(matches!(

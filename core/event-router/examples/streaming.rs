@@ -1,4 +1,4 @@
-//! Usage: a streaming Event fans into a streaming Workflow step in order.
+//! Usage: application-level samples travel as one JSON array through a Workflow.
 
 use std::cell::{Cell, RefCell};
 use std::future::{pending, poll_fn, Future};
@@ -8,43 +8,48 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext, Streaming, Unary,
+    JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcLaneStorage, RunContext,
     UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
-use futures_util::stream;
+use serde::Deserialize;
 use static_cell::ConstStaticCell;
 
-const FRAME_SIZE: usize = 64;
+const FRAME_SIZE: usize = 256;
+const SAMPLES_SCHEMA: JsonSchema = JsonSchema::new(
+    r#"{"type":"object","properties":{"samples":{"type":"array","items":{"type":"integer"}}},"required":["samples"],"additionalProperties":false}"#,
+);
+const EMPTY_SCHEMA: JsonSchema =
+    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());
 
 const WORKFLOW_JSON: &str = r#"{
-    "id": "streaming-event-collector",
+    "id": "sample-collector",
     "match": { "event": "sensor.samples" },
-    "steps": [
-        { "call": "example.collect" }
-    ]
+    "steps": [{ "call": "example.collect" }]
 }"#;
 
 struct SensorSamples;
 
 impl Event for SensorSamples {
     const ID: &'static str = "sensor.samples";
-    type Message = [u8; 1];
-    type Input = Streaming;
 }
 
 struct Collect;
 
-impl RpcMethod for Collect {
+impl JsonRpcSchema for Collect {
     const ADDRESS: &'static str = "example.collect";
-    type Request = [u8; 1];
-    type Response = ();
-    type Error = ();
-    type Input = Streaming;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = SAMPLES_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 64;
+    const MAX_RESPONSE_BYTES: usize = 2;
+}
+
+#[derive(Deserialize)]
+struct Samples {
+    samples: Vec<u8>,
 }
 
 #[derive(Default)]
@@ -60,16 +65,15 @@ struct StreamingDemo {
 impl Component<FRAME_SIZE> for StreamingDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let collected = Rc::clone(&self.state.collected);
-        context.register_rpc::<Collect, _>(
-            "system",
-            move |_context, mut requests: RpcStream<RpcFrame<[u8; 1]>>| {
+        context.register_json::<Collect, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
                 let collected = Rc::clone(&collected);
                 async move {
-                    while let Some(request) = requests.next().await {
-                        let [value] = *request?.view()?;
-                        collected.borrow_mut().push(value);
-                    }
-                    Ok(Ok(()))
+                    collected
+                        .borrow_mut()
+                        .extend(request.deserialize::<Samples>()?.samples);
+                    response.write("{}").await
                 }
             },
         )
@@ -82,9 +86,8 @@ impl Component<FRAME_SIZE> for StreamingDemo {
                 .load(WORKFLOW_JSON)
                 .await
                 .map_err(ComponentError::lifecycle)?;
-            let samples = RpcStream::new(stream::iter([Ok([10]), Ok([11]), Ok([12])]));
             EventEmitter::<FRAME_SIZE>::new(client)
-                .emit::<SensorSamples>(samples)
+                .emit::<SensorSamples>(r#"{"samples":[10,11,12]}"#)
                 .await
                 .map_err(ComponentError::lifecycle)?;
             self.state.emitted.set(true);
@@ -102,7 +105,6 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(StreamState::default());
     install_global_memory_vfs().await?;
     let mut event_router = EventRouter::new(RPC_LANES.take()).await?;
-
     let demo = event_router.load(Box::new(StreamingDemo {
         state: Rc::clone(&state),
     }))?;
@@ -121,8 +123,7 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
 
     assert_eq!(state.collected.borrow().as_slice(), [10, 11, 12]);
     assert_eq!(event_router.workflow_info().failed_count, 0);
-
     event_router.unload(demo)?;
-    println!("Streaming Event preserved message order through the Workflow step");
+    println!("Application-level sample array preserved order through the Workflow");
     Ok(())
 }

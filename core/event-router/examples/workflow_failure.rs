@@ -1,5 +1,4 @@
-//! Usage: a Workflow step that returns its Method error is recorded in the
-//! immutable `WorkflowInfo` snapshot.
+//! Usage: a failed JSON RPC step is recorded in immutable Workflow state.
 
 use std::cell::Cell;
 use std::future::{pending, poll_fn, Future};
@@ -9,13 +8,15 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext,
-    WorkflowClient,
+    JsonRpcSchema, JsonSchema, RegisterContext, RpcError, RpcLaneStorage, RunContext,
+    UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use static_cell::ConstStaticCell;
 
-const FRAME_SIZE: usize = 64;
+const FRAME_SIZE: usize = 256;
+const EMPTY_SCHEMA: JsonSchema =
+    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
 
 static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
     ConstStaticCell::new(RpcLaneStorage::new());
@@ -23,28 +24,23 @@ static RPC_LANES: ConstStaticCell<RpcLaneStorage<4, FRAME_SIZE, 4>> =
 const WORKFLOW_JSON: &str = r#"{
     "id": "always-fails",
     "match": { "event": "example.fail" },
-    "steps": [
-        { "call": "example.fail" }
-    ]
+    "steps": [{ "call": "example.fail" }]
 }"#;
 
 struct FailEvent;
 
 impl Event for FailEvent {
     const ID: &'static str = "example.fail";
-    type Message = [u8; 1];
-    type Input = Unary;
 }
 
 struct Fail;
 
-impl RpcMethod for Fail {
+impl JsonRpcSchema for Fail {
     const ADDRESS: &'static str = "example.fail";
-    type Request = [u8; 1];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 2;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -58,10 +54,9 @@ struct FailureDemo {
 
 impl Component<FRAME_SIZE> for FailureDemo {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Fail, _>(
-            "system",
-            |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Err(())) },
-        )
+        context.register_json::<Fail, _>("*", |_context, _request, _response| async move {
+            Err(RpcError::InvalidFrameState)
+        })
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -72,7 +67,7 @@ impl Component<FRAME_SIZE> for FailureDemo {
                 .await
                 .map_err(ComponentError::lifecycle)?;
             EventEmitter::<FRAME_SIZE>::new(client)
-                .emit::<FailEvent>([1])
+                .emit::<FailEvent>("{}")
                 .await
                 .map_err(ComponentError::lifecycle)?;
             self.state.emitted.set(true);
@@ -90,7 +85,6 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let state = Rc::new(FailureState::default());
     install_global_memory_vfs().await?;
     let mut event_router = EventRouter::new(RPC_LANES.take()).await?;
-
     let demo = event_router.load(Box::new(FailureDemo {
         state: Rc::clone(&state),
     }))?;
@@ -110,12 +104,12 @@ async fn main() -> Result<(), Box<dyn core::error::Error>> {
     let info = event_router.workflow_info();
     assert_eq!(info.completed_count, 0);
     assert_eq!(info.failed_count, 1);
-    assert!(info.last_failure.is_some());
-    if let Some(failure) = &info.last_failure {
-        assert_eq!(failure.workflow_id().as_str(), "always-fails");
-        println!("Workflow failed as expected: {}", failure.error());
-    }
-
+    assert_eq!(
+        info.last_failure
+            .as_ref()
+            .map(|failure| failure.workflow_id().as_str()),
+        Some("always-fails")
+    );
     event_router.unload(demo)?;
     Ok(())
 }
