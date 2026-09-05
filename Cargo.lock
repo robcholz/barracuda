@@ -773,6 +773,7 @@ dependencies = [
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "barracuda-vfs",
  "embassy-executor",
  "embassy-futures",
  "embassy-time",
