@@ -9,13 +9,14 @@ use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventRouter,
-    EventRouterCreateError, RegisterContext, RouterError, RpcFrame, RpcLaneStorage, RpcMethod,
-    RunContext, Unary, UnregisterContext, WorkflowClient, WorkflowControlError, WorkflowId,
+    EventRouterCreateError, JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RouterError,
+    RpcLaneStorage, RunContext, UnregisterContext, WorkflowClient, WorkflowControlError,
+    WorkflowId,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vfs::read;
 
-const FRAME_SIZE: usize = 64;
+const FRAME_SIZE: usize = 256;
 
 type TestEventRouter = EventRouter<4, FRAME_SIZE, 4>;
 
@@ -29,13 +30,12 @@ const WORKFLOW_JSON: &str = r#"{
 
 struct Record;
 
-impl RpcMethod for Record {
+impl JsonRpcSchema for Record {
     const ADDRESS: &'static str = "example.record";
-    type Request = [u8; 4];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const RESPONSE_SCHEMA: JsonSchema = JsonSchema::new("{}");
+    const MAX_REQUEST_BYTES: usize = 64;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -51,9 +51,9 @@ struct WorkflowInstaller {
 impl Component<FRAME_SIZE> for WorkflowInstaller {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         // Register the step endpoint so `workflow.load` can validate the link.
-        context.register_rpc::<Record, _>(
-            "system",
-            |_context, _request: RpcFrame<[u8; 4]>| async move { Ok(Ok(())) },
+        context.register_json::<Record, _>(
+            "*",
+            |_context, _request, response: JsonWriter| async move { response.write("{}").await },
         )
     }
 

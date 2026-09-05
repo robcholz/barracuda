@@ -28,7 +28,7 @@ pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 /// Runtime integration surface used by Event Router's Component adapter.
 pub mod integration {
     pub use crate::control::{
-        WorkflowJsonFrame, WorkflowJsonRequest, WorkflowLoad, WorkflowUnload,
+        parse_definition, parse_workflow_id, write_control_response, WorkflowLoad, WorkflowUnload,
     };
     pub use crate::ingress::InternalEmit;
     pub use crate::runtime::{WorkflowRuntime, WorkflowRuntimeControl, WorkflowRuntimeView};

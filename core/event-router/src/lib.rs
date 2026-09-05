@@ -86,7 +86,7 @@ impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
         lanes: &'static RpcLaneStorage<N, M, Q>,
     ) -> Result<Self, EventRouterCreateError> {
         let mut router = Router::new(lanes);
-        let (workflow_component, workflow) = WorkflowComponent::new().await?;
+        let (workflow_component, workflow) = WorkflowComponent::<N>::new().await?;
         router.load(Box::new(workflow_component))?;
         Ok(Self { router, workflow })
     }
