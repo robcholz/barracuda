@@ -616,21 +616,13 @@ name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
  "barracuda-board-config",
+ "barracuda-platform-config",
+ "barracuda-platform-tool",
  "clap",
  "ctrlc",
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-build"
-version = "0.1.0"
-dependencies = [
- "barracuda-board-config",
- "barracuda-platform-config",
- "tempfile",
- "toml_edit",
 ]
 
 [[package]]
@@ -1165,6 +1157,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-platform",
  "barracuda-platform-config",
+ "barracuda-platform-macos",
  "barracuda-platform-tool",
  "embassy-executor",
 ]
@@ -6062,7 +6055,6 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
- "toml_writer",
  "winnow 1.0.4",
 ]
 

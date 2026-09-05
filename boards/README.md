@@ -75,17 +75,23 @@ cargo run
 
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
 currently selected Board. It validates the complete bundle before writing the
-ignored workspace-local `.barracuda/selected-board` file. Scripts may pass an
-explicit name as `cargo board select <board-name>`. Every active Board consumer
-watches and reads the state file, so changing the selection invalidates the
-relevant generated build output. A build with no selection stops with the
-command needed to select one; it never guesses a Board from the Rust target.
+ignored workspace-local Board, Platform, and Cargo selection files. Scripts
+may pass an explicit name as `cargo board select <board-name>`. The command also
+updates the selected dependency blocks, so native Cargo sees a complete static
+dependency graph before compilation starts. A build with no selection stops
+with the command needed to select one; it never guesses a Board from the Rust
+target.
 
 `boards/selected` does not infer a Board from the target OS or architecture.
-The build driver resolves the Board's chip and toolchain target against the
-self-described Platform catalog, then injects both implementation dependencies
-under stable aliases in an ignored generated workspace. Device entry code
-constructs the exact typed Platform and Board bindings.
+The selection command resolves the Board's chip and toolchain target against
+the self-described Platform catalog, then generates the two selected axes
+independently. Device entry code constructs the exact typed Platform and Board
+bindings.
+
+Adding a Board bundle or HAL is a maintainer operation. Run `cargo board sync`
+and commit its deterministic workspace dependency block. Use
+`cargo board sync --check` in CI to reject a stale registry. Consumers who pull
+that commit only run `cargo board select` followed by ordinary Cargo commands.
 
 The repository currently provides reference Board bundles for the ESP32,
 ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog

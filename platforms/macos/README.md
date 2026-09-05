@@ -14,10 +14,10 @@ cargo board select local-macos
 cargo run
 ```
 
-The Platform manifest makes the build driver compile
-`barracuda-macos-network` automatically and launch it through `sudo`; the
-application receives the inherited UTUN descriptor. Use
-`cargo barracuda build` to build both binaries without starting them.
+The Platform manifest installs a Cargo runner for this selection. `cargo run`
+uses that runner to compile `barracuda-macos-network` for the host, launch it
+through `sudo`, and pass the application its inherited UTUN descriptor. A plain
+`cargo build` compiles the selected application without starting networking.
 
 Platform, System, Core, and Plugin logs are written to standard error at
 `info`. Select another level for a build with, for example,

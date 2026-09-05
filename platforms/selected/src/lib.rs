@@ -5,36 +5,6 @@
 use barracuda_platform::{Platform, PlatformInitResult, PlatformResources};
 use embassy_executor::Spawner;
 
-/// Non-runnable placeholder used only when compiling source-workspace tooling.
-pub struct UnconfiguredPlatform;
-
-/// Error returned if the non-runnable placeholder is initialized.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct UnconfiguredPlatformError;
-
-impl core::fmt::Display for UnconfiguredPlatformError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("Barracuda target was not built through the generated build workspace")
-    }
-}
-
-impl core::error::Error for UnconfiguredPlatformError {}
-
-impl Platform for UnconfiguredPlatform {
-    type Bindings = &'static ();
-    type Tls = ();
-    type Partitions = ();
-    type Error = UnconfiguredPlatformError;
-
-    fn prepare() -> Result<(), Self::Error> {
-        Err(UnconfiguredPlatformError)
-    }
-
-    async fn initialize(_spawner: Spawner, _bindings: Self::Bindings) -> PlatformInitResult<Self> {
-        Err(UnconfiguredPlatformError)
-    }
-}
-
 mod selected {
     include!(concat!(env!("OUT_DIR"), "/selected_platform.rs"));
 }

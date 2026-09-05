@@ -5,7 +5,6 @@ use std::{env, error::Error, fs, path::PathBuf};
 use barracuda_board_config::{parse, read_selected_board, render_rust, SELECTED_BOARD_PATH};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    println!("cargo:rerun-if-env-changed=BARRACUDA_GENERATED_BUILD");
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
     let root = manifest.join("../..");
@@ -14,21 +13,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{error}; Board registries are source files, so run `cargo board sync` before rebuilding"
         )
     })?;
-    if env::var("BARRACUDA_GENERATED_BUILD").as_deref() != Ok("1") {
-        fs::write(
-            output.join("selected_board.rs"),
-            "/// Placeholder Board used only while compiling workspace tooling.\n\
-             pub const BOARD: ::barracuda_board::Board = ::barracuda_board::Board::new(\n\
-                 \"unconfigured\",\n\
-                 ::barracuda_board::Hardware::new(\"unconfigured\"),\n\
-                 ::barracuda_board::NativeLayout::new(\"unconfigured\"),\n\
-             );\n\n\
-             /// Empty placeholder used outside a generated target build.\n\
-             pub type SelectedBoardHal = ::barracuda_board_hal::EmptyBoardHal;\n",
-        )?;
-        return Ok(());
-    }
-
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
     let board_name =
@@ -45,7 +29,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hal_type = match board.board_hal() {
         Some(board_hal) => format!(
-            "::barracuda_selected_board_hal_implementation::{}",
+            "::{}::{}",
+            board_hal.package().replace('-', "_"),
             board_hal.type_name()
         ),
         None if board.has_hardware_surface() => {

@@ -15,13 +15,12 @@ members = [
     "plugins/*/crates/*",
     "platforms/*",
     "shared/*",
-    "tools/barracuda-build",
     "tools/plugin-tool",
     "tools/system-image",
     "apps/barracuda-cli",
 ]
 default-members = [
-    "tools/barracuda-build",
+    "apps/barracuda-cli",
 ]
 
 [workspace.dependencies]
