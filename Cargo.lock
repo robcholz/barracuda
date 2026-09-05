@@ -773,24 +773,16 @@ name = "barracuda-http-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
- "barracuda-http-wire",
+ "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
+ "embassy-time",
  "embedded-io 0.7.1",
  "embedded-io-async 0.7.0",
+ "futures-lite",
  "http-client",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-http-wire"
-version = "0.1.0"
-dependencies = [
- "barracuda-rpc",
- "barracuda-rpc-schema",
- "schemars",
  "serde",
- "zerocopy",
+ "serde_json",
 ]
 
 [[package]]
