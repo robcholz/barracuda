@@ -4,16 +4,27 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use barracuda_system_image::build_selected;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
-/// Builds the top-level image tree for the selected Board's System region.
+/// Manages the selected Board's System image.
 #[derive(Debug, Parser)]
 #[command(name = "cargo system-image", bin_name = "cargo system-image", version)]
-struct Cli {}
+struct Cli {
+    /// System-image operation to perform.
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Build the selected Board's System partition image.
+    Build,
+}
 
 fn main() -> ExitCode {
-    Cli::parse();
-    build()
+    match Cli::parse().command {
+        Command::Build => build(),
+    }
 }
 
 fn build() -> ExitCode {
@@ -48,13 +59,24 @@ fn workspace_root(manifest_dir: &Path) -> Option<&Path> {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use clap::{error::ErrorKind, Parser};
+    use clap::{Parser, error::ErrorKind};
 
     use super::Cli;
 
     #[test]
-    fn command_accepts_no_build_parameters() {
-        assert!(Cli::try_parse_from(["cargo system-image"]).is_ok());
+    fn command_requires_an_operation() {
+        let error = Cli::try_parse_from(["cargo system-image"])
+            .expect_err("an explicit operation is required");
+
+        assert_eq!(
+            error.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
+    }
+
+    #[test]
+    fn command_accepts_build_without_parameters() {
+        assert!(Cli::try_parse_from(["cargo system-image", "build"]).is_ok());
     }
 
     #[test]
@@ -69,7 +91,7 @@ mod tests {
     #[test]
     fn command_rejects_build_parameters() {
         for argument in ["--size", "--output"] {
-            let error = Cli::try_parse_from(["cargo system-image", argument])
+            let error = Cli::try_parse_from(["cargo system-image", "build", argument])
                 .expect_err("build parameters are unsupported");
             assert_eq!(error.kind(), ErrorKind::UnknownArgument);
         }
