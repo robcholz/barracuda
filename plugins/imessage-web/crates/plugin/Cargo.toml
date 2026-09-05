@@ -10,6 +10,7 @@ barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
 gateway = { path = "../../../imessage-gateway/crates/gateway" }
+log.workspace = true
 web = { path = "../provider", features = ["server"] }
 
 [lints.rust]

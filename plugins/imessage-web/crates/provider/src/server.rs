@@ -48,8 +48,19 @@ impl<const CAP: usize, const SUBS: usize> WebBridge<CAP, SUBS> {
 impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, SUBS> {
     fn connected<'a>(&'a self, connection: WebSocketConnection) -> WebSocketFuture<'a> {
         Box::pin(async move {
-            let Ok(mut subscription) = self.web.subscribe(self.conversation_id.clone()) else {
-                return;
+            log::info!(
+                "IMessage Web client connected for conversation `{}`",
+                self.conversation_id
+            );
+            let mut subscription = match self.web.subscribe(self.conversation_id.clone()) {
+                Ok(subscription) => subscription,
+                Err(error) => {
+                    log::warn!(
+                        "IMessage Web client subscription failed for conversation `{}`: {error}",
+                        self.conversation_id
+                    );
+                    return;
+                }
             };
             let mut next_message: u64 = 1;
 
@@ -61,34 +72,100 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                 .await;
                 match next {
                     NextMessage::Incoming(Ok(WebSocketMessage::Text(text))) => {
-                        if let Ok(frame) = serde_json::from_str::<WebClientFrame>(&text) {
-                            let message_id = format!("web-in-{next_message}");
-                            next_message = next_message.saturating_add(1);
-                            let message = InboundMessage {
-                                conversation_id: self.conversation_id.clone(),
-                                message_id,
-                                thread_id: None,
-                                text: frame.text,
-                                reply_to: frame.reply_to,
-                            };
-                            if self.sink.receive_message(message).await.is_err() {
-                                break;
+                        match serde_json::from_str::<WebClientFrame>(&text) {
+                            Ok(frame) => {
+                                let message_id = format!("web-in-{next_message}");
+                                next_message = next_message.saturating_add(1);
+                                log::debug!(
+                                    "IMessage Web received message `{message_id}` for conversation `{}`",
+                                    self.conversation_id
+                                );
+                                let message = InboundMessage {
+                                    conversation_id: self.conversation_id.clone(),
+                                    message_id: message_id.clone(),
+                                    thread_id: None,
+                                    text: frame.text,
+                                    reply_to: frame.reply_to,
+                                };
+                                if let Err(error) = self.sink.receive_message(message).await {
+                                    log::warn!(
+                                        "IMessage Web failed to deliver message `{message_id}` for conversation `{}`: {error}",
+                                        self.conversation_id
+                                    );
+                                    break;
+                                }
+                                log::info!(
+                                    "IMessage Web accepted message `{message_id}` for conversation `{}`",
+                                    self.conversation_id
+                                );
+                            }
+                            Err(error) => {
+                                log::warn!(
+                                    "IMessage Web rejected malformed WebSocket message for conversation `{}` ({} bytes): {error}",
+                                    self.conversation_id,
+                                    text.len()
+                                );
                             }
                         }
                     }
-                    NextMessage::Incoming(Ok(WebSocketMessage::Binary(_))) => {}
-                    NextMessage::Incoming(Err(_closed)) => break,
-                    NextMessage::Outgoing(None) => break,
+                    NextMessage::Incoming(Ok(WebSocketMessage::Binary(bytes))) => {
+                        log::warn!(
+                            "IMessage Web ignored unsupported binary message for conversation `{}` ({} bytes)",
+                            self.conversation_id,
+                            bytes.len()
+                        );
+                    }
+                    NextMessage::Incoming(Err(error)) => {
+                        log::debug!(
+                            "IMessage Web client receive ended for conversation `{}`: {error}",
+                            self.conversation_id
+                        );
+                        break;
+                    }
+                    NextMessage::Outgoing(None) => {
+                        log::warn!(
+                            "IMessage Web event subscription ended for conversation `{}`",
+                            self.conversation_id
+                        );
+                        break;
+                    }
                     NextMessage::Outgoing(Some(delivery)) => {
-                        let Ok(frame) = delivery.to_sse() else {
-                            continue;
+                        match &delivery {
+                            WebDelivery::Event(event) => log::debug!(
+                                "IMessage Web sending event {} id={} for conversation `{}`",
+                                event.data.event_name(),
+                                event.id,
+                                event.conversation_id
+                            ),
+                            WebDelivery::Lagged { missed } => log::warn!(
+                                "IMessage Web client missed {missed} event(s) for conversation `{}`",
+                                self.conversation_id
+                            ),
+                        }
+                        let frame = match delivery.to_sse() {
+                            Ok(frame) => frame,
+                            Err(error) => {
+                                log::warn!(
+                                    "IMessage Web failed to serialize an event for conversation `{}`: {error}",
+                                    self.conversation_id
+                                );
+                                continue;
+                            }
                         };
-                        if connection.send_text(frame).await.is_err() {
+                        if let Err(error) = connection.send_text(frame).await {
+                            log::warn!(
+                                "IMessage Web failed to send an event for conversation `{}`: {error}",
+                                self.conversation_id
+                            );
                             break;
                         }
                     }
                 }
             }
+            log::info!(
+                "IMessage Web client disconnected from conversation `{}`",
+                self.conversation_id
+            );
         })
     }
 }
