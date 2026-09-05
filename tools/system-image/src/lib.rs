@@ -13,6 +13,10 @@ use littlefs2::fs::Filesystem;
 use littlefs2::path::PathBuf as LittlePathBuf;
 use serde::Deserialize;
 
+mod flash;
+
+use flash::{FlashRequest, PlatformFlash};
+
 /// Workspace-relative source tree burned into the System partition.
 pub const IMAGE_SOURCE: &str = "image";
 /// Workspace-relative output path for the raw System partition image.
@@ -26,6 +30,7 @@ pub struct SystemRegion {
     board: String,
     offset: u64,
     size: usize,
+    platform_flash: PlatformFlash,
 }
 
 impl SystemRegion {
@@ -56,6 +61,48 @@ pub struct BuiltImage {
     output: PathBuf,
     offset: u64,
     size: usize,
+}
+
+/// Description of one completed System partition flash.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FlashedImage {
+    board: String,
+    image: PathBuf,
+    destination: String,
+    offset: u64,
+    size: usize,
+}
+
+impl FlashedImage {
+    /// Returns the selected Board name.
+    #[must_use]
+    pub fn board(&self) -> &str {
+        &self.board
+    }
+
+    /// Returns the raw image that was flashed.
+    #[must_use]
+    pub fn image(&self) -> &Path {
+        &self.image
+    }
+
+    /// Returns the Platform flash destination or tool name.
+    #[must_use]
+    pub fn destination(&self) -> &str {
+        &self.destination
+    }
+
+    /// Returns the selected Board's native System-region offset or address.
+    #[must_use]
+    pub const fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the number of flashed bytes.
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        self.size
+    }
 }
 
 impl BuiltImage {
@@ -176,6 +223,35 @@ pub fn build_selected(workspace: &Path) -> Result<BuiltImage, String> {
     })
 }
 
+/// Flashes the built System image into the currently selected Board's System partition.
+///
+/// The selected Board determines both the native partition bounds and the
+/// internal Platform flasher. This command never rebuilds the image.
+///
+/// # Errors
+///
+/// Returns an error when selection or native layout is invalid, the built
+/// image is absent or stale, Platform configuration is invalid, or flashing
+/// fails.
+pub fn flash_selected(workspace: &Path) -> Result<FlashedImage, String> {
+    let region = selected_system_region(workspace)?;
+    let image = workspace.join(IMAGE_OUTPUT);
+    let destination = flash::flash(FlashRequest {
+        workspace,
+        image: &image,
+        offset: region.offset,
+        size: region.size,
+        platform: &region.platform_flash,
+    })?;
+    Ok(FlashedImage {
+        board: region.board,
+        image,
+        destination,
+        offset: region.offset,
+        size: region.size,
+    })
+}
+
 /// Resolves the System region from the currently selected Board's native layout.
 ///
 /// # Errors
@@ -198,16 +274,46 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
     }
     let layout_path = bundle.join(board.native_layout().artifact());
     let layout = read_text(&layout_path, "native layout")?;
-    let (offset, size) = match board.hardware().chip() {
-        "macos" | "linux" => file_layout_system_region(&layout)?,
-        chip if chip.starts_with("esp32") => esp_system_region(&layout)?,
-        chip if chip.starts_with("stm32") => stm32_system_region(&layout)?,
+    let chip = board.hardware().chip();
+    let (offset, size, platform_flash) = match chip {
+        "macos" | "linux" => {
+            let (offset, size, capacity) = file_layout_system_region(&layout)?;
+            (
+                offset,
+                size,
+                PlatformFlash::File {
+                    platform: chip.to_owned(),
+                    capacity,
+                },
+            )
+        }
+        chip if chip.starts_with("esp32") => {
+            let (offset, size) = esp_system_region(&layout)?;
+            (
+                offset,
+                size,
+                PlatformFlash::Esp {
+                    chip: chip.to_owned(),
+                },
+            )
+        }
+        chip if chip.starts_with("stm32") => {
+            let (offset, size) = stm32_system_region(&layout)?;
+            (
+                offset,
+                size,
+                PlatformFlash::Stm32 {
+                    chip: chip.to_owned(),
+                },
+            )
+        }
         chip => return Err(format!("unsupported native layout for Board chip `{chip}`")),
     };
     Ok(SystemRegion {
         board: board_name,
         offset,
         size,
+        platform_flash,
     })
 }
 
@@ -455,7 +561,7 @@ enum FileRegionAccess {
     ReadWrite,
 }
 
-fn file_layout_system_region(layout: &str) -> Result<(u64, usize), String> {
+fn file_layout_system_region(layout: &str) -> Result<(u64, usize, usize), String> {
     let mut documents = yaml_peg::serde::from_str::<FileLayoutDocument>(layout)
         .map_err(|error| format!("invalid file layout: {error}"))?;
     if documents.len() != 1 {
@@ -484,7 +590,7 @@ fn file_layout_system_region(layout: &str) -> Result<(u64, usize), String> {
             "selected Board `system` region exceeds file-layout capacity",
         ));
     }
-    Ok((region.offset, region.size))
+    Ok((region.offset, region.size, document.capacity))
 }
 
 fn esp_system_region(layout: &str) -> Result<(u64, usize), String> {

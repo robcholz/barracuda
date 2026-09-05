@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use barracuda_system_image::build_selected;
+use barracuda_system_image::{build_selected, flash_selected};
 use clap::{Parser, Subcommand};
 
 /// Manages the selected Board's System image.
@@ -19,11 +19,38 @@ struct Cli {
 enum Command {
     /// Build the selected Board's System partition image.
     Build,
+    /// Flash the built image into the selected Board's System partition.
+    Flash,
 }
 
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Build => build(),
+        Command::Flash => flash(),
+    }
+}
+
+fn flash() -> ExitCode {
+    let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
+        eprintln!("error: system-image crate is not located below the workspace root");
+        return ExitCode::FAILURE;
+    };
+    match flash_selected(workspace) {
+        Ok(image) => {
+            println!(
+                "Flashed {}-byte system image for Board `{}` at {:#x} from `{}` to `{}`.",
+                image.size(),
+                image.board(),
+                image.offset(),
+                image.image().display(),
+                image.destination()
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -59,7 +86,7 @@ fn workspace_root(manifest_dir: &Path) -> Option<&Path> {
 mod tests {
     #![allow(clippy::expect_used)]
 
-    use clap::{Parser, error::ErrorKind};
+    use clap::{error::ErrorKind, Parser};
 
     use super::Cli;
 
@@ -80,6 +107,11 @@ mod tests {
     }
 
     #[test]
+    fn command_accepts_flash_without_parameters() {
+        assert!(Cli::try_parse_from(["cargo system-image", "flash"]).is_ok());
+    }
+
+    #[test]
     fn command_exposes_clap_help() {
         let error = Cli::try_parse_from(["cargo system-image", "--help"])
             .expect_err("help exits before building");
@@ -93,6 +125,15 @@ mod tests {
         for argument in ["--size", "--output"] {
             let error = Cli::try_parse_from(["cargo system-image", "build", argument])
                 .expect_err("build parameters are unsupported");
+            assert_eq!(error.kind(), ErrorKind::UnknownArgument);
+        }
+    }
+
+    #[test]
+    fn command_rejects_flash_parameters() {
+        for argument in ["--board", "--platform", "--image"] {
+            let error = Cli::try_parse_from(["cargo system-image", "flash", argument])
+                .expect_err("flash parameters are unsupported");
             assert_eq!(error.kind(), ErrorKind::UnknownArgument);
         }
     }
