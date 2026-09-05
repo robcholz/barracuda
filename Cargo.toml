@@ -37,6 +37,9 @@ barracuda-platform-linux = { path = "platforms/linux" }
 barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
+# BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES
+barracuda-board-stm32f429zi-nucleo = { path = "boards/stm32f429zi-nucleo" }
+# END GENERATED BOARD WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
 barracuda-file-plugin = { path = "plugins/file/crates/plugin" }

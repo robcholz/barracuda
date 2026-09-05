@@ -596,6 +596,7 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
+ "barracuda-board-tool",
  "embassy-executor",
 ]
 

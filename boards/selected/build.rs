@@ -7,6 +7,13 @@ use barracuda_board_config::{parse, read_selected_board, render_rust, SELECTED_B
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_GENERATED_BUILD");
     let output = PathBuf::from(env::var_os("OUT_DIR").ok_or("Cargo did not set OUT_DIR")?);
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
+    let root = manifest.join("../..");
+    barracuda_board_tool::sync(&root, true).map_err(|error| {
+        format!(
+            "{error}; Board registries are source files, so run `cargo board sync` before rebuilding"
+        )
+    })?;
     if env::var("BARRACUDA_GENERATED_BUILD").as_deref() != Ok("1") {
         fs::write(
             output.join("selected_board.rs"),
@@ -22,8 +29,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
-    let root = manifest.join("../..");
     let selection_path = root.join(SELECTED_BOARD_PATH);
     println!("cargo:rerun-if-changed={}", selection_path.display());
     let board_name =
