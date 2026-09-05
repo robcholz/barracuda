@@ -1,7 +1,6 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
 #![allow(clippy::panic)]
-#![allow(clippy::collapsible_match)]
 
 use std::cell::RefCell;
 use std::future::{pending, Future};
@@ -10,47 +9,103 @@ use std::rc::Rc;
 use std::task::Poll;
 
 use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_component::dto::{FixedStr, SessionIdDto, SessionPersistenceDto};
-use barracuda_agent_component::list_sessions::ListSessions;
-use barracuda_agent_component::new_session::{NewSession, NewSessionRequest};
-use barracuda_agent_component::open_session::{
-    frames_from_open_session_response, OpenSession, OpenSessionRequest, OpenSessionResponse,
-    OpenSessionResponseDecoder, SessionEventDto, ToolOutputDto,
-};
-use barracuda_agent_component::session;
-use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig, SessionId};
+use barracuda_agent_component::session::SessionOutputEvent;
+use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
 use barracuda_event_router::{
-    Component, ComponentError, ComponentFuture, ComponentResult, EventRouter, RegisterContext,
-    RpcError, RpcFrame, RpcLaneStorage, RpcStream, RunContext, UnregisterContext,
+    Component, ComponentFuture, ComponentResult, Event, EventRouter, JsonRef, JsonRpcSchema,
+    JsonSchema, JsonWriter, RegisterContext, RpcAddress, RpcClient, RpcLaneStorage, RunContext,
+    UnregisterContext, WorkflowClient,
 };
 use barracuda_model_api::ModelApi;
 use barracuda_platform_test::{install_global_memory_vfs, memory_vfs, ScriptStep, ScriptedStack};
 use http_client::ClientFactory;
+use serde::Deserialize;
+use serde_json::Value;
 use static_cell::StaticCell;
 
+const FRAME_SIZE: usize = 512;
+const EMPTY_SCHEMA: JsonSchema =
+    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
+const EVENT_SCHEMA: JsonSchema = JsonSchema::new(r#"{"type":"object"}"#);
+const WORKFLOW_JSON: &str = r#"{
+    "id":"agent-session-event-test",
+    "match":{"event":"session.event"},
+    "steps":[{"call":"test.record-session-event"}]
+}"#;
+const EXPECTED_OUTPUT: &str = "abcdefghijklmnopqrstuvwxyz😀ABCDEFGHIJKLMNO";
+
 static NETWORK: StaticCell<ScriptedStack> = StaticCell::new();
+
+struct RecordSessionEvent;
+
+impl JsonRpcSchema for RecordSessionEvent {
+    const ADDRESS: &'static str = "test.record-session-event";
+    const REQUEST_SCHEMA: JsonSchema = EVENT_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = FRAME_SIZE;
+    const MAX_RESPONSE_BYTES: usize = 2;
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EventChunk {
+    session: String,
+    run: String,
+    sequence: u32,
+    chunk_index: u32,
+    field: String,
+    chunk: String,
+    field_complete: bool,
+    event_complete: bool,
+    terminal: Option<String>,
+}
 
 #[derive(Default)]
 struct ResultState {
     stage: RefCell<&'static str>,
-    sessions: RefCell<Vec<u32>>,
-    output: RefCell<String>,
+    events: RefCell<Vec<EventChunk>>,
+    finished: RefCell<bool>,
+}
+
+impl ResultState {
+    fn field_for_event_type(&self, event_type: &str, field: &str) -> Option<String> {
+        let events = self.events.borrow();
+        let sequence = events
+            .iter()
+            .find(|chunk| chunk.field == "type" && chunk.chunk == event_type)
+            .map(|chunk| chunk.sequence)?;
+        let mut chunks: Vec<_> = events
+            .iter()
+            .filter(|chunk| chunk.sequence == sequence && chunk.field == field)
+            .cloned()
+            .collect();
+        chunks.sort_by_key(|chunk| chunk.chunk_index);
+        Some(chunks.iter().map(|chunk| chunk.chunk.as_str()).collect())
+    }
 }
 
 struct SessionApiClient {
     result: Rc<ResultState>,
 }
 
-impl Component<512> for SessionApiClient {
-    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
-        Ok(())
+impl Component<FRAME_SIZE> for SessionApiClient {
+    fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
+        let result = Rc::clone(&self.result);
+        context.register_json::<RecordSessionEvent, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let result = Rc::clone(&result);
+                async move {
+                    result.events.borrow_mut().push(request.deserialize()?);
+                    response.write("{}").await
+                }
+            },
+        )
     }
 
-    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
+    fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
         Box::pin(async move {
-            run_session_api(context, Rc::clone(&self.result))
-                .await
-                .map_err(ComponentError::lifecycle)?;
+            run_session_api(context.rpc().clone(), Rc::clone(&self.result)).await;
             pending().await
         })
     }
@@ -60,145 +115,207 @@ impl Component<512> for SessionApiClient {
     }
 }
 
-async fn run_session_api(
-    context: RunContext<512>,
-    result: Rc<ResultState>,
-) -> Result<(), RpcError> {
-    let client = context.rpc();
-    *result.stage.borrow_mut() = "new_session";
-    let session = success(
-        client
-            .call::<NewSession>(NewSessionRequest {
-                persistence: SessionPersistenceDto::Ephemeral,
-            })?
-            .await?,
-    )?
-    .view()?
-    .session;
-    let session = SessionId::new(session.get());
-
-    *result.stage.borrow_mut() = "list_sessions";
-    let mut sessions = client.call::<ListSessions>(())?;
-    while let Some(item) = sessions.next().await {
-        let frame = success(item?)?;
-        let response = frame.view()?;
-        for session in response.sessions.iter().take(response.count as usize) {
-            result.sessions.borrow_mut().push(session.get());
-        }
+async fn run_session_api(client: RpcClient, result: Rc<ResultState>) {
+    let system_rpcs = client
+        .rpcs_by_visibility("system")
+        .expect("discover system RPCs");
+    let agent_rpcs = [
+        "session.new",
+        "session.list",
+        "session.open",
+        "session.delete",
+        "session.append",
+        "session.respond",
+        "session.set_reasoning_effort",
+        "session.set_permission_level",
+        "session.interrupt",
+        "session.cancel",
+        "session.close",
+    ];
+    for address in agent_rpcs {
+        assert!(
+            system_rpcs.contains(&RpcAddress::try_from(address).expect("valid Agent RPC address")),
+            "{address} must be visible to the system group"
+        );
+    }
+    let public_rpcs = client
+        .rpcs_by_visibility("*")
+        .expect("discover public RPCs");
+    for address in agent_rpcs {
+        assert!(
+            !public_rpcs.contains(
+                &RpcAddress::try_from(address).expect("valid Agent RPC address")
+            ),
+            "{address} must not be publicly visible"
+        );
     }
 
-    *result.stage.borrow_mut() = "open_session";
-    let mut events = client.call::<OpenSession>(OpenSessionRequest {
-        session: SessionIdDto::new(session.0),
-    })?;
+    *result.stage.borrow_mut() = "load_workflow";
+    WorkflowClient::<FRAME_SIZE>::new(client.clone())
+        .load(WORKFLOW_JSON)
+        .await
+        .expect("load session Event workflow");
+
+    *result.stage.borrow_mut() = "new";
+    let created = call(&client, "session.new", r#"{"persistence":"ephemeral"}"#).await;
+    let session = created
+        .get("session")
+        .and_then(Value::as_str)
+        .expect("session.new returns a session")
+        .to_owned();
+
+    *result.stage.borrow_mut() = "list";
+    let listed = call(&client, "session.list", r#"{"offset":0,"limit":1}"#).await;
+    assert_eq!(
+        listed
+            .get("sessions")
+            .and_then(Value::as_array)
+            .and_then(|sessions| sessions.first())
+            .and_then(Value::as_str),
+        Some(session.as_str())
+    );
+    assert!(listed.get("next_offset").is_some_and(Value::is_null));
+
+    *result.stage.borrow_mut() = "closed_append";
+    let rejected = call(
+        &client,
+        "session.append",
+        &format!(r#"{{"session":"{session}","text":"too early"}}"#),
+    )
+    .await;
+    assert_eq!(
+        rejected.get("error").and_then(Value::as_str),
+        Some("session_not_open")
+    );
+
+    *result.stage.borrow_mut() = "open";
+    let opened = call(
+        &client,
+        "session.open",
+        &format!(r#"{{"session":"{session}"}}"#),
+    )
+    .await;
+    assert_eq!(
+        opened.get("session").and_then(Value::as_str),
+        Some(session.as_str())
+    );
+    assert_eq!(opened.get("run").and_then(Value::as_str), Some("run-1"));
+
+    for (address, body) in [
+        (
+            "session.set_reasoning_effort",
+            format!(r#"{{"session":"{session}","effort":"medium"}}"#),
+        ),
+        (
+            "session.set_permission_level",
+            format!(r#"{{"session":"{session}","level":"ask"}}"#),
+        ),
+    ] {
+        *result.stage.borrow_mut() = "control";
+        assert_eq!(call(&client, address, &body).await, serde_json::json!({}));
+    }
+
     *result.stage.borrow_mut() = "append";
-    let append = session::append::AppendRequestFrame {
-        session: SessionIdDto::new(session.0),
-        text: FixedStr::new("hello").map_err(|_error| RpcError::InvalidFrameState)?,
-    };
-    let append_stream = RpcStream::new(futures_lite::stream::iter([Ok(append)]));
-    *result.stage.borrow_mut() = "events";
-    let item = events.next().await.ok_or(RpcError::InvalidFrameState)?;
-    let frame = match item? {
-        Ok(frame) => *frame.view()?,
-        Err(error) => panic!("open session method error: {:?}", error.view()?),
-    };
-    let mut decoder = OpenSessionResponseDecoder::new();
-    let response = decoder
-        .push(frame)
-        .unwrap_or_else(|error| panic!("invalid Opened event: {error}"))
-        .expect("complete Opened event");
-    assert!(matches!(response, OpenSessionResponse::Opened { .. }));
-    success(
-        client
-            .call::<session::append::Append>(append_stream)?
-            .await?,
-    )?;
+    let message = "x".repeat(430);
+    assert_eq!(
+        call(
+            &client,
+            "session.append",
+            &format!(r#"{{"session":"{session}","text":"{message}"}}"#),
+        )
+        .await,
+        serde_json::json!({})
+    );
 
-    loop {
-        let Some(item) = events.next().await else {
-            break;
-        };
-        let outcome = item.unwrap_or_else(|error| panic!("open stream transport error: {error:?}"));
-        let frame = match outcome {
-            Ok(frame) => *frame.view()?,
-            Err(error) => panic!("open session method error: {:?}", error.view()?),
-        };
-        let Some(response) = decoder
-            .push(frame)
-            .unwrap_or_else(|error| panic!("invalid event frame: {error}"))
-        else {
-            continue;
-        };
-        match response {
-            OpenSessionResponse::Event {
-                event:
-                    SessionEventDto::OutputDelta { text } | SessionEventDto::EffectOutputDelta { text },
-                ..
-            } => {
-                result.output.borrow_mut().push_str(&text);
-            }
-            OpenSessionResponse::Event {
-                event: SessionEventDto::TurnEnded { .. },
-                ..
-            } => break,
-            _ => {}
-        }
-    }
+    *result.stage.borrow_mut() = "events";
+    wait_until(|| {
+        result
+            .field_for_event_type("output_delta", "text")
+            .as_deref()
+            == Some(EXPECTED_OUTPUT)
+    })
+    .await;
+
+    *result.stage.borrow_mut() = "usage";
+    wait_until(|| {
+        result
+            .field_for_event_type("usage", "cache_read_tokens")
+            .as_deref()
+            == Some("8")
+    })
+    .await;
+    assert_eq!(
+        result
+            .field_for_event_type("usage", "input_tokens")
+            .as_deref(),
+        Some("12")
+    );
+    assert_eq!(
+        result
+            .field_for_event_type("usage", "output_tokens")
+            .as_deref(),
+        Some("3")
+    );
 
     *result.stage.borrow_mut() = "close";
-    success(
-        client
-            .call::<session::close::Close>(session::close::CloseRequest {
-                session: SessionIdDto::new(session.0),
-            })?
-            .await?,
-    )?;
-    *result.stage.borrow_mut() = "done";
-    Ok(())
+    assert_eq!(
+        call(
+            &client,
+            "session.close",
+            &format!(r#"{{"session":"{session}"}}"#),
+        )
+        .await,
+        serde_json::json!({})
+    );
+    wait_until(|| {
+        result
+            .events
+            .borrow()
+            .iter()
+            .any(|chunk| chunk.terminal.as_deref() == Some("closed"))
+    })
+    .await;
+
+    *result.stage.borrow_mut() = "delete";
+    assert_eq!(
+        call(
+            &client,
+            "session.delete",
+            &format!(r#"{{"session":"{session}"}}"#),
+        )
+        .await,
+        serde_json::json!({})
+    );
+    *result.finished.borrow_mut() = true;
+}
+
+async fn call(client: &RpcClient, method: &str, request: &str) -> Value {
+    let address = RpcAddress::try_from(method).expect("valid test RPC address");
+    client
+        .call_json(&address, request)
+        .expect("start JSON RPC")
+        .await
+        .expect("complete JSON RPC")
+        .deserialize()
+        .expect("valid JSON RPC response")
+}
+
+async fn wait_until(mut ready: impl FnMut() -> bool) {
+    while !ready() {
+        futures_lite::future::yield_now().await;
+    }
 }
 
 #[test]
-fn session_open_chunks_and_recovers_long_tool_results() {
-    let session = SessionId::new(77);
-    let response = OpenSessionResponse::Event {
-        session,
-        event: SessionEventDto::ToolResult {
-            call: barracuda_agent_runtime::ToolCall {
-                id: "call-1".into(),
-                name: "large-tool".into(),
-                arguments_json: format!(r#"{{"input":"{}"}}"#, "a".repeat(900)),
-            },
-            output: ToolOutputDto {
-                content: "result".repeat(400),
-                ok: true,
-            },
-        },
-    };
-
-    let frames = frames_from_open_session_response(session, &response).expect("encode event");
-    assert!(frames.len() > 4);
-
-    let mut decoder = OpenSessionResponseDecoder::new();
-    let decoded = frames
-        .into_iter()
-        .find_map(|frame| decoder.push(frame).expect("decode frame"))
-        .expect("complete event");
-    assert_eq!(decoded, response);
-}
-
-fn success<T, E>(outcome: Result<RpcFrame<T>, RpcFrame<E>>) -> Result<RpcFrame<T>, RpcError> {
-    outcome.map_err(|_error| RpcError::InvalidFrameState)
-}
-
-#[test]
-fn public_session_rpcs_drive_the_existing_agent_api() {
+fn system_json_rpcs_and_bounded_session_events_drive_the_agent() {
     futures_lite::future::block_on(async {
-        let event = r#"data: {"choices":[{"delta":{"content":"session reply"}}]}
-
-data: [DONE]
-
-"#;
+        let event = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"",
+            "abcdefghijklmnopqrstuvwxyz😀ABCDEFGHIJKLMNO",
+            "\"}}]}\n\n",
+            "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":3,\"prompt_tokens_details\":{\"cached_tokens\":8}}}\n\n",
+            "data: [DONE]\n\n"
+        );
         let network: &'static ScriptedStack =
             NETWORK.init(ScriptedStack::new([ScriptStep::sse(200, &[event])]));
         let factory = ModelApiFactory::new(move || {
@@ -230,10 +347,8 @@ data: [DONE]
         install_global_memory_vfs()
             .await
             .expect("install global test VFS");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-        let mut router = EventRouter::<8, 512, 8>::new(lanes)
-            .await
-            .expect("build Event Router");
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, FRAME_SIZE, 8>::new()));
+        let mut router = EventRouter::new(lanes).await.expect("build Event Router");
         router
             .load(Box::new(AgentComponent::new(runtime, service)))
             .expect("load Agent Component");
@@ -243,32 +358,52 @@ data: [DONE]
             }))
             .expect("load Session API client");
 
-        drive_until(&mut router, &result, || !result.output.borrow().is_empty()).await;
+        drive_until(&mut router, &result).await;
 
-        assert_eq!(result.sessions.borrow().as_slice(), &[1]);
-        assert_eq!(result.output.borrow().as_str(), "session reply");
+        let events = result.events.borrow();
+        assert!(events.iter().any(|chunk| chunk.chunk.len() > 32));
+        assert!(events.iter().all(|chunk| chunk.session == "session-1"));
+        assert!(events.iter().all(|chunk| chunk.run == "run-1"));
+        assert!(events.iter().any(|chunk| chunk.field_complete));
+        assert!(events.iter().any(|chunk| chunk.event_complete));
+        assert_eq!(
+            events
+                .iter()
+                .filter(|chunk| chunk.terminal.is_some())
+                .count(),
+            1
+        );
     });
 }
 
-async fn drive_until(
-    router: &mut EventRouter<8, 512, 8>,
-    result: &ResultState,
-    ready: impl Fn() -> bool,
-) {
+async fn drive_until(router: &mut EventRouter<8, FRAME_SIZE, 8>, result: &ResultState) {
     core::future::poll_fn(|context| {
-        if let Poll::Ready(poll_result) = Pin::new(&mut *router).poll(context) {
-            if let Err(error) = poll_result {
-                panic!(
-                    "Event Router failed during {}: {error}",
-                    result.stage.borrow()
-                );
-            }
+        if let Poll::Ready(Err(error)) = Pin::new(&mut *router).poll(context) {
+            panic!(
+                "Event Router failed during {}: {error}",
+                result.stage.borrow()
+            );
         }
-        if ready() {
+        if *result.finished.borrow() {
             Poll::Ready(())
         } else {
             Poll::Pending
         }
     })
     .await;
+}
+
+#[test]
+fn session_event_contract_is_public_and_bounded() {
+    assert_eq!(SessionOutputEvent::ID, "session.event");
+    let schema = include_str!("../../../schemas/event/session_event.json");
+    assert!(!schema.contains("maxLength"));
+    for field in [
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+    ] {
+        assert!(schema.contains(&format!("\"{field}\"")));
+    }
 }

@@ -1,80 +1,37 @@
-# Agent Component RPCs
+# Agent JSON RPCs
 
-The Agent Component exposes the existing Agent runtime and session control as
-Event Router RPCs. Fixed-layout request and response types live in the
-`dto` module and are re-exported from the RPC modules.
+Every Agent RPC is unary JSON, registered with visibility `"system"`. A business
+failure is a successful transport response with `{"error":"code"}`. `RpcError`
+is reserved for invalid JSON/framing, lane capacity, or Event Router runtime
+failure. Successful commands without response data return `{}`.
 
-RPCs marked **dynamic** carry `#[rpc_dynamic]`, so they are reachable through
-`RpcClient::call_json` and expose per-field wire access for Workflow links.
-Streaming RPCs carry unbounded text and are not dynamic.
-
-| Address | Input | Output | Method error | Dynamic |
+| Address | Request | Success | Stable business errors | Request/response bytes |
 | --- | --- | --- | --- | --- |
-| `session.new` | unary `NewSessionRequest` | unary `NewSessionResponse` | `NewSessionError` | yes |
-| `session.delete` | unary `DeleteSessionRequest` | unary `()` | `DeleteSessionError` | yes |
-| `session.set_reasoning_effort` | unary `SetReasoningEffortRequest` | unary `()` | `SessionRpcError` | yes |
-| `session.set_permission_level` | unary `SetPermissionLevelRequest` | unary `()` | `SessionRpcError` | yes |
-| `session.interrupt` | unary `InterruptRequest` | unary `()` | `SessionRpcError` | yes |
-| `session.cancel` | unary `CancelRequest` | unary `()` | `SessionRpcError` | yes |
-| `session.close` | unary `CloseRequest` | unary `()` | `SessionRpcError` | yes |
-| `session.list` | unary `()` | streaming `ListSessionsResponse` | `()` | yes |
-| `session.open` | unary `OpenSessionRequest` | streaming `OpenSessionResponseFrame` | `OpenSessionError` | yes |
-| `session.append` | streaming `AppendRequestFrame` | unary `()` | `SessionRpcError` | yes |
-| `session.respond` | streaming `RespondRequestFrame` | unary `()` | `SessionRpcError` | yes |
+| `session.new` | `{"persistence":"persistent" \| "ephemeral"}` | `{"session":"session-N"}` | `worker_stopped`, `persistence` | 64 / 32 |
+| `session.list` | `{"offset"?:0,"limit"?:1..16}` | `{"sessions":[...],"next_offset":number \| null}` | `invalid_request` | 64 / 512 |
+| `session.open` | `{"session":"session-N"}` | `{"session":"session-N","run":"run-N"}` | `invalid_request`, `session_not_found`, `already_open`, `worker_stopped` | 48 / 64 |
+| `session.delete` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_found`, `already_deleting`, `worker_stopped`, `storage` | 48 / 31 |
+| `session.append` | `{"session":"session-N","text":"..."}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 512 / 34 |
+| `session.respond` | `{"session":"session-N","request":"input-N","text":"..."}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `not_awaiting_input`, `input_request_mismatch`, `worker_stopped` | 512 / 34 |
+| `session.set_reasoning_effort` | `{"session":"session-N","effort":"low" \| "medium" \| "high" \| "ultra"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 80 / 34 |
+| `session.set_permission_level` | `{"session":"session-N","level":"deny" \| "ask" \| "allow_all"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 80 / 34 |
+| `session.interrupt` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 48 / 34 |
+| `session.cancel` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 48 / 34 |
+| `session.close` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` | 48 / 34 |
 
-## Text representation
+`session.list` is a bounded snapshot page. Omitted `offset` and `limit` default
+to `0` and `16`; pass `next_offset` into the following call until it is `null`.
 
-Text is always a fixed-capacity, NUL-terminated UTF-8 C-string (`FixedStr`)
-that serializes as a JSON string — never as a byte array.
+`session.open` is a command, not a transport stream. Its `run` identifies that
+particular open lease. Runtime output is delivered separately through the
+bounded `session.event` contract. `session.close` acknowledges the command;
+the matching terminal Event is the authoritative end of that run.
 
-## Request and response shapes
+`text` is ordinary JSON UTF-8 text with no independent field limit. The complete
+encoded request, including escaping and the other fields, must fit the RPC's
+512-byte lane. The handler borrows request fields from the lane. It allocates
+only the `Message` data that `SessionControl` must own after the RPC lane is
+released.
 
-### `session.new`
-
-`NewSessionRequest` carries `persistence` (`"persistent"` or `"ephemeral"`).
-`NewSessionResponse` returns the created `session` identifier (`"session-N"`).
-
-### `session.list`
-
-The response streams `ListSessionsResponse` items, each carrying up to four
-session identifiers in a `sessions` array plus a `count`. Unused slots
-serialize as `"session-0"`; callers should read only the first `count` entries.
-
-### `session.open`
-
-`OpenSessionRequest` carries the `session` identifier. The response is a
-streaming sequence of typed `OpenSessionResponseFrame` chunks. Each frame
-carries `session`, `value`, and one field: `OpenedMore`, `OpenedComplete`,
-`EventMore`, or `EventComplete`. `OpenSessionResponseDecoder` reconstructs one
-logical `OpenSessionResponse` whenever a complete field arrives.
-
-Logical events are not bounded by one RPC lane. JSON is split on UTF-8
-boundaries across as many frames as required, so large reasoning, tool call,
-tool output, and error events are not dropped by the wire contract.
-
-Events: `opened`, `turn_started`, `input_requested`, `iteration_started`,
-`reasoning_delta`, `reasoning_ended`, `output_delta`, `output_ended`,
-`tool_result`, `tool_results_ended`, `iteration_ended`, `usage`,
-`effect_output_delta`, `effect_output_ended`, `turn_error`, `turn_ended`,
-`session_error`, and `closed`.
-
-### `session.append` and `session.respond`
-
-Each streamed `AppendRequestFrame` carries `session` and a fixed-capacity
-`text` C-string; `RespondRequestFrame` additionally carries the `request`
-identifier being answered. Each frame is one complete message (bounded to 399
-bytes of text); a call may stream several.
-
-### Session control requests
-
-`SetReasoningEffortRequest`, `SetPermissionLevelRequest`, `InterruptRequest`,
-`CancelRequest`, and `CloseRequest` are fixed-layout unary requests that carry
-the target `session` identifier and, where applicable, the new value.
-
-## Error reference
-
-- `NewSessionError::{WorkerStopped, Persistence}`.
-- `DeleteSessionError::{SessionNotFound, AlreadyDeleting, WorkerStopped, Storage}`.
-- `OpenSessionError::{SessionNotFound, AlreadyOpen, WorkerStopped, InvalidEvent}`.
-- `SessionRpcError::{SessionNotOpen, SessionClosed, NotAwaitingInput,
-  InputRequestMismatch, WorkerStopped, InvalidRequest}`.
+Schemas live at `schemas/rpc/<short-name>/{request,response}.json` and are
+included by each method's `JsonRpcSchema` implementation.

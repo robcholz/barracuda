@@ -1,16 +1,14 @@
 #![no_std]
 
-//! Event Router Component exposing the existing Agent runtime API.
+//! Event Router Component exposing the Agent runtime as JSON contracts.
 
 extern crate alloc;
 
 /// Component lifecycle and RPC registration.
 pub mod component;
-mod convert;
 /// `AgentRuntime::delete_session` RPC.
 pub mod delete_session;
-/// Fixed-layout RPC messages.
-pub mod dto;
+mod json;
 /// `AgentRuntime::list_sessions` RPC.
 pub mod list_sessions;
 /// `AgentRuntime::new_session` RPC.

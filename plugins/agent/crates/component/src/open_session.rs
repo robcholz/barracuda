@@ -1,207 +1,134 @@
-use alloc::{collections::VecDeque, format, rc::Rc, string::String, vec::Vec};
+use alloc::{rc::Rc, string::String};
+use core::fmt::Write as _;
 
 use barracuda_agent_runtime::{
     stream::StreamPart, AgentRuntime, InputRequestId, InputRequestKind, IterationEvent,
-    IterationId, OpenSessionError as RuntimeOpenSessionError, RuntimeError, SessionCloseReason,
-    SessionEvent, SessionId, ToolCall, ToolOutput, TurnEvent, TurnId, TurnOrigin,
+    IterationId, OpenSessionError as RuntimeOpenSessionError, ProviderUsage, RuntimeError,
+    SessionCloseReason, SessionEvent, ToolCall, ToolOutput, TurnEvent, TurnId, TurnOrigin,
 };
 use barracuda_event_router::{
-    rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming, Unary,
+    json_schema, JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
 };
-use futures_lite::{stream, Stream, StreamExt};
-use serde::{Deserialize, Serialize};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
+use serde::Deserialize;
 
-use crate::convert;
-use crate::dto::FixedStr;
+use crate::json::{parse_session, AgentRpcError, ErrorResponse, OpenedResponse};
 use crate::session::SessionRegistry;
 
-pub use crate::dto::{OpenSessionRequest, OpenSessionResponseField, OpenSessionResponseFrame};
+/// Opens a session control lease and subscribes it to `session.event`.
+pub struct OpenSession;
 
-/// Logical item returned by the `session.open` stream.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OpenSessionResponse {
-    /// Confirms that the control handle and event stream opened.
-    Opened {
-        /// Opened session.
-        session: SessionId,
-    },
-    /// One event from the opened Agent session.
-    Event {
-        /// Session that emitted the event.
-        session: SessionId,
-        /// Transport-stable event representation.
-        event: SessionEventDto,
-    },
+impl JsonRpcSchema for OpenSession {
+    const ADDRESS: &'static str = "session.open";
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("open", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("open", response);
+    const MAX_REQUEST_BYTES: usize = 48;
+    const MAX_RESPONSE_BYTES: usize = 64;
 }
 
-/// Failure while rebuilding one logical `session.open` response from chunks.
-#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum OpenSessionDecodeError {
-    /// Chunks from different sessions or logical response kinds were interleaved.
-    #[error("session.open chunks are out of order")]
-    InvalidSequence,
-    /// The completed chunk sequence was not a valid logical response.
-    #[error("session.open response JSON is invalid")]
-    InvalidJson,
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OpenSessionRequest<'a> {
+    #[serde(borrow)]
+    session: &'a str,
 }
 
-/// Stateful decoder for the typed, chunked `session.open` response stream.
-#[derive(Default)]
-pub struct OpenSessionResponseDecoder {
-    session: Option<crate::dto::SessionIdDto>,
-    opened: Option<bool>,
-    json: String,
-}
-
-impl OpenSessionResponseDecoder {
-    /// Creates an empty decoder.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            session: None,
-            opened: None,
-            json: String::new(),
-        }
-    }
-
-    /// Absorbs one frame and returns a response when its final chunk arrives.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for interleaved sequences or invalid completed JSON.
-    pub fn push(
-        &mut self,
-        frame: OpenSessionResponseFrame,
-    ) -> Result<Option<OpenSessionResponse>, OpenSessionDecodeError> {
-        let (opened, complete) = response_field_parts(frame.field);
-        if self.session.is_some_and(|session| session != frame.session)
-            || self.opened.is_some_and(|current| current != opened)
-        {
-            self.reset();
-            return Err(OpenSessionDecodeError::InvalidSequence);
-        }
-        self.session = Some(frame.session);
-        self.opened = Some(opened);
-        self.json.push_str(frame.value.as_str());
-        if !complete {
-            return Ok(None);
-        }
-
-        let response = match serde_json::from_str(&self.json) {
-            Ok(response) => response,
-            Err(_error) => {
-                self.reset();
-                return Err(OpenSessionDecodeError::InvalidJson);
+/// Builds the unary JSON handler for [`OpenSession`].
+pub fn open_session_handler(
+    runtime: Rc<AgentRuntime>,
+    registry: SessionRegistry,
+) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
+        let runtime = Rc::clone(&runtime);
+        let registry = registry.clone();
+        async move {
+            let request = request.deserialize::<OpenSessionRequest<'_>>()?;
+            let session = match parse_session(request.session) {
+                Ok(session) => session,
+                Err(error) => return response.write(&ErrorResponse(error)).await,
+            };
+            match runtime.open_session(session).await {
+                Ok((control, events)) => {
+                    let run = registry.insert(session, control, events);
+                    response.write(&OpenedResponse { session, run }).await
+                }
+                Err(error) => response.write(&ErrorResponse(map_open_error(error))).await,
             }
-        };
-        let kind_matches = matches!(
-            (&response, opened),
-            (OpenSessionResponse::Opened { .. }, true)
-        ) || matches!(
-            (&response, opened),
-            (OpenSessionResponse::Event { .. }, false)
-        );
-        self.reset();
-        if !kind_matches {
-            return Err(OpenSessionDecodeError::InvalidSequence);
         }
-        Ok(Some(response))
-    }
-
-    fn reset(&mut self) {
-        self.session = None;
-        self.opened = None;
-        self.json.clear();
     }
 }
 
-/// Transport-stable representation of an Agent `SessionEvent`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionEventDto {
-    /// A caller-visible turn started.
+fn map_open_error(error: RuntimeError) -> AgentRpcError {
+    match error {
+        RuntimeError::OpenSession(RuntimeOpenSessionError::SessionNotFound(_)) => {
+            AgentRpcError::SessionNotFound
+        }
+        RuntimeError::OpenSession(RuntimeOpenSessionError::AlreadyOpen(_)) => {
+            AgentRpcError::AlreadyOpen
+        }
+        RuntimeError::OpenSession(RuntimeOpenSessionError::WorkerStopped) => {
+            AgentRpcError::WorkerStopped
+        }
+        _ => AgentRpcError::WorkerStopped,
+    }
+}
+
+/// Owned runtime event awaiting bounded field-by-field Event emission.
+pub(crate) enum SessionEventDocument {
     TurnStarted {
-        /// Session-local turn identifier.
         turn: TurnId,
-        /// Cause of the new turn.
         origin: TurnOrigin,
     },
-    /// The turn paused for caller input.
     InputRequested {
-        /// Request identifier required by `session.respond`.
         request: InputRequestId,
-        /// Semantic input required by the Agent.
         kind: InputRequestKind,
     },
-    /// A root Agent iteration started.
     IterationStarted {
-        /// Iteration identifier.
         iteration: IterationId,
     },
-    /// Incremental model reasoning text.
     ReasoningDelta {
-        /// Text fragment.
         text: String,
     },
-    /// End of reasoning text for the iteration.
     ReasoningEnded,
-    /// Incremental assistant-visible text.
     OutputDelta {
-        /// Text fragment.
         text: String,
     },
-    /// End of assistant-visible model text for the iteration.
     OutputEnded,
-    /// One completed tool execution.
     ToolResult {
-        /// Original model-requested tool call.
         call: ToolCall,
-        /// Tool execution result.
-        output: ToolOutputDto,
+        output: ToolOutput,
     },
-    /// End of tool results for the iteration.
     ToolResultsEnded,
-    /// The root Agent iteration ended.
     IterationEnded,
-    /// Provider usage metadata was emitted for the iteration.
-    Usage,
-    /// Incremental assistant-visible effect output.
+    Usage {
+        usage: ProviderUsage,
+    },
     EffectOutputDelta {
-        /// Text fragment.
         text: String,
     },
-    /// End of assistant-visible effect output.
     EffectOutputEnded,
-    /// Recoverable error scoped to the active turn.
     TurnError {
-        /// Display-safe error description.
-        message: String,
+        message: ErrorText,
     },
-    /// The caller-visible turn ended.
     TurnEnded {
-        /// Session-local turn identifier.
         turn: TurnId,
     },
-    /// Recoverable error scoped to the session.
     SessionError {
-        /// Display-safe error description.
-        message: String,
+        message: ErrorText,
     },
-    /// The opened session stream closed normally.
     Closed {
-        /// Cause of closure.
-        reason: SessionCloseReasonDto,
+        reason: CloseReasonDocument,
+    },
+    StreamError {
+        error: &'static str,
     },
 }
 
-impl From<SessionEvent> for SessionEventDto {
+impl From<SessionEvent> for SessionEventDocument {
     fn from(event: SessionEvent) -> Self {
         match event {
             SessionEvent::Turn(event) => event.into(),
             SessionEvent::Error(error) => Self::SessionError {
-                message: format!("{error}"),
+                message: ErrorText::from_display(error),
             },
             SessionEvent::Closed(reason) => Self::Closed {
                 reason: reason.into(),
@@ -210,7 +137,7 @@ impl From<SessionEvent> for SessionEventDto {
     }
 }
 
-impl From<TurnEvent> for SessionEventDto {
+impl From<TurnEvent> for SessionEventDocument {
     fn from(event: TurnEvent) -> Self {
         match event {
             TurnEvent::Started { turn, origin } => Self::TurnStarted { turn, origin },
@@ -219,15 +146,14 @@ impl From<TurnEvent> for SessionEventDto {
             TurnEvent::EffectOutput(StreamPart::Delta(text)) => Self::EffectOutputDelta { text },
             TurnEvent::EffectOutput(StreamPart::End) => Self::EffectOutputEnded,
             TurnEvent::Error(error) => Self::TurnError {
-                message: format!("{error}"),
+                message: ErrorText::from_display(error),
             },
             TurnEvent::Ended { turn } => Self::TurnEnded { turn },
         }
     }
 }
 
-impl From<IterationEvent> for SessionEventDto {
-    #[allow(unreachable_patterns)]
+impl From<IterationEvent> for SessionEventDocument {
     fn from(event: IterationEvent) -> Self {
         match event {
             IterationEvent::Started { iteration } => Self::IterationStarted { iteration },
@@ -235,48 +161,34 @@ impl From<IterationEvent> for SessionEventDto {
             IterationEvent::Reasoning(StreamPart::End) => Self::ReasoningEnded,
             IterationEvent::Output(StreamPart::Delta(text)) => Self::OutputDelta { text },
             IterationEvent::Output(StreamPart::End) => Self::OutputEnded,
-            IterationEvent::ToolResult(StreamPart::Delta((call, output))) => Self::ToolResult {
-                call,
-                output: output.into(),
-            },
+            IterationEvent::ToolResult(StreamPart::Delta((call, output))) => {
+                Self::ToolResult { call, output }
+            }
             IterationEvent::ToolResult(StreamPart::End) => Self::ToolResultsEnded,
+            IterationEvent::Usage { usage } => Self::Usage { usage },
             IterationEvent::Ended => Self::IterationEnded,
-            _ => Self::Usage,
         }
     }
 }
 
-/// Transport representation of Agent tool output.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-pub struct ToolOutputDto {
-    /// Tool-produced content.
-    pub content: String,
-    /// Whether the tool reported success.
-    pub ok: bool,
-}
-
-impl From<ToolOutput> for ToolOutputDto {
-    fn from(output: ToolOutput) -> Self {
-        Self {
-            content: output.content,
-            ok: output.ok,
-        }
-    }
-}
-
-/// Transport representation of why an opened session stream closed.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionCloseReasonDto {
-    /// The caller explicitly closed the session lease.
+#[derive(Clone, Copy)]
+pub(crate) enum CloseReasonDocument {
     Requested,
-    /// The session was deleted.
     Deleted,
-    /// The owning runtime shut down.
     RuntimeShutdown,
 }
 
-impl From<SessionCloseReason> for SessionCloseReasonDto {
+impl CloseReasonDocument {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Deleted => "deleted",
+            Self::RuntimeShutdown => "runtime_shutdown",
+        }
+    }
+}
+
+impl From<SessionCloseReason> for CloseReasonDocument {
     fn from(reason: SessionCloseReason) -> Self {
         match reason {
             SessionCloseReason::Requested => Self::Requested,
@@ -286,214 +198,69 @@ impl From<SessionCloseReason> for SessionCloseReasonDto {
     }
 }
 
-/// Failure returned by `session.open`.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    TryFromBytes,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum OpenSessionError {
-    /// The requested session does not exist.
-    SessionNotFound,
-    /// Another caller already owns the session stream.
-    AlreadyOpen,
-    /// The Agent runtime worker stopped.
+/// Terminal outcome attached to the last chunk of a subscription run.
+#[derive(Clone, Copy)]
+pub(crate) enum TerminalOutcome {
+    Closed,
     WorkerStopped,
-    /// A session event could not be encoded into one frame.
-    InvalidEvent,
 }
 
-/// RPC corresponding to `AgentRuntime::open_session`.
-pub struct OpenSession;
-
-#[rpc_dynamic]
-impl RpcMethod for OpenSession {
-    const ADDRESS: &'static str = "session.open";
-    type Request = OpenSessionRequest;
-    type Response = OpenSessionResponseFrame;
-    type Error = OpenSessionError;
-    type Input = Unary;
-    type Output = Streaming;
-}
-
-/// Builds the reusable handler for [`OpenSession`].
-pub fn open_session_handler(
-    runtime: Rc<AgentRuntime>,
-    registry: SessionRegistry,
-) -> impl RpcHandler<OpenSession>
-where
-{
-    move |_context, request: RpcFrame<OpenSessionRequest>| {
-        let runtime = Rc::clone(&runtime);
-        let registry = registry.clone();
-        async move {
-            let session = convert::session_from_wire(request.view()?.session);
-            let (control, events) = match runtime.open_session(session).await {
-                Ok(opened) => opened,
-                Err(error) => {
-                    return Ok(RpcStream::new(stream::once(Ok(Err(map_open_error(error))))));
-                }
-            };
-            registry.insert(session, control);
-            let opened = OpenSessionResponse::Opened { session };
-            let opened_frames = match frames_from_open_session_response(session, &opened) {
-                Ok(frames) => frames,
-                Err(_error) => {
-                    return Ok(RpcStream::new(stream::once(Ok(Err(
-                        OpenSessionError::InvalidEvent,
-                    )))));
-                }
-            };
-            let events = open_session_stream(events, registry, session);
-            Ok(RpcStream::new(
-                stream::iter(opened_frames.into_iter().map(|frame| Ok(Ok(frame)))).chain(events),
-            ))
+impl TerminalOutcome {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Closed => "closed",
+            Self::WorkerStopped => "worker_stopped",
         }
     }
 }
 
-fn open_session_stream(
-    events: barracuda_agent_runtime::SessionStream,
-    registry: SessionRegistry,
-    session: SessionId,
-) -> impl Stream<Item = RpcResult<Result<OpenSessionResponseFrame, OpenSessionError>>> {
-    stream::unfold(
-        (events, registry, session, false, VecDeque::new()),
-        |(mut events, registry, session, terminal, mut pending)| async move {
-            if let Some(frame) = pending.pop_front() {
-                return Some((
-                    Ok(Ok(frame)),
-                    (events, registry, session, terminal, pending),
-                ));
-            }
-            if terminal {
-                return None;
-            }
-            match events.next().await {
-                Some(Ok(event)) => {
-                    let terminal = matches!(&event, SessionEvent::Closed(_));
-                    if terminal {
-                        registry.remove(session);
-                    }
-                    let response = OpenSessionResponse::Event {
-                        session,
-                        event: event.into(),
-                    };
-                    match frames_from_open_session_response(session, &response) {
-                        Ok(frames) => {
-                            pending.extend(frames);
-                            pending.pop_front().map(|frame| {
-                                (
-                                    Ok(Ok(frame)),
-                                    (events, registry, session, terminal, pending),
-                                )
-                            })
-                        }
-                        Err(_error) => Some((
-                            Ok(Err(OpenSessionError::InvalidEvent)),
-                            (events, registry, session, terminal, pending),
-                        )),
-                    }
-                }
-                Some(Err(_error)) => {
-                    registry.remove(session);
-                    Some((
-                        Ok(Err(OpenSessionError::WorkerStopped)),
-                        (events, registry, session, true, pending),
-                    ))
-                }
-                None => None,
-            }
-        },
-    )
+const ERROR_TEXT_CAPACITY: usize = 192;
+
+pub(crate) struct ErrorText {
+    bytes: [u8; ERROR_TEXT_CAPACITY],
+    len: usize,
+    truncated: bool,
 }
 
-/// Encodes one logical response into fixed-size typed chunks.
-///
-/// # Errors
-///
-/// Returns [`OpenSessionError::InvalidEvent`] if JSON serialization fails.
-pub fn frames_from_open_session_response(
-    session: SessionId,
-    response: &OpenSessionResponse,
-) -> Result<Vec<OpenSessionResponseFrame>, OpenSessionError> {
-    let json = serde_json::to_string(response).map_err(|_error| OpenSessionError::InvalidEvent)?;
-    let opened = matches!(response, OpenSessionResponse::Opened { .. });
-    let chunks = utf8_chunks(&json, FixedStr::<506>::capacity());
-    let last = chunks.len().saturating_sub(1);
-    chunks
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| {
-            let complete = index == last;
-            Ok(OpenSessionResponseFrame {
-                session: convert::session_to_wire(session),
-                value: FixedStr::new(chunk).map_err(|_error| OpenSessionError::InvalidEvent)?,
-                field: response_field(opened, complete),
-                reserved: 0,
-            })
-        })
-        .collect()
-}
+impl ErrorText {
+    fn from_display(value: impl core::fmt::Display) -> Self {
+        let mut text = Self {
+            bytes: [0; ERROR_TEXT_CAPACITY],
+            len: 0,
+            truncated: false,
+        };
+        let _ignored = write!(text, "{value}");
+        text
+    }
 
-const fn response_field(opened: bool, complete: bool) -> OpenSessionResponseField {
-    match (opened, complete) {
-        (true, false) => OpenSessionResponseField::OpenedMore,
-        (true, true) => OpenSessionResponseField::OpenedComplete,
-        (false, false) => OpenSessionResponseField::EventMore,
-        (false, true) => OpenSessionResponseField::EventComplete,
+    pub(crate) fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.len).unwrap_or(&[])).unwrap_or("")
+    }
+
+    pub(crate) const fn truncated(&self) -> bool {
+        self.truncated
     }
 }
 
-const fn response_field_parts(field: OpenSessionResponseField) -> (bool, bool) {
-    match field {
-        OpenSessionResponseField::OpenedMore => (true, false),
-        OpenSessionResponseField::OpenedComplete => (true, true),
-        OpenSessionResponseField::EventMore => (false, false),
-        OpenSessionResponseField::EventComplete => (false, true),
-    }
-}
-
-fn utf8_chunks(value: &str, capacity: usize) -> Vec<&str> {
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    while start < value.len() {
-        let mut end = core::cmp::min(start.saturating_add(capacity), value.len());
-        while !value.is_char_boundary(end) {
-            end = end.saturating_sub(1);
+impl core::fmt::Write for ErrorText {
+    fn write_str(&mut self, value: &str) -> core::fmt::Result {
+        let available = ERROR_TEXT_CAPACITY.saturating_sub(self.len);
+        let mut take = core::cmp::min(available, value.len());
+        while !value.is_char_boundary(take) {
+            take = take.saturating_sub(1);
         }
-        if end == start {
-            break;
+        let Some(source) = value.as_bytes().get(..take) else {
+            return Ok(());
+        };
+        let Some(destination) = self.bytes.get_mut(self.len..self.len.saturating_add(take)) else {
+            self.truncated = true;
+            return Ok(());
+        };
+        destination.copy_from_slice(source);
+        self.len = self.len.saturating_add(take);
+        if take < value.len() {
+            self.truncated = true;
         }
-        if let Some(chunk) = value.get(start..end) {
-            chunks.push(chunk);
-        }
-        start = end;
-    }
-    chunks
-}
-
-fn map_open_error(error: RuntimeError) -> OpenSessionError {
-    match error {
-        RuntimeError::OpenSession(RuntimeOpenSessionError::SessionNotFound(_)) => {
-            OpenSessionError::SessionNotFound
-        }
-        RuntimeError::OpenSession(RuntimeOpenSessionError::AlreadyOpen(_)) => {
-            OpenSessionError::AlreadyOpen
-        }
-        RuntimeError::OpenSession(RuntimeOpenSessionError::WorkerStopped) => {
-            OpenSessionError::WorkerStopped
-        }
-        _ => OpenSessionError::WorkerStopped,
+        Ok(())
     }
 }

@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","properties":{"session":{"type":"string","pattern":"^session-[0-9]+$"}},"required":["session"],"additionalProperties":false}
