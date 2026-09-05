@@ -73,3 +73,37 @@ fn dropping_write_transaction_rolls_back_every_write() {
         assert_eq!(read.read::<Record>("second").await, Err(Error::KeyNotFound));
     });
 }
+
+#[test]
+fn read_entry_iterator_streams_values_inside_the_requested_range() {
+    block_on(async {
+        let database = database().await;
+        let mut write = database.write_transaction().await;
+        write.write("before", &0_u32).await.expect("write before");
+        write
+            .write("scope:alpha", &1_u32)
+            .await
+            .expect("write alpha");
+        write.write("scope:beta", &2_u32).await.expect("write beta");
+        write
+            .write("scope;after", &3_u32)
+            .await
+            .expect("write after");
+        write.commit().await.expect("commit entries");
+
+        let read = database.read_transaction().await;
+        let mut entries = read
+            .entries_in_range("scope:", "scope;")
+            .await
+            .expect("open range iterator");
+
+        let alpha = entries.next().await.expect("read alpha").expect("alpha");
+        assert_eq!(alpha.key(), "scope:alpha");
+        assert_eq!(alpha.value::<u32>().expect("decode alpha"), 1);
+
+        let beta = entries.next().await.expect("read beta").expect("beta");
+        assert_eq!(beta.key(), "scope:beta");
+        assert_eq!(beta.value::<u32>().expect("decode beta"), 2);
+        assert_eq!(entries.next().await.expect("finish range"), None);
+    });
+}
