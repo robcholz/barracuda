@@ -4,16 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "Barracuda system composition root that registers the fixed Plugin set"
 
-[features]
-default = []
-tokio = [
-# BEGIN GENERATED PLUGIN FEATURES
-    "barracuda-agent-plugin/std",
-    "barracuda-webserver-plugin/std",
-# END GENERATED PLUGIN FEATURES
-    "barracuda-vfs/std",
-]
-
 [lib]
 crate-type = ["rlib"]
 
