@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "session": { "type": "string", "pattern": "^session-[0-9]+$" },
+        "run": { "type": "string", "pattern": "^run-[0-9]+$" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "chunk_index": { "type": "integer", "minimum": 0 },
+        "field": { "type": "string" },
+        "chunk": { "type": "string" },
+        "field_complete": { "type": "boolean" },
+        "event_complete": { "type": "boolean" },
+        "terminal": { "enum": ["closed", "worker_stopped", null] }
+      },
+      "required": ["session", "run", "sequence", "chunk_index", "field", "chunk", "field_complete", "event_complete", "terminal"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "command_id": { "type": "string", "pattern": "^command-[0-9]+$" }
+      },
+      "required": ["command_id"],
+      "additionalProperties": false
+    }
+  ]
+}

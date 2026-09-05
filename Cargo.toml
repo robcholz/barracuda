@@ -32,6 +32,7 @@ barracuda-gpio-plugin = { path = "plugins/gpio/crates/plugin" }
 barracuda-http-plugin = { path = "plugins/http/crates/plugin" }
 barracuda-i2c-plugin = { path = "plugins/i2c/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "plugins/imessage-bluebubble/crates/plugin" }
+barracuda-imessage-bridge-plugin = { path = "plugins/imessage-bridge/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "plugins/imessage-gateway/crates/plugin" }
 barracuda-imessage-inkbox-plugin = { path = "plugins/imessage-inkbox/crates/plugin" }
 barracuda-imessage-qq-plugin = { path = "plugins/imessage-qq/crates/plugin" }
@@ -65,6 +66,7 @@ barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-stm32f429zi-nucleo = { path = "boards/stm32f429zi-nucleo" }
 barracuda-event-router = { path = "core/event-router" }
+barracuda-imessage-bridge-component = { path = "plugins/imessage-bridge/crates/component" }
 barracuda-imessage-gateway-component = { path = "plugins/imessage-gateway/crates/component" }
 barracuda-indicator-led = { path = "boards/drivers/indicator-led" }
 barracuda-kv = { path = "shared/kv" }

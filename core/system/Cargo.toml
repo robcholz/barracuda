@@ -17,6 +17,7 @@ barracuda-gpio-plugin.workspace = true
 barracuda-http-plugin.workspace = true
 barracuda-i2c-plugin.workspace = true
 barracuda-imessage-bluebubble-plugin.workspace = true
+barracuda-imessage-bridge-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-imessage-inkbox-plugin.workspace = true
 barracuda-imessage-qq-plugin.workspace = true
