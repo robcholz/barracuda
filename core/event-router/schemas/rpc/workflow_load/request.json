@@ -14,13 +14,29 @@
     "steps": {
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "call": { "type": "string" },
-          "arguments": { "type": "object" }
-        },
-        "required": ["call"],
-        "additionalProperties": false
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "call": { "type": "string" },
+              "arguments": { "type": "object" }
+            },
+            "required": ["call"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "return": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            },
+            "required": ["return"],
+            "additionalProperties": false
+          }
+        ]
       },
       "minItems": 1
     }

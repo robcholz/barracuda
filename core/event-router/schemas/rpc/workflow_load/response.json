@@ -16,7 +16,8 @@
             "invalid_arguments",
             "unknown_method",
             "invalid_link",
-            "invalid_topic"
+            "invalid_topic",
+            "invalid_control_flow"
           ]
         }
       },
