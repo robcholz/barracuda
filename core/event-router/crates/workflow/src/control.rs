@@ -44,6 +44,8 @@ pub enum WorkflowControlRejection {
     InvalidLink,
     /// The JSON contained an invalid Event topic.
     InvalidTopic,
+    /// The Workflow control-flow structure was invalid.
+    InvalidControlFlow,
 }
 
 impl WorkflowControlRejection {
@@ -61,6 +63,7 @@ impl WorkflowControlRejection {
             Self::UnknownMethod => "unknown_method",
             Self::InvalidLink => "invalid_link",
             Self::InvalidTopic => "invalid_topic",
+            Self::InvalidControlFlow => "invalid_control_flow",
         }
     }
 }
@@ -207,10 +210,28 @@ struct WorkflowMatchDocument {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorkflowStepDocument {
+struct WorkflowCallDocument {
     call: String,
     #[serde(default)]
     arguments: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowReturnDocument {
+    #[serde(rename = "return")]
+    _value: EmptyReturnDocument,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyReturnDocument {}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WorkflowStepDocument {
+    Call(WorkflowCallDocument),
+    Return(WorkflowReturnDocument),
 }
 
 #[derive(Deserialize)]
@@ -233,18 +254,31 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .map(Topic::try_from)
             .transpose()
             .map_err(|_error| WorkflowControlRejection::InvalidTopic)?;
-        let steps = document
-            .steps
-            .into_iter()
-            .map(|step| {
-                let address = RpcAddress::try_from(step.call.as_str())
-                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
-                Ok(WorkflowStep::new(address, step.arguments))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let definition = match topic {
-            Some(topic) => WorkflowDefinition::with_topic(id, event, topic, steps),
-            None => WorkflowDefinition::new(id, event, steps),
+        let mut steps = Vec::new();
+        let mut returns = false;
+        let mut operations = document.steps.into_iter().peekable();
+        while let Some(operation) = operations.next() {
+            match operation {
+                WorkflowStepDocument::Call(step) => {
+                    let address = RpcAddress::try_from(step.call.as_str())
+                        .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
+                    steps.push(WorkflowStep::new(address, step.arguments));
+                }
+                WorkflowStepDocument::Return(_return) => {
+                    if operations.peek().is_some() {
+                        return Err(WorkflowControlRejection::InvalidControlFlow);
+                    }
+                    returns = true;
+                }
+            }
+        }
+        let definition = if returns {
+            WorkflowDefinition::returning(id, event, topic, steps)
+        } else {
+            match topic {
+                Some(topic) => WorkflowDefinition::with_topic(id, event, topic, steps),
+                None => WorkflowDefinition::new(id, event, steps),
+            }
         };
         definition.map_err(|error| match error {
             WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
@@ -385,5 +419,33 @@ mod tests {
             empty_steps,
             Err(WorkflowControlRejection::EmptySteps)
         ));
+    }
+
+    #[test]
+    fn workflow_json_accepts_a_successful_return_terminal() {
+        let definition = parse_definition(
+            r#"{
+                "id":"ignore-event",
+                "match":{"event":"gateway.*"},
+                "steps":[{"return":{}}]
+            }"#,
+        )
+        .expect("return-only Workflow");
+
+        assert!(definition.steps().is_empty());
+        assert!(definition.returns());
+    }
+
+    #[test]
+    fn workflow_json_rejects_steps_after_return() {
+        let result = parse_definition(
+            r#"{
+                "id":"unreachable",
+                "match":{"event":"gateway.*"},
+                "steps":[{"return":{}},{"call":"agent.run"}]
+            }"#,
+        );
+
+        assert_eq!(result, Err(WorkflowControlRejection::InvalidControlFlow));
     }
 }

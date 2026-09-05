@@ -6,13 +6,14 @@ maintainers; callers should read the Event Router usage guide.
 
 ## Model
 
-A Workflow is an ordered RPC chain started by an Event. Step 0 is the
-**ingress**: the Event payload becomes its request. Every later step is fed by
-the previous step's response through its **link**. Workflows are loaded through
-the durable `workflow.load` control RPC or restored from disk at startup; a
-single `/system/workflows.json` catalog is authoritative on restart. The
-catalog is a JSON array whose objects are ordered Workflow definitions; load
-appends one object and unload removes one object through an atomic file
+A Workflow is an ordered block started by an Event. RPC step 0 is the
+**ingress**: the Event payload becomes its request. Every later RPC step is fed
+by the previous step's response through its **link**. A block ends through
+natural completion or an explicit successful `return`. Workflows are loaded
+through the durable `workflow.load` control RPC or restored from disk at
+startup; a single `/system/workflows.json` catalog is authoritative on restart.
+The catalog is a JSON array whose objects are ordered Workflow definitions;
+load appends one object and unload removes one object through an atomic file
 replacement.
 
 ## Event matching
@@ -49,11 +50,19 @@ response becomes the next request. It is declared implicitly by the step's
 | present, no `$` | `Literal` | Request built entirely from the literal arguments, independent of the previous step. |
 | present, with `$` | `Mapping` | Request built from literal arguments, then each referenced field is copied wire-to-wire from the previous response. |
 
-Reference grammar: `$previous.output.<field>`. Only `previous` / `output` are
-defined today; `$previous.input`, `$previous.error`, and absolute step
-selectors are reserved. The field is mandatory and a single top-level JSON
-name (the serde name); a bare `$previous.output` is rejected with a hint to
-use a `Direct` link, and nested paths are rejected.
+Reference grammar: `$event.input.<field>` selects the triggering Event and
+`$previous.output.<field>` selects the preceding RPC response.
+`$previous.input`, `$previous.error`, and absolute step selectors are reserved.
+The field is mandatory and a single top-level JSON name (the serde name); a
+whole-document source reference is rejected with a hint to use a `Direct` link,
+and nested paths are rejected.
+
+## Successful return
+
+`{"return":{}}` is a block terminal that completes the current Workflow
+execution successfully. It invokes no RPC, produces no failure, and no step may
+follow it in the same block. A return-only Workflow is valid and can explicitly
+consume a matched Event without invoking an application endpoint.
 
 ## Unified frame-flow model
 
@@ -117,9 +126,7 @@ Validation runs at two points with the same rule set:
 Load-time validation ordering constraint: a workflow can only reference
 methods registered before it is loaded.
 
-## Status
-
-Implemented:
+## Validation invariants
 
 - Link classification (`Direct` / `Literal` / `Mapping`), `$previous.output`
   grammar, wire-to-wire field mapping.

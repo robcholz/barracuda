@@ -165,6 +165,21 @@ client.load(r#"{
 }"#).await?;
 ```
 
+Use a terminal `return` to complete a matched execution successfully without
+calling another RPC:
+
+```json
+{
+  "id": "ignore-heartbeat",
+  "match": { "event": "gateway.heartbeat" },
+  "steps": [
+    { "return": {} }
+  ]
+}
+```
+
+No operation may follow `return` in the same block.
+
 `match.topic` is an optional exact selector within the 16-byte bound:
 
 ```json

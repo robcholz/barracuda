@@ -162,6 +162,64 @@ fn event_selector_and_direct_link_execute_json_rpc_steps() {
     assert_eq!(event_router.workflow_info().failed_count, 0);
 }
 
+const RETURN_WORKFLOW: &str = r#"{
+    "id":"return-success",
+    "match":{"event":"gateway.message.received"},
+    "steps":[{"return":{}}]
+}"#;
+
+struct ReturnComponent {
+    emitted: Rc<Cell<bool>>,
+}
+
+impl Component<FRAME_SIZE> for ReturnComponent {
+    fn name(&self) -> &'static str {
+        "return"
+    }
+
+    fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
+        Ok(())
+    }
+
+    fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
+        Box::pin(async move {
+            WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone())
+                .load(RETURN_WORKFLOW)
+                .await
+                .map_err(ComponentError::lifecycle)?;
+            EventEmitter::<FRAME_SIZE>::new(context.rpc().clone())
+                .emit::<GatewayMessage>(r#"{"value":41}"#)
+                .await
+                .map_err(ComponentError::lifecycle)?;
+            self.emitted.set(true);
+            pending().await
+        })
+    }
+
+    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn explicit_return_completes_without_an_rpc_call() {
+    let _global_vfs = reset_global_vfs();
+    let emitted = Rc::new(Cell::new(false));
+    let mut event_router = new_router::<1>();
+    event_router
+        .load(Box::new(ReturnComponent {
+            emitted: Rc::clone(&emitted),
+        }))
+        .expect("load return Component");
+
+    support::drive_until(&mut event_router, |router| {
+        emitted.get() && router.workflow_info().completed_count == 1
+    })
+    .expect("drive return Workflow");
+
+    assert_eq!(event_router.workflow_info().failed_count, 0);
+}
+
 const EXACT_WORKFLOW: &str = r#"{
     "id":"exact",
     "match":{"event":"gateway.message.received"},

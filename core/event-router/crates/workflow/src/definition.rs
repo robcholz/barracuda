@@ -117,6 +117,7 @@ pub struct WorkflowDefinition {
     topic: Option<Topic>,
     steps: Vec<WorkflowStep>,
     links: Vec<LinkKind>,
+    returns: bool,
 }
 
 impl WorkflowDefinition {
@@ -135,7 +136,7 @@ impl WorkflowDefinition {
         event: Rule,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, None, steps)
+        Self::from_parts(id, event, None, steps, false)
     }
 
     /// Creates a Workflow whose Event match also requires a matching topic.
@@ -145,7 +146,16 @@ impl WorkflowDefinition {
         topic: Topic,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, Some(topic), steps)
+        Self::from_parts(id, event, Some(topic), steps, false)
+    }
+
+    pub(crate) fn returning(
+        id: WorkflowId,
+        event: Rule,
+        topic: Option<Topic>,
+        steps: Vec<WorkflowStep>,
+    ) -> Result<Self, WorkflowDefinitionError> {
+        Self::from_parts(id, event, topic, steps, true)
     }
 
     fn from_parts(
@@ -153,8 +163,9 @@ impl WorkflowDefinition {
         event: Rule,
         topic: Option<Topic>,
         steps: Vec<WorkflowStep>,
+        returns: bool,
     ) -> Result<Self, WorkflowDefinitionError> {
-        if steps.is_empty() {
+        if steps.is_empty() && !returns {
             return Err(WorkflowDefinitionError::EmptySteps);
         }
         let mut links = Vec::with_capacity(steps.len());
@@ -169,6 +180,7 @@ impl WorkflowDefinition {
             topic,
             steps,
             links,
+            returns,
         })
     }
 
@@ -182,6 +194,12 @@ impl WorkflowDefinition {
     #[must_use]
     pub fn steps(&self) -> &[WorkflowStep] {
         &self.steps
+    }
+
+    /// Returns whether this Workflow ends with an explicit successful return.
+    #[must_use]
+    pub const fn returns(&self) -> bool {
+        self.returns
     }
 
     pub(crate) fn link(&self, step: usize) -> Option<&LinkKind> {
