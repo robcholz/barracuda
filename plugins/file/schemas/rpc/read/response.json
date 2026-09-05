@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string",
+          "maxLength": 240
+        }
+      },
+      "required": ["content"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "invalid_request",
+            "invalid_utf8",
+            "not_found",
+            "permission_denied",
+            "too_large",
+            "io"
+          ]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

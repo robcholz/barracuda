@@ -711,9 +711,12 @@ dependencies = [
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "critical-section",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
  "serde",
- "serde-big-array",
- "zerocopy",
+ "serde_json",
 ]
 
 [[package]]

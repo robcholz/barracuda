@@ -1,4 +1,4 @@
-//! System filesystem capability and dynamic RPC harness.
+//! Plugin-scoped filesystem capability and Agent/Workflow JSON RPCs.
 
 #![no_std]
 
@@ -17,9 +17,7 @@ use barracuda_plugin_manager::{
 };
 use barracuda_vfs::{FsError, Metadata, ScopedVfs};
 
-pub use rpc::{
-    FileBytes, FilePath, FileRead, FileReadRequest, FileRpcError, FileWrite, FileWriteRequest,
-};
+pub use rpc::{FileRead, FileRpcError, FileWrite};
 
 /// Cloneable API for files in the File Plugin's private namespace.
 #[derive(Clone)]
@@ -73,7 +71,7 @@ impl FileSystem {
     }
 }
 
-/// Plugin that publishes [`FileSystem`] and exposes its RPC harness.
+/// Plugin that publishes [`FileSystem`] and exposes its JSON RPCs.
 #[barracuda_plugin_api::plugin]
 pub struct FilePlugin;
 
@@ -110,9 +108,8 @@ struct FileComponent {
 impl<const M: usize> Component<M> for FileComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context
-            .register_rpc::<FileRead, _>("agent", rpc::read_handler(Rc::clone(&self.filesystem)))?;
-        context
-            .register_rpc::<FileWrite, _>("agent", rpc::write_handler(Rc::clone(&self.filesystem)))
+            .register_json::<FileRead, _>("*", rpc::read_handler(Rc::clone(&self.filesystem)))?;
+        context.register_json::<FileWrite, _>("*", rpc::write_handler(Rc::clone(&self.filesystem)))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
