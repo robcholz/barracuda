@@ -208,7 +208,8 @@ where
                 TextBody::Stream(mut stream) => {
                     let mut text = String::new();
                     while let Some(chunk) = stream.next().await {
-                        text.push_str(&chunk?);
+                        let chunk = chunk?;
+                        text.push_str(chunk.as_str());
                     }
                     text
                 }

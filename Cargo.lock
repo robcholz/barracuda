@@ -795,7 +795,6 @@ dependencies = [
  "gateway",
  "serde",
  "thiserror 2.0.18",
- "zerocopy",
 ]
 
 [[package]]

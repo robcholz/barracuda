@@ -6,7 +6,7 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
     BinaryBody, MediaKind, MessageChannel, MessageTarget, ReactRequest, SendMediaRequest,
-    SendMessageRequest, SetTypingRequest,
+    SendMessageRequest, SetTypingRequest, TextChunk,
 };
 use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
@@ -100,6 +100,10 @@ fn target() -> MessageTarget {
     MessageTarget::new("imessage", "conversation-uuid")
 }
 
+fn text_chunk(text: &str) -> TextChunk {
+    TextChunk::inline(text).expect("test text chunk fits inline storage")
+}
+
 fn provider(http: &Rc<MockHttp>) -> Inkbox<'static, ScriptedStack, ScriptedStack> {
     let mut config = InkboxConfig::new("ApiKey_secret", "identity-uuid");
     config.api_base = "http://inkbox.test".to_owned();
@@ -148,7 +152,7 @@ fn buffers_streams_and_maps_tapbacks_and_typing() {
             response(r#"{}"#),
         ]));
         let channel = provider(&http);
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([Ok(text_chunk("hel")), Ok(text_chunk("lo"))]);
         channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
             .await

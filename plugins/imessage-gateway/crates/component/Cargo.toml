@@ -11,7 +11,6 @@ futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway = { path = "../gateway" }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
-zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../../../platforms/test" }

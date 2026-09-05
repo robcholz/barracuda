@@ -1,503 +1,452 @@
-use alloc::{boxed::Box, format, rc::Rc, string::ToString, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, rc::Rc, string::String};
+use core::{
+    cell::{Cell, RefCell},
+    fmt,
+};
 
+use async_channel::{Receiver, Sender, TrySendError};
 use barracuda_event_router::{
-    rpc_message, RpcFrame, RpcHandler, RpcMethod, RpcStream, Streaming, Unary,
+    json_schema, Event, EventEmitter, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema,
+    JsonWriter, RpcError,
 };
 use futures_lite::stream;
 use gateway::{
-    MessageGateway, MessageTarget, SendStreamField, SendStreamFrame, SendStreamRequest,
-    StreamBoundary,
+    MessageGateway, MessageTarget, SendStream, SendStreamField, SendStreamFrame, SendStreamRequest,
+    StreamBoundary, StreamError,
 };
-use serde::{Deserialize, Serialize};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
+use serde::Deserialize;
 
-use crate::route::GatewayRoute;
-use crate::wire::{GatewaySendReceipt, GatewayText, GatewayWireError};
+use crate::component::STREAM_WORKERS;
+use crate::gateway_send::map_gateway_error;
+use crate::json::{
+    encoded_json_len, event_input_capacity, valid_required, valid_stream_id, write_encoded_json,
+    write_json_string, AckResponse, EncodedJson, ErrorResponse, GatewayJsonError, FRAME_CAPACITY,
+};
 
-const TEXT_CAPACITY: usize = 510;
+const CHUNK_QUEUE_CAPACITY: usize = 2;
 
-/// One logical full Gateway stream used by typed callers and tests.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GatewayOutboundStream {
-    /// Destination route and provider conversation identity.
-    pub route: GatewayRoute,
-    /// Optional provider message being replied to.
-    pub reply_to: Option<alloc::string::String>,
-    /// Ordered primary-text and extra-content frames.
-    pub frames: Vec<SendStreamFrame>,
-}
-
-/// Semantic field carried by one [`GatewaySendStreamRequestFrame`].
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum GatewaySendStreamField {
-    /// Registered message-channel name.
-    Channel,
-    /// Provider conversation identifier.
-    Conversation,
-    /// Optional provider thread identifier.
-    Thread,
-    /// Optional provider message identifier being replied to.
-    ReplyTo,
-    /// More primary text follows for the current block.
-    TextMore,
-    /// Completes the current primary text block.
-    TextComplete,
-    /// More reasoning text follows.
-    ReasoningMore,
-    /// Completes the current reasoning block.
-    ReasoningComplete,
-    /// More effect-result text follows.
-    EffectResultMore,
-    /// Completes the current effect-result block.
-    EffectResultComplete,
-    /// More notice text follows.
-    NoticeMore,
-    /// Completes the current notice.
-    NoticeComplete,
-    /// More generic event metadata follows.
-    EventMore,
-    /// Completes one generic event metadata value.
-    EventComplete,
-    /// Starts one structured tool result.
-    ToolResultStart,
-    /// More tool-call identifier text follows.
-    ToolCallIdMore,
-    /// Completes the tool-call identifier.
-    ToolCallIdComplete,
-    /// More tool-name text follows.
-    ToolNameMore,
-    /// Completes the tool name.
-    ToolNameComplete,
-    /// More tool-arguments JSON follows.
-    ToolArgumentsMore,
-    /// Completes the tool arguments JSON.
-    ToolArgumentsComplete,
-    /// More tool-output text follows.
-    ToolOutputMore,
-    /// Completes the tool output.
-    ToolOutputComplete,
-    /// Marks successful tool completion.
-    ToolSucceeded,
-    /// Marks failed tool completion.
-    ToolFailed,
-    /// Ends one structured tool result.
-    ToolResultEnd,
-}
-
-/// One typed frame carried by `gateway.send_stream`.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GatewaySendStreamRequestFrame {
-    value: GatewayText<TEXT_CAPACITY>,
-    field: GatewaySendStreamField,
-}
-
-impl GatewaySendStreamRequestFrame {
-    fn new(field: GatewaySendStreamField, value: &str) -> Result<Self, GatewayWireError> {
-        Ok(Self {
-            value: GatewayText::new(value)?,
-            field,
-        })
-    }
-
-    fn value(&self) -> Result<&str, GatewayWireError> {
-        self.value.as_str()
-    }
-
-    /// Returns the semantic field carried by this wire frame.
-    #[must_use]
-    pub const fn field(&self) -> GatewaySendStreamField {
-        self.field
-    }
-}
-
-/// Business failure returned by `gateway.send_stream`.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum GatewaySendStreamError {
-    /// The request stream did not follow the field protocol.
-    InvalidRequest,
-    /// No provider is registered for the requested channel.
-    UnknownChannel,
-    /// The selected provider rejected or failed the delivery.
-    Delivery,
-    /// The provider receipt could not fit in the Gateway response contract.
-    InvalidReceipt,
-}
-
-/// Sends one full primary-text stream with optional extra frames.
+/// Applies one bounded command to an outbound text stream.
 pub struct GatewaySendStream;
 
-impl RpcMethod for GatewaySendStream {
+impl JsonRpcSchema for GatewaySendStream {
     const ADDRESS: &'static str = "gateway.send_stream";
-    type Request = GatewaySendStreamRequestFrame;
-    type Response = GatewaySendReceipt;
-    type Error = GatewaySendStreamError;
-    type Input = Streaming;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("send_stream", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("send_stream", response);
+    const MAX_REQUEST_BYTES: usize = FRAME_CAPACITY;
+    const MAX_RESPONSE_BYTES: usize = 128;
 }
 
-/// Builds the reusable handler for [`GatewaySendStream`].
-pub fn gateway_send_stream_handler(
-    gateway: Rc<MessageGateway>,
-) -> impl RpcHandler<GatewaySendStream> {
-    move |_context, frames: RpcStream<RpcFrame<GatewaySendStreamRequestFrame>>| {
-        let gateway = Rc::clone(&gateway);
+/// Terminal outcome for one accepted outbound text stream.
+pub struct GatewaySendStreamFinished;
+
+impl Event for GatewaySendStreamFinished {
+    const ID: &'static str = "gateway.send_stream.finished";
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+enum StreamRequest<'a> {
+    Start {
+        #[serde(borrow)]
+        stream_id: &'a str,
+        sequence: u32,
+        #[serde(borrow)]
+        channel: &'a str,
+        #[serde(borrow)]
+        conversation_id: &'a str,
+        #[serde(default, borrow)]
+        thread_id: Option<&'a str>,
+        #[serde(default, borrow)]
+        reply_to: Option<&'a str>,
+    },
+    Chunk {
+        #[serde(borrow)]
+        stream_id: &'a str,
+        sequence: u32,
+        field: SendStreamField,
+        boundary: StreamBoundary,
+        #[serde(borrow)]
+        text: &'a str,
+    },
+    Finish {
+        #[serde(borrow)]
+        stream_id: &'a str,
+        sequence: u32,
+    },
+}
+
+enum StreamCommand {
+    Chunk(JsonRef),
+    Finish(u32),
+}
+
+struct TextSession {
+    next_sequence: Cell<u32>,
+    commands: Sender<StreamCommand>,
+}
+
+pub(crate) struct TextJob {
+    stream_id: String,
+    terminal_sequence: Rc<RefCell<Option<u32>>>,
+    target: MessageTarget,
+    reply_to: Option<String>,
+    commands: Receiver<StreamCommand>,
+}
+
+#[derive(Default)]
+pub(crate) struct TextSessions {
+    entries: RefCell<BTreeMap<String, Rc<TextSession>>>,
+}
+
+impl TextSessions {
+    pub(crate) fn clear(&self) {
+        self.entries.borrow_mut().clear();
+    }
+
+    fn remove(&self, stream_id: &str) {
+        self.entries.borrow_mut().remove(stream_id);
+    }
+
+    fn prepare_chunk(
+        &self,
+        stream_id: &str,
+        sequence: u32,
+    ) -> Result<Rc<TextSession>, GatewayJsonError> {
+        let entries = self.entries.borrow();
+        let session = entries
+            .get(stream_id)
+            .ok_or(GatewayJsonError::UnknownStream)?;
+        if sequence != session.next_sequence.get() {
+            return Err(GatewayJsonError::OutOfOrder);
+        }
+        Ok(Rc::clone(session))
+    }
+
+    fn push_chunk(session: &TextSession, request: JsonRef) -> Result<(), GatewayJsonError> {
+        match session.commands.try_send(StreamCommand::Chunk(request)) {
+            Ok(()) => {
+                session
+                    .next_sequence
+                    .set(session.next_sequence.get().saturating_add(1));
+                Ok(())
+            }
+            Err(TrySendError::Full(_command)) => Err(GatewayJsonError::Busy),
+            Err(TrySendError::Closed(_command)) => Err(GatewayJsonError::UnknownStream),
+        }
+    }
+
+    fn finish(&self, stream_id: &str, sequence: u32) -> Result<(), GatewayJsonError> {
+        let mut entries = self.entries.borrow_mut();
+        let session = entries
+            .get(stream_id)
+            .ok_or(GatewayJsonError::UnknownStream)?;
+        if sequence != session.next_sequence.get() {
+            return Err(GatewayJsonError::OutOfOrder);
+        }
+        match session.commands.try_send(StreamCommand::Finish(sequence)) {
+            Ok(()) => {
+                entries.remove(stream_id);
+                Ok(())
+            }
+            Err(TrySendError::Full(_command)) => Err(GatewayJsonError::Busy),
+            Err(TrySendError::Closed(_command)) => {
+                entries.remove(stream_id);
+                Err(GatewayJsonError::UnknownStream)
+            }
+        }
+    }
+}
+
+/// Builds the JSON command handler for [`GatewaySendStream`].
+pub(crate) fn gateway_send_stream_handler(
+    sessions: Rc<TextSessions>,
+    jobs: Sender<TextJob>,
+) -> impl JsonHandler {
+    move |_context, document: JsonRef, response: JsonWriter| {
+        let sessions = Rc::clone(&sessions);
+        let jobs = jobs.clone();
         async move {
-            let (target, reply_to, frames) = match split_metadata(frames).await? {
-                Ok(request) => request,
-                Err(_error) => return Ok(Err(GatewaySendStreamError::InvalidRequest)),
-            };
-            let request = SendStreamRequest {
-                target,
-                frames,
-                reply_to,
-            };
-            let receipt = match gateway.send_stream(request).await {
-                Ok(receipt) => receipt,
-                Err(gateway::GatewayError::UnknownChannel { .. }) => {
-                    return Ok(Err(GatewaySendStreamError::UnknownChannel));
+            let request = document.deserialize::<StreamRequest<'_>>()?;
+            match request {
+                StreamRequest::Start {
+                    stream_id,
+                    sequence,
+                    channel,
+                    conversation_id,
+                    thread_id,
+                    reply_to,
+                } => {
+                    if sequence != 0
+                        || !valid_stream_id(stream_id)
+                        || !valid_required(channel)
+                        || !valid_required(conversation_id)
+                    {
+                        return response
+                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
+                            .await;
+                    }
+                    if sessions.entries.borrow().contains_key(stream_id) {
+                        return response
+                            .write(&ErrorResponse(GatewayJsonError::DuplicateStream))
+                            .await;
+                    }
+                    if sessions.entries.borrow().len() >= STREAM_WORKERS {
+                        return response.write(&ErrorResponse(GatewayJsonError::Busy)).await;
+                    }
+
+                    let (commands, receiver) = async_channel::bounded(CHUNK_QUEUE_CAPACITY);
+                    let terminal_sequence = Rc::new(RefCell::new(None));
+                    let mut target = MessageTarget::new(channel, conversation_id);
+                    target.thread_id = thread_id.map(String::from);
+                    let job = TextJob {
+                        stream_id: String::from(stream_id),
+                        terminal_sequence: Rc::clone(&terminal_sequence),
+                        target,
+                        reply_to: reply_to.map(String::from),
+                        commands: receiver,
+                    };
+                    match jobs.try_send(job) {
+                        Ok(()) => {
+                            sessions.entries.borrow_mut().insert(
+                                String::from(stream_id),
+                                Rc::new(TextSession {
+                                    next_sequence: Cell::new(1),
+                                    commands,
+                                }),
+                            );
+                            response
+                                .write(&AckResponse {
+                                    accepted_sequence: sequence,
+                                })
+                                .await
+                        }
+                        Err(TrySendError::Full(_job)) => {
+                            response.write(&ErrorResponse(GatewayJsonError::Busy)).await
+                        }
+                        Err(TrySendError::Closed(_job)) => Err(RpcError::RegistryDropped),
+                    }
                 }
-                Err(_error) => return Ok(Err(GatewaySendStreamError::Delivery)),
-            };
-            match GatewaySendReceipt::new(&receipt.message_id) {
-                Ok(receipt) => Ok(Ok(receipt)),
-                Err(_error) => Ok(Err(GatewaySendStreamError::InvalidReceipt)),
-            }
-        }
-    }
-}
-
-/// Encodes one logical full send stream into typed RPC frames.
-///
-/// # Errors
-///
-/// Returns a wire error when route metadata or content cannot be represented.
-pub fn frames_from_gateway_send_stream(
-    value: &GatewayOutboundStream,
-) -> Result<Vec<GatewaySendStreamRequestFrame>, GatewayWireError> {
-    let mut frames = Vec::new();
-    frames.push(GatewaySendStreamRequestFrame::new(
-        GatewaySendStreamField::Channel,
-        &value.route.channel,
-    )?);
-    frames.push(GatewaySendStreamRequestFrame::new(
-        GatewaySendStreamField::Conversation,
-        &value.route.conversation_id,
-    )?);
-    if let Some(thread) = &value.route.thread_id {
-        frames.push(GatewaySendStreamRequestFrame::new(
-            GatewaySendStreamField::Thread,
-            thread,
-        )?);
-    }
-    if let Some(reply_to) = &value.reply_to {
-        frames.push(GatewaySendStreamRequestFrame::new(
-            GatewaySendStreamField::ReplyTo,
-            reply_to,
-        )?);
-    }
-    for content in &value.frames {
-        push_content_frames(&mut frames, content)?;
-    }
-    Ok(frames)
-}
-
-/// Encodes one logical content frame into one or more RPC wire frames.
-///
-/// # Errors
-///
-/// Returns a wire error when the content contains an embedded NUL byte.
-pub fn frames_from_gateway_stream_frame(
-    content: &SendStreamFrame,
-) -> Result<Vec<GatewaySendStreamRequestFrame>, GatewayWireError> {
-    let mut frames = Vec::new();
-    push_content_frames(&mut frames, content)?;
-    Ok(frames)
-}
-
-/// Decodes typed `gateway.send_stream` frames into their logical form.
-///
-/// # Errors
-///
-/// Returns a wire error when route fields are missing, duplicated, or out of order.
-pub fn gateway_send_stream_from_frames(
-    frames: impl IntoIterator<Item = GatewaySendStreamRequestFrame>,
-) -> Result<GatewayOutboundStream, GatewayWireError> {
-    decode_frames(frames)
-}
-
-async fn split_metadata(
-    mut frames: RpcStream<RpcFrame<GatewaySendStreamRequestFrame>>,
-) -> barracuda_event_router::RpcResult<
-    Result<
-        (
-            MessageTarget,
-            Option<alloc::string::String>,
-            gateway::SendStream,
-        ),
-        GatewayWireError,
-    >,
-> {
-    let mut channel = None;
-    let mut conversation = None;
-    let mut thread = None;
-    let mut reply_to = None;
-
-    while let Some(frame) = frames.next().await {
-        let frame = *frame?.view()?;
-        let value = match frame.value() {
-            Ok(value) => value.to_string(),
-            Err(error) => return Ok(Err(error)),
-        };
-        match frame.field {
-            GatewaySendStreamField::Channel if channel.is_none() => channel = Some(value),
-            GatewaySendStreamField::Conversation if conversation.is_none() => {
-                conversation = Some(value);
-            }
-            GatewaySendStreamField::Thread if thread.is_none() => thread = Some(value),
-            GatewaySendStreamField::ReplyTo if reply_to.is_none() => reply_to = Some(value),
-            GatewaySendStreamField::Channel
-            | GatewaySendStreamField::Conversation
-            | GatewaySendStreamField::Thread
-            | GatewaySendStreamField::ReplyTo => {
-                return Ok(Err(GatewayWireError::InvalidRequest));
-            }
-            _ => {
-                let Some(channel) = channel else {
-                    return Ok(Err(GatewayWireError::InvalidRequest));
-                };
-                let Some(conversation) = conversation else {
-                    return Ok(Err(GatewayWireError::InvalidRequest));
-                };
-                let mut target = MessageTarget::new(channel, conversation);
-                target.thread_id = thread;
-                let content = content_stream(frame, frames);
-                return Ok(Ok((target, reply_to, Box::pin(content))));
-            }
-        }
-    }
-
-    Ok(Err(GatewayWireError::InvalidRequest))
-}
-
-fn content_stream(
-    first: GatewaySendStreamRequestFrame,
-    frames: RpcStream<RpcFrame<GatewaySendStreamRequestFrame>>,
-) -> impl futures_lite::Stream<Item = Result<SendStreamFrame, gateway::StreamError>> {
-    stream::unfold(
-        (Some(first), frames),
-        |(mut first, mut frames)| async move {
-            let decoded = if let Some(frame) = first.take() {
-                decode_content_frame(frame)
-            } else {
-                match frames.next().await {
-                    Some(Ok(frame)) => match frame.view() {
-                        Ok(frame) => decode_content_frame(*frame),
-                        Err(error) => Err(gateway::StreamError::failed(format!(
-                            "invalid gateway stream frame: {error}"
-                        ))),
-                    },
-                    Some(Err(error)) => Err(gateway::StreamError::failed(format!(
-                        "gateway stream transport failed: {error}"
-                    ))),
-                    None => return None,
+                StreamRequest::Chunk {
+                    stream_id,
+                    sequence,
+                    field,
+                    boundary,
+                    text,
+                } => {
+                    if !valid_stream_id(stream_id) {
+                        return response
+                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
+                            .await;
+                    }
+                    let session = match sessions.prepare_chunk(stream_id, sequence) {
+                        Ok(session) => session,
+                        Err(error) => return response.write(&ErrorResponse(error)).await,
+                    };
+                    let _ = (field, boundary, text);
+                    let result = TextSessions::push_chunk(&session, document);
+                    match result {
+                        Ok(()) => {
+                            response
+                                .write(&AckResponse {
+                                    accepted_sequence: sequence,
+                                })
+                                .await
+                        }
+                        Err(error) => response.write(&ErrorResponse(error)).await,
+                    }
                 }
-            };
-            Some((decoded, (first, frames)))
-        },
-    )
-}
-
-fn decode_content_frame(
-    frame: GatewaySendStreamRequestFrame,
-) -> Result<SendStreamFrame, gateway::StreamError> {
-    let value = frame
-        .value()
-        .map_err(|error| gateway::StreamError::failed(format!("invalid stream text: {error}")))?;
-    let (field, boundary) = content_field(frame.field)
-        .map_err(|error| gateway::StreamError::failed(format!("invalid stream field: {error}")))?;
-    Ok(SendStreamFrame::new(field, boundary, value))
-}
-
-fn decode_frames(
-    frames: impl IntoIterator<Item = GatewaySendStreamRequestFrame>,
-) -> Result<GatewayOutboundStream, GatewayWireError> {
-    let mut channel = None;
-    let mut conversation = None;
-    let mut thread = None;
-    let mut reply_to = None;
-    let mut content = Vec::new();
-    let mut content_started = false;
-
-    for frame in frames {
-        let value = frame.value()?;
-        match frame.field {
-            GatewaySendStreamField::Channel if channel.is_none() && !content_started => {
-                channel = Some(value.to_string());
-            }
-            GatewaySendStreamField::Conversation if conversation.is_none() && !content_started => {
-                conversation = Some(value.to_string());
-            }
-            GatewaySendStreamField::Thread if thread.is_none() && !content_started => {
-                thread = Some(value.to_string());
-            }
-            GatewaySendStreamField::ReplyTo if reply_to.is_none() && !content_started => {
-                reply_to = Some(value.to_string());
-            }
-            field => {
-                content_started = true;
-                let (field, boundary) = content_field(field)?;
-                content.push(SendStreamFrame::new(field, boundary, value));
+                StreamRequest::Finish {
+                    stream_id,
+                    sequence,
+                } => {
+                    if !valid_stream_id(stream_id) {
+                        return response
+                            .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
+                            .await;
+                    }
+                    let result = sessions.finish(stream_id, sequence);
+                    match result {
+                        Ok(()) => {
+                            response
+                                .write(&AckResponse {
+                                    accepted_sequence: sequence,
+                                })
+                                .await
+                        }
+                        Err(error) => response.write(&ErrorResponse(error)).await,
+                    }
+                }
             }
         }
     }
-
-    Ok(GatewayOutboundStream {
-        route: GatewayRoute {
-            channel: channel.ok_or(GatewayWireError::InvalidRequest)?,
-            conversation_id: conversation.ok_or(GatewayWireError::InvalidRequest)?,
-            thread_id: thread,
-        },
-        reply_to,
-        frames: content,
-    })
 }
 
-fn push_content_frames(
-    frames: &mut Vec<GatewaySendStreamRequestFrame>,
-    content: &SendStreamFrame,
-) -> Result<(), GatewayWireError> {
-    if content.text.as_bytes().contains(&0) {
-        return Err(GatewayWireError::EmbeddedNul);
-    }
-    let chunks = utf8_chunks(&content.text, TEXT_CAPACITY.saturating_sub(1));
-    let last = chunks.len().saturating_sub(1);
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        let boundary = if index == last {
-            content.boundary
-        } else {
-            StreamBoundary::More
-        };
-        frames.push(GatewaySendStreamRequestFrame::new(
-            wire_field(content.field, boundary),
-            chunk,
-        )?);
-    }
-    Ok(())
-}
-
-fn wire_field(field: SendStreamField, boundary: StreamBoundary) -> GatewaySendStreamField {
-    use GatewaySendStreamField as Wire;
-    use SendStreamField as Domain;
-    use StreamBoundary::{Complete, More};
-    match (field, boundary) {
-        (Domain::Text, More) => Wire::TextMore,
-        (Domain::Text, Complete) => Wire::TextComplete,
-        (Domain::Reasoning, More) => Wire::ReasoningMore,
-        (Domain::Reasoning, Complete) => Wire::ReasoningComplete,
-        (Domain::EffectResult, More) => Wire::EffectResultMore,
-        (Domain::EffectResult, Complete) => Wire::EffectResultComplete,
-        (Domain::Notice, More) => Wire::NoticeMore,
-        (Domain::Notice, Complete) => Wire::NoticeComplete,
-        (Domain::Event, More) => Wire::EventMore,
-        (Domain::Event, Complete) => Wire::EventComplete,
-        (Domain::ToolResultStart, _) => Wire::ToolResultStart,
-        (Domain::ToolCallId, More) => Wire::ToolCallIdMore,
-        (Domain::ToolCallId, Complete) => Wire::ToolCallIdComplete,
-        (Domain::ToolName, More) => Wire::ToolNameMore,
-        (Domain::ToolName, Complete) => Wire::ToolNameComplete,
-        (Domain::ToolArguments, More) => Wire::ToolArgumentsMore,
-        (Domain::ToolArguments, Complete) => Wire::ToolArgumentsComplete,
-        (Domain::ToolOutput, More) => Wire::ToolOutputMore,
-        (Domain::ToolOutput, Complete) => Wire::ToolOutputComplete,
-        (Domain::ToolSucceeded, _) => Wire::ToolSucceeded,
-        (Domain::ToolFailed, _) => Wire::ToolFailed,
-        (Domain::ToolResultEnd, _) => Wire::ToolResultEnd,
-    }
-}
-
-fn content_field(
-    field: GatewaySendStreamField,
-) -> Result<(SendStreamField, StreamBoundary), GatewayWireError> {
-    use GatewaySendStreamField as Wire;
-    use SendStreamField as Domain;
-    use StreamBoundary::{Complete, More};
-    let value = match field {
-        Wire::TextMore => (Domain::Text, More),
-        Wire::TextComplete => (Domain::Text, Complete),
-        Wire::ReasoningMore => (Domain::Reasoning, More),
-        Wire::ReasoningComplete => (Domain::Reasoning, Complete),
-        Wire::EffectResultMore => (Domain::EffectResult, More),
-        Wire::EffectResultComplete => (Domain::EffectResult, Complete),
-        Wire::NoticeMore => (Domain::Notice, More),
-        Wire::NoticeComplete => (Domain::Notice, Complete),
-        Wire::EventMore => (Domain::Event, More),
-        Wire::EventComplete => (Domain::Event, Complete),
-        Wire::ToolResultStart => (Domain::ToolResultStart, Complete),
-        Wire::ToolCallIdMore => (Domain::ToolCallId, More),
-        Wire::ToolCallIdComplete => (Domain::ToolCallId, Complete),
-        Wire::ToolNameMore => (Domain::ToolName, More),
-        Wire::ToolNameComplete => (Domain::ToolName, Complete),
-        Wire::ToolArgumentsMore => (Domain::ToolArguments, More),
-        Wire::ToolArgumentsComplete => (Domain::ToolArguments, Complete),
-        Wire::ToolOutputMore => (Domain::ToolOutput, More),
-        Wire::ToolOutputComplete => (Domain::ToolOutput, Complete),
-        Wire::ToolSucceeded => (Domain::ToolSucceeded, Complete),
-        Wire::ToolFailed => (Domain::ToolFailed, Complete),
-        Wire::ToolResultEnd => (Domain::ToolResultEnd, Complete),
-        Wire::Channel | Wire::Conversation | Wire::Thread | Wire::ReplyTo => {
-            return Err(GatewayWireError::InvalidRequest);
-        }
+pub(crate) async fn deliver_text_stream<const M: usize>(
+    gateway: &MessageGateway,
+    sessions: &TextSessions,
+    emitter: &EventEmitter<M>,
+    job: TextJob,
+) -> Result<(), barracuda_event_router::EmitError> {
+    let stream_id = job.stream_id;
+    let terminal_sequence = Rc::clone(&job.terminal_sequence);
+    let frames = command_stream(job.commands, Rc::clone(&terminal_sequence));
+    let request = SendStreamRequest {
+        target: job.target,
+        frames,
+        reply_to: job.reply_to,
     };
-    Ok(value)
+    let result = gateway.send_stream(request).await;
+    sessions.remove(&stream_id);
+    let completed_sequence = *terminal_sequence.borrow();
+    let sequence = completed_sequence.unwrap_or_default();
+    let mut terminal = match (&result, completed_sequence) {
+        (Ok(receipt), Some(_)) => {
+            TerminalEvent::completed(&stream_id, sequence, &receipt.message_id)
+        }
+        (Ok(_receipt), None) => {
+            TerminalEvent::failed(&stream_id, sequence, GatewayJsonError::Delivery)
+        }
+        (Err(error), _) => TerminalEvent::failed(&stream_id, sequence, map_gateway_error(error)),
+    };
+    let event_input_bytes = event_input_capacity::<M>(GatewaySendStreamFinished::ID)?;
+    if terminal
+        .encoded_len()
+        .map_or(true, |length| length > event_input_bytes)
+    {
+        terminal = TerminalEvent::failed(&stream_id, sequence, GatewayJsonError::InvalidReceipt);
+    }
+    emitter.emit::<GatewaySendStreamFinished>(&terminal).await
 }
 
-fn utf8_chunks(value: &str, capacity: usize) -> Vec<&str> {
-    if value.is_empty() {
-        return alloc::vec![""];
+fn command_stream(
+    commands: Receiver<StreamCommand>,
+    terminal_sequence: Rc<RefCell<Option<u32>>>,
+) -> SendStream {
+    Box::pin(stream::unfold(
+        (commands, terminal_sequence),
+        |(commands, terminal_sequence)| async move {
+            match commands.recv().await {
+                Ok(StreamCommand::Chunk(request)) => {
+                    let frame = match request.deserialize::<StreamRequest<'_>>() {
+                        Ok(StreamRequest::Chunk {
+                            field,
+                            boundary,
+                            text,
+                            ..
+                        }) => SendStreamFrame::inline(field, boundary, text)
+                            .ok_or_else(|| StreamError::failed("Gateway text chunk exceeds lane")),
+                        Ok(_) | Err(_) => Err(StreamError::failed("invalid Gateway text chunk")),
+                    };
+                    Some((frame, (commands, terminal_sequence)))
+                }
+                Ok(StreamCommand::Finish(sequence)) => {
+                    terminal_sequence.replace(Some(sequence));
+                    None
+                }
+                Err(_closed) => None,
+            }
+        },
+    ))
+}
+
+enum TerminalOutcome<'a> {
+    Completed(&'a str),
+    Failed(GatewayJsonError),
+}
+
+struct TerminalEvent<'a> {
+    stream_id: &'a str,
+    sequence: u32,
+    outcome: TerminalOutcome<'a>,
+}
+
+impl<'a> TerminalEvent<'a> {
+    const fn completed(stream_id: &'a str, sequence: u32, message_id: &'a str) -> Self {
+        Self {
+            stream_id,
+            sequence,
+            outcome: TerminalOutcome::Completed(message_id),
+        }
     }
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    while start < value.len() {
-        let mut end = core::cmp::min(start.saturating_add(capacity), value.len());
-        while !value.is_char_boundary(end) {
-            end = end.saturating_sub(1);
+
+    const fn failed(stream_id: &'a str, sequence: u32, error: GatewayJsonError) -> Self {
+        Self {
+            stream_id,
+            sequence,
+            outcome: TerminalOutcome::Failed(error),
         }
-        if end == start {
-            break;
-        }
-        if let Some(chunk) = value.get(start..end) {
-            chunks.push(chunk);
-        }
-        start = end;
     }
-    chunks
+}
+
+impl EncodedJson for TerminalEvent<'_> {
+    fn encode(&self, writer: &mut impl fmt::Write) -> fmt::Result {
+        writer.write_str("{\"stream_id\":")?;
+        write_json_string(writer, self.stream_id)?;
+        write!(writer, ",\"sequence\":{},\"outcome\":", self.sequence)?;
+        match self.outcome {
+            TerminalOutcome::Completed(message_id) => {
+                writer.write_str("\"completed\",\"message_id\":")?;
+                write_json_string(writer, message_id)?;
+            }
+            TerminalOutcome::Failed(error) => {
+                writer.write_str("\"failed\",\"error\":")?;
+                write_json_string(writer, error.code())?;
+            }
+        }
+        writer.write_char('}')
+    }
+}
+
+impl JsonPayload for TerminalEvent<'_> {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        encoded_json_len(self)
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        write_encoded_json(self, destination)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use alloc::string::String;
+
+    use super::{StreamCommand, TextSession, TextSessions, CHUNK_QUEUE_CAPACITY};
+    use crate::json::GatewayJsonError;
+
+    #[test]
+    fn text_session_enforces_sequence_and_bounded_backpressure() {
+        let sessions = TextSessions::default();
+        let (commands, receiver) = async_channel::bounded(CHUNK_QUEUE_CAPACITY);
+        sessions.entries.borrow_mut().insert(
+            String::from("stream-1"),
+            alloc::rc::Rc::new(TextSession {
+                next_sequence: core::cell::Cell::new(1),
+                commands,
+            }),
+        );
+
+        assert_eq!(
+            sessions.prepare_chunk("stream-1", 2).map(|_| ()),
+            Err(GatewayJsonError::OutOfOrder)
+        );
+        let session = sessions
+            .prepare_chunk("stream-1", 1)
+            .expect("first sequence is accepted");
+        session
+            .commands
+            .try_send(StreamCommand::Finish(1))
+            .expect("first queue slot");
+        session.next_sequence.set(2);
+        session
+            .commands
+            .try_send(StreamCommand::Finish(2))
+            .expect("second queue slot");
+        session.next_sequence.set(3);
+        assert_eq!(sessions.finish("stream-1", 3), Err(GatewayJsonError::Busy));
+        assert!(matches!(receiver.try_recv(), Ok(StreamCommand::Finish(1))));
+        assert_eq!(sessions.finish("stream-1", 3), Ok(()));
+    }
 }

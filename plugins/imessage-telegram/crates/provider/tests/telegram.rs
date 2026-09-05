@@ -10,8 +10,8 @@ use std::{boxed::Box, rc::Rc};
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
 use gateway::{
-    BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel, MessageTarget,
-    ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest,
+    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
+    MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
 };
 use http_client::ClientFactory;
 use telegram::{Telegram, TelegramConfig};
@@ -150,7 +150,10 @@ fn maps_text_chunks_to_drafts_and_finishes_with_a_normal_message() {
         let mut settings = config("token");
         settings.draft_min_delta_bytes = 1;
         let channel = Telegram::new(http.factory(), settings);
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([
+            Ok(TextChunk::inline("hel").expect("chunk fits inline storage")),
+            Ok(TextChunk::inline("lo").expect("chunk fits inline storage")),
+        ]);
 
         let result = channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
@@ -183,7 +186,10 @@ fn sends_images_as_multipart_without_buffering_stream_inputs() {
             r#"{"ok":true,"result":{"message_id":11}}"#,
         )]));
         let channel = Telegram::new(http.factory(), config("token"));
-        let data = stream::iter([Ok(vec![1, 2]), Ok(vec![3, 4])]);
+        let data = stream::iter([
+            Ok(BinaryChunk::from(vec![1, 2])),
+            Ok(BinaryChunk::from(vec![3, 4])),
+        ]);
         let request = SendMediaRequest {
             target: target(),
             body: BinaryBody::Stream(Box::pin(data)),

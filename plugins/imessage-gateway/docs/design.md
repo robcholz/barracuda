@@ -1,40 +1,45 @@
 # IMessage Gateway Design
 
-## Purpose
+## Boundary
 
-Provide one provider-neutral messaging boundary. Callers select a route and a
-delivery shape; providers decide how much of the shape they can present.
+`IMessageGateway` and `MessageChannel` are typed Plugin-to-Plugin capabilities.
+They preserve provider registration, direct provider dispatch, and live Rust
+streams. Agent/Workflow operations are JSON contracts on Event Router lanes.
 
-## Outbound APIs
+## Complete messages
 
-| RPC | Cardinality | Dynamic | Use |
-| --- | --- | --- | --- |
-| `gateway.send` | unary -> unary | yes | simple complete text and JSON/dynamic callers |
-| `gateway.send_stream` | streaming -> unary | no | live text plus typed extra frames |
-| `gateway.send_media` | streaming -> unary | no | binary media |
+`gateway.send` is unary JSON request to unary JSON response. It is the natural
+operation for one already-complete text message. The complete encoded JSON
+document, rather than an independent text-field limit, must fit one RPC lane.
 
-`gateway.send_stream` frames contain one `field` identifying their content.
-Route fields form a finite prefix. Content fields are `Text`, `Reasoning`,
-`EffectResult`, `Notice`, `Event`, and the structured tool-result fields. Each
-content value also carries a `More` or `Complete` boundary on the provider
-model; wire enum variants encode both properties in one fixed-layout field.
+## Application streams
 
-## Provider projection
+`gateway.send_stream` and `gateway.send_media` are unary JSON command APIs.
+Each logical stream is a state machine:
 
-The default `MessageChannel::send_stream` implementation consumes every frame
-and forwards only `Text` through `send_message`. This is the required behavior
-for plain IM providers. Rich providers override `send_stream`; Web publishes
-primary text as `message.delta` and extras as `message.extra`.
+```text
+start(sequence=0) -> chunk(sequence=1..n) -> finish(sequence=n+1)
+```
 
-## Streaming invariant
+Every accepted command returns `accepted_sequence`. Commands are rejected when the
+stream is absent, duplicated, out of order, or its bounded queue is full. A
+`busy` response is backpressure: the caller yields and retries the same
+sequence. `finish` acceptance closes input; provider completion is reported by
+one terminal Event rather than holding an RPC lane.
 
-The RPC handler reads only the route prefix before invoking the provider. It
-then maps the remaining RPC input directly into the provider stream. It never
-collects the full content stream, so ordering, bounded backpressure, and early
-provider rendering are preserved.
+The adapter turns accepted chunks into the existing typed provider stream as
+they arrive. It never gathers a full text or binary body. A queued command owns
+the original `JsonRef`, so the Event Router lane is the queue buffer. When a
+worker consumes it, text and decoded media use inline stream items rather than
+allocating per chunk. Media is Base64 only because JSON cannot carry raw binary.
 
-## Ownership
+Four text workers and four media workers match the four retained stream slots;
+all accepted streams can therefore make progress concurrently.
 
-Gateway owns routes, generic content fields, provider registration, and
-delivery errors. Agent-specific events are mapped before entering this
-boundary. Workflows and provider-specific SDK types do not belong here.
+## Inbound messages
+
+A short normalized message produces one `complete` JSON Event. A larger text
+produces `start`, ordered `chunk` Events, and one `finish` Event, all sharing a
+numeric correlation ID. Event Router accepts each bounded Event before the
+next is emitted. Each chunk is sized from the actual Event lane after accounting
+for the complete `internal.emit` envelope; there is no second fixed Event limit.

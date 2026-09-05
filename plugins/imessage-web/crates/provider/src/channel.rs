@@ -170,7 +170,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                     &request.target,
                                     WebEventData::MessageDelta {
                                         message_id: message_id.clone(),
-                                        delta,
+                                        delta: delta.into_string(),
                                     },
                                 )?;
                             }
@@ -219,7 +219,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                 &request.target,
                                 WebEventData::MessageDelta {
                                     message_id: message_id.clone(),
-                                    delta: frame.text,
+                                    delta: frame.text.into_string(),
                                 },
                             )?;
                         }
@@ -231,7 +231,7 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                 message_id: message_id.clone(),
                                 field: frame.field,
                                 boundary: frame.boundary,
-                                content: frame.text,
+                                content: frame.text.into_string(),
                             },
                         )?;
                     }
@@ -300,7 +300,9 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                                     WebEventData::Media {
                                         message_id: message_id.clone(),
                                         kind,
-                                        phase: MediaPhase::Delta { bytes },
+                                        phase: MediaPhase::Delta {
+                                            bytes: bytes.into_vec(),
+                                        },
                                     },
                                 )?;
                             }

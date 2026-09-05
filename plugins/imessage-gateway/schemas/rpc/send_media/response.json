@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "accepted_sequence": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      },
+      "required": ["accepted_sequence"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": ["invalid_request", "duplicate_stream", "unknown_stream", "out_of_order", "busy"]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}
