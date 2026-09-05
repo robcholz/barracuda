@@ -5,12 +5,40 @@
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{PluginId, PluginManager, PluginStartError};
+use barracuda_plugin_manager::{
+    Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
+    PluginStartError,
+};
+use barracuda_time_component::{ClockError, UtcClock};
 use barracuda_time_plugin::TimePlugin;
 use embassy_executor::{Executor, Spawner};
 use futures_lite::future::block_on;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::time::Duration;
+
+struct ClockConsumer {
+    observed: Rc<RefCell<Option<Rc<UtcClock>>>>,
+}
+
+impl PluginDeclaration for ClockConsumer {
+    const ID: &'static str = "time-test-consumer";
+    const DEPENDS_ON: &'static [&'static str] = &["time"];
+}
+
+impl Plugin<512> for ClockConsumer {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, 512, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        *self.observed.borrow_mut() = Some(context.require::<UtcClock>("time")?);
+        Ok(())
+    }
+}
 
 #[test]
 fn plugin_loads_the_time_component() {
@@ -39,7 +67,24 @@ fn plugin_loads_the_time_component() {
         manager
             .register(&mut router, plugin)
             .expect("register Time Plugin");
+        let observed = Rc::new(RefCell::new(None));
+        manager
+            .register(
+                &mut router,
+                ClockConsumer {
+                    observed: Rc::clone(&observed),
+                },
+            )
+            .expect("require UTC clock capability");
         assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+        assert_eq!(
+            observed
+                .borrow()
+                .as_ref()
+                .expect("UTC clock capability")
+                .now(),
+            Err(ClockError::Unsynchronized)
+        );
         let error = manager
             .start(&mut router)
             .expect_err("Time task requires the System spawner");

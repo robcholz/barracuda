@@ -1,36 +1,21 @@
 #![allow(missing_docs)]
-#![allow(clippy::expect_used)]
-
-use barracuda_event_router::{RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Unary};
-use barracuda_time_component::now::{Now, TimeNow, TimeNowRequest, TimeRpcError, now_handler};
-
-fn assert_method<M, Request, Response, Error, Input, Output>()
-where
-    M: RpcMethod<
-            Request = Request,
-            Response = Response,
-            Error = Error,
-            Input = Input,
-            Output = Output,
-        >,
-    Request: RpcMessage,
-    Response: RpcMessage,
-    Error: RpcMessage,
-    Input: RpcInputMode<Request>,
-    Output: RpcOutputMode<Response, Error>,
-{
-}
+use barracuda_event_router::JsonRpcSchema;
+use barracuda_time_component::now::Now;
 
 #[test]
-fn time_now_is_dynamic_fixed_layout_and_schema_baked() {
-    let _ = now_handler;
+fn time_now_exposes_the_json_contract() {
     assert_eq!(Now::ADDRESS, "time.now");
-    assert_method::<Now, TimeNowRequest, TimeNow, TimeRpcError, Unary, Unary>();
-    let schema = Now::dynamic()
-        .and_then(|dynamic| dynamic.schema())
-        .expect("time.now request schema is baked");
-    assert!(schema.contains("TimeNowRequest"));
-    assert!(schema.contains("\"type\": \"object\""));
-    assert!(!schema.contains("reserved"));
-    assert_eq!(core::mem::size_of::<TimeNow>(), 8);
+    assert_eq!(Now::MAX_REQUEST_BYTES, 2);
+    assert_eq!(Now::MAX_RESPONSE_BYTES, 34);
+
+    let request = Now::REQUEST_SCHEMA.as_str();
+    assert!(request.contains(r#""type": "object""#));
+    assert!(request.contains(r#""additionalProperties": false"#));
+
+    let response = Now::RESPONSE_SCHEMA.as_str();
+    assert!(response.contains(r#""utc""#));
+    assert!(response.contains(r#""format": "date-time""#));
+    for error in ["unsynchronized", "stale", "out_of_range"] {
+        assert!(response.contains(error));
+    }
 }

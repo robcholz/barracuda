@@ -1482,7 +1482,6 @@ name = "barracuda-time-component"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
- "barracuda-time-wire",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
@@ -1511,18 +1510,6 @@ dependencies = [
  "futures-lite",
  "log",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-time-wire"
-version = "0.1.0"
-dependencies = [
- "barracuda-rpc",
- "barracuda-rpc-schema",
- "getset",
- "schemars",
- "serde",
- "zerocopy",
 ]
 
 [[package]]

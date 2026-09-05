@@ -10,11 +10,10 @@ use barracuda_plugin_manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
 use barracuda_time_component::{
-    ClockState, TimeComponent, TimeConfig,
+    TimeComponent, TimeConfig, UtcClockUpdater,
     sntp::{SntpConfig, SntpSource},
-    synchronize_clock,
+    synchronize_clock, utc_clock,
 };
-use core::cell::RefCell;
 use embassy_futures::select::select;
 use embassy_net::Stack;
 
@@ -33,7 +32,7 @@ pub struct TimePlugin {
 
 struct TimeRuntime {
     source: SntpSource,
-    state: Rc<RefCell<ClockState>>,
+    updater: UtcClockUpdater,
 }
 
 impl TimePlugin {
@@ -64,10 +63,11 @@ impl<const M: usize> Plugin<M> for TimePlugin {
             RESYNC_INTERVAL_MILLIS,
             MAX_HOLDOVER_MILLIS,
         );
-        let component = TimeComponent::new(config);
-        let state = component.shared_state();
+        let (clock, updater) = utc_clock(config);
+        let component = TimeComponent::new(Rc::clone(&clock));
+        context.provide(Rc::clone(&clock))?;
         context.event_router.load(component)?;
-        self.runtime = Some(TimeRuntime { source, state });
+        self.runtime = Some(TimeRuntime { source, updater });
         Ok(())
     }
 
@@ -82,7 +82,11 @@ impl<const M: usize> Plugin<M> for TimePlugin {
         let spawner = context.task_spawner()?;
         let cancellation = context.task_token();
         spawner
-            .spawn(time_sync_task(runtime.source, runtime.state, cancellation))
+            .spawn(time_sync_task(
+                runtime.source,
+                runtime.updater,
+                cancellation,
+            ))
             .map_err(PluginError::registration)?;
         Ok(())
     }
@@ -91,10 +95,10 @@ impl<const M: usize> Plugin<M> for TimePlugin {
 #[embassy_executor::task]
 async fn time_sync_task(
     source: SntpSource,
-    state: Rc<RefCell<ClockState>>,
+    updater: UtcClockUpdater,
     cancellation: PluginTaskToken,
 ) {
-    let _completed = select(cancellation.cancelled(), synchronize_clock(source, state)).await;
+    let _completed = select(cancellation.cancelled(), synchronize_clock(source, updater)).await;
     log::info!("stopped Time synchronization task");
 }
 
