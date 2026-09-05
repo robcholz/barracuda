@@ -1361,6 +1361,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-platform-test",
+ "barracuda-plugin-manager",
  "barracuda-time-component",
  "embassy-futures",
  "embassy-sync 0.7.2",
@@ -1384,8 +1385,10 @@ dependencies = [
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
  "barracuda-scheduler-component",
+ "barracuda-time-component",
  "barracuda-time-plugin",
  "embassy-executor",
+ "embassy-futures",
  "embassy-time",
  "futures-lite",
 ]

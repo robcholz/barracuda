@@ -1,31 +1,31 @@
 use alloc::{boxed::Box, rc::Rc};
-use core::cell::RefCell;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventEmitter, RegisterContext,
-    RpcClient, RunContext, Topic, UnregisterContext,
+    RunContext, Topic, UnregisterContext,
 };
-use barracuda_time_component::now::{Now, TimeNowRequest};
+use barracuda_plugin_manager::{
+    PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
+};
+use barracuda_time_component::UtcClock;
 use embassy_futures::select::{Either, select};
-use embassy_sync::{blocking_mutex::raw::NoopRawMutex, signal::Signal};
+use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, Timer};
 use getset::CopyGetters;
 
 use crate::{
     cancel::{Cancel, cancel_handler},
-    event::{SchedulerTriggered, Triggered},
-    model::unix_seconds,
+    event::SchedulerTriggered,
+    json::Triggered,
+    model::ScheduleId,
     schedule::{Schedule, schedule_handler},
-    state::ScheduleBook,
+    state::{PersistedSchedule, RecordError, ScheduleBook},
 };
 
-/// Scheduler capacity and maximum RTC recheck interval.
+/// Scheduler timing policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
 pub struct SchedulerConfig {
-    /// Maximum number of simultaneously live schedules.
-    #[getset(get_copy = "pub")]
-    capacity: usize,
-    /// Longest period scheduler may sleep without re-reading `time.now`.
+    /// Longest period scheduler may sleep without re-reading the UTC clock.
     #[getset(get_copy = "pub")]
     max_recheck_millis: u64,
 }
@@ -33,65 +33,126 @@ pub struct SchedulerConfig {
 impl SchedulerConfig {
     /// Creates an explicit scheduler policy.
     #[must_use]
-    pub const fn new(capacity: usize, max_recheck_millis: u64) -> Self {
-        Self {
-            capacity,
-            max_recheck_millis,
-        }
+    pub const fn new(max_recheck_millis: u64) -> Self {
+        Self { max_recheck_millis }
     }
 }
 
-pub(crate) struct SchedulerShared {
-    pub(crate) book: RefCell<ScheduleBook>,
+pub(crate) struct SchedulerShared<Storage> {
+    pub(crate) book: Mutex<NoopRawMutex, ScheduleBook>,
     pub(crate) changed: Signal<NoopRawMutex, ()>,
+    pub(crate) storage: Storage,
 }
 
 /// Cloneable control passed to reusable scheduler RPC handlers.
 #[derive(Clone)]
-pub struct SchedulerControl {
-    pub(crate) shared: Rc<SchedulerShared>,
+pub(crate) struct SchedulerControl<Storage> {
+    pub(crate) shared: Rc<SchedulerShared<Storage>>,
 }
 
-impl SchedulerShared {
-    fn new(capacity: usize) -> Self {
+impl<Storage> SchedulerShared<Storage>
+where
+    Storage: PluginStorage,
+{
+    fn new(book: ScheduleBook, storage: Storage) -> Self {
         Self {
-            book: RefCell::new(ScheduleBook::new(capacity)),
+            book: Mutex::new(book),
             changed: Signal::new(),
+            storage,
         }
+    }
+
+    pub(crate) async fn write(
+        &self,
+        id: ScheduleId,
+        value: &PersistedSchedule,
+    ) -> Result<(), SchedulerStorageError> {
+        self.storage.put(id.as_str(), value).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn delete(&self, id: ScheduleId) -> Result<(), SchedulerStorageError> {
+        self.storage.delete(id.as_str()).await?;
+        Ok(())
     }
 }
 
-/// Event Router Component that schedules against typed `time.now` readings.
-pub struct SchedulerComponent {
-    config: SchedulerConfig,
-    control: SchedulerControl,
+/// Failure loading or saving Scheduler's persistent state.
+#[derive(Debug, thiserror::Error)]
+pub enum SchedulerStorageError {
+    /// Plugin-scoped key-value storage failed.
+    #[error(transparent)]
+    Storage(#[from] StorageError),
+    /// A stored record is incompatible.
+    #[error("scheduler persistent state is invalid")]
+    InvalidState,
 }
 
-impl SchedulerComponent {
-    /// Creates an empty in-memory scheduler.
-    #[must_use]
-    pub fn new(config: SchedulerConfig) -> Self {
-        Self {
+impl From<RecordError> for SchedulerStorageError {
+    fn from(_error: RecordError) -> Self {
+        Self::InvalidState
+    }
+}
+
+/// Event Router Component that schedules against the typed UTC clock capability.
+pub struct SchedulerComponent<Storage> {
+    config: SchedulerConfig,
+    control: SchedulerControl<Storage>,
+    clock: Rc<UtcClock>,
+}
+
+impl<Storage> SchedulerComponent<Storage>
+where
+    Storage: PluginStorage,
+{
+    /// Restores Scheduler state from its Plugin-scoped key-value storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when storage cannot be read or a record is invalid.
+    pub async fn load(
+        config: SchedulerConfig,
+        clock: Rc<UtcClock>,
+        storage: Storage,
+    ) -> Result<Self, SchedulerStorageError> {
+        let mut book = ScheduleBook::new();
+        let transaction = storage.read_transaction().await;
+        let mut entries = transaction.entries().await?;
+        while let Some(entry) = entries.next().await? {
+            let id = ScheduleId::new(entry.key())
+                .map_err(|_error| SchedulerStorageError::InvalidState)?;
+            let record = entry.value::<PersistedSchedule>()?;
+            book.restore(id, record)?;
+        }
+        drop(entries);
+        drop(transaction);
+        Ok(Self {
             config,
             control: SchedulerControl {
-                shared: Rc::new(SchedulerShared::new(config.capacity)),
+                shared: Rc::new(SchedulerShared::new(book, storage)),
             },
-        }
+            clock,
+        })
     }
 }
 
-impl<const M: usize> Component<M> for SchedulerComponent {
+impl<Storage, const M: usize> Component<M> for SchedulerComponent<Storage>
+where
+    Storage: PluginStorage,
+{
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Schedule, _>("agent", schedule_handler(self.control.clone()))?;
-        context.register_rpc::<Cancel, _>("agent", cancel_handler(self.control.clone()))
+        context.register_json::<Schedule, _>(
+            "*",
+            schedule_handler(self.control.clone(), Rc::clone(&self.clock)),
+        )?;
+        context.register_json::<Cancel, _>("*", cancel_handler(self.control.clone()))
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
         Box::pin(async move {
-            let client = context.rpc().clone();
-            let emitter = EventEmitter::<M>::new(client.clone());
+            let emitter = EventEmitter::<M>::new(context.rpc().clone());
             loop {
-                let Some(now_unix_seconds) = read_time(&client).await? else {
+                let Some(now_unix_seconds) = read_time(&self.clock) else {
                     wait_for_change(
                         &self.control.shared,
                         Duration::from_millis(self.config.max_recheck_millis.max(1)),
@@ -101,24 +162,35 @@ impl<const M: usize> Component<M> for SchedulerComponent {
                 };
 
                 loop {
-                    let occurrence = self.control.shared.book.borrow().take_due(now_unix_seconds);
+                    let occurrence = self
+                        .control
+                        .shared
+                        .book
+                        .lock()
+                        .await
+                        .take_due(now_unix_seconds);
                     let Some(occurrence) = occurrence else {
                         break;
                     };
                     let topic = Topic::try_from(occurrence.id().as_str())
                         .map_err(ComponentError::lifecycle)?;
                     emitter
-                        .emit_to::<SchedulerTriggered>(&topic, Triggered::new(occurrence))
+                        .emit_to::<SchedulerTriggered>(&topic, &Triggered::new(occurrence))
                         .await
                         .map_err(ComponentError::lifecycle)?;
-                    self.control
-                        .shared
-                        .book
-                        .borrow_mut()
-                        .commit(occurrence, now_unix_seconds);
+                    let mut book = self.control.shared.book.lock().await;
+                    if book.commit(occurrence, now_unix_seconds) {
+                        match book.persisted(&occurrence.id()) {
+                            Some(record) => {
+                                self.control.shared.write(occurrence.id(), &record).await
+                            }
+                            None => self.control.shared.delete(occurrence.id()).await,
+                        }
+                        .map_err(ComponentError::lifecycle)?;
+                    }
                 }
 
-                let deadline = self.control.shared.book.borrow().next_deadline();
+                let deadline = self.control.shared.book.lock().await.next_deadline();
                 let Some(deadline) = deadline else {
                     self.control.shared.changed.wait().await;
                     continue;
@@ -138,15 +210,11 @@ impl<const M: usize> Component<M> for SchedulerComponent {
     }
 }
 
-async fn read_time(client: &RpcClient) -> ComponentResult<Option<u64>> {
-    let result = client.call::<Now>(TimeNowRequest::new())?.await?;
-    match result {
-        Ok(frame) => Ok(unix_seconds(*frame.view()?).ok()),
-        Err(_unavailable) => Ok(None),
-    }
+fn read_time(clock: &UtcClock) -> Option<u64> {
+    clock.now().ok().map(|now| u64::from(now) / 1_000)
 }
 
-async fn wait_for_change(shared: &SchedulerShared, duration: Duration) {
+async fn wait_for_change<Storage>(shared: &SchedulerShared<Storage>, duration: Duration) {
     match select(Timer::after(duration), shared.changed.wait()).await {
         Either::First(()) | Either::Second(()) => {}
     }
