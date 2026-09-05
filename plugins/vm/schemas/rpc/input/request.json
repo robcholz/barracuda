@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "input": {
+          "type": "string",
+          "maxLength": 400
+        }
+      },
+      "required": ["run_id", "input"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "run_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "eof": {
+          "const": true
+        }
+      },
+      "required": ["run_id", "eof"],
+      "additionalProperties": false
+    }
+  ]
+}

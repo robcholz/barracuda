@@ -1,1073 +1,728 @@
-use alloc::string::{String, ToString};
-use core::{future::Future, pin::Pin, task::Poll};
+use alloc::string::String;
+use core::future::Future as _;
+use core::task::Poll;
 
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, RpcResult, RpcStream, Streaming};
+use barracuda_event_router::{
+    Event, EventEmitter, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
+    RpcError, json_schema,
+};
 use barracuda_lua::{Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
-use barracuda_runtime_utils::yield_stream::{Yielder, try_yield_stream};
+use barracuda_rpc::{JsonObjectFields, JsonObjectPayload, JsonObjectWriter};
 use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
 use barracuda_vm_package_api::LuaPackageRegistry;
-use getset::CopyGetters;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
+use serde::Deserialize;
 
 use crate::VmLimits;
-use crate::component::create_lua;
+use crate::component::DEFAULT_MAX_SOURCE_BYTES;
+use crate::memory::VmMemoryLease;
+use crate::runtime::{
+    ControlError, RunControl, VM_YIELD_DELAY_MILLIS, VmRuntime, VmYieldSignal,
+};
 
-const TEXT_CAPACITY: usize = 62;
-const TEXT_MAX_BYTES: usize = TEXT_CAPACITY - 1;
-const ERROR_TEXT_CAPACITY: usize = 63;
-const ERROR_TEXT_MAX_BYTES: usize = ERROR_TEXT_CAPACITY - 1;
+/// Maximum encoded JSON document accepted by VM control RPCs.
+pub const VM_JSON_REQUEST_BYTES: usize = 512;
+/// Maximum encoded JSON document returned by VM control RPCs.
+pub const VM_JSON_RESPONSE_BYTES: usize = 48;
+/// Maximum raw UTF-8 bytes carried by one output Event chunk.
+pub const VM_OUTPUT_CHUNK_BYTES: usize = 48;
+/// Maximum diagnostic bytes included in a terminal Event.
+pub const VM_DIAGNOSTIC_BYTES: usize = 48;
+/// Maximum encoded JSON input document emitted by any VM Event.
+pub const VM_EVENT_INPUT_BYTES: usize = 416;
 
-/// Whether a logical source, input, or output message continues in another frame.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum ChunkBoundary {
-    /// More frames belong to the current logical message.
-    More = 0,
-    /// This frame completes the current logical message.
-    Complete = 1,
-}
-
-/// Logical request stream carried by a `vm.run` frame.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum RunRequestKind {
-    /// Lua source bytes, sent before execution starts.
-    Source = 0,
-    /// One `io.input()` message, sent after source completion.
-    Input = 1,
-}
-
-/// Failure to construct or decode a fixed-size NUL-terminated text field.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
-pub enum FrameTextError {
-    /// Text exceeds the field's UTF-8 byte capacity.
-    #[error("text exceeds the RPC frame capacity")]
-    TooLong,
-    /// Text contains an interior NUL byte.
-    #[error("text contains a NUL byte")]
-    ContainsNul,
-    /// Wire bytes are not a canonical NUL-terminated field.
-    #[error("text is not canonically NUL terminated")]
-    InvalidTerminator,
-    /// Wire bytes before the terminator are not UTF-8.
-    #[error("text is not valid UTF-8")]
-    InvalidUtf8,
-}
-
-/// Fixed-capacity, NUL-terminated UTF-8 text carried in request/response frames.
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Eq, Immutable, IntoBytes, KnownLayout, PartialEq, TryFromBytes)]
-#[doc(hidden)]
-pub struct VmTextChunk([u8; TEXT_CAPACITY]);
-
-impl VmTextChunk {
-    fn new(text: &str) -> Result<Self, FrameTextError> {
-        Ok(Self(encode_text(text)?))
-    }
-
-    /// Decodes the canonical UTF-8 C string.
-    fn as_str(&self) -> Result<&str, FrameTextError> {
-        decode_text(&self.0)
-    }
-}
-
-impl Serialize for VmTextChunk {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.as_str()
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for VmTextChunk {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let text = String::deserialize(deserializer)?;
-        Self::new(&text).map_err(serde::de::Error::custom)
-    }
-}
-
-/// One fixed 64-byte request frame for [`Run`].
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-    CopyGetters,
-)]
-pub struct RunRequestFrame {
-    /// Logical request channel carried by this frame.
-    #[getset(get_copy = "pub")]
-    kind: RunRequestKind,
-    /// Whether this frame completes the logical message.
-    #[getset(get_copy = "pub")]
-    boundary: ChunkBoundary,
-    text: VmTextChunk,
-}
-
-impl RunRequestFrame {
-    /// Creates one Lua source frame.
-    pub fn source(text: &str, boundary: ChunkBoundary) -> Result<Self, FrameTextError> {
-        Self::new(RunRequestKind::Source, text, boundary)
-    }
-
-    /// Creates one Lua `io.input()` frame.
-    pub fn input(text: &str, boundary: ChunkBoundary) -> Result<Self, FrameTextError> {
-        Self::new(RunRequestKind::Input, text, boundary)
-    }
-
-    fn new(
-        kind: RunRequestKind,
-        text: &str,
-        boundary: ChunkBoundary,
-    ) -> Result<Self, FrameTextError> {
-        Ok(Self {
-            kind,
-            boundary,
-            text: VmTextChunk::new(text)?,
-        })
-    }
-
-    /// Decodes this frame's UTF-8 text chunk.
-    pub fn text(&self) -> Result<&str, FrameTextError> {
-        self.text.as_str()
-    }
-}
-
-/// One fixed 64-byte response frame containing part of one `io.print(...)` message.
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-    CopyGetters,
-)]
-pub struct RunResponseFrame {
-    /// Whether this frame completes the current printed message.
-    #[getset(get_copy = "pub")]
-    boundary: ChunkBoundary,
-    reserved: u8,
-    text: VmTextChunk,
-}
-
-impl RunResponseFrame {
-    fn new(text: &str, boundary: ChunkBoundary) -> Result<Self, FrameTextError> {
-        Ok(Self {
-            boundary,
-            reserved: 0,
-            text: VmTextChunk::new(text)?,
-        })
-    }
-
-    /// Decodes this frame's UTF-8 text chunk.
-    pub fn text(&self) -> Result<&str, FrameTextError> {
-        self.text.as_str()
-    }
-}
-
-/// Business-level terminal status returned by `vm.run`.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum RunErrorKind {
-    /// Request frames violated the source-then-input state machine.
-    InvalidProtocol = 0,
-    /// A request carried invalid fixed-field text.
-    InvalidText = 1,
-    /// Complete source exceeded [`VmLimits::max_source_bytes`].
-    SourceLimitExceeded = 2,
-    /// One logical input message exceeded [`VmLimits::max_input_bytes`].
-    InputLimitExceeded = 3,
-    /// The host could not create a Lua state.
-    VmCreate = 4,
-    /// The host-created state or execution IO could not be configured.
-    VmConfigure = 5,
-    /// Lua rejected the source chunk.
-    LuaLoad = 6,
-    /// Lua execution failed.
-    LuaRuntime = 7,
-    /// Lua yielded outside the wrapper's async binding protocol.
-    UnexpectedYield = 8,
-    /// A printed message could not be represented by the output protocol.
-    OutputEncoding = 9,
-    /// The VM Plugin has not started its Embassy runtime.
-    RuntimeUnavailable = 10,
-    /// All VM Embassy task slots are occupied.
-    Busy = 11,
-    /// The fixed Lua heap assigned to this execution was exhausted.
-    LuaMemory = 12,
-}
-
-/// Fixed-capacity NUL-terminated UTF-8 diagnostic attached to [`RunError`].
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug, Eq, Immutable, IntoBytes, KnownLayout, PartialEq, TryFromBytes)]
-#[doc(hidden)]
-pub struct VmErrorText([u8; ERROR_TEXT_CAPACITY]);
-
-impl VmErrorText {
-    fn from_lossy(message: &str) -> Self {
-        let prefix = message.split('\0').next().unwrap_or_default();
-        let mut end = core::cmp::min(prefix.len(), ERROR_TEXT_MAX_BYTES);
-        while !prefix.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
-        let text = prefix.get(..end).unwrap_or_default();
-        let mut bytes = [0_u8; ERROR_TEXT_CAPACITY];
-        if let Some(target) = bytes.get_mut(..text.len()) {
-            target.copy_from_slice(text.as_bytes());
-        }
-        Self(bytes)
-    }
-
-    /// Decodes the diagnostic string.
-    fn as_str(&self) -> Result<&str, FrameTextError> {
-        decode_text(&self.0)
-    }
-}
-
-impl Serialize for VmErrorText {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.as_str()
-            .map_err(serde::ser::Error::custom)?
-            .serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for VmErrorText {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let text = String::deserialize(deserializer)?;
-        if text.as_bytes().contains(&0) || text.len() > ERROR_TEXT_MAX_BYTES {
-            return Err(serde::de::Error::custom("invalid VM error text"));
-        }
-        Ok(Self::from_lossy(&text))
-    }
-}
-
-/// Fixed 64-byte terminal method error for [`Run`].
-#[repr(C)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-    CopyGetters,
-)]
-pub struct RunError {
-    /// Stable error category.
-    #[getset(get_copy = "pub")]
-    kind: RunErrorKind,
-    diagnostic: VmErrorText,
-}
-
-impl RunError {
-    pub(crate) fn new(kind: RunErrorKind, diagnostic: &str) -> Self {
-        Self {
-            kind,
-            diagnostic: VmErrorText::from_lossy(diagnostic),
-        }
-    }
-
-    /// Decodes the bounded UTF-8 diagnostic.
-    pub fn diagnostic(&self) -> Result<&str, FrameTextError> {
-        self.diagnostic.as_str()
-    }
-}
-
-/// Runs one isolated Lua state over bidirectional request/response streams.
+/// Starts one isolated Lua execution.
 pub struct Run;
 
-impl RpcMethod for Run {
+impl JsonRpcSchema for Run {
     const ADDRESS: &'static str = "vm.run";
-    type Request = RunRequestFrame;
-    type Response = RunResponseFrame;
-    type Error = RunError;
-    type Input = Streaming;
-    type Output = Streaming;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("run", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("run", response);
+    const MAX_REQUEST_BYTES: usize = VM_JSON_REQUEST_BYTES;
+    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
 }
 
-/// Builds the reusable `vm.run` handler.
-pub fn run_handler(limits: VmLimits, builtin_packages: BuiltinPackages) -> impl RpcHandler<Run> {
-    run_handler_with_registry(limits, builtin_packages, LuaPackageRegistry::new())
+/// Supplies one complete input value, or EOF, to an active execution.
+pub struct Input;
+
+impl JsonRpcSchema for Input {
+    const ADDRESS: &'static str = "vm.input";
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("input", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("input", response);
+    const MAX_REQUEST_BYTES: usize = VM_JSON_REQUEST_BYTES;
+    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
 }
 
-pub(crate) fn run_handler_with_registry(
-    limits: VmLimits,
-    builtin_packages: BuiltinPackages,
-    package_registry: LuaPackageRegistry,
-) -> impl RpcHandler<Run> {
-    move |_context, requests: RpcStream<RpcFrame<RunRequestFrame>>| {
-        let package_registry = package_registry.clone();
-        async move {
-            let stream = run_stream(
-                requests,
-                limits,
-                builtin_packages,
-                package_registry,
-                None,
-                None,
-            );
-            Ok(RpcStream::new(stream))
+/// Cancels one active execution.
+pub struct Cancel;
+
+impl JsonRpcSchema for Cancel {
+    const ADDRESS: &'static str = "vm.cancel";
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("cancel", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("cancel", response);
+    const MAX_REQUEST_BYTES: usize = 32;
+    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
+}
+
+/// One bounded output chunk emitted by an active execution.
+pub struct Output;
+
+impl Event for Output {
+    const ID: &'static str = "vm.output";
+}
+
+/// Notification that an execution is blocked in `io.input()`.
+pub struct InputRequired;
+
+impl Event for InputRequired {
+    const ID: &'static str = "vm.input_required";
+}
+
+/// Terminal outcome for one execution.
+pub struct Finished;
+
+impl Event for Finished {
+    const ID: &'static str = "vm.finished";
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunRequest<'a> {
+    #[serde(borrow)]
+    source: &'a str,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InputRequest<'a> {
+    run_id: u32,
+    #[serde(borrow)]
+    input: Option<&'a str>,
+    eof: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RunReference {
+    run_id: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ExecutionErrorKind {
+    VmCreate,
+    VmConfigure,
+    LuaLoad,
+    LuaRuntime,
+    UnexpectedYield,
+    LuaMemory,
+}
+
+impl ExecutionErrorKind {
+    const fn code(self) -> &'static str {
+        match self {
+            Self::VmCreate => "vm_create",
+            Self::VmConfigure => "vm_configure",
+            Self::LuaLoad => "lua_load",
+            Self::LuaRuntime => "lua_runtime",
+            Self::UnexpectedYield => "unexpected_yield",
+            Self::LuaMemory => "lua_memory",
         }
     }
 }
 
-pub(crate) type RunItem = Result<RunResponseFrame, RunError>;
+struct ExecutionError {
+    kind: ExecutionErrorKind,
+    diagnostic: Diagnostic,
+}
 
-pub(crate) fn run_stream(
-    requests: RpcStream<RpcFrame<RunRequestFrame>>,
+impl ExecutionError {
+    fn new(kind: ExecutionErrorKind, diagnostic: &str) -> Self {
+        Self {
+            kind,
+            diagnostic: Diagnostic::new(diagnostic),
+        }
+    }
+}
+
+struct Diagnostic {
+    bytes: [u8; VM_DIAGNOSTIC_BYTES],
+    length: usize,
+}
+
+impl Diagnostic {
+    fn new(diagnostic: &str) -> Self {
+        let diagnostic = truncate_utf8(diagnostic, VM_DIAGNOSTIC_BYTES);
+        let mut bytes = [0_u8; VM_DIAGNOSTIC_BYTES];
+        if let Some(output) = bytes.get_mut(..diagnostic.len()) {
+            output.copy_from_slice(diagnostic.as_bytes());
+        }
+        Self {
+            bytes,
+            length: diagnostic.len(),
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
+    }
+}
+
+pub(crate) struct OwnedSource {
+    bytes: [u8; DEFAULT_MAX_SOURCE_BYTES],
+    length: usize,
+}
+
+impl OwnedSource {
+    pub(crate) fn new(source: &str) -> Option<Self> {
+        let mut bytes = [0_u8; DEFAULT_MAX_SOURCE_BYTES];
+        bytes
+            .get_mut(..source.len())?
+            .copy_from_slice(source.as_bytes());
+        Some(Self {
+            bytes,
+            length: source.len(),
+        })
+    }
+
+    fn as_str(&self) -> &str {
+        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
+    }
+}
+
+/// Builds the JSON handler for [`Run`].
+pub fn run_handler(
+    runtime: VmRuntime,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
-    yield_signal: Option<crate::runtime::VmYieldSignal>,
-    memory: Option<crate::memory::VmMemoryLease>,
-) -> impl futures_core::Stream<Item = RpcResult<RunItem>> + 'static {
-    try_yield_stream(move |yielder| async move {
-        drive_run(
-            yielder,
-            requests,
+) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
+        let runtime = runtime.clone();
+        let package_registry = package_registry.clone();
+        async move {
+            let request = request.deserialize::<RunRequest<'_>>()?;
+            if request.source.len() > limits.max_source_bytes() {
+                return response
+                    .write(&ErrorResponse("source_limit_exceeded"))
+                    .await;
+            }
+            match runtime.dispatch(request.source, limits, builtin_packages, package_registry) {
+                Ok(run_id) => response.write(&RunAccepted(run_id)).await,
+                Err(error) => response.write(&ErrorResponse(error.code())).await,
+            }
+        }
+    }
+}
+
+/// Builds the JSON handler for [`Input`].
+pub fn input_handler(runtime: VmRuntime, limits: VmLimits) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
+        let runtime = runtime.clone();
+        async move {
+            let request = request.deserialize::<InputRequest<'_>>()?;
+            let result = match (request.input, request.eof) {
+                (Some(input), None | Some(false)) if input.len() <= limits.max_input_bytes() => {
+                    runtime.send_input(request.run_id, input)
+                }
+                (Some(_input), None | Some(false)) => Err(ControlError::InputLimitExceeded),
+                (None, Some(true)) => runtime.close_input(request.run_id),
+                _ => return Err(RpcError::InvalidJson),
+            };
+            match result {
+                Ok(()) => response.write("{}").await,
+                Err(error) => response.write(&ErrorResponse(error.code())).await,
+            }
+        }
+    }
+}
+
+/// Builds the JSON handler for [`Cancel`].
+pub fn cancel_handler(runtime: VmRuntime) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
+        let runtime = runtime.clone();
+        async move {
+            let request = request.deserialize::<RunReference>()?;
+            match runtime.cancel(request.run_id) {
+                Ok(()) => response.write("{}").await,
+                Err(error) => response.write(&ErrorResponse(error.code())).await,
+            }
+        }
+    }
+}
+
+struct RunAccepted(u32);
+
+impl JsonPayload for RunAccepted {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        JsonObjectPayload::new(self).encoded_len()
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        JsonObjectPayload::new(self).write_json(destination)
+    }
+}
+
+impl JsonObjectFields for RunAccepted {
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.field("run_id", &JsonInteger(u64::from(self.0)))
+    }
+}
+
+struct ErrorResponse(&'static str);
+
+impl JsonPayload for ErrorResponse {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        JsonObjectPayload::new(self).encoded_len()
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        JsonObjectPayload::new(self).write_json(destination)
+    }
+}
+
+impl JsonObjectFields for ErrorResponse {
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.string_field("error", self.0)
+    }
+}
+
+pub(crate) struct ExecutionJob {
+    pub(crate) emitter: EventEmitter<VM_JSON_REQUEST_BYTES>,
+    pub(crate) run_id: u32,
+    pub(crate) source: OwnedSource,
+    pub(crate) control: RunControl,
+    pub(crate) memory: VmMemoryLease,
+    pub(crate) limits: VmLimits,
+    pub(crate) builtin_packages: BuiltinPackages,
+    pub(crate) package_registry: LuaPackageRegistry,
+}
+
+pub(crate) async fn execute_run(job: ExecutionJob) {
+    let ExecutionJob {
+        emitter,
+        run_id,
+        source,
+        control,
+        memory,
+        limits,
+        builtin_packages,
+        package_registry,
+    } = job;
+    let mut events = RunEvents::new(emitter, run_id);
+    let result = drive_execution(
+        &mut events,
+        ExecutionSetup {
+            source,
+            control: &control,
             limits,
             builtin_packages,
             package_registry,
-            yield_signal,
-            memory,
-        )
-        .await
-    })
+            yield_signal: VmYieldSignal::default(),
+            memory: &memory,
+        },
+    )
+    .await;
+    let terminal = if control.is_cancelled() {
+        TerminalOutcome::Cancelled
+    } else {
+        match result {
+            Ok(()) => TerminalOutcome::Success,
+            Err(error) => TerminalOutcome::Error(error),
+        }
+    };
+    let _result = events.finished(terminal).await;
 }
 
-async fn drive_run(
-    yielder: Yielder<RunItem>,
-    mut requests: RpcStream<RpcFrame<RunRequestFrame>>,
+struct ExecutionSetup<'a> {
+    source: OwnedSource,
+    control: &'a RunControl,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
-    yield_signal: Option<crate::runtime::VmYieldSignal>,
-    memory: Option<crate::memory::VmMemoryLease>,
-) -> RpcResult<()> {
-    let source = match collect_source(&mut requests, limits).await? {
-        Ok(source) => source,
-        Err(error) => return emit_error(&yielder, error).await,
-    };
-    let lua = match memory.as_ref() {
-        // `memory` is a function parameter, so it outlives the local Lua state
-        // and the LuaExecution that consumes it below.
-        Some(memory) => unsafe { memory.create_lua() },
-        None => create_lua(),
-    };
-    let mut lua = match lua {
-        Ok(lua) => lua,
-        Err(error) => return emit_error(&yielder, factory_error(&error)).await,
-    };
-    let (input, mut output) = match builtin_packages.install(&mut lua) {
-        Ok(installed) => installed.into_io(),
-        Err(error) => {
-            return emit_error(
-                &yielder,
-                RunError::new(RunErrorKind::VmConfigure, error.message()),
-            )
-            .await;
-        }
-    };
-    if let Err(error) = package_registry.install(&mut lua) {
-        return emit_error(
-            &yielder,
-            RunError::new(RunErrorKind::VmConfigure, error.message()),
-        )
-        .await;
-    }
-    if let Some(yield_signal) = yield_signal
-        && let Err(error) =
-            lua.set_instruction_hook(limits.instruction_hook_interval(), move || {
-                yield_signal.mark();
-            })
-    {
-        return emit_error(
-            &yielder,
-            RunError::new(RunErrorKind::VmConfigure, error.message()),
-        )
-        .await;
-    }
-    let mut execution = lua.run(&source);
-    drive_started(
-        &yielder,
-        &mut requests,
-        input,
-        &mut output,
-        &mut execution,
-        limits,
-    )
-    .await
+    yield_signal: VmYieldSignal,
+    memory: &'a VmMemoryLease,
 }
 
-async fn collect_source(
-    requests: &mut RpcStream<RpcFrame<RunRequestFrame>>,
-    limits: VmLimits,
-) -> RpcResult<Result<String, RunError>> {
-    let mut source = String::new();
+async fn drive_execution(
+    events: &mut RunEvents,
+    setup: ExecutionSetup<'_>,
+) -> Result<(), ExecutionError> {
+    let mut lua = unsafe { setup.memory.create_lua() }.map_err(|error| factory_error(&error))?;
+    let installed = setup
+        .builtin_packages
+        .install(&mut lua)
+        .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+    let (lua_input, mut output) = installed.into_io();
+    setup
+        .package_registry
+        .install(&mut lua)
+        .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+    lua.set_instruction_hook(setup.limits.instruction_hook_interval(), {
+        let yield_signal = setup.yield_signal.clone();
+        move || yield_signal.mark()
+    })
+    .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
+
+    let mut execution = start_execution(lua, setup.source);
     loop {
-        let Some(frame) = requests.next().await else {
-            return Ok(Err(RunError::new(
-                RunErrorKind::InvalidProtocol,
-                "request ended before source completion",
-            )));
-        };
-        let frame = *frame?.view()?;
-        if frame.kind() != RunRequestKind::Source {
-            return Ok(Err(RunError::new(
-                RunErrorKind::InvalidProtocol,
-                "input arrived before source completion",
-            )));
-        }
-        let text = match frame.text() {
-            Ok(text) => text,
-            Err(error) => {
-                return Ok(Err(RunError::new(
-                    RunErrorKind::InvalidText,
-                    &error.to_string(),
-                )));
-            }
-        };
-        if append_limited(&mut source, text, limits.max_source_bytes()).is_err() {
-            return Ok(Err(RunError::new(
-                RunErrorKind::SourceLimitExceeded,
-                "Lua source exceeds the configured limit",
-            )));
-        }
-        if frame.boundary() == ChunkBoundary::Complete {
-            return Ok(Ok(source));
-        }
-    }
-}
-
-async fn drive_started(
-    yielder: &Yielder<RunItem>,
-    requests: &mut RpcStream<RpcFrame<RunRequestFrame>>,
-    input: LuaInput,
-    output: &mut LuaOutput,
-    execution: &mut LuaExecution,
-    limits: VmLimits,
-) -> RpcResult<()> {
-    let mut pending_input = String::new();
-    let mut has_pending_input = false;
-    loop {
-        match next_event(requests, output, execution).await {
-            RunEvent::Output(Some(message)) => {
-                if let Err(error) = emit_output(yielder, &message).await {
-                    return emit_error(yielder, error).await;
+        match next_execution_event(
+            &lua_input,
+            &mut output,
+            &mut execution,
+            &setup.yield_signal,
+            setup.control,
+        )
+        .await
+        {
+            ExecutionEvent::Output(Some(message)) => events.output(&message).await?,
+            ExecutionEvent::Output(None) => {}
+            ExecutionEvent::InputRequired(true) => {
+                events.input_required().await?;
+                match setup.control.next_input().await {
+                    Some(input) => lua_input.send(input.as_str()).await.map_err(|error| {
+                        ExecutionError::new(ExecutionErrorKind::LuaRuntime, error.message())
+                    })?,
+                    None if setup.control.is_cancelled() => return Ok(()),
+                    None => lua_input.close(),
                 }
             }
-            RunEvent::Output(None) => {}
-            RunEvent::Execution(result) => {
-                input.close();
-                return finish_execution(yielder, output, result).await;
+            ExecutionEvent::InputRequired(false) => lua_input.close(),
+            ExecutionEvent::Complete(result) => {
+                lua_input.close();
+                while let Some(message) = output.next().await {
+                    events.output(&message).await?;
+                }
+                return result.map_err(|error| execution_error(&error));
             }
-            RunEvent::Request(Some(frame)) => {
-                let frame = *frame?.view()?;
-                if frame.kind() != RunRequestKind::Input {
-                    return emit_error(
-                        yielder,
-                        RunError::new(
-                            RunErrorKind::InvalidProtocol,
-                            "source frame arrived after execution started",
-                        ),
-                    )
-                    .await;
-                }
-                let text = match frame.text() {
-                    Ok(text) => text,
-                    Err(error) => {
-                        return emit_error(
-                            yielder,
-                            RunError::new(RunErrorKind::InvalidText, &error.to_string()),
-                        )
-                        .await;
-                    }
-                };
-                if append_limited(&mut pending_input, text, limits.max_input_bytes()).is_err() {
-                    return emit_error(
-                        yielder,
-                        RunError::new(
-                            RunErrorKind::InputLimitExceeded,
-                            "Lua input message exceeds the configured limit",
-                        ),
-                    )
-                    .await;
-                }
-                has_pending_input = true;
-                if frame.boundary() == ChunkBoundary::Complete {
-                    let message = core::mem::take(&mut pending_input);
-                    has_pending_input = false;
-                    match send_input(yielder, &input, message, output, execution).await? {
-                        SendOutcome::Sent | SendOutcome::Closed => {}
-                        SendOutcome::Execution(result) => {
-                            input.close();
-                            return finish_execution(yielder, output, result).await;
-                        }
-                    }
-                }
+            ExecutionEvent::Yielded => {
+                embassy_time::Timer::after_millis(VM_YIELD_DELAY_MILLIS).await;
             }
-            RunEvent::Request(None) => {
-                if has_pending_input {
-                    let message = core::mem::take(&mut pending_input);
-                    if let SendOutcome::Execution(result) =
-                        send_input(yielder, &input, message, output, execution).await?
-                    {
-                        input.close();
-                        return finish_execution(yielder, output, result).await;
-                    }
-                }
-                input.close();
-                return drive_to_completion(yielder, output, execution).await;
-            }
+            ExecutionEvent::Cancelled => return Ok(()),
         }
     }
 }
 
-enum RunEvent {
-    Request(Option<RpcResult<RpcFrame<RunRequestFrame>>>),
+fn start_execution(lua: barracuda_lua::Lua, source: OwnedSource) -> LuaExecution {
+    lua.run(source.as_str())
+}
+
+enum ExecutionEvent {
     Output(Option<String>),
-    Execution(barracuda_lua::Result<()>),
+    InputRequired(bool),
+    Complete(barracuda_lua::Result<()>),
+    Yielded,
+    Cancelled,
 }
 
-async fn next_event(
-    requests: &mut RpcStream<RpcFrame<RunRequestFrame>>,
+async fn next_execution_event(
+    input: &LuaInput,
     output: &mut LuaOutput,
     execution: &mut LuaExecution,
-) -> RunEvent {
-    let mut request = core::pin::pin!(requests.next());
+    yield_signal: &VmYieldSignal,
+    control: &RunControl,
+) -> ExecutionEvent {
     let mut next_output = core::pin::pin!(output.next());
+    let mut next_input_request = core::pin::pin!(input.next_request());
     core::future::poll_fn(|context| {
+        if control.is_cancelled() {
+            return Poll::Ready(ExecutionEvent::Cancelled);
+        }
         if let Poll::Ready(message) = next_output.as_mut().poll(context) {
-            return Poll::Ready(RunEvent::Output(message));
+            return Poll::Ready(ExecutionEvent::Output(message));
         }
-        if let Poll::Ready(result) = Pin::new(&mut *execution).poll(context) {
-            return Poll::Ready(RunEvent::Execution(result));
+        if let Poll::Ready(requested) = next_input_request.as_mut().poll(context) {
+            return Poll::Ready(ExecutionEvent::InputRequired(requested));
         }
-        request.as_mut().poll(context).map(RunEvent::Request)
+        match core::pin::Pin::new(&mut *execution).poll(context) {
+            Poll::Ready(result) => Poll::Ready(ExecutionEvent::Complete(result)),
+            Poll::Pending if yield_signal.take() => Poll::Ready(ExecutionEvent::Yielded),
+            Poll::Pending => Poll::Pending,
+        }
     })
     .await
 }
 
-enum SendOutcome {
-    Sent,
-    Closed,
-    Execution(barracuda_lua::Result<()>),
+struct RunEvents {
+    emitter: EventEmitter<VM_JSON_REQUEST_BYTES>,
+    run_id: u32,
+    sequence: u64,
 }
 
-async fn send_input(
-    yielder: &Yielder<RunItem>,
-    input: &LuaInput,
-    message: String,
-    output: &mut LuaOutput,
-    execution: &mut LuaExecution,
-) -> RpcResult<SendOutcome> {
-    let mut send = core::pin::pin!(input.send(message));
-    loop {
-        let mut next_output = core::pin::pin!(output.next());
-        let event = core::future::poll_fn(|context| {
-            if let Poll::Ready(message) = next_output.as_mut().poll(context) {
-                return Poll::Ready(SendEvent::Output(message));
-            }
-            if let Poll::Ready(result) = Pin::new(&mut *execution).poll(context) {
-                return Poll::Ready(SendEvent::Execution(result));
-            }
-            send.as_mut().poll(context).map(SendEvent::Send)
-        })
-        .await;
-        match event {
-            SendEvent::Output(Some(message)) => {
-                if let Err(error) = emit_output(yielder, &message).await {
-                    emit_error(yielder, error).await?;
-                    return Ok(SendOutcome::Closed);
-                }
-            }
-            SendEvent::Output(None) => {}
-            SendEvent::Execution(result) => return Ok(SendOutcome::Execution(result)),
-            SendEvent::Send(Ok(())) => return Ok(SendOutcome::Sent),
-            SendEvent::Send(Err(_closed)) => return Ok(SendOutcome::Closed),
+impl RunEvents {
+    const fn new(emitter: EventEmitter<VM_JSON_REQUEST_BYTES>, run_id: u32) -> Self {
+        Self {
+            emitter,
+            run_id,
+            sequence: 0,
         }
     }
-}
 
-enum SendEvent {
-    Send(barracuda_lua::Result<()>),
-    Output(Option<String>),
-    Execution(barracuda_lua::Result<()>),
-}
+    async fn output(&mut self, message: &str) -> Result<(), ExecutionError> {
+        if message.is_empty() {
+            self.emit_output("", true).await?;
+            return Ok(());
+        }
+        let mut remaining = message;
+        while !remaining.is_empty() {
+            let end = utf8_prefix(remaining, VM_OUTPUT_CHUNK_BYTES);
+            let (chunk, rest) = remaining.split_at(end);
+            self.emit_output(chunk, rest.is_empty()).await?;
+            remaining = rest;
+        }
+        Ok(())
+    }
 
-async fn drive_to_completion(
-    yielder: &Yielder<RunItem>,
-    output: &mut LuaOutput,
-    execution: &mut LuaExecution,
-) -> RpcResult<()> {
-    loop {
-        let event = {
-            let mut next_output = core::pin::pin!(output.next());
-            core::future::poll_fn(|context| {
-                if let Poll::Ready(message) = next_output.as_mut().poll(context) {
-                    return Poll::Ready(CompletionEvent::Output(message));
-                }
-                Pin::new(&mut *execution)
-                    .poll(context)
-                    .map(CompletionEvent::Execution)
-            })
+    async fn emit_output(&mut self, chunk: &str, message_end: bool) -> Result<(), ExecutionError> {
+        let fields = OutputFields {
+            run_id: self.run_id,
+            sequence: self.sequence,
+            chunk,
+            message_end,
+        };
+        self.emitter
+            .emit::<Output>(&JsonObjectPayload::new(&fields))
             .await
+            .map_err(|_error| {
+                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
+            })?;
+        self.advance_sequence()
+    }
+
+    async fn input_required(&mut self) -> Result<(), ExecutionError> {
+        let fields = OrderedFields {
+            run_id: self.run_id,
+            sequence: self.sequence,
         };
-        match event {
-            CompletionEvent::Output(Some(message)) => {
-                if let Err(error) = emit_output(yielder, &message).await {
-                    return emit_error(yielder, error).await;
-                }
-            }
-            CompletionEvent::Output(None) => {}
-            CompletionEvent::Execution(result) => {
-                return finish_execution(yielder, output, result).await;
-            }
-        }
+        self.emitter
+            .emit::<InputRequired>(&JsonObjectPayload::new(&fields))
+            .await
+            .map_err(|_error| {
+                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
+            })?;
+        self.advance_sequence()
     }
-}
 
-enum CompletionEvent {
-    Output(Option<String>),
-    Execution(barracuda_lua::Result<()>),
-}
+    async fn finished(&mut self, outcome: TerminalOutcome) -> Result<(), ExecutionError> {
+        let fields = FinishedFields {
+            run_id: self.run_id,
+            sequence: self.sequence,
+            outcome,
+        };
+        self.emitter
+            .emit::<Finished>(&JsonObjectPayload::new(&fields))
+            .await
+            .map_err(|_error| {
+                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
+            })
+    }
 
-async fn finish_execution(
-    yielder: &Yielder<RunItem>,
-    output: &mut LuaOutput,
-    result: barracuda_lua::Result<()>,
-) -> RpcResult<()> {
-    while let Some(message) = output.next().await {
-        if let Err(error) = emit_output(yielder, &message).await {
-            return emit_error(yielder, error).await;
-        }
-    }
-    if let Err(error) = result {
-        emit_error(yielder, execution_error(&error)).await?;
-    }
-    Ok(())
-}
-
-async fn emit_output(yielder: &Yielder<RunItem>, message: &str) -> Result<(), RunError> {
-    if message.as_bytes().contains(&0) {
-        return Err(RunError::new(
-            RunErrorKind::OutputEncoding,
-            "printed text contains a NUL byte",
-        ));
-    }
-    if message.is_empty() {
-        let frame = RunResponseFrame::new("", ChunkBoundary::Complete)
-            .map_err(|error| RunError::new(RunErrorKind::OutputEncoding, &error.to_string()))?;
-        yielder.yield_one(Ok(frame)).await;
-        return Ok(());
-    }
-    let mut remaining = message;
-    while !remaining.is_empty() {
-        let mut end = core::cmp::min(remaining.len(), TEXT_MAX_BYTES);
-        while !remaining.is_char_boundary(end) {
-            end = end.saturating_sub(1);
-        }
-        let chunk = remaining.get(..end).ok_or_else(|| {
-            RunError::new(
-                RunErrorKind::OutputEncoding,
-                "could not split printed UTF-8",
+    fn advance_sequence(&mut self) -> Result<(), ExecutionError> {
+        self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
+            ExecutionError::new(
+                ExecutionErrorKind::VmConfigure,
+                "VM event sequence overflow",
             )
         })?;
-        remaining = remaining.get(end..).ok_or_else(|| {
-            RunError::new(
-                RunErrorKind::OutputEncoding,
-                "could not split printed UTF-8",
-            )
-        })?;
-        let boundary = if remaining.is_empty() {
-            ChunkBoundary::Complete
-        } else {
-            ChunkBoundary::More
-        };
-        let frame = RunResponseFrame::new(chunk, boundary)
-            .map_err(|error| RunError::new(RunErrorKind::OutputEncoding, &error.to_string()))?;
-        yielder.yield_one(Ok(frame)).await;
+        Ok(())
     }
-    Ok(())
 }
 
-async fn emit_error(yielder: &Yielder<RunItem>, error: RunError) -> RpcResult<()> {
-    yielder.yield_one(Err(error)).await;
-    Ok(())
+struct OrderedFields {
+    run_id: u32,
+    sequence: u64,
 }
 
-fn append_limited(target: &mut String, text: &str, limit: usize) -> Result<(), ()> {
-    let length = target.len().checked_add(text.len()).ok_or(())?;
-    if length > limit {
-        return Err(());
+impl JsonObjectFields for OrderedFields {
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
+        writer.field("sequence", &JsonInteger(self.sequence))
     }
-    target.push_str(text);
-    Ok(())
 }
 
-fn encode_text<const N: usize>(text: &str) -> Result<[u8; N], FrameTextError> {
-    if text.as_bytes().contains(&0) {
-        return Err(FrameTextError::ContainsNul);
-    }
-    if text.len() >= N {
-        return Err(FrameTextError::TooLong);
-    }
-    let mut bytes = [0_u8; N];
-    bytes
-        .get_mut(..text.len())
-        .ok_or(FrameTextError::TooLong)?
-        .copy_from_slice(text.as_bytes());
-    Ok(bytes)
+struct OutputFields<'a> {
+    run_id: u32,
+    sequence: u64,
+    chunk: &'a str,
+    message_end: bool,
 }
 
-fn decode_text(bytes: &[u8]) -> Result<&str, FrameTextError> {
-    let end = bytes
-        .iter()
-        .position(|byte| *byte == 0)
-        .ok_or(FrameTextError::InvalidTerminator)?;
-    if bytes
-        .get(end..)
-        .ok_or(FrameTextError::InvalidTerminator)?
-        .iter()
-        .any(|byte| *byte != 0)
-    {
-        return Err(FrameTextError::InvalidTerminator);
+impl JsonObjectFields for OutputFields<'_> {
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
+        writer.field("sequence", &JsonInteger(self.sequence))?;
+        writer.string_field("chunk", self.chunk)?;
+        writer.field(
+            "message_end",
+            if self.message_end { "true" } else { "false" },
+        )
     }
-    core::str::from_utf8(bytes.get(..end).ok_or(FrameTextError::InvalidTerminator)?)
-        .map_err(|_error| FrameTextError::InvalidUtf8)
 }
 
-fn factory_error(error: &LuaError) -> RunError {
+enum TerminalOutcome {
+    Success,
+    Cancelled,
+    Error(ExecutionError),
+}
+
+struct FinishedFields {
+    run_id: u32,
+    sequence: u64,
+    outcome: TerminalOutcome,
+}
+
+impl JsonObjectFields for FinishedFields {
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
+        writer.field("sequence", &JsonInteger(self.sequence))?;
+        match &self.outcome {
+            TerminalOutcome::Success => writer.string_field("outcome", "success"),
+            TerminalOutcome::Cancelled => writer.string_field("outcome", "cancelled"),
+            TerminalOutcome::Error(error) => {
+                writer.string_field("outcome", "error")?;
+                writer.string_field("error", error.kind.code())?;
+                writer.string_field("diagnostic", error.diagnostic.as_str())
+            }
+        }
+    }
+}
+
+struct JsonInteger(u64);
+
+impl JsonPayload for JsonInteger {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        Ok(decimal_len(self.0))
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        let length = decimal_len(self.0);
+        let capacity = destination.len();
+        let output = destination
+            .get_mut(..length)
+            .ok_or(RpcError::FrameTooLarge {
+                size: length,
+                capacity,
+            })?;
+        let mut value = self.0;
+        for index in (0..length).rev() {
+            let digit = u8::try_from(value % 10).map_err(|_error| RpcError::InvalidFrameState)?;
+            let encoded = b'0'.checked_add(digit).ok_or(RpcError::InvalidFrameState)?;
+            *output.get_mut(index).ok_or(RpcError::InvalidFrameState)? = encoded;
+            value /= 10;
+        }
+        Ok(length)
+    }
+}
+
+const fn decimal_len(mut value: u64) -> usize {
+    let mut length = 1_usize;
+    while value >= 10 {
+        value /= 10;
+        length = length.saturating_add(1);
+    }
+    length
+}
+
+fn utf8_prefix(value: &str, max_bytes: usize) -> usize {
+    let mut end = core::cmp::min(value.len(), max_bytes);
+    while !value.is_char_boundary(end) {
+        end = end.saturating_sub(1);
+    }
+    end
+}
+
+fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+    value
+        .get(..utf8_prefix(value, max_bytes))
+        .unwrap_or_default()
+}
+
+fn factory_error(error: &LuaError) -> ExecutionError {
     let kind = match error.kind() {
-        LuaErrorKind::Create => RunErrorKind::VmCreate,
-        LuaErrorKind::Memory => RunErrorKind::LuaMemory,
+        LuaErrorKind::Create => ExecutionErrorKind::VmCreate,
+        LuaErrorKind::Memory => ExecutionErrorKind::LuaMemory,
         LuaErrorKind::Load
         | LuaErrorKind::Runtime
         | LuaErrorKind::Conversion
-        | LuaErrorKind::UnexpectedYield => RunErrorKind::VmConfigure,
+        | LuaErrorKind::UnexpectedYield => ExecutionErrorKind::VmConfigure,
     };
-    RunError::new(kind, error.message())
+    ExecutionError::new(kind, error.message())
 }
 
-fn execution_error(error: &LuaError) -> RunError {
+fn execution_error(error: &LuaError) -> ExecutionError {
     let kind = match error.kind() {
-        LuaErrorKind::Load => RunErrorKind::LuaLoad,
-        LuaErrorKind::Memory => RunErrorKind::LuaMemory,
-        LuaErrorKind::UnexpectedYield => RunErrorKind::UnexpectedYield,
+        LuaErrorKind::Load => ExecutionErrorKind::LuaLoad,
+        LuaErrorKind::Memory => ExecutionErrorKind::LuaMemory,
+        LuaErrorKind::UnexpectedYield => ExecutionErrorKind::UnexpectedYield,
         LuaErrorKind::Create | LuaErrorKind::Runtime | LuaErrorKind::Conversion => {
-            RunErrorKind::LuaRuntime
+            ExecutionErrorKind::LuaRuntime
         }
     };
-    RunError::new(kind, error.message())
+    ExecutionError::new(kind, error.message())
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
-    #![allow(clippy::indexing_slicing)]
 
-    use alloc::format;
-    use alloc::string::ToString;
-    use alloc::vec::Vec;
-
-    use core::future::pending;
-    use core::task::{Context, Waker};
-
-    use futures_lite::future::block_on;
-
-    use super::*;
-
-    fn install_environment(lua: &mut barracuda_lua::Lua) -> (LuaInput, LuaOutput) {
-        BuiltinPackages::all()
-            .install(lua)
-            .expect("install environment")
-            .into_io()
-    }
+    use super::{
+        ExecutionError, ExecutionErrorKind, FinishedFields, JsonInteger, JsonObjectPayload,
+        JsonPayload, OutputFields, TerminalOutcome, VM_DIAGNOSTIC_BYTES, VM_EVENT_INPUT_BYTES,
+        VM_OUTPUT_CHUNK_BYTES, decimal_len, truncate_utf8, utf8_prefix,
+    };
 
     #[test]
-    fn response_chunking_preserves_utf8_and_message_boundary() {
-        block_on(async {
-            let message = "é".repeat(40);
-            let mut stream = try_yield_stream(|yielder| async move {
-                emit_output(&yielder, &message).await.map_err(|_| ())
-            });
-            let mut frames = Vec::new();
-            while let Some(item) = futures_lite::StreamExt::next(&mut stream).await {
-                frames.push(
-                    item.expect("output stream")
-                        .expect("response frame instead of method error"),
-                );
-            }
-            assert_eq!(frames.len(), 2);
-            assert_eq!(frames[0].boundary(), ChunkBoundary::More);
-            assert_eq!(frames[1].boundary(), ChunkBoundary::Complete);
-            assert_eq!(
-                frames
-                    .iter()
-                    .map(|frame| frame.text().expect("valid text"))
-                    .collect::<String>(),
-                "é".repeat(40)
-            );
-        });
-    }
-
-    #[test]
-    fn append_limit_is_checked_per_logical_value() {
-        let mut value = "ab".to_string();
-        assert_eq!(append_limited(&mut value, "c", 3), Ok(()));
-        assert_eq!(append_limited(&mut value, "d", 3), Err(()));
-        assert_eq!(value, "abc");
-    }
-
-    #[test]
-    fn error_diagnostic_is_utf8_truncated_and_nul_safe() {
-        let error = RunError::new(RunErrorKind::LuaRuntime, &("€".repeat(30) + "\0hidden"));
-        let diagnostic = error.diagnostic().expect("valid diagnostic");
-        assert!(diagnostic.len() <= ERROR_TEXT_MAX_BYTES);
-        assert!(!diagnostic.contains('\0'));
-        assert_eq!(error.kind(), RunErrorKind::LuaRuntime);
-    }
-
-    #[test]
-    fn fixed_text_rejects_oversize_and_nul() {
+    fn integer_payload_writes_without_an_intermediate_string() {
+        let mut output = [0_u8; 20];
+        let written = JsonInteger(u64::MAX)
+            .write_json(&mut output)
+            .expect("write integer");
         assert_eq!(
-            VmTextChunk::new(&"x".repeat(TEXT_MAX_BYTES + 1)),
-            Err(FrameTextError::TooLong)
+            output.get(..written).expect("written integer range"),
+            b"18446744073709551615"
         );
-        assert_eq!(VmTextChunk::new("a\0b"), Err(FrameTextError::ContainsNul));
-        assert_eq!(encode_text::<4>("abc"), Ok([b'a', b'b', b'c', 0]));
-        assert_eq!(
-            decode_text(&[b'a', 0, b'b']),
-            Err(FrameTextError::InvalidTerminator)
+        assert_eq!(decimal_len(u64::MAX), 20);
+        assert_eq!(decimal_len(0), 1);
+    }
+
+    #[test]
+    fn utf8_chunks_and_diagnostics_end_at_character_boundaries() {
+        assert_eq!(utf8_prefix("abc", 2), 2);
+        assert_eq!(utf8_prefix("aé", 2), 1);
+        assert_eq!(truncate_utf8("aé", 2), "a");
+    }
+
+    #[test]
+    fn worst_case_event_inputs_fit_the_declared_bound() {
+        let text = "\0".repeat(VM_OUTPUT_CHUNK_BYTES);
+        let output = OutputFields {
+            run_id: u32::MAX,
+            sequence: u64::MAX,
+            chunk: &text,
+            message_end: false,
+        };
+        assert!(
+            JsonObjectPayload::new(&output)
+                .encoded_len()
+                .expect("measure output Event")
+                <= VM_EVENT_INPUT_BYTES
         );
-        assert_eq!(decode_text(&[0xff, 0]), Err(FrameTextError::InvalidUtf8));
-        assert_eq!(decode_text(b"a"), Err(FrameTextError::InvalidTerminator));
-        assert_eq!(TEXT_MAX_BYTES, 61);
-    }
 
-    #[test]
-    fn output_rejects_an_interior_nul() {
-        block_on(async {
-            let mut stream = try_yield_stream(|yielder| async move {
-                let error = emit_output(&yielder, "before\0after")
-                    .await
-                    .expect_err("NUL must be rejected");
-                assert_eq!(error.kind(), RunErrorKind::OutputEncoding);
-                Ok::<(), ()>(())
-            });
-            assert!(futures_lite::StreamExt::next(&mut stream).await.is_none());
-        });
-    }
-
-    #[test]
-    fn method_error_json_uses_a_string_diagnostic() {
-        let error = RunError::new(RunErrorKind::LuaRuntime, "boom");
-        let json = serde_json::to_string(&error).expect("serialize method error");
-        assert!(json.contains("\"diagnostic\":\"boom\""));
-        let decoded: RunError = serde_json::from_str(&json).expect("deserialize method error");
-        assert_eq!(decoded, error);
-
-        let oversized = format!(
-            "{{\"kind\":\"LuaRuntime\",\"diagnostic\":\"{}\"}}",
-            "x".repeat(ERROR_TEXT_CAPACITY)
+        let diagnostic = "\0".repeat(VM_DIAGNOSTIC_BYTES);
+        let finished = FinishedFields {
+            run_id: u32::MAX,
+            sequence: u64::MAX,
+            outcome: TerminalOutcome::Error(ExecutionError::new(
+                ExecutionErrorKind::UnexpectedYield,
+                &diagnostic,
+            )),
+        };
+        assert!(
+            JsonObjectPayload::new(&finished)
+                .encoded_len()
+                .expect("measure finished Event")
+                <= VM_EVENT_INPUT_BYTES
         );
-        assert!(serde_json::from_str::<RunError>(&oversized).is_err());
-    }
-
-    #[test]
-    fn send_input_observes_execution_and_a_closed_input() {
-        block_on(async {
-            let mut lua = barracuda_lua::Lua::new().expect("create Lua");
-            let (input, mut output) = install_environment(&mut lua);
-            let mut execution = lua.run("return");
-            let mut stream = try_yield_stream(|yielder| async move {
-                let outcome = send_input(
-                    &yielder,
-                    &input,
-                    String::from("unused"),
-                    &mut output,
-                    &mut execution,
-                )
-                .await
-                .map_err(|_| ())?;
-                assert!(matches!(outcome, SendOutcome::Execution(Ok(()))));
-                Ok::<(), ()>(())
-            });
-            assert!(futures_lite::StreamExt::next(&mut stream).await.is_none());
-
-            let mut lua = barracuda_lua::Lua::new().expect("create Lua");
-            lua.register_async("wait_forever", |(): ()| async {
-                pending::<()>().await;
-                None::<barracuda_lua::Result<()>>
-            })
-            .expect("register wait");
-            let (input, mut output) = install_environment(&mut lua);
-            let mut execution = lua.run("wait_forever()");
-            input.close();
-            let mut stream = try_yield_stream(|yielder| async move {
-                let outcome = send_input(
-                    &yielder,
-                    &input,
-                    String::from("closed"),
-                    &mut output,
-                    &mut execution,
-                )
-                .await
-                .map_err(|_| ())?;
-                assert!(matches!(outcome, SendOutcome::Closed));
-                Ok::<(), ()>(())
-            });
-            assert!(futures_lite::StreamExt::next(&mut stream).await.is_none());
-        });
-    }
-
-    #[test]
-    fn send_and_completion_forward_output_while_lua_is_suspended() {
-        block_on(async {
-            let mut lua = barracuda_lua::Lua::new().expect("create Lua");
-            lua.register_async("wait_forever", |(): ()| async {
-                pending::<()>().await;
-                None::<barracuda_lua::Result<()>>
-            })
-            .expect("register wait");
-            let (input, mut output) = install_environment(&mut lua);
-            let mut execution =
-                lua.run("local io = require('io'); io.print('queued'); wait_forever()");
-            assert!(
-                Pin::new(&mut execution)
-                    .poll(&mut Context::from_waker(Waker::noop()))
-                    .is_pending()
-            );
-            let mut stream = try_yield_stream(|yielder| async move {
-                let outcome = send_input(
-                    &yielder,
-                    &input,
-                    String::from("accepted"),
-                    &mut output,
-                    &mut execution,
-                )
-                .await
-                .map_err(|_| ())?;
-                assert!(matches!(outcome, SendOutcome::Sent));
-                Ok::<(), ()>(())
-            });
-            let item = futures_lite::StreamExt::next(&mut stream)
-                .await
-                .expect("one output")
-                .expect("stream success")
-                .expect("response frame");
-            assert_eq!(item.text(), Ok("queued"));
-            assert!(futures_lite::StreamExt::next(&mut stream).await.is_none());
-
-            let mut lua = barracuda_lua::Lua::new().expect("create Lua");
-            lua.register_async("yield_once", |(): ()| async {
-                let mut yielded = false;
-                core::future::poll_fn(move |context| {
-                    if yielded {
-                        Poll::Ready(())
-                    } else {
-                        yielded = true;
-                        context.waker().wake_by_ref();
-                        Poll::Pending
-                    }
-                })
-                .await;
-                None::<barracuda_lua::Result<()>>
-            })
-            .expect("register yield");
-            let (_input, mut output) = install_environment(&mut lua);
-            let mut execution =
-                lua.run("local io = require('io'); io.print('before completion'); yield_once()");
-            assert!(
-                Pin::new(&mut execution)
-                    .poll(&mut Context::from_waker(Waker::noop()))
-                    .is_pending()
-            );
-            let mut stream = try_yield_stream(|yielder| async move {
-                drive_to_completion(&yielder, &mut output, &mut execution)
-                    .await
-                    .map_err(|_| ())
-            });
-            let item = futures_lite::StreamExt::next(&mut stream)
-                .await
-                .expect("one output")
-                .expect("stream success")
-                .expect("response frame");
-            assert_eq!(item.text(), Ok("before completion"));
-            assert!(futures_lite::StreamExt::next(&mut stream).await.is_none());
-        });
     }
 }

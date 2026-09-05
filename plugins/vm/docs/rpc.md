@@ -1,140 +1,81 @@
-# Lua VM RPC
+# Lua VM JSON RPCs
 
-The VM Component exposes one typed, bidirectional streaming RPC. One call owns
-one isolated Lua state from source upload through completion.
+All VM RPCs are unary JSON contracts with visibility `"*"`. A successful
+`vm.run` starts an execution and releases its RPC lane immediately. Execution
+output and completion use the Events in [event.md](event.md); they are not
+collected into the RPC response.
 
-| Address | Request | Response | Method error | Shape |
-| --- | --- | --- | --- | --- |
-| `vm.run` | `RunRequestFrame` | `RunResponseFrame` | `RunError` | streaming → streaming |
+## `vm.run`
 
-The method is intentionally typed-only. It does not opt into Event Router's
-runtime JSON surface, because a long-lived duplex execution is not a useful
-unary JSON operation.
+- Request schema: `schemas/rpc/run/request.json`
+- Response schema: `schemas/rpc/run/response.json`
+- Maximum encoded request: 512 bytes
+- Maximum encoded response: 48 bytes
 
-## Plugin setup
+Request:
 
-`VmPlugin::register` publishes `LuaPackageRegistry`, fixes the built-in package
-installation plan, and loads the Component before any Plugin startup hook
-runs. Dependent Plugins register packages during the same unified registration
-phase. `VmPlugin::start` then gives the Component runtime the System-owned
-Embassy spawner. The Component creates a fresh Lua state for every RPC call and
-installs the built-ins plus the packages registered by enabled Plugins.
-
-```rust,ignore
-use barracuda_vm_component::{BuiltinPackages, VmComponent, VmRuntime};
-use barracuda_vm_package_api::LuaPackageRegistry;
-
-let runtime = VmRuntime::new()?;
-let packages = LuaPackageRegistry::new();
-let component = VmComponent::with_runtime(BuiltinPackages::all(), runtime.clone())
-    .with_package_registry(packages);
-context.event_router.load(component)?;
-runtime.start(system_spawner)?;
+```json
+{"source":"local io=require('io'); io.print('hello')"}
 ```
 
-Direct Component construction is intended for tests and embedding. Normal
-system composition loads it through `VmPlugin`.
+Accepted response:
 
-There is no RPC for installing libraries or changing sandbox policy. Scripts
-can only access built-ins and packages registered by enabled Plugins, for
-example `local gpio = require("gpio")`.
+```json
+{"run_id":1}
+```
 
-The exact globals, data-flow functions, native-module policy, and current
-resource-limit gaps are documented in [environment.md](environment.md).
+The `run_id` is a nonzero `u32`, is unique among the four active executions,
+and correlates all later control calls and Events. The source is copied once
+from the lane into a fixed 480-byte task argument because execution outlives
+the request lane; this does not allocate a per-run source `String`. JSON
+escaping and the object envelope must also fit the 512-byte encoded request
+limit.
 
-## Fixed frame layout
+Stable rejections are `source_limit_exceeded`, `runtime_unavailable`, and
+`busy`. A `busy` response means all four task/memory slots are occupied.
 
-All three wire messages are exactly 64 bytes and work with a 64-byte Event
-Router lane.
+## `vm.input`
 
-`RunRequestFrame` contains:
+- Request schema: `schemas/rpc/input/request.json`
+- Response schema: `schemas/rpc/input/response.json`
+- Maximum encoded request: 512 bytes
+- Maximum encoded response: 48 bytes
 
-- `kind: RunRequestKind` (`Source` or `Input`), one byte;
-- `boundary: ChunkBoundary` (`More` or `Complete`), one byte;
-- `text: VmTextChunk`, 62 bytes.
+Supply one complete input value after `vm.input_required`:
 
-`RunResponseFrame` contains:
+```json
+{"run_id":1,"input":"barracuda"}
+```
 
-- `boundary: ChunkBoundary`, one byte;
-- one reserved zero byte;
-- `text: VmTextChunk`, 62 bytes.
+Close the input side so later `io.input()` calls return `nil`:
 
-`RunError` contains:
+```json
+{"run_id":1,"eof":true}
+```
 
-- `kind: RunErrorKind`, one byte;
-- `diagnostic: VmErrorText`, 63 bytes.
+Success is `{}`. The input queue holds one complete message and therefore
+preserves backpressure without accumulating caller input. The default logical
+input limit is 400 UTF-8 bytes. Stable rejections are `run_not_found`,
+`input_limit_exceeded`, `input_backpressure`, and `input_closed`.
 
-Both text types are canonical NUL-terminated UTF-8 C strings. A request or
-response chunk can carry at most 61 UTF-8 bytes; an error diagnostic can carry
-at most 62. Bytes after the first NUL must be zero. Their Serde representation
-is a JSON string, never an array of bytes. Long values must be split only at
-UTF-8 character boundaries.
+## `vm.cancel`
 
-## Request state machine
+- Request schema: `schemas/rpc/cancel/request.json`
+- Response schema: `schemas/rpc/cancel/response.json`
+- Maximum encoded request: 32 bytes
+- Maximum encoded response: 48 bytes
 
-1. Send one or more `Source` frames. `Source(..., Complete)` completes the Lua
-   chunk and starts execution. An empty script is `Source("", Complete)`.
-2. After execution starts, send zero or more logical input messages. Each
-   message consists of one or more `Input` frames ending in `Input(...,
-   Complete)`. One complete message satisfies one Lua `io.input()` call.
-3. Close the request stream when no more input will arrive. If the final input
-   has only `More` frames, EOF commits that accumulated value as the final input
-   message. The input flow then closes; after queued messages are consumed,
-   Lua `io.input()` returns `nil`.
+Request:
 
-`Input` before source completion, `Source` after execution starts, or EOF before
-source completion terminates the call with `InvalidProtocol`.
+```json
+{"run_id":1}
+```
 
-The default limits are 65,536 source bytes and 4,096 bytes per logical input
-message. The default instruction-hook interval is 10,000 instructions. A host
-can replace the byte limits with `VmLimits::new` and the interval with
-`VmLimits::with_instruction_hook_interval`.
+Success is `{}`; an unknown or already released execution returns
+`{"error":"run_not_found"}`. Cancellation closes pending input and is observed
+at the next async suspension or Lua instruction-hook boundary. The terminal
+Event reports `"outcome":"cancelled"`.
 
-Normal Plugin execution also leases one of four reusable TLSF allocator slots.
-Each slot provides a fixed 65,536-byte Lua heap by default. The size can be
-changed for all four slots with `VmRuntime::with_memory_bytes`; exhaustion is a
-terminal `LuaMemory` method error.
-
-## Response and completion
-
-Every Lua `io.print(...)` produces one logical output message. A long message is
-split across `RunResponseFrame`s; `Complete` marks its final frame. An empty
-printed message is represented by one empty `Complete` frame.
-
-The response stream is also the execution handle:
-
-- response EOF means the script finished successfully;
-- a terminal `RunError` means execution failed;
-- response frames already produced by Lua are delivered before its terminal
-  load/runtime error;
-- an outer `RpcError` is transport failure, not a Lua or protocol error.
-
-Dropping the response stream cancels the RPC and drops its `LuaExecution`.
-Normal Plugin executions install a Lua count hook. Every configured number of
-instructions, the hook yields back to the owning Embassy task. The task waits
-100 ms asynchronously and then polls Lua again. This makes a pure Lua loop
-cooperative without exposing or injecting a timer into Lua.
-
-The Embassy task pool has four static slots. Four VM calls can execute
-concurrently; a call made while all slots are occupied fails with `Busy`.
-
-## Method errors
-
-| Kind | Meaning |
-| --- | --- |
-| `InvalidProtocol` | Request order or EOF violated the state machine. |
-| `InvalidText` | A fixed text field was not canonical NUL-terminated UTF-8. |
-| `SourceLimitExceeded` | Complete source exceeded the configured byte limit. |
-| `InputLimitExceeded` | One logical input message exceeded its byte limit. |
-| `VmCreate` | The VM crate failed while creating Lua. |
-| `VmConfigure` | VM configuration or execution IO setup failed. |
-| `LuaLoad` | Lua could not load the source chunk. |
-| `LuaRuntime` | Lua or a native binding failed while executing. |
-| `UnexpectedYield` | Lua yielded outside the wrapper's async protocol. |
-| `OutputEncoding` | Printed text could not be represented by the frame format. |
-| `RuntimeUnavailable` | The VM Plugin's Embassy runtime has not started. |
-| `Busy` | All four VM execution task slots are occupied. |
-| `LuaMemory` | The execution exhausted its fixed Lua allocator slot. |
-
-Diagnostics are bounded and may be UTF-8-truncated. Callers must branch on
-`RunErrorKind`, not diagnostic text.
+Malformed JSON and request shapes are Event Router `RpcError`s. The stable
+rejections above are business response documents. Lua load/runtime/memory
+failures occur after acceptance and therefore appear only in `vm.finished`.
