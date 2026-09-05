@@ -1,10 +1,11 @@
 //! Link classification for Workflow steps.
 //!
-//! The link between two adjacent RPC steps is implicit in the step JSON and is
-//! never named in the document:
+//! The link feeding each executed RPC is implicit in the step JSON and is never
+//! named in the document:
 //!
-//! - no `arguments` → [`LinkKind::Direct`]: the first step receives the Event
-//!   input unchanged; later steps receive the previous JSON response unchanged.
+//! - no `arguments` → [`LinkKind::Direct`]: the first executed RPC receives the
+//!   Event input unchanged; later RPCs receive the most recently executed RPC's
+//!   JSON response unchanged.
 //! - `arguments` with at least one `$` reference → [`LinkKind::Mapping`]: the
 //!   next request is built from the literal arguments, then each referenced
 //!   JSON value is copied out of the selected Event input or previous response.
@@ -27,7 +28,7 @@ use serde_json::{Map, Value};
 pub(crate) enum SourceSelector {
     /// The original Event JSON that triggered the Workflow.
     EventInput,
-    /// The preceding RPC step's response JSON.
+    /// The most recently executed RPC step's response JSON.
     PreviousOutput,
 }
 
@@ -36,7 +37,7 @@ pub(crate) enum SourceSelector {
 pub(crate) struct FieldRef {
     /// Request field the value is written into (the arguments key).
     pub(crate) dest_field: String,
-    /// Event input or previous step output selected by the reference.
+    /// Event input or most recently executed step output selected by the reference.
     pub(crate) selector: SourceSelector,
     /// Top-level JSON field read from the selected source.
     pub(crate) source_field: String,
@@ -126,7 +127,7 @@ pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError>
 }
 
 /// Parses a source selector and returns it with its top-level field name.
-fn parse_reference(body: &str) -> Result<(SourceSelector, String), LinkError> {
+pub(crate) fn parse_reference(body: &str) -> Result<(SourceSelector, String), LinkError> {
     if body.is_empty() {
         return Err(LinkError::EmptyReference);
     }
