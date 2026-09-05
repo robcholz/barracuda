@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "boards/api",
     "boards/config",
-    "boards/drivers/indicator-led",
+    "drivers/indicator-led",
     "boards/tool",
     "boards/stm32f429zi-nucleo",
     "bench/crates/*",
@@ -81,7 +81,7 @@ barracuda-board-selected = { path = "boards/selected" }
 barracuda-event-router = { path = "core/event-router" }
 barracuda-imessage-bridge-component = { path = "plugins/imessage-bridge/crates/component" }
 barracuda-imessage-gateway-component = { path = "plugins/imessage-gateway/crates/component" }
-barracuda-indicator-led = { path = "boards/drivers/indicator-led" }
+barracuda-indicator-led = { path = "drivers/indicator-led" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-lua = { path = "plugins/vm/crates/lua" }
 barracuda-model-api = { path = "plugins/agent/crates/model-api" }
