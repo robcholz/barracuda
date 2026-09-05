@@ -1,105 +1,60 @@
 #![allow(missing_docs)]
-#![allow(clippy::expect_used)]
 
-use barracuda_event_router::{Event, RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Unary};
-use barracuda_scheduler_component::cancel::{
-    Cancel, CancelRequest, CancelResponse, cancel_handler,
+use barracuda_event_router::{Event, JsonRpcSchema};
+use barracuda_scheduler_component::{
+    cancel::Cancel, event::SchedulerTriggered, schedule::Schedule,
 };
-use barracuda_scheduler_component::event::{SchedulerTriggered, Triggered};
-use barracuda_scheduler_component::schedule::{
-    Schedule, ScheduleError, ScheduleRequest, ScheduleResponse, Trigger, TriggerAt,
-    schedule_handler,
-};
-use serde_json::json;
-
-fn assert_method<M, Request, Response, Error, Input, Output>()
-where
-    M: RpcMethod<
-            Request = Request,
-            Response = Response,
-            Error = Error,
-            Input = Input,
-            Output = Output,
-        >,
-    Request: RpcMessage,
-    Response: RpcMessage,
-    Error: RpcMessage,
-    Input: RpcInputMode<Request>,
-    Output: RpcOutputMode<Response, Error>,
-{
-}
 
 #[test]
-fn scheduler_exposes_two_dynamic_unary_rpcs() {
-    let _ = schedule_handler;
-    let _ = cancel_handler;
+fn scheduler_exposes_two_bounded_json_rpcs() {
     assert_eq!(Schedule::ADDRESS, "scheduler.schedule");
+    assert_eq!(Schedule::MAX_REQUEST_BYTES, 512);
+    assert_eq!(Schedule::MAX_RESPONSE_BYTES, 32);
     assert_eq!(Cancel::ADDRESS, "scheduler.cancel");
-    assert_method::<Schedule, ScheduleRequest, ScheduleResponse, ScheduleError, Unary, Unary>();
-    assert_method::<Cancel, CancelRequest, CancelResponse, ScheduleError, Unary, Unary>();
-    assert!(Schedule::dynamic().is_some());
-    assert!(Cancel::dynamic().is_some());
+    assert_eq!(Cancel::MAX_REQUEST_BYTES, 512);
+    assert_eq!(Cancel::MAX_RESPONSE_BYTES, 64);
 }
 
 #[test]
-fn trigger_json_uses_at_for_once_and_interval() {
-    let at = TriggerAt::new(2027, 1, 15, 8, 30, 0);
-    let once = serde_json::to_value(Trigger::once(at)).expect("serialize once trigger");
-    assert_eq!(
-        once,
-        json!({
-            "type":"once",
-            "at":{
-                "year":2027,
-                "month":1,
-                "day":15,
-                "hour":8,
-                "minute":30,
-                "second":0
-            }
-        })
-    );
+fn schedule_schema_describes_public_json_contract() {
+    let request = Schedule::REQUEST_SCHEMA.as_str();
+    assert!(request.contains(r#""id""#));
+    assert!(request.contains(r#""trigger""#));
+    assert!(request.contains(r#""once""#));
+    assert!(request.contains(r#""interval""#));
+    assert!(request.contains(r#""every_seconds""#));
+    assert!(request.contains(r#""type": "string""#));
+    assert!(request.contains(r#""RFC3339 UTC timestamp matching time.now.utc.""#));
+    assert!(!request.contains(r#""year""#));
 
-    let expected_interval = Trigger::interval(at, 3_600, 3);
-    let interval = serde_json::to_value(expected_interval).expect("serialize interval trigger");
-    assert_eq!(
-        interval,
-        json!({
-            "type":"interval",
-            "at":{
-                "year":2027,
-                "month":1,
-                "day":15,
-                "hour":8,
-                "minute":30,
-                "second":0
-            },
-            "every_seconds":3_600,
-            "count":3
-        })
-    );
-    let decoded =
-        serde_json::from_value::<Trigger>(interval).expect("deserialize interval trigger");
-    assert_eq!(decoded, expected_interval);
-
-    assert!(
-        serde_json::from_value::<Trigger>(json!({
-            "type":"once",
-            "starts_at":{
-                "year":2027,
-                "month":1,
-                "day":15,
-                "hour":8,
-                "minute":30,
-                "second":0
-            }
-        }))
-        .is_err()
-    );
+    let response = Schedule::RESPONSE_SCHEMA.as_str();
+    assert!(response.contains(r#""duplicate_id""#));
+    assert!(response.contains(r#""time_unavailable""#));
+    assert!(response.contains(r#""trigger_in_past""#));
+    assert!(response.contains(r#""storage_unavailable""#));
 }
 
 #[test]
-fn trigger_event_is_fixed_layout_and_unary() {
+fn cancel_schema_describes_success_and_not_found() {
+    let request = Cancel::REQUEST_SCHEMA.as_str();
+    assert!(request.contains(r#""maxLength": 16"#));
+
+    let response = Cancel::RESPONSE_SCHEMA.as_str();
+    assert!(response.contains(r#""completed_runs""#));
+    assert!(response.contains(r#""not_found""#));
+}
+
+#[test]
+fn schedule_ids_are_direct_bounded_ascii() {
+    let schedule = Schedule::REQUEST_SCHEMA.as_str();
+    let cancel = Cancel::REQUEST_SCHEMA.as_str();
+    for schema in [schedule, cancel] {
+        assert!(schema.contains(r#""maxLength": 16"#));
+        assert!(schema.contains(r#""pattern": "^[A-Za-z0-9_.-]+$""#));
+    }
+}
+
+#[test]
+fn scheduler_triggered_is_a_json_event_identity() {
     assert_eq!(SchedulerTriggered::ID, "scheduler.triggered");
-    assert_eq!(core::mem::size_of::<Triggered>(), 40);
 }

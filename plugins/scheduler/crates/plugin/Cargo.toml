@@ -9,7 +9,8 @@ license = "Apache-2.0"
 barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
 barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
 barracuda-scheduler-component = { path = "../component" }
-barracuda-time-plugin = { path = "../../../time/crates/plugin" }
+barracuda-time-component = { path = "../../../time/crates/component" }
+embassy-futures.workspace = true
 
 [dev-dependencies]
 barracuda-event-router = { path = "../../../../core/event-router" }
@@ -17,6 +18,7 @@ barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
+barracuda-time-plugin = { path = "../../../time/crates/plugin" }
 
 [lints.rust]
 unsafe_code = "forbid"

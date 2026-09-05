@@ -1,117 +1,100 @@
-# Scheduler RPC API
+# Scheduler JSON RPC API
 
-The Scheduler Component stores bounded in-memory schedules. Its public mutation
-RPCs are runtime-dynamic. `scheduler.schedule` itself makes a nested typed call
-to `time.now` to validate the requested trigger against the authoritative RTC;
-callers never provide the current time or a Unix timestamp. Schedules are not
-persisted across Component or process restart.
+Both Scheduler operations are unary JSON RPCs with visibility `"*"`. Their
+schemas are included directly from `plugins/scheduler/schemas/rpc`; there is no
+native RPC endpoint, fixed-layout wire DTO, or schema-baking step.
 
-Schedule IDs contain 1–16 ASCII letters, digits, `_`, `-`, or `.`. The
-Scheduler uses the ID unchanged as the Topic of each `scheduler.triggered`
-Event. Its established RPC storage slot remains fixed at 32 bytes, preserving
-the existing wire layout.
+The request is deserialized as a borrowed view of the RPC lane. Accepted IDs
+are copied into fixed 16-byte storage, responses are written directly into the
+lane, and each successful mutation atomically replaces or deletes only that
+schedule's 32-byte KV value. The collection has no fixed schedule count.
+
+Schedule IDs contain 1–16 ASCII letters, digits, `_`, `-`, or `.`. The ID is
+also the Topic of each resulting `scheduler.triggered` Event.
 
 ## `scheduler.schedule`
 
-- Address: `scheduler.schedule`
-- Dynamic JSON: yes
-- Request: unary `ScheduleRequest`
-- Response: unary `ScheduleResponse`
-- Method error: `ScheduleError`
+- Visibility: `"*"`
+- Maximum request: 512 bytes
+- Maximum response: 32 bytes
+- Request schema: `schemas/rpc/schedule/request.json`
+- Response schema: `schemas/rpc/schedule/response.json`
 
-Request fields:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | `ScheduleId` string | Stable caller-selected identity. |
-| `trigger` | `Trigger` | One-time or fixed-interval trigger rule. |
-
-`Trigger` is tagged by `type`:
-
-- `once`: contains only `at`, the absolute UTC calendar time to trigger.
-- `interval`: contains `at`, `every_seconds`, and `count`. `at` is the first
-  trigger time and `count` is the total number of triggers including the first.
-
-Both variants deliberately use the field name `at`; `starts_at` is not accepted.
-
-Response fields:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | `ScheduleId` string | Accepted identity. |
-
-Method errors:
-
-| Variant | Meaning |
-| --- | --- |
-| `InvalidSchedule` | The `at` calendar fields or trigger-rule fields are invalid. |
-| `DuplicateId` | A live schedule already owns `id`. |
-| `CapacityExceeded` | The configured live-schedule capacity is full. |
-| `NotFound` | Reserved for mutation operations requiring an existing schedule. |
-| `TimeUnavailable` | The internal typed `time.now` call failed or returned invalid UTC fields. |
-| `TriggerInPast` | The requested `at` is earlier than the current RTC value. |
-
-One-time example:
+The request contains a caller-selected `id` and a `trigger`. `at` uses the same
+24-byte RFC3339 UTC representation returned by `time.now.utc`, including exactly
+three fractional digits and the trailing `Z`. Scheduler evaluates deadlines at
+whole-second precision; the fractional digits do not create subsecond timing:
 
 ```json
 {
   "id": "meeting",
   "trigger": {
     "type": "once",
-    "at": {
-      "year": 2027,
-      "month": 1,
-      "day": 15,
-      "hour": 8,
-      "minute": 30,
-      "second": 0
-    }
+    "at": "2027-01-15T08:30:00.000Z"
   }
 }
 ```
 
-Interval example:
+An interval trigger adds `every_seconds` and `count`. `count` includes the
+first occurrence and both values must be non-zero.
 
 ```json
 {
   "id": "drink-water",
   "trigger": {
     "type": "interval",
-    "at": {
-      "year": 2027,
-      "month": 1,
-      "day": 15,
-      "hour": 8,
-      "minute": 30,
-      "second": 0
-    },
+    "at": "2027-01-15T08:30:00.000Z",
     "every_seconds": 3600,
     "count": 3
   }
 }
 ```
 
+Success returns the accepted identity:
+
+```json
+{"id":"drink-water"}
+```
+
+Business failures are response documents:
+
+| Error | Meaning |
+| --- | --- |
+| `invalid_schedule` | The ID, UTC timestamp, or trigger rule is invalid. |
+| `duplicate_id` | A live schedule already owns the requested ID. |
+| `time_unavailable` | The `UtcClock` capability is unsynchronized, stale, or out of range. |
+| `trigger_in_past` | `at` is earlier than the current UTC clock value. |
+| `storage_unavailable` | The affected schedule KV value could not be committed. |
+
+For example: `{"error":"duplicate_id"}`.
+
 ## `scheduler.cancel`
 
-- Address: `scheduler.cancel`
-- Dynamic JSON: yes
-- Request: unary `CancelRequest`
-- Response: unary `CancelResponse`
-- Method error: `ScheduleError`
+- Visibility: `"*"`
+- Maximum request: 512 bytes
+- Maximum response: 64 bytes
+- Request schema: `schemas/rpc/cancel/request.json`
+- Response schema: `schemas/rpc/cancel/response.json`
 
-Request fields:
+Request:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | `ScheduleId` string | Live schedule to remove. |
+```json
+{"id":"drink-water"}
+```
 
-Response fields:
+Success returns the cancelled identity and the number of Events accepted
+before cancellation:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `id` | `ScheduleId` string | Cancelled identity. |
-| `completed_runs` | `u64` | Events committed before cancellation. |
+```json
+{"id":"drink-water","completed_runs":1}
+```
 
-`NotFound` is returned when no live schedule owns `id`. If cancellation races
-with Event emission, an Event already accepted by Event Router cannot be
-recalled; cancellation prevents later occurrences.
+`{"error":"not_found"}` means no live schedule owns the ID.
+`{"error":"invalid_schedule"}` means the supplied ID violates the Scheduler
+ID rules. An Event already accepted by Event Router cannot be recalled;
+cancellation prevents subsequent occurrences.
+`{"error":"storage_unavailable"}` means cancellation was rolled back because
+its schedule key could not be deleted.
+
+Invalid JSON and documents with the wrong request shape are transport errors
+reported as `RpcError::InvalidJson`, not business response documents.

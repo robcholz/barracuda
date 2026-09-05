@@ -5,10 +5,10 @@
 extern crate alloc;
 
 use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
+use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
+use barracuda_time_component::UtcClock;
 
-const SCHEDULE_CAPACITY: usize = 16;
 const MAX_RECHECK_MILLIS: u64 = 1_000;
 
 /// Plugin that owns the RTC-authoritative Scheduler Component.
@@ -31,12 +31,14 @@ impl<const M: usize> Plugin<M> for SchedulerPlugin {
     where
         Storage: barracuda_plugin_manager::PluginStorage,
     {
-        context
-            .event_router
-            .load(SchedulerComponent::new(SchedulerConfig::new(
-                SCHEDULE_CAPACITY,
-                MAX_RECHECK_MILLIS,
-            )))?;
+        let clock = context.require::<UtcClock>("time")?;
+        let component = embassy_futures::block_on(SchedulerComponent::load(
+            SchedulerConfig::new(MAX_RECHECK_MILLIS),
+            clock,
+            context.storage().clone(),
+        ))
+        .map_err(PluginError::registration)?;
+        context.event_router.load(component)?;
         Ok(())
     }
 }

@@ -1,0 +1,33 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16,
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "invalid_schedule",
+            "duplicate_id",
+            "time_unavailable",
+            "trigger_in_past",
+            "storage_unavailable"
+          ]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}
