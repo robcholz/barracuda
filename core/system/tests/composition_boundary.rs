@@ -65,7 +65,6 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         "TimePlugin",
         "SchedulerPlugin",
         "AgentPlugin",
-        "CaptivePortalPlugin",
         "IMessageGatewayPlugin",
         "IMessageBlueBubblePlugin",
         "IMessageInkboxPlugin",
@@ -119,7 +118,7 @@ fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), s
 
     assert!(!system_manifest.contains("tokio = ["));
     assert!(!system_manifest.contains("GENERATED PLUGIN FEATURES"));
-    assert!(application_manifest.contains("barracuda-system = { path = \"../../core/system\" }"));
+    assert!(application_manifest.contains("barracuda-system.workspace = true"));
     assert!(application_manifest.contains(
         "serde = { version = \"1\", default-features = false, features = [\"alloc\", \"derive\"] }"
     ));

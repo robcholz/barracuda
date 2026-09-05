@@ -13,8 +13,8 @@ crate-type = ["rlib"]
 cache_profile = []
 
 [dependencies]
-barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
-http-client = { path = "../../../../shared/http-client" }
+barracuda-runtime-utils.workspace = true
+http-client.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 embedded-nal-async = "0.9"
@@ -35,7 +35,7 @@ strum = { version = "0.28", default-features = false, features = ["derive"] }
 tracing = { version = "0.1", default-features = false }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test.workspace = true
 embedded-io = "0.7"
 serde_json = "1"
 # Ergonomic error handling for host-target doc-tests and the chat example.
@@ -44,7 +44,7 @@ anyhow = "1"
 futures-lite = "2"
 tempdir = "0.3"
 # Capturing subscriber used by the attempt/retry trace contract tests.
-barracuda-agent-trace = { path = "../trace" }
+barracuda-agent-trace.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

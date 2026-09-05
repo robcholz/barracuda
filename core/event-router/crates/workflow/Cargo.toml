@@ -9,7 +9,7 @@ description = "Event ingress and Workflow runtime for Barracuda"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-rpc = { path = "../rpc" }
+barracuda-rpc.workspace = true
 getset = "0.1.7"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }

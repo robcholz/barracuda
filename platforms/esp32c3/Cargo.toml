@@ -5,12 +5,12 @@ edition = "2021"
 description = "ESP32-C3 Platform implementation for Barracuda"
 
 [dependencies]
-barracuda-board = { path = "../../boards/api" }
-barracuda-platform = { path = "../api" }
+barracuda-board.workspace = true
+barracuda-platform.workspace = true
 log.workspace = true
 
 [target.'cfg(target_arch = "riscv32")'.dependencies]
-barracuda-tls = { path = "../../shared/tls" }
+barracuda-tls.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.6.0"
 embassy-net.workspace = true
@@ -20,7 +20,7 @@ esp-println = { version = "0.18.0", default-features = false, features = ["esp32
 esp-storage = { version = "0.10.0", default-features = false, features = ["esp32c3", "embedded-storage"] }
 
 [build-dependencies]
-barracuda-board-config = { path = "../../boards/config" }
+barracuda-board-config.workspace = true
 esp-idf-part = "0.6.0"
 
 [lints.rust]

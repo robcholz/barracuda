@@ -15,7 +15,7 @@ thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../platforms/test" }
+barracuda-platform-test.workspace = true
 embassy-sync.workspace = true
 futures-lite = "2"
 

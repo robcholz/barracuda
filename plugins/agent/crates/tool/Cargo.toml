@@ -14,20 +14,20 @@ build-support = ["dep:anyhow"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
-barracuda-agent-permission = { path = "../permission" }
-barracuda-agent-persistence = { path = "../persistence" }
+barracuda-agent-permission.workspace = true
+barracuda-agent-persistence.workspace = true
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 getset = "0.1.7"
-json-validator = { path = "../../../../shared/json-validator" }
+json-validator.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 tracing = { version = "0.1", default-features = false }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-platform-test.workspace = true
 anyhow = "1"
 futures-lite = "2"
 

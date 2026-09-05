@@ -9,9 +9,9 @@ default = []
 testing = ["embassy-executor/arch-std", "embassy-executor/executor-thread"]
 
 [dependencies]
-barracuda-board = { path = "../../boards/api" }
-barracuda-platform = { path = "../api" }
-barracuda-tls = { path = "../../shared/tls", features = ["pem", "std"] }
+barracuda-board.workspace = true
+barracuda-platform.workspace = true
+barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
 embassy-executor.workspace = true
@@ -34,7 +34,7 @@ tempfile = "3"
 tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread"] }
 
 [build-dependencies]
-barracuda-board-config = { path = "../../boards/config" }
+barracuda-board-config.workspace = true
 serde = { version = "1", features = ["derive"] }
 yaml-peg = { version = "1.0.8", features = ["serde"] }
 

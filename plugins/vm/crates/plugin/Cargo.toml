@@ -5,17 +5,17 @@ edition = "2021"
 description = "Barracuda Plugin that owns the Lua VM Component"
 
 [dependencies]
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-barracuda-vm-builtin-packages = { path = "../builtin-packages" }
-barracuda-vm-component = { path = "../component", features = ["vendored"] }
-barracuda-vm-package-api = { path = "../package-api" }
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+barracuda-vm-builtin-packages.workspace = true
+barracuda-vm-component = { workspace = true, features = ["vendored"] }
+barracuda-vm-package-api.workspace = true
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-lua = { path = "../lua", features = ["vendored"] }
-barracuda-platform-test = { path = "../../../../platforms/test" }
-barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-lua = { workspace = true, features = ["vendored"] }
+barracuda-platform-test.workspace = true
+barracuda-event-router.workspace = true
 critical-section = { version = "1", features = ["std"] }
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

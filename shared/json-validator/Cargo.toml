@@ -9,7 +9,7 @@ description = "Static no_std JSON Schema subset validator"
 crate-type = ["rlib"]
 
 [dependencies]
-json-validator-macros = { path = "../json-validator-macros" }
+json-validator-macros.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 

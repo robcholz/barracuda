@@ -9,7 +9,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 bare-vfs = { version = "0.3", default-features = false }
-barracuda-vfs = { path = "../vfs" }
+barracuda-vfs.workspace = true
 embedded-io-async = "0.7"
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
 
