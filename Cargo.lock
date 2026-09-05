@@ -862,6 +862,7 @@ dependencies = [
  "barracuda-plugin-manager",
  "barracuda-webserver-plugin",
  "gateway",
+ "log",
  "web",
 ]
 
@@ -6325,6 +6326,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "gateway",
+ "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",

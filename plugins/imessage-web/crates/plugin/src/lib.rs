@@ -84,6 +84,9 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
         let web_registration = webserver
             .serve("/", bridge)
             .map_err(PluginError::registration)?;
+        log::info!(
+            "registered IMessage Web channel `{WEB_CHANNEL}` for conversation `{WEB_CONVERSATION}` at WebSocket route `/`"
+        );
 
         context.retain(channel_registration);
         context.retain(web_registration);
