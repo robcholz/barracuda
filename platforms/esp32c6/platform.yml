@@ -1,3 +1,16 @@
 name: esp32c6
+package: barracuda-platform-esp32c6
 crate: barracuda_platform_esp32c6
 type: Esp32c6Platform
+selection:
+  board-chips:
+    - esp32c6
+  targets:
+    - triple: riscv32imac-unknown-none-elf
+system-image:
+  layout:
+    driver: esp-idf-partitions
+  flash:
+    driver: command
+    program: espflash
+    arguments: [write-bin, --chip, "{chip}", "{offset}", "{image}"]

@@ -69,22 +69,24 @@ Board selection is a persistent workspace action, separate from compilation:
 
 ```bash
 cargo board select
-cargo build
+cargo run
 ```
 
 The first command opens a colored Board list. Use the arrow keys to move, type
 to fuzzy-search, and press Enter to select. It validates the Board bundle and
 records the selection in ignored local state at
-`.barracuda/selected-board`. The second command is the ordinary Cargo build;
-no `BARRACUDA_BOARD` environment variable or custom build wrapper is required.
-The Rust target independently selects the Platform, and compilation rejects an
-incompatible Board/Platform pair.
+`.barracuda/selected-board`. Ordinary `cargo run` starts the Board-selected
+build driver. It discovers the Platform from `platforms/*/platform.yml`,
+creates an ignored build workspace below `target/`, injects stable aliases for
+the selected Platform and optional Board HAL, and then runs `barracuda`.
+Use `cargo barracuda build` to compile the selected target without running it.
+Neither command accepts a Board or Platform argument.
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
 
 ```bash
-BARRACUDA_LOG_LEVEL=debug cargo build
+BARRACUDA_LOG_LEVEL=debug cargo run
 ```
 
 The selected level is validated and baked into the Platform binary; it is not
@@ -92,9 +94,9 @@ read from the environment at runtime.
 
 Automation can bypass the prompt with `cargo board select <board-name>`.
 
-Available Board names are the directory names under `boards/configs/`.
-Cross-compilation continues to use Cargo's normal `--target` and `-p`
-arguments; selecting a Board does not rewrite Cargo's target configuration.
+Available Board names are the directory names under `boards/configs/`. A
+device Board's `toolchain.target` is passed to the generated Cargo build; host
+Boards omit it.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:

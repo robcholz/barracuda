@@ -1,18 +1,16 @@
 [package]
-name = "barracuda-platform-selected"
+name = "barracuda-build"
 version = "0.1.0"
 edition = "2021"
-description = "Compile-time selected Barracuda Platform"
-
-[lib]
-crate-type = ["rlib"]
+description = "Board-selected Barracuda build driver"
 
 [dependencies]
-barracuda-platform.workspace = true
-embassy-executor.workspace = true
-
-[build-dependencies]
+barracuda-board-config.workspace = true
 barracuda-platform-config.workspace = true
+toml_edit = "0.25"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints.rust]
 unsafe_code = "forbid"

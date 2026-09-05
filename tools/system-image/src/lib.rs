@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::path::{Component, Path, PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board};
-use barracuda_platform_config::resolve_board_platform;
+use barracuda_platform_config::{resolve_board_platform, FlashDriver, LayoutDriver};
 use esp_idf_part::{Flags, PartitionTable};
 use generic_array::typenum::{U128, U8};
 use littlefs2::driver::Storage;
@@ -14,6 +14,7 @@ use littlefs2::fs::Filesystem;
 use littlefs2::path::PathBuf as LittlePathBuf;
 use serde::Deserialize;
 
+mod command;
 mod flash;
 
 use flash::{FlashRequest, PlatformFlash};
@@ -276,35 +277,49 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
     let layout_path = bundle.join(board.native_layout().artifact());
     let layout = read_text(&layout_path, "native layout")?;
     let chip = board.hardware().chip();
-    let platform =
-        resolve_board_platform(chip, board.toolchain().map(|toolchain| toolchain.target()))
-            .map_err(|error| error.to_string())?;
-    let (offset, size, platform_flash) = match platform.as_str() {
-        "macos" | "linux" => {
+    let platform = resolve_board_platform(
+        workspace,
+        chip,
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )
+    .map_err(|error| error.to_string())?;
+    let (offset, size, capacity) = match platform.system_image().layout() {
+        LayoutDriver::FileRegions => {
             let (offset, size, capacity) = file_layout_system_region(&layout)?;
-            (offset, size, PlatformFlash::File { platform, capacity })
+            (offset, size, Some(capacity))
         }
-        "esp32" | "esp32s2" | "esp32s3" | "esp32c3" | "esp32c6" | "esp32p4" => {
+        LayoutDriver::EspIdfPartitions => {
             let (offset, size) = esp_system_region(&layout)?;
-            (
-                offset,
-                size,
-                PlatformFlash::Esp {
-                    chip: chip.to_owned(),
-                },
-            )
+            (offset, size, None)
         }
-        "stm32" => {
+        LayoutDriver::LinkerMemory => {
             let (offset, size) = stm32_system_region(&layout)?;
-            (
-                offset,
-                size,
-                PlatformFlash::Stm32 {
-                    chip: chip.to_owned(),
-                },
-            )
+            (offset, size, None)
         }
-        platform => return Err(format!("Platform `{platform}` has no System image flasher")),
+        LayoutDriver::Command(driver) => {
+            command_system_region(workspace, platform.directory(), &layout_path, chip, driver)?
+        }
+    };
+    let platform_flash = match platform.system_image().flash() {
+        FlashDriver::File {
+            state_directory,
+            flash_image,
+        } => PlatformFlash::File {
+            state_directory: state_directory.clone(),
+            flash_image: flash_image.clone(),
+            capacity: capacity.ok_or_else(|| {
+                format!(
+                    "Platform `{}` uses file flash but its layout driver reports no capacity",
+                    platform.name()
+                )
+            })?,
+        },
+        FlashDriver::Command(driver) => PlatformFlash::Command {
+            platform_directory: platform.directory().to_path_buf(),
+            layout: layout_path,
+            chip: chip.to_owned(),
+            driver: driver.clone(),
+        },
     };
     Ok(SystemRegion {
         board: board_name,
@@ -312,6 +327,51 @@ pub fn selected_system_region(workspace: &Path) -> Result<SystemRegion, String> 
         size,
         platform_flash,
     })
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommandRegion {
+    offset: u64,
+    size: usize,
+    #[serde(default)]
+    capacity: Option<usize>,
+}
+
+fn command_system_region(
+    workspace: &Path,
+    platform: &Path,
+    layout: &Path,
+    chip: &str,
+    driver: &barracuda_platform_config::CommandDriver,
+) -> Result<(u64, usize, Option<usize>), String> {
+    let command = command::prepare(
+        driver,
+        command::DriverContext {
+            workspace,
+            platform,
+            layout,
+            chip,
+            image: None,
+            offset: None,
+            size: None,
+        },
+    );
+    let stdout = command::output(&command)?;
+    let yaml = std::str::from_utf8(&stdout)
+        .map_err(|error| format!("Platform layout command output is not UTF-8: {error}"))?;
+    let mut documents = yaml_peg::serde::from_str::<CommandRegion>(yaml)
+        .map_err(|error| format!("invalid Platform layout command output: {error}"))?;
+    if documents.len() != 1 {
+        return Err(format!(
+            "Platform layout command must return one YAML document, found {}",
+            documents.len()
+        ));
+    }
+    let region = documents
+        .pop()
+        .ok_or_else(|| String::from("Platform layout command returned an empty document"))?;
+    Ok((region.offset, region.size, region.capacity))
 }
 
 /// Builds one raw LittleFS image from all files below `source`.

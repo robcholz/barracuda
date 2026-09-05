@@ -23,6 +23,33 @@ fn parses_concrete_board_hardware_and_native_layout() {
 }
 
 #[test]
+fn parses_a_board_owned_hal_dependency_without_a_central_registry() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: acme123
+toolchain:
+  target: riscv64acme-unknown-none-elf
+native-layout:
+  artifact: memory.x
+board-hal:
+  package: barracuda-board-product-a
+  path: platforms/acme/boards/product-a
+  type: ProductAHal
+"#;
+
+    let board = parse(yaml).expect("Board HAL dependency");
+    let board_hal = board.board_hal().expect("declared Board HAL");
+
+    assert_eq!(board_hal.package(), "barracuda-board-product-a");
+    assert_eq!(
+        board_hal.path(),
+        Path::new("platforms/acme/boards/product-a")
+    );
+    assert_eq!(board_hal.type_name(), "ProductAHal");
+}
+
+#[test]
 fn parses_explicit_io_and_builtin_peripheral_declarations() {
     let yaml = r#"
 name: product-a

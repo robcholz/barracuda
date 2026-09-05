@@ -98,6 +98,10 @@ pub struct BoardDefinition {
     toolchain: Option<ToolchainDefinition>,
     #[serde(rename = "native-layout")]
     native_layout: NativeLayoutDefinition,
+    #[serde(default, rename = "board-hal")]
+    board_hal: Option<BoardHalDefinition>,
+    #[serde(default, rename = "platform-features")]
+    platform_features: Vec<String>,
     #[serde(default, rename = "exposed-io")]
     exposed_io: ExposedIoDefinition,
     #[serde(default, rename = "builtin-peripherals")]
@@ -133,6 +137,18 @@ impl BoardDefinition {
     #[must_use]
     pub const fn native_layout(&self) -> &NativeLayoutDefinition {
         &self.native_layout
+    }
+
+    /// Returns the concrete Board HAL crate selected by this Board, when needed.
+    #[must_use]
+    pub const fn board_hal(&self) -> Option<&BoardHalDefinition> {
+        self.board_hal.as_ref()
+    }
+
+    /// Returns Cargo features enabled on the selected Platform implementation.
+    #[must_use]
+    pub fn platform_features(&self) -> &[String] {
+        &self.platform_features
     }
 
     /// Returns the I/O capabilities explicitly exposed by this Board.
@@ -180,6 +196,16 @@ impl BoardDefinition {
         {
             return Err(ConfigError::InvalidNativeLayoutArtifact);
         }
+        if let Some(board_hal) = &self.board_hal {
+            board_hal.validate()?;
+        }
+        if self
+            .platform_features
+            .iter()
+            .any(|feature| feature.trim().is_empty())
+        {
+            return Err(ConfigError::InvalidPlatformFeature);
+        }
         self.exposed_io.validate()?;
         for (name, peripheral) in &self.builtin_peripherals {
             validate_resource_name("builtin-peripherals", name)?;
@@ -194,6 +220,63 @@ impl BoardDefinition {
         }
         Ok(())
     }
+}
+
+/// Cargo dependency and exported type implementing one Board's HAL matrix.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BoardHalDefinition {
+    package: String,
+    path: PathBuf,
+    #[serde(rename = "type")]
+    type_name: String,
+}
+
+impl BoardHalDefinition {
+    /// Returns the Board HAL Cargo package name.
+    #[must_use]
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+
+    /// Returns the Board HAL crate path relative to the workspace.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the Board HAL type exported by the dependency alias.
+    #[must_use]
+    pub fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.package.trim().is_empty() {
+            return Err(ConfigError::InvalidBoardHalPackage);
+        }
+        if self.path.as_os_str().is_empty()
+            || self.path.is_absolute()
+            || self
+                .path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(ConfigError::InvalidBoardHalPath);
+        }
+        if !is_rust_identifier(&self.type_name) {
+            return Err(ConfigError::InvalidBoardHalType);
+        }
+        Ok(())
+    }
+}
+
+fn is_rust_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 /// I/O declarations that become visible outside built-in peripheral Drivers.
@@ -613,6 +696,18 @@ pub enum ConfigError {
     /// A native-layout artifact is absolute or escapes the Board bundle.
     #[error("Board native-layout artifact must remain inside its Board bundle")]
     InvalidNativeLayoutArtifact,
+    /// A Board HAL package name is empty.
+    #[error("Board board-hal package must not be empty")]
+    InvalidBoardHalPackage,
+    /// A Board HAL dependency path is absolute or escapes the workspace.
+    #[error("Board board-hal path must remain inside the workspace")]
+    InvalidBoardHalPath,
+    /// A Board HAL exported type is not a Rust identifier.
+    #[error("Board board-hal type must be a Rust identifier")]
+    InvalidBoardHalType,
+    /// A selected-Platform Cargo feature is empty.
+    #[error("Board platform-features entries must not be empty")]
+    InvalidPlatformFeature,
     /// A map contains an empty Board-level resource name.
     #[error("Board `{section}` resource name must not be empty")]
     EmptyHardwareResourceName {

@@ -1,6 +1,10 @@
-//! Shared host-side resolution of Barracuda Platform identities.
+//! Filesystem discovery and host-side resolution of Barracuda Platforms.
 
-use core::fmt;
+use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use serde::Deserialize;
 
 /// Cargo target properties used to select a concrete Platform.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,226 +22,547 @@ impl<'a> PlatformTarget<'a> {
     }
 }
 
-/// Failure while resolving a concrete Platform.
-#[derive(Debug, PartialEq, Eq)]
+/// A command-backed Platform operation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CommandDriver {
+    program: PathBuf,
+    #[serde(default)]
+    arguments: Vec<String>,
+}
+
+impl CommandDriver {
+    /// Returns the workspace-relative executable path or command name.
+    #[must_use]
+    pub fn program(&self) -> &Path {
+        &self.program
+    }
+
+    /// Returns the argument templates passed without a shell.
+    #[must_use]
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+}
+
+/// Platform-owned System image layout resolution.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "driver", rename_all = "kebab-case")]
+pub enum LayoutDriver {
+    /// Barracuda host file-region YAML.
+    FileRegions,
+    /// ESP-IDF partition CSV.
+    EspIdfPartitions,
+    /// Linker `MEMORY` region declarations.
+    LinkerMemory,
+    /// Platform-local command returning the standard layout response.
+    Command(CommandDriver),
+}
+
+/// Platform-owned System image flashing operation.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "driver", rename_all = "kebab-case")]
+pub enum FlashDriver {
+    /// Host file-backed flash configured in the Platform manifest.
+    File {
+        /// Workspace-relative directory containing the emulated flash.
+        #[serde(rename = "state-directory")]
+        state_directory: PathBuf,
+        /// Path below `state-directory` containing the emulated flash bytes.
+        #[serde(rename = "flash-image")]
+        flash_image: PathBuf,
+    },
+    /// Platform-local command using standard argument templates.
+    Command(CommandDriver),
+}
+
+/// System image behavior declared by one Platform.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SystemImageConfig {
+    layout: LayoutDriver,
+    flash: FlashDriver,
+}
+
+/// Platform-owned support binaries and optional application launcher.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationConfig {
+    #[serde(default, rename = "support-binaries")]
+    support_binaries: Vec<String>,
+    #[serde(default)]
+    launcher: Option<CommandDriver>,
+}
+
+impl ApplicationConfig {
+    /// Returns Platform package binaries built alongside the application.
+    #[must_use]
+    pub fn support_binaries(&self) -> &[String] {
+        &self.support_binaries
+    }
+
+    /// Returns the optional command used to launch the built application.
+    #[must_use]
+    pub const fn launcher(&self) -> Option<&CommandDriver> {
+        self.launcher.as_ref()
+    }
+}
+
+impl SystemImageConfig {
+    /// Returns the Platform's native System layout resolver.
+    #[must_use]
+    pub const fn layout(&self) -> &LayoutDriver {
+        &self.layout
+    }
+
+    /// Returns the Platform's System partition flasher.
+    #[must_use]
+    pub const fn flash(&self) -> &FlashDriver {
+        &self.flash
+    }
+}
+
+impl FlashDriver {
+    /// Returns file-backed flash paths when this is the built-in file driver.
+    #[must_use]
+    pub fn file_paths(&self) -> Option<(&Path, &Path)> {
+        match self {
+            Self::File {
+                state_directory,
+                flash_image,
+            } => Some((state_directory, flash_image)),
+            Self::Command(_) => None,
+        }
+    }
+}
+
+/// One self-described Platform discovered below `platforms/`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlatformDefinition {
+    name: String,
+    package: String,
+    crate_name: String,
+    type_name: String,
+    directory: PathBuf,
+    selection: SelectionConfig,
+    system_image: SystemImageConfig,
+    application: ApplicationConfig,
+}
+
+impl PlatformDefinition {
+    /// Returns the stable Platform name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the Platform Cargo package name.
+    #[must_use]
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+
+    /// Returns the Platform Rust crate identifier.
+    #[must_use]
+    pub fn crate_name(&self) -> &str {
+        &self.crate_name
+    }
+
+    /// Returns the concrete Platform type exported by its crate.
+    #[must_use]
+    pub fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    /// Returns the Platform bundle directory.
+    #[must_use]
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    /// Returns the Platform-owned System image behavior.
+    #[must_use]
+    pub const fn system_image(&self) -> &SystemImageConfig {
+        &self.system_image
+    }
+
+    /// Returns Platform-owned application build and launch behavior.
+    #[must_use]
+    pub const fn application(&self) -> &ApplicationConfig {
+        &self.application
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+struct SelectionConfig {
+    board_chips: Vec<String>,
+    targets: Vec<TargetSelector>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct TargetSelector {
+    #[serde(default)]
+    triple: Option<String>,
+    #[serde(default)]
+    os: Option<String>,
+    #[serde(default)]
+    arch: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PlatformDocument {
+    name: String,
+    package: String,
+    #[serde(rename = "crate")]
+    crate_name: String,
+    #[serde(rename = "type")]
+    type_name: String,
+    selection: SelectionConfig,
+    #[serde(rename = "system-image")]
+    system_image: SystemImageConfig,
+    #[serde(default)]
+    application: ApplicationConfig,
+}
+
+/// Failure while discovering or resolving a Platform.
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum ResolveError {
-    /// No registered Platform supports this Cargo target.
-    UnsupportedTarget {
-        /// Cargo target triple.
-        triple: String,
-        /// Cargo target operating system.
-        os: String,
-        /// Cargo target architecture.
-        arch: String,
+    /// The Platform catalog cannot be read.
+    Catalog {
+        /// Catalog directory that could not be read.
+        path: PathBuf,
+        /// Underlying filesystem failure.
+        source: std::io::Error,
     },
-    /// A requested Platform name is unsafe or malformed.
-    InvalidPlatformName(String),
-    /// The requested Platform cannot compile for the Cargo target.
-    IncompatibleTarget {
-        /// Requested Platform name.
-        platform: String,
-        /// Cargo target triple.
-        triple: String,
-        /// Cargo target operating system.
-        os: String,
-        /// Cargo target architecture.
-        arch: String,
+    /// A Platform manifest cannot be read.
+    ManifestRead {
+        /// Manifest path that could not be read.
+        path: PathBuf,
+        /// Underlying filesystem failure.
+        source: std::io::Error,
     },
-    /// No registered Platform supports this Board chip.
-    UnsupportedBoardChip(String),
-    /// The Board chip and its toolchain target select different Platforms.
-    IncompatibleBoardTarget {
-        /// Board chip identifier.
-        chip: String,
-        /// Platform registered for the Board chip.
-        chip_platform: String,
-        /// Board toolchain target.
-        target: String,
-        /// Platform registered for the toolchain target.
-        target_platform: String,
+    /// A Platform manifest is malformed.
+    ManifestInvalid {
+        /// Invalid manifest path.
+        path: PathBuf,
+        /// Validation or parser diagnostic.
+        message: String,
     },
-    /// A device Board does not declare the target needed to resolve its Platform.
-    MissingBoardTarget(String),
+    /// The Platform directory and manifest names differ.
+    NameMismatch {
+        /// Platform bundle directory name.
+        directory: String,
+        /// Name declared inside the manifest.
+        declared: String,
+    },
+    /// No Platform matches the requested Board or target.
+    NoMatch(String),
+    /// More than one Platform matches the requested Board or target.
+    Ambiguous {
+        /// Selection request that matched multiple Platforms.
+        request: String,
+        /// Matching Platform names.
+        platforms: Vec<String>,
+    },
+    /// A requested concrete Platform does not exist or is incompatible.
+    Requested(String),
 }
 
 impl fmt::Display for ResolveError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnsupportedTarget { triple, os, arch } => write!(
-                formatter,
-                "no Barracuda Platform is registered for target `{triple}` (OS `{os}`, architecture `{arch}`)"
-            ),
-            Self::InvalidPlatformName(name) => {
-                write!(formatter, "invalid Platform name `{name}`")
+            Self::Catalog { path, source } => {
+                write!(
+                    formatter,
+                    "failed to read Platform catalog `{}`: {source}",
+                    path.display()
+                )
             }
-            Self::IncompatibleTarget {
-                platform,
-                triple,
-                os,
-                arch,
+            Self::ManifestRead { path, source } => {
+                write!(
+                    formatter,
+                    "failed to read Platform manifest `{}`: {source}",
+                    path.display()
+                )
+            }
+            Self::ManifestInvalid { path, message } => {
+                write!(
+                    formatter,
+                    "invalid Platform manifest `{}`: {message}",
+                    path.display()
+                )
+            }
+            Self::NameMismatch {
+                directory,
+                declared,
             } => write!(
                 formatter,
-                "Platform `{platform}` cannot be built for target `{triple}` (OS `{os}`, architecture `{arch}`)"
+                "Platform directory `{directory}` declares Platform `{declared}`"
             ),
-            Self::UnsupportedBoardChip(chip) => {
-                write!(formatter, "no Barracuda Platform supports Board chip `{chip}`")
+            Self::NoMatch(request) => write!(formatter, "no Platform matches {request}"),
+            Self::Ambiguous { request, platforms } => write!(
+                formatter,
+                "multiple Platforms match {request}: {}",
+                platforms.join(", ")
+            ),
+            Self::Requested(name) => {
+                write!(
+                    formatter,
+                    "requested Platform `{name}` is missing or incompatible"
+                )
             }
-            Self::IncompatibleBoardTarget {
-                chip,
-                chip_platform,
-                target,
-                target_platform,
-            } => write!(
-                formatter,
-                "Board chip `{chip}` selects Platform `{chip_platform}`, but target `{target}` selects Platform `{target_platform}`"
-            ),
-            Self::MissingBoardTarget(chip) => write!(
-                formatter,
-                "Board chip `{chip}` requires a toolchain target to select its Platform"
-            ),
         }
     }
 }
 
-impl std::error::Error for ResolveError {}
+impl std::error::Error for ResolveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Catalog { source, .. } | Self::ManifestRead { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
 
-/// Resolves the concrete Platform for one Cargo target.
-///
-/// `requested` carries the optional existing `BARRACUDA_PLATFORM` override.
-/// The override is validated against the same target as the default.
+/// Discovers the Platform matching one Cargo target.
 ///
 /// # Errors
 ///
-/// Returns [`ResolveError`] when the target is unsupported, the override name
-/// is invalid, or the override is incompatible with the target.
+/// Returns [`ResolveError`] for an invalid catalog, no match, multiple matches,
+/// or an incompatible explicit request.
 pub fn resolve_platform(
+    workspace: &Path,
     target: PlatformTarget<'_>,
     requested: Option<&str>,
-) -> Result<String, ResolveError> {
-    let default = default_platform(target)?;
-    let platform = requested.unwrap_or(default);
-    validate_platform_name(platform)?;
-    if platform_supports_target(platform, target) {
-        Ok(platform.to_owned())
-    } else {
-        Err(ResolveError::IncompatibleTarget {
-            platform: platform.to_owned(),
-            triple: target.triple.to_owned(),
-            os: target.os.to_owned(),
-            arch: target.arch.to_owned(),
-        })
+) -> Result<PlatformDefinition, ResolveError> {
+    let platforms = discover_platforms(workspace)?;
+    if let Some(name) = requested {
+        return platforms
+            .into_iter()
+            .find(|platform| platform.name == name && matches_target(&platform.selection, target))
+            .ok_or_else(|| ResolveError::Requested(name.to_owned()));
     }
+    unique_match(
+        platforms
+            .into_iter()
+            .filter(|platform| matches_target(&platform.selection, target))
+            .collect(),
+        format!("Cargo target `{}`", target.triple),
+    )
 }
 
-/// Resolves a Platform from the selected Board's hardware and toolchain fields.
-///
-/// Host Boards (`macos` and `linux`) do not require an explicit toolchain.
-/// Device Boards must declare a target, and its Platform must agree with the
-/// Platform registered for the Board chip.
+/// Discovers the Platform matching a selected Board's chip and toolchain target.
 ///
 /// # Errors
 ///
-/// Returns [`ResolveError`] when the Board chip or target is unsupported, a
-/// device target is missing, or the two fields resolve to different Platforms.
+/// Returns [`ResolveError`] for an invalid catalog, no match, or multiple
+/// matching Platforms.
 pub fn resolve_board_platform(
+    workspace: &Path,
     chip: &str,
     toolchain_target: Option<&str>,
-) -> Result<String, ResolveError> {
-    let chip_platform = platform_for_chip(chip)?;
-    let Some(target) = toolchain_target else {
-        return if matches!(chip_platform, "macos" | "linux") {
-            Ok(chip_platform.to_owned())
-        } else {
-            Err(ResolveError::MissingBoardTarget(chip.to_owned()))
-        };
-    };
-    let target_platform =
-        platform_for_embedded_target(target).ok_or_else(|| ResolveError::UnsupportedTarget {
-            triple: target.to_owned(),
-            os: String::from("none"),
-            arch: embedded_arch(target).unwrap_or("unknown").to_owned(),
+) -> Result<PlatformDefinition, ResolveError> {
+    let platforms = discover_platforms(workspace)?;
+    unique_match(
+        platforms
+            .into_iter()
+            .filter(|platform| {
+                platform
+                    .selection
+                    .board_chips
+                    .iter()
+                    .any(|pattern| wildcard_matches(pattern, chip))
+                    && toolchain_target.is_none_or(|target| {
+                        platform.selection.targets.iter().any(|selector| {
+                            selector
+                                .triple
+                                .as_deref()
+                                .is_some_and(|pattern| wildcard_matches(pattern, target))
+                        })
+                    })
+            })
+            .collect(),
+        match toolchain_target {
+            Some(target) => format!("Board chip `{chip}` with target `{target}`"),
+            None => format!("Board chip `{chip}`"),
+        },
+    )
+}
+
+fn discover_platforms(workspace: &Path) -> Result<Vec<PlatformDefinition>, ResolveError> {
+    let catalog = workspace.join("platforms");
+    let entries = fs::read_dir(&catalog).map_err(|source| ResolveError::Catalog {
+        path: catalog.clone(),
+        source,
+    })?;
+    let mut manifests = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| ResolveError::Catalog {
+            path: catalog.clone(),
+            source,
         })?;
-    if chip_platform == target_platform {
-        Ok(chip_platform.to_owned())
+        if !entry
+            .file_type()
+            .map_err(|source| ResolveError::Catalog {
+                path: entry.path(),
+                source,
+            })?
+            .is_dir()
+        {
+            continue;
+        }
+        let manifest = entry.path().join("platform.yml");
+        if manifest.is_file() {
+            manifests.push(manifest);
+        }
+    }
+    manifests.sort();
+    manifests.into_iter().map(read_platform).collect()
+}
+
+fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
+    let yaml = fs::read_to_string(&path).map_err(|source| ResolveError::ManifestRead {
+        path: path.clone(),
+        source,
+    })?;
+    let mut documents = yaml_peg::serde::from_str::<PlatformDocument>(&yaml).map_err(|error| {
+        ResolveError::ManifestInvalid {
+            path: path.clone(),
+            message: error.to_string(),
+        }
+    })?;
+    if documents.len() != 1 {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: format!("expected one YAML document, found {}", documents.len()),
+        });
+    }
+    let document = documents
+        .pop()
+        .ok_or_else(|| ResolveError::ManifestInvalid {
+            path: path.clone(),
+            message: String::from("manifest is empty"),
+        })?;
+    let directory =
+        path.parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| ResolveError::ManifestInvalid {
+                path: path.clone(),
+                message: String::from("manifest has no parent directory"),
+            })?;
+    let directory_name = directory
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ResolveError::ManifestInvalid {
+            path: path.clone(),
+            message: String::from("Platform directory name is not UTF-8"),
+        })?;
+    if directory_name != document.name {
+        return Err(ResolveError::NameMismatch {
+            directory: directory_name.to_owned(),
+            declared: document.name,
+        });
+    }
+    validate_identifier(&document.crate_name, "crate", &path)?;
+    validate_identifier(&document.type_name, "type", &path)?;
+    if document.package.is_empty() || document.selection.board_chips.is_empty() {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: String::from("package and selection.board-chips must not be empty"),
+        });
+    }
+    Ok(PlatformDefinition {
+        name: document.name,
+        package: document.package,
+        crate_name: document.crate_name,
+        type_name: document.type_name,
+        directory,
+        selection: document.selection,
+        system_image: document.system_image,
+        application: document.application,
+    })
+}
+
+fn validate_identifier(value: &str, field: &str, path: &Path) -> Result<(), ResolveError> {
+    let mut bytes = value.bytes();
+    if bytes
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        Ok(())
     } else {
-        Err(ResolveError::IncompatibleBoardTarget {
-            chip: chip.to_owned(),
-            chip_platform: chip_platform.to_owned(),
-            target: target.to_owned(),
-            target_platform: target_platform.to_owned(),
+        Err(ResolveError::ManifestInvalid {
+            path: path.to_owned(),
+            message: format!("invalid Rust identifier in `{field}`: `{value}`"),
         })
     }
 }
 
-fn default_platform(target: PlatformTarget<'_>) -> Result<&'static str, ResolveError> {
-    match (target.os, target.arch) {
-        ("macos", _) => Ok("macos"),
-        ("linux", _) => Ok("linux"),
-        _ => platform_for_embedded_target(target.triple).ok_or_else(|| {
-            ResolveError::UnsupportedTarget {
-                triple: target.triple.to_owned(),
-                os: target.os.to_owned(),
-                arch: target.arch.to_owned(),
-            }
+fn matches_target(selection: &SelectionConfig, target: PlatformTarget<'_>) -> bool {
+    selection.targets.iter().any(|selector| {
+        let has_constraint =
+            selector.triple.is_some() || selector.os.is_some() || selector.arch.is_some();
+        has_constraint
+            && selector
+                .triple
+                .as_deref()
+                .is_none_or(|pattern| wildcard_matches(pattern, target.triple))
+            && selector
+                .os
+                .as_deref()
+                .is_none_or(|pattern| wildcard_matches(pattern, target.os))
+            && selector
+                .arch
+                .as_deref()
+                .is_none_or(|pattern| wildcard_matches(pattern, target.arch))
+    })
+}
+
+fn unique_match(
+    mut platforms: Vec<PlatformDefinition>,
+    request: String,
+) -> Result<PlatformDefinition, ResolveError> {
+    match platforms.len() {
+        0 => Err(ResolveError::NoMatch(request)),
+        1 => platforms.pop().ok_or(ResolveError::NoMatch(request)),
+        _ => Err(ResolveError::Ambiguous {
+            request,
+            platforms: platforms
+                .into_iter()
+                .map(|platform| platform.name)
+                .collect(),
         }),
     }
 }
 
-fn platform_supports_target(platform: &str, target: PlatformTarget<'_>) -> bool {
-    match platform {
-        "macos" => target.os == "macos",
-        "linux" => target.os == "linux",
-        platform => platform_for_embedded_target(target.triple) == Some(platform),
+fn wildcard_matches(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
     }
-}
-
-fn platform_for_embedded_target(target: &str) -> Option<&'static str> {
-    match target {
-        "xtensa-esp32-none-elf" => Some("esp32"),
-        "xtensa-esp32s2-none-elf" => Some("esp32s2"),
-        "xtensa-esp32s3-none-elf" => Some("esp32s3"),
-        "riscv32imc-unknown-none-elf" => Some("esp32c3"),
-        "riscv32imac-unknown-none-elf" => Some("esp32c6"),
-        "riscv32imafc-unknown-none-elf" => Some("esp32p4"),
-        target if target.starts_with("thumb") && target.ends_with("-none-eabi") => Some("stm32"),
-        target if target.starts_with("thumb") && target.ends_with("-none-eabihf") => Some("stm32"),
-        _ => None,
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return pattern == value;
     }
-}
-
-fn embedded_arch(target: &str) -> Option<&'static str> {
-    match target {
-        target if target.starts_with("xtensa-") => Some("xtensa"),
-        target if target.starts_with("riscv32") => Some("riscv32"),
-        target if target.starts_with("thumb") => Some("arm"),
-        _ => None,
+    let mut remaining = value;
+    for (index, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if index == 0 && !pattern.starts_with('*') {
+            let Some(tail) = remaining.strip_prefix(part) else {
+                return false;
+            };
+            remaining = tail;
+            continue;
+        }
+        let Some(position) = remaining.find(part) else {
+            return false;
+        };
+        remaining = &remaining[position + part.len()..];
     }
-}
-
-fn platform_for_chip(chip: &str) -> Result<&'static str, ResolveError> {
-    match chip {
-        "macos" => Ok("macos"),
-        "linux" => Ok("linux"),
-        "esp32" => Ok("esp32"),
-        "esp32s2" => Ok("esp32s2"),
-        "esp32s3" => Ok("esp32s3"),
-        "esp32c3" => Ok("esp32c3"),
-        "esp32c6" => Ok("esp32c6"),
-        "esp32p4" => Ok("esp32p4"),
-        chip if chip.starts_with("stm32") => Ok("stm32"),
-        _ => Err(ResolveError::UnsupportedBoardChip(chip.to_owned())),
-    }
-}
-
-fn validate_platform_name(value: &str) -> Result<(), ResolveError> {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-    {
-        Ok(())
-    } else {
-        Err(ResolveError::InvalidPlatformName(value.to_owned()))
-    }
+    pattern.ends_with('*') || remaining.is_empty()
 }

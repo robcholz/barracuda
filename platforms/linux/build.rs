@@ -6,7 +6,6 @@ use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct PlatformDocument {
     name: String,
     #[serde(rename = "crate")]

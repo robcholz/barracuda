@@ -1,82 +1,94 @@
-//! Shared Platform resolution behavior.
+//! Filesystem-discovered Platform resolution behavior.
 
 #![allow(clippy::expect_used)]
 
+use std::fs;
+use std::path::Path;
+
 use barracuda_platform_config::{resolve_board_platform, resolve_platform, PlatformTarget};
+use tempfile::tempdir;
 
-#[test]
-fn resolves_every_registered_cargo_target() {
-    let targets = [
-        ("aarch64-apple-darwin", "macos", "aarch64", "macos"),
-        ("x86_64-unknown-linux-gnu", "linux", "x86_64", "linux"),
-        ("xtensa-esp32-none-elf", "none", "xtensa", "esp32"),
-        ("xtensa-esp32s2-none-elf", "none", "xtensa", "esp32s2"),
-        ("xtensa-esp32s3-none-elf", "none", "xtensa", "esp32s3"),
-        ("riscv32imc-unknown-none-elf", "none", "riscv32", "esp32c3"),
-        ("riscv32imac-unknown-none-elf", "none", "riscv32", "esp32c6"),
-        (
-            "riscv32imafc-unknown-none-elf",
-            "none",
-            "riscv32",
-            "esp32p4",
+fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
+    let directory = root.join("platforms").join(name);
+    let crate_name = name.replace('-', "_");
+    fs::create_dir_all(&directory).expect("Platform directory");
+    fs::write(
+        directory.join("platform.yml"),
+        format!(
+            "name: {name}\npackage: barracuda-platform-{name}\ncrate: barracuda_platform_{crate_name}\ntype: AcmePlatform\nselection:\n  board-chips:\n    - '{chip}'\n  targets:\n    - triple: '{target}'\nsystem-image:\n  layout:\n    driver: command\n    program: tools/system-image\n    arguments: [describe, '{{layout}}']\n  flash:\n    driver: command\n    program: tools/system-image\n    arguments: [flash, '{{layout}}', '{{image}}']\napplication:\n  support-binaries: [acme-network]\n  launcher:\n    program: privilege-tool\n    arguments: ['{{support:acme-network}}', '{{application}}']\n"
         ),
-        ("thumbv7em-none-eabihf", "none", "arm", "stm32"),
-    ];
+    )
+    .expect("Platform manifest");
+}
 
-    for (triple, os, arch, expected) in targets {
-        let target = PlatformTarget::new(triple, os, arch);
-        assert_eq!(
-            resolve_platform(target, None).expect("registered target"),
-            expected
-        );
+#[test]
+fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(
+        root.path(),
+        "acme-rv",
+        "acme123*",
+        "riscv64acme-unknown-none-elf",
+    );
+
+    let board = resolve_board_platform(
+        root.path(),
+        "acme123-pro",
+        Some("riscv64acme-unknown-none-elf"),
+    )
+    .expect("Platform selected from Board");
+    let target = resolve_platform(
+        root.path(),
+        PlatformTarget::new("riscv64acme-unknown-none-elf", "none", "riscv64"),
+        None,
+    )
+    .expect("Platform selected from Cargo target");
+
+    assert_eq!(board.name(), "acme-rv");
+    assert_eq!(board.package(), "barracuda-platform-acme-rv");
+    assert_eq!(target.name(), board.name());
+    assert_eq!(board.directory(), root.path().join("platforms/acme-rv"));
+    assert_eq!(board.application().support_binaries(), ["acme-network"]);
+    assert_eq!(
+        board
+            .application()
+            .launcher()
+            .map(|launcher| launcher.program()),
+        Some(Path::new("privilege-tool"))
+    );
+}
+
+#[test]
+fn rejects_missing_ambiguous_and_incompatible_platforms() {
+    let root = tempdir().expect("temporary workspace");
+    add_platform(root.path(), "first", "chip-*", "target-one");
+    add_platform(root.path(), "second", "chip-*", "target-one");
+
+    let error = resolve_board_platform(root.path(), "missing", None)
+        .expect_err("missing Platform must fail");
+    assert!(error.to_string().contains("no Platform"));
+
+    let error = resolve_board_platform(root.path(), "chip-x", Some("target-one"))
+        .expect_err("ambiguous Platform must fail");
+    assert!(error.to_string().contains("multiple Platforms"));
+
+    let target = PlatformTarget::new("target-one", "none", "custom");
+    let error = resolve_platform(root.path(), target, Some("missing"))
+        .expect_err("unknown requested Platform must fail");
+    assert!(error.to_string().contains("missing"));
+}
+
+#[test]
+fn central_resolver_contains_no_concrete_platform_registry() -> Result<(), std::io::Error> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let resolver = fs::read_to_string(root.join("platforms/config/src/lib.rs"))?;
+    let selected = fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+
+    for concrete in [
+        "macos", "linux", "esp32", "esp32c3", "esp32c6", "esp32p4", "esp32s2", "esp32s3", "stm32",
+    ] {
+        assert!(!resolver.contains(&format!("\"{concrete}\"")));
+        assert!(!selected.contains(&format!("\"{concrete}\"")));
     }
-}
-
-#[test]
-fn resolves_platform_from_the_selected_board_definition() {
-    let boards = [
-        ("macos", None, "macos"),
-        ("linux", None, "linux"),
-        ("esp32", Some("xtensa-esp32-none-elf"), "esp32"),
-        ("esp32c6", Some("riscv32imac-unknown-none-elf"), "esp32c6"),
-        ("stm32f429zi", Some("thumbv7em-none-eabihf"), "stm32"),
-    ];
-
-    for (chip, target, expected) in boards {
-        assert_eq!(
-            resolve_board_platform(chip, target).expect("compatible Board"),
-            expected
-        );
-    }
-}
-
-#[test]
-fn rejects_board_target_and_platform_overrides_that_are_incompatible() {
-    let error = resolve_board_platform("esp32c6", Some("riscv32imafc-unknown-none-elf"))
-        .expect_err("Board target mismatch");
-    assert!(error.to_string().contains("esp32c6"));
-    assert!(error.to_string().contains("esp32p4"));
-
-    let target = PlatformTarget::new("riscv32imac-unknown-none-elf", "none", "riscv32");
-    let error = resolve_platform(target, Some("esp32p4")).expect_err("Platform override mismatch");
-    assert!(error.to_string().contains("cannot be built"));
-}
-
-#[test]
-fn rejects_unknown_targets_chips_and_platform_names() {
-    let target = PlatformTarget::new("wasm32-unknown-unknown", "unknown", "wasm32");
-    assert!(resolve_platform(target, None)
-        .expect_err("unsupported target")
-        .to_string()
-        .contains("no Barracuda Platform"));
-    assert!(resolve_board_platform("unknown-chip", None)
-        .expect_err("unsupported Board chip")
-        .to_string()
-        .contains("unknown-chip"));
-
-    let target = PlatformTarget::new("aarch64-apple-darwin", "macos", "aarch64");
-    assert!(resolve_platform(target, Some("../macos"))
-        .expect_err("unsafe Platform name")
-        .to_string()
-        .contains("invalid Platform name"));
+    Ok(())
 }

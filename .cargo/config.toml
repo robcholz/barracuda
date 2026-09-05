@@ -1,4 +1,5 @@
 [alias]
+barracuda = "run --quiet --package barracuda-build --"
 board = "run --quiet --package barracuda-board-tool --"
 plugin = "run --quiet --package barracuda-plugin-tool --"
 system-image = "run --quiet --package barracuda-system-image --"

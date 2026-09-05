@@ -310,7 +310,7 @@ fn select_board<W: Write>(
 
     write_selected_board(workspace_root, name)?;
     writeln!(output, "Selected Board `{name}`.").map_err(CommandError::Output)?;
-    writeln!(output, "Run `cargo build` to build it.").map_err(CommandError::Output)
+    writeln!(output, "Run `cargo run` to build and start it.").map_err(CommandError::Output)
 }
 
 #[cfg(test)]

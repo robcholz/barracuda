@@ -15,12 +15,13 @@ members = [
     "plugins/*/crates/*",
     "platforms/*",
     "shared/*",
+    "tools/barracuda-build",
     "tools/plugin-tool",
     "tools/system-image",
     "apps/barracuda-cli",
 ]
 default-members = [
-    "apps/barracuda-cli",
+    "tools/barracuda-build",
 ]
 
 [workspace.dependencies]
@@ -64,7 +65,6 @@ barracuda-board = { path = "boards/api" }
 barracuda-board-config = { path = "boards/config" }
 barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
-barracuda-board-stm32f429zi-nucleo = { path = "boards/stm32f429zi-nucleo" }
 barracuda-event-router = { path = "core/event-router" }
 barracuda-imessage-bridge-component = { path = "plugins/imessage-bridge/crates/component" }
 barracuda-imessage-gateway-component = { path = "plugins/imessage-gateway/crates/component" }
@@ -74,16 +74,7 @@ barracuda-lua = { path = "plugins/vm/crates/lua" }
 barracuda-model-api = { path = "plugins/agent/crates/model-api" }
 barracuda-platform = { path = "platforms/api" }
 barracuda-platform-config = { path = "platforms/config" }
-barracuda-platform-esp32 = { path = "platforms/esp32" }
-barracuda-platform-esp32c3 = { path = "platforms/esp32c3" }
-barracuda-platform-esp32c6 = { path = "platforms/esp32c6" }
-barracuda-platform-esp32p4 = { path = "platforms/esp32p4" }
-barracuda-platform-esp32s2 = { path = "platforms/esp32s2" }
-barracuda-platform-esp32s3 = { path = "platforms/esp32s3" }
-barracuda-platform-linux = { path = "platforms/linux" }
-barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-selected = { path = "platforms/selected" }
-barracuda-platform-stm32 = { path = "platforms/stm32" }
 barracuda-platform-test = { path = "platforms/test" }
 barracuda-plugin-api = { path = "core/plugin/crates/api" }
 barracuda-plugin-macros = { path = "core/plugin/crates/macros" }

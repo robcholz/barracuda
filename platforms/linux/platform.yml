@@ -1,6 +1,19 @@
 name: linux
+package: barracuda-platform-linux
 crate: barracuda_platform_linux
 type: LinuxPlatform
+selection:
+  board-chips:
+    - linux
+  targets:
+    - os: linux
+system-image:
+  layout:
+    driver: file-regions
+  flash:
+    driver: file
+    state-directory: .barracuda
+    flash-image: board.flash
 settings:
   state-directory: .barracuda
   flash-image: board.flash
