@@ -1,4 +1,4 @@
-//! Network-synchronized real-time clock exposed through a dynamic typed RPC.
+//! Network-synchronized UTC clock capability and JSON RPC.
 #![no_std]
 
 extern crate alloc;
@@ -11,6 +11,6 @@ pub mod now;
 pub mod sntp;
 
 pub use component::{
-    ClockState, SyncSample, TimeComponent, TimeConfig, TimeSource, TimeSourceError,
-    TimeSourceFuture, synchronize_clock,
+    ClockError, SyncSample, TimeComponent, TimeConfig, TimeSource, TimeSourceError,
+    TimeSourceFuture, UnixMillis, UtcClock, UtcClockUpdater, synchronize_clock, utc_clock,
 };

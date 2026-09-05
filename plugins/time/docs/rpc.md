@@ -1,41 +1,52 @@
-# Time RPC API
+# Time JSON RPC API
 
-The Time Component owns a network-synchronized real-time clock. It establishes
-UTC from SNTP at startup, periodically resynchronizes, and uses the local
-monotonic clock only to interpolate between accepted network samples.
+The Time Plugin exposes synchronized UTC to Agents and Workflows through one
+unary JSON RPC. Plugin-to-Plugin callers should use the typed `UtcClock`
+capability instead.
 
 ## `time.now`
 
 - Address: `time.now`
-- Dynamic JSON: yes
-- Request: unary `TimeNowRequest`, represented as `{}` in JSON
-- Response: unary `TimeNow`
-- Method error: `TimeRpcError`
-- Request schema: baked at build time and embedded in the dynamic RPC metadata
+- Visibility: `*`
+- Request limit: 2 bytes
+- Response limit: 34 bytes
+- Request schema: `plugins/time/schemas/rpc/now/request.json`
+- Response schema: `plugins/time/schemas/rpc/now/response.json`
 
-The fixed-layout request and response DTOs live in `barracuda-time-wire`. Its
-host-only `schema` feature derives and registers the `TimeNowRequest` schema;
-the Component build script bakes that schema into `OUT_DIR`. The normal wire
-crate remains `no_std` and does not ship `schemars` to the target.
+The request is exactly the empty JSON object:
 
-`TimeNow` fields:
+```json
+{}
+```
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `year` | `u16` | UTC year. |
-| `month` | `u8` | UTC month, 1 through 12. |
-| `day` | `u8` | UTC day of month. |
-| `hour` | `u8` | UTC hour, 0 through 23. |
-| `minute` | `u8` | UTC minute, 0 through 59. |
-| `second` | `u8` | UTC second, 0 through 59. |
+A successful response contains an RFC 3339 UTC timestamp with fixed millisecond
+precision:
 
-Method errors:
+```json
+{"utc":"2026-09-05T14:30:00.123Z"}
+```
 
-| Variant | Meaning |
+The trailing `Z` identifies UTC. The RPC never substitutes uptime, zero, or a
+firmware build timestamp when synchronized UTC is unavailable.
+
+Clock availability failures are successful JSON RPC responses with one stable
+business error:
+
+```json
+{"error":"unsynchronized"}
+```
+
+| Error | Meaning |
 | --- | --- |
-| `Unsynchronized` | No valid network time sample has completed since boot. |
-| `Stale` | The last accepted sample is older than the configured maximum holdover. |
-| `OutOfRange` | The synchronized UTC value cannot be represented as calendar fields. |
+| `unsynchronized` | No valid network time sample has completed since boot. |
+| `stale` | The last accepted sample is older than the configured maximum holdover. |
+| `out_of_range` | The UTC value cannot be represented in the response timestamp format. |
 
-The RPC never substitutes uptime, zero, or a firmware timestamp for synchronized
-UTC. Callers must treat every method error as clock unavailable.
+Requests within the 2-byte limit that are not the exact empty object fail with
+the Event Router's `RpcError::InvalidJson` transport error. Larger requests fail
+with `RpcError::FrameTooLarge` before the handler runs. Neither transport failure
+produces a business-error document.
+
+The request and response schemas are included directly at compile time. This
+contract has no native wire DTO, schema-only wire crate, build script, or
+transport streaming cardinality.

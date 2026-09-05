@@ -1,0 +1,25 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "utc": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["utc"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": ["unsynchronized", "stale", "out_of_range"]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}
