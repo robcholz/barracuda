@@ -6,9 +6,9 @@ use alloc::string::String;
 use core::fmt::Debug;
 
 use barracuda_kv::{
-    Database, EntryIterator as KvEntryIterator, Error as KvError,
+    Database, EntryIterator as KvEntryIterator, Error as KvError, MAX_KEY_SIZE,
     ReadTransaction as KvReadTransaction, Value, WriteTransaction as KvWriteTransaction,
-    MAX_KEY_SIZE,
+    WriteValue,
 };
 use embedded_storage_async::nor_flash::NorFlash;
 
@@ -61,8 +61,8 @@ pub trait PluginStorage: Clone + 'static {
     /// Reads one typed value, returning `None` when the key does not exist.
     async fn get<T: Value>(&self, key: &str) -> StorageResult<Option<T>>;
 
-    /// Inserts or replaces one typed value atomically.
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()>;
+    /// Inserts or replaces one byte-representable value atomically.
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()>;
 
     /// Deletes one key atomically.
     async fn delete(&self, key: &str) -> StorageResult<()>;
@@ -108,6 +108,12 @@ impl PluginEntry<'_> {
         T::try_read_from_bytes(self.value)
             .map_err(|_error| StorageError::Database(KvError::InvalidValue))
     }
+
+    /// Returns the stored value bytes.
+    #[must_use]
+    pub fn value_bytes(&self) -> &[u8] {
+        self.value
+    }
 }
 
 /// Streaming iterator over entries in one Plugin namespace.
@@ -125,7 +131,7 @@ pub trait PluginEntryIterator {
 #[allow(async_fn_in_trait)]
 pub trait PluginWriteTransaction: Sized {
     /// Stages one insert or replacement.
-    async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()>;
+    async fn write<T: WriteValue + ?Sized>(&mut self, key: &str, value: &T) -> StorageResult<()>;
 
     /// Stages deletion of one key.
     async fn delete(&mut self, key: &str) -> StorageResult<()>;
@@ -211,8 +217,8 @@ where
         }
     }
 
-    /// Inserts or replaces one typed zerocopy value in a committed transaction.
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()> {
+    /// Inserts or replaces one byte-representable value in a committed transaction.
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         let mut transaction = self.write_transaction().await;
         transaction.write(key, value).await?;
         transaction.commit().await
@@ -250,7 +256,7 @@ where
         ScopedStorage::get(self, key).await
     }
 
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()> {
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         ScopedStorage::put(self, key, value).await
     }
 
@@ -361,7 +367,11 @@ where
     P::Error: Debug,
 {
     /// Stages one scoped insert or replacement.
-    pub async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()> {
+    pub async fn write<T: WriteValue + ?Sized>(
+        &mut self,
+        key: &str,
+        value: &T,
+    ) -> StorageResult<()> {
         let key = scoped_key(self.prefix, key)?;
         self.inner
             .write(&key, value)
@@ -386,7 +396,7 @@ where
     P: NorFlash,
     P::Error: Debug,
 {
-    async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()> {
+    async fn write<T: WriteValue + ?Sized>(&mut self, key: &str, value: &T) -> StorageResult<()> {
         ScopedWriteTransaction::write(self, key, value).await
     }
 
