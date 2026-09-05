@@ -10,6 +10,7 @@ use gateway::MessageGateway;
 
 use crate::gateway_message_received::{
     emit_inbound, validate_inbound, GatewayInboundMessage, GatewayMessageReceived,
+    InboundValidationError,
 };
 use crate::gateway_send::{gateway_send_handler, GatewaySend};
 use crate::gateway_send_media::{
@@ -25,9 +26,12 @@ pub(crate) const STREAM_WORKERS: usize = 4;
 /// Failure queueing a normalized message for Event emission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GatewayIngressError {
-    /// Required metadata is absent or cannot fit the first Event document.
-    #[error("inbound Gateway metadata does not fit its Event contract")]
+    /// Required route metadata or the provider message identifier is absent.
+    #[error("inbound Gateway message is missing required metadata")]
     InvalidMessage,
+    /// The complete encoded message cannot fit one Event document.
+    #[error("inbound Gateway message exceeds the Event lane capacity")]
+    MessageTooLarge,
     /// The matching Gateway ingress Component has stopped.
     #[error("Gateway ingress Component is not running")]
     Stopped,
@@ -42,9 +46,22 @@ pub struct GatewayIngress {
 
 impl GatewayIngress {
     /// Queues one normalized inbound message, awaiting bounded backpressure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GatewayIngressError::InvalidMessage`] when required metadata
+    /// is absent, [`GatewayIngressError::MessageTooLarge`] when the complete
+    /// Event does not fit one lane, or [`GatewayIngressError::Stopped`] after
+    /// the ingress Component stops accepting messages.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
-        if !validate_inbound(&message, self.event_input_bytes) {
-            return Err(GatewayIngressError::InvalidMessage);
+        match validate_inbound(&message, self.event_input_bytes) {
+            Ok(()) => {}
+            Err(InboundValidationError::InvalidMessage) => {
+                return Err(GatewayIngressError::InvalidMessage);
+            }
+            Err(InboundValidationError::MessageTooLarge) => {
+                return Err(GatewayIngressError::MessageTooLarge);
+            }
         }
         self.messages
             .send(message)
@@ -106,7 +123,6 @@ impl GatewayComponent {
         let runtime = GatewayRuntimeComponents {
             inbound: GatewayInboundComponent {
                 messages: inbound_messages,
-                next_stream_id: 1,
             },
             text: core::array::from_fn(|_| GatewayTextStreamComponent {
                 gateway: Rc::clone(&gateway),
@@ -168,7 +184,6 @@ impl<const M: usize> Component<M> for GatewayComponent {
 /// Component that emits bounded inbound Gateway JSON Events.
 pub struct GatewayInboundComponent {
     messages: Receiver<GatewayInboundMessage>,
-    next_stream_id: u64,
 }
 
 impl<const M: usize> Component<M> for GatewayInboundComponent {
@@ -188,9 +203,7 @@ impl<const M: usize> Component<M> for GatewayInboundComponent {
                     Ok(message) => message,
                     Err(_closed) => return pending().await,
                 };
-                let stream_id = self.next_stream_id;
-                self.next_stream_id = self.next_stream_id.checked_add(1).unwrap_or(1);
-                emit_inbound(&emitter, stream_id, &message)
+                emit_inbound(&emitter, &message)
                     .await
                     .map_err(ComponentError::lifecycle)?;
             }

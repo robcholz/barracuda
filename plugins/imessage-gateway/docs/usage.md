@@ -20,8 +20,9 @@ gateway
     .await?;
 ```
 
-`publish` awaits the bounded ingress queue. Text may span any number of Event
-documents. Route metadata and the message ID must fit the first Event document.
+`publish` awaits the bounded ingress queue. The route, message ID, and complete
+text are emitted as one Event document. It returns `MessageTooLarge` before
+queueing when that encoded document does not fit one Event lane.
 
 ## Complete JSON send
 

@@ -38,8 +38,11 @@ all accepted streams can therefore make progress concurrently.
 
 ## Inbound messages
 
-A short normalized message produces one `complete` JSON Event. A larger text
-produces `start`, ordered `chunk` Events, and one `finish` Event, all sharing a
-numeric correlation ID. Event Router accepts each bounded Event before the
-next is emitted. Each chunk is sized from the actual Event lane after accounting
-for the complete `internal.emit` envelope; there is no second fixed Event limit.
+Each normalized provider message produces exactly one
+`gateway.message.received` JSON Event containing its route, provider message ID,
+and complete text. Provider ingress validates the fully encoded document against
+the available Event input capacity before queueing it.
+
+This keeps inbound routing atomic for Workflow consumers. Its cost is an
+explicit size boundary: a message whose complete Event does not fit one lane is
+rejected at provider ingress.
