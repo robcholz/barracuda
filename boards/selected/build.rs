@@ -27,15 +27,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("Board bundle directory and Board name differ".into());
     }
 
-    let hal_type = match board.board_hal() {
-        Some(board_hal) => format!(
-            "::{}::{}",
-            board_hal.package().replace('-', "_"),
-            board_hal.type_name()
-        ),
+    let hal_type = match barracuda_board_tool::board_hal_dependency(&root, &board_name)? {
+        Some(board_hal) => format!("::{}::SelectedBoardHal", board_hal.crate_name()),
         None if board.has_hardware_surface() => {
             return Err(format!(
-                "Board `{board_name}` declares hardware resources but has no `board-hal` dependency"
+                "Board `{board_name}` declares hardware resources but has no HAL at `boards/configs/{board_name}/hal`"
             )
             .into());
         }

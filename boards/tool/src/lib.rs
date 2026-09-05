@@ -1,7 +1,6 @@
 //! Board selection command support.
 
 use std::{
-    collections::BTreeMap,
     env,
     ffi::OsString,
     fs,
@@ -36,6 +35,33 @@ pub struct SyncReport {
     status: SyncStatus,
     boards: usize,
     board_hals: usize,
+}
+
+/// Convention-discovered Cargo dependency for one Board-owned HAL crate.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoardHalDependency {
+    package: String,
+    path: PathBuf,
+}
+
+impl BoardHalDependency {
+    /// Returns the conventional Board HAL package name.
+    #[must_use]
+    pub fn package(&self) -> &str {
+        &self.package
+    }
+
+    /// Returns the Board HAL path relative to the workspace.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the Rust crate identifier derived from the Cargo package name.
+    #[must_use]
+    pub fn crate_name(&self) -> String {
+        self.package.replace('-', "_")
+    }
 }
 
 impl SyncReport {
@@ -178,15 +204,32 @@ pub enum CommandError {
     /// Generated Board dependencies do not match the catalog.
     #[error("Board registry is stale; run `cargo board sync`")]
     StaleRegistry,
-    /// Two Board bundles disagree about one HAL package path.
-    #[error("Board HAL package `{package}` has conflicting paths `{first}` and `{second}`")]
-    ConflictingBoardHal {
-        /// Conflicting Cargo package.
-        package: String,
-        /// First declared workspace-relative path.
-        first: PathBuf,
-        /// Second declared workspace-relative path.
-        second: PathBuf,
+    /// A Board declares hardware but has no conventionally located HAL crate.
+    #[error("Board `{name}` declares hardware resources but has no HAL at `{path}`")]
+    BoardHalMissing {
+        /// Board requiring a HAL.
+        name: String,
+        /// Expected HAL manifest path.
+        path: PathBuf,
+    },
+    /// A conventionally located Board HAL has the wrong Cargo package name.
+    #[error("Board `{name}` HAL package must be `{expected}`, found `{declared}`")]
+    BoardHalPackageMismatch {
+        /// Owning Board.
+        name: String,
+        /// Required package name.
+        expected: String,
+        /// Package name declared by the HAL manifest.
+        declared: String,
+    },
+    /// A Board HAL Cargo manifest is malformed.
+    #[error("invalid Board HAL manifest `{path}`: {source}")]
+    BoardHalManifest {
+        /// Manifest path.
+        path: PathBuf,
+        /// TOML parsing failure.
+        #[source]
+        source: toml::de::Error,
     },
     /// The local target runner executable could not be installed.
     #[error("failed to install target runner `{path}`: {source}")]
@@ -342,22 +385,18 @@ pub fn sync(workspace_root: &Path, check: bool) -> Result<(), CommandError> {
 /// Returns an error when Board discovery, generated markers, or file access fails.
 pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport, CommandError> {
     let boards = discover_boards(workspace_root)?;
-    let mut board_hals = BTreeMap::<String, PathBuf>::new();
+    let mut board_hals = Vec::new();
     for name in &boards {
         let board = read_board(workspace_root, name)?;
-        let Some(board_hal) = board.board_hal() else {
-            continue;
-        };
-        if let Some(first) = board_hals.get(board_hal.package()) {
-            if first != board_hal.path() {
-                return Err(CommandError::ConflictingBoardHal {
-                    package: board_hal.package().to_owned(),
-                    first: first.clone(),
-                    second: board_hal.path().to_owned(),
+        match board_hal_dependency(workspace_root, name)? {
+            Some(board_hal) => board_hals.push(board_hal),
+            None if board.has_hardware_surface() => {
+                return Err(CommandError::BoardHalMissing {
+                    name: name.clone(),
+                    path: board_hal_manifest_path(workspace_root, name),
                 });
             }
-        } else {
-            board_hals.insert(board_hal.package().to_owned(), board_hal.path().to_owned());
+            None => {}
         }
     }
 
@@ -368,7 +407,13 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
     })?;
     let dependencies = board_hals
         .iter()
-        .map(|(package, path)| format!("{package} = {{ path = {:?} }}", path.to_string_lossy()))
+        .map(|board_hal| {
+            format!(
+                "{} = {{ path = {:?} }}",
+                board_hal.package(),
+                board_hal.path().to_string_lossy()
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let manifest = replace_block(&old_manifest, WORKSPACE_BEGIN, WORKSPACE_END, &dependencies)?;
@@ -391,6 +436,60 @@ pub fn sync_with_report(workspace_root: &Path, check: bool) -> Result<SyncReport
         boards: boards.len(),
         board_hals: board_hals.len(),
     })
+}
+
+/// Discovers a Board HAL from `boards/configs/<board>/hal/Cargo.toml`.
+///
+/// # Errors
+///
+/// Returns an error when the Board name is invalid or the manifest is malformed
+/// or violates the conventional `barracuda-board-<board>` package name.
+pub fn board_hal_dependency(
+    workspace_root: &Path,
+    board_name: &str,
+) -> Result<Option<BoardHalDependency>, CommandError> {
+    validate_board_name(board_name)?;
+    let manifest_path = board_hal_manifest_path(workspace_root, board_name);
+    let contents = match fs::read_to_string(&manifest_path) {
+        Ok(contents) => contents,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(CommandError::Read {
+                path: manifest_path,
+                source,
+            });
+        }
+    };
+    let manifest = toml::from_str::<toml::Value>(&contents).map_err(|source| {
+        CommandError::BoardHalManifest {
+            path: manifest_path.clone(),
+            source,
+        }
+    })?;
+    let declared = manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("");
+    let expected = format!("barracuda-board-{board_name}");
+    if declared != expected {
+        return Err(CommandError::BoardHalPackageMismatch {
+            name: board_name.to_owned(),
+            expected,
+            declared: declared.to_owned(),
+        });
+    }
+    Ok(Some(BoardHalDependency {
+        package: expected,
+        path: PathBuf::from("boards/configs").join(board_name).join("hal"),
+    }))
+}
+
+fn board_hal_manifest_path(workspace_root: &Path, board_name: &str) -> PathBuf {
+    workspace_root
+        .join("boards/configs")
+        .join(board_name)
+        .join("hal/Cargo.toml")
 }
 
 fn replace_block(text: &str, begin: &str, end: &str, body: &str) -> Result<String, CommandError> {
@@ -573,11 +672,11 @@ fn write_selected_build(
         board.hardware().chip(),
         board.toolchain().map(|toolchain| toolchain.target()),
     )?;
-    let platform_dependency = if board.platform_features().is_empty() {
+    let platform_features = platform.cargo_features_for_chip(board.hardware().chip());
+    let platform_dependency = if platform_features.is_empty() {
         format!("{}.workspace = true", platform.package())
     } else {
-        let features = board
-            .platform_features()
+        let features = platform_features
             .iter()
             .map(|feature| format!("{feature:?}"))
             .collect::<Vec<_>>()
@@ -594,9 +693,16 @@ fn write_selected_build(
         "# END GENERATED SELECTED PLATFORM",
         &platform_dependency,
     )?;
-    let board_hal_dependency = board.board_hal().map_or_else(String::new, |board_hal| {
-        format!("{}.workspace = true", board_hal.package())
-    });
+    let board_hal_dependency = match board_hal_dependency(workspace_root, board.name())? {
+        Some(board_hal) => format!("{}.workspace = true", board_hal.package()),
+        None if board.has_hardware_surface() => {
+            return Err(CommandError::BoardHalMissing {
+                name: board.name().to_owned(),
+                path: board_hal_manifest_path(workspace_root, board.name()),
+            });
+        }
+        None => String::new(),
+    };
     replace_file_block(
         &workspace_root.join("boards/selected/Cargo.toml"),
         "# BEGIN GENERATED SELECTED BOARD HAL",
@@ -727,22 +833,22 @@ mod tests {
         .expect("selected Board manifest");
     }
 
-    fn add_board_hal(root: &Path, name: &str, package: &str, path: &str) {
+    fn add_board_hal(root: &Path, name: &str) {
         let directory = root.join("boards/configs").join(name);
         fs::create_dir_all(&directory).expect("Board directory");
         fs::write(
             directory.join("board.yml"),
             format!(
-                "name: {name}\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\nboard-hal:\n  package: {package}\n  path: {path}\n  type: TestBoardHal\n"
+                "name: {name}\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\n"
             ),
         )
         .expect("Board YAML");
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
-        let hal = root.join(path);
+        let hal = directory.join("hal");
         fs::create_dir_all(&hal).expect("Board HAL directory");
         fs::write(
             hal.join("Cargo.toml"),
-            format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
+            format!("[package]\nname = \"barracuda-board-{name}\"\nversion = \"0.1.0\"\n"),
         )
         .expect("Board HAL manifest");
     }
@@ -756,41 +862,24 @@ mod tests {
     }
 
     #[test]
-    fn sync_registers_board_hals_once_in_package_order() {
+    fn sync_discovers_board_hals_from_their_bundle_directories() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
-        add_board_hal(
-            root.path(),
-            "zeta-board",
-            "barracuda-board-zeta",
-            "boards/zeta",
-        );
-        add_board_hal(
-            root.path(),
-            "alpha-board",
-            "barracuda-board-alpha",
-            "boards/alpha",
-        );
-        add_board_hal(
-            root.path(),
-            "alpha-board-variant",
-            "barracuda-board-alpha",
-            "boards/alpha",
-        );
+        add_board_hal(root.path(), "zeta-board");
+        add_board_hal(root.path(), "alpha-board");
 
         let report = sync_with_report(root.path(), false).expect("Board sync");
 
         assert_eq!(report.status(), SyncStatus::Updated);
-        assert_eq!(report.boards(), 3);
+        assert_eq!(report.boards(), 2);
         assert_eq!(report.board_hals(), 2);
         let workspace =
             fs::read_to_string(root.path().join("Cargo.toml")).expect("workspace manifest");
-        assert_eq!(workspace.matches("barracuda-board-alpha =").count(), 1);
         let alpha = workspace
-            .find("barracuda-board-alpha = { path = \"boards/alpha\" }")
+            .find("barracuda-board-alpha-board = { path = \"boards/configs/alpha-board/hal\" }")
             .expect("alpha HAL");
         let zeta = workspace
-            .find("barracuda-board-zeta = { path = \"boards/zeta\" }")
+            .find("barracuda-board-zeta-board = { path = \"boards/configs/zeta-board/hal\" }")
             .expect("zeta HAL");
         assert!(alpha < zeta);
     }
@@ -799,12 +888,7 @@ mod tests {
     fn board_sync_check_rejects_stale_registry_without_writing() {
         let root = tempdir().expect("temporary workspace");
         add_workspace(root.path());
-        add_board_hal(
-            root.path(),
-            "alpha-board",
-            "barracuda-board-alpha",
-            "boards/alpha",
-        );
+        add_board_hal(root.path(), "alpha-board");
         let before = fs::read_to_string(root.path().join("Cargo.toml")).expect("before");
 
         let error = sync_with_report(root.path(), true).expect_err("stale registry");
@@ -814,6 +898,44 @@ mod tests {
             fs::read_to_string(root.path().join("Cargo.toml")).expect("after"),
             before
         );
+    }
+
+    #[test]
+    fn board_sync_rejects_a_nonconventional_hal_package_name() {
+        let root = tempdir().expect("temporary workspace");
+        add_workspace(root.path());
+        add_board_hal(root.path(), "alpha-board");
+        fs::write(
+            root.path()
+                .join("boards/configs/alpha-board/hal/Cargo.toml"),
+            "[package]\nname = \"custom-hal\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("replace Board HAL manifest");
+
+        let error = sync_with_report(root.path(), false).expect_err("invalid HAL package");
+
+        assert!(matches!(
+            error,
+            CommandError::BoardHalPackageMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn board_sync_rejects_a_hardware_surface_without_a_hal_crate() {
+        let root = tempdir().expect("temporary workspace");
+        add_workspace(root.path());
+        let directory = root.path().join("boards/configs/alpha-board");
+        fs::create_dir_all(&directory).expect("Board directory");
+        fs::write(
+            directory.join("board.yml"),
+            "name: alpha-board\nhardware:\n  chip: test\nnative-layout:\n  artifact: layout.yml\nexposed-io:\n  gpio:\n    button:\n      pin: P0\n",
+        )
+        .expect("Board YAML");
+        fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
+
+        let error = sync_with_report(root.path(), false).expect_err("missing Board HAL");
+
+        assert!(matches!(error, CommandError::BoardHalMissing { .. }));
     }
 
     #[test]

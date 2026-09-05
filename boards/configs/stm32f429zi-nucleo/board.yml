@@ -5,12 +5,6 @@ toolchain:
   target: thumbv7em-none-eabihf
 native-layout:
   artifact: memory.x
-board-hal:
-  package: barracuda-board-stm32f429zi-nucleo
-  path: boards/configs/stm32f429zi-nucleo/hal
-  type: Stm32f429ziNucleoHal
-platform-features:
-  - stm32f429zi
 builtin-peripherals:
   status-led:
     driver: indicator-led
