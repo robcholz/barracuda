@@ -1635,31 +1635,15 @@ name = "barracuda-web-search-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
- "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",
- "barracuda-web-search-wire",
  "barracuda-webserver-plugin",
- "embedded-io 0.7.1",
+ "embassy-futures",
  "embedded-io-async 0.7.0",
- "futures-lite",
  "http-client",
  "log",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-web-search-wire"
-version = "0.1.0"
-dependencies = [
- "barracuda-rpc",
- "barracuda-rpc-schema",
- "schemars",
- "serde",
- "thiserror 2.0.18",
- "zerocopy",
 ]
 
 [[package]]

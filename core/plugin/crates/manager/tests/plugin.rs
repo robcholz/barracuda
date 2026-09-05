@@ -14,7 +14,7 @@ use barracuda_event_router::{
     RunContext, UnregisterContext,
 };
 use barracuda_kv::MAX_CAPACITY;
-use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
+use barracuda_platform_test::{MemoryPartition, install_global_memory_vfs, memory_partition};
 use barracuda_plugin_manager::{
     CapabilityError, Plugin, PluginDeclaration, PluginEntryIterator, PluginError, PluginId,
     PluginIdError, PluginManager, PluginReadTransaction, PluginRegisterContext,
@@ -383,10 +383,12 @@ fn failed_plugin_start_cancels_tasks_started_by_that_hook() {
     let error = manager.start(&mut router).expect_err("startup must fail");
 
     assert!(matches!(error, PluginStartError::Start(_)));
-    assert!(token
-        .borrow()
-        .as_ref()
-        .is_some_and(PluginTaskToken::is_cancelled));
+    assert!(
+        token
+            .borrow()
+            .as_ref()
+            .is_some_and(PluginTaskToken::is_cancelled)
+    );
 }
 
 struct TaskTokenPlugin {
@@ -420,17 +422,21 @@ fn dropping_the_manager_cancels_its_task_tokens() {
         )
         .expect("register Plugin");
     manager.start(&mut router).expect("start Plugin");
-    assert!(token
-        .borrow()
-        .as_ref()
-        .is_some_and(|token| !token.is_cancelled()));
+    assert!(
+        token
+            .borrow()
+            .as_ref()
+            .is_some_and(|token| !token.is_cancelled())
+    );
 
     drop(manager);
 
-    assert!(token
-        .borrow()
-        .as_ref()
-        .is_some_and(PluginTaskToken::is_cancelled));
+    assert!(
+        token
+            .borrow()
+            .as_ref()
+            .is_some_and(PluginTaskToken::is_cancelled)
+    );
 }
 
 #[test]
@@ -451,10 +457,12 @@ fn shutdown_waits_for_plugin_task_completion() {
 
     let mut shutdown = Box::pin(manager.shutdown(&mut router));
     assert!(block_on(poll_once(shutdown.as_mut())).is_none());
-    assert!(token
-        .borrow()
-        .as_ref()
-        .is_some_and(PluginTaskToken::is_cancelled));
+    assert!(
+        token
+            .borrow()
+            .as_ref()
+            .is_some_and(PluginTaskToken::is_cancelled)
+    );
 
     drop(token.borrow_mut().take());
     block_on(shutdown).expect("shutdown Plugin graph");
@@ -540,8 +548,10 @@ impl Plugin<FRAME_SIZE> for LateKeyWriterPlugin {
     }
 }
 
+type ObservedEntries = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
+
 struct EntryIteratorPlugin {
-    observed: Rc<RefCell<Vec<(String, u32)>>>,
+    observed: ObservedEntries,
 }
 
 declare_plugin!(EntryIteratorPlugin, "entry-iterator");
@@ -555,14 +565,16 @@ impl Plugin<FRAME_SIZE> for EntryIteratorPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         block_on(async {
-            context.storage().put("beta", &2_u32).await?;
-            context.storage().put("alpha", &1_u32).await?;
+            let mut write = context.storage().write_transaction().await;
+            write.write("api_base", "https://api.tavily.com").await?;
+            write.write("api_key", "secret").await?;
+            write.commit().await?;
             let read = context.storage().read_transaction().await;
             let mut entries = read.entries().await?;
             while let Some(entry) = entries.next().await? {
                 self.observed
                     .borrow_mut()
-                    .push((String::from(entry.key()), entry.value::<u32>()?));
+                    .push((String::from(entry.key()), Vec::from(entry.value_bytes())));
             }
             Ok::<(), PluginError>(())
         })
@@ -588,7 +600,13 @@ fn plugin_entry_iterator_streams_relative_keys_and_values_only_from_its_namespac
 
     assert_eq!(
         observed.borrow().as_slice(),
-        [(String::from("alpha"), 1), (String::from("beta"), 2)]
+        [
+            (
+                String::from("api_base"),
+                Vec::from(b"https://api.tavily.com")
+            ),
+            (String::from("api_key"), Vec::from(b"secret"))
+        ]
     );
 }
 

@@ -93,12 +93,17 @@ pub struct Database<P: NorFlash> {
     inner: EkvDatabase<NorFlashAdapter<P>, NoopRawMutex>,
 }
 
-/// Fixed-layout value accepted by the database.
+/// Byte-representable value accepted by database writes.
+pub trait WriteValue: IntoBytes + Immutable {}
+
+impl<T> WriteValue for T where T: ?Sized + IntoBytes + Immutable {}
+
+/// Fixed-layout value accepted by database reads.
 ///
 /// Deriving [`TryFromBytes`], [`IntoBytes`], [`KnownLayout`], and [`Immutable`]
 /// ensures values contain neither pointers nor uninitialized padding and can
 /// be validated when read from persistent bytes.
-pub trait Value: TryFromBytes + IntoBytes + KnownLayout + Immutable + 'static {}
+pub trait Value: WriteValue + TryFromBytes + KnownLayout + 'static {}
 
 impl<T> Value for T where T: TryFromBytes + IntoBytes + KnownLayout + Immutable + 'static {}
 
@@ -286,7 +291,11 @@ where
     P::Error: Debug,
 {
     /// Stages one insert or replacement.
-    pub async fn write<T: Value>(&mut self, key: &str, value: &T) -> Result<(), Error> {
+    pub async fn write<T: WriteValue + ?Sized>(
+        &mut self,
+        key: &str,
+        value: &T,
+    ) -> Result<(), Error> {
         self.inner
             .write(key.as_bytes(), value.as_bytes())
             .await

@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use barracuda_kv::{Database, Error, MAX_CAPACITY};
-use barracuda_platform_test::{memory_partition, MemoryPartition};
+use barracuda_platform_test::{MemoryPartition, memory_partition};
 use futures_lite::future::block_on;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
@@ -48,6 +48,35 @@ fn committed_write_transaction_persists_every_write() {
             count
         );
         assert_eq!(read.read::<u32>("count").await, Err(Error::InvalidValue));
+    });
+}
+
+#[test]
+fn write_transaction_accepts_variable_length_utf8_values() {
+    block_on(async {
+        let database = database().await;
+        let mut write = database.write_transaction().await;
+        write
+            .write("api_base", "https://api.tavily.com")
+            .await
+            .expect("write API base");
+        write
+            .write("api_key", "secret")
+            .await
+            .expect("write API key");
+        write.commit().await.expect("commit strings");
+
+        let read = database.read_transaction().await;
+        let mut entries = read
+            .entries_in_range("api_", "api`")
+            .await
+            .expect("open string entries");
+        let base = entries.next().await.expect("read base").expect("base");
+        assert_eq!(base.key(), "api_base");
+        assert_eq!(base.value_bytes(), b"https://api.tavily.com");
+        let key = entries.next().await.expect("read key").expect("key");
+        assert_eq!(key.key(), "api_key");
+        assert_eq!(key.value_bytes(), b"secret");
     });
 }
 
