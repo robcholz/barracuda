@@ -10,7 +10,7 @@ use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EventRouter, JsonRpcSchema, RegisterContext,
     RpcAddress, RpcLaneStorage, RpcRegistry, RunContext, UnregisterContext,
 };
-use barracuda_imessage_gateway_component::component::GatewayComponent;
+use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngressError};
 use barracuda_imessage_gateway_component::gateway_message_received::{
     GatewayInboundMessage, GatewayMessageReceived,
 };
@@ -68,6 +68,13 @@ fn publishes_three_bounded_json_contracts_and_terminal_event_ids() {
         <GatewayMessageReceived as barracuda_event_router::Event>::ID,
         "gateway.message.received"
     );
+    let inbound_schema = include_str!("../../../schemas/event/gateway_message_received.json");
+    for streaming_field in ["stream_id", "sequence", "phase", "terminal"] {
+        assert!(!inbound_schema.contains(streaming_field));
+    }
+    for message_field in ["route", "message_id", "text"] {
+        assert!(inbound_schema.contains(message_field));
+    }
     assert_eq!(
         <GatewaySendStreamFinished as barracuda_event_router::Event>::ID,
         "gateway.send_stream.finished"
@@ -371,17 +378,37 @@ fn application_streams_are_chunked_acked_and_delivered_without_aggregation() {
 }
 
 #[test]
-fn inbound_capability_accepts_text_beyond_one_event_lane_for_chunking() {
+fn inbound_capability_rejects_a_message_that_exceeds_one_event_lane() {
     block_on(async {
         let (component, ingress, _runtime) = GatewayComponent::new::<512>(MessageGateway::new(), 1);
         let _component = component;
-        ingress
+        let error = ingress
             .publish(GatewayInboundMessage {
                 route: GatewayRoute::new("test", "chat"),
                 message_id: "message-1".into(),
                 text: "x".repeat(16 * 1024 + 1),
             })
             .await
-            .expect("Event chunking, not a field limit, bounds inbound text");
+            .expect_err("one inbound message must fit one complete Event");
+
+        assert_eq!(error, GatewayIngressError::MessageTooLarge);
+    });
+}
+
+#[test]
+fn inbound_capability_reports_missing_metadata_separately() {
+    block_on(async {
+        let (component, ingress, _runtime) = GatewayComponent::new::<512>(MessageGateway::new(), 1);
+        let _component = component;
+        let error = ingress
+            .publish(GatewayInboundMessage {
+                route: GatewayRoute::new("", "chat"),
+                message_id: "message-1".into(),
+                text: "hello".into(),
+            })
+            .await
+            .expect_err("empty channel is invalid metadata");
+
+        assert_eq!(error, GatewayIngressError::InvalidMessage);
     });
 }

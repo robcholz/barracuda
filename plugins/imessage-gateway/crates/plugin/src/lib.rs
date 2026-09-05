@@ -47,8 +47,10 @@ impl IMessageGateway {
     ///
     /// # Errors
     ///
-    /// Returns [`GatewayIngressError::Stopped`] after the Gateway Component
-    /// stops accepting messages.
+    /// Returns [`GatewayIngressError::InvalidMessage`] when required metadata
+    /// is absent, [`GatewayIngressError::MessageTooLarge`] when the complete
+    /// Event does not fit one lane, or [`GatewayIngressError::Stopped`] after
+    /// the Gateway Component stops accepting messages.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         self.ingress.publish(message).await
     }
