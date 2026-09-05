@@ -48,6 +48,10 @@ struct CounterService {
 }
 
 impl Component<FRAME_SIZE> for CounterService {
+    fn name(&self) -> &'static str {
+        "counter-service"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_rpc::<Increment, _>(
             "system",
@@ -74,6 +78,10 @@ struct StartupCaller {
 }
 
 impl Component<FRAME_SIZE> for StartupCaller {
+    fn name(&self) -> &'static str {
+        "startup-caller"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         Ok(())
     }

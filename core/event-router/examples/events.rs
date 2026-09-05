@@ -65,6 +65,10 @@ struct Gateway {
 }
 
 impl Component<FRAME_SIZE> for Gateway {
+    fn name(&self) -> &'static str {
+        "gateway"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let state = Rc::clone(&self.state);
         context.register_json::<RecordMessage, _>(

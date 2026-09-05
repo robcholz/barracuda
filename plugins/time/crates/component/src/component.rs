@@ -220,6 +220,10 @@ impl TimeComponent {
 }
 
 impl<const M: usize> Component<M> for TimeComponent {
+    fn name(&self) -> &'static str {
+        "time"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<Now, _>("*", now_handler(Rc::clone(&self.clock)))
     }

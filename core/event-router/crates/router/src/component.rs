@@ -168,6 +168,13 @@ impl UnregisterContext<'_> {
 /// [`RegisterContext::register_rpc`] reject oversized method frames at compile
 /// time while the lane count and waiter capacity remain hidden.
 pub trait Component<const M: usize> {
+    /// Returns the stable human-readable name of this Component type.
+    ///
+    /// Names identify Component types for diagnostics and need not be unique
+    /// across loaded instances. [`crate::ComponentId`] remains the unique
+    /// identity of each loaded instance.
+    fn name(&self) -> &'static str;
+
     /// Registers the Component's interfaces and initializes local resources.
     ///
     /// # Errors
@@ -260,6 +267,10 @@ mod tests {
     }
 
     impl Component<256> for IncrementComponent {
+        fn name(&self) -> &'static str {
+            "increment"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, 256>,
@@ -356,6 +367,10 @@ mod tests {
     struct PassiveComponent;
 
     impl Component<64> for PassiveComponent {
+        fn name(&self) -> &'static str {
+            "passive"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, 64>,

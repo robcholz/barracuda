@@ -172,6 +172,10 @@ struct PendingComponent {
 }
 
 impl Component<ROUTER_FRAME> for PendingComponent {
+    fn name(&self) -> &'static str {
+        "profile-pending"
+    }
+
     fn register(
         &mut self,
         _context: &mut RegisterContext<'_, ROUTER_FRAME>,
@@ -255,6 +259,10 @@ struct CatalogLoader {
 }
 
 impl Component<EVENT_FRAME> for CatalogLoader {
+    fn name(&self) -> &'static str {
+        "profile-catalog-loader"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, EVENT_FRAME>) -> ComponentResult<()> {
         context.register_json::<CatalogSink, _>(
             "*",

@@ -93,6 +93,10 @@ impl VmComponent {
 }
 
 impl<const M: usize> Component<M> for VmComponent {
+    fn name(&self) -> &'static str {
+        "vm"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<Run, _>(
             "*",

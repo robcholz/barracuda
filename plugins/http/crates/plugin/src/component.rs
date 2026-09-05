@@ -724,6 +724,10 @@ impl<T, D> HttpComponent<T, D> {
 impl<T: TcpConnect + 'static, D: Dns + 'static, const M: usize> Component<M>
     for HttpComponent<T, D>
 {
+    fn name(&self) -> &'static str {
+        "http"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<Request, _>(
             "*",

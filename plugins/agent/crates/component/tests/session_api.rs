@@ -89,6 +89,10 @@ struct SessionApiClient {
 }
 
 impl Component<FRAME_SIZE> for SessionApiClient {
+    fn name(&self) -> &'static str {
+        "session-api-client"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let result = Rc::clone(&self.result);
         context.register_json::<RecordSessionEvent, _>(

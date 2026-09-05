@@ -51,6 +51,10 @@ impl<const N: usize> WorkflowComponent<N> {
 }
 
 impl<const N: usize, const M: usize> Component<M> for WorkflowComponent<N> {
+    fn name(&self) -> &'static str {
+        "workflow-runtime"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<InternalEmit<M>, _>(
             "system",

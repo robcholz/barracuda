@@ -65,6 +65,10 @@ struct PendingComponent<Storage: barracuda_plugin_manager::PluginStorage> {
 impl<Storage: barracuda_plugin_manager::PluginStorage> Component<FRAME_SIZE>
     for PendingComponent<Storage>
 {
+    fn name(&self) -> &'static str {
+        "pending"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         self.registered.set(self.registered.get() + 1);
         Ok(())

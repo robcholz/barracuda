@@ -54,6 +54,10 @@ struct FailureDemo {
 }
 
 impl Component<FRAME_SIZE> for FailureDemo {
+    fn name(&self) -> &'static str {
+        "workflow-failure-demo"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_json::<Fail, _>("*", |_context, _request, _response| async move {
             Err(RpcError::InvalidFrameState)

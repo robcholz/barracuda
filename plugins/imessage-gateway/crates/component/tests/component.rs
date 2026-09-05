@@ -198,6 +198,10 @@ struct CommandCaller {
 }
 
 impl Component<512> for CommandCaller {
+    fn name(&self) -> &'static str {
+        "command-caller"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
         Ok(())
     }

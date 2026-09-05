@@ -96,6 +96,10 @@ struct MappingComponent {
 }
 
 impl Component<FRAME_SIZE> for MappingComponent {
+    fn name(&self) -> &'static str {
+        "mapping"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_json::<AddOne, _>(
             "*",
@@ -176,6 +180,10 @@ struct FanoutComponent {
 }
 
 impl Component<FRAME_SIZE> for FanoutComponent {
+    fn name(&self) -> &'static str {
+        "fanout"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let exact = Rc::clone(&self.recorded);
         context.register_json::<Record, _>(
@@ -264,6 +272,10 @@ struct ControlComponent {
 }
 
 impl Component<FRAME_SIZE> for ControlComponent {
+    fn name(&self) -> &'static str {
+        "control"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_json::<Record, _>(
             "*",
