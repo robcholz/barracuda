@@ -14,3 +14,11 @@ fn board_hal_api_does_not_own_platform_services() -> Result<(), std::io::Error> 
     assert!(!manifest.contains("barracuda-platform"));
     Ok(())
 }
+
+#[test]
+fn peripheral_drivers_live_at_the_workspace_root() {
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+
+    assert!(workspace.join("drivers/indicator-led/Cargo.toml").is_file());
+    assert!(!workspace.join("boards/drivers").exists());
+}

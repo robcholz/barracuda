@@ -1,14 +1,14 @@
 # Boards
 
-`boards/` owns concrete product bundles, reusable built-in peripheral Drivers,
-and the build-time tooling that turns their common YAML into static Rust data.
+`boards/` owns concrete product bundles and the build-time tooling that turns
+their common YAML into static Rust data. Reusable peripheral Drivers live in
+the workspace-level `drivers/` directory.
 Platform-specific Board HAL code may live inside its owning Platform bundle.
 
 ```text
 boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
 |-- config/       # std-only YAML parsing, validation, and Rust generation
-|-- drivers/      # reusable semantic built-in peripheral Drivers
 `-- configs/
     `-- <board>/
         |-- board.yml
