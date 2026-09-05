@@ -1,1 +1,113 @@
-[]
+[
+  {
+    "id": "imessage-to-agent",
+    "match": {
+      "event": "gateway.message.received"
+    },
+    "steps": [
+      {
+        "call": "imessage_bridge.to_agent"
+      },
+      {
+        "if": "$previous.output.found",
+        "then": [
+          {
+            "if": "$previous.output.open_required",
+            "then": [
+              {
+                "call": "session.open",
+                "arguments": {
+                  "session": "$previous.output.session"
+                }
+              },
+              {
+                "call": "imessage_bridge.to_agent",
+                "arguments": {
+                  "route": "$event.input.route",
+                  "message_id": "$event.input.message_id",
+                  "session": "$previous.output.session"
+                }
+              }
+            ],
+            "else": []
+          },
+          {
+            "call": "session.append",
+            "arguments": {
+              "session": "$previous.output.session",
+              "text": "$event.input.text"
+            }
+          },
+          {
+            "return": {}
+          }
+        ],
+        "else": [
+          {
+            "call": "session.new",
+            "arguments": {
+              "persistence": "persistent"
+            }
+          },
+          {
+            "call": "session.open",
+            "arguments": {
+              "session": "$previous.output.session"
+            }
+          },
+          {
+            "call": "imessage_bridge.to_agent",
+            "arguments": {
+              "route": "$event.input.route",
+              "message_id": "$event.input.message_id",
+              "session": "$previous.output.session"
+            }
+          },
+          {
+            "call": "session.append",
+            "arguments": {
+              "session": "$previous.output.session",
+              "text": "$event.input.text"
+            }
+          },
+          {
+            "return": {}
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "agent-to-imessage",
+    "match": {
+      "event": "session.event"
+    },
+    "steps": [
+      {
+        "call": "imessage_bridge.to_gateway"
+      },
+      {
+        "if": "$previous.output.forward",
+        "then": [
+          {
+            "call": "imessage_bridge.to_gateway",
+            "arguments": {
+              "command_id": "$previous.output.command_id"
+            }
+          },
+          {
+            "call": "gateway.send_stream"
+          },
+          {
+            "return": {}
+          }
+        ],
+        "else": [
+          {
+            "return": {}
+          }
+        ]
+      }
+    ]
+  }
+]
