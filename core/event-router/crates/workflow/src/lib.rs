@@ -19,9 +19,7 @@ pub use definition::{
     WorkflowDefinition, WorkflowDefinitionError, WorkflowId, WorkflowIdError, WorkflowLoadError,
     WorkflowStep, WorkflowUnloadError,
 };
-pub use event::{
-    EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError, EventInputMode,
-};
+pub use event::{EmitError, Event, EventEmitter, EventId, EventIdError};
 pub use link::LinkError;
 pub use rule::{Rule, RuleError};
 pub use runtime::{validate_definition, WorkflowExecutionError, WorkflowFailure, WorkflowInfo};
@@ -32,7 +30,7 @@ pub mod integration {
     pub use crate::control::{
         WorkflowJsonFrame, WorkflowJsonRequest, WorkflowLoad, WorkflowUnload,
     };
-    pub use crate::ingress::{EmitErrorFrame, InternalEmit, InternalEmitFrame};
+    pub use crate::ingress::InternalEmit;
     pub use crate::runtime::{WorkflowRuntime, WorkflowRuntimeControl, WorkflowRuntimeView};
 }
 pub use control::{WorkflowClient, WorkflowControlError, WorkflowControlRejection};

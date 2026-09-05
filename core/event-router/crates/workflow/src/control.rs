@@ -41,7 +41,7 @@ pub enum WorkflowControlRejection {
     NotFound,
     /// The persistence operation failed.
     Persistence,
-    /// A step's link arguments were malformed or placed on the ingress step.
+    /// A step's link arguments were malformed.
     InvalidArguments,
     /// A step addressed a method that is not registered.
     UnknownMethod,
@@ -323,8 +323,7 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
         };
         definition.map_err(|error| match error {
             WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
-            WorkflowDefinitionError::FirstStepHasArguments
-            | WorkflowDefinitionError::InvalidReference(_) => {
+            WorkflowDefinitionError::InvalidReference(_) => {
                 WorkflowControlRejection::InvalidArguments
             }
         })

@@ -179,6 +179,156 @@ impl JsonPayload for Value {
     }
 }
 
+/// Allocation-free JSON object assembled field-by-field into caller-provided
+/// storage.
+///
+/// The field callback runs once to measure the document and once to write it.
+/// Each field value may be either raw JSON (`str`) or another [`JsonPayload`].
+pub struct JsonObjectPayload<'a, F: ?Sized> {
+    fields: &'a F,
+}
+
+impl<'a, F: ?Sized> JsonObjectPayload<'a, F> {
+    /// Creates an object payload from a repeatable field callback.
+    #[must_use]
+    pub const fn new(fields: &'a F) -> Self {
+        Self { fields }
+    }
+}
+
+/// Repeatable source of fields for an allocation-free JSON object.
+pub trait JsonObjectFields {
+    /// Visits every object field in output order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a field cannot be produced or written.
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> RpcResult<()>;
+}
+
+impl<F> JsonObjectFields for F
+where
+    F: for<'writer> Fn(&mut JsonObjectWriter<'writer>) -> RpcResult<()>,
+{
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> RpcResult<()> {
+        self(writer)
+    }
+}
+
+impl<F> JsonPayload for JsonObjectPayload<'_, F>
+where
+    F: JsonObjectFields + ?Sized,
+{
+    fn encoded_len(&self) -> RpcResult<usize> {
+        let mut writer = JsonObjectWriter::measuring();
+        self.fields.write_fields(&mut writer)?;
+        writer.finish()
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> RpcResult<usize> {
+        let mut writer = JsonObjectWriter::writing(destination)?;
+        self.fields.write_fields(&mut writer)?;
+        writer.finish()
+    }
+}
+
+enum JsonObjectOutput<'a> {
+    Measuring(usize),
+    Writing(SliceWriter<'a>),
+}
+
+/// Object-field sink supplied to [`JsonObjectPayload`]'s callback.
+pub struct JsonObjectWriter<'a> {
+    output: JsonObjectOutput<'a>,
+    field_count: usize,
+}
+
+struct JsonString<'a>(&'a str);
+
+impl JsonPayload for JsonString<'_> {
+    fn encoded_len(&self) -> RpcResult<usize> {
+        escaped_string_len(self.0)
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> RpcResult<usize> {
+        let mut writer = SliceWriter::new(destination);
+        write_escaped_string(self.0, &mut writer)?;
+        Ok(writer.written())
+    }
+}
+
+impl<'a> JsonObjectWriter<'a> {
+    fn measuring() -> Self {
+        Self {
+            output: JsonObjectOutput::Measuring(1),
+            field_count: 0,
+        }
+    }
+
+    fn writing(destination: &'a mut [u8]) -> RpcResult<Self> {
+        let mut writer = SliceWriter::new(destination);
+        writer.write(b"{")?;
+        Ok(Self {
+            output: JsonObjectOutput::Writing(writer),
+            field_count: 0,
+        })
+    }
+
+    /// Appends one named JSON value to the object.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the field name or value length overflows, the
+    /// value is invalid JSON, or the destination slice is too small.
+    pub fn field<J>(&mut self, name: &str, value: &J) -> RpcResult<()>
+    where
+        J: JsonPayload + ?Sized,
+    {
+        let separator = usize::from(self.field_count > 0);
+        match &mut self.output {
+            JsonObjectOutput::Measuring(length) => {
+                *length = checked_add(*length, separator)?;
+                *length = checked_add(*length, escaped_string_len(name)?)?;
+                *length = checked_add(*length, 1)?;
+                *length = checked_add(*length, value.encoded_len()?)?;
+            }
+            JsonObjectOutput::Writing(writer) => {
+                if separator > 0 {
+                    writer.write(b",")?;
+                }
+                write_escaped_string(name, writer)?;
+                writer.write(b":")?;
+                writer.write_payload(value)?;
+            }
+        }
+        self.field_count = self
+            .field_count
+            .checked_add(1)
+            .ok_or(RpcError::InvalidFrameState)?;
+        Ok(())
+    }
+
+    /// Appends one named JSON string, escaping its contents in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the encoded length overflows or the destination
+    /// slice is too small.
+    pub fn string_field(&mut self, name: &str, value: &str) -> RpcResult<()> {
+        self.field(name, &JsonString(value))
+    }
+
+    fn finish(mut self) -> RpcResult<usize> {
+        match &mut self.output {
+            JsonObjectOutput::Measuring(length) => checked_add(*length, 1),
+            JsonObjectOutput::Writing(writer) => {
+                writer.write(b"}")?;
+                Ok(writer.written())
+            }
+        }
+    }
+}
+
 /// One validated JSON document retained in its RPC lane frame.
 ///
 /// The lane cannot reuse this frame until the `JsonRef` is dropped. Parsing a
@@ -557,6 +707,28 @@ impl<'a> SliceWriter<'a> {
                     capacity,
                 })?;
         output.copy_from_slice(bytes);
+        self.written = end;
+        Ok(())
+    }
+
+    fn write_payload<J>(&mut self, payload: &J) -> RpcResult<()>
+    where
+        J: JsonPayload + ?Sized,
+    {
+        let length = payload.encoded_len()?;
+        let end = checked_add(self.written, length)?;
+        let capacity = self.destination.len();
+        let output =
+            self.destination
+                .get_mut(self.written..end)
+                .ok_or(RpcError::FrameTooLarge {
+                    size: end,
+                    capacity,
+                })?;
+        let written = payload.write_json(output)?;
+        if written != length {
+            return Err(RpcError::InvalidFrameState);
+        }
         self.written = end;
         Ok(())
     }

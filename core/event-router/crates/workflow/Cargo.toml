@@ -13,7 +13,7 @@ barracuda-rpc = { path = "../rpc" }
 futures-core = { version = "0.3", default-features = false }
 getset = "0.1.7"
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }
 zerocopy = { version = "0.8", features = ["derive"] }
 

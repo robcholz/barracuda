@@ -53,7 +53,7 @@ impl WorkflowComponent {
 impl<const M: usize> Component<M> for WorkflowComponent {
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context
-            .register_rpc::<InternalEmit<M>, _>("system", self.runtime.ingress_handler::<M>())?;
+            .register_json::<InternalEmit<M>, _>("system", self.runtime.ingress_handler::<M>())?;
 
         let load_control = self.runtime.control();
         let load_catalog = Rc::clone(&self.catalog);

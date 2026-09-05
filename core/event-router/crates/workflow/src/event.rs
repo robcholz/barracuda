@@ -1,17 +1,15 @@
-//! Public typed Event declaration and emission API.
+//! Public JSON Event declaration and emission API.
 
 use alloc::string::String;
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-
-use futures_core::Stream;
 
 use barracuda_rpc::{
-    RpcClient, RpcError, RpcInputMode, RpcMessage, RpcResult, RpcStream, Streaming, Unary,
+    JsonObjectFields, JsonObjectPayload, JsonObjectWriter, JsonPayload, JsonRpcSchema, RpcAddress,
+    RpcClient, RpcError,
 };
 
-use super::{ingress, Topic};
+use super::ingress::InternalEmit;
+use super::Topic;
 
 /// A validated identifier for one Event type.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -79,121 +77,10 @@ pub enum EventIdError {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum EventCardinality {
-    Unary,
-    Streaming,
-}
-
-mod private {
-    use super::{EventCardinality, RpcInputMode, RpcMessage, RpcStream};
-
-    pub trait InputMode<T>: RpcInputMode<T>
-    where
-        T: RpcMessage,
-    {
-        fn cardinality() -> EventCardinality;
-
-        fn into_stream(input: <Self as RpcInputMode<T>>::ClientInput) -> RpcStream<T>;
-    }
-}
-
-/// Type-level input cardinality accepted by one [`Event`].
-///
-/// This trait is sealed; use RPC's existing [`Unary`] and [`Streaming`]
-/// marker types.
-pub trait EventInputMode<T>: RpcInputMode<T> + private::InputMode<T>
-where
-    T: RpcMessage,
-{
-}
-
-impl<T> private::InputMode<T> for Unary
-where
-    T: RpcMessage,
-{
-    fn cardinality() -> EventCardinality {
-        EventCardinality::Unary
-    }
-
-    fn into_stream(input: <Self as RpcInputMode<T>>::ClientInput) -> RpcStream<T> {
-        RpcStream::new(OnceEventStream { value: Some(input) })
-    }
-}
-
-impl<T> EventInputMode<T> for Unary where T: RpcMessage {}
-
-impl<T> private::InputMode<T> for Streaming
-where
-    T: RpcMessage,
-{
-    fn cardinality() -> EventCardinality {
-        EventCardinality::Streaming
-    }
-
-    fn into_stream(input: <Self as RpcInputMode<T>>::ClientInput) -> RpcStream<T> {
-        input
-    }
-}
-
-impl<T> EventInputMode<T> for Streaming where T: RpcMessage {}
-
-/// Compile-time description of one typed Event.
+/// Compile-time identity of one JSON Event.
 pub trait Event: 'static {
     /// Stable Event identifier used by Workflow matching.
     const ID: &'static str;
-
-    /// Fixed-layout Event payload message.
-    type Message: RpcMessage;
-
-    /// Unary or streaming Event input.
-    type Input: EventInputMode<Self::Message>;
-}
-
-pub(super) fn cardinality<E>() -> EventCardinality
-where
-    E: Event,
-{
-    <E::Input as private::InputMode<E::Message>>::cardinality()
-}
-
-pub(super) fn into_stream<E>(
-    input: <E::Input as RpcInputMode<E::Message>>::ClientInput,
-) -> RpcStream<E::Message>
-where
-    E: Event,
-{
-    <E::Input as private::InputMode<E::Message>>::into_stream(input)
-}
-
-/// Receiver-side reason an Event was rejected before ownership transfer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum EmitRejection {
-    /// First frame is absent or not a valid Header.
-    InvalidHeader,
-    /// Header Event ID is invalid.
-    InvalidEventId,
-    /// Header Event ID exceeds the wire limit.
-    EventIdTooLong,
-    /// Header cardinality is unknown.
-    InvalidCardinality,
-    /// Event message wire size is zero or unrepresentable.
-    InvalidMessageSize,
-    /// Payload frame metadata or padding is invalid.
-    InvalidPayloadFrame,
-    /// Request EOF occurred partway through a message.
-    TruncatedPayload,
-    /// Unary Event did not contain exactly one message.
-    InvalidUnaryMessageCount,
-    /// Matched Workflow inputs are unavailable or incompatible.
-    DownstreamUnavailable,
-    /// Topic metadata is missing or not a valid fixed C string.
-    InvalidTopic,
-    /// The fixed Topic metadata does not fit in the Router frame.
-    TopicTooLong,
-    /// Error code is not recognized by the ingress protocol.
-    Unknown,
 }
 
 /// Failure returned by [`EventEmitter::emit`].
@@ -203,18 +90,12 @@ pub enum EmitError {
     /// The Event type declares an invalid Event ID.
     #[error("invalid Event ID: {0}")]
     InvalidEventId(#[from] EventIdError),
-    /// Local Event metadata cannot be represented by the ingress protocol.
-    #[error("Event cannot be encoded: {0:?}")]
-    Encoding(EmitRejection),
-    /// RPC transport or runtime failure.
+    /// RPC transport, JSON encoding, or runtime failure.
     #[error(transparent)]
     Rpc(#[from] RpcError),
-    /// WorkflowRuntime rejected the Event before ownership transfer.
-    #[error("Event was rejected: {0:?}")]
-    Rejected(EmitRejection),
 }
 
-/// Typed Event producer backed by a Component's RPC client.
+/// JSON Event producer backed by a Component's RPC client.
 #[derive(Clone)]
 pub struct EventEmitter<const M: usize> {
     rpc: RpcClient,
@@ -224,76 +105,74 @@ impl<const M: usize> EventEmitter<M> {
     /// Wraps an existing client without creating another registry or transport.
     #[must_use]
     pub const fn new(rpc: RpcClient) -> Self {
-        const { ingress::assert_frame_capacity::<M>() }
         Self { rpc }
     }
 
-    /// Emits one typed Event and waits until WorkflowRuntime accepts ownership.
+    /// Emits one JSON Event and waits until Workflow Runtime accepts ownership.
     ///
     /// This does not wait for matching Workflow executions or downstream RPCs
-    /// to complete.
-    ///
-    /// An Event ID that cannot fit in the Router's frame capacity is rejected
-    /// at compile time:
-    ///
-    /// ```compile_fail
-    /// use barracuda_rpc::Unary;
-    /// use barracuda_workflow::{Event, EventEmitter};
-    ///
-    /// struct EventIdExceedsFrame;
-    ///
-    /// impl Event for EventIdExceedsFrame {
-    ///     const ID: &'static str =
-    ///         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    ///     type Message = [u8; 1];
-    ///     type Input = Unary;
-    /// }
-    ///
-    /// fn emitter() -> &'static EventEmitter<64> {
-    ///     loop {}
-    /// }
-    ///
-    /// fn main() {
-    ///     let _ = emitter().emit::<EventIdExceedsFrame>([0]);
-    /// }
-    /// ```
-    pub async fn emit<E>(
-        &self,
-        input: <E::Input as RpcInputMode<E::Message>>::ClientInput,
-    ) -> Result<(), EmitError>
+    /// to complete. The input is encoded directly into the internal request
+    /// lane through [`JsonPayload`].
+    pub async fn emit<E>(&self, input: &(impl JsonPayload + ?Sized)) -> Result<(), EmitError>
     where
         E: Event,
     {
-        ingress::emit::<E, M>(&self.rpc, None, input).await
+        self.emit_inner::<E>(None, input).await
     }
 
-    /// Emits one typed Event with a topic used by optional Workflow filtering.
-    ///
-    /// Workflows without `match.topic` still receive this Event. Workflows with
-    /// `match.topic` receive it only when their exact topic matches `topic`.
+    /// Emits one JSON Event with a topic used by optional Workflow filtering.
     pub async fn emit_to<E>(
         &self,
         topic: &Topic,
-        input: <E::Input as RpcInputMode<E::Message>>::ClientInput,
+        input: &(impl JsonPayload + ?Sized),
     ) -> Result<(), EmitError>
     where
         E: Event,
     {
-        ingress::emit::<E, M>(&self.rpc, Some(topic), input).await
+        self.emit_inner::<E>(Some(topic), input).await
+    }
+
+    async fn emit_inner<E>(
+        &self,
+        topic: Option<&Topic>,
+        input: &(impl JsonPayload + ?Sized),
+    ) -> Result<(), EmitError>
+    where
+        E: Event,
+    {
+        let event = EventId::try_from(E::ID)?;
+        let fields = EmitFields {
+            event: event.as_str(),
+            topic,
+            input,
+        };
+        let document = JsonObjectPayload::new(&fields);
+        let address = RpcAddress::try_from(InternalEmit::<M>::ADDRESS)
+            .map_err(|_error| EmitError::Rpc(RpcError::InvalidFrameState))?;
+        let response = self.rpc.call_json(&address, &document)?.await?;
+        if response.as_str()? != "{}" {
+            return Err(EmitError::Rpc(RpcError::InvalidFrameState));
+        }
+        Ok(())
     }
 }
 
-struct OnceEventStream<T> {
-    value: Option<T>,
+struct EmitFields<'a, J: ?Sized> {
+    event: &'a str,
+    topic: Option<&'a Topic>,
+    input: &'a J,
 }
 
-impl<T> Unpin for OnceEventStream<T> {}
-
-impl<T> Stream for OnceEventStream<T> {
-    type Item = RpcResult<T>;
-
-    fn poll_next(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Poll::Ready(self.get_mut().value.take().map(Ok))
+impl<J> JsonObjectFields for EmitFields<'_, J>
+where
+    J: JsonPayload + ?Sized,
+{
+    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
+        writer.string_field("event", self.event)?;
+        if let Some(topic) = self.topic {
+            writer.string_field("topic", topic.as_str())?;
+        }
+        writer.field("input", self.input)
     }
 }
 
@@ -314,7 +193,7 @@ mod tests {
     fn event_id_rejects_empty_or_pattern_values() {
         assert_eq!(EventId::try_from(""), Err(EventIdError::Empty));
         assert!(matches!(
-            EventId::try_from("aaa.*"),
+            EventId::try_from("gateway.*"),
             Err(EventIdError::InvalidCharacter { .. })
         ));
     }

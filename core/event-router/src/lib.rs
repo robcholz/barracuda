@@ -23,20 +23,20 @@ pub use barracuda_router::{
 };
 pub use barracuda_rpc::{
     json_schema, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef, JsonRpcInfo,
-    JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId,
-    RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
-    RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
-    RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
-    RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration,
-    RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming, Unary,
+    JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId, RpcCardinality,
+    RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup, RpcGroupError, RpcHandler,
+    RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage,
+    RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode, RpcPayloadFrame, RpcPayloadReader,
+    RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream,
+    RpcUnaryCall, Streaming, Unary,
 };
 pub use barracuda_vfs::FsError;
 pub use barracuda_workflow::{
-    validate_definition, EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError,
-    EventInputMode, Rule, RuleError, Topic, TopicError, WorkflowClient, WorkflowControlError,
-    WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError,
-    WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError,
-    WorkflowUnloadError, TOPIC_MAX_BYTES,
+    validate_definition, EmitError, Event, EventEmitter, EventId, EventIdError, Rule, RuleError,
+    Topic, TopicError, WorkflowClient, WorkflowControlError, WorkflowControlRejection,
+    WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError, WorkflowFailure,
+    WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError, WorkflowUnloadError,
+    TOPIC_MAX_BYTES,
 };
 
 /// Failure while constructing Event Router and restoring durable Workflows.
