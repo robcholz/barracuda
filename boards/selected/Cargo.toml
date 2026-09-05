@@ -9,9 +9,6 @@ barracuda-board.workspace = true
 barracuda-board-hal.workspace = true
 embassy-executor.workspace = true
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-barracuda-board-stm32f429zi-nucleo.workspace = true
-
 [build-dependencies]
 barracuda-board-config.workspace = true
 

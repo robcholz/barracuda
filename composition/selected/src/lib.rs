@@ -50,13 +50,29 @@ pub async fn resources_with_bindings(
 ///
 /// Host Platforms do not own a chip peripheral singleton. Device entry points
 /// call [`resources_with_bindings`] after splitting their singleton instead.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    barracuda_generated_build
+))]
 pub async fn resources(spawner: embassy_executor::Spawner) -> Result<Resources, Error> {
     resources_with_bindings(
         spawner,
         TargetBindings::new(&barracuda_board_selected::BOARD, ()),
     )
     .await
+}
+
+/// Rejects attempts to run the placeholder source-workspace target.
+///
+/// Ordinary `cargo run` invokes the build driver and compiles the other
+/// implementation of this function inside its generated workspace.
+#[cfg(all(
+    any(target_os = "macos", target_os = "linux"),
+    not(barracuda_generated_build)
+))]
+pub async fn resources(spawner: embassy_executor::Spawner) -> Result<Resources, Error> {
+    static UNCONFIGURED_BINDINGS: () = ();
+    resources_with_bindings(spawner, TargetBindings::new(&UNCONFIGURED_BINDINGS, ())).await
 }
 
 /// Board selected independently from Platform.

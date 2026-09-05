@@ -14,20 +14,21 @@ Platform argument. `build` reads the Board's native physical layout and writes
 `target/barracuda-system.img`. `flash` requires that complete image to already
 exist and writes it only to the selected Board's native `system` partition.
 
-The shared Platform resolver checks the selected Board's chip and declared
-toolchain target, then chooses the internal Platform flasher. The runtime
-Platform build uses the same target-to-Platform registry, so system-image does
-not maintain its own chip mapping or Platform selection state.
+The shared Platform resolver discovers `platforms/*/platform.yml`, checks the
+selected Board's chip and declared toolchain target, and reads that Platform's
+`system-image` drivers. The runtime build and system-image tool therefore share
+the same filesystem catalog without a central chip or Platform registry.
 
-- macOS and Linux update the file-backed flash configured by that Platform's
-  `platform.yml`, preserving all other regions;
-- ESP Platforms call `espflash write-bin` at the partition-table offset;
-- STM32 Platforms call `probe-rs download` with the linker-defined absolute
-  base address.
+Layout drivers support file-region YAML, ESP-IDF partition CSV, linker
+`MEMORY`, or a Platform-local command returning the standard region response.
+Flash drivers either update a configured file-backed flash or execute a
+shell-free command template with Board chip, offset, size, layout, and image
+placeholders.
 
 Adding another Board that uses an existing Platform requires no new CLI
-configuration. A new Platform family adds one internal flasher and one native
-layout resolver while the CLI remains Board-selected.
+configuration. A new Platform declares its selection and image behavior in its
+own `platform.yml`; custom behavior can ship as a command inside that same
+Platform directory.
 
 Paths below the source directory are preserved relative to the mounted root;
 for example, `image/system/workflows.json` becomes

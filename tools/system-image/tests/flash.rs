@@ -42,7 +42,7 @@ fn select_host_board(root: &Path, chip: &str) {
     fs::write(
         platform.join("platform.yml"),
         format!(
-            "name: {chip}\ncrate: test_platform\ntype: TestPlatform\nsettings:\n  state-directory: .state-{chip}\n  flash-image: physical.flash\n"
+            "name: {chip}\npackage: test-platform-{chip}\ncrate: test_platform_{chip}\ntype: TestPlatform\nselection:\n  board-chips: [{chip}]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state-{chip}\n    flash-image: physical.flash\n"
         ),
     )
     .expect("Platform definition");
@@ -57,15 +57,15 @@ fn write_system_image(root: &Path, fill: u8, size: usize) {
 #[test]
 fn flashes_only_the_selected_partition_of_the_board_platform_file() {
     let root = tempdir().expect("temporary workspace");
-    select_host_board(root.path(), "macos");
+    select_host_board(root.path(), "hosta");
     write_system_image(root.path(), 0x5a, SYSTEM_SIZE);
-    let flash_path = root.path().join(".state-macos/physical.flash");
+    let flash_path = root.path().join(".state-hosta/physical.flash");
     fs::create_dir_all(flash_path.parent().expect("flash parent")).expect("state directory");
     fs::write(&flash_path, vec![0xa5; CAPACITY]).expect("physical flash");
 
     let flashed = flash_selected(root.path()).expect("flash selected System partition");
 
-    assert_eq!(flashed.board(), "local-macos");
+    assert_eq!(flashed.board(), "local-hosta");
     assert_eq!(flashed.image(), root.path().join(IMAGE_OUTPUT));
     assert_eq!(flashed.destination(), flash_path.display().to_string());
     assert_eq!(flashed.offset(), SYSTEM_OFFSET as u64);
@@ -85,7 +85,7 @@ fn flashes_only_the_selected_partition_of_the_board_platform_file() {
 #[test]
 fn initializes_a_missing_host_flash_as_erased_before_writing_the_partition() {
     let root = tempdir().expect("temporary workspace");
-    select_host_board(root.path(), "linux");
+    select_host_board(root.path(), "hostb");
     write_system_image(root.path(), 0x36, SYSTEM_SIZE);
 
     let flashed = flash_selected(root.path()).expect("flash selected System partition");
@@ -104,22 +104,22 @@ fn initializes_a_missing_host_flash_as_erased_before_writing_the_partition() {
 #[test]
 fn rejects_an_image_that_does_not_exactly_fill_the_selected_partition() {
     let root = tempdir().expect("temporary workspace");
-    select_host_board(root.path(), "macos");
+    select_host_board(root.path(), "hosta");
     write_system_image(root.path(), 0x11, SYSTEM_SIZE - 1);
 
     let error = flash_selected(root.path()).expect_err("wrong image size must fail");
 
     assert!(error.contains("8191 bytes"));
     assert!(error.contains("8192-byte"));
-    assert!(!root.path().join(".state-macos/physical.flash").exists());
+    assert!(!root.path().join(".state-hosta/physical.flash").exists());
 }
 
 #[test]
 fn rejects_a_host_flash_whose_capacity_disagrees_with_the_board_layout() {
     let root = tempdir().expect("temporary workspace");
-    select_host_board(root.path(), "linux");
+    select_host_board(root.path(), "hostb");
     write_system_image(root.path(), 0x22, SYSTEM_SIZE);
-    let flash_path = root.path().join(".state-linux/physical.flash");
+    let flash_path = root.path().join(".state-hostb/physical.flash");
     fs::create_dir_all(flash_path.parent().expect("flash parent")).expect("state directory");
     fs::write(&flash_path, vec![0x77; CAPACITY - 1]).expect("physical flash");
 

@@ -1,15 +1,14 @@
 # Boards
 
 `boards/` owns concrete product bundles, reusable built-in peripheral Drivers,
-Board HAL adapters, and the build-time tooling that turns their common YAML
-into static Rust data.
+and the build-time tooling that turns their common YAML into static Rust data.
+Platform-specific Board HAL code may live inside its owning Platform bundle.
 
 ```text
 boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
 |-- config/       # std-only YAML parsing, validation, and Rust generation
 |-- drivers/      # reusable semantic built-in peripheral Drivers
-|-- <board>/      # concrete Board HAL adapter when the Board has hardware
 `-- configs/
     `-- <board>/
         |-- board.yml
@@ -49,8 +48,10 @@ builtin-peripherals:
       active-low: true
 ```
 
-A Board that declares this surface must register a concrete Board HAL adapter
-in the selected composition. The build rejects declarations that would
+A Board that declares this surface must declare its concrete `board-hal`
+Cargo package, workspace-relative path, and exported type in `board.yml`. The
+path may point inside `platforms/<platform>/boards/`; no central selected-crate
+registry is edited. The build rejects hardware declarations that would
 otherwise be silently reduced to the empty HAL.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's
@@ -69,7 +70,7 @@ Select a concrete Board once, then use the ordinary build command:
 
 ```bash
 cargo board select
-cargo build
+cargo run
 ```
 
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
@@ -81,11 +82,10 @@ relevant generated build output. A build with no selection stops with the
 command needed to select one; it never guesses a Board from the Rust target.
 
 `boards/selected` does not infer a Board from the target OS or architecture.
-Platform selection remains independent in `platforms/selected`; the Rust target
-chooses the Platform. Device entry code constructs the exact typed Platform and
-Board bindings, and concrete binding constructors validate chip compatibility.
-Platform YAML remains beside its implementation at
-`platforms/<name>/platform.yml`.
+The build driver resolves the Board's chip and toolchain target against the
+self-described Platform catalog, then injects both implementation dependencies
+under stable aliases in an ignored generated workspace. Device entry code
+constructs the exact typed Platform and Board bindings.
 
 The repository currently provides reference Board bundles for the ESP32,
 ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog

@@ -1,3 +1,16 @@
 name: stm32
+package: barracuda-platform-stm32
 crate: barracuda_platform_stm32
 type: Stm32Platform
+selection:
+  board-chips:
+    - "stm32*"
+  targets:
+    - triple: "thumb*-none-eabi*"
+system-image:
+  layout:
+    driver: linker-memory
+  flash:
+    driver: command
+    program: probe-rs
+    arguments: [download, --chip, "{chip}", --binary-format, bin, --base-address, "{offset}", "{image}"]

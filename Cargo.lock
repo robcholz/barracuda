@@ -594,7 +594,6 @@ dependencies = [
  "barracuda-board",
  "barracuda-board-config",
  "barracuda-board-hal",
- "barracuda-board-stm32f429zi-nucleo",
  "embassy-executor",
 ]
 
@@ -619,6 +618,16 @@ dependencies = [
  "dialoguer",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-build"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "barracuda-platform-config",
+ "tempfile",
+ "toml_edit",
 ]
 
 [[package]]
@@ -969,6 +978,11 @@ dependencies = [
 [[package]]
 name = "barracuda-platform-config"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "yaml-peg",
+]
 
 [[package]]
 name = "barracuda-platform-esp32"
@@ -1148,18 +1162,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-platform",
  "barracuda-platform-config",
- "barracuda-platform-esp32",
- "barracuda-platform-esp32c3",
- "barracuda-platform-esp32c6",
- "barracuda-platform-esp32p4",
- "barracuda-platform-esp32s2",
- "barracuda-platform-esp32s3",
- "barracuda-platform-linux",
- "barracuda-platform-macos",
- "barracuda-platform-stm32",
  "embassy-executor",
- "serde",
- "yaml-peg",
 ]
 
 [[package]]
@@ -6045,6 +6048,7 @@ dependencies = [
  "indexmap",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

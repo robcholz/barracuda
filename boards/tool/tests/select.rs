@@ -52,7 +52,7 @@ fn select_persists_a_valid_board_for_the_next_build() {
     );
     assert_eq!(
         String::from_utf8(output).expect("UTF-8 output"),
-        "Selected Board `local-macos`.\nRun `cargo build` to build it.\n"
+        "Selected Board `local-macos`.\nRun `cargo run` to build and start it.\n"
     );
 }
 
@@ -189,7 +189,7 @@ fn cargo_config_exposes_board_without_replacing_builtin_build() {
 }
 
 #[test]
-fn normal_cargo_build_reaches_the_selected_target_composition() {
+fn normal_cargo_run_reaches_the_board_selected_build_driver() {
     let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
         .expect("workspace manifest");
     let default_members = manifest
@@ -198,7 +198,8 @@ fn normal_cargo_build_reaches_the_selected_target_composition() {
         .map(|(members, _after)| members)
         .expect("default members");
 
-    assert!(default_members.contains("apps/barracuda-cli"));
+    assert!(default_members.contains("tools/barracuda-build"));
+    assert!(!default_members.contains("apps/barracuda-cli"));
 }
 
 #[test]

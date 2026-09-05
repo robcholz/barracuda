@@ -9,12 +9,28 @@ use barracuda_system_image::{build_selected, selected_system_region};
 use tempfile::tempdir;
 
 fn select_board(root: &Path, name: &str, board: &str, artifact: &str, layout: &str) {
+    copy_platform_catalog(root);
     let bundle = root.join("boards/configs").join(name);
     fs::create_dir_all(&bundle).expect("Board bundle");
     fs::create_dir_all(root.join(".barracuda")).expect("selection directory");
     fs::write(root.join(".barracuda/selected-board"), format!("{name}\n")).expect("selected Board");
     fs::write(bundle.join("board.yml"), board).expect("Board definition");
     fs::write(bundle.join(artifact), layout).expect("native layout");
+}
+
+fn copy_platform_catalog(root: &Path) {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let catalog = fs::read_dir(workspace.join("platforms")).expect("Platform catalog");
+    for entry in catalog {
+        let entry = entry.expect("Platform entry");
+        let source = entry.path().join("platform.yml");
+        if !source.is_file() {
+            continue;
+        }
+        let destination = root.join("platforms").join(entry.file_name());
+        fs::create_dir_all(&destination).expect("Platform destination");
+        fs::copy(source, destination.join("platform.yml")).expect("Platform manifest");
+    }
 }
 
 #[test]
@@ -139,7 +155,7 @@ fn rejects_mismatched_and_unsupported_board_bundles() {
     );
     assert!(selected_system_region(root.path())
         .expect_err("unsupported layout")
-        .contains("no Barracuda Platform supports Board chip"));
+        .contains("no Platform matches Board chip `unknown`"));
 }
 
 #[test]
@@ -156,7 +172,7 @@ fn rejects_a_board_whose_toolchain_selects_an_incompatible_platform() {
     let error = selected_system_region(root.path()).expect_err("Platform mismatch must fail");
 
     assert!(error.contains("esp32c6"));
-    assert!(error.contains("esp32p4"));
+    assert!(error.contains("riscv32imafc-unknown-none-elf"));
 }
 
 #[test]

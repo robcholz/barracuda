@@ -1,18 +1,26 @@
 //! Platform-specific host-side System partition flashing.
 
-use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
 
-use serde::Deserialize;
+use barracuda_platform_config::CommandDriver;
+
+use crate::command::{self, DriverContext};
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum PlatformFlash {
-    File { platform: String, capacity: usize },
-    Esp { chip: String },
-    Stm32 { chip: String },
+    File {
+        state_directory: PathBuf,
+        flash_image: PathBuf,
+        capacity: usize,
+    },
+    Command {
+        platform_directory: PathBuf,
+        layout: PathBuf,
+        chip: String,
+        driver: CommandDriver,
+    },
 }
 
 pub(crate) struct FlashRequest<'a> {
@@ -40,8 +48,12 @@ pub(crate) fn flash(request: FlashRequest<'_>) -> Result<String, String> {
     }
 
     match request.platform {
-        PlatformFlash::File { platform, capacity } => {
-            let destination = host_flash_path(request.workspace, platform)?;
+        PlatformFlash::File {
+            state_directory,
+            flash_image,
+            capacity,
+        } => {
+            let destination = host_flash_path(request.workspace, state_directory, flash_image)?;
             write_file_partition(
                 &destination,
                 *capacity,
@@ -51,71 +63,39 @@ pub(crate) fn flash(request: FlashRequest<'_>) -> Result<String, String> {
             )?;
             Ok(destination.display().to_string())
         }
-        PlatformFlash::Esp { chip } => {
-            let command = esp_command(chip, request.offset, request.image);
-            run(command)?;
-            Ok(String::from("espflash"))
+        PlatformFlash::Command {
+            platform_directory,
+            layout,
+            chip,
+            driver,
+        } => {
+            let command = command::prepare(
+                driver,
+                DriverContext {
+                    workspace: request.workspace,
+                    platform: platform_directory,
+                    layout,
+                    chip,
+                    image: Some(request.image),
+                    offset: Some(request.offset),
+                    size: Some(request.size),
+                },
+            );
+            let destination = command.program.display().to_string();
+            command::status(&command)?;
+            Ok(destination)
         }
-        PlatformFlash::Stm32 { chip } => {
-            let command = stm32_command(chip, request.offset, request.image);
-            run(command)?;
-            Ok(String::from("probe-rs"))
-        }
     }
 }
 
-#[derive(Deserialize)]
-struct HostPlatformDocument {
-    name: String,
-    settings: HostPlatformSettings,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct HostPlatformSettings {
-    state_directory: PathBuf,
-    flash_image: PathBuf,
-}
-
-fn host_flash_path(workspace: &Path, platform: &str) -> Result<PathBuf, String> {
-    let definition = workspace
-        .join("platforms")
-        .join(platform)
-        .join("platform.yml");
-    let yaml = fs::read_to_string(&definition).map_err(|error| {
-        format!(
-            "failed to read selected Board Platform definition `{}`: {error}",
-            definition.display()
-        )
-    })?;
-    let mut documents =
-        yaml_peg::serde::from_str::<HostPlatformDocument>(&yaml).map_err(|error| {
-            format!(
-                "invalid Platform definition `{}`: {error}",
-                definition.display()
-            )
-        })?;
-    if documents.len() != 1 {
-        return Err(format!(
-            "Platform definition `{}` must contain one document, found {}",
-            definition.display(),
-            documents.len()
-        ));
-    }
-    let document = documents
-        .pop()
-        .ok_or_else(|| format!("Platform definition `{}` is empty", definition.display()))?;
-    if document.name != platform {
-        return Err(format!(
-            "Platform directory `{platform}` declares Platform `{}`",
-            document.name
-        ));
-    }
-    validate_relative_path(&document.settings.state_directory, "state-directory")?;
-    validate_relative_path(&document.settings.flash_image, "flash-image")?;
-    Ok(workspace
-        .join(document.settings.state_directory)
-        .join(document.settings.flash_image))
+fn host_flash_path(
+    workspace: &Path,
+    state_directory: &Path,
+    flash_image: &Path,
+) -> Result<PathBuf, String> {
+    validate_relative_path(state_directory, "state-directory")?;
+    validate_relative_path(flash_image, "flash-image")?;
+    Ok(workspace.join(state_directory).join(flash_image))
 }
 
 fn validate_relative_path(path: &Path, field: &str) -> Result<(), String> {
@@ -232,99 +212,4 @@ fn initialize_erased(
             destination.display()
         )
     })
-}
-
-struct FlashCommand {
-    program: &'static str,
-    arguments: Vec<OsString>,
-}
-
-fn esp_command(chip: &str, offset: u64, image: &Path) -> FlashCommand {
-    FlashCommand {
-        program: "espflash",
-        arguments: vec![
-            OsString::from("write-bin"),
-            OsString::from("--chip"),
-            OsString::from(chip),
-            OsString::from(format!("{offset:#x}")),
-            image.as_os_str().to_owned(),
-        ],
-    }
-}
-
-fn stm32_command(chip: &str, offset: u64, image: &Path) -> FlashCommand {
-    FlashCommand {
-        program: "probe-rs",
-        arguments: vec![
-            OsString::from("download"),
-            OsString::from("--chip"),
-            OsString::from(chip),
-            OsString::from("--binary-format"),
-            OsString::from("bin"),
-            OsString::from("--base-address"),
-            OsString::from(format!("{offset:#x}")),
-            image.as_os_str().to_owned(),
-        ],
-    }
-}
-
-fn run(command: FlashCommand) -> Result<(), String> {
-    let rendered = render_command(&command);
-    let status = Command::new(command.program)
-        .args(&command.arguments)
-        .status()
-        .map_err(|error| format!("failed to run `{rendered}`: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("`{rendered}` exited with {status}"))
-    }
-}
-
-fn render_command(command: &FlashCommand) -> String {
-    std::iter::once(OsString::from(command.program))
-        .chain(command.arguments.iter().cloned())
-        .map(|argument| argument.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use std::ffi::OsString;
-    use std::path::Path;
-
-    #[test]
-    fn esp_platform_uses_the_selected_board_chip_and_partition_offset() {
-        let command = super::esp_command("esp32c6", 0x52_0000, Path::new("system.img"));
-
-        assert_eq!(command.program, "espflash");
-        assert_eq!(
-            command.arguments,
-            ["write-bin", "--chip", "esp32c6", "0x520000", "system.img"].map(OsString::from)
-        );
-    }
-
-    #[test]
-    fn stm32_platform_uses_the_selected_board_chip_and_absolute_address() {
-        let command = super::stm32_command("stm32f429zi", 0x0812_0000, Path::new("system.img"));
-
-        assert_eq!(command.program, "probe-rs");
-        assert_eq!(
-            command.arguments,
-            [
-                "download",
-                "--chip",
-                "stm32f429zi",
-                "--binary-format",
-                "bin",
-                "--base-address",
-                "0x8120000",
-                "system.img",
-            ]
-            .map(OsString::from)
-        );
-    }
 }
