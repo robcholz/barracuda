@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "route": { "$ref": "#/$defs/route" },
+        "message_id": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "text": { "type": "string" }
+      },
+      "required": ["route", "message_id", "text"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "route": { "$ref": "#/$defs/route" },
+        "message_id": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "session": { "type": "string", "pattern": "^session-[0-9]+$", "maxLength": 32 }
+      },
+      "required": ["route", "message_id", "session"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "route": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "conversation_id": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "thread_id": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "required": ["channel", "conversation_id"],
+      "additionalProperties": false
+    }
+  }
+}

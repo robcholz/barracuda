@@ -750,6 +750,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-imessage-bridge-component"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-platform-test",
+ "barracuda-plugin-manager",
+ "embassy-sync 0.7.2",
+ "futures-lite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zerocopy",
+]
+
+[[package]]
+name = "barracuda-imessage-bridge-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-imessage-bridge-component",
+ "barracuda-platform-test",
+ "barracuda-plugin-api",
+ "barracuda-plugin-manager",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
+ "futures-lite",
+]
+
+[[package]]
 name = "barracuda-imessage-gateway-component"
 version = "0.1.0"
 dependencies = [
@@ -1344,6 +1374,7 @@ dependencies = [
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
  "barracuda-imessage-bluebubble-plugin",
+ "barracuda-imessage-bridge-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",
  "barracuda-imessage-qq-plugin",
