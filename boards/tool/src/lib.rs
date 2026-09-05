@@ -2,15 +2,19 @@
 
 use std::{
     collections::BTreeMap,
+    env,
+    ffi::OsString,
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    process::Command as ProcessCommand,
 };
 
 use barracuda_board_config::{
     parse, read_selected_board, validate_board_name, write_selected_board, BoardDefinition,
     ConfigError, SelectionError,
 };
+use barracuda_platform_config::{resolve_board_platform, ResolveError};
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, FuzzySelect};
 
@@ -82,6 +86,17 @@ pub enum Command {
         /// Board bundle name; defaults to the selected Board.
         name: Option<String>,
     },
+    /// Internal Cargo target runner installed by Board selection.
+    #[command(name = "__run", hide = true)]
+    Run {
+        /// Selected Platform name.
+        platform: String,
+        /// Cargo-produced executable.
+        application: PathBuf,
+        /// Arguments forwarded to the executable.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
+    },
 }
 
 /// Failure while selecting a Board bundle.
@@ -115,6 +130,9 @@ pub enum CommandError {
     /// A Board configuration is invalid.
     #[error(transparent)]
     Config(#[from] ConfigError),
+    /// The Board's Platform could not be resolved.
+    #[error(transparent)]
+    Platform(#[from] ResolveError),
     /// Persistent selection state is invalid or unavailable.
     #[error(transparent)]
     Selection(#[from] SelectionError),
@@ -170,6 +188,30 @@ pub enum CommandError {
         /// Second declared workspace-relative path.
         second: PathBuf,
     },
+    /// The local target runner executable could not be installed.
+    #[error("failed to install target runner `{path}`: {source}")]
+    RunnerInstall {
+        /// Runner path that could not be written.
+        path: PathBuf,
+        /// Underlying filesystem error.
+        #[source]
+        source: io::Error,
+    },
+    /// A directly executed Cargo tool could not be started.
+    #[error("failed to start selected executable `{path}`: {source}")]
+    RunnerStart {
+        /// Executable Cargo asked the runner to start.
+        path: PathBuf,
+        /// Underlying process error.
+        #[source]
+        source: io::Error,
+    },
+    /// A selected executable exited unsuccessfully.
+    #[error("selected executable exited with {0}")]
+    RunnerFailed(std::process::ExitStatus),
+    /// Platform launch orchestration failed.
+    #[error(transparent)]
+    PlatformLaunch(#[from] barracuda_platform_tool::CommandError),
 }
 
 /// Runs the workspace Board command against `workspace_root`.
@@ -251,6 +293,36 @@ where
             print_target(workspace_root, &name, output)
         }
         Command::Target { name: Some(name) } => print_target(workspace_root, &name, output),
+        Command::Run {
+            platform,
+            application,
+            arguments,
+        } => run_selected_application(workspace_root, &platform, &application, &arguments),
+    }
+}
+
+fn run_selected_application(
+    workspace_root: &Path,
+    platform: &str,
+    application: &Path,
+    arguments: &[OsString],
+) -> Result<(), CommandError> {
+    let status = if application.file_stem().and_then(|name| name.to_str()) == Some("barracuda") {
+        barracuda_platform_tool::launch(workspace_root, platform, application, arguments)?
+    } else {
+        ProcessCommand::new(application)
+            .args(arguments)
+            .current_dir(workspace_root)
+            .status()
+            .map_err(|source| CommandError::RunnerStart {
+                path: application.to_owned(),
+                source,
+            })?
+    };
+    if status.success() {
+        Ok(())
+    } else {
+        Err(CommandError::RunnerFailed(status))
     }
 }
 
@@ -486,9 +558,126 @@ fn select_board<W: Write>(
         });
     }
 
+    write_selected_build(workspace_root, &board)?;
     write_selected_board(workspace_root, name)?;
     writeln!(output, "Selected Board `{name}`.").map_err(CommandError::Output)?;
     writeln!(output, "Run `cargo run` to build and start it.").map_err(CommandError::Output)
+}
+
+fn write_selected_build(
+    workspace_root: &Path,
+    board: &BoardDefinition,
+) -> Result<(), CommandError> {
+    let platform = resolve_board_platform(
+        workspace_root,
+        board.hardware().chip(),
+        board.toolchain().map(|toolchain| toolchain.target()),
+    )?;
+    let platform_dependency = if board.platform_features().is_empty() {
+        format!("{}.workspace = true", platform.package())
+    } else {
+        let features = board
+            .platform_features()
+            .iter()
+            .map(|feature| format!("{feature:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{} = {{ workspace = true, features = [{}] }}",
+            platform.package(),
+            features
+        )
+    };
+    replace_file_block(
+        &workspace_root.join("platforms/selected/Cargo.toml"),
+        "# BEGIN GENERATED SELECTED PLATFORM",
+        "# END GENERATED SELECTED PLATFORM",
+        &platform_dependency,
+    )?;
+    let board_hal_dependency = board.board_hal().map_or_else(String::new, |board_hal| {
+        format!("{}.workspace = true", board_hal.package())
+    });
+    replace_file_block(
+        &workspace_root.join("boards/selected/Cargo.toml"),
+        "# BEGIN GENERATED SELECTED BOARD HAL",
+        "# END GENERATED SELECTED BOARD HAL",
+        &board_hal_dependency,
+    )?;
+
+    let host = barracuda_platform_tool::host_tuple(workspace_root)?;
+    let target = board
+        .toolchain()
+        .map_or(host.as_str(), |toolchain| toolchain.target());
+    let mut cargo = format!(
+        "# Generated by `cargo board select`; do not edit.\n\n[build]\ntarget = {target:?}\n"
+    );
+    if platform.application().launcher().is_some() {
+        let runner = install_runner(workspace_root, &host)?;
+        cargo.push_str(&format!(
+            "\n[target.{target}]\nrunner = [{:?}, \"__run\", {:?}, \"--\"]\n",
+            runner.to_string_lossy(),
+            platform.name()
+        ));
+    }
+    write_file(&workspace_root.join(".barracuda/cargo.toml"), &cargo)?;
+    write_file(
+        &workspace_root.join(".barracuda/selected-platform"),
+        &format!("{}\n", platform.name()),
+    )
+}
+
+fn install_runner(workspace_root: &Path, host: &str) -> Result<PathBuf, CommandError> {
+    let executable = env::current_exe().map_err(|source| CommandError::RunnerInstall {
+        path: PathBuf::from("current executable"),
+        source,
+    })?;
+    let workspace_root =
+        workspace_root
+            .canonicalize()
+            .map_err(|source| CommandError::RunnerInstall {
+                path: workspace_root.to_owned(),
+                source,
+            })?;
+    let runner = workspace_root
+        .join(".barracuda/bin")
+        .join(format!("barracuda-runner{}", env::consts::EXE_SUFFIX));
+    let parent = runner.parent().unwrap_or(&workspace_root);
+    fs::create_dir_all(parent).map_err(|source| CommandError::RunnerInstall {
+        path: parent.to_owned(),
+        source,
+    })?;
+    let temporary = runner.with_extension(format!("{host}.new"));
+    fs::copy(&executable, &temporary).map_err(|source| CommandError::RunnerInstall {
+        path: temporary.clone(),
+        source,
+    })?;
+    fs::rename(&temporary, &runner).map_err(|source| CommandError::RunnerInstall {
+        path: runner.clone(),
+        source,
+    })?;
+    Ok(runner)
+}
+
+fn replace_file_block(path: &Path, begin: &str, end: &str, body: &str) -> Result<(), CommandError> {
+    let old = fs::read_to_string(path).map_err(|source| CommandError::Read {
+        path: path.to_owned(),
+        source,
+    })?;
+    let new = replace_block(&old, begin, end, body)?;
+    write_file(path, &new)
+}
+
+fn write_file(path: &Path, contents: &str) -> Result<(), CommandError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|source| CommandError::Read {
+            path: parent.to_owned(),
+            source,
+        })?;
+    }
+    fs::write(path, contents).map_err(|source| CommandError::Read {
+        path: path.to_owned(),
+        source,
+    })
 }
 
 #[cfg(test)]
@@ -513,6 +702,29 @@ mod tests {
         )
         .expect("Board YAML");
         fs::write(directory.join("layout.yml"), "layout\n").expect("native layout");
+        add_selection_files(root);
+    }
+
+    fn add_selection_files(root: &Path) {
+        let platform = root.join("platforms/test");
+        fs::create_dir_all(&platform).expect("Platform directory");
+        fs::write(
+            platform.join("platform.yml"),
+            "name: test\npackage: barracuda-platform-test\ncrate: barracuda_platform_test\ntype: TestPlatform\nselection:\n  board-chips: [test]\n  targets:\n    - os: test\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+        )
+        .expect("Platform manifest");
+        fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");
+        fs::write(
+            root.join("platforms/selected/Cargo.toml"),
+            "# BEGIN GENERATED SELECTED PLATFORM\nold\n# END GENERATED SELECTED PLATFORM\n",
+        )
+        .expect("selected Platform manifest");
+        fs::create_dir_all(root.join("boards/selected")).expect("selected Board directory");
+        fs::write(
+            root.join("boards/selected/Cargo.toml"),
+            "# BEGIN GENERATED SELECTED BOARD HAL\nold\n# END GENERATED SELECTED BOARD HAL\n",
+        )
+        .expect("selected Board manifest");
     }
 
     fn add_board_hal(root: &Path, name: &str, package: &str, path: &str) {

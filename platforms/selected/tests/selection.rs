@@ -13,33 +13,32 @@ fn selected_platform_exports_no_board() -> Result<(), std::io::Error> {
 }
 
 #[test]
-fn source_workspace_uses_only_the_non_runnable_placeholder() {
-    assert_eq!(barracuda_platform_selected::PLATFORM_NAME, "unconfigured");
+fn source_workspace_uses_the_persisted_platform_selection() {
+    assert_eq!(barracuda_platform_selected::PLATFORM_NAME, "macos");
 }
 
 #[test]
-fn selected_platform_uses_the_shared_host_resolver() -> Result<(), std::io::Error> {
+fn selected_platform_uses_only_its_persisted_axis() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
 
-    assert!(selection.contains("barracuda_platform_config::resolve_platform"));
-    assert!(selection.contains("barracuda_selected_platform_implementation"));
+    assert!(selection.contains("barracuda_platform_config::discover_platforms"));
+    assert!(selection.contains(".barracuda/selected-platform"));
+    assert!(!selection.contains("selected-board"));
+    assert!(!selection.contains("barracuda_board"));
     assert!(!selection.contains("fn default_platform"));
     assert!(!selection.contains("fn validate_target"));
     Ok(())
 }
 
 #[test]
-fn selected_manifest_has_no_concrete_platform_dependencies() -> Result<(), std::io::Error> {
+fn selected_manifest_contains_only_the_generated_concrete_dependency() -> Result<(), std::io::Error>
+{
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    for concrete in [
-        "barracuda-platform-macos",
-        "barracuda-platform-linux",
-        "barracuda-platform-esp32",
-        "barracuda-platform-stm32",
-    ] {
-        assert!(!manifest.contains(concrete));
-    }
+    assert!(manifest.contains("# BEGIN GENERATED SELECTED PLATFORM"));
+    assert!(manifest.contains("barracuda-platform-macos.workspace = true"));
+    assert!(!manifest.contains("barracuda-platform-linux"));
+    assert!(!manifest.contains("barracuda-platform-stm32"));
     Ok(())
 }

@@ -1,8 +1,8 @@
 //! `cargo platform` workspace maintenance commands.
 
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{env, ffi::OsString, path::PathBuf, process::ExitCode};
 
-use barracuda_platform_tool::{sync_with_report, SyncStatus};
+use barracuda_platform_tool::{launch, sync_with_report, SyncStatus};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -19,6 +19,16 @@ enum Command {
         /// Check whether generated files are current without writing them.
         #[arg(long)]
         check: bool,
+    },
+    /// Launch an application through one Platform's declared runner.
+    Launch {
+        /// Registered Platform name.
+        platform: String,
+        /// Application executable produced by Cargo.
+        application: PathBuf,
+        /// Arguments forwarded to the application launcher.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
     },
 }
 
@@ -37,6 +47,22 @@ fn main() -> ExitCode {
                 );
                 ExitCode::SUCCESS
             }
+            Err(error) => {
+                eprintln!("error: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::Launch {
+            platform,
+            application,
+            arguments,
+        } => match launch(&root, &platform, &application, &arguments) {
+            Ok(status) => ExitCode::from(
+                status
+                    .code()
+                    .and_then(|code| u8::try_from(code).ok())
+                    .unwrap_or(1),
+            ),
             Err(error) => {
                 eprintln!("error: {error}");
                 ExitCode::FAILURE

@@ -74,13 +74,12 @@ cargo run
 
 The first command opens a colored Board list. Use the arrow keys to move, type
 to fuzzy-search, and press Enter to select. It validates the Board bundle and
-records the selection in ignored local state at
-`.barracuda/selected-board`. Ordinary `cargo run` starts the Board-selected
-build driver. It discovers the Platform from `platforms/*/platform.yml`,
-creates an ignored build workspace below `target/`, injects stable aliases for
-the selected Platform and optional Board HAL, and then runs `barracuda`.
-Use `cargo barracuda build` to compile the selected target without running it.
-Neither command accepts a Board or Platform argument.
+records the selection in ignored local state. It resolves the matching
+self-described Platform, updates the static selected-Platform and
+selected-Board-HAL dependency blocks, and writes the target and runner
+configuration locally. After that, ordinary `cargo build` and `cargo run`
+operate directly on the selected application through native Cargo; there is no
+Board-aware build wrapper.
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
@@ -94,8 +93,19 @@ read from the environment at runtime.
 
 Automation can bypass the prompt with `cargo board select <board-name>`.
 
+When adding a Platform or Board HAL, maintainers update the tracked registries
+once and commit the generated blocks:
+
+```bash
+cargo platform sync
+cargo board sync
+```
+
+CI can validate them without writing through the corresponding `--check`
+forms. Pulling an up-to-date commit never requires an additional sync step.
+
 Available Board names are the directory names under `boards/configs/`. A
-device Board's `toolchain.target` is passed to the generated Cargo build; host
+device Board's `toolchain.target` becomes the local Cargo build target; host
 Boards omit it.
 
 The memory profiler is an executable workload rather than a throughput
