@@ -719,39 +719,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-gateway-agent-component"
-version = "0.1.0"
-dependencies = [
- "barracuda-agent-component",
- "barracuda-agent-runtime",
- "barracuda-event-router",
- "barracuda-imessage-gateway-component",
- "barracuda-model-api",
- "barracuda-platform-test",
- "embassy-time",
- "futures-lite",
- "gateway",
- "http-client",
- "serde_json",
- "static_cell",
- "thiserror 2.0.18",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-gateway-agent-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-gateway-agent-component",
- "barracuda-imessage-gateway-plugin",
- "barracuda-platform-test",
- "barracuda-plugin-api",
- "barracuda-plugin-manager",
- "futures-lite",
-]
-
-[[package]]
 name = "barracuda-gpio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1419,7 +1386,6 @@ dependencies = [
  "barracuda-captive-portal-plugin",
  "barracuda-event-router",
  "barracuda-file-plugin",
- "barracuda-gateway-agent-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
