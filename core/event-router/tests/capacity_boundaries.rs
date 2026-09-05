@@ -58,6 +58,10 @@ struct FanoutComponent {
 }
 
 impl Component<FRAME_CAPACITY> for FanoutComponent {
+    fn name(&self) -> &'static str {
+        "fanout"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,

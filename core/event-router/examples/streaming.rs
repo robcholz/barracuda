@@ -63,6 +63,10 @@ struct StreamingDemo {
 }
 
 impl Component<FRAME_SIZE> for StreamingDemo {
+    fn name(&self) -> &'static str {
+        "streaming-demo"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let collected = Rc::clone(&self.state.collected);
         context.register_json::<Collect, _>(

@@ -53,6 +53,10 @@ struct CatalogLoader {
 }
 
 impl Component<FRAME_CAPACITY> for CatalogLoader {
+    fn name(&self) -> &'static str {
+        "catalog-loader"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,

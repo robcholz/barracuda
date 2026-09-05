@@ -88,6 +88,10 @@ struct Producer<const N: usize, const M: usize, const P: usize> {
 }
 
 impl<const N: usize, const M: usize, const P: usize> Component<M> for Producer<N, M, P> {
+    fn name(&self) -> &'static str {
+        "throughput-producer"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         if !self.matched {
             return Ok(());

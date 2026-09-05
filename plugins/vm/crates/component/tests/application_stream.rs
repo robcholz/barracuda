@@ -85,6 +85,10 @@ struct Driver {
 }
 
 impl Component<FRAME_SIZE> for Driver {
+    fn name(&self) -> &'static str {
+        "driver"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         let observed = Rc::clone(&self.observed);
         context.register_json::<RecordOutput, _>(

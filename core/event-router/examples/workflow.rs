@@ -89,6 +89,10 @@ struct WorkflowDemo {
 }
 
 impl Component<FRAME_SIZE> for WorkflowDemo {
+    fn name(&self) -> &'static str {
+        "workflow-demo"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         context.register_json::<Produce, _>(
             "*",

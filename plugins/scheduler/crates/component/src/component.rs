@@ -140,6 +140,10 @@ impl<Storage, const M: usize> Component<M> for SchedulerComponent<Storage>
 where
     Storage: PluginStorage,
 {
+    fn name(&self) -> &'static str {
+        "scheduler"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<Schedule, _>(
             "*",

@@ -59,6 +59,10 @@ struct Producer {
 }
 
 impl Component<FRAME_CAPACITY> for Producer {
+    fn name(&self) -> &'static str {
+        "producer"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,

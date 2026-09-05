@@ -39,6 +39,10 @@ impl AgentComponent {
 }
 
 impl<const M: usize> Component<M> for AgentComponent {
+    fn name(&self) -> &'static str {
+        "agent-runtime"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<NewSession, _>(
             "system",

@@ -108,6 +108,10 @@ impl WebSearchComponent {
 }
 
 impl<const M: usize> Component<M> for WebSearchComponent {
+    fn name(&self) -> &'static str {
+        "web-search"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_json::<WebSearch, _>(
             "*",

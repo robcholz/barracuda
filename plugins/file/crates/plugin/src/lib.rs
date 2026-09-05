@@ -106,6 +106,10 @@ struct FileComponent {
 }
 
 impl<const M: usize> Component<M> for FileComponent {
+    fn name(&self) -> &'static str {
+        "file"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context
             .register_json::<FileRead, _>("*", rpc::read_handler(Rc::clone(&self.filesystem)))?;

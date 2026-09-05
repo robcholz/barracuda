@@ -49,6 +49,10 @@ struct WorkflowInstaller {
 }
 
 impl Component<FRAME_SIZE> for WorkflowInstaller {
+    fn name(&self) -> &'static str {
+        "workflow-installer"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         // Register the step endpoint so `workflow.load` can validate the link.
         context.register_json::<Record, _>(
@@ -80,6 +84,10 @@ struct WorkflowUninstaller {
 }
 
 impl Component<FRAME_SIZE> for WorkflowUninstaller {
+    fn name(&self) -> &'static str {
+        "workflow-uninstaller"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         Ok(())
     }

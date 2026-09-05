@@ -84,6 +84,10 @@ Workflow links.
 
 ```rust
 impl Component<M> for MyComponent {
+    fn name(&self) -> &'static str {
+        "my-component"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context.register_rpc::<SetLevel, _>(|_context, request: RpcFrame<SetLevelRequest>| async move {
             Ok(Ok(())) // or Ok(Err(SetLevelError::...))
@@ -93,6 +97,10 @@ impl Component<M> for MyComponent {
     // run / unregister as needed
 }
 ```
+
+A Component name is a stable, human-readable type name used in lifecycle
+diagnostics. Multiple loaded instances may share a name; the `ComponentId`
+returned by `load` uniquely identifies each instance.
 
 A handler receives the call's `RpcContext` and an `RpcFrame<Request>`. Streaming
 inputs arrive as an `RpcStream<RpcFrame<Request>>`.

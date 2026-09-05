@@ -135,6 +135,10 @@ impl GatewayComponent {
 }
 
 impl<const M: usize> Component<M> for GatewayComponent {
+    fn name(&self) -> &'static str {
+        "imessage-gateway"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         context
             .register_json::<GatewaySend, _>("*", gateway_send_handler(Rc::clone(&self.gateway)))?;
@@ -168,6 +172,10 @@ pub struct GatewayInboundComponent {
 }
 
 impl<const M: usize> Component<M> for GatewayInboundComponent {
+    fn name(&self) -> &'static str {
+        "imessage-gateway-inbound"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         Ok(())
     }
@@ -203,6 +211,10 @@ pub struct GatewayTextStreamComponent {
 }
 
 impl<const M: usize> Component<M> for GatewayTextStreamComponent {
+    fn name(&self) -> &'static str {
+        "imessage-gateway-text-stream"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         Ok(())
     }
@@ -237,6 +249,10 @@ pub struct GatewayMediaStreamComponent {
 }
 
 impl<const M: usize> Component<M> for GatewayMediaStreamComponent {
+    fn name(&self) -> &'static str {
+        "imessage-gateway-media-stream"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         Ok(())
     }

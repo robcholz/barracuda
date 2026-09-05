@@ -153,6 +153,10 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for PendingComponent {
+        fn name(&self) -> &'static str {
+            "pending"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
