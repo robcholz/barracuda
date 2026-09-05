@@ -5,7 +5,7 @@ members = [
     "boards/config",
     "drivers/indicator-led",
     "boards/tool",
-    "boards/stm32f429zi-nucleo",
+    "boards/configs/*/hal",
     "bench/crates/*",
     "composition/*",
     "core/event-router",
@@ -37,7 +37,7 @@ barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
 # BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES
-barracuda-board-stm32f429zi-nucleo = { path = "boards/stm32f429zi-nucleo" }
+barracuda-board-stm32f429zi-nucleo = { path = "boards/configs/stm32f429zi-nucleo/hal" }
 # END GENERATED BOARD WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
