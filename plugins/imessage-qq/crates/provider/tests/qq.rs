@@ -7,7 +7,7 @@
 
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
-use gateway::{MessageChannel, MessageTarget, SendMessageRequest};
+use gateway::{MessageChannel, MessageTarget, SendMessageRequest, TextChunk};
 use http_client::ClientFactory;
 use qq::{QQConfig, QQ};
 use std::{boxed::Box, rc::Rc};
@@ -64,7 +64,10 @@ fn maps_group_channel_and_stream_destinations() {
             ))
             .await
             .expect("group send");
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([
+            Ok(TextChunk::inline("hel").expect("chunk fits inline storage")),
+            Ok(TextChunk::inline("lo").expect("chunk fits inline storage")),
+        ]);
         channel
             .send_message(SendMessageRequest::stream(
                 MessageTarget::new("qq", "channel:42"),

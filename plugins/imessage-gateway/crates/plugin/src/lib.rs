@@ -75,9 +75,17 @@ impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
         Storage: barracuda_plugin_manager::PluginStorage,
     {
         let gateway = Rc::new(MessageGateway::new());
-        let (component, ingress) =
-            GatewayComponent::new(gateway.as_ref().clone(), GATEWAY_INGRESS_CAPACITY);
+        let (component, ingress, runtime) =
+            GatewayComponent::new::<M>(gateway.as_ref().clone(), GATEWAY_INGRESS_CAPACITY);
         context.event_router.load(component)?;
+        let (inbound, text, media) = runtime.into_parts();
+        context.event_router.load(inbound)?;
+        for worker in text {
+            context.event_router.load(worker)?;
+        }
+        for worker in media {
+            context.event_router.load(worker)?;
+        }
         context.provide(Rc::new(IMessageGateway { gateway, ingress }))?;
         Ok(())
     }
@@ -125,7 +133,7 @@ mod tests {
                 .expect("register IMessage Gateway Plugin");
             manager.start(&mut router).expect("start Plugins");
 
-            assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
+            assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(10));
         });
     }
 }

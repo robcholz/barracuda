@@ -1,16 +1,16 @@
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
+use alloc::string::String;
+use core::fmt;
 
-use barracuda_event_router::{rpc_message, Event, Streaming};
+use barracuda_event_router::{Event, EventEmitter, JsonPayload, RpcError};
 use serde::{Deserialize, Serialize};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
+use crate::json::{
+    bounded_json_prefix, encoded_json_len, event_input_capacity, valid_required,
+    write_encoded_json, write_json_string, EncodedJson,
+};
 use crate::route::GatewayRoute;
-use crate::wire::{GatewayText, GatewayWireError};
 
-const TEXT_CAPACITY: usize = 508;
-
-/// Gateway-owned logical payload of `gateway.message.received`.
+/// Gateway-owned logical inbound message published by channel providers.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct GatewayInboundMessage {
     /// Origin route and conversation identity.
@@ -21,199 +21,196 @@ pub struct GatewayInboundMessage {
     pub text: String,
 }
 
-/// Semantic field carried by one [`GatewayEventFrame`].
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum GatewayEventField {
-    /// Registered message-channel name.
-    Channel,
-    /// Provider conversation identifier.
-    Conversation,
-    /// Optional provider thread identifier.
-    Thread,
-    /// Provider-assigned message identifier.
-    MessageId,
-    /// More text belongs to the same inbound message.
-    TextMore,
-    /// This frame completes the inbound message text.
-    TextComplete,
-}
-
-/// One typed frame carrying part of a `gateway.message.received` Event.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GatewayEventFrame {
-    text: GatewayText<TEXT_CAPACITY>,
-    field: GatewayEventField,
-}
-
-impl GatewayEventFrame {
-    fn new(field: GatewayEventField, text: &str) -> Result<Self, GatewayWireError> {
-        Ok(Self {
-            text: GatewayText::new(text)?,
-            field,
-        })
-    }
-
-    fn text(&self) -> Result<&str, GatewayWireError> {
-        self.text.as_str()
-    }
-}
-
-/// Event emitted for each normalized inbound text message.
+/// Bounded JSON Event emitted for normalized inbound message data.
 pub struct GatewayMessageReceived;
 
 impl Event for GatewayMessageReceived {
     const ID: &'static str = "gateway.message.received";
-    type Message = GatewayEventFrame;
-    type Input = Streaming;
 }
 
-/// Encodes one normalized inbound message into typed Event frames.
-///
-/// # Errors
-///
-/// Returns a wire error when route metadata cannot fit in one frame or message
-/// text contains a NUL byte.
-pub fn frames_from_gateway_event(
-    value: &GatewayInboundMessage,
-) -> Result<Vec<GatewayEventFrame>, GatewayWireError> {
-    let mut frames = Vec::new();
-    frames.push(GatewayEventFrame::new(
-        GatewayEventField::Channel,
-        &value.route.channel,
-    )?);
-    frames.push(GatewayEventFrame::new(
-        GatewayEventField::Conversation,
-        &value.route.conversation_id,
-    )?);
-    if let Some(thread_id) = &value.route.thread_id {
-        frames.push(GatewayEventFrame::new(
-            GatewayEventField::Thread,
-            thread_id,
-        )?);
-    }
-    frames.push(GatewayEventFrame::new(
-        GatewayEventField::MessageId,
-        &value.message_id,
-    )?);
-    push_text_frames(&mut frames, &value.text)?;
-    Ok(frames)
+pub(crate) fn validate_inbound(message: &GatewayInboundMessage, event_input_bytes: usize) -> bool {
+    valid_required(&message.route.channel)
+        && valid_required(&message.route.conversation_id)
+        && valid_required(&message.message_id)
+        && InboundEvent::start(1, message)
+            .encoded_len()
+            .is_ok_and(|length| length <= event_input_bytes)
 }
 
-/// Decodes typed Event frames into one normalized inbound message.
-///
-/// # Errors
-///
-/// Returns a wire error when fields are missing, duplicated, out of order, or
-/// contain invalid text.
-pub fn gateway_event_from_frames(
-    frames: impl IntoIterator<Item = GatewayEventFrame>,
-) -> Result<GatewayInboundMessage, GatewayWireError> {
-    let mut channel = None;
-    let mut conversation = None;
-    let mut thread = None;
-    let mut message_id = None;
-    let mut text = String::new();
-    let mut text_started = false;
-    let mut text_complete = false;
-
-    for frame in frames {
-        if text_complete {
-            return Err(GatewayWireError::InvalidRequest);
-        }
-        let value = frame.text()?;
-        match frame.field {
-            GatewayEventField::Channel if channel.is_none() && !text_started => {
-                channel = Some(value.to_string());
-            }
-            GatewayEventField::Conversation if conversation.is_none() && !text_started => {
-                conversation = Some(value.to_string());
-            }
-            GatewayEventField::Thread if thread.is_none() && !text_started => {
-                thread = Some(value.to_string());
-            }
-            GatewayEventField::MessageId if message_id.is_none() && !text_started => {
-                message_id = Some(value.to_string());
-            }
-            GatewayEventField::TextMore => {
-                text_started = true;
-                text.push_str(value);
-            }
-            GatewayEventField::TextComplete => {
-                text_started = true;
-                text.push_str(value);
-                text_complete = true;
-            }
-            _ => return Err(GatewayWireError::InvalidRequest),
-        }
+pub(crate) async fn emit_inbound<const M: usize>(
+    emitter: &EventEmitter<M>,
+    stream_id: u64,
+    message: &GatewayInboundMessage,
+) -> Result<(), barracuda_event_router::EmitError> {
+    let input_capacity = event_input_capacity::<M>(GatewayMessageReceived::ID)?;
+    let complete = InboundEvent::complete(stream_id, message);
+    if complete
+        .encoded_len()
+        .is_ok_and(|length| length <= input_capacity)
+    {
+        return emitter.emit::<GatewayMessageReceived>(&complete).await;
     }
 
-    if !text_complete {
-        return Err(GatewayWireError::InvalidRequest);
+    emitter
+        .emit::<GatewayMessageReceived>(&InboundEvent::start(stream_id, message))
+        .await?;
+    let mut remaining = message.text.as_str();
+    let mut sequence = 1_u32;
+    while !remaining.is_empty() {
+        let empty = InboundEvent::chunk(stream_id, sequence, "").encoded_len()?;
+        let available = input_capacity
+            .checked_sub(empty)
+            .ok_or(RpcError::FrameTooLarge {
+                size: empty,
+                capacity: input_capacity,
+            })?;
+        let chunk = bounded_json_prefix(remaining, available);
+        if chunk.is_empty() {
+            return Err(barracuda_event_router::EmitError::Rpc(
+                RpcError::InvalidFrameState,
+            ));
+        }
+        emitter
+            .emit::<GatewayMessageReceived>(&InboundEvent::chunk(stream_id, sequence, chunk))
+            .await?;
+        remaining = remaining
+            .get(chunk.len()..)
+            .ok_or(barracuda_event_router::EmitError::Rpc(
+                RpcError::InvalidFrameState,
+            ))?;
+        sequence = sequence.saturating_add(1);
     }
-    Ok(GatewayInboundMessage {
-        route: GatewayRoute {
-            channel: channel.ok_or(GatewayWireError::InvalidRequest)?,
-            conversation_id: conversation.ok_or(GatewayWireError::InvalidRequest)?,
-            thread_id: thread,
-        },
-        message_id: message_id.ok_or(GatewayWireError::InvalidRequest)?,
-        text,
-    })
+    emitter
+        .emit::<GatewayMessageReceived>(&InboundEvent::finish(stream_id, sequence))
+        .await
 }
 
-fn push_text_frames(
-    frames: &mut Vec<GatewayEventFrame>,
-    text: &str,
-) -> Result<(), GatewayWireError> {
-    if text.as_bytes().contains(&0) {
-        return Err(GatewayWireError::EmbeddedNul);
-    }
-    let chunks = utf8_chunks(text, TEXT_CAPACITY.saturating_sub(1));
-    let last = chunks.len().saturating_sub(1);
-    for (index, chunk) in chunks.into_iter().enumerate() {
-        let field = if index == last {
-            GatewayEventField::TextComplete
-        } else {
-            GatewayEventField::TextMore
-        };
-        frames.push(GatewayEventFrame::new(field, chunk)?);
-    }
-    Ok(())
+enum InboundPhase<'a> {
+    Complete(&'a GatewayInboundMessage),
+    Start(&'a GatewayInboundMessage),
+    Chunk(&'a str),
+    Finish,
 }
 
-fn utf8_chunks(value: &str, capacity: usize) -> Vec<&str> {
-    if value.is_empty() {
-        return alloc::vec![""];
+struct InboundEvent<'a> {
+    stream_id: u64,
+    sequence: u32,
+    phase: InboundPhase<'a>,
+}
+
+impl<'a> InboundEvent<'a> {
+    const fn complete(stream_id: u64, message: &'a GatewayInboundMessage) -> Self {
+        Self {
+            stream_id,
+            sequence: 0,
+            phase: InboundPhase::Complete(message),
+        }
     }
-    let mut chunks = Vec::new();
-    let mut start = 0;
-    while start < value.len() {
-        let mut end = core::cmp::min(start.saturating_add(capacity), value.len());
-        while !value.is_char_boundary(end) {
-            end = end.saturating_sub(1);
+
+    const fn start(stream_id: u64, message: &'a GatewayInboundMessage) -> Self {
+        Self {
+            stream_id,
+            sequence: 0,
+            phase: InboundPhase::Start(message),
         }
-        if end == start {
-            break;
-        }
-        if let Some(chunk) = value.get(start..end) {
-            chunks.push(chunk);
-        }
-        start = end;
     }
-    chunks
+
+    const fn chunk(stream_id: u64, sequence: u32, text: &'a str) -> Self {
+        Self {
+            stream_id,
+            sequence,
+            phase: InboundPhase::Chunk(text),
+        }
+    }
+
+    const fn finish(stream_id: u64, sequence: u32) -> Self {
+        Self {
+            stream_id,
+            sequence,
+            phase: InboundPhase::Finish,
+        }
+    }
+
+    fn write_route(writer: &mut impl fmt::Write, message: &GatewayInboundMessage) -> fmt::Result {
+        writer.write_str(",\"route\":{\"channel\":")?;
+        write_json_string(writer, &message.route.channel)?;
+        writer.write_str(",\"conversation_id\":")?;
+        write_json_string(writer, &message.route.conversation_id)?;
+        if let Some(thread_id) = &message.route.thread_id {
+            writer.write_str(",\"thread_id\":")?;
+            write_json_string(writer, thread_id)?;
+        }
+        writer.write_str("},\"message_id\":")?;
+        write_json_string(writer, &message.message_id)
+    }
+}
+
+impl EncodedJson for InboundEvent<'_> {
+    fn encode(&self, writer: &mut impl fmt::Write) -> fmt::Result {
+        write!(
+            writer,
+            "{{\"stream_id\":{},\"sequence\":{},",
+            self.stream_id, self.sequence
+        )?;
+        match self.phase {
+            InboundPhase::Complete(message) => {
+                writer.write_str("\"phase\":\"complete\",\"terminal\":true")?;
+                Self::write_route(writer, message)?;
+                writer.write_str(",\"text\":")?;
+                write_json_string(writer, &message.text)?;
+            }
+            InboundPhase::Start(message) => {
+                writer.write_str("\"phase\":\"start\",\"terminal\":false")?;
+                Self::write_route(writer, message)?;
+            }
+            InboundPhase::Chunk(text) => {
+                writer.write_str("\"phase\":\"chunk\",\"terminal\":false,\"text\":")?;
+                write_json_string(writer, text)?;
+            }
+            InboundPhase::Finish => {
+                writer.write_str("\"phase\":\"finish\",\"terminal\":true")?;
+            }
+        }
+        writer.write_char('}')
+    }
+}
+
+impl JsonPayload for InboundEvent<'_> {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        encoded_json_len(self)
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        self.encoded_len()?;
+        write_encoded_json(self, destination)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use alloc::string::String;
+
+    use barracuda_event_router::{Event, JsonPayload};
+
+    use super::{GatewayMessageReceived, InboundEvent};
+    use crate::json::{bounded_json_prefix, event_input_capacity};
+
+    #[test]
+    fn inbound_chunk_uses_the_actual_event_lane_budget() {
+        let input_capacity = event_input_capacity::<512>(GatewayMessageReceived::ID)
+            .expect("512-byte Event lane fits its envelope");
+        let empty = InboundEvent::chunk(1, 1, "")
+            .encoded_len()
+            .expect("empty chunk length");
+        let available = input_capacity - empty;
+        let text = String::from("😀\\\"").repeat(100);
+        let chunk = bounded_json_prefix(&text, available);
+        let payload = InboundEvent::chunk(1, 1, chunk);
+
+        assert!(chunk.len() > 240);
+        assert!(payload.encoded_len().expect("chunk length") <= input_capacity);
+        assert!(text.is_char_boundary(chunk.len()));
+    }
 }

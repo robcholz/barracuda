@@ -5,7 +5,7 @@ use core::cell::RefCell;
 
 use futures_lite::{future::block_on, stream};
 use gateway::{
-    BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
+    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
     SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
     StreamError,
@@ -151,7 +151,10 @@ fn maps_all_media_and_mutation_operations_to_events() {
 
         let media = SendMediaRequest {
             target: target(),
-            body: BinaryBody::Stream(Box::pin(stream::iter([Ok(vec![1, 2]), Ok(vec![3])]))),
+            body: BinaryBody::Stream(Box::pin(stream::iter([
+                Ok(BinaryChunk::from(vec![1, 2])),
+                Ok(BinaryChunk::from(vec![3])),
+            ]))),
             filename: Some("photo.jpg".into()),
             mime_type: Some("image/jpeg".into()),
             caption: Some("photo".into()),

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "start" },
+        "stream_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_.-]+$" },
+        "sequence": { "const": 0 },
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" },
+        "reply_to": { "type": "string" }
+      },
+      "required": ["action", "stream_id", "sequence", "channel", "conversation_id"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "chunk" },
+        "stream_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_.-]+$" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "field": {
+          "enum": [
+            "text",
+            "reasoning",
+            "effect_result",
+            "notice",
+            "event",
+            "tool_result_start",
+            "tool_call_id",
+            "tool_name",
+            "tool_arguments",
+            "tool_output",
+            "tool_succeeded",
+            "tool_failed",
+            "tool_result_end"
+          ]
+        },
+        "boundary": { "enum": ["more", "complete"] },
+        "text": { "type": "string" }
+      },
+      "required": ["action", "stream_id", "sequence", "field", "boundary", "text"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "finish" },
+        "stream_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9_.-]+$" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+      },
+      "required": ["action", "stream_id", "sequence"],
+      "additionalProperties": false
+    }
+  ]
+}

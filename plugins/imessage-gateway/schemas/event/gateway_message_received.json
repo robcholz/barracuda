@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "stream_id": { "type": "integer", "minimum": 1 },
+        "sequence": { "const": 0 },
+        "phase": { "const": "complete" },
+        "terminal": { "const": true },
+        "route": { "$ref": "#/$defs/route" },
+        "message_id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string" }
+      },
+      "required": ["stream_id", "sequence", "phase", "terminal", "route", "message_id", "text"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "stream_id": { "type": "integer", "minimum": 1 },
+        "sequence": { "const": 0 },
+        "phase": { "const": "start" },
+        "terminal": { "const": false },
+        "route": { "$ref": "#/$defs/route" },
+        "message_id": { "type": "string", "minLength": 1 }
+      },
+      "required": ["stream_id", "sequence", "phase", "terminal", "route", "message_id"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "stream_id": { "type": "integer", "minimum": 1 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "phase": { "const": "chunk" },
+        "terminal": { "const": false },
+        "text": { "type": "string" }
+      },
+      "required": ["stream_id", "sequence", "phase", "terminal", "text"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "stream_id": { "type": "integer", "minimum": 1 },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "phase": { "const": "finish" },
+        "terminal": { "const": true }
+      },
+      "required": ["stream_id", "sequence", "phase", "terminal"],
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "route": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" }
+      },
+      "required": ["channel", "conversation_id"],
+      "additionalProperties": false
+    }
+  }
+}

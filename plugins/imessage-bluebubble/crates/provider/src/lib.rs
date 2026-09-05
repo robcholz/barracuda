@@ -171,7 +171,8 @@ where
                     message: "message text is empty".into(),
                 });
             };
-            text.push_str(&chunk?);
+            let chunk = chunk?;
+            text.push_str(chunk.as_str());
         }
         let receipt = self
             .send_complete(target.clone(), text.clone(), reply_to)
@@ -181,7 +182,8 @@ where
         let max_edits = self.config.stream_max_edits.max(1);
 
         while let Some(chunk) = stream.next().await {
-            text.push_str(&chunk?);
+            let chunk = chunk?;
+            text.push_str(chunk.as_str());
             let delta = text.len().saturating_sub(published.len());
             let can_publish_intermediate = edits.saturating_add(1) < max_edits;
             if delta >= self.config.stream_edit_min_delta_bytes.max(1) && can_publish_intermediate {
@@ -377,7 +379,8 @@ where
 async fn collect_text(stream: &mut gateway::TextStream) -> Result<String, ChannelError> {
     let mut text = String::new();
     while let Some(chunk) = stream.next().await {
-        text.push_str(&chunk?);
+        let chunk = chunk?;
+        text.push_str(chunk.as_str());
     }
     Ok(text)
 }

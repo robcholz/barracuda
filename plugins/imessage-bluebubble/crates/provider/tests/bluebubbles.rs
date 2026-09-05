@@ -11,8 +11,8 @@ use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
 use futures_lite::{future::block_on, stream};
 use gateway::{
-    BinaryBody, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel, MessageTarget,
-    ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest,
+    BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
+    MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
 };
 use http_client::ClientFactory;
 
@@ -128,6 +128,18 @@ fn target() -> MessageTarget {
     MessageTarget::new("imessage", "iMessage;-;+15551234567")
 }
 
+fn text_chunk(text: &str) -> TextChunk {
+    TextChunk::inline(text).expect("test text chunk fits inline storage")
+}
+
+fn binary_chunk(bytes: &[u8]) -> BinaryChunk {
+    let mut chunk = BinaryChunk::empty_inline();
+    for &byte in bytes {
+        assert!(chunk.push(byte));
+    }
+    chunk
+}
+
 fn body_json(request: &RecordedRequest) -> serde_json::Value {
     serde_json::from_slice(&request.body).expect("valid JSON request")
 }
@@ -176,7 +188,7 @@ fn streams_by_sending_once_then_editing_the_same_message() {
             response("stream-guid"),
         ]));
         let channel = provider(&http);
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([Ok(text_chunk("hel")), Ok(text_chunk("lo"))]);
 
         let receipt = channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
@@ -204,7 +216,7 @@ fn sends_streamed_attachments_without_buffering_them() {
     block_on(async {
         let http = Rc::new(MockHttp::responding([response("attachment-guid")]));
         let channel = provider(&http);
-        let data = stream::iter([Ok(vec![1, 2]), Ok(vec![3, 4])]);
+        let data = stream::iter([Ok(binary_chunk(&[1, 2])), Ok(binary_chunk(&[3, 4]))]);
         let request = SendMediaRequest {
             target: target(),
             body: BinaryBody::Stream(Box::pin(data)),
@@ -294,7 +306,7 @@ fn without_private_api_streaming_falls_back_and_mutations_are_unsupported() {
         let mut config = BlueBubblesConfig::new("http://mac.local", "password");
         config.use_private_api = false;
         let channel = BlueBubbles::new(http.factory(), config);
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([Ok(text_chunk("hel")), Ok(text_chunk("lo"))]);
 
         channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
@@ -328,10 +340,10 @@ fn caps_intermediate_stream_edits_and_always_publishes_the_final_text() {
         config.stream_max_edits = 2;
         let channel = BlueBubbles::new(http.factory(), config);
         let chunks = stream::iter([
-            Ok("a".to_owned()),
-            Ok("b".to_owned()),
-            Ok("c".to_owned()),
-            Ok("d".to_owned()),
+            Ok(text_chunk("a")),
+            Ok(text_chunk("b")),
+            Ok(text_chunk("c")),
+            Ok(text_chunk("d")),
         ]);
 
         channel
@@ -475,7 +487,7 @@ fn rejects_empty_messages_and_uses_temp_guid_when_server_omits_guid() {
             Err(gateway::ChannelError::InvalidRequest { .. })
         ));
 
-        let chunks = stream::iter(Vec::<Result<String, gateway::StreamError>>::new());
+        let chunks = stream::iter(Vec::<Result<TextChunk, gateway::StreamError>>::new());
         let empty_stream = channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
             .await;

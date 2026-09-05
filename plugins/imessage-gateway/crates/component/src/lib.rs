@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Event Router lifecycle, Event ingress, and outbound RPC adapter for Gateway.
+//! JSON Event ingress and Agent/Workflow JSON RPC adapters for Gateway.
 
 extern crate alloc;
 
@@ -14,7 +14,6 @@ pub mod gateway_send;
 pub mod gateway_send_media;
 /// Typed streaming outbound message RPC.
 pub mod gateway_send_stream;
+mod json;
 /// Gateway provider routing identity.
 pub mod route;
-/// Shared fixed-layout Gateway wire values.
-pub mod wire;

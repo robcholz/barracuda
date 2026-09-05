@@ -5,11 +5,11 @@ use std::rc::Rc;
 
 use futures_lite::{future::block_on, stream, StreamExt};
 use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest,
+    BinaryBody, BinaryChunk, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest,
     GatewayError, MediaKind, MessageChannel, MessageChannelRegistration, MessageGateway,
     MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
     SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
-    StreamError, TextBody,
+    StreamError, TextBody, TextChunk,
 };
 
 #[derive(Default)]
@@ -210,9 +210,9 @@ fn send_message_passes_an_async_text_stream_to_the_channel() {
     block_on(async {
         let (gateway, state, _registration) = fixture("telegram");
         let chunks = stream::iter([
-            Ok("hel".to_owned()),
-            Ok("lo ".to_owned()),
-            Ok("world".to_owned()),
+            Ok(TextChunk::from("hel")),
+            Ok(TextChunk::from("lo ")),
+            Ok(TextChunk::from("world")),
         ]);
 
         let result = gateway
@@ -435,7 +435,10 @@ fn optional_provider_operations_return_typed_unsupported_errors() {
 
 #[test]
 fn media_request_can_carry_a_binary_stream() {
-    let chunks = stream::iter([Ok(vec![1, 2]), Ok(vec![3, 4])]);
+    let chunks = stream::iter([
+        Ok(BinaryChunk::from(vec![1, 2])),
+        Ok(BinaryChunk::from(vec![3, 4])),
+    ]);
     let request = SendMediaRequest::stream(
         target("wechat"),
         "photo.jpg",

@@ -9,7 +9,7 @@ use std::{boxed::Box, rc::Rc};
 
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
-use gateway::{MessageChannel, MessageTarget, SendMessageRequest};
+use gateway::{MessageChannel, MessageTarget, SendMessageRequest, TextChunk};
 use http_client::ClientFactory;
 use wechat::{Wechat, WechatConfig};
 
@@ -130,7 +130,7 @@ fn buffers_an_async_text_stream_into_one_wechat_message() {
     block_on(async {
         let http = Rc::new(MockHttp::responding(1));
         let channel = Wechat::new(http.factory(), config("token"));
-        let chunks = stream::iter([Ok("hel".to_owned()), Ok("lo".to_owned())]);
+        let chunks = stream::iter([Ok(TextChunk::from("hel")), Ok(TextChunk::from("lo"))]);
 
         channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
