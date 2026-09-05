@@ -4,12 +4,10 @@
   "properties": {
     "path": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 255
+      "minLength": 1
     },
     "content": {
-      "type": "string",
-      "maxLength": 240
+      "type": "string"
     }
   },
   "required": ["path", "content"],

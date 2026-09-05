@@ -6,7 +6,7 @@
       "properties": {
         "content": {
           "type": "string",
-          "maxLength": 240
+          "maxLength": 498
         }
       },
       "required": ["content"],
