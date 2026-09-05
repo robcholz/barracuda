@@ -8,14 +8,12 @@ description = "Event Router Component adapter for the Agent runtime"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-agent-runtime = { path = "../runtime" }
+barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile"] }
 barracuda-event-router = { path = "../../../../core/event-router" }
 barracuda-vfs = { path = "../../../../shared/vfs" }
+async-channel = { version = "2", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc"] }
-thiserror = { version = "2", default-features = false }
-zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 http-client = { path = "../../../../shared/http-client" }
@@ -23,6 +21,7 @@ barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2", features = ["std"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
 static_cell = "2.1.1"
 
 [lints.rust]

@@ -1,41 +1,53 @@
-use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
+use barracuda_event_router::{
+    json_schema, JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
+};
+use serde::Deserialize;
 
-use crate::convert;
+use crate::json::{map_control_error, parse_session, AgentRpcError, ErrorResponse};
 
-use super::{SessionRegistry, SessionRpcError};
+use super::SessionRegistry;
 
-pub use crate::dto::CloseRequest;
-
-/// RPC corresponding to `SessionControl::close`.
+/// Closes an open session subscription and control lease.
 pub struct Close;
 
-#[rpc_dynamic]
-impl RpcMethod for Close {
+impl JsonRpcSchema for Close {
     const ADDRESS: &'static str = "session.close";
-    type Request = CloseRequest;
-    type Response = ();
-    type Error = SessionRpcError;
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("close", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("close", response);
+    const MAX_REQUEST_BYTES: usize = 48;
+    const MAX_RESPONSE_BYTES: usize = 34;
 }
 
-/// Builds the reusable handler for [`Close`].
-pub fn close_handler(registry: SessionRegistry) -> impl RpcHandler<Close> {
-    move |_context, request: RpcFrame<CloseRequest>| {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Request<'a> {
+    #[serde(borrow)]
+    session: &'a str,
+}
+
+/// Builds the JSON handler for [`Close`].
+pub fn close_handler(registry: SessionRegistry) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
         let registry = registry.clone();
         async move {
-            let session = convert::session_from_wire(request.view()?.session);
-            let Some(control) = registry.get(session) else {
-                return Ok(Err(SessionRpcError::SessionNotOpen));
+            let request = request.deserialize::<Request<'_>>()?;
+            let session = match parse_session(request.session) {
+                Ok(session) => session,
+                Err(error) => return response.write(&ErrorResponse(error)).await,
             };
-            let result = control
-                .close()
-                .await
-                .map_err(convert::session_error_from_control);
-            if result.is_ok() {
-                registry.remove(session);
+            let Some(control) = registry.get(session) else {
+                return response
+                    .write(&ErrorResponse(AgentRpcError::SessionNotOpen))
+                    .await;
+            };
+            match control.close().await {
+                Ok(()) => response.write("{}").await,
+                Err(error) => {
+                    response
+                        .write(&ErrorResponse(map_control_error(error)))
+                        .await
+                }
             }
-            Ok(result)
         }
     }
 }

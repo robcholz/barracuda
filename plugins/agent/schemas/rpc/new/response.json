@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","oneOf":[{"type":"object","properties":{"session":{"type":"string","pattern":"^session-[0-9]+$"}},"required":["session"],"additionalProperties":false},{"type":"object","properties":{"error":{"enum":["worker_stopped","persistence"]}},"required":["error"],"additionalProperties":false}]}
