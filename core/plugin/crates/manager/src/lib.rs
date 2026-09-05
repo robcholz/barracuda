@@ -21,5 +21,6 @@ pub use lifecycle::{
     PluginResult, PluginStartContext, PluginStartError, PluginTaskToken, PluginUnloadError,
 };
 pub use storage::{
-    PluginReadTransaction, PluginStorage, PluginWriteTransaction, StorageError, StorageResult,
+    PluginEntry, PluginEntryIterator, PluginReadTransaction, PluginStorage, PluginWriteTransaction,
+    StorageError, StorageResult,
 };
