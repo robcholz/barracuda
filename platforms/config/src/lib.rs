@@ -1,5 +1,6 @@
 //! Filesystem discovery and host-side resolution of Barracuda Platforms.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -191,6 +192,15 @@ impl PlatformDefinition {
     pub const fn application(&self) -> &ApplicationConfig {
         &self.application
     }
+
+    /// Returns Platform-owned Cargo features needed by one supported chip.
+    #[must_use]
+    pub fn cargo_features_for_chip(&self, chip: &str) -> &[String] {
+        self.selection
+            .features_by_chip
+            .get(chip)
+            .map_or(&[], Vec::as_slice)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -198,6 +208,8 @@ impl PlatformDefinition {
 struct SelectionConfig {
     board_chips: Vec<String>,
     targets: Vec<TargetSelector>,
+    #[serde(default)]
+    features_by_chip: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -477,6 +489,23 @@ fn read_platform(path: PathBuf) -> Result<PlatformDefinition, ResolveError> {
         return Err(ResolveError::ManifestInvalid {
             path,
             message: String::from("package and selection.board-chips must not be empty"),
+        });
+    }
+    if document
+        .selection
+        .features_by_chip
+        .iter()
+        .any(|(chip, features)| {
+            chip.trim().is_empty()
+                || features.is_empty()
+                || features.iter().any(|feature| feature.trim().is_empty())
+        })
+    {
+        return Err(ResolveError::ManifestInvalid {
+            path,
+            message: String::from(
+                "selection.features-by-chip requires non-empty chips and Cargo features",
+            ),
         });
     }
     Ok(PlatformDefinition {

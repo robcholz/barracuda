@@ -96,6 +96,55 @@ fn select_persists_a_valid_board_for_the_next_build() {
 }
 
 #[test]
+fn select_uses_platform_owned_features_for_the_board_chip() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace(
+            "  targets:\n",
+            "  features-by-chip:\n    macos: [native-chip]\n  targets:\n",
+        ),
+    )
+    .expect("Platform manifest with chip features");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let selected = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
+        .expect("selected Platform manifest");
+    assert!(selected
+        .contains("barracuda-platform-macos = { workspace = true, features = [\"native-chip\"] }"));
+}
+
+#[test]
+fn select_discovers_a_board_hal_from_the_board_bundle() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board YAML");
+    fs::write(
+        &board_path,
+        format!("{board}exposed-io:\n  gpio:\n    button:\n      pin: P0\n"),
+    )
+    .expect("Board hardware surface");
+    let hal = root.path().join("boards/configs/local-macos/hal");
+    fs::create_dir_all(&hal).expect("Board HAL directory");
+    fs::write(
+        hal.join("Cargo.toml"),
+        "[package]\nname = \"barracuda-board-local-macos\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("Board HAL manifest");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+        .expect("selected Board manifest");
+    assert!(selected.contains("barracuda-board-local-macos.workspace = true"));
+}
+
+#[test]
 fn unknown_board_does_not_replace_the_previous_selection() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");

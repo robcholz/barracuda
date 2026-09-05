@@ -23,7 +23,7 @@ fn parses_concrete_board_hardware_and_native_layout() {
 }
 
 #[test]
-fn parses_a_board_owned_hal_dependency_without_a_central_registry() {
+fn rejects_rust_registration_fields_in_board_yaml() {
     let yaml = r#"
 name: product-a
 hardware:
@@ -38,15 +38,7 @@ board-hal:
   type: ProductAHal
 "#;
 
-    let board = parse(yaml).expect("Board HAL dependency");
-    let board_hal = board.board_hal().expect("declared Board HAL");
-
-    assert_eq!(board_hal.package(), "barracuda-board-product-a");
-    assert_eq!(
-        board_hal.path(),
-        Path::new("platforms/acme/boards/product-a")
-    );
-    assert_eq!(board_hal.type_name(), "ProductAHal");
+    assert!(matches!(parse(yaml), Err(ConfigError::Yaml(_))));
 }
 
 #[test]
@@ -313,14 +305,7 @@ fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
             path.file_name().and_then(|name| name.to_str()).unwrap()
         );
         assert!(path.join(board.native_layout().artifact()).is_file());
-        if let Some(board_hal) = board.board_hal() {
-            assert_eq!(
-                board_hal.path(),
-                path.join("hal")
-                    .strip_prefix(&workspace)
-                    .expect("Board HAL path below workspace")
-            );
-            assert!(path.join("hal/Cargo.toml").is_file());
-        }
+        assert!(!yaml.contains("board-hal:"));
+        assert!(!yaml.contains("platform-features:"));
     }
 }

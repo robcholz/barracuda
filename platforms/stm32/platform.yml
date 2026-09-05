@@ -7,6 +7,9 @@ selection:
     - "stm32*"
   targets:
     - triple: "thumb*-none-eabi*"
+  features-by-chip:
+    stm32f429zi:
+      - stm32f429zi
 system-image:
   layout:
     driver: linker-memory

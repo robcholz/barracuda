@@ -3,7 +3,8 @@
 `boards/` owns concrete product bundles and the build-time tooling that turns
 their common YAML into static Rust data. Reusable peripheral Drivers live in
 the workspace-level `drivers/` directory.
-Platform-specific Board HAL code may live inside its owning Platform bundle.
+A Board's optional statically composed HAL crate lives inside that Board's
+bundle at `boards/configs/<board>/hal`.
 
 ```text
 boards/
@@ -49,10 +50,11 @@ builtin-peripherals:
       active-low: true
 ```
 
-A Board that declares this surface must declare its concrete `board-hal`
-Cargo package, workspace-relative path, and exported type in `board.yml`. The
-path may point inside `platforms/<platform>/boards/`; no central selected-crate
-registry is edited. The build rejects hardware declarations that would
+A Board that declares this surface must include `hal/Cargo.toml` in its bundle.
+`cargo board sync` discovers that crate by convention: its package is
+`barracuda-board-<board>` and it exports `SelectedBoardHal`. `board.yml` remains
+hardware data and contains no Cargo package, crate path, Rust type, or Platform
+feature registration. The build rejects hardware declarations that would
 otherwise be silently reduced to the empty HAL.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's

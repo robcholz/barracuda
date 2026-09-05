@@ -49,6 +49,7 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
     assert_eq!(target.name(), board.name());
     assert_eq!(board.directory(), root.path().join("platforms/acme-rv"));
     assert_eq!(board.application().support_binaries(), ["acme-network"]);
+    assert!(board.cargo_features_for_chip("acme123-pro").is_empty());
     assert_eq!(
         board
             .application()
@@ -56,6 +57,25 @@ fn discovers_an_unknown_platform_entirely_from_its_own_directory() {
             .map(|launcher| launcher.program()),
         Some(Path::new("privilege-tool"))
     );
+}
+
+#[test]
+fn platform_owns_cargo_features_for_supported_chips() {
+    let root = tempdir().expect("temporary workspace");
+    let directory = root.path().join("platforms/acme-rv");
+    fs::create_dir_all(&directory).expect("Platform directory");
+    fs::write(
+        directory.join("platform.yml"),
+        "name: acme-rv\npackage: barracuda-platform-acme-rv\ncrate: barracuda_platform_acme_rv\ntype: AcmePlatform\nselection:\n  board-chips: ['acme*']\n  targets:\n    - triple: 'riscv64acme-unknown-none-elf'\n  features-by-chip:\n    acme123: [acme123-hal]\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\n",
+    )
+    .expect("Platform manifest");
+
+    let platform =
+        resolve_board_platform(root.path(), "acme123", Some("riscv64acme-unknown-none-elf"))
+            .expect("Platform selected from Board");
+
+    assert_eq!(platform.cargo_features_for_chip("acme123"), ["acme123-hal"]);
+    assert!(platform.cargo_features_for_chip("acme999").is_empty());
 }
 
 #[test]

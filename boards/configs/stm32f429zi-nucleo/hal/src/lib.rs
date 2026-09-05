@@ -143,9 +143,9 @@ mod board {
     }
 
     /// Board matrix and built-in Driver composition for NUCLEO-F429ZI.
-    pub struct Stm32f429ziNucleoHal;
+    pub struct SelectedBoardHal;
 
-    impl BoardHal for Stm32f429ziNucleoHal {
+    impl BoardHal for SelectedBoardHal {
         type Bindings = Stm32f429ziNucleoBindings;
         type Resources = BoardHalResources<Stm32f429ziNucleoBuiltins, Stm32f429ziNucleoIo>;
         type Error = Infallible;
