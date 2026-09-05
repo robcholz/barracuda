@@ -13,7 +13,7 @@ path = "src/main.rs"
 web = { path = "../../plugins/imessage-web/crates/provider" }
 barracuda-event-router = { path = "../../core/event-router" }
 barracuda-target = { path = "../../composition/selected" }
-barracuda-system = { path = "../../core/system", features = ["tokio"] }
+barracuda-system = { path = "../../core/system" }
 anyhow = "1"
 tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
 tokio-tungstenite = "0.29"
@@ -27,5 +27,5 @@ strum = { version = "0.28", features = ["derive"] }
 terminal_size = "0.4.4"
 unicode-width = "0.2.2"
 thiserror = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
