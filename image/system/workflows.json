@@ -10,10 +10,42 @@
       },
       {
         "if": {
-          "source": "$previous.output.found",
-          "equals": true
+          "source": "$previous.output",
+          "equals": {}
         },
         "then": [
+          {
+            "call": "session.new",
+            "arguments": {
+              "persistence": "persistent"
+            }
+          },
+          {
+            "call": "session.open",
+            "arguments": {
+              "session": "$previous.output.session"
+            }
+          },
+          {
+            "call": "imessage_bridge.to_agent",
+            "arguments": {
+              "route": "$event.input.route",
+              "message_id": "$event.input.message_id",
+              "session": "$previous.output.session"
+            }
+          },
+          {
+            "call": "session.append",
+            "arguments": {
+              "session": "$previous.output.session",
+              "text": "$event.input.text"
+            }
+          },
+          {
+            "return": {}
+          }
+        ],
+        "else": [
           {
             "if": {
               "source": "$previous.output.open_required",
@@ -47,38 +79,6 @@
           {
             "return": {}
           }
-        ],
-        "else": [
-          {
-            "call": "session.new",
-            "arguments": {
-              "persistence": "persistent"
-            }
-          },
-          {
-            "call": "session.open",
-            "arguments": {
-              "session": "$previous.output.session"
-            }
-          },
-          {
-            "call": "imessage_bridge.to_agent",
-            "arguments": {
-              "route": "$event.input.route",
-              "message_id": "$event.input.message_id",
-              "session": "$previous.output.session"
-            }
-          },
-          {
-            "call": "session.append",
-            "arguments": {
-              "session": "$previous.output.session",
-              "text": "$event.input.text"
-            }
-          },
-          {
-            "return": {}
-          }
         ]
       }
     ]
@@ -94,10 +94,15 @@
       },
       {
         "if": {
-          "source": "$previous.output.forward",
-          "equals": true
+          "source": "$previous.output",
+          "equals": {}
         },
         "then": [
+          {
+            "return": {}
+          }
+        ],
+        "else": [
           {
             "call": "gateway.send_stream",
             "arguments": {
@@ -109,11 +114,6 @@
               "payload": "$event.input.payload"
             }
           },
-          {
-            "return": {}
-          }
-        ],
-        "else": [
           {
             "return": {}
           }

@@ -4,20 +4,15 @@
     {
       "type": "object",
       "properties": {
-        "found": { "const": true },
         "open_required": { "type": "boolean" },
         "session": { "type": "string", "pattern": "^session-[0-9]+$" }
       },
-      "required": ["found", "open_required", "session"],
+      "required": ["open_required", "session"],
       "additionalProperties": false
     },
     {
       "type": "object",
-      "properties": {
-        "found": { "const": false },
-        "open_required": { "const": false }
-      },
-      "required": ["found", "open_required"],
+      "maxProperties": 0,
       "additionalProperties": false
     },
     {

@@ -104,7 +104,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_agent,
         route,
-        r#"{"found":false,"open_required":false}"#,
+        r#"{}"#,
     )
     .await?;
     let bind = r#"{"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"},"message_id":"message-9","session":"session-4"}"#;
@@ -113,7 +113,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_agent,
         route,
-        r#"{"found":true,"open_required":false,"session":"session-4"}"#,
+        r#"{"open_required":false,"session":"session-4"}"#,
     )
     .await?;
 
@@ -122,7 +122,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_gateway,
         started,
-        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+        r#"{"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
@@ -131,7 +131,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_gateway,
         reasoning,
-        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+        r#"{"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
@@ -141,7 +141,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_gateway,
         output,
-        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+        r#"{"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
@@ -151,25 +151,25 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
         &client,
         &to_gateway,
         ended,
-        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+        r#"{"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
     let closed =
         r#"{"session":"session-4","sequence":4,"type":"closed","payload":{"reason":"closed"}}"#;
-    assert_call(&client, &to_gateway, closed, r#"{"forward":false}"#).await?;
+    assert_call(&client, &to_gateway, closed, r#"{}"#).await?;
     assert_call(
         &client,
         &to_agent,
         route,
-        r#"{"found":true,"open_required":true,"session":"session-4"}"#,
+        r#"{"open_required":true,"session":"session-4"}"#,
     )
     .await?;
     assert_call(
         &client,
         &to_gateway,
         r#"{"session":"session-99","sequence":0,"type":"turn_started","payload":{}}"#,
-        r#"{"forward":false}"#,
+        r#"{}"#,
     )
     .await?;
     assert!(client.call_json(&to_agent, "[]")?.await.is_err());
@@ -183,7 +183,7 @@ async fn exercise_restored(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErr
         context.rpc(),
         &address,
         route,
-        r#"{"found":true,"open_required":true,"session":"session-4"}"#,
+        r#"{"open_required":true,"session":"session-4"}"#,
     )
     .await
 }
