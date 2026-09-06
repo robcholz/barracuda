@@ -299,6 +299,7 @@ impl Component<512> for CommandCaller {
                     }
                     break;
                 }
+                futures_lite::future::yield_now().await;
             }
             self.finished.set(true);
             core::future::pending().await

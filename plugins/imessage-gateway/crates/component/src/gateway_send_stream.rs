@@ -23,7 +23,7 @@ use crate::json::{
     AckResponse, EncodedJson, ErrorResponse, GatewayJsonError, FRAME_CAPACITY,
 };
 
-const EVENT_QUEUE_CAPACITY: usize = 2;
+const EVENT_QUEUE_CAPACITY: usize = 16;
 
 /// Feeds one complete semantic Agent event into an outbound Gateway stream.
 pub struct GatewaySendStream;
@@ -526,7 +526,7 @@ mod tests {
     fn text_session_enforces_order_route_and_bounded_backpressure() {
         let sessions = EventSessions::default();
         let target = MessageTarget::new("test", "chat");
-        let (events, receiver) = async_channel::bounded(EVENT_QUEUE_CAPACITY);
+        let (events, receiver) = async_channel::bounded(2);
         sessions.entries.borrow_mut().insert(
             String::from("session-1"),
             Rc::new(EventSession {
@@ -569,6 +569,34 @@ mod tests {
         assert_eq!(
             sessions.push("session-1", 4, &target, None, event(4), true),
             Ok(())
+        );
+    }
+
+    #[test]
+    fn configured_queue_accepts_a_sixteen_event_burst() {
+        let sessions = EventSessions::default();
+        let target = MessageTarget::new("test", "chat");
+        let (events, _receiver) = async_channel::bounded(EVENT_QUEUE_CAPACITY);
+        sessions.entries.borrow_mut().insert(
+            String::from("session-1"),
+            Rc::new(EventSession {
+                last_sequence: core::cell::Cell::new(0),
+                target: target.clone(),
+                reply_to: None,
+                terminal_sequence: Rc::new(core::cell::RefCell::new(None)),
+                events,
+            }),
+        );
+
+        for sequence in 1..=16 {
+            assert_eq!(
+                sessions.push("session-1", sequence, &target, None, event(sequence), false),
+                Ok(())
+            );
+        }
+        assert_eq!(
+            sessions.push("session-1", 17, &target, None, event(17), false),
+            Err(GatewayJsonError::Busy)
         );
     }
 
