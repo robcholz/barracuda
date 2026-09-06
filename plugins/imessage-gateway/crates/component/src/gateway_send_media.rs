@@ -254,7 +254,7 @@ pub(crate) fn gateway_send_media_handler(
                             );
                             response
                                 .write(&AckResponse {
-                                    accepted_sequence: sequence,
+                                    accepted_sequence: u64::from(sequence),
                                 })
                                 .await
                         }
@@ -289,7 +289,7 @@ pub(crate) fn gateway_send_media_handler(
                         Ok(()) => {
                             response
                                 .write(&AckResponse {
-                                    accepted_sequence: sequence,
+                                    accepted_sequence: u64::from(sequence),
                                 })
                                 .await
                         }
@@ -310,7 +310,7 @@ pub(crate) fn gateway_send_media_handler(
                         Ok(()) => {
                             response
                                 .write(&AckResponse {
-                                    accepted_sequence: sequence,
+                                    accepted_sequence: u64::from(sequence),
                                 })
                                 .await
                         }

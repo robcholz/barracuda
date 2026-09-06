@@ -8,8 +8,7 @@ use gateway::{
     BinaryBody, BinaryChunk, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest,
     GatewayError, MediaKind, MessageChannel, MessageChannelRegistration, MessageGateway,
     MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
-    SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
-    StreamError, TextBody, TextChunk,
+    SendStreamEvent, SendStreamRequest, SetTypingRequest, StreamError, TextBody, TextChunk,
 };
 
 #[derive(Default)]
@@ -300,36 +299,40 @@ fn reports_an_unknown_target_channel() {
 }
 
 #[test]
-fn default_stream_projection_consumes_extras_and_delivers_only_primary_text() {
+fn default_stream_projection_consumes_semantic_events_and_delivers_only_output_deltas() {
     block_on(async {
         let (gateway, state, _registration) = fixture("imessage");
-        let frames = stream::iter([
-            Ok(SendStreamFrame::new(
-                SendStreamField::Reasoning,
-                StreamBoundary::Complete,
-                "hidden thought",
+        let events = stream::iter([
+            Ok(SendStreamEvent::new(
+                "session-1",
+                1,
+                "reasoning_delta",
+                r#"{"text":"hidden thought"}"#,
             )),
-            Ok(SendStreamFrame::new(
-                SendStreamField::Text,
-                StreamBoundary::More,
-                "hel",
+            Ok(SendStreamEvent::new(
+                "session-1",
+                2,
+                "output_delta",
+                r#"{"text":"hel"}"#,
             )),
-            Ok(SendStreamFrame::new(
-                SendStreamField::ToolOutput,
-                StreamBoundary::Complete,
-                "hidden tool output",
+            Ok(SendStreamEvent::new(
+                "session-1",
+                3,
+                "tool_output_delta",
+                r#"{"text":"hidden tool output"}"#,
             )),
-            Ok(SendStreamFrame::new(
-                SendStreamField::Text,
-                StreamBoundary::Complete,
-                "lo",
+            Ok(SendStreamEvent::new(
+                "session-1",
+                4,
+                "output_delta",
+                r#"{"text":"lo"}"#,
             )),
         ]);
 
         let receipt = gateway
             .send_stream(SendStreamRequest {
                 target: target("imessage"),
-                frames: Box::pin(frames),
+                events: Box::pin(events),
                 reply_to: None,
             })
             .await

@@ -18,6 +18,7 @@ capacity. The provider ingress queue is bounded to 16 messages by the Plugin.
 
 `gateway.send_stream.finished` and `gateway.send_media.finished` each emit
 exactly once after an accepted stream reaches provider completion or failure.
-Their documents contain `stream_id`, the accepted finish `sequence`, and either
-`outcome: "completed"` with `message_id` or `outcome: "failed"` with `error`.
-Each terminal document uses the complete Event lane.
+The semantic `gateway.send_stream.finished` document contains `session`, the
+accepted `turn_ended` sequence, and either `outcome: "completed"` with
+`message_id` or `outcome: "failed"` with `error`. Media terminal documents keep
+their `stream_id`. Each terminal document uses the complete Event lane.

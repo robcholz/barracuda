@@ -3,10 +3,11 @@ use core::{future::Future, pin::Pin};
 
 use crate::{
     ChannelError, DeleteMessageRequest, EditMessageRequest, MediaKind, Operation, ReactRequest,
-    SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamField, SendStreamRequest,
-    SetTypingRequest,
+    SendMediaRequest, SendMessageRequest, SendReceipt, SendStreamRequest, SetTypingRequest,
+    StreamError, TextChunk,
 };
 use futures_lite::{stream, StreamExt};
+use serde::Deserialize;
 
 /// Local, executor-neutral future returned by a message-channel provider.
 pub type ChannelFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, ChannelError>> + 'a>>;
@@ -18,26 +19,43 @@ pub trait MessageChannel: 'static {
 
     fn send_message(&self, request: SendMessageRequest) -> ChannelFuture<'_, SendReceipt>;
 
-    /// Sends one ordered primary-text stream with optional extra-content frames.
+    /// Sends one ordered stream of semantic Agent events.
     ///
-    /// The default projection consumes every frame and forwards only primary
-    /// text to [`MessageChannel::send_message`]. Rich channels override this
-    /// method to interpret extra fields.
+    /// The default projection consumes every event and forwards only
+    /// `output_delta.payload.text` to [`MessageChannel::send_message`]. Rich
+    /// channels override this method to consume additional event types.
     fn send_stream(&self, request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             let SendStreamRequest {
                 target,
-                frames,
+                events,
                 reply_to,
             } = request;
-            let chunks = stream::unfold(frames, |mut frames| async move {
+            let chunks = stream::unfold(events, |mut events| async move {
                 loop {
-                    match frames.next().await {
-                        Some(Ok(frame)) if frame.field == SendStreamField::Text => {
-                            return Some((Ok(frame.text), frames));
+                    match events.next().await {
+                        Some(Ok(event)) if event.event_type == "output_delta" => {
+                            let payload = match serde_json::from_str::<OutputDelta<'_>>(
+                                event.payload.as_str(),
+                            ) {
+                                Ok(payload) => payload,
+                                Err(_error) => {
+                                    return Some((
+                                        Err(StreamError::failed("invalid output_delta payload")),
+                                        events,
+                                    ));
+                                }
+                            };
+                            let Some(text) = TextChunk::inline(payload.text) else {
+                                return Some((
+                                    Err(StreamError::failed("output_delta exceeds stream frame")),
+                                    events,
+                                ));
+                            };
+                            return Some((Ok(text), events));
                         }
-                        Some(Ok(_extra)) => {}
-                        Some(Err(error)) => return Some((Err(error), frames)),
+                        Some(Ok(_event)) => {}
+                        Some(Err(error)) => return Some((Err(error), events)),
                         None => return None,
                     }
                 }
@@ -71,4 +89,10 @@ pub trait MessageChannel: 'static {
     fn set_typing(&self, _request: SetTypingRequest) -> ChannelFuture<'_, ()> {
         Box::pin(async { Err(ChannelError::unsupported(Operation::SetTyping)) })
     }
+}
+
+#[derive(Deserialize)]
+struct OutputDelta<'a> {
+    #[serde(borrow)]
+    text: &'a str,
 }

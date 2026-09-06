@@ -235,83 +235,93 @@ impl fmt::Debug for BinaryChunk {
 /// Asynchronous append-only chunks for one text message.
 pub type TextStream = Pin<Box<dyn Stream<Item = Result<TextChunk, StreamError>> + 'static>>;
 
-/// Ordered content field carried by one full Gateway send stream.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SendStreamField {
-    /// Primary text understood by every channel.
-    Text,
-    /// Optional model reasoning metadata.
-    Reasoning,
-    /// Optional effect-produced result metadata.
-    EffectResult,
-    /// Optional user-facing notice metadata.
-    Notice,
-    /// Generic producer lifecycle or metadata event.
-    Event,
-    /// Start of one structured tool result.
-    ToolResultStart,
-    /// Provider tool-call identifier.
-    ToolCallId,
-    /// Tool name.
-    ToolName,
-    /// Tool arguments JSON.
-    ToolArguments,
-    /// Tool output text.
-    ToolOutput,
-    /// Successful tool completion marker.
-    ToolSucceeded,
-    /// Failed tool completion marker.
-    ToolFailed,
-    /// End of one structured tool result.
-    ToolResultEnd,
-}
-
-/// Whether more chunks belong to the current stream field.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StreamBoundary {
-    /// More chunks follow for this field.
-    More,
-    /// This chunk completes the field.
-    Complete,
-}
-
-/// One ordered primary-text or extra-content frame delivered to a channel.
+/// One complete lane-bounded JSON value carried by a semantic event.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SendStreamFrame {
-    /// Semantic content carried by this frame.
-    pub field: SendStreamField,
-    /// Current field's chunk boundary.
-    pub boundary: StreamBoundary,
-    /// UTF-8 content; marker fields carry an empty string.
-    pub text: TextChunk,
+pub struct JsonContent(TextChunk);
+
+impl JsonContent {
+    /// Copies a lane-backed JSON value into inline storage.
+    #[must_use]
+    pub fn inline(json: &str) -> Option<Self> {
+        Some(Self(TextChunk::inline(json)?))
+    }
+
+    /// Borrows the encoded JSON value.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Converts the value into provider-owned JSON text.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0.into_string()
+    }
+
+    /// Returns whether the JSON value occupies only inline storage.
+    #[must_use]
+    pub const fn is_inline(&self) -> bool {
+        self.0.is_inline()
+    }
 }
 
-impl SendStreamFrame {
-    /// Creates one channel-facing stream frame.
+impl From<String> for JsonContent {
+    fn from(json: String) -> Self {
+        Self(TextChunk::from(json))
+    }
+}
+
+impl From<&str> for JsonContent {
+    fn from(json: &str) -> Self {
+        Self(TextChunk::from(json))
+    }
+}
+
+/// One complete semantic event delivered in an outbound Gateway stream.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SendStreamEvent {
+    /// Agent session that owns the event stream.
+    pub session: String,
+    /// Agent-assigned event order.
+    pub sequence: u64,
+    /// Forward-compatible semantic event type.
+    pub event_type: String,
+    /// Complete JSON object payload encoded without an outer envelope.
+    pub payload: JsonContent,
+}
+
+impl SendStreamEvent {
+    /// Creates one provider-facing semantic event.
     #[must_use]
-    pub fn new(field: SendStreamField, boundary: StreamBoundary, text: impl Into<String>) -> Self {
+    pub fn new(
+        session: impl Into<String>,
+        sequence: u64,
+        event_type: impl Into<String>,
+        payload: impl Into<String>,
+    ) -> Self {
+        let payload = payload.into();
         Self {
-            field,
-            boundary,
-            text: TextChunk::from(text.into()),
+            session: session.into(),
+            sequence,
+            event_type: event_type.into(),
+            payload: JsonContent::from(payload),
         }
     }
 
-    /// Creates a frame whose text remains inline with the stream item.
+    /// Copies one lane-bounded semantic event into provider-facing storage.
     #[must_use]
-    pub fn inline(field: SendStreamField, boundary: StreamBoundary, text: &str) -> Option<Self> {
+    pub fn inline(session: &str, sequence: u64, event_type: &str, payload: &str) -> Option<Self> {
         Some(Self {
-            field,
-            boundary,
-            text: TextChunk::inline(text)?,
+            session: String::from(session),
+            sequence,
+            event_type: String::from(event_type),
+            payload: JsonContent::inline(payload)?,
         })
     }
 }
 
-/// Ordered frame stream for one outbound Gateway delivery.
-pub type SendStream = Pin<Box<dyn Stream<Item = Result<SendStreamFrame, StreamError>> + 'static>>;
+/// Ordered semantic event stream for one outbound Gateway delivery.
+pub type SendStream = Pin<Box<dyn Stream<Item = Result<SendStreamEvent, StreamError>> + 'static>>;
 
 /// Asynchronous chunks for one binary payload.
 pub type BinaryStream = Pin<Box<dyn Stream<Item = Result<BinaryChunk, StreamError>> + 'static>>;
@@ -354,12 +364,12 @@ pub struct SendMessageRequest {
     pub kind: MessageKind,
 }
 
-/// One full outbound Gateway stream with primary text and optional extra frames.
+/// One full outbound Gateway stream of semantic Agent events.
 pub struct SendStreamRequest {
     /// Destination provider and conversation.
     pub target: MessageTarget,
-    /// Ordered primary-text and extra-content frames.
-    pub frames: SendStream,
+    /// Ordered semantic events, including turn lifecycle records.
+    pub events: SendStream,
     /// Optional provider message being replied to.
     pub reply_to: Option<String>,
 }

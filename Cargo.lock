@@ -793,6 +793,7 @@ dependencies = [
  "futures-lite",
  "gateway",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -3719,6 +3720,7 @@ dependencies = [
  "futures-core",
  "futures-lite",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

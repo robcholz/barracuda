@@ -15,7 +15,7 @@ use futures_lite::StreamExt;
 use gateway::{
     BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendStreamField, SendStreamRequest, SetTypingRequest, TextBody,
+    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody,
 };
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
@@ -211,27 +211,14 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                 },
             )?;
 
-            while let Some(frame) = request.frames.next().await {
-                match frame {
-                    Ok(frame) if frame.field == SendStreamField::Text => {
-                        if !frame.text.is_empty() {
-                            self.publish(
-                                &request.target,
-                                WebEventData::MessageDelta {
-                                    message_id: message_id.clone(),
-                                    delta: frame.text.into_string(),
-                                },
-                            )?;
-                        }
-                    }
-                    Ok(frame) => {
+            while let Some(event) = request.events.next().await {
+                match event {
+                    Ok(event) => {
                         self.publish(
                             &request.target,
-                            WebEventData::MessageExtra {
+                            WebEventData::MessageEvent {
                                 message_id: message_id.clone(),
-                                field: frame.field,
-                                boundary: frame.boundary,
-                                content: frame.text.into_string(),
+                                event,
                             },
                         )?;
                     }

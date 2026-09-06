@@ -110,7 +110,7 @@ impl JsonPayload for ErrorResponse {
 }
 
 pub(crate) struct AckResponse {
-    pub(crate) accepted_sequence: u32,
+    pub(crate) accepted_sequence: u64,
 }
 
 impl EncodedJson for AckResponse {

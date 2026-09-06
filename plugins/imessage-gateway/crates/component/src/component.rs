@@ -17,7 +17,7 @@ use crate::gateway_send_media::{
     deliver_media_stream, gateway_send_media_handler, GatewaySendMedia, MediaJob, MediaSessions,
 };
 use crate::gateway_send_stream::{
-    deliver_text_stream, gateway_send_stream_handler, GatewaySendStream, TextJob, TextSessions,
+    deliver_event_stream, gateway_send_stream_handler, EventJob, EventSessions, GatewaySendStream,
 };
 use crate::json::event_input_capacity;
 
@@ -73,16 +73,16 @@ impl GatewayIngress {
 /// Event Router adapter that owns all public Gateway JSON RPC registrations.
 pub struct GatewayComponent {
     gateway: Rc<MessageGateway>,
-    text_sessions: Rc<TextSessions>,
+    event_sessions: Rc<EventSessions>,
     media_sessions: Rc<MediaSessions>,
-    text_jobs: Sender<TextJob>,
+    event_jobs: Sender<EventJob>,
     media_jobs: Sender<MediaJob>,
 }
 
 /// Runtime Components that advance inbound and application-stream contracts.
 pub struct GatewayRuntimeComponents {
     inbound: GatewayInboundComponent,
-    text: [GatewayTextStreamComponent; STREAM_WORKERS],
+    events: [GatewayEventStreamComponent; STREAM_WORKERS],
     media: [GatewayMediaStreamComponent; STREAM_WORKERS],
 }
 
@@ -93,10 +93,10 @@ impl GatewayRuntimeComponents {
         self,
     ) -> (
         GatewayInboundComponent,
-        [GatewayTextStreamComponent; STREAM_WORKERS],
+        [GatewayEventStreamComponent; STREAM_WORKERS],
         [GatewayMediaStreamComponent; STREAM_WORKERS],
     ) {
-        (self.inbound, self.text, self.media)
+        (self.inbound, self.events, self.media)
     }
 }
 
@@ -109,25 +109,25 @@ impl GatewayComponent {
     ) -> (Self, GatewayIngress, GatewayRuntimeComponents) {
         let gateway = Rc::new(gateway);
         let (messages, inbound_messages) = async_channel::bounded(ingress_capacity.max(1));
-        let (text_jobs, text_worker_jobs) = async_channel::bounded(STREAM_WORKERS);
+        let (event_jobs, event_worker_jobs) = async_channel::bounded(STREAM_WORKERS);
         let (media_jobs, media_worker_jobs) = async_channel::bounded(STREAM_WORKERS);
-        let text_sessions = Rc::new(TextSessions::default());
+        let event_sessions = Rc::new(EventSessions::default());
         let media_sessions = Rc::new(MediaSessions::default());
         let component = Self {
             gateway: Rc::clone(&gateway),
-            text_sessions: Rc::clone(&text_sessions),
+            event_sessions: Rc::clone(&event_sessions),
             media_sessions: Rc::clone(&media_sessions),
-            text_jobs,
+            event_jobs,
             media_jobs,
         };
         let runtime = GatewayRuntimeComponents {
             inbound: GatewayInboundComponent {
                 messages: inbound_messages,
             },
-            text: core::array::from_fn(|_| GatewayTextStreamComponent {
+            events: core::array::from_fn(|_| GatewayEventStreamComponent {
                 gateway: Rc::clone(&gateway),
-                sessions: Rc::clone(&text_sessions),
-                jobs: text_worker_jobs.clone(),
+                sessions: Rc::clone(&event_sessions),
+                jobs: event_worker_jobs.clone(),
             }),
             media: core::array::from_fn(|_| GatewayMediaStreamComponent {
                 gateway: Rc::clone(&gateway),
@@ -160,7 +160,7 @@ impl<const M: usize> Component<M> for GatewayComponent {
             .register_json::<GatewaySend, _>("*", gateway_send_handler(Rc::clone(&self.gateway)))?;
         context.register_json::<GatewaySendStream, _>(
             "*",
-            gateway_send_stream_handler(Rc::clone(&self.text_sessions), self.text_jobs.clone()),
+            gateway_send_stream_handler(Rc::clone(&self.event_sessions), self.event_jobs.clone()),
         )?;
         context.register_json::<GatewaySendMedia, _>(
             "*",
@@ -173,9 +173,9 @@ impl<const M: usize> Component<M> for GatewayComponent {
     }
 
     fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.text_jobs.close();
+        self.event_jobs.close();
         self.media_jobs.close();
-        self.text_sessions.clear();
+        self.event_sessions.clear();
         self.media_sessions.clear();
         Ok(())
     }
@@ -216,16 +216,16 @@ impl<const M: usize> Component<M> for GatewayInboundComponent {
     }
 }
 
-/// Component that drives accepted outbound text streams to channel providers.
-pub struct GatewayTextStreamComponent {
+/// Component that drives accepted semantic event streams to channel providers.
+pub struct GatewayEventStreamComponent {
     gateway: Rc<MessageGateway>,
-    sessions: Rc<TextSessions>,
-    jobs: Receiver<TextJob>,
+    sessions: Rc<EventSessions>,
+    jobs: Receiver<EventJob>,
 }
 
-impl<const M: usize> Component<M> for GatewayTextStreamComponent {
+impl<const M: usize> Component<M> for GatewayEventStreamComponent {
     fn name(&self) -> &'static str {
-        "imessage-gateway-text-stream"
+        "imessage-gateway-event-stream"
     }
 
     fn register(&mut self, _context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
@@ -240,7 +240,7 @@ impl<const M: usize> Component<M> for GatewayTextStreamComponent {
                     Ok(job) => job,
                     Err(_closed) => return pending().await,
                 };
-                deliver_text_stream(&self.gateway, &self.sessions, &emitter, job)
+                deliver_event_stream(&self.gateway, &self.sessions, &emitter, job)
                     .await
                     .map_err(ComponentError::lifecycle)?;
             }

@@ -38,15 +38,18 @@ let response = client
 
 ## Streaming JSON send
 
-Call `gateway.send_stream` or `gateway.send_media` once for `start`, once per
-bounded `chunk`, and once for `finish`. Begin at sequence 0 and increment only
-after the response echoes `accepted_sequence`. If the response is
-`{"error":"busy"}`, yield and retry the same document. Do not advance the
-sequence.
+Call `gateway.send_stream` once for every complete semantic Agent event. Supply
+the route with each event. `turn_started` opens the provider stream and
+`turn_ended` closes it after being forwarded. The Agent session and sequence are
+used directly; Gateway does not assign another stream identity or order. If the
+response is `{"error":"busy"}`, yield and retry the same document.
 
-After finish is accepted, match the corresponding `.finished` Event by
-`stream_id` to obtain the provider receipt or failure. The RPC lane is not held
+After `turn_ended` is accepted, match `gateway.send_stream.finished` by
+`session` to obtain the provider receipt or failure. The RPC lane is not held
 for the lifetime of the provider stream.
+
+`gateway.send_media` keeps the explicit `start`, bounded `chunk`, and `finish`
+commands documented in `rpc.md`.
 
 See `rpc.md` for exact JSON and `event.md` for inbound and terminal Event
 documents.
