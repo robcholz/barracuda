@@ -2,9 +2,10 @@
 
 #![no_std]
 
-/// Expands the selected Platform's application entry in the application binary.
-pub use barracuda_platform_selected::application_entry;
 pub use barracuda_target_api::{TargetBindings, TargetResources};
+
+#[doc(hidden)]
+pub use barracuda_platform_selected as __platform;
 
 /// Complete move-only bindings required by the selected target axes.
 pub type Bindings =
@@ -48,17 +49,25 @@ pub async fn resources_with_bindings(
     })
 }
 
-/// Constructs resources for the local host Target.
-///
-/// Host Platforms do not own a chip peripheral singleton. Device entry points
-/// call [`resources_with_bindings`] after splitting their singleton instead.
+/// Constructs the statically selected host Target bindings for the application entry.
+#[doc(hidden)]
+#[must_use]
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub async fn resources(spawner: embassy_executor::Spawner) -> Result<Resources, Error> {
-    resources_with_bindings(
-        spawner,
-        TargetBindings::new(&barracuda_board_selected::BOARD, ()),
-    )
-    .await
+pub fn __application_bindings() -> Bindings {
+    TargetBindings::new(&barracuda_board_selected::BOARD, ())
+}
+
+/// Generates the selected Platform ABI entry and connects it to `application`.
+///
+/// The callback is a direct path substituted at compile time. The expanded
+/// entry contains no dynamic dispatch, boxed future, or runtime lookup.
+#[macro_export]
+macro_rules! application_entry {
+    ($application:path) => {
+        $crate::__platform::platform_entry!(|spawner| async {
+            $application(spawner, $crate::__application_bindings()).await
+        });
+    };
 }
 
 /// Board selected independently from Platform.

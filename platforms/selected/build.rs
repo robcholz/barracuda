@@ -24,40 +24,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let platform_path = platform.directory().join("platform.yml");
     println!("cargo:rerun-if-changed={}", platform_path.display());
 
-    let application_entry = if let Some(entry) = platform.application().entry() {
-        let path = platform.directory().join(entry.source());
-        println!("cargo:rerun-if-changed={}", path.display());
-        if !path.is_file() {
-            return Err(format!(
-                "selected Platform `{selected}` application entry does not exist: {}",
-                path.display()
-            )
-            .into());
-        }
-        format!("include!({path:?});")
-    } else {
-        format!(
-            "compile_error!({:?});",
-            format!(
-                "selected Platform `{selected}` cannot run barracuda-system until its bundle declares `application.entry.source`"
-            )
-        )
-    };
-
     let generated = format!(
         "/// Name of the independently selected Platform.\n\
          pub const PLATFORM_NAME: &str = {:?};\n\n\
          /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::{}::{};\n\n\
          #[doc(hidden)]\n\
-         #[macro_export]\n\
-         macro_rules! application_entry {{\n\
-             () => {{ {} }};\n\
-         }}\n",
+         pub use ::{}::platform_entry;\n",
         platform.name(),
         platform.crate_name(),
         platform.type_name(),
-        application_entry
+        platform.crate_name(),
     );
     fs::write(output.join("selected_platform.rs"), generated)?;
     Ok(())

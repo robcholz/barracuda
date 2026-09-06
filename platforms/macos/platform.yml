@@ -15,8 +15,6 @@ system-image:
     state-directory: .barracuda
     flash-image: board.flash
 application:
-  entry:
-    source: application.rs
   support-binaries:
     - barracuda-macos-network
   launcher:

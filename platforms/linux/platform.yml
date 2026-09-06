@@ -14,9 +14,6 @@ system-image:
     driver: file
     state-directory: .barracuda
     flash-image: board.flash
-application:
-  entry:
-    source: application.rs
 settings:
   state-directory: .barracuda
   flash-image: board.flash

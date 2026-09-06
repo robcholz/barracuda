@@ -81,7 +81,7 @@ fn platform_owns_cargo_features_for_supported_chips() {
 }
 
 #[test]
-fn application_entry_is_owned_by_the_platform_bundle() {
+fn legacy_application_source_is_rejected() {
     let root = tempdir().expect("temporary workspace");
     let directory = root.path().join("platforms/acme");
     fs::create_dir_all(&directory).expect("Platform directory");
@@ -91,13 +91,9 @@ fn application_entry_is_owned_by_the_platform_bundle() {
     )
     .expect("Platform manifest");
 
-    let platform = discover_platforms(root.path())
-        .expect("Platform catalog")
-        .pop()
-        .expect("Platform");
-    let entry = platform.application().entry().expect("application entry");
+    let error = discover_platforms(root.path()).expect_err("entry source is no longer metadata");
 
-    assert_eq!(entry.source(), Path::new("application.rs"));
+    assert!(error.to_string().contains("entry"));
 }
 
 #[test]

@@ -4,6 +4,7 @@
 
 extern crate alloc;
 
+mod application;
 mod flash;
 mod layout;
 mod logging;

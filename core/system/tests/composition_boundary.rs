@@ -8,13 +8,19 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     let application = std::fs::read_to_string(root.join("apps/barracuda-system/src/lib.rs"))?;
     let application_entry =
         std::fs::read_to_string(root.join("apps/barracuda-system/src/main.rs"))?;
-    let platform_entry = std::fs::read_to_string(root.join("platforms/macos/application.rs"))?;
+    let platform_entry = std::fs::read_to_string(root.join("platforms/macos/src/application.rs"))?;
 
     assert!(target.contains("barracuda_platform_selected::prepare()"));
     assert!(target.contains("barracuda_board_selected::resources(spawner, board_bindings)"));
     assert!(target.contains("bindings.split()"));
-    assert!(application_entry.contains("barracuda_target::application_entry!()"));
-    assert!(platform_entry.contains("barracuda_target::resources(spawner)"));
+    assert!(application_entry.contains("barracuda_target::application_entry!(application)"));
+    assert!(application_entry.contains("barracuda_target::resources_with_bindings"));
+    assert!(application_entry.contains("barracuda_system_app::run"));
+    assert!(target.contains("macro_rules! application_entry"));
+    assert!(platform_entry.contains("macro_rules! platform_entry"));
+    assert!(platform_entry.contains("$application"));
+    assert!(!platform_entry.contains("barracuda_target"));
+    assert!(!platform_entry.contains("barracuda_system_app"));
     assert!(application.contains("System::new(lanes, resources, spawner)"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Tls, Partitions<"));

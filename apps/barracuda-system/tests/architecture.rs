@@ -26,7 +26,10 @@ fn portable_application_has_no_concrete_platform_or_board_code() {
 
     assert!(source.contains("system::new"));
     assert!(entry.contains("#![no_std]"));
-    assert!(entry.contains("barracuda_target::application_entry!()"));
+    assert!(entry.contains("async fn application"));
+    assert!(entry.contains("barracuda_target::resources_with_bindings"));
+    assert!(entry.contains("barracuda_system_app::run"));
+    assert!(entry.contains("barracuda_target::application_entry!(application)"));
     assert!(!entry.contains("target_os"));
     assert!(!entry.contains("embassy_executor::main"));
     assert!(!entry.contains("std::process"));
