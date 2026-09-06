@@ -6,9 +6,9 @@ use alloc::string::String;
 use core::fmt::Debug;
 
 use barracuda_kv::{
-    Database, EntryIterator as KvEntryIterator, Error as KvError, MAX_KEY_SIZE,
+    Database, EntryIterator as KvEntryIterator, Error as KvError,
     ReadTransaction as KvReadTransaction, Value, WriteTransaction as KvWriteTransaction,
-    WriteValue,
+    WriteValue, MAX_KEY_SIZE,
 };
 use embedded_storage_async::nor_flash::NorFlash;
 

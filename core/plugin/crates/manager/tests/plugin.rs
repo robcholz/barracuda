@@ -14,7 +14,7 @@ use barracuda_event_router::{
     RunContext, UnregisterContext,
 };
 use barracuda_kv::MAX_CAPACITY;
-use barracuda_platform_test::{MemoryPartition, install_global_memory_vfs, memory_partition};
+use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
     CapabilityError, Plugin, PluginDeclaration, PluginEntryIterator, PluginError, PluginId,
     PluginIdError, PluginManager, PluginReadTransaction, PluginRegisterContext,
@@ -387,12 +387,10 @@ fn failed_plugin_start_cancels_tasks_started_by_that_hook() {
     let error = manager.start(&mut router).expect_err("startup must fail");
 
     assert!(matches!(error, PluginStartError::Start(_)));
-    assert!(
-        token
-            .borrow()
-            .as_ref()
-            .is_some_and(PluginTaskToken::is_cancelled)
-    );
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
 }
 
 struct TaskTokenPlugin {
@@ -426,21 +424,17 @@ fn dropping_the_manager_cancels_its_task_tokens() {
         )
         .expect("register Plugin");
     manager.start(&mut router).expect("start Plugin");
-    assert!(
-        token
-            .borrow()
-            .as_ref()
-            .is_some_and(|token| !token.is_cancelled())
-    );
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(|token| !token.is_cancelled()));
 
     drop(manager);
 
-    assert!(
-        token
-            .borrow()
-            .as_ref()
-            .is_some_and(PluginTaskToken::is_cancelled)
-    );
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
 }
 
 #[test]
@@ -461,12 +455,10 @@ fn shutdown_waits_for_plugin_task_completion() {
 
     let mut shutdown = Box::pin(manager.shutdown(&mut router));
     assert!(block_on(poll_once(shutdown.as_mut())).is_none());
-    assert!(
-        token
-            .borrow()
-            .as_ref()
-            .is_some_and(PluginTaskToken::is_cancelled)
-    );
+    assert!(token
+        .borrow()
+        .as_ref()
+        .is_some_and(PluginTaskToken::is_cancelled));
 
     drop(token.borrow_mut().take());
     block_on(shutdown).expect("shutdown Plugin graph");

@@ -17,9 +17,7 @@ use serde::Deserialize;
 use crate::VmLimits;
 use crate::component::DEFAULT_MAX_SOURCE_BYTES;
 use crate::memory::VmMemoryLease;
-use crate::runtime::{
-    ControlError, RunControl, VM_YIELD_DELAY_MILLIS, VmRuntime, VmYieldSignal,
-};
+use crate::runtime::{ControlError, RunControl, VM_YIELD_DELAY_MILLIS, VmRuntime, VmYieldSignal};
 
 /// Maximum encoded JSON document accepted by VM control RPCs.
 pub const VM_JSON_REQUEST_BYTES: usize = 512;

@@ -3,7 +3,7 @@
 #![allow(clippy::expect_used)]
 
 use barracuda_kv::{Database, Error, MAX_CAPACITY};
-use barracuda_platform_test::{MemoryPartition, memory_partition};
+use barracuda_platform_test::{memory_partition, MemoryPartition};
 use futures_lite::future::block_on;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
