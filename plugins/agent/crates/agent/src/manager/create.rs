@@ -73,7 +73,6 @@ where
                 state: Some(persisted),
             },
         )?;
-        self.register_restored_agent(id, agent.state())?;
         Ok((agent, reasoning_effort_handle))
     }
 
@@ -265,5 +264,144 @@ where
         log::info!("Agent {id} ({}) created", kind.as_str());
         tracing::info!(name: "created", agent = %id, kind = %kind.as_str());
         Ok((agent, reasoning_effort_handle))
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use alloc::{sync::Arc, vec::Vec};
+
+    use barracuda_agent_permission::AllowAll;
+    use barracuda_agent_persistence::{DurableState, InstanceId, Persistence};
+    use barracuda_agent_tool::ToolRegistry;
+    use barracuda_model_api::{ModelApi, ModelApiFactory};
+    use barracuda_platform_test::{memory_vfs, NeverStack};
+    use futures_lite::future::block_on;
+    use http_client::ClientFactory;
+
+    use crate::{baked, AgentEngineState, AgentId, ReasoningEffort, SharedApiManager};
+
+    use super::{AgentManager, PersistenceConfig};
+
+    static NETWORK: NeverStack = NeverStack;
+
+    #[test]
+    fn persisted_agent_resumes_after_manager_restart() {
+        block_on(async {
+            let filesystem = memory_vfs().await.expect("memory VFS mounts");
+            let agent = AgentId::new(1);
+            {
+                let persistence = Persistence::new(filesystem.clone(), "/agent")
+                    .await
+                    .expect("persistence opens");
+                let state = DurableState::new(AgentEngineState::new(baked::root_kind()));
+                persistence
+                    .collection::<AgentEngineState>("agents")
+                    .expect("Agent collection opens")
+                    .register(
+                        &InstanceId::new(agent.to_wire()).expect("Agent id is valid"),
+                        &state,
+                    )
+                    .expect("Agent state registers");
+                persistence
+                    .maybe_persist()
+                    .await
+                    .expect("Agent state persists");
+            }
+
+            let persistence = Arc::new(
+                Persistence::new(filesystem.clone(), "/agent")
+                    .await
+                    .expect("persistence reopens"),
+            );
+            let tools = Arc::new(
+                ToolRegistry::new(Arc::clone(&persistence))
+                    .await
+                    .expect("tool registry opens"),
+            );
+            let factory = ModelApiFactory::new(|| {
+                ModelApi::new(ClientFactory::from_network(&NETWORK, &NETWORK))
+            });
+            let manager = AgentManager::new(
+                filesystem,
+                tools,
+                persistence,
+                "/agent".into(),
+                Vec::new(),
+                SharedApiManager::default(),
+                factory,
+            )
+            .await
+            .expect("Agent manager rebuilds");
+
+            manager
+                .resume_from(
+                    agent,
+                    true,
+                    Arc::new(AllowAll),
+                    ReasoningEffort::Medium,
+                    Vec::new(),
+                )
+                .expect("persisted Agent resumes without registering its state twice");
+        });
+    }
+
+    #[test]
+    fn fresh_persistent_agent_still_registers_once() {
+        block_on(async {
+            let filesystem = memory_vfs().await.expect("memory VFS mounts");
+            let persistence = Arc::new(
+                Persistence::new(filesystem.clone(), "/fresh-agent")
+                    .await
+                    .expect("persistence opens"),
+            );
+            let tools = Arc::new(
+                ToolRegistry::new(Arc::clone(&persistence))
+                    .await
+                    .expect("tool registry opens"),
+            );
+            let factory = ModelApiFactory::new(|| {
+                ModelApi::new(ClientFactory::from_network(&NETWORK, &NETWORK))
+            });
+            let manager = AgentManager::new(
+                filesystem,
+                tools,
+                Arc::clone(&persistence),
+                "/fresh-agent".into(),
+                Vec::new(),
+                SharedApiManager::default(),
+                factory,
+            )
+            .await
+            .expect("Agent manager builds");
+            let agent = AgentId::new(1);
+
+            manager
+                .create(
+                    agent,
+                    baked::root_kind(),
+                    true,
+                    Arc::new(AllowAll),
+                    ReasoningEffort::Medium,
+                    PersistenceConfig::Persistent,
+                    Vec::new(),
+                )
+                .expect("fresh persistent Agent creates");
+            persistence
+                .maybe_persist()
+                .await
+                .expect("fresh Agent persists");
+
+            assert_eq!(
+                persistence
+                    .collection::<AgentEngineState>("agents")
+                    .expect("Agent collection opens")
+                    .list()
+                    .await
+                    .expect("Agent collection lists"),
+                vec![InstanceId::new(agent.to_wire()).expect("Agent id is valid")]
+            );
+        });
     }
 }
