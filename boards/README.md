@@ -82,9 +82,11 @@ The CLI is forced to the development host target, so it can connect while an
 embedded Board remains selected.
 
 The application binary itself is always `barracuda-system`. Its tracked
-`main.rs` is `no_std` and expands the entry source declared by the selected
-Platform; host process startup and embedded firmware startup therefore remain
-Platform-owned without introducing another application package.
+`main.rs` is `no_std` and owns Target construction plus the System lifecycle.
+It passes that application callback to the selected Platform's compile-time
+entry macro, so host process startup and embedded firmware startup remain
+Platform-owned without introducing another application package or runtime
+dispatch.
 
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
 currently selected Board. It validates the complete bundle before writing the

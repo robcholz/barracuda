@@ -12,9 +12,9 @@
   workload-specific harnesses and shared recording fixtures.
 - `tools/` contains project-wide development utilities such as the LLM API
   recorder and deterministic replay proxy.
-- `apps/barracuda-system/` contains the portable System lifecycle and the host
-  binary shell selected by ordinary `cargo run`; the selected Platform supplies
-  the concrete entry source from its own bundle.
+- `apps/barracuda-system/` owns the portable application lifecycle selected by
+  ordinary `cargo run`; the selected Platform supplies only the compile-time
+  ABI and executor entry wrapper.
 - `apps/barracuda-cli/` is an external terminal Channel that connects to a
   running Gateway; it never constructs the System.
 - `core/event-router/bench/profile/` contains Event Router heap/allocation
