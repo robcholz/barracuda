@@ -6,151 +6,275 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
-# CI never reuses incremental state across commits effectively. Disabling it
-# and omitting dev-profile debug info reduces both compile time and cache size.
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
 
 jobs:
-  # rustfmt is target-independent. Running it once over the workspace covers
-  # every Platform without making each cross-compilation runner repeat the
-  # exact same work.
-  format:
-    name: Rust formatting (all Platforms)
+  # The catalogs and generated dependency blocks are source code. Validate all
+  # three through the same Cargo aliases maintainers use before compiling a
+  # selected Target.
+  workspace:
+    name: Workspace registries & formatting
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install rustfmt
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-  # The complete codebase, built and tested on the Linux host Target. Board and
-  # Platform are selected explicitly: the architecture forbids inferring a Board
-  # from the target, and this keeps the selection visible rather than relying on
-  # a default. The non-host Platform crates are excluded here — they only build
-  # for their own target and are covered by the platform-build matrix below.
-  host:
-    name: Host (linux) — build & test
-    runs-on: ubuntu-latest
-    env:
-      BARRACUDA_PLATFORM: linux
-      HOST_EXCLUDES: >-
-        --exclude barracuda-platform-esp32c6
-        --exclude barracuda-platform-stm32
-        --exclude barracuda-platform-macos
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
-      - name: Cache cargo build
+      - name: Cache Cargo build
         uses: Swatinem/rust-cache@v2
+        with:
+          key: workspace-tools
 
-      - name: Select Linux host Board
-        run: cargo board select local-linux
+      - name: Check committed lockfile
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets $HOST_EXCLUDES
-
-      - name: Test
-        run: cargo test --workspace $HOST_EXCLUDES
-
-      # The non-host Platform crates carry host-runnable tests for their native
-      # layout projection (partition table, linker regions, file layout). They
-      # are excluded from the workspace run above because each build script needs
-      # its own Board selected, so run them here one Board at a time. This is the
-      # host-side coverage; the platform-build matrix proves they cross-compile.
-      - name: Test non-host Platform crates (host side)
+      - name: Check generated registries
         run: |
-          for entry in \
-            "esp32c6-devkitc-1:barracuda-platform-esp32c6" \
-            "stm32f429zi-nucleo:barracuda-platform-stm32" \
-            "local-macos:barracuda-platform-macos"; do
-            board="${entry%%:*}"; crate="${entry##*:}"
-            echo "== $crate (Board $board) =="
-            cargo board select "$board"
-            cargo test --target host-tuple -p "$crate"
-          done
+          cargo platform sync --check
+          cargo board sync --check
+          cargo plugin sync --check
 
-  # Cross-check the selected Platform composition rather than naming individual
-  # Platform crates or chip features here. Cargo resolves the implementation
-  # and target-specific features from barracuda-platform-selected, while
-  # `cargo board` supplies the Board target. This keeps Board/toolchain policy
-  # out of the workflow and also exercises the same selection path as a real
-  # application build.
-  platform-build:
-    name: Platform check (${{ matrix.board }})
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+  # Run the complete target-independent Rust suite once. Concrete Platforms
+  # whose build scripts require a different Board are tested in platform-host;
+  # the selected Linux Target still drives the full System application here.
+  rust:
+    name: Rust build, lint & test (local-linux)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        board:
-          - esp32c6-devkitc-1
-          - stm32f429zi-nucleo
+    timeout-minutes: 30
+    env:
+      PLATFORM_EXCLUDES: >-
+        --exclude barracuda-platform-esp32
+        --exclude barracuda-platform-esp32c3
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-esp32p4
+        --exclude barracuda-platform-esp32s2
+        --exclude barracuda-platform-esp32s3
+        --exclude barracuda-platform-macos
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      - name: Cache cargo build
+      - name: Cache Cargo build
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.board }}
+          key: local-linux
 
-      - name: Select Board and install its Rust target
+      - name: Select Linux Target
+        run: cargo board select local-linux
+
+      - name: Build System application
+        run: cargo build
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+
+      - name: Test
+        run: cargo test --workspace $PLATFORM_EXCLUDES
+
+  # Platform crates expose host-runnable layout and composition tests even for
+  # device targets. One representative Board per Platform exercises selection,
+  # feature resolution, build scripts, lint, and those tests without duplicating
+  # the entire portable workspace suite. Linux is already covered above.
+  platform-host:
+    name: Platform host tests (${{ matrix.board }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: local-macos
+            os: macos-latest
+            package: barracuda-platform-macos
+            build_system: true
+          - board: esp32-devkitc-v4
+            os: ubuntu-latest
+            package: barracuda-platform-esp32
+          - board: esp32c3-devkitc-02
+            os: ubuntu-latest
+            package: barracuda-platform-esp32c3
+          - board: esp32c6-devkitc-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32c6
+          - board: esp32p4-function-ev-board
+            os: ubuntu-latest
+            package: barracuda-platform-esp32p4
+          - board: esp32s2-saola-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32s2
+          - board: esp32s3-devkitc-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32s3
+          - board: stm32f429zi-nucleo
+            os: ubuntu-latest
+            package: barracuda-platform-stm32
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: host-${{ matrix.board }}
+
+      - name: Select Board
+        run: cargo board select ${{ matrix.board }}
+
+      - name: Clippy Platform
+        run: cargo clippy --target host-tuple --package ${{ matrix.package }} --all-targets
+
+      - name: Test Platform
+        run: cargo test --target host-tuple --package ${{ matrix.package }}
+
+      - name: Build macOS System application
+        if: matrix.build_system
+        run: cargo build
+
+  # RISC-V and ARM targets use stable Rust. Build the actual application rather
+  # than only the Platform facade so Target composition, the Board HAL, System,
+  # Plugins, and the Platform entry point are all checked together.
+  device-stable:
+    name: Device build (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: esp32c3-devkitc-02
+            c_toolchain: riscv
+          - board: esp32c6-devkitc-1
+            c_toolchain: riscv
+          - board: esp32p4-function-ev-board
+            c_toolchain: riscv
+          - board: stm32f429zi-nucleo
+            c_toolchain: arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install C cross-toolchain
+        run: |
+          sudo apt-get update
+          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
+            sudo apt-get install --no-install-recommends \
+              gcc-riscv64-unknown-elf \
+              picolibc-riscv64-unknown-elf
+          else
+            sudo apt-get install --no-install-recommends \
+              gcc-arm-none-eabi \
+              libnewlib-arm-none-eabi
+          fi
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: device-${{ matrix.board }}
+
+      - name: Select Board and install Rust target
         run: |
           cargo board select ${{ matrix.board }}
           target="$(cargo board target)"
-          echo "Board ${{ matrix.board }} declares target: $target"
+          echo "Selected ${{ matrix.board }} ($target)"
           rustup target add "$target"
           echo "target=$target" >> "$GITHUB_ENV"
+          if [[ "$target" == riscv32* ]]; then
+            cc_variable="CC_${target//[-.]/_}"
+            echo "$cc_variable=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
+          fi
 
-      - name: Clippy selected Platform
-        # Bare-metal targets do not provide Rust's host-only test harness.
-        run: cargo clippy -p barracuda-platform-selected --target "$target"
+      - name: Build System application
+        run: cargo build --target "$target"
 
-      - name: Build selected Platform
-        run: cargo build -p barracuda-platform-selected --target "$target"
+  # Xtensa targets require Espressif's Rust fork and matching GCC toolchain.
+  # Keep this separate from stable device builds so neither toolchain overrides
+  # the other and each Board receives an isolated cache.
+  device-xtensa:
+    name: Device build (${{ matrix.board }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - board: esp32-devkitc-v4
+            chip: esp32
+          - board: esp32s2-saola-1
+            chip: esp32s2
+          - board: esp32s3-devkitc-1
+            chip: esp32s3
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust for Xtensa
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          default: false
+          ldproxy: false
+          override: false
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: device-${{ matrix.board }}
+
+      - name: Select Board
+        run: cargo +esp board select ${{ matrix.board }}
+
+      - name: Build System application
+        run: cargo +esp build
 
   python:
-    name: Python tooling
+    name: Python formatting, lint & test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
       - name: Sync workspace
-        run: uv sync --all-packages --all-groups
+        run: uv sync --locked --all-packages --all-groups
 
       - name: Check formatting (ruff)
         run: uv run ruff format --check .
