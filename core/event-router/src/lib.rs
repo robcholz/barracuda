@@ -22,13 +22,13 @@ pub use barracuda_router::{
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    json_schema, json_schema_inline, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload,
-    JsonRef, JsonRpcInfo, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError,
-    RpcCallId, RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
-    RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
-    RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
-    RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration,
-    RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, Streaming, Unary,
+    json_schema, JsonCall, JsonHandler, JsonHandlerFuture, JsonPayload, JsonRef, JsonRpcInfo,
+    JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId, RpcCardinality,
+    RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup, RpcGroupError, RpcHandler,
+    RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage,
+    RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode, RpcPayloadFrame, RpcPayloadReader,
+    RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream,
+    RpcUnaryCall, Streaming, Unary,
 };
 pub use barracuda_vfs::FsError;
 pub use barracuda_workflow::{

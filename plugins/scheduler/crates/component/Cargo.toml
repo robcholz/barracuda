@@ -20,6 +20,7 @@ zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
 barracuda-platform-test.workspace = true
+barracuda-rpc.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
 serde_json = "1"

@@ -24,7 +24,7 @@ use barracuda_plugin_manager::PluginManager;
 use barracuda_vfs::{create_dir_all, write};
 
 const FRAME_SIZE: usize = 512;
-const ANY_JSON: JsonSchema = barracuda_event_router::json_schema_inline!("{}");
+const ANY_JSON: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
 const WORKFLOWS: &str = include_str!("../../../../../image/system/workflows.json");
 
 struct GatewayMessageReceived;
