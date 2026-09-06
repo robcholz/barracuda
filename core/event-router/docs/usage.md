@@ -248,10 +248,11 @@ the most recently executed RPC response, based on `arguments`:
 | present, literals only | `Literal` — the request comes entirely from the arguments. |
 | present, with a `$` reference | `Mapping` — literals plus fields copied from the previous response. |
 
-A reference looks like `$previous.output.<field>` and names a single top-level
-serde field. For a `Mapping` link, give the destination field `#[serde(default)]`
-or a placeholder in the literal arguments, so the JSON codec can fill it from
-the reference.
+A reference looks like `$previous.output[.<field>]`. With a field, it copies
+one top-level serde value. Without a field, it embeds the complete source JSON
+document as that argument value; for example,
+`{"payload":"$previous.output"}`. Omit `arguments` when the complete source
+document is also the complete next request.
 
 ### Unload a Workflow
 

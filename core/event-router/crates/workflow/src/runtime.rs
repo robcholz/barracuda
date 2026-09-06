@@ -682,11 +682,15 @@ fn validate_mapping_source(
     {
         return Ok(());
     }
-    if source
-        .as_bytes()
+    let selects_field = references
         .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        != Some(&b'{')
+        .any(|reference| reference.selector == selector && reference.source_field.is_some());
+    if selects_field
+        && source
+            .as_bytes()
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            != Some(&b'{')
     {
         return Err(match selector {
             SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
@@ -706,18 +710,21 @@ fn validate_mapping_source(
     }
     for reference in references
         .iter()
-        .filter(|reference| reference.selector == selector)
+        .filter(|reference| reference.selector == selector && reference.source_field.is_some())
     {
+        let Some(field) = &reference.source_field else {
+            continue;
+        };
         let matched = count_mapping_values(source, core::slice::from_ref(reference), selector)
             .map_err(|source| step_error(to_step.saturating_sub(1), source))?;
         if matched == 0 {
             return Err(match selector {
                 SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
-                    field: reference.source_field.clone(),
+                    field: field.clone(),
                 },
                 SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
                     step: to_step.saturating_sub(1),
-                    field: reference.source_field.clone(),
+                    field: field.clone(),
                 },
             });
         }
@@ -779,8 +786,22 @@ fn write_mapping_source(
     if expected == 0 {
         return Ok(());
     }
+    let mut matched = 0usize;
+    for reference in references
+        .iter()
+        .filter(|reference| reference.selector == selector && reference.source_field.is_none())
+    {
+        writer.field(&reference.dest_field, source)?;
+        matched = matched.checked_add(1).ok_or(RpcError::InvalidFrameState)?;
+    }
+    if !references
+        .iter()
+        .any(|reference| reference.selector == selector && reference.source_field.is_some())
+    {
+        return Ok(());
+    }
     let mut deserializer = serde_json::Deserializer::from_str(source);
-    let matched = deserializer
+    let field_matches = deserializer
         .deserialize_map(WriteMappingFields {
             writer,
             references,
@@ -788,6 +809,9 @@ fn write_mapping_source(
         })
         .map_err(|_error| RpcError::InvalidJson)?;
     deserializer.end().map_err(|_error| RpcError::InvalidJson)?;
+    matched = matched
+        .checked_add(field_matches)
+        .ok_or(RpcError::InvalidFrameState)?;
     if matched != expected {
         return Err(RpcError::InvalidJson);
     }
@@ -799,6 +823,17 @@ fn count_mapping_values(
     references: &[FieldRef],
     selector: SourceSelector,
 ) -> RpcResult<usize> {
+    let document_count = references
+        .iter()
+        .filter(|reference| reference.selector == selector && reference.source_field.is_none())
+        .count();
+    if !references
+        .iter()
+        .any(|reference| reference.selector == selector && reference.source_field.is_some())
+    {
+        source.encoded_len()?;
+        return Ok(document_count);
+    }
     let mut deserializer = serde_json::Deserializer::from_str(source);
     let matched = deserializer
         .deserialize_map(CountMappingFields {
@@ -807,7 +842,9 @@ fn count_mapping_values(
         })
         .map_err(|_error| RpcError::InvalidJson)?;
     deserializer.end().map_err(|_error| RpcError::InvalidJson)?;
-    Ok(matched)
+    document_count
+        .checked_add(matched)
+        .ok_or(RpcError::InvalidFrameState)
 }
 
 struct CountMappingFields<'a> {
@@ -833,7 +870,8 @@ impl<'de> Visitor<'de> for CountMappingFields<'_> {
                 .references
                 .iter()
                 .filter(|reference| {
-                    reference.selector == self.selector && reference.source_field == name.as_ref()
+                    reference.selector == self.selector
+                        && reference.source_field.as_deref() == Some(name.as_ref())
                 })
                 .count();
             matched = matched
@@ -865,7 +903,8 @@ impl<'de> Visitor<'de> for WriteMappingFields<'_, '_, '_> {
         while let Some(name) = map.next_key::<Cow<'de, str>>()? {
             let value = map.next_value::<&RawValue>()?;
             for reference in self.references.iter().filter(|reference| {
-                reference.selector == self.selector && reference.source_field == name.as_ref()
+                reference.selector == self.selector
+                    && reference.source_field.as_deref() == Some(name.as_ref())
             }) {
                 self.writer
                     .field(&reference.dest_field, value.get())
@@ -926,10 +965,26 @@ fn validate_links(
                         };
                         let response_schema =
                             parse_schema(prev.response_schema().as_str(), from_step)?;
-                        let response_properties = schema_properties(&response_schema)
-                            .ok_or(WorkflowExecutionError::InvalidLink { from_step, to_step })?;
-                        if response_properties.get(&reference.source_field) != Some(destination) {
-                            return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
+                        match &reference.source_field {
+                            Some(source_field) => {
+                                let response_properties =
+                                    schema_properties(&response_schema).ok_or(
+                                        WorkflowExecutionError::InvalidLink { from_step, to_step },
+                                    )?;
+                                if response_properties.get(source_field) != Some(destination) {
+                                    return Err(WorkflowExecutionError::InvalidLink {
+                                        from_step,
+                                        to_step,
+                                    });
+                                }
+                            }
+                            None if &response_schema == destination => {}
+                            None => {
+                                return Err(WorkflowExecutionError::InvalidLink {
+                                    from_step,
+                                    to_step,
+                                });
+                            }
                         }
                     }
                 }
@@ -1164,6 +1219,9 @@ mod json_workflow_tests {
     const MODE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"mode":{"type":"string"}},"required":["mode"],"additionalProperties":false}"#,
     );
+    const DOCUMENT_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{"payload":{"type":"object"}},"required":["payload"],"additionalProperties":false}"#,
+    );
 
     static CAPTURE: CaptureLogger = CaptureLogger {
         records: Mutex::new(Vec::new()),
@@ -1235,6 +1293,16 @@ mod json_workflow_tests {
     impl JsonRpcSchema for LiteralSink {
         const ADDRESS: &'static str = "workflow.literal-sink";
         const REQUEST_SCHEMA: JsonSchema = MODE_SCHEMA;
+        const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+        const MAX_REQUEST_BYTES: usize = 64;
+        const MAX_RESPONSE_BYTES: usize = 2;
+    }
+
+    struct WholeDocumentSink;
+
+    impl JsonRpcSchema for WholeDocumentSink {
+        const ADDRESS: &'static str = "workflow.whole-document-sink";
+        const REQUEST_SCHEMA: JsonSchema = DOCUMENT_SCHEMA;
         const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
         const MAX_REQUEST_BYTES: usize = 64;
         const MAX_RESPONSE_BYTES: usize = 2;
@@ -1872,6 +1940,53 @@ mod json_workflow_tests {
             registry.client(),
         ))
         .expect("non-null error selects error branch");
+    }
+
+    #[test]
+    fn mapping_can_embed_a_complete_previous_output_document() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 128, 2>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"error":"worker_stopped"}"#);
+        let seen = Rc::new(RefCell::new(None));
+        let handler_seen = Rc::clone(&seen);
+        registry
+            .register_json::<WholeDocumentSink, _>(
+                "*",
+                move |_context, request: JsonRef, writer: JsonWriter| {
+                    let seen = Rc::clone(&handler_seen);
+                    async move {
+                        seen.replace(Some(String::from(request.as_str()?)));
+                        writer.write("{}").await
+                    }
+                },
+            )
+            .expect("register document sink");
+        let workflow = parse_definition(
+            r#"{
+                "id":"whole-output-mapping",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "call":"workflow.whole-document-sink",
+                        "arguments":{"payload":"$previous.output"}
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse whole-document mapping");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("embed complete previous output");
+
+        assert_eq!(
+            seen.borrow().as_deref(),
+            Some(r#"{"payload":{"error":"worker_stopped"}}"#)
+        );
     }
 
     #[test]

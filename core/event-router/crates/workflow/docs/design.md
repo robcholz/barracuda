@@ -50,17 +50,17 @@ response becomes the next request. It is declared implicitly by the step's
 | --- | --- | --- |
 | absent | `Direct` | Previous response frame passed byte-for-byte. |
 | present, no `$` | `Literal` | Request built entirely from the literal arguments, independent of the previous step. |
-| present, with `$` | `Mapping` | Request built from literal arguments, then each referenced field is copied wire-to-wire from the previous response. |
+| present, with `$` | `Mapping` | Request built from literal arguments, then each referenced value is copied wire-to-wire from its source. |
 
-Mapping reference grammar: `$event.input.<field>` selects the triggering Event
-and `$previous.output.<field>` selects the most recently executed RPC response
-on the actual path. An `if` node does not update `$previous`: an empty selected arm
-therefore leaves the last executed RPC as previous without any special merge or
-inheritance rule.
+Mapping reference grammar: `$event.input[.<field>]` selects the triggering Event
+and `$previous.output[.<field>]` selects the most recently executed RPC response
+on the actual path. A field selects one top-level JSON value. Omitting the field
+embeds the complete source document as the destination request field. An `if`
+node does not update `$previous`: an empty selected arm therefore leaves the
+last executed RPC as previous without any special merge or inheritance rule.
 `$previous.input`, `$previous.error`, and absolute step selectors are reserved.
-The field is mandatory and a single top-level JSON name (the serde name); a
-whole-document source reference is rejected with a hint to use a `Direct` link,
-and nested paths are rejected.
+Nested source paths are rejected. A `Direct` link remains the whole-request
+passthrough form.
 
 ## Successful return
 
@@ -108,7 +108,7 @@ The **transform** is the link's per-frame function:
 
 - `Direct`: identity — bytes copied verbatim (frame sizes must match).
 - `Mapping`: encode the literal arguments into the request frame, then patch
-  each `$previous.output.<field>` reference wire-to-wire.
+  each field or whole-document reference wire-to-wire.
 - `Literal`: encode the arguments; the transform is constant (identical for
   every frame), so a streaming source produces one identical request per
   frame.
