@@ -30,7 +30,14 @@ fn main() -> Result<(), Box<dyn Error>> {
          /// Independently selected Platform implementation.\n\
          pub type SelectedPlatform = ::{}::{};\n\n\
          #[doc(hidden)]\n\
-         pub use ::{}::platform_entry;\n",
+         pub use ::{} as __platform;\n\n\
+         #[doc(hidden)]\n\
+         #[macro_export]\n\
+         macro_rules! platform_entry {{\n\
+             ($($tokens:tt)*) => {{\n\
+                 $crate::__platform::platform_entry!($($tokens)*);\n\
+             }};\n\
+         }}\n",
         platform.name(),
         platform.crate_name(),
         platform.type_name(),

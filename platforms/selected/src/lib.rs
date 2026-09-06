@@ -10,7 +10,7 @@ mod selected {
 }
 
 #[doc(hidden)]
-pub use selected::platform_entry;
+pub use selected::__platform;
 /// Independently selected concrete Platform.
 pub use selected::SelectedPlatform;
 /// Name of the independently selected Platform.
