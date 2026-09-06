@@ -136,7 +136,11 @@ macro_rules! json_schema {
 }
 
 #[macro_export]
-#[doc(hidden)]
+/// Compiles an inline JSON Schema into an allocation-free RPC schema.
+///
+/// Prefer [`json_schema!`](crate::json_schema) for production RPC contracts
+/// stored under a crate's `schemas/rpc` directory. Inline schemas are useful
+/// when a caller owns a small local contract, including tests and examples.
 macro_rules! json_schema_inline {
     ($source:literal $(,)?) => {
         $crate::JsonSchema::from_parts(
