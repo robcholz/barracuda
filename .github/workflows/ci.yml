@@ -159,11 +159,17 @@ jobs:
       - name: Select Board
         run: cargo board select local-linux
 
+      - name: Check selected application
+        run: cargo check
+
       - name: Build
         run: cargo build
 
       - name: Test selected application
         run: cargo test
+
+      - name: Check portable workspace
+        run: cargo check --workspace $PLATFORM_EXCLUDES
 
       - name: Test portable workspace
         run: cargo test --workspace $PLATFORM_EXCLUDES
@@ -194,6 +200,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache macOS build
         uses: Swatinem/rust-cache@v2
@@ -203,19 +211,27 @@ jobs:
       - name: Select Board
         run: cargo board select local-macos
 
+      - name: Check selected application
+        run: cargo check
+
       - name: Build
         run: cargo build
 
       - name: Test selected application
         run: cargo test
 
+      - name: Check portable workspace
+        run: cargo check --workspace $PLATFORM_EXCLUDES
+
       - name: Test portable workspace
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
-  # The two host Platforms are covered by complete end-user paths above. Build
-  # every device Platform directly for its native target. These jobs are small
-  # and parallel, so toolchain and target regressions fail before the expensive
-  # Board stage starts.
+      - name: Clippy portable workspace
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+
+  # The two host Platforms are covered by complete end-user paths above. Check,
+  # lint, test, and build every device Platform independently. Native target
+  # checks validate the actual implementation while host tests remain runnable.
   platforms:
     name: Platform (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -267,6 +283,8 @@ jobs:
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Select representative Board
         run: |
@@ -291,6 +309,25 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: platform-${{ matrix.name }}
+
+      - name: Check Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo check --package ${{ matrix.package }}
+
+      - name: Check Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp check -Zbuild-std=core,alloc --package ${{ matrix.package }}
+
+      - name: Clippy Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo clippy --package ${{ matrix.package }}
+
+      - name: Clippy Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp clippy -Zbuild-std=core,alloc --package ${{ matrix.package }}
+
+      - name: Test Platform on host
+        run: cargo test --target host-tuple --package ${{ matrix.package }}
 
       - name: Build Platform
         if: matrix.toolchain == 'stable'
@@ -339,9 +376,9 @@ jobs:
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
 
-  # Once all fast gates pass, exercise the actual end-user build for every
-  # Board. Target groups run in parallel; Boards sharing a target run serially
-  # on one runner so the expensive dependency graph is compiled only once.
+  # Once all fast gates pass, exercise the actual end-user check, lint, and
+  # build for every Board. Target groups run in parallel; Boards sharing a
+  # target run serially so the expensive dependency graph is reused.
   boards:
     name: Boards (${{ matrix.key }})
     needs: [preflight, linux, macos, platforms, python]
@@ -358,6 +395,8 @@ jobs:
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install stable Rust target
         if: matrix.toolchain == 'stable'
@@ -398,25 +437,26 @@ jobs:
           shared-key: boards-${{ matrix.key }}
           add-job-id-key: false
 
-      - name: Build every Board
+      - name: Check, lint & build every Board
         if: matrix.toolchain != 'esp'
         run: |
           while IFS= read -r board; do
-            echo "::group::cargo board select $board && cargo build"
+            echo "::group::$board: cargo check, cargo clippy, cargo build"
             cargo board select "$board"
+            cargo check
+            cargo clippy
             cargo build
-            if [[ "${{ matrix.toolchain }}" == "host" ]]; then
-              cargo test
-            fi
             echo "::endgroup::"
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
 
-      - name: Build every Board (Xtensa)
+      - name: Check, lint & build every Board (Xtensa)
         if: matrix.toolchain == 'esp'
         run: |
           while IFS= read -r board; do
-            echo "::group::cargo +esp board select $board && cargo +esp build"
+            echo "::group::$board: cargo +esp check, clippy, build"
             cargo +esp board select "$board"
+            cargo +esp check -Zbuild-std=core,alloc
+            cargo +esp clippy -Zbuild-std=core,alloc
             cargo +esp build -Zbuild-std=core,alloc
             echo "::endgroup::"
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
