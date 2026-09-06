@@ -16,3 +16,8 @@ empty object. The semantic event remains untouched for Workflow to pass to
 `gateway.send_stream`. A `closed` event clears transient reply state, marks the
 stored Agent session as no longer open, returns an empty object, and leaves its
 route mapping available for a later explicit `session.open`.
+
+If that explicit open returns a non-null `error`, the builtin Workflow keeps
+the mapping, does not append the inbound message, and sends the complete Agent
+error response as a standalone `stream_error` payload using the inbound route
+and message ID.

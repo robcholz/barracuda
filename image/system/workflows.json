@@ -59,15 +59,38 @@
                 }
               },
               {
-                "call": "imessage_bridge.to_agent",
-                "arguments": {
-                  "route": "$event.input.route",
-                  "message_id": "$event.input.message_id",
-                  "session": "$previous.output.session"
-                }
+                "if": {
+                  "source": "$previous.output.error",
+                  "not_equals": null
+                },
+                "then": [
+                  {
+                    "call": "gateway.send_stream",
+                    "arguments": {
+                      "route": "$event.input.route",
+                      "reply_to": "$event.input.message_id",
+                      "session": "$previous.output.session",
+                      "sequence": 0,
+                      "type": "stream_error",
+                      "payload": "$previous.output"
+                    }
+                  },
+                  {
+                    "return": {}
+                  }
+                ],
+                "else": []
               }
             ],
             "else": []
+          },
+          {
+            "call": "imessage_bridge.to_agent",
+            "arguments": {
+              "route": "$event.input.route",
+              "message_id": "$event.input.message_id",
+              "session": "$previous.output.session"
+            }
           },
           {
             "call": "session.append",
