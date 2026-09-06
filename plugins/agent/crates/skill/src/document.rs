@@ -6,9 +6,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use core::fmt;
 
+use barracuda_minimal_yaml::Entry;
 use barracuda_vfs::FsError;
 use getset::Getters;
-use serde::Deserialize;
 use thiserror::Error;
 
 const MAX_NAME_CHARS: usize = 64;
@@ -173,14 +173,12 @@ pub enum SkillError {
     },
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 struct RawFrontmatter {
     name: Option<String>,
     description: Option<String>,
     license: Option<String>,
     compatibility: Option<String>,
-    #[serde(default)]
     metadata: BTreeMap<String, String>,
     allowed_tools: Option<String>,
 }
@@ -198,15 +196,7 @@ pub(crate) fn parse_frontmatter(
             "JSON object frontmatter is not accepted; use standard YAML mappings".into(),
         ));
     }
-    let mut documents = yaml_peg::serde::from_str::<RawFrontmatter>(yaml)
-        .map_err(|error| SkillError::InvalidYaml(directory_name.clone(), error.to_string()))?;
-    if documents.len() != 1 {
-        return Err(SkillError::InvalidYaml(
-            directory_name.clone(),
-            "frontmatter must contain exactly one YAML document".into(),
-        ));
-    }
-    let raw = documents.remove(0);
+    let raw = parse_raw_frontmatter(&directory_name, yaml)?;
 
     let name = required_string(&directory_name, "name", raw.name)?;
     if name != directory_name.as_str() {
@@ -238,6 +228,75 @@ pub(crate) fn parse_frontmatter(
         allowed_tools: raw.allowed_tools,
         directory: Some(format!("{}/{}", root.trim_end_matches('/'), name)),
     })
+}
+
+fn parse_raw_frontmatter(name: &SkillName, yaml: &str) -> Result<RawFrontmatter, SkillError> {
+    let mut raw = RawFrontmatter::default();
+    let mut metadata_seen = false;
+
+    for entry in barracuda_minimal_yaml::mapping(yaml).entries() {
+        let entry = entry.map_err(|error| invalid_yaml(name, error))?;
+        match entry.key() {
+            "name" => set_scalar(name, "name", &mut raw.name, &entry)?,
+            "description" => {
+                set_scalar(name, "description", &mut raw.description, &entry)?;
+            }
+            "license" => set_scalar(name, "license", &mut raw.license, &entry)?,
+            "compatibility" => {
+                set_scalar(name, "compatibility", &mut raw.compatibility, &entry)?;
+            }
+            "allowed-tools" => {
+                set_scalar(name, "allowed-tools", &mut raw.allowed_tools, &entry)?;
+            }
+            "metadata" => {
+                if metadata_seen {
+                    return Err(duplicate_field(name, "metadata"));
+                }
+                metadata_seen = true;
+                let metadata = entry.mapping().map_err(|error| invalid_yaml(name, error))?;
+                for metadata_entry in metadata.entries() {
+                    let metadata_entry =
+                        metadata_entry.map_err(|error| invalid_yaml(name, error))?;
+                    let key = metadata_entry.key().to_string();
+                    let value = metadata_entry
+                        .scalar()
+                        .map_err(|error| invalid_yaml(name, error))?
+                        .into_owned();
+                    if raw.metadata.insert(key.clone(), value).is_some() {
+                        return Err(duplicate_field(name, &key));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(raw)
+}
+
+fn set_scalar(
+    name: &SkillName,
+    field: &str,
+    target: &mut Option<String>,
+    entry: &Entry<'_>,
+) -> Result<(), SkillError> {
+    if target.is_some() {
+        return Err(duplicate_field(name, field));
+    }
+    *target = Some(
+        entry
+            .scalar()
+            .map_err(|error| invalid_yaml(name, error))?
+            .into_owned(),
+    );
+    Ok(())
+}
+
+fn invalid_yaml(name: &SkillName, error: barracuda_minimal_yaml::Error) -> SkillError {
+    SkillError::InvalidYaml(name.clone(), error.to_string())
+}
+
+fn duplicate_field(name: &SkillName, field: &str) -> SkillError {
+    SkillError::InvalidYaml(name.clone(), format!("duplicate field '{field}'"))
 }
 
 pub(crate) fn frontmatter_sections<'a>(

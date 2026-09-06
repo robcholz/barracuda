@@ -447,7 +447,6 @@ name = "barracuda-agent-profile"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-runtime",
- "barracuda-agent-skill",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-profile",
@@ -524,14 +523,13 @@ name = "barracuda-agent-skill"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "barracuda-minimal-yaml",
  "barracuda-platform-test",
  "barracuda-vfs",
  "futures-lite",
  "getset",
- "serde",
  "serde_json",
  "thiserror 2.0.18",
- "yaml-peg",
 ]
 
 [[package]]

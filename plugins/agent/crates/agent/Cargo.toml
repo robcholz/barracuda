@@ -24,7 +24,6 @@ multiagent = []
 # Host-only raw Context snapshots served over a private WebSocket endpoint.
 intrusive-observability = [
     "barracuda-agent-context/intrusive-observability",
-    "barracuda-agent-skill/std",
 ]
 
 [dependencies]

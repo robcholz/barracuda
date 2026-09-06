@@ -19,7 +19,6 @@ name = "embassy_runtime"
 #   to this executor-neutral framework crate.
 # - `cache_profile` forwards provider usage support.
 #
-std = ["barracuda-agent-skill/std"]
 multiagent = ["barracuda-agent-session/multiagent"]
 intrusive-observability = ["barracuda-agent/intrusive-observability"]
 # Provider token/cache usage diagnostics.
@@ -54,9 +53,6 @@ tracing = { version = "0.1", default-features = false, features = ["attributes"]
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
 anyhow = "1"
 barracuda-agent-trace.workspace = true
-# Host test dependencies enable serde's std support, so yaml-peg must expose
-# its matching std error implementation in the unified test graph.
-barracuda-agent-skill = { workspace = true, features = ["std"] }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted network doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API.

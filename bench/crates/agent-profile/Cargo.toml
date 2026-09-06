@@ -14,7 +14,6 @@ path = "src/main.rs"
 [dependencies]
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 barracuda-agent-runtime.workspace = true
-barracuda-agent-skill = { workspace = true, features = ["std"] }
 barracuda-model-api.workspace = true
 barracuda-platform-test.workspace = true
 barracuda-profile = { workspace = true, features = ["dhat-heap"] }

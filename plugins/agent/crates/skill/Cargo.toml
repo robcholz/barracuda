@@ -5,18 +5,11 @@ version = "0.1.0"
 edition = "2021"
 description = "no_std filesystem runtime for standard Agent Skills"
 
-[features]
-default = []
-# Host consumers that unify serde's std support must also enable yaml-peg's
-# matching error implementation.
-std = ["yaml-peg/std"]
-
 [dependencies]
+barracuda-minimal-yaml.workspace = true
 barracuda-vfs.workspace = true
 getset = "0.1.7"
-serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 thiserror = { version = "2", default-features = false }
-yaml-peg = { version = "1.0.8", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 # Host tests copy data-driven fixtures into a mounted in-memory VFS.
