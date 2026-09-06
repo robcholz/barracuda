@@ -5,14 +5,14 @@ extern crate alloc;
 
 mod component;
 
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginRegisterContext, PluginResult};
 use http_client::ClientFactory;
 
 use component::HttpComponent;
 
 /// Plugin exposing the shared HTTP client through JSON RPC.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct HttpPlugin {
     clients: ClientFactory<'static>,
 }
@@ -26,7 +26,7 @@ impl HttpPlugin {
     }
 }
 impl<const M: usize> Plugin<M> for HttpPlugin {
-    fn register<S: barracuda_plugin_manager::PluginStorage>(
+    fn register<S: barracuda_plugin::manager::PluginStorage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, M, S>,
     ) -> PluginResult<()> {
@@ -46,8 +46,8 @@ mod tests {
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, never_embassy_stack,
     };
-    use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::{PluginDeclaration, PluginId, PluginManager};
+    use barracuda_plugin::api::{ClientFactory, PluginContext};
+    use barracuda_plugin::manager::{PluginDeclaration, PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     use super::HttpPlugin;

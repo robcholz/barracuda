@@ -8,8 +8,8 @@ mod component;
 use alloc::{boxed::Box, format, rc::Rc, string::String, vec::Vec};
 use core::{cell::RefCell, fmt};
 
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginEntryIterator, PluginError, PluginReadTransaction, PluginRegisterContext,
     PluginResult, PluginStorage, PluginWriteTransaction, StorageResult,
 };
@@ -30,7 +30,7 @@ const API_BASE_STORAGE_KEY: &str = "api_base";
 const API_KEY_STORAGE_KEY: &str = "api_key";
 
 /// Plugin providing web search to Agents through Event Router.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct WebSearchPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -51,10 +51,10 @@ impl<const M: usize> Plugin<M> for WebSearchPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let config = Rc::new(RefCell::new(
             embassy_futures::block_on(load_configuration(context.storage()))?.map(Rc::new),
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn exposes_web_search_identity() {
         assert_eq!(
-            <WebSearchPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            <WebSearchPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
             "web-search"
         );
         assert_eq!(WebSearch::ADDRESS, "web_search.search");

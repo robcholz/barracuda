@@ -7,8 +7,8 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext,
 };
 use embassy_net::Stack;
@@ -36,7 +36,7 @@ pub const WEB_SERVER_CONNECTION_SLOTS: usize = 4;
 ///     let _server = plugin.webserver();
 /// }
 /// ```
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct WebServerPlugin {
     stack: Stack<'static>,
     runtime: Option<Rc<WebServer>>,
@@ -59,7 +59,7 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let webserver = Rc::new(WebServer::new());
         context.provide(Rc::clone(&webserver))?;
@@ -69,7 +69,7 @@ impl<const M: usize> Plugin<M> for WebServerPlugin {
 
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let webserver = self
             .runtime

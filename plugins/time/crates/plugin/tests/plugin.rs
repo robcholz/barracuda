@@ -4,8 +4,8 @@
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
     PluginStartError,
 };
@@ -33,7 +33,7 @@ impl Plugin<512> for ClockConsumer {
         context: &mut PluginRegisterContext<'_, 512, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         *self.observed.borrow_mut() = Some(context.require::<UtcClock>("time")?);
         Ok(())
@@ -60,10 +60,12 @@ fn plugin_loads_the_time_component() {
         let plugin = TimePlugin::new(&mut context);
 
         assert_eq!(
-            <TimePlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            <TimePlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
             "time"
         );
-        assert!(<TimePlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON.is_empty());
+        assert!(
+            <TimePlugin as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON.is_empty()
+        );
         manager
             .register(&mut router, plugin)
             .expect("register Time Plugin");

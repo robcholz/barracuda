@@ -13,8 +13,8 @@ use barracuda_platform_test::{
     install_global_memory_vfs, loopback_network, memory_partition, memory_vfs_root,
     never_embassy_stack,
 };
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
 use barracuda_webserver_plugin::WebServer;
@@ -38,7 +38,7 @@ impl Plugin<FRAME_SIZE> for WebServerProvider {
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         context.provide(Rc::clone(&self.server))?;
         Ok(())

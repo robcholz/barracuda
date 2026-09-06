@@ -4,8 +4,8 @@
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{PluginId, PluginManager, PluginRegisterError};
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::{PluginId, PluginManager, PluginRegisterError};
 use barracuda_scheduler_plugin::SchedulerPlugin;
 use barracuda_time_plugin::TimePlugin;
 use embassy_executor::{Executor, Spawner};
@@ -33,11 +33,11 @@ async fn start_scheduler_with_time(spawner: Spawner, completed: SyncSender<Resul
         manager.install_task_spawner(spawner);
 
         assert_eq!(
-            <SchedulerPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            <SchedulerPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
             "scheduler"
         );
         assert_eq!(
-            <SchedulerPlugin as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON,
+            <SchedulerPlugin as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON,
             &["time"],
         );
         let error = manager
@@ -64,7 +64,7 @@ async fn start_scheduler_with_time(spawner: Spawner, completed: SyncSender<Resul
             .await
             .map_err(|error| error.to_string())?;
         let time_id =
-            PluginId::try_from(<TimePlugin as barracuda_plugin_manager::PluginDeclaration>::ID)
+            PluginId::try_from(<TimePlugin as barracuda_plugin::manager::PluginDeclaration>::ID)
                 .expect("valid Time Plugin ID");
         manager
             .unload(&mut router, &time_id)

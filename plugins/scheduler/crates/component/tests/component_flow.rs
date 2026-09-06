@@ -14,12 +14,14 @@ use barracuda_event_router::{
     RunContext, UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
-use barracuda_plugin_manager::{
+use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginError, PluginId, PluginManager, PluginRegisterContext,
     PluginResult,
 };
 use barracuda_scheduler_component::{SchedulerComponent, SchedulerConfig};
-use barracuda_time_component::{SyncSample, TimeConfig, UtcClock, UtcClockUpdater, utc_clock};
+use barracuda_time_plugin::component::{
+    SyncSample, TimeConfig, UtcClock, UtcClockUpdater, utc_clock,
+};
 use embassy_time::Instant;
 use serde::Deserialize;
 
@@ -65,7 +67,7 @@ impl Plugin<FRAME_SIZE> for TestSchedulerPlugin {
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let scheduler = futures_lite::future::block_on(SchedulerComponent::load(
             SchedulerConfig::new(10),

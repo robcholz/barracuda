@@ -10,8 +10,8 @@ use alloc::string::{String, ToString};
 
 use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::WebServer;
 use web::{InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web, WebBridge};
 
@@ -47,7 +47,7 @@ impl IMessageWebRoute {
 }
 
 /// Plugin that registers the Web channel with the IMessage Gateway.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct IMessageWebPlugin;
 
 impl IMessageWebPlugin {
@@ -64,13 +64,13 @@ impl<const M: usize> Plugin<M> for IMessageWebPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
         let web = Rc::new(WebChannel::new());
         let channel: Rc<dyn MessageChannel> = web.clone();

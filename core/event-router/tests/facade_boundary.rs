@@ -27,16 +27,19 @@ fn workspace_consumers_depend_only_on_the_event_router_facade() -> Result<(), st
             ("barracuda-rpc", "barracuda_rpc::"),
             ("barracuda-workflow", "barracuda_workflow::"),
         ] {
-            assert!(
-                !contents.contains(package),
-                "{} depends directly on the internal {package} crate",
-                path.display()
-            );
-            assert!(
-                !contents.contains(module),
-                "{} uses the internal {package} crate instead of the Event Router facade",
-                path.display()
-            );
+            if path.file_name().is_some_and(|name| name == "Cargo.toml") {
+                assert!(
+                    !contents.lines().any(|line| line.starts_with(package)),
+                    "{} depends directly on the internal {package} crate",
+                    path.display()
+                );
+            } else {
+                assert!(
+                    !contents.contains(module),
+                    "{} uses the internal {package} crate instead of the Event Router facade",
+                    path.display()
+                );
+            }
         }
     }
 
@@ -55,6 +58,40 @@ fn implementation_crates_are_not_publishable() {
             "Event Router implementation crates must not be published directly"
         );
     }
+}
+
+#[test]
+fn workspace_catalog_does_not_expose_implementation_crates() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
+
+    for package in ["barracuda-router", "barracuda-rpc", "barracuda-workflow"] {
+        assert!(
+            !has_workspace_dependency(&manifest, package),
+            "workspace dependencies expose internal package {package}"
+        );
+    }
+
+    Ok(())
+}
+
+fn has_workspace_dependency(manifest: &str, package: &str) -> bool {
+    manifest.lines().any(|line| {
+        line.split_once('=')
+            .is_some_and(|(name, _value)| name.trim() == package)
+    })
+}
+
+#[test]
+fn implementation_crates_are_reexported_as_namespaces() {
+    use barracuda_event_router::{router, rpc, workflow};
+
+    let _: Option<router::ComponentId> = None;
+    let _: Option<rpc::RpcError> = None;
+    let _: Option<workflow::WorkflowId> = None;
+
+    const SCHEMA: rpc::JsonSchema = rpc::json_schema_inline!("{}");
+    assert_eq!(SCHEMA.as_str(), "{}");
 }
 
 fn collect_sources_and_manifests(

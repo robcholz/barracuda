@@ -5,8 +5,8 @@
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_imessage_bridge_plugin::ImessageBridgePlugin;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{PluginDeclaration, PluginId, PluginManager};
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::{PluginDeclaration, PluginId, PluginManager};
 
 #[test]
 fn plugin_loads_one_component_without_typed_dependencies() {

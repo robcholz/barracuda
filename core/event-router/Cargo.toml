@@ -20,9 +20,9 @@ harness = false
 
 [dependencies]
 barracuda-vfs.workspace = true
-barracuda-router.workspace = true
-barracuda-rpc.workspace = true
-barracuda-workflow.workspace = true
+barracuda-router = { path = "crates/router" }
+barracuda-rpc = { path = "crates/rpc" }
+barracuda-workflow = { path = "crates/workflow" }
 log.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }

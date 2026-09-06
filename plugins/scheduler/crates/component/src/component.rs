@@ -4,7 +4,7 @@ use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventEmitter, RegisterContext,
     RunContext, Topic, UnregisterContext,
 };
-use barracuda_plugin_manager::{
+use barracuda_plugin::manager::{
     PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
 };
 use barracuda_time_plugin::UtcClock;

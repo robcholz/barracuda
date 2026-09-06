@@ -9,6 +9,7 @@ members = [
     "bench/crates/*",
     "composition/*",
     "core/event-router",
+    "core/plugin",
     "core/plugin/crates/*",
     "core/system",
     "core/event-router/crates/*",
@@ -77,14 +78,9 @@ barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-selected = { path = "platforms/selected" }
 barracuda-platform-test = { path = "platforms/test" }
 barracuda-platform-tool = { path = "platforms/tool" }
-barracuda-plugin-api = { path = "core/plugin/crates/api" }
-barracuda-plugin-macros = { path = "core/plugin/crates/macros" }
-barracuda-plugin-manager = { path = "core/plugin/crates/manager" }
-barracuda-plugin-manifest = { path = "core/plugin/crates/manifest" }
+barracuda-plugin = { path = "core/plugin" }
 barracuda-plugin-tool = { path = "tools/plugin-tool" }
 barracuda-profile = { path = "shared/profile" }
-barracuda-router = { path = "core/event-router/crates/router" }
-barracuda-rpc = { path = "core/event-router/crates/rpc" }
 barracuda-runtime-utils = { path = "shared/runtime-utils" }
 barracuda-system = { path = "core/system" }
 barracuda-target = { path = "composition/selected" }
@@ -93,7 +89,6 @@ barracuda-tls = { path = "shared/tls" }
 barracuda-vfs = { path = "shared/vfs" }
 barracuda-vfs-littlefs = { path = "shared/vfs-littlefs" }
 barracuda-vfs-memfs = { path = "shared/vfs-memfs" }
-barracuda-workflow = { path = "core/event-router/crates/workflow" }
 http-client = { path = "shared/http-client" }
 json-validator = { path = "shared/json-validator" }
 json-validator-macros = { path = "shared/json-validator-macros" }

@@ -5,8 +5,8 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext,
 };
 use barracuda_vm_builtin_packages::BuiltinPackages;
@@ -16,7 +16,7 @@ pub use barracuda_lua::{Error, Lua, Package, Result};
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 
 /// Registers the VM Component and starts its owner-managed Embassy runtime.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct VmPlugin {
     runtime: Option<VmRuntime>,
     package_registry: LuaPackageRegistry,
@@ -39,7 +39,7 @@ impl<const M: usize> Plugin<M> for VmPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let runtime = VmRuntime::new().map_err(PluginError::registration)?;
         context.provide(Rc::new(self.package_registry.clone()))?;
@@ -53,7 +53,7 @@ impl<const M: usize> Plugin<M> for VmPlugin {
 
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let runtime = self
             .runtime
@@ -87,8 +87,8 @@ mod tests {
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, never_embassy_stack,
     };
-    use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::{
+    use barracuda_plugin::api::{ClientFactory, PluginContext};
+    use barracuda_plugin::manager::{
         Plugin, PluginId, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
     };
     use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
@@ -120,7 +120,7 @@ mod tests {
         observed: Rc<RefCell<Option<Rc<LuaPackageRegistry>>>>,
     }
 
-    impl barracuda_plugin_manager::PluginDeclaration for PackageConsumer {
+    impl barracuda_plugin::manager::PluginDeclaration for PackageConsumer {
         const ID: &'static str = "package-consumer";
         const DEPENDS_ON: &'static [&'static str] = &["vm"];
     }
@@ -131,14 +131,14 @@ mod tests {
             context: &mut PluginRegisterContext<'_, 512, Storage>,
         ) -> PluginResult<()>
         where
-            Storage: barracuda_plugin_manager::PluginStorage,
+            Storage: barracuda_plugin::manager::PluginStorage,
         {
             let registry = context.require::<LuaPackageRegistry>(
-                <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+                <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
             )?;
             let registration = registry
                 .register(MarkerPackage)
-                .map_err(barracuda_plugin_manager::PluginError::registration)?;
+                .map_err(barracuda_plugin::manager::PluginError::registration)?;
             context.retain(registration);
             *self.observed.borrow_mut() = Some(registry);
             Ok(())
@@ -155,7 +155,7 @@ mod tests {
         let id = PluginId::try_from("vm").expect("valid Plugin ID");
         let plugin = VmPlugin::new(&mut plugin_context());
         assert_eq!(
-            <VmPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+            <VmPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
             "vm"
         );
 

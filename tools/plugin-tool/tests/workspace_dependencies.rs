@@ -21,6 +21,35 @@ fn workspace_catalog_exposes_only_plugin_packages() -> Result<(), std::io::Error
 }
 
 #[test]
+fn workspace_catalog_exposes_only_core_facades() -> Result<(), std::io::Error> {
+    let manifest = std::fs::read_to_string(workspace_root().join("Cargo.toml"))?;
+
+    for package in [
+        "barracuda-plugin-api",
+        "barracuda-plugin-macros",
+        "barracuda-plugin-manager",
+        "barracuda-plugin-manifest",
+        "barracuda-router",
+        "barracuda-rpc",
+        "barracuda-workflow",
+    ] {
+        assert!(
+            !has_workspace_dependency(&manifest, package),
+            "workspace dependencies expose internal package {package}"
+        );
+    }
+
+    for facade in ["barracuda-event-router", "barracuda-plugin"] {
+        assert!(
+            has_workspace_dependency(&manifest, facade),
+            "workspace dependencies do not expose facade {facade}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn plugin_implementation_crates_are_not_publishable() -> Result<(), std::io::Error> {
     let root = workspace_root();
     let mut manifests = Vec::new();
@@ -79,6 +108,13 @@ fn workspace_root() -> PathBuf {
 fn plugin_path(line: &str) -> Option<&str> {
     let path = line.split_once("path = \"")?.1.split_once('"')?.0;
     path.starts_with("plugins/").then_some(path)
+}
+
+fn has_workspace_dependency(manifest: &str, package: &str) -> bool {
+    manifest.lines().any(|line| {
+        line.split_once('=')
+            .is_some_and(|(name, _value)| name.trim() == package)
+    })
 }
 
 fn collect_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {

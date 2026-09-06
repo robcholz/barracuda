@@ -18,8 +18,8 @@ use core::task::{Context, Poll};
 use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
 use barracuda_event_router::{EventRouter, EventRouterCreateError, RouterError, RpcLaneStorage};
 use barracuda_platform::{Partitions, PlatformResources};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     PluginManager, PluginManagerInitError, PluginRegisterError, PluginStartError, PluginUnloadError,
 };
 use barracuda_target_api::TargetResources;

@@ -2,6 +2,7 @@
 name = "barracuda-plugin-manifest"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Canonical parser for Barracuda Plugin manifests"
 license = "Apache-2.0"
 

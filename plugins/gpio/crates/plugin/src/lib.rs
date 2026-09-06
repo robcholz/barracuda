@@ -9,8 +9,8 @@ use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, ExposedIo, InputConfig, OutputConfig, OutputDrive, Pull,
     ResourceSet,
 };
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -18,7 +18,7 @@ use embassy_sync::mutex::Mutex;
 use embedded_hal::digital::{InputPin, OutputPin};
 
 /// Takes the Board-exposed GPIO value and registers the `gpio` Lua package.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct GpioPlugin<Gpio> {
     hardware: Option<Gpio>,
 }
@@ -47,10 +47,10 @@ where
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let registry = context.require::<LuaPackageRegistry>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
             .register(GpioPackage::new(self.hardware.take()))

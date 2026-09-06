@@ -8,7 +8,7 @@ license = "Apache-2.0"
 
 [dependencies]
 barracuda-event-router.workspace = true
-barracuda-plugin-manager.workspace = true
+barracuda-plugin.workspace = true
 embassy-sync.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }

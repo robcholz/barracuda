@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::mem::size_of;
 
-use barracuda_plugin_manager::PluginStorage;
+use barracuda_plugin::manager::PluginStorage;
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 pub(crate) const CHANNEL_MAX: usize = 32;

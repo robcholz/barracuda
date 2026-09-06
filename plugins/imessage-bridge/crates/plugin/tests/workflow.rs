@@ -19,8 +19,8 @@ use barracuda_event_router::{
 };
 use barracuda_imessage_bridge_plugin::ImessageBridgePlugin;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::PluginManager;
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::PluginManager;
 use barracuda_vfs::{create_dir_all, write};
 
 const FRAME_SIZE: usize = 512;

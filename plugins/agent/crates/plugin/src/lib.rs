@@ -12,8 +12,8 @@ mod model_api_http;
 use barracuda_agent_component::component::AgentComponent;
 use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
 use barracuda_model_api::ModelApi;
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
 use barracuda_webserver_plugin::WebServer;
@@ -24,7 +24,7 @@ pub use model_api_http::SET_API_PATH;
 const PERSISTENCE_ROOT: &str = "/";
 
 /// Plugin that constructs and owns the Agent runtime and Component.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct AgentPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -48,10 +48,10 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let filesystem = context.filesystem()?.clone();
         let http_clients = self.http_clients.clone();
@@ -88,8 +88,8 @@ mod tests {
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
     };
-    use barracuda_plugin_api::PluginContext;
-    use barracuda_plugin_manager::{
+    use barracuda_plugin::api::PluginContext;
+    use barracuda_plugin::manager::{
         Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
     };
     use barracuda_webserver_plugin::WebServer;
@@ -111,7 +111,7 @@ mod tests {
             context: &mut PluginRegisterContext<'_, 512, Storage>,
         ) -> PluginResult<()>
         where
-            Storage: barracuda_plugin_manager::PluginStorage,
+            Storage: barracuda_plugin::manager::PluginStorage,
         {
             context.provide(Rc::clone(&self.0))?;
             Ok(())
@@ -143,7 +143,7 @@ mod tests {
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = AgentPlugin::new(&mut context);
             assert_eq!(
-                <AgentPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+                <AgentPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
                 "agent"
             );
 

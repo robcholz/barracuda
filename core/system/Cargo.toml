@@ -32,8 +32,7 @@ barracuda-vm-plugin.workspace = true
 barracuda-web-search-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 # END GENERATED PLUGINS
-barracuda-plugin-api.workspace = true
-barracuda-plugin-manager.workspace = true
+barracuda-plugin.workspace = true
 barracuda-platform.workspace = true
 barracuda-target-api.workspace = true
 barracuda-tls.workspace = true

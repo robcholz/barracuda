@@ -6,8 +6,8 @@ extern crate alloc;
 
 use alloc::{format, string::String, sync::Arc, vec, vec::Vec};
 use barracuda_board_hal::{ExposedIo, ResourceSet};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -17,7 +17,7 @@ use embedded_hal_async::i2c::I2c;
 const MAX_TRANSFER_BYTES: usize = 64 * 1024;
 
 /// Takes the concrete Board-exposed I2C set and registers the `i2c` package.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct I2cPlugin<I2cSet> {
     hardware: Option<I2cSet>,
 }
@@ -46,10 +46,10 @@ where
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let registry = context.require::<LuaPackageRegistry>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
             .register(I2cPackage::new(self.hardware.take()))

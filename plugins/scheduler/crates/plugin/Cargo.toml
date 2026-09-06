@@ -6,8 +6,7 @@ description = "Barracuda Plugin that owns the RTC-authoritative Scheduler Compon
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-plugin-api.workspace = true
-barracuda-plugin-manager.workspace = true
+barracuda-plugin.workspace = true
 barracuda-scheduler-component = { path = "../component" }
 barracuda-time-plugin.workspace = true
 embassy-futures.workspace = true

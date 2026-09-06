@@ -2,6 +2,7 @@
 name = "barracuda-plugin-macros"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Compile-time manifest macros for Barracuda Plugins"
 license = "Apache-2.0"
 
@@ -9,7 +10,7 @@ license = "Apache-2.0"
 proc-macro = true
 
 [dependencies]
-barracuda-plugin-manifest.workspace = true
+barracuda-plugin-manifest = { path = "../manifest" }
 quote = "1"
 syn = { version = "2", features = ["full"] }
 

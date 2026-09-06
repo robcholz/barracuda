@@ -6,8 +6,7 @@ description = "IMessage QQ provider Plugin"
 
 [dependencies]
 barracuda-imessage-gateway-plugin.workspace = true
-barracuda-plugin-api.workspace = true
-barracuda-plugin-manager.workspace = true
+barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
 http-client.workspace = true
 log = "0.4"

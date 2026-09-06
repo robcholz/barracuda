@@ -7,8 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 barracuda-board-hal.workspace = true
-barracuda-plugin-api.workspace = true
-barracuda-plugin-manager.workspace = true
+barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 embassy-sync.workspace = true
 embedded-hal.workspace = true

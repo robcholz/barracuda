@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult, PluginStartError,
 };
 use barracuda_webserver_plugin::{WebServer, WebServerPlugin};
@@ -42,7 +42,7 @@ impl Plugin<FRAME_SIZE> for Consumer {
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         *self.observed.borrow_mut() =
             Some(context.require::<WebServer>(<Self as PluginDeclaration>::DEPENDS_ON[0])?);
@@ -58,7 +58,7 @@ fn plugin_provides_webserver_to_dependent_plugins() {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
     let mut router = block_on(EventRouter::new(lanes)).expect("create router");
     let observed = Rc::new(RefCell::new(None));
-    let plugin_id = barracuda_plugin_manager::PluginId::try_from("webserver")
+    let plugin_id = barracuda_plugin::manager::PluginId::try_from("webserver")
         .expect("valid WebServer Plugin ID");
 
     manager

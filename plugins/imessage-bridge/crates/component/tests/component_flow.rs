@@ -14,7 +14,7 @@ use barracuda_event_router::{
 };
 use barracuda_imessage_bridge_component::ImessageBridgeComponent;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition};
-use barracuda_plugin_manager::{
+use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginError, PluginId, PluginManager, PluginRegisterContext,
     PluginResult,
 };
@@ -33,7 +33,7 @@ impl Plugin<FRAME_SIZE> for TestBridgePlugin {
         context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let bridge = futures_lite::future::block_on(ImessageBridgeComponent::load(
             context.storage().clone(),

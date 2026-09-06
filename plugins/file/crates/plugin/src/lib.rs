@@ -11,8 +11,8 @@ use alloc::rc::Rc;
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
 };
 use barracuda_vfs::{FsError, Metadata, ScopedVfs};
@@ -72,7 +72,7 @@ impl FileSystem {
 }
 
 /// Plugin that publishes [`FileSystem`] and exposes its JSON RPCs.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct FilePlugin;
 
 impl FilePlugin {
@@ -92,7 +92,7 @@ impl<const M: usize> Plugin<M> for FilePlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let filesystem = Rc::new(FileSystem::new(context.filesystem()?.clone()));
         context.provide(Rc::clone(&filesystem))?;
