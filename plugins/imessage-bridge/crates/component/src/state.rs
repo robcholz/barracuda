@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, format, string::String};
+use alloc::{collections::BTreeMap, string::String};
 use core::mem::size_of;
 
 use barracuda_plugin_manager::PluginStorage;
@@ -9,7 +9,6 @@ pub(crate) const CONVERSATION_MAX: usize = 96;
 pub(crate) const THREAD_MAX: usize = 64;
 pub(crate) const MESSAGE_ID_MAX: usize = 96;
 pub(crate) const SESSION_MAX: usize = 32;
-const COMMAND_CAPACITY: usize = 16;
 const RECORD_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -56,13 +55,17 @@ pub(crate) enum ResolveResult {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GatewayTarget {
+    pub(crate) route: Route,
+    pub(crate) reply_to: String,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BridgeError {
     InvalidRequest,
     Conflict,
     Storage,
-    Busy,
-    UnknownCommand,
 }
 
 impl BridgeError {
@@ -71,61 +74,13 @@ impl BridgeError {
             Self::InvalidRequest => "invalid_request",
             Self::Conflict => "conflict",
             Self::Storage => "storage",
-            Self::Busy => "busy",
-            Self::UnknownCommand => "unknown_command",
         }
     }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) enum GatewayCommand {
-    Start {
-        stream_id: String,
-        route: Route,
-        reply_to: String,
-    },
-    Chunk {
-        stream_id: String,
-        sequence: u32,
-        boundary: &'static str,
-        text: String,
-    },
-    Finish {
-        stream_id: String,
-        sequence: u32,
-    },
-}
-
-#[derive(Clone, Debug)]
-struct ActiveStream {
-    stream_id: String,
-    next_sequence: u32,
-}
-
-#[derive(Clone, Debug, Default)]
-struct SessionEventState {
-    logical_sequence: Option<u64>,
-    event_type: String,
-    active_stream: Option<ActiveStream>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SessionField<'a> {
-    pub(crate) session: &'a str,
-    pub(crate) run: &'a str,
-    pub(crate) sequence: u64,
-    pub(crate) field: &'a str,
-    pub(crate) chunk: &'a str,
-    pub(crate) field_complete: bool,
-    pub(crate) terminal: Option<&'a str>,
 }
 
 pub(crate) struct BridgeBook {
     by_route: BTreeMap<Route, String>,
     by_session: BTreeMap<String, Mapping>,
-    events: BTreeMap<String, SessionEventState>,
-    commands: BTreeMap<String, GatewayCommand>,
-    next_command: u64,
 }
 
 impl BridgeBook {
@@ -133,9 +88,6 @@ impl BridgeBook {
         Self {
             by_route: BTreeMap::new(),
             by_session: BTreeMap::new(),
-            events: BTreeMap::new(),
-            commands: BTreeMap::new(),
-            next_command: 1,
         }
     }
 
@@ -226,103 +178,25 @@ impl BridgeBook {
         })
     }
 
-    pub(crate) fn process_field(
+    pub(crate) fn gateway_target(
         &mut self,
-        field: SessionField<'_>,
-    ) -> Result<Option<String>, BridgeError> {
-        if !valid_session(field.session) || !valid_run(field.run) {
+        session: &str,
+        closed: bool,
+    ) -> Result<Option<GatewayTarget>, BridgeError> {
+        if !valid_session(session) {
             return Err(BridgeError::InvalidRequest);
         }
-        if field.terminal.is_some()
-            && let Some(mapping) = self.by_session.get_mut(field.session)
-        {
+        let Some(mapping) = self.by_session.get_mut(session) else {
+            return Ok(None);
+        };
+        if closed {
             mapping.opened = false;
-        }
-        if !self.by_session.contains_key(field.session) {
             return Ok(None);
         }
-
-        let state = self.events.entry(String::from(field.session)).or_default();
-        if state.logical_sequence != Some(field.sequence) {
-            state.logical_sequence = Some(field.sequence);
-            state.event_type.clear();
-        }
-
-        let mut command = if field.field == "type" {
-            state.event_type.push_str(field.chunk);
-            if !field.field_complete {
-                None
-            } else if state.event_type == "turn_started" && state.active_stream.is_none() {
-                let mapping = self
-                    .by_session
-                    .get(field.session)
-                    .cloned()
-                    .ok_or(BridgeError::InvalidRequest)?;
-                let stream_id = format!("{}.{}.{}", field.session, field.run, field.sequence);
-                state.active_stream = Some(ActiveStream {
-                    stream_id: stream_id.clone(),
-                    next_sequence: 1,
-                });
-                Some(GatewayCommand::Start {
-                    stream_id,
-                    route: mapping.route,
-                    reply_to: mapping.reply_to,
-                })
-            } else if state.event_type == "turn_ended" {
-                state
-                    .active_stream
-                    .take()
-                    .map(|active| GatewayCommand::Finish {
-                        stream_id: active.stream_id,
-                        sequence: active.next_sequence,
-                    })
-            } else {
-                None
-            }
-        } else if field.field == "text" && state.event_type == "output_delta" {
-            state.active_stream.as_mut().map(|active| {
-                let sequence = active.next_sequence;
-                active.next_sequence = active.next_sequence.saturating_add(1);
-                GatewayCommand::Chunk {
-                    stream_id: active.stream_id.clone(),
-                    sequence,
-                    boundary: if field.field_complete {
-                        "complete"
-                    } else {
-                        "more"
-                    },
-                    text: String::from(field.chunk),
-                }
-            })
-        } else {
-            None
-        };
-
-        if command.is_none() && field.terminal.is_some() {
-            command = state
-                .active_stream
-                .take()
-                .map(|active| GatewayCommand::Finish {
-                    stream_id: active.stream_id,
-                    sequence: active.next_sequence,
-                });
-        }
-
-        command.map(|value| self.insert_command(value)).transpose()
-    }
-
-    pub(crate) fn take_command(&mut self, id: &str) -> Result<GatewayCommand, BridgeError> {
-        self.commands.remove(id).ok_or(BridgeError::UnknownCommand)
-    }
-
-    fn insert_command(&mut self, command: GatewayCommand) -> Result<String, BridgeError> {
-        if self.commands.len() >= COMMAND_CAPACITY {
-            return Err(BridgeError::Busy);
-        }
-        let id = format!("command-{}", self.next_command);
-        self.next_command = self.next_command.checked_add(1).ok_or(BridgeError::Busy)?;
-        self.commands.insert(id.clone(), command);
-        Ok(id)
+        Ok(Some(GatewayTarget {
+            route: mapping.route.clone(),
+            reply_to: mapping.reply_to.clone(),
+        }))
     }
 }
 
@@ -335,12 +209,6 @@ fn valid_session(value: &str) -> bool {
         && value.strip_prefix("session-").is_some_and(|suffix| {
             !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
         })
-}
-
-fn valid_run(value: &str) -> bool {
-    value.strip_prefix("run-").is_some_and(|suffix| {
-        !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit())
-    })
 }
 
 #[repr(C)]

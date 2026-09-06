@@ -90,13 +90,15 @@
         "if": "$previous.output.forward",
         "then": [
           {
-            "call": "imessage_bridge.to_gateway",
+            "call": "gateway.send_stream",
             "arguments": {
-              "command_id": "$previous.output.command_id"
+              "route": "$previous.output.route",
+              "reply_to": "$previous.output.reply_to",
+              "session": "$event.input.session",
+              "sequence": "$event.input.sequence",
+              "type": "$event.input.type",
+              "payload": "$event.input.payload"
             }
-          },
-          {
-            "call": "gateway.send_stream"
           },
           {
             "return": {}

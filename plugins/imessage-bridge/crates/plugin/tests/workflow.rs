@@ -18,6 +18,7 @@ use barracuda_event_router::{
     UnregisterContext,
 };
 use barracuda_imessage_bridge_plugin::ImessageBridgePlugin;
+use barracuda_imessage_gateway_component::gateway_send_stream::GatewaySendStream;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::PluginManager;
@@ -56,7 +57,12 @@ macro_rules! rpc {
 rpc!(NewSession, "session.new", ANY_JSON, ANY_JSON);
 rpc!(OpenSession, "session.open", ANY_JSON, ANY_JSON);
 rpc!(AppendSession, "session.append", ANY_JSON, ANY_JSON);
-rpc!(SendStream, "gateway.send_stream", ANY_JSON, ANY_JSON);
+rpc!(
+    SendStream,
+    "gateway.send_stream",
+    GatewaySendStream::REQUEST_SCHEMA,
+    GatewaySendStream::RESPONSE_SCHEMA
+);
 
 #[derive(Debug)]
 struct WorkflowTestError(&'static str);
@@ -103,7 +109,7 @@ impl Component<FRAME_SIZE> for WorkflowDriver {
                 let appended = Rc::clone(&appended);
                 async move {
                     appended.borrow_mut().push(request.as_str()?.to_string());
-                    response.write("{}").await
+                    response.write(r#"{"accepted_sequence":0}"#).await
                 }
             },
         )?;
@@ -154,52 +160,51 @@ async fn exercise_workflows(
         .map_err(ComponentError::lifecycle)?;
     wait_for_len(appended, 1, "inbound Workflow did not append to Agent").await?;
 
-    emit_session_field(&emitter, 0, 0, "type", "turn_started", true, false).await?;
+    emit_session_event(
+        &emitter,
+        0,
+        "turn_started",
+        r#"{"turn":"turn-1","origin":"user"}"#,
+    )
+    .await?;
     wait_for_len(
         gateway_commands,
         1,
         "outbound Workflow did not start stream",
     )
     .await?;
-    emit_session_field(&emitter, 1, 0, "type", "reasoning_delta", true, false).await?;
-    emit_session_field(&emitter, 1, 1, "text", "private", true, true).await?;
-    for _iteration in 0..8 {
-        futures_lite::future::yield_now().await;
-    }
-    if gateway_commands.borrow().len() != 1 {
-        return Err(ComponentError::lifecycle(WorkflowTestError(
-            "reasoning text was forwarded",
-        )));
-    }
-    emit_session_field(&emitter, 2, 0, "type", "output_delta", true, false).await?;
-    emit_session_field(&emitter, 2, 1, "text", "hello user", true, true).await?;
+    emit_session_event(&emitter, 1, "reasoning_delta", r#"{"text":"private"}"#).await?;
     wait_for_len(
         gateway_commands,
         2,
-        "outbound Workflow did not forward output",
+        "outbound Workflow did not forward reasoning",
     )
     .await?;
-    emit_session_field(&emitter, 3, 0, "type", "turn_ended", true, false).await?;
+    emit_session_event(&emitter, 2, "output_delta", r#"{"text":"hello user"}"#).await?;
     wait_for_len(
         gateway_commands,
         3,
+        "outbound Workflow did not forward output",
+    )
+    .await?;
+    emit_session_event(&emitter, 3, "turn_ended", r#"{"turn":"turn-1"}"#).await?;
+    wait_for_len(
+        gateway_commands,
+        4,
         "outbound Workflow did not finish stream",
     )
     .await?;
     Ok(())
 }
 
-async fn emit_session_field(
+async fn emit_session_event(
     emitter: &EventEmitter<FRAME_SIZE>,
     sequence: u64,
-    chunk_index: u64,
-    field: &str,
-    chunk: &str,
-    field_complete: bool,
-    event_complete: bool,
+    event_type: &str,
+    payload: &str,
 ) -> Result<(), ComponentError> {
     let document = format!(
-        r#"{{"session":"session-1","run":"run-1","sequence":{sequence},"chunk_index":{chunk_index},"field":"{field}","chunk":"{chunk}","field_complete":{field_complete},"event_complete":{event_complete},"terminal":null}}"#,
+        r#"{{"session":"session-1","sequence":{sequence},"type":"{event_type}","payload":{payload}}}"#,
     );
     emitter
         .emit::<SessionEvent>(&document)
@@ -273,9 +278,20 @@ fn builtin_workflows_restore_before_plugins_and_bridge_both_directions() {
             appended.borrow().as_slice(),
             &[r#"{"text":"hello agent","session":"session-1"}"#]
         );
-        assert_eq!(gateway_commands.borrow().len(), 3);
-        assert!(gateway_commands.borrow()[0].contains(r#""action":"start""#));
-        assert!(gateway_commands.borrow()[1].contains(r#""text":"hello user""#));
-        assert!(gateway_commands.borrow()[2].contains(r#""action":"finish""#));
+        assert_eq!(gateway_commands.borrow().len(), 4);
+        for (index, event_type) in [
+            "turn_started",
+            "reasoning_delta",
+            "output_delta",
+            "turn_ended",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let command = &gateway_commands.borrow()[index];
+            assert!(command.contains(&format!(r#""type":"{event_type}""#)));
+            assert!(command.contains(r#""route":{"channel":"imessage","conversation_id":"chat-1","thread_id":"thread-1"}"#));
+            assert!(command.contains(r#""reply_to":"message-1""#));
+        }
     });
 }

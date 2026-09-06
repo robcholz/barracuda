@@ -117,89 +117,59 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
     )
     .await?;
 
-    let started = r#"{"session":"session-4","run":"run-2","sequence":0,"chunk_index":0,"field":"type","chunk":"turn_started","field_complete":true,"event_complete":false,"terminal":null}"#;
+    let started = r#"{"session":"session-4","sequence":0,"type":"turn_started","payload":{"turn":"turn-1","origin":"user"}}"#;
     assert_call(
         &client,
         &to_gateway,
         started,
-        r#"{"command_id":"command-1","forward":true}"#,
-    )
-    .await?;
-    assert_call(
-        &client,
-        &to_gateway,
-        r#"{"command_id":"command-1"}"#,
-        r#"{"action":"start","channel":"imessage","conversation_id":"chat-7","reply_to":"message-9","sequence":0,"stream_id":"session-4.run-2.0","thread_id":"thread-2"}"#,
+        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
-    let reasoning = r#"{"session":"session-4","run":"run-2","sequence":1,"chunk_index":0,"field":"type","chunk":"reasoning_delta","field_complete":true,"event_complete":false,"terminal":null}"#;
-    assert_call(&client, &to_gateway, reasoning, r#"{"forward":false}"#).await?;
-    let reasoning_text = r#"{"session":"session-4","run":"run-2","sequence":1,"chunk_index":1,"field":"text","chunk":"private","field_complete":true,"event_complete":true,"terminal":null}"#;
-    assert_call(&client, &to_gateway, reasoning_text, r#"{"forward":false}"#).await?;
-    let output_type = r#"{"session":"session-4","run":"run-2","sequence":2,"chunk_index":0,"field":"type","chunk":"output_delta","field_complete":true,"event_complete":false,"terminal":null}"#;
-    assert_call(&client, &to_gateway, output_type, r#"{"forward":false}"#).await?;
-    let text_more = r#"{"session":"session-4","run":"run-2","sequence":2,"chunk_index":1,"field":"text","chunk":"wor","field_complete":false,"event_complete":false,"terminal":null}"#;
+    let reasoning = r#"{"session":"session-4","sequence":1,"type":"reasoning_delta","payload":{"text":"private"}}"#;
     assert_call(
         &client,
         &to_gateway,
-        text_more,
-        r#"{"command_id":"command-2","forward":true}"#,
-    )
-    .await?;
-    assert_call(
-        &client,
-        &to_gateway,
-        r#"{"command_id":"command-2"}"#,
-        r#"{"action":"chunk","boundary":"more","field":"text","sequence":1,"stream_id":"session-4.run-2.0","text":"wor"}"#,
-    )
-    .await?;
-    assert_call(
-        &client,
-        &to_gateway,
-        r#"{"command_id":"command-2"}"#,
-        r#"{"error":"unknown_command"}"#,
+        reasoning,
+        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
-    let text_complete = r#"{"session":"session-4","run":"run-2","sequence":2,"chunk_index":2,"field":"text","chunk":"ld","field_complete":true,"event_complete":true,"terminal":null}"#;
+    let output =
+        r#"{"session":"session-4","sequence":2,"type":"output_delta","payload":{"text":"world"}}"#;
     assert_call(
         &client,
         &to_gateway,
-        text_complete,
-        r#"{"command_id":"command-3","forward":true}"#,
-    )
-    .await?;
-    assert_call(
-        &client,
-        &to_gateway,
-        r#"{"command_id":"command-3"}"#,
-        r#"{"action":"chunk","boundary":"complete","field":"text","sequence":2,"stream_id":"session-4.run-2.0","text":"ld"}"#,
+        output,
+        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
 
-    let ended = r#"{"session":"session-4","run":"run-2","sequence":3,"chunk_index":0,"field":"type","chunk":"turn_ended","field_complete":true,"event_complete":false,"terminal":null}"#;
+    let ended =
+        r#"{"session":"session-4","sequence":3,"type":"turn_ended","payload":{"turn":"turn-1"}}"#;
     assert_call(
         &client,
         &to_gateway,
         ended,
-        r#"{"command_id":"command-4","forward":true}"#,
+        r#"{"forward":true,"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
     )
     .await?;
-    assert_call(
-        &client,
-        &to_gateway,
-        r#"{"command_id":"command-4"}"#,
-        r#"{"action":"finish","sequence":3,"stream_id":"session-4.run-2.0"}"#,
-    )
-    .await?;
-    let closed = r#"{"session":"session-4","run":"run-2","sequence":4,"chunk_index":0,"field":"type","chunk":"closed","field_complete":true,"event_complete":false,"terminal":"closed"}"#;
+
+    let closed =
+        r#"{"session":"session-4","sequence":4,"type":"closed","payload":{"reason":"closed"}}"#;
     assert_call(&client, &to_gateway, closed, r#"{"forward":false}"#).await?;
     assert_call(
         &client,
         &to_agent,
         route,
         r#"{"found":true,"open_required":true,"session":"session-4"}"#,
+    )
+    .await?;
+    assert_call(
+        &client,
+        &to_gateway,
+        r#"{"session":"session-99","sequence":0,"type":"turn_started","payload":{}}"#,
+        r#"{"forward":false}"#,
     )
     .await?;
     assert!(client.call_json(&to_agent, "[]")?.await.is_err());
@@ -246,7 +216,7 @@ fn drive_until_complete(
 }
 
 #[test]
-fn route_persists_and_output_delta_becomes_gateway_stream_commands() {
+fn route_persists_and_turn_events_resolve_the_gateway_target() {
     futures_lite::future::block_on(install_global_memory_vfs()).expect("install test VFS");
     let partition =
         futures_lite::future::block_on(memory_partition(64 * 1024)).expect("create test partition");

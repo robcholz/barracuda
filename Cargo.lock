@@ -773,6 +773,7 @@ version = "0.1.0"
 dependencies = [
  "barracuda-event-router",
  "barracuda-imessage-bridge-component",
+ "barracuda-imessage-gateway-component",
  "barracuda-platform-test",
  "barracuda-plugin-api",
  "barracuda-plugin-manager",

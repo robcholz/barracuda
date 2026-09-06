@@ -5,14 +5,14 @@ use barracuda_event_router::{
 };
 use barracuda_plugin_manager::PluginStorage;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 
 use crate::{
     component::BridgeControl,
-    json::{command_response, error_response, forwarding_response},
-    state::SessionField,
+    json::{error_response, gateway_target_response},
 };
 
-/// Converts Agent session Event chunks into one-shot Gateway stream commands.
+/// Resolves the Gateway delivery target for one complete Agent session Event.
 pub struct ToGateway;
 
 impl JsonRpcSchema for ToGateway {
@@ -24,28 +24,16 @@ impl JsonRpcSchema for ToGateway {
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum ToGatewayRequest<'a> {
-    Event {
-        #[serde(borrow)]
-        session: &'a str,
-        #[serde(borrow)]
-        run: &'a str,
-        sequence: u64,
-        chunk_index: u64,
-        #[serde(borrow)]
-        field: &'a str,
-        #[serde(borrow)]
-        chunk: &'a str,
-        field_complete: bool,
-        event_complete: bool,
-        #[serde(default, borrow)]
-        terminal: Option<&'a str>,
-    },
-    Command {
-        #[serde(borrow)]
-        command_id: &'a str,
-    },
+#[serde(deny_unknown_fields)]
+struct ToGatewayRequest<'a> {
+    #[serde(borrow)]
+    session: &'a str,
+    #[serde(rename = "sequence")]
+    _sequence: u64,
+    #[serde(rename = "type", borrow)]
+    event_type: &'a str,
+    #[serde(rename = "payload", borrow)]
+    _payload: &'a RawValue,
 }
 
 pub(crate) fn to_gateway_handler<Storage>(control: BridgeControl<Storage>) -> impl JsonHandler
@@ -56,41 +44,12 @@ where
         let shared = Rc::clone(&control.shared);
         async move {
             let request = request.deserialize::<ToGatewayRequest<'_>>()?;
-            let result = match request {
-                ToGatewayRequest::Event {
-                    session,
-                    run,
-                    sequence,
-                    chunk_index,
-                    field,
-                    chunk,
-                    field_complete,
-                    event_complete,
-                    terminal,
-                } => {
-                    let _bounded_order = (chunk_index, event_complete);
-                    shared
-                        .book
-                        .lock()
-                        .await
-                        .process_field(SessionField {
-                            session,
-                            run,
-                            sequence,
-                            field,
-                            chunk,
-                            field_complete,
-                            terminal,
-                        })
-                        .map(|command_id| forwarding_response(command_id.as_deref()))
-                }
-                ToGatewayRequest::Command { command_id } => shared
-                    .book
-                    .lock()
-                    .await
-                    .take_command(command_id)
-                    .map(command_response),
-            };
+            let result = shared
+                .book
+                .lock()
+                .await
+                .gateway_target(request.session, request.event_type == "closed")
+                .map(gateway_target_response);
             match result {
                 Ok(value) => response.write(&value).await,
                 Err(error) => response.write(&error_response(error)).await,

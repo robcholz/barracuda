@@ -13,6 +13,7 @@ embassy-futures.workspace = true
 
 [dev-dependencies]
 barracuda-event-router.workspace = true
+barracuda-imessage-gateway-component.workspace = true
 barracuda-platform-test.workspace = true
 barracuda-vfs.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }

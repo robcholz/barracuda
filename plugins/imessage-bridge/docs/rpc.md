@@ -5,7 +5,10 @@ document or binds a newly opened Agent session to that route. Restored mappings
 explicitly report `open_required: true` because Agent session ownership is not
 persisted.
 
-`imessage_bridge.to_gateway` consumes one bounded `session.event` field chunk.
-It only forwards `output_delta.text`; `turn_started` and `turn_ended` delimit a
-`gateway.send_stream` stream. A forwarding decision returns a one-shot
-`command_id`, and a second call exchanges that ID for the Gateway RPC request.
+`imessage_bridge.to_gateway` consumes one complete bounded `session.event`
+document and uses only its `session` and `type`. A mapped session returns its
+stored Gateway `route` and current `reply_to`; an unmapped session returns
+`{"forward":false}`. The semantic event remains untouched for Workflow to pass
+to `gateway.send_stream`. A `closed` event marks the stored Agent session as no
+longer open, returns `{"forward":false}`, and leaves its route mapping available
+for a later explicit `session.open`.
