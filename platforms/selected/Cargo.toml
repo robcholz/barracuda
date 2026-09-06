@@ -16,7 +16,7 @@ embassy-executor.workspace = true
 
 [build-dependencies]
 barracuda-platform-config.workspace = true
-barracuda-platform-tool = { path = "../tool" }
+barracuda-platform-tool.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
