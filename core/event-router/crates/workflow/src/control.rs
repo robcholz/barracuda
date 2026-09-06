@@ -11,7 +11,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::definition::{
-    WorkflowBranch, WorkflowCondition, WorkflowDefinitionError, WorkflowOperation,
+    WorkflowBranch, WorkflowComparison, WorkflowCondition, WorkflowDefinitionError,
+    WorkflowOperation,
 };
 use crate::link::parse_condition_source;
 use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
@@ -232,9 +233,38 @@ struct EmptyReturnDocument {}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorkflowConditionDocument {
+struct WorkflowEqualsConditionDocument {
     source: String,
     equals: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowNotEqualsConditionDocument {
+    source: String,
+    not_equals: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WorkflowConditionDocument {
+    Equals(WorkflowEqualsConditionDocument),
+    NotEquals(WorkflowNotEqualsConditionDocument),
+}
+
+impl WorkflowConditionDocument {
+    fn into_parts(self) -> (String, WorkflowComparison) {
+        match self {
+            Self::Equals(condition) => (
+                condition.source,
+                WorkflowComparison::Equals(condition.equals),
+            ),
+            Self::NotEquals(condition) => (
+                condition.source,
+                WorkflowComparison::NotEquals(condition.not_equals),
+            ),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -312,9 +342,8 @@ fn parse_operations(
                 returns = true;
             }
             WorkflowStepDocument::Branch(branch) => {
-                let body = branch
-                    .condition
-                    .source
+                let (source, comparison) = branch.condition.into_parts();
+                let body = source
                     .strip_prefix('$')
                     .ok_or(WorkflowControlRejection::InvalidControlFlow)?;
                 let (selector, field) = parse_condition_source(body)
@@ -325,7 +354,7 @@ fn parse_operations(
                     condition: WorkflowCondition {
                         selector,
                         field,
-                        expected: branch.condition.equals,
+                        comparison,
                     },
                     then_operations,
                     else_operations,
@@ -525,6 +554,40 @@ mod tests {
         assert_eq!(definition.steps().len(), 3);
         assert!(!definition.returns());
         assert!(definition.has_branch());
+    }
+
+    #[test]
+    fn workflow_json_accepts_json_inequality_with_null() {
+        let definition = parse_definition(
+            r#"{
+                "id":"forward-error",
+                "match":{"event":"session.error"},
+                "steps":[
+                    {
+                        "if":{"source":"$event.input.error","not_equals":null},
+                        "then":[{"return":{}}],
+                        "else":[]
+                    }
+                ]
+            }"#,
+        )
+        .expect("JSON inequality condition");
+
+        assert!(definition.has_branch());
+        assert!(definition.returns());
+    }
+
+    #[test]
+    fn workflow_json_requires_exactly_one_comparison_operator() {
+        for json in [
+            r#"{"id":"missing-comparison","match":{"event":"a"},"steps":[{"if":{"source":"$event.input.error"},"then":[],"else":[]}]}"#,
+            r#"{"id":"multiple-comparisons","match":{"event":"a"},"steps":[{"if":{"source":"$event.input.error","equals":null,"not_equals":null},"then":[],"else":[]}]}"#,
+        ] {
+            assert_eq!(
+                parse_definition(json),
+                Err(WorkflowControlRejection::InvalidJson)
+            );
+        }
     }
 
     #[test]

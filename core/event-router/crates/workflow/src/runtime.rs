@@ -605,6 +605,7 @@ fn condition_value(
 ) -> Result<bool, WorkflowExecutionError> {
     let value: Value = serde_json::from_str(source)
         .map_err(|_error| step_error(branch_step.saturating_sub(1), RpcError::InvalidJson))?;
+    let missing = Value::Null;
     let actual = match &condition.field {
         None => &value,
         Some(field) => {
@@ -614,18 +615,10 @@ fn condition_value(
                     step: branch_step.saturating_sub(1),
                 },
             })?;
-            object.get(field).ok_or_else(|| match condition.selector {
-                SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
-                    field: field.clone(),
-                },
-                SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
-                    step: branch_step.saturating_sub(1),
-                    field: field.clone(),
-                },
-            })?
+            object.get(field).unwrap_or(&missing)
         }
     };
-    Ok(actual == &condition.expected)
+    Ok(condition.comparison.matches(actual))
 }
 
 fn mapped_request<'source, 'definition>(
@@ -1166,6 +1159,16 @@ mod json_workflow_tests {
         const MAX_RESPONSE_BYTES: usize = 64;
     }
 
+    struct ConditionProduce;
+
+    impl JsonRpcSchema for ConditionProduce {
+        const ADDRESS: &'static str = "workflow.condition-produce";
+        const REQUEST_SCHEMA: JsonSchema = ANY_SCHEMA;
+        const RESPONSE_SCHEMA: JsonSchema = ANY_SCHEMA;
+        const MAX_REQUEST_BYTES: usize = 64;
+        const MAX_RESPONSE_BYTES: usize = 64;
+    }
+
     struct DirectSink;
 
     impl JsonRpcSchema for DirectSink {
@@ -1254,6 +1257,20 @@ mod json_workflow_tests {
                 },
             )
             .expect("register producer");
+    }
+
+    fn register_condition_producer<const N: usize, const M: usize, const Q: usize>(
+        registry: &RpcRegistry<N, M, Q>,
+        response: &'static str,
+    ) {
+        registry
+            .register_json::<ConditionProduce, _>(
+                "*",
+                move |_context, _request: JsonRef, writer: JsonWriter| async move {
+                    writer.write(response).await
+                },
+            )
+            .expect("register condition producer");
     }
 
     #[test]
@@ -1681,6 +1698,64 @@ mod json_workflow_tests {
             registry.client(),
         ))
         .expect("compare string field");
+    }
+
+    #[test]
+    fn missing_condition_field_compares_as_json_null() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"session":"session-1"}"#);
+        let workflow = parse_definition(
+            r#"{
+                "id":"missing-error-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "if":{"source":"$previous.output.error","not_equals":null},
+                        "then":[{"call":"missing.method"}],
+                        "else":[{"return":{}}]
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse missing-field condition");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("missing field compares equal to null");
+    }
+
+    #[test]
+    fn non_null_condition_field_satisfies_json_inequality() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"error":"worker_stopped"}"#);
+        let workflow = parse_definition(
+            r#"{
+                "id":"arbitrary-error-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "if":{"source":"$previous.output.error","not_equals":null},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse non-null condition");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("non-null error selects error branch");
     }
 
     #[test]

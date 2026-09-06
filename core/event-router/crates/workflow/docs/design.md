@@ -71,20 +71,22 @@ consume a matched Event without invoking an application endpoint.
 
 ## Conditional execution
 
-An `if` operation compares a JSON `source` with an arbitrary JSON `equals`
-value. The source may be the complete `$event.input` or `$previous.output`
-document, or one top-level field from either document. JSON equality applies
-uniformly to objects, arrays, strings, numbers, booleans, and null. The
-selected block may be empty, may contain nested conditionals, and may complete
-normally into the operations after the `if`. A `return` inside either arm
-terminates the entire Workflow successfully.
+An `if` operation compares a JSON `source` with an arbitrary JSON value using
+exactly one `equals` or `not_equals` operator. The source may be the complete
+`$event.input` or `$previous.output` document, or one top-level field from
+either document. JSON comparison applies uniformly to objects, arrays,
+strings, numbers, booleans, and null. A missing selected field has the JSON
+value null, which lets a Workflow branch on the presence of a non-null protocol
+value without a protocol-specific condition operator. The selected block may
+be empty, may contain nested conditionals, and may complete normally into the
+operations after the `if`. A `return` inside either arm terminates the entire
+Workflow successfully.
 
 Conditions and post-branch links are dynamic. Workflow loading validates the
 document structure, reference grammar, and every declared RPC address, but it
 does not require branch output schemas to agree or attempt to select a merged
-schema. At execution time a missing field or invalid source JSON fails that
-execution, and each invoked RPC reports incompatible actual request data in the
-normal way.
+schema. At execution time invalid source JSON fails that execution, and each
+invoked RPC reports incompatible actual request data in the normal way.
 
 ## Unified frame-flow model
 

@@ -61,13 +61,26 @@
       "type": "object",
       "properties": {
         "if": {
-          "type": "object",
-          "properties": {
-            "source": { "type": "string" },
-            "equals": {}
-          },
-          "required": ["source", "equals"],
-          "additionalProperties": false
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "source": { "type": "string" },
+                "equals": {}
+              },
+              "required": ["source", "equals"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "source": { "type": "string" },
+                "not_equals": {}
+              },
+              "required": ["source", "not_equals"],
+              "additionalProperties": false
+            }
+          ]
         },
         "then": { "$ref": "#/$defs/branch_arm" },
         "else": { "$ref": "#/$defs/branch_arm" }

@@ -190,11 +190,11 @@ block:
   "steps": [
     { "call": "imessage_bridge.to_gateway" },
     {
-      "if": { "source": "$previous.output.forward", "equals": true },
+      "if": { "source": "$previous.output.error", "not_equals": null },
       "then": [
         {
-          "call": "imessage.send",
-          "arguments": { "message": "$previous.output.message" }
+          "call": "error.report",
+          "arguments": { "error": "$previous.output.error" }
         }
       ],
       "else": []
@@ -204,17 +204,18 @@ block:
 }
 ```
 
-The condition compares its `source` with the JSON value in `equals`. A source
-may select the complete `$event.input` or `$previous.output` document, or one
-top-level field from either document. Objects, arrays, strings, numbers,
-booleans, and null all use JSON equality. Only the selected arm runs; arms may
-be empty or nested.
+The condition compares its `source` with the JSON value in exactly one
+`equals` or `not_equals` operator. A source may select the complete
+`$event.input` or `$previous.output` document, or one top-level field from
+either document. Objects, arrays, strings, numbers, booleans, and null all use
+JSON comparison. A missing selected field is null. Only the selected arm runs;
+arms may be empty or nested.
 After the arm, execution resumes with the following outer operation. A branch
 does not produce or merge an output: `$previous.output` always means the most
 recent RPC that actually completed on the selected path. Branch output schemas
-are not merged or compared at load time; missing fields, invalid runtime JSON,
-and incompatible runtime request data fail that execution. A `return` inside
-an arm exits the entire Workflow successfully.
+are not merged or compared at load time; invalid runtime JSON and incompatible
+runtime request data fail that execution. A `return` inside an arm exits the
+entire Workflow successfully.
 
 `match.topic` is an optional exact selector within the 16-byte bound:
 
