@@ -155,10 +155,10 @@ mod tests {
         ($method:ty, $address:literal) => {
             impl JsonRpcSchema for $method {
                 const ADDRESS: &'static str = $address;
-                const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+                const REQUEST_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
                     r#"{"type":"object","properties":{},"additionalProperties":false}"#
                 );
-                const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+                const RESPONSE_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
                     r#"{"type":"object","properties":{},"additionalProperties":false}"#
                 );
                 const MAX_REQUEST_BYTES: usize = 2;

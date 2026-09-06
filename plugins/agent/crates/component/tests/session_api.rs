@@ -24,10 +24,11 @@ use serde_json::Value;
 use static_cell::StaticCell;
 
 const FRAME_SIZE: usize = 512;
-const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+const EMPTY_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
     r#"{"type":"object","properties":{},"additionalProperties":false}"#
 );
-const EVENT_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(r#"{"type":"object"}"#);
+const EVENT_SCHEMA: JsonSchema =
+    barracuda_event_router::json_schema_inline!(r#"{"type":"object"}"#);
 const WORKFLOW_JSON: &str = r#"{
     "id":"agent-session-event-test",
     "match":{"event":"session.event"},

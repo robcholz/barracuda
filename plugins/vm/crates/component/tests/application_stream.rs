@@ -23,10 +23,11 @@ use serde_json::Value;
 
 const FRAME_SIZE: usize = 512;
 const TEST_MAX_INPUT_BYTES: usize = 16;
-const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+const EMPTY_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
     r#"{"type":"object","properties":{},"additionalProperties":false}"#
 );
-const EVENT_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(r#"{"type":"object"}"#);
+const EVENT_SCHEMA: JsonSchema =
+    barracuda_event_router::json_schema_inline!(r#"{"type":"object"}"#);
 
 const OUTPUT_WORKFLOW: &str = r#"{
     "id":"vm-output-test",

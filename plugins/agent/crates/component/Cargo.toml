@@ -19,7 +19,6 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 http-client.workspace = true
 barracuda-model-api.workspace = true
 barracuda-platform-test.workspace = true
-barracuda-rpc.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2", features = ["std"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

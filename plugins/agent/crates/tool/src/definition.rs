@@ -7,7 +7,7 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_agent_permission::{Action, RiskClass};
-use barracuda_rpc::{JsonRpcInfo, RpcClient};
+use barracuda_event_router::{JsonRpcInfo, RpcClient};
 use getset::CopyGetters;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -101,7 +101,7 @@ mod invocation_tests {
     use core::cell::Cell;
 
     use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
-    use barracuda_rpc::{
+    use barracuda_event_router::{
         JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcLaneStorage, RpcRegistry,
     };
     use futures_lite::future::block_on;
@@ -164,10 +164,10 @@ mod invocation_tests {
 
     impl JsonRpcSchema for RpcEcho {
         const ADDRESS: &'static str = "demo.rpc_echo";
-        const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        const REQUEST_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
             r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#
         );
-        const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        const RESPONSE_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
             r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#
         );
         const MAX_REQUEST_BYTES: usize = 128;
@@ -308,7 +308,7 @@ pub enum ToolError {
     #[error("invalid arguments: {0}")]
     ArgumentsSchema(#[from] json_validator::ValidationError),
     #[error("RPC call failed: {0}")]
-    Rpc(#[from] barracuda_rpc::RpcError),
+    Rpc(#[from] barracuda_event_router::RpcError),
     #[error("tool invocation rejected: {0}")]
     InvokeRejected(String),
 }

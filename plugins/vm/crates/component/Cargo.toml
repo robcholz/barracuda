@@ -15,7 +15,6 @@ vendored = [
 [dependencies]
 barracuda-event-router.workspace = true
 barracuda-lua.workspace = true
-barracuda-rpc.workspace = true
 barracuda-vm-builtin-packages.workspace = true
 barracuda-vm-package-api.workspace = true
 embassy-executor.workspace = true
