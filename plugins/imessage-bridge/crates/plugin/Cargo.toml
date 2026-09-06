@@ -6,14 +6,13 @@ description = "Barracuda Plugin that owns the iMessage Agent bridge"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-imessage-bridge-component.workspace = true
+barracuda-imessage-bridge-component = { path = "../component" }
 barracuda-plugin-api.workspace = true
 barracuda-plugin-manager.workspace = true
 embassy-futures.workspace = true
 
 [dev-dependencies]
 barracuda-event-router.workspace = true
-barracuda-imessage-gateway-component.workspace = true
 barracuda-platform-test.workspace = true
 barracuda-vfs.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }

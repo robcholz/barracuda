@@ -3,6 +3,7 @@ name = "barracuda-agent"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Single-Agent execution and context-provider implementations"
 # Agent manifests under `resources/agents/<kind>/` are parsed + validated at
 # compile time and emitted as typed catalog entries (see `manifest_gen/`),
@@ -30,11 +31,11 @@ intrusive-observability = [
 json-validator.workspace = true
 barracuda-vfs.workspace = true
 barracuda-runtime-utils.workspace = true
-barracuda-model-api.workspace = true
+barracuda-model-api = { path = "../model-api" }
 http-client.workspace = true
 embassy-time.workspace = true
 embassy-sync.workspace = true
-barracuda-agent-persistence.workspace = true
+barracuda-agent-persistence = { path = "../persistence" }
 # Vetted async MPMC channel (smol family, same lineage as `edge-executor`). Each
 # open session gets one unbounded channel that carries its `SessionEvent` stream.
 async-channel = { version = "2", default-features = false }
@@ -50,12 +51,12 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 getset = "0.1.7"
 # The runtime is exposed as an ordinary Future. The application chooses Embassy,
 # Tokio, or another executor and spawns that future at its own boundary.
-barracuda-agent-memory.workspace = true
-barracuda-agent-skill.workspace = true
-barracuda-agent-context.workspace = true
-barracuda-agent-permission.workspace = true
+barracuda-agent-memory = { path = "../memory" }
+barracuda-agent-skill = { path = "../skill" }
+barracuda-agent-context = { path = "../context" }
+barracuda-agent-permission = { path = "../permission" }
 # The tool runtime used by core agents.
-barracuda-agent-tool.workspace = true
+barracuda-agent-tool = { path = "../tool" }
 # Flat production diagnostics. Compile-time level ceilings are selected by the
 # final application through `log`'s max-level features.
 log = { version = "0.4", default-features = false }
@@ -80,7 +81,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quote = "1"
 proc-macro2 = "1"
-barracuda-agent-tool = { workspace = true, features = ["build-support"] }
+barracuda-agent-tool = { path = "../tool", features = ["build-support"] }
 
 [dev-dependencies]
 # Host-only test generators; production streams use the internal no_std adapter.

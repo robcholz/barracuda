@@ -1,8 +1,8 @@
 //! Terminal WebSocket client: an external IM endpoint for the host server.
 //!
 //! Sends user lines as gateway messages and renders the reply stream. Rich
-//! content arrives as ordinary IM messages tagged with a [`gateway::MessageKind`]
-//! role, rendered distinctly in the terminal.
+//! content arrives as ordinary IM messages tagged with a message-kind role,
+//! rendered distinctly in the terminal.
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
@@ -13,7 +13,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::line_editor::{ChatLineEditor, LineInput};
 use crate::protocol::parse_sse;
-use web::WebClientFrame;
+use barracuda_imessage_web_plugin::WebClientFrame;
 
 const WAITING_TICK: Duration = Duration::from_millis(400);
 

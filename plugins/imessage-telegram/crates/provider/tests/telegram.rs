@@ -7,12 +7,12 @@
 
 use std::{boxed::Box, rc::Rc};
 
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
-use futures_lite::{future::block_on, stream};
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
 };
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use futures_lite::{future::block_on, stream};
 use http_client::ClientFactory;
 use telegram::{Telegram, TelegramConfig};
 
@@ -285,11 +285,17 @@ fn maps_telegram_authentication_and_rate_limit_errors() {
                 .await
                 .expect_err("request should fail");
             assert_eq!(
-                matches!(&error, gateway::ChannelError::Authentication),
+                matches!(
+                    &error,
+                    barracuda_imessage_gateway_plugin::ChannelError::Authentication
+                ),
                 expected_auth
             );
             assert_eq!(
-                matches!(&error, gateway::ChannelError::RateLimited),
+                matches!(
+                    &error,
+                    barracuda_imessage_gateway_plugin::ChannelError::RateLimited
+                ),
                 !expected_auth
             );
         }

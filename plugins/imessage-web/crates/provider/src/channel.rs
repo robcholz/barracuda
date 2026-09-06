@@ -6,17 +6,17 @@ use core::{
     task::{Context, Poll},
 };
 
+use barracuda_imessage_gateway_plugin::{
+    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
+    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
+    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody,
+};
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     pubsub::{PubSubChannel, Subscriber, WaitResult},
 };
 use futures_core::Stream;
 use futures_lite::StreamExt;
-use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
-    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody,
-};
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
 
@@ -456,8 +456,8 @@ impl<const CAP: usize, const SUBS: usize> Stream for WebSubscription<'_, CAP, SU
     }
 }
 
-fn stream_error_message(error: &gateway::StreamError) -> String {
+fn stream_error_message(error: &barracuda_imessage_gateway_plugin::StreamError) -> String {
     match error {
-        gateway::StreamError::Failed { message } => message.clone(),
+        barracuda_imessage_gateway_plugin::StreamError::Failed { message } => message.clone(),
     }
 }

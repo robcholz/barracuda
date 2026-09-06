@@ -9,11 +9,13 @@ use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 
 use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute, IMessageGateway};
+use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::WebServer;
-use gateway::{MessageChannel, MessageChannelRegistration};
 use web::{InboundError, InboundFuture, InboundMessage, InboundMessageSink, Web, WebBridge};
+
+pub use web::WebClientFrame;
 
 /// Stable name of the Web message channel.
 pub const WEB_CHANNEL: &str = "web";

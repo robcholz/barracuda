@@ -5,10 +5,9 @@
 extern crate alloc;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
-use barracuda_lua::{Error, Lua, Package, Result};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
+use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures_util::future::{AbortHandle, Abortable};

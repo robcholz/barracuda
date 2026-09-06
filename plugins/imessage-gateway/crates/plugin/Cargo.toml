@@ -5,11 +5,11 @@ edition = "2021"
 description = "Base IMessage Gateway Plugin and provider-registration capability"
 
 [dependencies]
-barracuda-imessage-gateway-component.workspace = true
+barracuda-imessage-gateway-component = { path = "../component" }
 barracuda-plugin-api.workspace = true
 barracuda-plugin-manager.workspace = true
-gateway.workspace = true
-
+gateway = { path = "../gateway" }
+gateway-http = { path = "../http" }
 [dev-dependencies]
 barracuda-platform-test.workspace = true
 barracuda-event-router.workspace = true

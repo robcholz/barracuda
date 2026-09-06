@@ -9,10 +9,9 @@ use barracuda_board_hal::{
     ConfigurableDigitalPin, DigitalLevel, ExposedIo, InputConfig, OutputConfig, OutputDrive, Pull,
     ResourceSet,
 };
-use barracuda_lua::{Error, Lua, Package, Result};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
+use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use core::sync::atomic::{AtomicBool, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;

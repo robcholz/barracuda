@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use gateway::{MediaKind, MessageKind, SendStreamEvent};
+use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]

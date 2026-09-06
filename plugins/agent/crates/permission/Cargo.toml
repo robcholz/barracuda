@@ -3,6 +3,7 @@ name = "barracuda-agent-permission"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Permission policy layer: classifies tool actions into Allow/Ask/Deny decisions"
 
 [lib]

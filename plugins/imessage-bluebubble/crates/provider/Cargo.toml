@@ -2,13 +2,13 @@
 name = "bluebubbles"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "BlueBubbles iMessage provider for the IMessage Gateway"
 license = "Apache-2.0"
 
 [dependencies]
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway.workspace = true
-gateway-http.workspace = true
+barracuda-imessage-gateway-plugin.workspace = true
 http-client.workspace = true
 percent-encoding = { version = "2.3.2", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

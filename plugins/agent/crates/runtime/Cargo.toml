@@ -3,6 +3,7 @@ name = "barracuda-agent-runtime"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Top-level Agent runtime API over single-agent execution and Sessions"
 autotests = false
 
@@ -31,13 +32,13 @@ cache_profile = [
 [dependencies]
 http-client.workspace = true
 json-validator.workspace = true
-barracuda-agent = { workspace = true, default-features = false }
-barracuda-agent-session = { workspace = true, default-features = false }
-barracuda-agent-memory.workspace = true
-barracuda-agent-skill.workspace = true
-barracuda-model-api.workspace = true
-barracuda-agent-persistence.workspace = true
-barracuda-agent-tool.workspace = true
+barracuda-agent = { path = "../agent", default-features = false }
+barracuda-agent-session = { path = "../session", default-features = false }
+barracuda-agent-memory = { path = "../memory" }
+barracuda-agent-skill = { path = "../skill" }
+barracuda-model-api = { path = "../model-api" }
+barracuda-agent-persistence = { path = "../persistence" }
+barracuda-agent-tool = { path = "../tool" }
 # Filesystem traits remain platform-neutral. HTTP is injected through the
 # shared client facade; time is provided globally by `embassy-time`.
 barracuda-vfs.workspace = true
@@ -52,7 +53,7 @@ tracing = { version = "0.1", default-features = false, features = ["attributes"]
 [dev-dependencies]
 # Host-only dependencies used by tests and the `tool_submit_loop` API example.
 anyhow = "1"
-barracuda-agent-trace.workspace = true
+barracuda-agent-trace = { path = "../trace" }
 tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "sync", "time"] }
 # In-memory fs + scripted network doubles so the end-to-end tests run hermetically
 # (no network, no API key) entirely through the public API.

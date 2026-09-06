@@ -2,6 +2,7 @@
 name = "barracuda-imessage-bridge-component"
 version = "0.1.0"
 edition = "2024"
+publish = false
 description = "Workflow bridge between the iMessage Gateway and Agent sessions"
 license = "Apache-2.0"
 

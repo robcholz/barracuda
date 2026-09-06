@@ -5,7 +5,7 @@ use alloc::{
 };
 use core::{future::Future, pin::Pin};
 
-use gateway::{BinaryStream, MediaKind};
+use barracuda_imessage_gateway_plugin::{BinaryStream, MediaKind};
 use serde::Deserialize;
 
 /// Runtime-neutral future returned by an inbound Web message sink.

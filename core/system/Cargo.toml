@@ -50,7 +50,6 @@ embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 
 [dev-dependencies]
-barracuda-model-api.workspace = true
 barracuda-platform-test.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"

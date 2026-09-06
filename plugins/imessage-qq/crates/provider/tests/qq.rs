@@ -5,9 +5,11 @@
     clippy::unwrap_used
 )]
 
+use barracuda_imessage_gateway_plugin::{
+    MessageChannel, MessageTarget, SendMessageRequest, TextChunk,
+};
 use barracuda_platform_test::{ScriptStep, ScriptedStack};
 use futures_lite::{future::block_on, stream};
-use gateway::{MessageChannel, MessageTarget, SendMessageRequest, TextChunk};
 use http_client::ClientFactory;
 use qq::{QQConfig, QQ};
 use std::{boxed::Box, rc::Rc};

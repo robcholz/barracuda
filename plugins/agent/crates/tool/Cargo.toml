@@ -3,6 +3,7 @@ name = "barracuda-agent-tool"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Tool registry, tool set projection, and tool runner"
 
 [lib]
@@ -14,8 +15,8 @@ build-support = ["dep:anyhow"]
 
 [dependencies]
 anyhow = { version = "1", optional = true }
-barracuda-agent-permission.workspace = true
-barracuda-agent-persistence.workspace = true
+barracuda-agent-permission = { path = "../permission" }
+barracuda-agent-persistence = { path = "../persistence" }
 barracuda-event-router.workspace = true
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }

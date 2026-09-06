@@ -3,12 +3,12 @@
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use futures_lite::{future::block_on, stream};
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
     SendStreamEvent, SendStreamRequest, SetTypingRequest, StreamError,
 };
+use futures_lite::{future::block_on, stream};
 use web::{
     InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, MediaPhase,
     MessageBody, Web, WebDelivery, WebEventData, WebService,

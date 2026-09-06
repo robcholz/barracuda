@@ -11,7 +11,9 @@ use barracuda_plugin_manager::{
 };
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_component::{VmComponent, VmRuntime};
-use barracuda_vm_package_api::LuaPackageRegistry;
+
+pub use barracuda_lua::{Error, Lua, Package, Result};
+pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 
 /// Registers the VM Component and starts its owner-managed Embassy runtime.
 #[barracuda_plugin_api::plugin]

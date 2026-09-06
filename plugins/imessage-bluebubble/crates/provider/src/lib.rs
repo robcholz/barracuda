@@ -10,13 +10,13 @@ use alloc::{
 };
 use core::cell::Cell;
 
-use futures_lite::StreamExt as _;
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageTarget, Operation, ReactRequest, SendMediaRequest, SendMessageRequest,
     SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use gateway_http::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::{json, Value};
@@ -96,11 +96,12 @@ where
         headers: &[(&str, &str)],
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = gateway_http::send(&self.http_clients, method, url, headers, body)
-            .await
-            .map_err(|error| ChannelError::Transport {
-                message: error.to_string(),
-            })?;
+        let response =
+            barracuda_imessage_gateway_plugin::send(&self.http_clients, method, url, headers, body)
+                .await
+                .map_err(|error| ChannelError::Transport {
+                    message: error.to_string(),
+                })?;
         parse_response(response)
     }
 
@@ -156,7 +157,7 @@ where
     async fn send_stream(
         &self,
         target: MessageTarget,
-        mut stream: gateway::TextStream,
+        mut stream: barracuda_imessage_gateway_plugin::TextStream,
         reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         if !self.config.use_private_api {
@@ -376,7 +377,9 @@ where
     }
 }
 
-async fn collect_text(stream: &mut gateway::TextStream) -> Result<String, ChannelError> {
+async fn collect_text(
+    stream: &mut barracuda_imessage_gateway_plugin::TextStream,
+) -> Result<String, ChannelError> {
     let mut text = String::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;

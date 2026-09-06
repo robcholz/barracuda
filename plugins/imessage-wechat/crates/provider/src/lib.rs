@@ -11,12 +11,12 @@ use alloc::{
 };
 use core::cell::Cell;
 
-use futures_lite::StreamExt as _;
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
     TextBody,
 };
-use gateway_http::{Method, Response};
+use barracuda_imessage_gateway_plugin::{Method, Response};
+use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
@@ -154,7 +154,7 @@ where
         if let Some(route_tag) = &self.config.route_tag {
             headers.push(("SKRouteTag", route_tag));
         }
-        let response = gateway_http::send(
+        let response = barracuda_imessage_gateway_plugin::send(
             &self.http_clients,
             Method::POST,
             &url,
@@ -172,7 +172,7 @@ where
     async fn send_stream(
         &self,
         target: MessageTarget,
-        mut stream: gateway::TextStream,
+        mut stream: barracuda_imessage_gateway_plugin::TextStream,
         reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         let mut text = String::new();

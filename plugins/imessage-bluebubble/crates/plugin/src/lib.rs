@@ -11,13 +11,13 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_imessage_gateway_plugin::IMessageGateway;
+use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
 use bluebubbles::{BlueBubbles, BlueBubblesConfig};
-use gateway::{MessageChannel, MessageChannelRegistration};
 use http_client::ClientFactory;
 use serde::Deserialize;
 

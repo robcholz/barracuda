@@ -3,6 +3,7 @@ name = "barracuda-agent-trace"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Host logging and flat-tree tracing support for agent-framework tests and tools"
 
 [lib]

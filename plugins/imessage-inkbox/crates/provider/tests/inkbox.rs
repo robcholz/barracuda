@@ -2,12 +2,12 @@
 
 use std::{boxed::Box, rc::Rc};
 
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
-use futures_lite::{future::block_on, stream};
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     BinaryBody, MediaKind, MessageChannel, MessageTarget, ReactRequest, SendMediaRequest,
     SendMessageRequest, SetTypingRequest, TextChunk,
 };
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use futures_lite::{future::block_on, stream};
 use http_client::ClientFactory;
 use inkbox::{Inkbox, InkboxConfig};
 
@@ -230,11 +230,17 @@ fn maps_authentication_and_rate_limits() {
                 .await
                 .expect_err("fails");
             assert_eq!(
-                matches!(error, gateway::ChannelError::Authentication),
+                matches!(
+                    error,
+                    barracuda_imessage_gateway_plugin::ChannelError::Authentication
+                ),
                 authentication
             );
             assert_eq!(
-                matches!(error, gateway::ChannelError::RateLimited),
+                matches!(
+                    error,
+                    barracuda_imessage_gateway_plugin::ChannelError::RateLimited
+                ),
                 !authentication
             );
         }

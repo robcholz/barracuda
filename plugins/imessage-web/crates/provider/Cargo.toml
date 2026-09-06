@@ -2,6 +2,7 @@
 name = "web"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Runtime-neutral REST and SSE web channel for the IMessage Gateway"
 license = "Apache-2.0"
 
@@ -16,7 +17,7 @@ barracuda-webserver-plugin = { workspace = true, optional = true }
 embassy-sync.workspace = true
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway.workspace = true
+barracuda-imessage-gateway-plugin.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

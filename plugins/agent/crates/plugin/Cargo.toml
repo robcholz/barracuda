@@ -5,9 +5,9 @@ edition = "2021"
 description = "Barracuda Plugin that owns the Agent Component"
 
 [dependencies]
-barracuda-agent-component.workspace = true
-barracuda-agent-runtime = { workspace = true, features = ["cache_profile", "multiagent"] }
-barracuda-model-api.workspace = true
+barracuda-agent-component = { path = "../component" }
+barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
+barracuda-model-api = { path = "../model-api" }
 barracuda-plugin-api.workspace = true
 barracuda-plugin-manager.workspace = true
 barracuda-webserver-plugin.workspace = true
@@ -18,7 +18,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 barracuda-event-router.workspace = true
-barracuda-model-api.workspace = true
+barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test.workspace = true
 embassy-net.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

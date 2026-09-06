@@ -13,8 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-barracuda-agent-runtime.workspace = true
-barracuda-model-api.workspace = true
+barracuda-agent-runtime = { path = "../../../plugins/agent/crates/runtime" }
+barracuda-model-api = { path = "../../../plugins/agent/crates/model-api" }
 barracuda-platform-test.workspace = true
 barracuda-profile = { workspace = true, features = ["dhat-heap"] }
 http-client.workspace = true

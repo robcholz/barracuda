@@ -3,6 +3,7 @@ name = "barracuda-agent-skill"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "no_std filesystem runtime for standard Agent Skills"
 
 [dependencies]

@@ -3,6 +3,7 @@ name = "barracuda-model-api"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "OpenAI-/Anthropic-compatible LLM client chat + media"
 
 [lib]
@@ -44,7 +45,7 @@ anyhow = "1"
 futures-lite = "2"
 tempdir = "0.3"
 # Capturing subscriber used by the attempt/retry trace contract tests.
-barracuda-agent-trace.workspace = true
+barracuda-agent-trace = { path = "../trace" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 
 [lints.rust]

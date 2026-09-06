@@ -10,9 +10,8 @@ barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin-api.workspace = true
 barracuda-plugin-manager.workspace = true
 barracuda-webserver-plugin.workspace = true
-gateway.workspace = true
 http-client.workspace = true
-inkbox.workspace = true
+inkbox = { path = "../provider" }
 log = "0.4"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

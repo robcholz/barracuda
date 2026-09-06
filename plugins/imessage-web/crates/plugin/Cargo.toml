@@ -9,9 +9,8 @@ barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin-api.workspace = true
 barracuda-plugin-manager.workspace = true
 barracuda-webserver-plugin.workspace = true
-gateway.workspace = true
 log.workspace = true
-web = { workspace = true, features = ["server"] }
+web = { path = "../provider", features = ["server"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -3,6 +3,7 @@ name = "barracuda-agent-memory"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Agent memory subsystem: conversation tape and compaction"
 
 [lib]

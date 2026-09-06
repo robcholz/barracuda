@@ -18,7 +18,6 @@ use barracuda_event_router::{
     UnregisterContext,
 };
 use barracuda_imessage_bridge_plugin::ImessageBridgePlugin;
-use barracuda_imessage_gateway_component::gateway_send_stream::GatewaySendStream;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
 use barracuda_plugin_api::{ClientFactory, PluginContext};
 use barracuda_plugin_manager::PluginManager;
@@ -57,12 +56,7 @@ macro_rules! rpc {
 rpc!(NewSession, "session.new", ANY_JSON, ANY_JSON);
 rpc!(OpenSession, "session.open", ANY_JSON, ANY_JSON);
 rpc!(AppendSession, "session.append", ANY_JSON, ANY_JSON);
-rpc!(
-    SendStream,
-    "gateway.send_stream",
-    GatewaySendStream::REQUEST_SCHEMA,
-    GatewaySendStream::RESPONSE_SCHEMA
-);
+rpc!(SendStream, "gateway.send_stream", ANY_JSON, ANY_JSON);
 
 #[derive(Debug)]
 struct WorkflowTestError(&'static str);

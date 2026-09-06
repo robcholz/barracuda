@@ -6,14 +6,14 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 
-use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
-use gateway::{GatewayError, MessageChannel, MessageChannelRegistration, MessageGateway};
-
 pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
+use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
 pub use barracuda_imessage_gateway_component::gateway_message_received::GatewayInboundMessage;
 pub use barracuda_imessage_gateway_component::route::GatewayRoute;
+use barracuda_plugin_api::PluginContext;
+use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
+pub use gateway::*;
+pub use gateway_http::*;
 
 const GATEWAY_INGRESS_CAPACITY: usize = 16;
 

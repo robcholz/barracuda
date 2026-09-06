@@ -2,13 +2,14 @@
 name = "barracuda-agent-component"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Event Router Component adapter for the Agent runtime"
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-agent-runtime = { workspace = true, features = ["cache_profile"] }
+barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile"] }
 barracuda-event-router.workspace = true
 barracuda-vfs.workspace = true
 async-channel = { version = "2", default-features = false }
@@ -18,7 +19,7 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 
 [dev-dependencies]
 http-client.workspace = true
-barracuda-model-api.workspace = true
+barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2", features = ["std"] }

@@ -9,6 +9,7 @@ use barracuda_plugin_api::PluginContext;
 use barracuda_plugin_manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
+pub use barracuda_time_component::UtcClock;
 use barracuda_time_component::{
     TimeComponent, TimeConfig, UtcClockUpdater,
     sntp::{SntpConfig, SntpSource},

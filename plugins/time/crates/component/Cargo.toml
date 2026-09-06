@@ -2,6 +2,7 @@
 name = "barracuda-time-component"
 version = "0.1.0"
 edition = "2024"
+publish = false
 description = "Network-synchronized real-time clock component for Barracuda"
 license = "Apache-2.0"
 
