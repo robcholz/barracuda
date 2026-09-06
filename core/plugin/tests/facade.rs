@@ -1,5 +1,7 @@
 //! The Plugin facade exposes each implementation crate through a namespace.
 
+#![allow(clippy::expect_used)]
+
 #[allow(unused_imports)]
 use barracuda_plugin::macros::plugin;
 #[cfg(feature = "manifest")]
