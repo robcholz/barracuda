@@ -72,7 +72,7 @@ fn map_open_error(error: RuntimeError) -> AgentRpcError {
     }
 }
 
-/// Owned runtime event awaiting bounded field-by-field Event emission.
+/// Owned runtime event awaiting bounded semantic Event emission.
 pub(crate) enum SessionEventDocument {
     TurnStarted {
         turn: TurnId,
@@ -194,22 +194,6 @@ impl From<SessionCloseReason> for CloseReasonDocument {
             SessionCloseReason::Requested => Self::Requested,
             SessionCloseReason::Deleted => Self::Deleted,
             SessionCloseReason::RuntimeShutdown => Self::RuntimeShutdown,
-        }
-    }
-}
-
-/// Terminal outcome attached to the last chunk of a subscription run.
-#[derive(Clone, Copy)]
-pub(crate) enum TerminalOutcome {
-    Closed,
-    WorkerStopped,
-}
-
-impl TerminalOutcome {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Closed => "closed",
-            Self::WorkerStopped => "worker_stopped",
         }
     }
 }

@@ -50,39 +50,58 @@ impl JsonRpcSchema for RecordSessionEvent {
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EventChunk {
+struct SessionEventRecord {
     session: String,
-    run: String,
     sequence: u32,
-    chunk_index: u32,
-    field: String,
-    chunk: String,
-    field_complete: bool,
-    event_complete: bool,
-    terminal: Option<String>,
+    #[serde(rename = "type")]
+    event_type: String,
+    payload: Value,
 }
 
 #[derive(Default)]
 struct ResultState {
     stage: RefCell<&'static str>,
-    events: RefCell<Vec<EventChunk>>,
+    events: RefCell<Vec<SessionEventRecord>>,
     finished: RefCell<bool>,
 }
 
 impl ResultState {
-    fn field_for_event_type(&self, event_type: &str, field: &str) -> Option<String> {
-        let events = self.events.borrow();
-        let sequence = events
+    fn text_for_event_type(&self, event_type: &str) -> Option<String> {
+        let mut events: Vec<_> = self
+            .events
+            .borrow()
             .iter()
-            .find(|chunk| chunk.field == "type" && chunk.chunk == event_type)
-            .map(|chunk| chunk.sequence)?;
-        let mut chunks: Vec<_> = events
-            .iter()
-            .filter(|chunk| chunk.sequence == sequence && chunk.field == field)
-            .cloned()
+            .filter(|event| event.event_type == event_type)
+            .map(|event| {
+                (
+                    event.sequence,
+                    event
+                        .payload
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+            })
             .collect();
-        chunks.sort_by_key(|chunk| chunk.chunk_index);
-        Some(chunks.iter().map(|chunk| chunk.chunk.as_str()).collect())
+        if events.is_empty() {
+            return None;
+        }
+        events.sort_by_key(|(sequence, _text)| *sequence);
+        Some(
+            events
+                .iter()
+                .map(|(_sequence, text)| text.as_str())
+                .collect(),
+        )
+    }
+
+    fn payload_for_event_type(&self, event_type: &str) -> Option<Value> {
+        self.events
+            .borrow()
+            .iter()
+            .find(|event| event.event_type == event_type)
+            .map(|event| event.payload.clone())
     }
 }
 
@@ -232,34 +251,23 @@ async fn run_session_api(client: RpcClient, result: Rc<ResultState>) {
     );
 
     *result.stage.borrow_mut() = "events";
-    wait_until(|| {
-        result
-            .field_for_event_type("output_delta", "text")
-            .as_deref()
-            == Some(EXPECTED_OUTPUT)
-    })
-    .await;
+    wait_until(|| result.text_for_event_type("output_delta").as_deref() == Some(EXPECTED_OUTPUT))
+        .await;
 
     *result.stage.borrow_mut() = "usage";
     wait_until(|| {
         result
-            .field_for_event_type("usage", "cache_read_tokens")
-            .as_deref()
-            == Some("8")
+            .payload_for_event_type("usage")
+            .and_then(|payload| payload.get("cache_read_tokens").cloned())
+            .and_then(|value| value.as_u64())
+            == Some(8)
     })
     .await;
-    assert_eq!(
-        result
-            .field_for_event_type("usage", "input_tokens")
-            .as_deref(),
-        Some("12")
-    );
-    assert_eq!(
-        result
-            .field_for_event_type("usage", "output_tokens")
-            .as_deref(),
-        Some("3")
-    );
+    let usage = result
+        .payload_for_event_type("usage")
+        .expect("usage event has a payload");
+    assert_eq!(usage.get("input_tokens").and_then(Value::as_u64), Some(12));
+    assert_eq!(usage.get("output_tokens").and_then(Value::as_u64), Some(3));
 
     *result.stage.borrow_mut() = "close";
     assert_eq!(
@@ -276,7 +284,7 @@ async fn run_session_api(client: RpcClient, result: Rc<ResultState>) {
             .events
             .borrow()
             .iter()
-            .any(|chunk| chunk.terminal.as_deref() == Some("closed"))
+            .any(|event| event.event_type == "closed")
     })
     .await;
 
@@ -392,17 +400,18 @@ fn system_json_rpcs_and_bounded_session_events_drive_the_agent() {
         assert!(!tool_names.contains(&"session.new"));
 
         let events = result.events.borrow();
-        assert!(events.iter().any(|chunk| chunk.chunk.len() > 32));
-        assert!(events.iter().all(|chunk| chunk.session == "session-1"));
-        assert!(events.iter().all(|chunk| chunk.run == "run-1"));
-        assert!(events.iter().any(|chunk| chunk.field_complete));
-        assert!(events.iter().any(|chunk| chunk.event_complete));
+        assert!(events.iter().all(|event| event.session == "session-1"));
+        assert!(events.iter().all(|event| event.payload.is_object()));
+        let mut sequences: Vec<_> = events.iter().map(|event| event.sequence).collect();
+        sequences.sort_unstable();
+        sequences.dedup();
+        assert_eq!(sequences.len(), events.len());
+        assert_eq!(sequences.first(), Some(&0));
         assert_eq!(
-            events
-                .iter()
-                .filter(|chunk| chunk.terminal.is_some())
-                .count(),
-            1
+            sequences.last().copied(),
+            u32::try_from(events.len())
+                .ok()
+                .and_then(|len| len.checked_sub(1))
         );
     });
 }
@@ -428,13 +437,19 @@ async fn drive_until(router: &mut EventRouter<8, FRAME_SIZE, 8>, result: &Result
 fn session_event_contract_is_public_and_bounded() {
     assert_eq!(SessionOutputEvent::ID, "session.event");
     let schema = include_str!("../../../schemas/event/session_event.json");
-    assert!(!schema.contains("maxLength"));
-    for field in [
-        "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "cache_write_tokens",
-    ] {
+    for field in ["session", "sequence", "type", "payload"] {
         assert!(schema.contains(&format!("\"{field}\"")));
     }
+    for removed in [
+        "run",
+        "chunk_index",
+        "field",
+        "chunk",
+        "field_complete",
+        "event_complete",
+        "terminal",
+    ] {
+        assert!(!schema.contains(&format!("\"{removed}\"")));
+    }
+    assert!(!schema.contains("maxLength"));
 }

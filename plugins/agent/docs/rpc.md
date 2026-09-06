@@ -25,7 +25,8 @@ to `0` and `16`; pass `next_offset` into the following call until it is `null`.
 `session.open` is a command, not a transport stream. Its `run` identifies that
 particular open lease. Runtime output is delivered separately through the
 bounded `session.event` contract. `session.close` acknowledges the command;
-the matching terminal Event is the authoritative end of that run.
+the matching `closed` or `stream_error` Event is the authoritative end of that
+run.
 
 `text` is ordinary JSON UTF-8 text with no independent field limit. The complete
 encoded request, including escaping and the other fields, must fit the RPC's
