@@ -11,7 +11,9 @@ use barracuda_event_router::{
 };
 use serde::Deserialize;
 
-use crate::json::{parse_session, AgentRpcError, ErrorResponse, OpenedResponse};
+use crate::json::{
+    parse_session, AgentRpcError, ErrorResponse, OpenedResponse, SessionErrorResponse,
+};
 use crate::session::SessionRegistry;
 
 /// Opens a session control lease and subscribes it to `session.event`.
@@ -62,7 +64,9 @@ pub fn open_session_handler(
                 Err(error) => {
                     let error = map_open_error(error);
                     log::warn!("Agent failed to open session `{session}`: {error}");
-                    response.write(&ErrorResponse(error)).await
+                    response
+                        .write(&SessionErrorResponse { session, error })
+                        .await
                 }
             }
         }

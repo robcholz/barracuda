@@ -224,6 +224,18 @@ async fn run_session_api(client: RpcClient, result: Rc<ResultState>) {
     );
     assert_eq!(opened.get("run").and_then(Value::as_str), Some("run-1"));
 
+    *result.stage.borrow_mut() = "open_again";
+    let rejected = call(
+        &client,
+        "session.open",
+        &format!(r#"{{"session":"{session}"}}"#),
+    )
+    .await;
+    assert_eq!(
+        rejected,
+        serde_json::json!({"session": session.as_str(), "error": "already_open"})
+    );
+
     for (address, body) in [
         (
             "session.set_reasoning_effort",

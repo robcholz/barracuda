@@ -1,9 +1,11 @@
 # Agent JSON RPCs
 
 Every Agent RPC is unary JSON, registered with visibility `"system"`. A business
-failure is a successful transport response with `{"error":"code"}`. `RpcError`
-is reserved for invalid JSON/framing, lane capacity, or Event Router runtime
-failure. Successful commands without response data return `{}`.
+failure is a successful transport response with `{"error":"code"}`. An
+operation that has already parsed a session may also retain it in the response
+as `{"session":"session-N","error":"code"}`. `RpcError` is reserved for
+invalid JSON/framing, lane capacity, or Event Router runtime failure. Successful
+commands without response data return `{}`.
 
 | Address | Request | Success | Stable business errors | Request/response bytes |
 | --- | --- | --- | --- | --- |
@@ -23,10 +25,11 @@ failure. Successful commands without response data return `{}`.
 to `0` and `16`; pass `next_offset` into the following call until it is `null`.
 
 `session.open` is a command, not a transport stream. Its `run` identifies that
-particular open lease. Runtime output is delivered separately through the
-bounded `session.event` contract. `session.close` acknowledges the command;
-the matching `closed` or `stream_error` Event is the authoritative end of that
-run.
+particular open lease. Failures after parsing the request retain `session`, so a
+Workflow can correlate the error with its Gateway route. Runtime output is
+delivered separately through the bounded `session.event` contract.
+`session.close` acknowledges the command; the matching `closed` or
+`stream_error` Event is the authoritative end of that run.
 
 `text` is ordinary JSON UTF-8 text with no independent field limit. The complete
 encoded request, including escaping and the other fields, must fit the RPC's
