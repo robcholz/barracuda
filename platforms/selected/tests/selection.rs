@@ -13,56 +13,51 @@ fn selected_platform_exports_no_board() -> Result<(), std::io::Error> {
 }
 
 #[test]
-fn selected_native_platform_matches_the_target_operating_system() {
+fn source_workspace_uses_the_persisted_platform_selection() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let selected = std::fs::read_to_string(root.join(".barracuda/selected-platform"))?;
+    assert_eq!(barracuda_platform_selected::PLATFORM_NAME, selected.trim());
+    Ok(())
+}
+
+#[test]
+fn selected_platform_uses_only_its_persisted_axis() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+
+    assert!(selection.contains("barracuda_platform_config::discover_platforms"));
+    assert!(selection.contains(".barracuda/selected-platform"));
+    assert!(!selection.contains("selected-board"));
+    assert!(!selection.contains("barracuda_board"));
+    assert!(!selection.contains("fn default_platform"));
+    assert!(!selection.contains("fn validate_target"));
+    Ok(())
+}
+
+#[test]
+fn selected_manifest_contains_only_the_generated_concrete_dependency() -> Result<(), std::io::Error>
+{
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
+    let selected = std::fs::read_to_string(root.join(".barracuda/selected-platform"))?;
+    let expected_dependency = format!("barracuda-platform-{}.workspace = true", selected.trim());
+    assert!(manifest.contains("# BEGIN GENERATED SELECTED PLATFORM"));
+    assert!(manifest.contains("# END GENERATED SELECTED PLATFORM"));
+    let generated = manifest
+        .split_once("# BEGIN GENERATED SELECTED PLATFORM")
+        .and_then(|(_before, generated)| {
+            generated
+                .split_once("# END GENERATED SELECTED PLATFORM")
+                .map(|(generated, _after)| generated)
+        })
+        .unwrap_or_default();
+    assert!(generated.contains(&expected_dependency));
     assert_eq!(
-        barracuda_platform_selected::PLATFORM_NAME,
-        std::env::consts::OS
+        generated
+            .lines()
+            .filter(|line| line.trim_start().starts_with("barracuda-platform-"))
+            .count(),
+        1
     );
-}
-
-#[test]
-fn esp32c6_is_a_concrete_platform_identity() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
-    let implementation = std::fs::read_to_string(root.join("platforms/esp32c6/src/lib.rs"))?;
-
-    assert!(manifest.contains("barracuda-platform-esp32c6"));
-    assert!(!manifest.contains("features = [\"esp32c6\"]"));
-    assert!(!manifest.contains("cfg(target_arch = \"riscv32\")"));
-    assert!(selection.contains("\"esp32c6\""));
-    assert!(!implementation.contains("feature = \"esp32c6\""));
-    Ok(())
-}
-
-#[test]
-fn xtensa_esp_chips_have_concrete_platform_identities() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
-
-    for chip in ["esp32", "esp32s2", "esp32s3"] {
-        let implementation =
-            std::fs::read_to_string(root.join("platforms").join(chip).join("src/lib.rs"))?;
-        assert!(manifest.contains(&format!("barracuda-platform-{chip}")));
-        assert!(selection.contains(&format!("\"{chip}\"")));
-        assert!(!implementation.contains(&format!("feature = \"{chip}\"")));
-    }
-    Ok(())
-}
-
-#[test]
-fn additional_riscv_esp_chips_have_concrete_platform_identities() -> Result<(), std::io::Error> {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest = std::fs::read_to_string(root.join("platforms/selected/Cargo.toml"))?;
-    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
-
-    for chip in ["esp32c3", "esp32p4"] {
-        let implementation =
-            std::fs::read_to_string(root.join("platforms").join(chip).join("src/lib.rs"))?;
-        assert!(manifest.contains(&format!("barracuda-platform-{chip}")));
-        assert!(selection.contains(&format!("\"{chip}\"")));
-        assert!(!implementation.contains(&format!("feature = \"{chip}\"")));
-    }
     Ok(())
 }

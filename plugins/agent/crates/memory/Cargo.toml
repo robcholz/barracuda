@@ -11,9 +11,9 @@ crate-type = ["rlib"]
 [dependencies]
 # Filesystem paths are always scoped by System/Plugin Manager before reaching
 # Agent memory; backend selection remains outside this crate.
-barracuda-vfs = { path = "../../../../shared/vfs" }
+barracuda-vfs.workspace = true
 # Shared id/allocator macros (`define_id_allocator!` for the `TurnId` counter).
-barracuda-runtime-utils = { path = "../../../../shared/runtime-utils" }
+barracuda-runtime-utils.workspace = true
 log = { version = "0.4", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
@@ -23,7 +23,7 @@ thiserror = { version = "2", default-features = false }
 [dev-dependencies]
 # Host-target helpers for tests/examples/doctests: `diskfs-pretty` is a
 # disk-backed inspection backend. None of these reach device builds.
-barracuda-platform-test = { path = "../../../../platforms/test", features = ["std"] }
+barracuda-platform-test = { workspace = true, features = ["std"] }
 # Ergonomic error handling for the host dev workflow `conversation` example.
 anyhow = "1"
 # `block_on` for the `Compactor` doctest (smol family; replaces the removed

@@ -9,21 +9,21 @@ default = []
 std = ["barracuda-agent-runtime/std"]
 
 [dependencies]
-barracuda-agent-component = { path = "../component" }
-barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
-barracuda-model-api = { path = "../model-api" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin" }
-http-client = { path = "../../../../shared/http-client", features = ["mbedtls"] }
+barracuda-agent-component.workspace = true
+barracuda-agent-runtime = { workspace = true, features = ["cache_profile", "multiagent"] }
+barracuda-model-api.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+barracuda-webserver-plugin.workspace = true
+http-client = { workspace = true, features = ["mbedtls"] }
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
-barracuda-event-router = { path = "../../../../core/event-router" }
-barracuda-model-api = { path = "../model-api" }
-barracuda-platform-test = { path = "../../../../platforms/test" }
+barracuda-event-router.workspace = true
+barracuda-model-api.workspace = true
+barracuda-platform-test.workspace = true
 embassy-net.workspace = true
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 embedded-io-async = "0.7"

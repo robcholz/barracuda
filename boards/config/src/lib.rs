@@ -121,8 +121,8 @@ impl BoardDefinition {
     ///
     /// A Board that must be cross-compiled declares the Rust target triple it is
     /// built for. Host Boards omit this and build for the build host's native
-    /// target. The target is build policy, not a runtime hardware fact, so it is
-    /// consumed by the build driver (for example CI) and never baked into the
+    /// target. The target is build policy, not a runtime hardware fact, so Board
+    /// selection writes it into local Cargo configuration rather than the
     /// generated runtime Board value.
     #[must_use]
     pub const fn toolchain(&self) -> Option<&ToolchainDefinition> {
@@ -562,7 +562,7 @@ impl HardwareDefinition {
     }
 }
 
-/// Toolchain policy a Board carries so the build driver can choose a target.
+/// Toolchain policy a Board carries so selection can configure Cargo's target.
 #[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolchainDefinition {

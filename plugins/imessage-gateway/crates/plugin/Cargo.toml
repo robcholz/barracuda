@@ -5,14 +5,14 @@ edition = "2021"
 description = "Base IMessage Gateway Plugin and provider-registration capability"
 
 [dependencies]
-barracuda-imessage-gateway-component = { path = "../component" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-gateway = { path = "../gateway" }
+barracuda-imessage-gateway-component.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+gateway.workspace = true
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../../../platforms/test" }
-barracuda-event-router = { path = "../../../../core/event-router" }
+barracuda-platform-test.workspace = true
+barracuda-event-router.workspace = true
 futures-lite = "2"
 
 [lints.rust]

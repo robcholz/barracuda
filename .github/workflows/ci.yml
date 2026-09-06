@@ -87,7 +87,7 @@ jobs:
             board="${entry%%:*}"; crate="${entry##*:}"
             echo "== $crate (Board $board) =="
             cargo board select "$board"
-            cargo test -p "$crate"
+            cargo test --target host-tuple -p "$crate"
           done
 
   # Cross-check the selected Platform composition rather than naming individual
@@ -167,5 +167,6 @@ jobs:
         run: uv run --package llm-tape pytest
 
       - name: Test serial-log
-        working-directory: plugins/agent/crates/trace/scripts/serial_log
-        run: uv run --package serial-log pytest
+        run: >-
+          uv run --package serial-log pytest
+          plugins/agent/crates/trace/scripts/serial_log/tests

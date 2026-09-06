@@ -23,6 +23,29 @@ fn add_board(root: &Path, directory_name: &str, declared_name: &str) {
         "capacity: 1\nregions: []\n",
     )
     .expect("native layout");
+    add_selection_files(root);
+}
+
+fn add_selection_files(root: &Path) {
+    let platform = root.join("platforms/macos");
+    fs::create_dir_all(&platform).expect("Platform directory");
+    fs::write(
+        platform.join("platform.yml"),
+        "name: macos\npackage: barracuda-platform-macos\ncrate: barracuda_platform_macos\ntype: MacosPlatform\nselection:\n  board-chips: [macos]\n  targets:\n    - os: macos\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .barracuda\n    flash-image: board.flash\napplication:\n  support-binaries: [barracuda-macos-network]\n  launcher:\n    program: sudo\n    arguments: [\"{support:barracuda-macos-network}\", \"{application}\"]\n",
+    )
+    .expect("Platform manifest");
+    fs::create_dir_all(root.join("platforms/selected")).expect("selected Platform directory");
+    fs::write(
+        root.join("platforms/selected/Cargo.toml"),
+        "[dependencies]\n# BEGIN GENERATED SELECTED PLATFORM\nold\n# END GENERATED SELECTED PLATFORM\n",
+    )
+    .expect("selected Platform manifest");
+    fs::create_dir_all(root.join("boards/selected")).expect("selected Board directory");
+    fs::write(
+        root.join("boards/selected/Cargo.toml"),
+        "[dependencies]\n# BEGIN GENERATED SELECTED BOARD HAL\nold\n# END GENERATED SELECTED BOARD HAL\n",
+    )
+    .expect("selected Board manifest");
 }
 
 fn add_cross_board(root: &Path, name: &str, target: &str) {
@@ -52,8 +75,73 @@ fn select_persists_a_valid_board_for_the_next_build() {
     );
     assert_eq!(
         String::from_utf8(output).expect("UTF-8 output"),
-        "Selected Board `local-macos`.\nRun `cargo build` to build it.\n"
+        "Selected Board `local-macos`.\nRun `cargo run` to build and start it.\n"
     );
+    let platform = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
+        .expect("selected Platform manifest");
+    assert!(platform.contains("barracuda-platform-macos.workspace = true"));
+    assert!(!platform.contains("\nold\n"));
+    let board = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+        .expect("selected Board manifest");
+    assert!(!board.contains("\nold\n"));
+    let cargo = fs::read_to_string(root.path().join(".barracuda/cargo.toml"))
+        .expect("local Cargo selection");
+    assert!(cargo.contains("[build]"));
+    assert!(cargo.contains("runner = ["));
+    assert!(cargo.contains("\"__run\", \"macos\", \"--\"]"));
+    assert!(root
+        .path()
+        .join(".barracuda/bin/barracuda-runner")
+        .is_file());
+}
+
+#[test]
+fn select_uses_platform_owned_features_for_the_board_chip() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let platform_path = root.path().join("platforms/macos/platform.yml");
+    let platform = fs::read_to_string(&platform_path).expect("Platform manifest");
+    fs::write(
+        &platform_path,
+        platform.replace(
+            "  targets:\n",
+            "  features-by-chip:\n    macos: [native-chip]\n  targets:\n",
+        ),
+    )
+    .expect("Platform manifest with chip features");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let selected = fs::read_to_string(root.path().join("platforms/selected/Cargo.toml"))
+        .expect("selected Platform manifest");
+    assert!(selected
+        .contains("barracuda-platform-macos = { workspace = true, features = [\"native-chip\"] }"));
+}
+
+#[test]
+fn select_discovers_a_board_hal_from_the_board_bundle() {
+    let root = tempdir().expect("temporary workspace");
+    add_board(root.path(), "local-macos", "local-macos");
+    let board_path = root.path().join("boards/configs/local-macos/board.yml");
+    let board = fs::read_to_string(&board_path).expect("Board YAML");
+    fs::write(
+        &board_path,
+        format!("{board}exposed-io:\n  gpio:\n    button:\n      pin: P0\n"),
+    )
+    .expect("Board hardware surface");
+    let hal = root.path().join("boards/configs/local-macos/hal");
+    fs::create_dir_all(&hal).expect("Board HAL directory");
+    fs::write(
+        hal.join("Cargo.toml"),
+        "[package]\nname = \"barracuda-board-local-macos\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("Board HAL manifest");
+
+    run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
+
+    let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
+        .expect("selected Board manifest");
+    assert!(selected.contains("barracuda-board-local-macos.workspace = true"));
 }
 
 #[test]
@@ -182,14 +270,16 @@ fn cargo_config_exposes_board_without_replacing_builtin_build() {
     ))
     .expect("workspace Cargo config");
 
-    assert!(config.contains("board = \"run --quiet --package barracuda-board-tool --\""));
+    assert!(config.contains("include = [{ path = \"../.barracuda/cargo.toml\", optional = true }]"));
+    assert!(config
+        .contains("board = \"run --target host-tuple --quiet --package barracuda-board-tool --\""));
     assert!(!config
         .lines()
         .any(|line| line.trim_start().starts_with("build =")));
 }
 
 #[test]
-fn normal_cargo_build_reaches_the_selected_target_composition() {
+fn normal_cargo_build_targets_the_selected_application_directly() {
     let manifest = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
         .expect("workspace manifest");
     let default_members = manifest
@@ -199,6 +289,10 @@ fn normal_cargo_build_reaches_the_selected_target_composition() {
         .expect("default members");
 
     assert!(default_members.contains("apps/barracuda-cli"));
+    assert!(!default_members.contains("tools/barracuda-build"));
+    assert!(!manifest.contains("\"tools/barracuda-build\","));
+    assert!(manifest.contains("\"boards/configs/*/hal\","));
+    assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
 }
 
 #[test]

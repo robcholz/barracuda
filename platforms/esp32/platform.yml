@@ -1,3 +1,16 @@
 name: esp32
+package: barracuda-platform-esp32
 crate: barracuda_platform_esp32
 type: Esp32Platform
+selection:
+  board-chips:
+    - esp32
+  targets:
+    - triple: xtensa-esp32-none-elf
+system-image:
+  layout:
+    driver: esp-idf-partitions
+  flash:
+    driver: command
+    program: espflash
+    arguments: [write-bin, --chip, "{chip}", "{offset}", "{image}"]

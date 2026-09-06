@@ -5,15 +5,16 @@ edition = "2021"
 description = "Compile-time selected Barracuda Board HAL"
 
 [dependencies]
-barracuda-board = { path = "../api" }
-barracuda-board-hal = { path = "../hal" }
+barracuda-board.workspace = true
+barracuda-board-hal.workspace = true
+# BEGIN GENERATED SELECTED BOARD HAL
+
+# END GENERATED SELECTED BOARD HAL
 embassy-executor.workspace = true
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-barracuda-board-stm32f429zi-nucleo = { path = "../stm32f429zi-nucleo" }
-
 [build-dependencies]
-barracuda-board-config = { path = "../config" }
+barracuda-board-config.workspace = true
+barracuda-board-tool.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -19,17 +19,17 @@ path = "bench/throughput/main.rs"
 harness = false
 
 [dependencies]
-barracuda-vfs = { path = "../../shared/vfs" }
-barracuda-router = { path = "crates/router" }
-barracuda-rpc = { path = "crates/rpc" }
-barracuda-workflow = { path = "crates/workflow" }
+barracuda-vfs.workspace = true
+barracuda-router.workspace = true
+barracuda-rpc.workspace = true
+barracuda-workflow.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-platform-test = { path = "../../platforms/test" }
-barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
-barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
+barracuda-platform-test.workspace = true
+barracuda-vfs-memfs.workspace = true
+barracuda-profile = { workspace = true, features = ["dhat-heap"] }
 futures-lite = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

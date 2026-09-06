@@ -6,17 +6,17 @@ description = "Barracuda Plugin exposing Board GPIO resources to Lua"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-board-hal = { path = "../../../../boards/hal" }
-barracuda-lua = { path = "../../../vm/crates/lua" }
-barracuda-plugin-api = { path = "../../../../core/plugin/crates/api" }
-barracuda-plugin-manager = { path = "../../../../core/plugin/crates/manager" }
-barracuda-vm-package-api = { path = "../../../vm/crates/package-api" }
-barracuda-vm-plugin = { path = "../../../vm/crates/plugin" }
+barracuda-board-hal.workspace = true
+barracuda-lua.workspace = true
+barracuda-plugin-api.workspace = true
+barracuda-plugin-manager.workspace = true
+barracuda-vm-package-api.workspace = true
+barracuda-vm-plugin.workspace = true
 embassy-sync.workspace = true
 embedded-hal.workspace = true
 
 [dev-dependencies]
-barracuda-lua = { path = "../../../vm/crates/lua", features = ["vendored"] }
+barracuda-lua = { workspace = true, features = ["vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 
