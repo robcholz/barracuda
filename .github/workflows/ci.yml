@@ -6,151 +6,361 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
-# CI never reuses incremental state across commits effectively. Disabling it
-# and omitting dev-profile debug info reduces both compile time and cache size.
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
 
 jobs:
-  # rustfmt is target-independent. Running it once over the workspace covers
-  # every Platform without making each cross-compilation runner repeat the
-  # exact same work.
-  format:
-    name: Rust formatting (all Platforms)
+  # Validate generated source and derive the exhaustive Board matrix from the
+  # catalog. Boards are grouped by compilation target so each runner can reuse
+  # dependencies while still selecting and building every Board independently.
+  preflight:
+    name: Preflight & Board matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      board_matrix: ${{ steps.boards.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install rustfmt
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-  # The complete codebase, built and tested on the Linux host Target. Board and
-  # Platform are selected explicitly: the architecture forbids inferring a Board
-  # from the target, and this keeps the selection visible rather than relying on
-  # a default. The non-host Platform crates are excluded here — they only build
-  # for their own target and are covered by the platform-build matrix below.
-  host:
-    name: Host (linux) — build & test
-    runs-on: ubuntu-latest
-    env:
-      BARRACUDA_PLATFORM: linux
-      HOST_EXCLUDES: >-
-        --exclude barracuda-platform-esp32c6
-        --exclude barracuda-platform-stm32
-        --exclude barracuda-platform-macos
-    steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
 
-      - name: Cache cargo build
+      - name: Cache Cargo tools
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace-tools
 
-      - name: Select Linux host Board
-        run: cargo board select local-linux
+      - name: Check committed lockfile
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets $HOST_EXCLUDES
-
-      - name: Test
-        run: cargo test --workspace $HOST_EXCLUDES
-
-      # The non-host Platform crates carry host-runnable tests for their native
-      # layout projection (partition table, linker regions, file layout). They
-      # are excluded from the workspace run above because each build script needs
-      # its own Board selected, so run them here one Board at a time. This is the
-      # host-side coverage; the platform-build matrix proves they cross-compile.
-      - name: Test non-host Platform crates (host side)
+      - name: Check generated registries
         run: |
-          for entry in \
-            "esp32c6-devkitc-1:barracuda-platform-esp32c6" \
-            "stm32f429zi-nucleo:barracuda-platform-stm32" \
-            "local-macos:barracuda-platform-macos"; do
-            board="${entry%%:*}"; crate="${entry##*:}"
-            echo "== $crate (Board $board) =="
-            cargo board select "$board"
-            cargo test --target host-tuple -p "$crate"
-          done
+          cargo platform sync --check
+          cargo board sync --check
+          cargo plugin sync --check
 
-  # Cross-check the selected Platform composition rather than naming individual
-  # Platform crates or chip features here. Cargo resolves the implementation
-  # and target-specific features from barracuda-platform-selected, while
-  # `cargo board` supplies the Board target. This keeps Board/toolchain policy
-  # out of the workflow and also exercises the same selection path as a real
-  # application build.
-  platform-build:
-    name: Platform check (${{ matrix.board }})
+      - name: Check CI covers every Platform
+        run: |
+          diff -u \
+            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
+              -exec dirname {} \; | xargs -n1 basename | sort)
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Group all Boards by target
+        id: boards
+        run: |
+          entries='[]'
+          while IFS= read -r board_file; do
+            board="$(basename "$(dirname "$board_file")")"
+
+            # Host Boards are already exercised by the two complete test jobs.
+            if [[ "$board" == "local-linux" || "$board" == "local-macos" ]]; then
+              continue
+            fi
+
+            target="$(cargo board target "$board")"
+            os=ubuntu-latest
+            toolchain=stable
+            chip=''
+            c_toolchain=none
+            key="$target"
+
+            if [[ -z "$target" ]]; then
+              key="$board"
+              toolchain=host
+              if [[ "$board" == "local-macos" ]]; then
+                os=macos-latest
+              fi
+            elif [[ "$target" == xtensa-* ]]; then
+              toolchain=esp
+              chip="${target#xtensa-}"
+              chip="${chip%-none-elf}"
+            elif [[ "$target" == riscv32* ]]; then
+              c_toolchain=riscv
+            elif [[ "$target" == thumb* ]]; then
+              c_toolchain=arm
+            fi
+
+            entry="$(jq -cn \
+              --arg board "$board" \
+              --arg key "$key" \
+              --arg os "$os" \
+              --arg toolchain "$toolchain" \
+              --arg chip "$chip" \
+              --arg c_toolchain "$c_toolchain" \
+              '{board: $board, key: $key, os: $os, toolchain: $toolchain,
+                chip: $chip, c_toolchain: $c_toolchain}')"
+            entries="$(jq -cn \
+              --argjson entries "$entries" \
+              --argjson entry "$entry" \
+              '$entries + [$entry]')"
+          done < <(find boards/configs -mindepth 2 -maxdepth 2 -type f -name board.yml | sort)
+
+          matrix="$(jq -cn --argjson entries "$entries" '
+            {include: ($entries
+              | sort_by(.key, .board)
+              | group_by(.key)
+              | map({
+                  key: .[0].key,
+                  label: (if length == 1 then .[0].board
+                    else "\(.[0].board) + \(length - 1) more"
+                    end),
+                  os: .[0].os,
+                  toolchain: .[0].toolchain,
+                  chip: .[0].chip,
+                  c_toolchain: .[0].c_toolchain,
+                  boards: map(.board)
+                }))}')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq . <<< "$matrix"
+
+  # This is the shortest complete host validation and therefore the primary
+  # blocking signal: select a real host Board, build the default application,
+  # then run its tests before spending time on the exhaustive device matrix.
+  linux:
+    name: Host checks (local-linux)
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        board:
-          - esp32c6-devkitc-1
-          - stm32f429zi-nucleo
+    timeout-minutes: 30
+    env:
+      PLATFORM_EXCLUDES: >-
+        --exclude barracuda-platform-esp32
+        --exclude barracuda-platform-esp32c3
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-esp32p4
+        --exclude barracuda-platform-esp32s2
+        --exclude barracuda-platform-esp32s3
+        --exclude barracuda-platform-macos
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-board-stm32f429zi-nucleo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      - name: Cache cargo build
+      - name: Cache Linux build
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.board }}
+          shared-key: local-linux
 
-      - name: Select Board and install its Rust target
+      - name: Select Board
+        run: cargo board select local-linux
+
+      - name: Check selected application
+        run: cargo check
+
+      - name: Build
+        run: cargo build
+
+      - name: Test selected application
+        run: cargo test
+
+      - name: Check portable workspace
+        run: cargo check --workspace $PLATFORM_EXCLUDES
+
+      - name: Test portable workspace
+        run: cargo test --workspace $PLATFORM_EXCLUDES
+
+      - name: Clippy portable workspace
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+
+  # The same shared production path is tested on the second supported host.
+  # It runs in parallel with Linux: Linux normally reports first, while macOS
+  # adds host/compiler integration coverage without repeating device tests.
+  macos:
+    name: Host checks (local-macos)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      PLATFORM_EXCLUDES: >-
+        --exclude barracuda-platform-esp32
+        --exclude barracuda-platform-esp32c3
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-esp32p4
+        --exclude barracuda-platform-esp32s2
+        --exclude barracuda-platform-esp32s3
+        --exclude barracuda-platform-linux
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-board-stm32f429zi-nucleo
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache macOS build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: local-macos
+
+      - name: Select Board
+        run: cargo board select local-macos
+
+      - name: Check selected application
+        run: cargo check
+
+      - name: Build
+        run: cargo build
+
+      - name: Test selected application
+        run: cargo test
+
+      - name: Check portable workspace
+        run: cargo check --workspace $PLATFORM_EXCLUDES
+
+      - name: Test portable workspace
+        run: cargo test --workspace $PLATFORM_EXCLUDES
+
+      - name: Clippy portable workspace
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+
+  # The two host Platforms are covered by complete end-user paths above. Check,
+  # lint, test, and build every device Platform independently. Native target
+  # checks validate the actual implementation while host tests remain runnable.
+  platforms:
+    name: Platform (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      # Collect every Platform result. The Board stage is still gated on the
+      # complete matrix, so any failure prevents the expensive stage.
+      fail-fast: false
+      matrix:
+        include:
+          - name: esp32
+            board: esp32-devkitc-v4
+            os: ubuntu-latest
+            package: barracuda-platform-esp32
+            toolchain: esp
+            chip: esp32
+          - name: esp32c3
+            board: esp32c3-devkitc-02
+            os: ubuntu-latest
+            package: barracuda-platform-esp32c3
+            toolchain: stable
+          - name: esp32c6
+            board: esp32c6-devkitc-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32c6
+            toolchain: stable
+          - name: esp32p4
+            board: esp32p4-function-ev-board
+            os: ubuntu-latest
+            package: barracuda-platform-esp32p4
+            toolchain: stable
+          - name: esp32s2
+            board: esp32s2-saola-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32s2
+            toolchain: esp
+            chip: esp32s2
+          - name: esp32s3
+            board: esp32s3-devkitc-1
+            os: ubuntu-latest
+            package: barracuda-platform-esp32s3
+            toolchain: esp
+            chip: esp32s3
+          - name: stm32
+            board: stm32f429zi-nucleo
+            os: ubuntu-latest
+            package: barracuda-platform-stm32
+            toolchain: stable
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Select representative Board
         run: |
           cargo board select ${{ matrix.board }}
           target="$(cargo board target)"
-          echo "Board ${{ matrix.board }} declares target: $target"
-          rustup target add "$target"
           echo "target=$target" >> "$GITHUB_ENV"
 
-      - name: Clippy selected Platform
-        # Bare-metal targets do not provide Rust's host-only test harness.
-        run: cargo clippy -p barracuda-platform-selected --target "$target"
+      - name: Install stable Rust target
+        if: matrix.toolchain == 'stable'
+        run: rustup target add "$target"
 
-      - name: Build selected Platform
-        run: cargo build -p barracuda-platform-selected --target "$target"
+      - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp'
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          default: false
+          ldproxy: false
+          override: false
+
+      - name: Cache Platform build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: platform-${{ matrix.name }}
+
+      - name: Check Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo check --package ${{ matrix.package }}
+
+      - name: Check Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp check -Zbuild-std=core,alloc --package ${{ matrix.package }}
+
+      - name: Clippy Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo clippy --package ${{ matrix.package }}
+
+      - name: Clippy Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp clippy -Zbuild-std=core,alloc --package ${{ matrix.package }}
+
+      - name: Test Platform on host
+        run: cargo test --target host-tuple --package ${{ matrix.package }}
+
+      - name: Build Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo build --package ${{ matrix.package }}
+
+      - name: Build Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp build -Zbuild-std=core,alloc --package ${{ matrix.package }}
 
   python:
-    name: Python tooling
+    name: Python formatting, lint & test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version-file: .python-version
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       - name: Sync workspace
-        run: uv sync --all-packages --all-groups
+        run: uv sync --locked --all-packages --all-groups
 
       - name: Check formatting (ruff)
         run: uv run ruff format --check .
@@ -170,3 +380,104 @@ jobs:
         run: >-
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
+
+  # Once all fast gates pass, check, lint, and build every Board. Target groups
+  # run in parallel; Boards sharing a target run serially so the expensive
+  # dependency graph is reused.
+  boards:
+    name: Boards (${{ matrix.label }})
+    needs: [preflight, linux, macos, platforms, python]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      # This is the exhaustive stage: do not let one target hide failures in
+      # another target after all fast gates have already passed.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.preflight.outputs.board_matrix) }}
+    env:
+      BOARD_GROUP: ${{ toJSON(matrix.boards) }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install stable Rust target
+        if: matrix.toolchain == 'stable'
+        run: rustup target add ${{ matrix.key }}
+
+      - name: Install C cross-toolchain
+        if: matrix.c_toolchain != 'none'
+        run: |
+          sudo apt-get update
+          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
+            sudo apt-get install --no-install-recommends \
+              gcc-riscv64-unknown-elf \
+              picolibc-riscv64-unknown-elf
+            target_env="${{ matrix.key }}"
+            target_env="${target_env//[-.]/_}"
+            sysroot="$(dirname "$(find /usr -path '*/riscv64-unknown-elf/include/math.h' -print -quit)")"
+            sysroot="${sysroot%/include}"
+            echo "CC_${target_env}=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
+            echo "CFLAGS_${target_env}=--sysroot=$sysroot" >> "$GITHUB_ENV"
+          else
+            sudo apt-get install --no-install-recommends \
+              gcc-arm-none-eabi \
+              libnewlib-arm-none-eabi
+          fi
+
+      - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp'
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          default: false
+          ldproxy: false
+          override: false
+
+      - name: Cache Board builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: boards-${{ matrix.key }}
+          add-job-id-key: false
+
+      - name: Check, lint & build every Board
+        if: matrix.toolchain != 'esp'
+        run: |
+          failed=0
+          while IFS= read -r board; do
+            echo "::group::$board: cargo check, cargo clippy, cargo build"
+            if cargo board select "$board" &&
+              cargo check &&
+              cargo clippy &&
+              cargo build; then
+              echo "$board passed"
+            else
+              echo "::error title=Board validation failed::$board"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+          exit "$failed"
+
+      - name: Check, lint & build every Board (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: |
+          failed=0
+          while IFS= read -r board; do
+            echo "::group::$board: cargo +esp check, clippy, build"
+            if cargo +esp board select "$board" &&
+              cargo +esp check -Zbuild-std=core,alloc &&
+              cargo +esp clippy -Zbuild-std=core,alloc &&
+              cargo +esp build -Zbuild-std=core,alloc; then
+              echo "$board passed"
+            else
+              echo "::error title=Board validation failed::$board"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+          exit "$failed"
