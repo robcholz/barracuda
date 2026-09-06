@@ -22,9 +22,12 @@ use embassy_executor::{Executor, Spawner};
 use serde_json::Value;
 
 const FRAME_SIZE: usize = 512;
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
-const EVENT_SCHEMA: JsonSchema = JsonSchema::new(r#"{"type":"object"}"#);
+const TEST_MAX_INPUT_BYTES: usize = 16;
+const EMPTY_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
+const EVENT_SCHEMA: JsonSchema =
+    barracuda_event_router::json_schema_inline!(r#"{"type":"object"}"#);
 
 const OUTPUT_WORKFLOW: &str = r#"{
     "id":"vm-output-test",
@@ -225,8 +228,7 @@ impl Driver {
             .and_then(Value::as_u64)
             .ok_or_else(|| format!("infinite run was not accepted: {first}"))?;
         let oversized_input = "x".repeat(
-            VmLimits::default()
-                .max_input_bytes()
+            TEST_MAX_INPUT_BYTES
                 .checked_add(1)
                 .ok_or_else(|| "input limit overflow".to_owned())?,
         );
@@ -327,8 +329,9 @@ async fn exercise_application_stream(spawner: Spawner, completed: SyncSender<Res
             .map_err(|error| error.to_string())?;
         router
             .load(Box::new(
-                VmComponent::with_runtime(BuiltinPackages::all(), runtime)
-                    .with_limits(VmLimits::default().with_instruction_hook_interval(100)),
+                VmComponent::with_runtime(BuiltinPackages::all(), runtime).with_limits(
+                    VmLimits::new(480, TEST_MAX_INPUT_BYTES).with_instruction_hook_interval(100),
+                ),
             ))
             .map_err(|error| error.to_string())?;
         router

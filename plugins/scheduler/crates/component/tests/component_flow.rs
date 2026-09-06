@@ -24,10 +24,11 @@ use embassy_time::Instant;
 use serde::Deserialize;
 
 const FRAME_SIZE: usize = 512;
-const EMPTY_SCHEMA: JsonSchema =
-    JsonSchema::new(r#"{"type":"object","properties":{},"additionalProperties":false}"#);
-const TRIGGERED_SCHEMA: JsonSchema = JsonSchema::new(
-    r#"{"type":"object","properties":{"id":{"type":"string"},"run_number":{"type":"integer"}},"required":["id","run_number"],"additionalProperties":false}"#,
+const EMPTY_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
+const TRIGGERED_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
+    r#"{"type":"object","properties":{"id":{"type":"string"},"run_number":{"type":"integer"}},"required":["id","run_number"],"additionalProperties":false}"#
 );
 const WORKFLOW: &str = r#"{
     "id":"scheduler-test",
@@ -135,12 +136,18 @@ impl Component<FRAME_SIZE> for TestDriver {
                     .iter()
                     .any(|address| address.as_ref() == "scheduler.cancel")
             );
+            let agent = client
+                .rpcs_by_visibility("agent")
+                .map_err(ComponentError::lifecycle)?;
             assert!(
-                client
-                    .rpcs_by_visibility("agent")
-                    .map_err(ComponentError::lifecycle)?
+                agent
                     .iter()
-                    .all(|address| !address.as_ref().starts_with("scheduler."))
+                    .any(|address| address.as_ref() == "scheduler.schedule")
+            );
+            assert!(
+                agent
+                    .iter()
+                    .any(|address| address.as_ref() == "scheduler.cancel")
             );
 
             let schedule = RpcAddress::try_from("scheduler.schedule").map_err(RpcError::from)?;
@@ -165,10 +172,13 @@ impl Component<FRAME_SIZE> for TestDriver {
             assert_eq!(missing.as_str()?, r#"{"error":"not_found"}"#);
 
             let malformed = client.call_json(&schedule, "[]")?.await;
-            assert_eq!(
+            assert!(matches!(
                 malformed.expect_err("reject wrong request shape"),
-                RpcError::InvalidJson
-            );
+                RpcError::JsonRequestSchema {
+                    address: "scheduler.schedule",
+                    ..
+                }
+            ));
 
             let due = r#"{"id":"typed-time-flow","trigger":{"type":"once","at":"2027-01-15T08:00:00.000Z"}}"#;
             let accepted = client.call_json(&schedule, due)?.await?;

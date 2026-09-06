@@ -922,12 +922,12 @@ mod tests {
                 .expect("public RPC list"),
             [RpcAddress::try_from("http.request").expect("valid address")]
         );
-        assert!(
+        assert_eq!(
             registry
                 .client()
                 .rpcs_by_visibility("agent")
-                .expect("legacy visibility list")
-                .is_empty()
+                .expect("Agent-visible RPC list"),
+            [RpcAddress::try_from("http.request").expect("valid address")]
         );
     }
 
@@ -1005,13 +1005,15 @@ mod tests {
     }
 
     #[test]
-    fn validation_failures_are_business_documents() {
+    fn validation_failures_use_their_contract_boundaries() {
         let registry = registry(b"");
-        assert_eq!(
-            call(&registry, r#"{"method":"GET","url":"ftp://example.com"}"#)
-                .expect("business response")["error"],
-            "invalid_url"
-        );
+        assert!(matches!(
+            call(&registry, r#"{"method":"GET","url":"ftp://example.com"}"#),
+            Err(RpcError::JsonRequestSchema {
+                address: Request::ADDRESS,
+                ..
+            })
+        ));
         assert_eq!(
             call(
                 &registry,
@@ -1053,7 +1055,13 @@ mod tests {
                 .expect("start malformed call"),
         )
         .expect_err("array is not a request object");
-        assert_eq!(error, RpcError::InvalidJson);
+        assert!(matches!(
+            error,
+            RpcError::JsonRequestSchema {
+                address: Request::ADDRESS,
+                ..
+            }
+        ));
 
         let oversized = alloc::format!(
             "{{\"method\":\"POST\",\"url\":\"http://example.com\",\"body\":\"{}\"}}",
