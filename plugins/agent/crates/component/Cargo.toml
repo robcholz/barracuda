@@ -19,7 +19,6 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 http-client = { path = "../../../../shared/http-client" }
 barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test = { path = "../../../../platforms/test" }
-barracuda-rpc = { path = "../../../../core/event-router/crates/rpc" }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = { version = "2", features = ["std"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

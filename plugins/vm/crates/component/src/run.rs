@@ -3,11 +3,10 @@ use core::future::Future as _;
 use core::task::Poll;
 
 use barracuda_event_router::{
-    Event, EventEmitter, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
-    RpcError, json_schema,
+    Event, EventEmitter, JsonHandler, JsonObjectFields, JsonObjectPayload, JsonObjectWriter,
+    JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcError, json_schema,
 };
 use barracuda_lua::{Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
-use barracuda_rpc::{JsonObjectFields, JsonObjectPayload, JsonObjectWriter};
 use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},

@@ -24,10 +24,10 @@ use embassy_time::Instant;
 use serde::Deserialize;
 
 const FRAME_SIZE: usize = 512;
-const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+const EMPTY_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
     r#"{"type":"object","properties":{},"additionalProperties":false}"#
 );
-const TRIGGERED_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+const TRIGGERED_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
     r#"{"type":"object","properties":{"id":{"type":"string"},"run_number":{"type":"integer"}},"required":["id","run_number"],"additionalProperties":false}"#
 );
 const WORKFLOW: &str = r#"{
