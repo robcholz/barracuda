@@ -87,6 +87,7 @@ barracuda-indicator-led = { path = "drivers/indicator-led" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-lua = { path = "plugins/vm/crates/lua" }
 barracuda-model-api = { path = "plugins/agent/crates/model-api" }
+barracuda-minimal-yaml = { path = "shared/minimal-yaml" }
 barracuda-platform = { path = "platforms/api" }
 barracuda-platform-config = { path = "platforms/config" }
 barracuda-platform-selected = { path = "platforms/selected" }

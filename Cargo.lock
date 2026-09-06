@@ -934,6 +934,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-minimal-yaml"
+version = "0.1.0"
+
+[[package]]
 name = "barracuda-model-api"
 version = "0.1.0"
 dependencies = [
