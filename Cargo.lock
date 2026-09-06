@@ -4801,14 +4801,14 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 [[package]]
 name = "picoserve"
 version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4aaf10aff74fc2b847b186ae037e91412f5b17a5224ba162a2c1bb41f3f48f86"
+source = "git+https://github.com/sammhicks/picoserve.git?rev=dbe0513e21e6e28a04446e4027e1d337d83d8b24#dbe0513e21e6e28a04446e4027e1d337d83d8b24"
 dependencies = [
  "const-sha1",
  "data-encoding",
  "embassy-net",
  "embassy-time",
  "embedded-io-async 0.7.0",
+ "futures-util",
  "heapless 0.8.0",
  "lhash",
  "picoserve_derive",
@@ -4820,8 +4820,7 @@ dependencies = [
 [[package]]
 name = "picoserve_derive"
 version = "0.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e18e82b212e47a9df016984abe8da12c179440942c02f57c7badc82f6466a051"
+source = "git+https://github.com/sammhicks/picoserve.git?rev=dbe0513e21e6e28a04446e4027e1d337d83d8b24#dbe0513e21e6e28a04446e4027e1d337d83d8b24"
 dependencies = [
  "proc-macro2",
  "quote",

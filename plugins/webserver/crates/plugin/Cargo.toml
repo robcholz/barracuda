@@ -4,10 +4,6 @@ version = "0.1.0"
 edition = "2021"
 description = "Barracuda Plugin that provides the portable WebServer capability"
 
-[features]
-default = []
-std = ["picoserve/std"]
-
 [dependencies]
 async-channel = { version = "2", default-features = false }
 barracuda-plugin-api.workspace = true
