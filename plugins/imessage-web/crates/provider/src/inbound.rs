@@ -86,16 +86,34 @@ impl WebService {
         conversation_id: &str,
         body: &[u8],
     ) -> Result<InboundReceipt, InboundError> {
-        let dto: InboundMessageDto =
-            serde_json::from_slice(body).map_err(|error| InboundError::InvalidJson {
-                message: error.to_string(),
-            })?;
-        validate_required("conversation_id", conversation_id)?;
-        validate_required("message_id", &dto.message_id)?;
-        validate_required("text", &dto.text)?;
+        log::debug!(
+            "IMessage Web received message request for conversation `{conversation_id}` ({} bytes)",
+            body.len()
+        );
+        let dto: InboundMessageDto = match serde_json::from_slice(body) {
+            Ok(dto) => dto,
+            Err(error) => {
+                log::warn!(
+                    "IMessage Web rejected malformed message for conversation `{conversation_id}`: {error}"
+                );
+                return Err(InboundError::InvalidJson {
+                    message: error.to_string(),
+                });
+            }
+        };
+        if let Err(error) = validate_required("conversation_id", conversation_id)
+            .and_then(|()| validate_required("message_id", &dto.message_id))
+            .and_then(|()| validate_required("text", &dto.text))
+        {
+            log::warn!(
+                "IMessage Web rejected invalid message for conversation `{conversation_id}`: {error}"
+            );
+            return Err(error);
+        }
 
         let message_id = dto.message_id.clone();
-        self.sink
+        if let Err(error) = self
+            .sink
             .receive_message(InboundMessage {
                 conversation_id: String::from(conversation_id),
                 message_id: dto.message_id,
@@ -103,7 +121,16 @@ impl WebService {
                 text: dto.text,
                 reply_to: dto.reply_to,
             })
-            .await?;
+            .await
+        {
+            log::warn!(
+                "IMessage Web failed to deliver message `{message_id}` for conversation `{conversation_id}`: {error}"
+            );
+            return Err(error);
+        }
+        log::info!(
+            "IMessage Web accepted message `{message_id}` for conversation `{conversation_id}`"
+        );
         Ok(InboundReceipt { message_id })
     }
 
@@ -119,9 +146,16 @@ impl WebService {
         thread_id: Option<&str>,
         reply_to: Option<&str>,
     ) -> Result<InboundReceipt, InboundError> {
-        validate_required("conversation_id", conversation_id)?;
-        validate_required("message_id", message_id)?;
-        self.sink
+        if let Err(error) = validate_required("conversation_id", conversation_id)
+            .and_then(|()| validate_required("message_id", message_id))
+        {
+            log::warn!(
+                "IMessage Web rejected invalid {kind:?} media `{message_id}` for conversation `{conversation_id}`: {error}"
+            );
+            return Err(error);
+        }
+        if let Err(error) = self
+            .sink
             .receive_media(InboundMedia {
                 conversation_id: String::from(conversation_id),
                 message_id: String::from(message_id),
@@ -132,7 +166,16 @@ impl WebService {
                 mime_type: mime_type.map(String::from),
                 reply_to: reply_to.map(String::from),
             })
-            .await?;
+            .await
+        {
+            log::warn!(
+                "IMessage Web failed to deliver {kind:?} media `{message_id}` for conversation `{conversation_id}`: {error}"
+            );
+            return Err(error);
+        }
+        log::info!(
+            "IMessage Web accepted {kind:?} media `{message_id}` for conversation `{conversation_id}`"
+        );
         Ok(InboundReceipt {
             message_id: String::from(message_id),
         })

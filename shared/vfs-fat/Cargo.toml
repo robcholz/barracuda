@@ -8,7 +8,7 @@ description = "FAT backend for the Barracuda VFS"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-vfs = { path = "../vfs" }
+barracuda-vfs.workspace = true
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 hadris-fat = { version = "2.1", default-features = false, features = ["alloc", "async", "read", "write", "lfn"] }

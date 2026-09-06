@@ -10,6 +10,8 @@ use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
 const MANIFEST_END: &str = "# END GENERATED PLUGINS";
+const WORKSPACE_BEGIN: &str = "# BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES";
+const WORKSPACE_END: &str = "# END GENERATED PLUGIN WORKSPACE DEPENDENCIES";
 const SOURCE_BEGIN: &str = "// BEGIN GENERATED PLUGINS";
 const SOURCE_END: &str = "// END GENERATED PLUGINS";
 const DISABLED_PATH: &str = ".barracuda/disabled-plugins";
@@ -185,8 +187,10 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
         .partition(|plugin| disabled_names.binary_search(&plugin.directory).is_ok());
     let system_manifest = root.join("core/system/Cargo.toml");
     let system_source = root.join("core/system/src/lib.rs");
+    let workspace_manifest = root.join("Cargo.toml");
     let old_manifest = read(&system_manifest)?;
     let old_source = read(&system_source)?;
+    let old_workspace = read(&workspace_manifest)?;
     let manifest = replace_block(
         &old_manifest,
         MANIFEST_BEGIN,
@@ -199,11 +203,18 @@ pub fn sync_with_report(root: &Path, check: bool) -> Result<SyncReport, CommandE
         SOURCE_END,
         &render_registrations(&enabled),
     )?;
-    let stale = manifest != old_manifest || source != old_source;
+    let workspace = replace_block(
+        &old_workspace,
+        WORKSPACE_BEGIN,
+        WORKSPACE_END,
+        &render_workspace_dependencies(&plugins),
+    )?;
+    let stale = manifest != old_manifest || source != old_source || workspace != old_workspace;
     if check && stale {
         return Err(CommandError::Stale);
     }
     if !check && stale {
+        write(&workspace_manifest, &workspace)?;
         write(&system_manifest, &manifest)?;
         write(&system_source, &source)?;
     }
@@ -570,9 +581,17 @@ fn plugin_entry(source: &str) -> Option<String> {
 fn render_dependencies(plugins: &[&Plugin]) -> String {
     plugins
         .iter()
+        .map(|plugin| format!("{}.workspace = true", plugin.package))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_workspace_dependencies(plugins: &[Plugin]) -> String {
+    plugins
+        .iter()
         .map(|plugin| {
             format!(
-                "{} = {{ path = \"../../plugins/{}/crates/plugin\" }}",
+                "{} = {{ path = \"plugins/{}/crates/plugin\" }}",
                 plugin.package, plugin.directory
             )
         })
@@ -638,8 +657,9 @@ mod tests {
 
     use super::{
         cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
-        package_name, parse_metadata, persist_disabled_selection, plugin_entry, replace_block,
-        sync_with_report, validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
+        package_name, parse_metadata, persist_disabled_selection, plugin_entry,
+        render_dependencies, replace_block, sync_with_report, validate_dependency_graph,
+        CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -893,6 +913,16 @@ mod tests {
     }
 
     #[test]
+    fn renders_plugin_dependencies_from_the_workspace_catalog() {
+        let demo = plugin("demo", "demo", &[]);
+
+        assert_eq!(
+            render_dependencies(&[&demo]),
+            "barracuda-demo-plugin.workspace = true"
+        );
+    }
+
+    #[test]
     fn disabled_plugins_are_reported_and_omitted_from_registration() {
         let root = tempdir().expect("temporary workspace");
         let plugin = root.path().join("plugins/demo/crates/plugin");
@@ -913,6 +943,11 @@ mod tests {
         )
         .expect("Plugin source");
         fs::create_dir_all(root.path().join("core/system/src")).expect("System source directory");
+        fs::write(
+            root.path().join("Cargo.toml"),
+            "# BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES\nold\n# END GENERATED PLUGIN WORKSPACE DEPENDENCIES\n",
+        )
+        .expect("workspace manifest");
         fs::write(
             root.path().join("core/system/Cargo.toml"),
             "# BEGIN GENERATED PLUGINS\nold\n# END GENERATED PLUGINS\n",
@@ -938,6 +973,11 @@ mod tests {
         let manifest = fs::read_to_string(root.path().join("core/system/Cargo.toml"))
             .expect("generated System manifest");
         assert!(!manifest.contains("barracuda-demo-plugin"));
+        let workspace = fs::read_to_string(root.path().join("Cargo.toml"))
+            .expect("generated workspace manifest");
+        assert!(
+            workspace.contains("barracuda-demo-plugin = { path = \"plugins/demo/crates/plugin\" }")
+        );
         let plugin = info(root.path(), "demo").expect("load Plugin info");
         assert_eq!(plugin.id(), "demo");
         assert_eq!(plugin.description(), "Demonstrates Plugin discovery.");

@@ -23,6 +23,25 @@ fn parses_concrete_board_hardware_and_native_layout() {
 }
 
 #[test]
+fn rejects_rust_registration_fields_in_board_yaml() {
+    let yaml = r#"
+name: product-a
+hardware:
+  chip: acme123
+toolchain:
+  target: riscv64acme-unknown-none-elf
+native-layout:
+  artifact: memory.x
+board-hal:
+  package: barracuda-board-product-a
+  path: platforms/acme/boards/product-a
+  type: ProductAHal
+"#;
+
+    assert!(matches!(parse(yaml), Err(ConfigError::Yaml(_))));
+}
+
+#[test]
 fn parses_explicit_io_and_builtin_peripheral_declarations() {
     let yaml = r#"
 name: product-a
@@ -272,8 +291,9 @@ fn renders_a_static_board_without_platform_or_system_types() {
 
 #[test]
 fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
-    let configs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../configs");
-    for entry in std::fs::read_dir(configs).expect("read Board bundles") {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let configs = workspace.join("boards/configs");
+    for entry in std::fs::read_dir(&configs).expect("read Board bundles") {
         let path = entry.expect("read Board bundle entry").path();
         if !path.is_dir() {
             continue;
@@ -285,5 +305,7 @@ fn every_repository_board_bundle_has_valid_yaml_and_native_layout() {
             path.file_name().and_then(|name| name.to_str()).unwrap()
         );
         assert!(path.join(board.native_layout().artifact()).is_file());
+        assert!(!yaml.contains("board-hal:"));
+        assert!(!yaml.contains("platform-features:"));
     }
 }

@@ -12,7 +12,7 @@ crate-type = ["rlib"]
 [dependencies]
 futures-core = { version = "0.3", default-features = false }
 getset = "0.1.7"
-json-validator = { path = "../../../../shared/json-validator" }
+json-validator.workspace = true
 serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 smallvec = { version = "1", default-features = false }

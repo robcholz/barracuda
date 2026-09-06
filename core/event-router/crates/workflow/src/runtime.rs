@@ -26,6 +26,7 @@ use super::{
     EventId, Topic, WorkflowControlRejection, WorkflowDefinition, WorkflowId, WorkflowLoadError,
     WorkflowUnloadError,
 };
+use crate::definition::{WorkflowCondition, WorkflowOperation, WorkflowStep};
 
 type WorkflowDriver = Pin<Box<dyn Future<Output = Result<(), WorkflowExecutionError>> + 'static>>;
 
@@ -79,11 +80,17 @@ pub enum WorkflowExecutionError {
         /// Missing top-level Event input field.
         field: alloc::string::String,
     },
-    /// The first step attempted to select a previous step that does not exist.
+    /// A step attempted to select a previous executed RPC that does not exist.
     #[error("Workflow JSON RPC step {step} has no previous output")]
     PreviousOutputUnavailable {
         /// Step whose arguments contain the invalid selector.
         step: usize,
+    },
+    /// A branch condition selected a field whose runtime value is not boolean.
+    #[error("Workflow branch condition field {field} is not boolean")]
+    ConditionNotBoolean {
+        /// Condition field containing a non-boolean value.
+        field: alloc::string::String,
     },
     /// Event ingress failed after this execution was provisionally created.
     #[error("Event ingress was cancelled before ownership transfer")]
@@ -423,11 +430,12 @@ impl WorkflowExecution {
         client: &RpcClient,
         cancellation: Rc<Cell<bool>>,
     ) -> RpcResult<Self> {
-        let mut infos = Vec::with_capacity(plan.definition.steps().len());
-        for step in plan.definition.steps() {
-            infos.push(client.json_method_info(step.address())?);
-        }
-        let validation = validate_links(&plan.definition, &infos);
+        let infos = resolve_steps(client, plan.definition.steps())?;
+        let validation = if plan.definition.has_branch() {
+            Ok(())
+        } else {
+            validate_links(&plan.definition, &infos)
+        };
         let execution_client = client.clone();
         let definition = Rc::clone(&plan.definition);
         let driver = Box::pin(async move {
@@ -458,63 +466,173 @@ async fn execute_steps(
     event_input: &EventInput,
     client: RpcClient,
 ) -> Result<(), WorkflowExecutionError> {
+    let mut frames = Vec::new();
+    frames.push(OperationFrame {
+        operations: definition.operations(),
+        cursor: 0,
+    });
     let mut previous: Option<JsonRef> = None;
-    for to_step in 0..definition.steps().len() {
-        let from_step = to_step.saturating_sub(1);
-        let step = definition
-            .steps()
-            .get(to_step)
-            .ok_or_else(|| step_error(to_step, RpcError::InvalidFrameState))?;
-        let link = definition
-            .link(to_step)
-            .ok_or_else(|| internal_error(to_step))?;
-        let response = match link {
-            LinkKind::Direct => {
-                let call = match &previous {
-                    Some(previous) => {
-                        let request = previous
-                            .as_str()
-                            .map_err(|source| step_error(from_step, source))?;
-                        client.call_json(step.address(), request)
-                    }
-                    None => client.call_json(step.address(), event_input),
-                };
-                let response = call
-                    .map_err(|source| step_error(to_step, source))?
-                    .await
-                    .map_err(|source| step_error(to_step, source))?;
-                response
-            }
-            LinkKind::Literal { arguments } => {
-                let response = client
-                    .call_json(step.address(), arguments)
-                    .map_err(|source| step_error(to_step, source))?
-                    .await
-                    .map_err(|source| step_error(to_step, source))?;
-                response
-            }
-            LinkKind::Mapping {
-                arguments,
-                references,
-            } => {
-                let previous_output = previous
-                    .as_ref()
-                    .map(JsonRef::as_str)
-                    .transpose()
-                    .map_err(|source| step_error(from_step, source))?;
-                let request =
-                    mapped_request(event_input, previous_output, to_step, arguments, references)?;
-                let response = client
-                    .call_json(step.address(), &request)
-                    .map_err(|source| step_error(to_step, source))?
-                    .await
-                    .map_err(|source| step_error(to_step, source))?;
-                response
-            }
+    let mut previous_step = None;
+    while let Some(frame) = frames.last_mut() {
+        let Some(operation) = frame.operations.get(frame.cursor) else {
+            frames.pop();
+            continue;
         };
-        previous = Some(response);
+        frame.cursor = frame.cursor.saturating_add(1);
+        match operation {
+            WorkflowOperation::Call(to_step) => {
+                previous = Some(
+                    execute_call(
+                        definition,
+                        *to_step,
+                        event_input,
+                        &client,
+                        previous.as_ref(),
+                        previous_step,
+                    )
+                    .await?,
+                );
+                previous_step = Some(*to_step);
+            }
+            WorkflowOperation::Return => return Ok(()),
+            WorkflowOperation::Branch(branch) => {
+                let selected = evaluate_condition(
+                    &branch.condition,
+                    event_input,
+                    previous.as_ref(),
+                    previous_step,
+                )?;
+                frames.push(OperationFrame {
+                    operations: if selected {
+                        &branch.then_operations
+                    } else {
+                        &branch.else_operations
+                    },
+                    cursor: 0,
+                });
+            }
+        }
     }
     Ok(())
+}
+
+struct OperationFrame<'a> {
+    operations: &'a [WorkflowOperation],
+    cursor: usize,
+}
+
+async fn execute_call(
+    definition: &WorkflowDefinition,
+    to_step: usize,
+    event_input: &EventInput,
+    client: &RpcClient,
+    previous: Option<&JsonRef>,
+    previous_step: Option<usize>,
+) -> Result<JsonRef, WorkflowExecutionError> {
+    let from_step = to_step.saturating_sub(1);
+    let step = definition
+        .steps()
+        .get(to_step)
+        .ok_or_else(|| step_error(to_step, RpcError::InvalidFrameState))?;
+    let link = definition
+        .links()
+        .get(to_step)
+        .ok_or_else(|| internal_error(to_step))?;
+    match link {
+        LinkKind::Direct => {
+            let call = match previous {
+                Some(previous) => {
+                    let request = previous
+                        .as_str()
+                        .map_err(|source| step_error(previous_step.unwrap_or(from_step), source))?;
+                    client.call_json(step.address(), request)
+                }
+                None => client.call_json(step.address(), event_input),
+            };
+            call.map_err(|source| step_error(to_step, source))?
+                .await
+                .map_err(|source| step_error(to_step, source))
+        }
+        LinkKind::Literal { arguments } => client
+            .call_json(step.address(), arguments)
+            .map_err(|source| step_error(to_step, source))?
+            .await
+            .map_err(|source| step_error(to_step, source)),
+        LinkKind::Mapping {
+            arguments,
+            references,
+        } => {
+            let previous_output = previous
+                .map(JsonRef::as_str)
+                .transpose()
+                .map_err(|source| step_error(previous_step.unwrap_or(from_step), source))?;
+            let request =
+                mapped_request(event_input, previous_output, to_step, arguments, references)?;
+            let response = client
+                .call_json(step.address(), &request)
+                .map_err(|source| step_error(to_step, source))?
+                .await
+                .map_err(|source| step_error(to_step, source));
+            response
+        }
+    }
+}
+
+fn evaluate_condition(
+    condition: &WorkflowCondition,
+    event_input: &EventInput,
+    previous: Option<&JsonRef>,
+    previous_step: Option<usize>,
+) -> Result<bool, WorkflowExecutionError> {
+    let condition_step = previous_step.unwrap_or(0);
+    match condition.selector {
+        SourceSelector::EventInput => {
+            let source = event_input
+                .as_str()
+                .map_err(|source| step_error(condition_step, source))?;
+            condition_value(condition, &source, condition_step)
+        }
+        SourceSelector::PreviousOutput => {
+            let source = previous
+                .ok_or(WorkflowExecutionError::PreviousOutputUnavailable {
+                    step: condition_step,
+                })?
+                .as_str()
+                .map_err(|source| step_error(condition_step, source))?;
+            condition_value(condition, source, condition_step)
+        }
+    }
+}
+
+fn condition_value(
+    condition: &WorkflowCondition,
+    source: &str,
+    branch_step: usize,
+) -> Result<bool, WorkflowExecutionError> {
+    let value: Value = serde_json::from_str(source)
+        .map_err(|_error| step_error(branch_step.saturating_sub(1), RpcError::InvalidJson))?;
+    let object = value.as_object().ok_or(match condition.selector {
+        SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+        SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
+            step: branch_step.saturating_sub(1),
+        },
+    })?;
+    let value = object
+        .get(&condition.field)
+        .ok_or_else(|| match condition.selector {
+            SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
+                field: condition.field.clone(),
+            },
+            SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
+                step: branch_step.saturating_sub(1),
+                field: condition.field.clone(),
+            },
+        })?;
+    value
+        .as_bool()
+        .ok_or_else(|| WorkflowExecutionError::ConditionNotBoolean {
+            field: condition.field.clone(),
+        })
 }
 
 fn mapped_request<'source, 'definition>(
@@ -778,7 +896,10 @@ fn validate_links(
     for to_step in 0..definition.steps().len() {
         let from_step = to_step.saturating_sub(1);
         let this = infos.get(to_step).ok_or(internal_error(to_step))?;
-        let kind = definition.link(to_step).ok_or(internal_error(to_step))?;
+        let kind = definition
+            .links()
+            .get(to_step)
+            .ok_or(internal_error(to_step))?;
         let request_schema = parse_schema(this.request_schema().as_str(), to_step)?;
         match kind {
             LinkKind::Direct => {
@@ -826,6 +947,13 @@ fn validate_links(
         }
     }
     Ok(())
+}
+
+fn resolve_steps(client: &RpcClient, steps: &[WorkflowStep]) -> RpcResult<Vec<JsonRpcInfo>> {
+    steps
+        .iter()
+        .map(|step| client.json_method_info(step.address()))
+        .collect()
 }
 
 fn parse_schema(schema: &str, step: usize) -> Result<Value, WorkflowExecutionError> {
@@ -898,11 +1026,10 @@ fn validate_request_size(
 /// registered with `client`.
 ///
 /// This is the primary gate for `workflow.load`: every address must resolve to
-/// a JSON RPC, adjacent Direct and `$previous.output.*` links must have
-/// compatible schemas, and every Literal/Mapping request must supply the
-/// target's required fields. Event fields are resolved from the actual matched
-/// Event document at execution time because one rule may match multiple Event
-/// IDs.
+/// a JSON RPC. Linear Workflows additionally validate adjacent schemas and
+/// request shapes. Conditional Workflows resolve data flow dynamically from
+/// the actually executed path, so their value compatibility is checked by the
+/// invoked RPCs at execution time.
 ///
 /// # Errors
 ///
@@ -913,14 +1040,13 @@ pub fn validate_definition(
     client: &RpcClient,
     definition: &WorkflowDefinition,
 ) -> Result<(), WorkflowControlRejection> {
-    let mut infos = Vec::with_capacity(definition.steps().len());
-    for step in definition.steps() {
-        let info = client
-            .json_method_info(step.address())
-            .map_err(|_error| WorkflowControlRejection::UnknownMethod)?;
-        infos.push(info);
+    let infos = resolve_steps(client, definition.steps())
+        .map_err(|_error| WorkflowControlRejection::UnknownMethod)?;
+    if definition.has_branch() {
+        Ok(())
+    } else {
+        validate_links(definition, &infos).map_err(|_error| WorkflowControlRejection::InvalidLink)
     }
-    validate_links(definition, &infos).map_err(|_error| WorkflowControlRejection::InvalidLink)
 }
 
 fn internal_error(step: usize) -> WorkflowExecutionError {
@@ -1017,6 +1143,7 @@ mod json_workflow_tests {
 
     use super::{execute_steps, validate_definition, WorkflowRuntime};
     use crate::ingress::{EventInput, EventInputPool, InternalEmit};
+    use crate::integration::parse_definition;
     use crate::{
         Event, EventEmitter, Rule, WorkflowControlRejection, WorkflowDefinition,
         WorkflowExecutionError, WorkflowId, WorkflowStep,
@@ -1504,6 +1631,93 @@ mod json_workflow_tests {
         assert_eq!(
             validate_definition(&registry.client(), &workflow),
             Err(WorkflowControlRejection::InvalidLink)
+        );
+    }
+
+    #[test]
+    fn previous_output_condition_type_is_checked_at_execution_time() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_producer(&registry, r#"{"token":41}"#);
+        let workflow = parse_definition(
+            r#"{
+                "id":"invalid-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.produce","arguments":{}},
+                    {"if":"$previous.output.token","then":[{"return":{}}],"else":[{"return":{}}]}
+                ]
+            }"#,
+        )
+        .expect("parse conditional Workflow");
+
+        validate_definition(&registry.client(), &workflow).expect("load dynamic condition");
+        let error = block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect_err("reject non-boolean condition at execution time");
+
+        assert!(matches!(
+            error,
+            WorkflowExecutionError::ConditionNotBoolean { field } if field == "token"
+        ));
+    }
+
+    #[test]
+    fn event_input_condition_is_checked_at_execution_time() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let workflow = parse_definition(
+            r#"{
+                "id":"event-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"if":"$event.input.forward","then":[{"return":{}}],"else":[{"return":{}}]}
+                ]
+            }"#,
+        )
+        .expect("parse Event conditional Workflow");
+
+        validate_definition(&registry.client(), &workflow).expect("validate Event condition");
+        block_on(execute_steps(
+            &workflow,
+            &event_input(r#"{"forward":true}"#),
+            registry.client(),
+        ))
+        .expect("execute boolean condition");
+        let error = block_on(execute_steps(
+            &workflow,
+            &event_input(r#"{"forward":"yes"}"#),
+            registry.client(),
+        ))
+        .expect_err("reject non-boolean condition");
+
+        assert!(matches!(
+            error,
+            WorkflowExecutionError::ConditionNotBoolean { field } if field == "forward"
+        ));
+    }
+
+    #[test]
+    fn conditional_workflow_load_still_rejects_unknown_methods() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let workflow = parse_definition(
+            r#"{
+                "id":"unknown-branch-method",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"if":"$event.input.forward","then":[{"call":"missing.method"}],"else":[]}
+                ]
+            }"#,
+        )
+        .expect("parse conditional Workflow");
+
+        assert_eq!(
+            validate_definition(&registry.client(), &workflow),
+            Err(WorkflowControlRejection::UnknownMethod)
         );
     }
 }

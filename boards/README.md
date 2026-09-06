@@ -1,18 +1,19 @@
 # Boards
 
-`boards/` owns concrete product bundles, reusable built-in peripheral Drivers,
-Board HAL adapters, and the build-time tooling that turns their common YAML
-into static Rust data.
+`boards/` owns concrete product bundles and the build-time tooling that turns
+their common YAML into static Rust data. Reusable peripheral Drivers live in
+the workspace-level `drivers/` directory.
+A Board's optional statically composed HAL crate lives inside that Board's
+bundle at `boards/configs/<board>/hal`.
 
 ```text
 boards/
 |-- api/          # no_std `Board`, `Hardware`, and `Storage` values
 |-- config/       # std-only YAML parsing, validation, and Rust generation
-|-- drivers/      # reusable semantic built-in peripheral Drivers
-|-- <board>/      # concrete Board HAL adapter when the Board has hardware
 `-- configs/
     `-- <board>/
         |-- board.yml
+        |-- hal/       # optional statically composed Board HAL crate
         `-- <Platform-native layout files>
 ```
 
@@ -49,8 +50,11 @@ builtin-peripherals:
       active-low: true
 ```
 
-A Board that declares this surface must register a concrete Board HAL adapter
-in the selected composition. The build rejects declarations that would
+A Board that declares this surface must include `hal/Cargo.toml` in its bundle.
+`cargo board sync` discovers that crate by convention: its package is
+`barracuda-board-<board>` and it exports `SelectedBoardHal`. `board.yml` remains
+hardware data and contains no Cargo package, crate path, Rust type, or Platform
+feature registration. The build rejects hardware declarations that would
 otherwise be silently reduced to the empty HAL.
 
 Physical layout remains in that Board bundle but uses the boot ecosystem's
@@ -69,23 +73,28 @@ Select a concrete Board once, then use the ordinary build command:
 
 ```bash
 cargo board select
-cargo build
+cargo run
 ```
 
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
 currently selected Board. It validates the complete bundle before writing the
-ignored workspace-local `.barracuda/selected-board` file. Scripts may pass an
-explicit name as `cargo board select <board-name>`. Every active Board consumer
-watches and reads the state file, so changing the selection invalidates the
-relevant generated build output. A build with no selection stops with the
-command needed to select one; it never guesses a Board from the Rust target.
+ignored workspace-local Board, Platform, and Cargo selection files. Scripts
+may pass an explicit name as `cargo board select <board-name>`. The command also
+updates the selected dependency blocks, so native Cargo sees a complete static
+dependency graph before compilation starts. A build with no selection stops
+with the command needed to select one; it never guesses a Board from the Rust
+target.
 
 `boards/selected` does not infer a Board from the target OS or architecture.
-Platform selection remains independent in `platforms/selected`; the Rust target
-chooses the Platform. Device entry code constructs the exact typed Platform and
-Board bindings, and concrete binding constructors validate chip compatibility.
-Platform YAML remains beside its implementation at
-`platforms/<name>/platform.yml`.
+The selection command resolves the Board's chip and toolchain target against
+the self-described Platform catalog, then generates the two selected axes
+independently. Device entry code constructs the exact typed Platform and Board
+bindings.
+
+Adding a Board bundle or HAL is a maintainer operation. Run `cargo board sync`
+and commit its deterministic workspace dependency block. Use
+`cargo board sync --check` in CI to reject a stale registry. Consumers who pull
+that commit only run `cargo board select` followed by ordinary Cargo commands.
 
 The repository currently provides reference Board bundles for the ESP32,
 ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, and ESP32-P4 Platforms. The catalog

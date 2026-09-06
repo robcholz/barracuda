@@ -9,8 +9,8 @@ default = []
 std = []
 
 [dependencies]
-barracuda-vfs = { path = "../../shared/vfs", features = ["std"] }
-barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
+barracuda-vfs = { workspace = true, features = ["std"] }
+barracuda-vfs-memfs.workspace = true
 embassy-futures.workspace = true
 embassy-net.workspace = true
 embassy-net-driver-channel.workspace = true

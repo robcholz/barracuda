@@ -14,7 +14,7 @@ pem = ["mbedtls", "mbedtls-rs/pem-parse"]
 std = ["mbedtls", "mbedtls-rs/std"]
 
 [dependencies]
-http-client = { path = "../http-client" }
+http-client.workspace = true
 mbedtls-rs = { version = "0.1.0", default-features = false, optional = true }
 rand_core = "0.10.0-rc-2"
 thiserror = { version = "2", default-features = false }

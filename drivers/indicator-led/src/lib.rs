@@ -1,4 +1,4 @@
-//! Semantic driver for a Board-configured indicator LED.
+//! Reusable semantic driver for an indicator LED.
 
 #![no_std]
 

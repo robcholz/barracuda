@@ -10,10 +10,10 @@ name = "barracuda"
 path = "src/main.rs"
 
 [dependencies]
-web = { path = "../../plugins/imessage-web/crates/provider" }
-barracuda-event-router = { path = "../../core/event-router" }
-barracuda-target = { path = "../../composition/selected" }
-barracuda-system = { path = "../../core/system" }
+web.workspace = true
+barracuda-event-router.workspace = true
+barracuda-target.workspace = true
+barracuda-system.workspace = true
 anyhow = "1"
 tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
 tokio-tungstenite = "0.29"

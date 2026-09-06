@@ -69,22 +69,23 @@ Board selection is a persistent workspace action, separate from compilation:
 
 ```bash
 cargo board select
-cargo build
+cargo run
 ```
 
 The first command opens a colored Board list. Use the arrow keys to move, type
 to fuzzy-search, and press Enter to select. It validates the Board bundle and
-records the selection in ignored local state at
-`.barracuda/selected-board`. The second command is the ordinary Cargo build;
-no `BARRACUDA_BOARD` environment variable or custom build wrapper is required.
-The Rust target independently selects the Platform, and compilation rejects an
-incompatible Board/Platform pair.
+records the selection in ignored local state. It resolves the matching
+self-described Platform, updates the static selected-Platform and
+selected-Board-HAL dependency blocks, and writes the target and runner
+configuration locally. After that, ordinary `cargo build` and `cargo run`
+operate directly on the selected application through native Cargo; there is no
+Board-aware build wrapper.
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
 
 ```bash
-BARRACUDA_LOG_LEVEL=debug cargo build
+BARRACUDA_LOG_LEVEL=debug cargo run
 ```
 
 The selected level is validated and baked into the Platform binary; it is not
@@ -92,9 +93,20 @@ read from the environment at runtime.
 
 Automation can bypass the prompt with `cargo board select <board-name>`.
 
-Available Board names are the directory names under `boards/configs/`.
-Cross-compilation continues to use Cargo's normal `--target` and `-p`
-arguments; selecting a Board does not rewrite Cargo's target configuration.
+When adding a Platform or Board HAL, maintainers update the tracked registries
+once and commit the generated blocks:
+
+```bash
+cargo platform sync
+cargo board sync
+```
+
+CI can validate them without writing through the corresponding `--check`
+forms. Pulling an up-to-date commit never requires an additional sync step.
+
+Available Board names are the directory names under `boards/configs/`. A
+device Board's `toolchain.target` becomes the local Cargo build target; host
+Boards omit it.
 
 The memory profiler is an executable workload rather than a throughput
 benchmark:

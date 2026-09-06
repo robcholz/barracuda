@@ -58,27 +58,6 @@ pub(crate) fn write_json_string(writer: &mut impl fmt::Write, value: &str) -> fm
     writer.write_char('"')
 }
 
-pub(crate) fn bounded_json_prefix(value: &str, max_encoded_bytes: usize) -> &str {
-    let mut encoded = 0_usize;
-    let mut end = 0_usize;
-    for (index, character) in value.char_indices() {
-        let bytes = match character {
-            '"' | '\\' => 2,
-            '\u{0000}'..='\u{001f}' => 6,
-            _ => character.len_utf8(),
-        };
-        let Some(next) = encoded.checked_add(bytes) else {
-            break;
-        };
-        if next > max_encoded_bytes {
-            break;
-        }
-        encoded = next;
-        end = index.saturating_add(character.len_utf8());
-    }
-    value.get(..end).unwrap_or_default()
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum GatewayJsonError {
     InvalidRequest,

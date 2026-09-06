@@ -10,7 +10,10 @@ use barracuda_rpc::{
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::definition::WorkflowDefinitionError;
+use crate::definition::{
+    WorkflowBranch, WorkflowCondition, WorkflowDefinitionError, WorkflowOperation,
+};
+use crate::link::parse_reference;
 use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
 
 const CONTROL_RESPONSE_MAX_BYTES: usize = 40;
@@ -44,6 +47,8 @@ pub enum WorkflowControlRejection {
     InvalidLink,
     /// The JSON contained an invalid Event topic.
     InvalidTopic,
+    /// The Workflow control-flow structure was invalid.
+    InvalidControlFlow,
 }
 
 impl WorkflowControlRejection {
@@ -61,6 +66,7 @@ impl WorkflowControlRejection {
             Self::UnknownMethod => "unknown_method",
             Self::InvalidLink => "invalid_link",
             Self::InvalidTopic => "invalid_topic",
+            Self::InvalidControlFlow => "invalid_control_flow",
         }
     }
 }
@@ -207,10 +213,39 @@ struct WorkflowMatchDocument {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct WorkflowStepDocument {
+struct WorkflowCallDocument {
     call: String,
     #[serde(default)]
     arguments: Option<Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowReturnDocument {
+    #[serde(rename = "return")]
+    _value: EmptyReturnDocument,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EmptyReturnDocument {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkflowBranchDocument {
+    #[serde(rename = "if")]
+    condition: String,
+    then: Vec<WorkflowStepDocument>,
+    #[serde(rename = "else")]
+    otherwise: Vec<WorkflowStepDocument>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum WorkflowStepDocument {
+    Call(WorkflowCallDocument),
+    Return(WorkflowReturnDocument),
+    Branch(WorkflowBranchDocument),
 }
 
 #[derive(Deserialize)]
@@ -233,19 +268,10 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             .map(Topic::try_from)
             .transpose()
             .map_err(|_error| WorkflowControlRejection::InvalidTopic)?;
-        let steps = document
-            .steps
-            .into_iter()
-            .map(|step| {
-                let address = RpcAddress::try_from(step.call.as_str())
-                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
-                Ok(WorkflowStep::new(address, step.arguments))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let definition = match topic {
-            Some(topic) => WorkflowDefinition::with_topic(id, event, topic, steps),
-            None => WorkflowDefinition::new(id, event, steps),
-        };
+        let mut steps = Vec::new();
+        let (operations, returns) = parse_operations(document.steps, &mut steps)?;
+        let definition =
+            WorkflowDefinition::with_operations(id, event, topic, steps, operations, returns);
         definition.map_err(|error| match error {
             WorkflowDefinitionError::EmptySteps => WorkflowControlRejection::EmptySteps,
             WorkflowDefinitionError::InvalidReference(_) => {
@@ -253,6 +279,50 @@ impl TryFrom<WorkflowDocument> for WorkflowDefinition {
             }
         })
     }
+}
+
+fn parse_operations(
+    operations: Vec<WorkflowStepDocument>,
+    steps: &mut Vec<WorkflowStep>,
+) -> Result<(Vec<WorkflowOperation>, bool), WorkflowControlRejection> {
+    let mut parsed = Vec::new();
+    let mut returns = false;
+    let mut operations = operations.into_iter().peekable();
+    while let Some(operation) = operations.next() {
+        match operation {
+            WorkflowStepDocument::Call(step) => {
+                let address = RpcAddress::try_from(step.call.as_str())
+                    .map_err(|_error| WorkflowControlRejection::InvalidRpcAddress)?;
+                let index = steps.len();
+                steps.push(WorkflowStep::new(address, step.arguments));
+                parsed.push(WorkflowOperation::Call(index));
+            }
+            WorkflowStepDocument::Return(_) => {
+                if operations.peek().is_some() {
+                    return Err(WorkflowControlRejection::InvalidControlFlow);
+                }
+                parsed.push(WorkflowOperation::Return);
+                returns = true;
+            }
+            WorkflowStepDocument::Branch(branch) => {
+                let body = branch
+                    .condition
+                    .strip_prefix('$')
+                    .ok_or(WorkflowControlRejection::InvalidControlFlow)?;
+                let (selector, field) = parse_reference(body)
+                    .map_err(|_error| WorkflowControlRejection::InvalidControlFlow)?;
+                let (then_operations, then_returns) = parse_operations(branch.then, steps)?;
+                let (else_operations, else_returns) = parse_operations(branch.otherwise, steps)?;
+                parsed.push(WorkflowOperation::Branch(WorkflowBranch {
+                    condition: WorkflowCondition { selector, field },
+                    then_operations,
+                    else_operations,
+                }));
+                returns = returns || then_returns || else_returns;
+            }
+        }
+    }
+    Ok((parsed, returns))
 }
 
 #[cfg(test)]
@@ -385,5 +455,77 @@ mod tests {
             empty_steps,
             Err(WorkflowControlRejection::EmptySteps)
         ));
+    }
+
+    #[test]
+    fn workflow_json_accepts_a_successful_return_terminal() {
+        let definition = parse_definition(
+            r#"{
+                "id":"ignore-event",
+                "match":{"event":"gateway.*"},
+                "steps":[{"return":{}}]
+            }"#,
+        )
+        .expect("return-only Workflow");
+
+        assert!(definition.steps().is_empty());
+        assert!(definition.returns());
+    }
+
+    #[test]
+    fn workflow_json_rejects_steps_after_return() {
+        let result = parse_definition(
+            r#"{
+                "id":"unreachable",
+                "match":{"event":"gateway.*"},
+                "steps":[{"return":{}},{"call":"agent.run"}]
+            }"#,
+        );
+
+        assert_eq!(result, Err(WorkflowControlRejection::InvalidControlFlow));
+    }
+
+    #[test]
+    fn workflow_json_accepts_dynamic_and_nested_if_else() {
+        let definition = parse_definition(
+            r#"{
+                "id":"forward-output",
+                "match":{"event":"session.event"},
+                "steps":[
+                    {"call":"imessage_bridge.to_gateway"},
+                    {
+                        "if":"$previous.output.forward",
+                        "then":[
+                            {
+                                "if":"$event.input.enabled",
+                                "then":[{"call":"gateway.send_stream"}],
+                                "else":[]
+                            }
+                        ],
+                        "else":[]
+                    },
+                    {"call":"audit.record"}
+                ]
+            }"#,
+        )
+        .expect("dynamic branch Workflow");
+
+        assert_eq!(definition.steps().len(), 3);
+        assert!(!definition.returns());
+        assert!(definition.has_branch());
+    }
+
+    #[test]
+    fn workflow_json_rejects_invalid_branch_control_flow() {
+        for json in [
+            r#"{"id":"after-return","match":{"event":"a"},"steps":[{"if":"$event.input.ok","then":[{"return":{}},{"call":"a.b"}],"else":[]}]}"#,
+            r#"{"id":"bad-condition","match":{"event":"a"},"steps":[{"if":"event.input.ok","then":[],"else":[]}]}"#,
+            r#"{"id":"nested-field","match":{"event":"a"},"steps":[{"if":"$event.input.flags.ok","then":[],"else":[]}]}"#,
+        ] {
+            assert_eq!(
+                parse_definition(json),
+                Err(WorkflowControlRejection::InvalidControlFlow)
+            );
+        }
     }
 }

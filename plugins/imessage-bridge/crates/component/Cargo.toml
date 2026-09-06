@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-imessage-bridge-component"
+version = "0.1.0"
+edition = "2024"
+description = "Workflow bridge between the iMessage Gateway and Agent sessions"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-event-router.workspace = true
+barracuda-plugin-manager.workspace = true
+embassy-sync.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+zerocopy = { version = "0.8", features = ["derive"] }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

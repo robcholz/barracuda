@@ -149,6 +149,7 @@ where
             barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&mut plugin_context),
+            barracuda_imessage_bridge_plugin::ImessageBridgePlugin::new(&mut plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&mut plugin_context),
             barracuda_imessage_inkbox_plugin::IMessageInkboxPlugin::new(&mut plugin_context),
             barracuda_imessage_qq_plugin::IMessageQQPlugin::new(&mut plugin_context),

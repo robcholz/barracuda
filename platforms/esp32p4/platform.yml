@@ -1,3 +1,16 @@
 name: esp32p4
+package: barracuda-platform-esp32p4
 crate: barracuda_platform_esp32p4
 type: Esp32P4Platform
+selection:
+  board-chips:
+    - esp32p4
+  targets:
+    - triple: riscv32imafc-unknown-none-elf
+system-image:
+  layout:
+    driver: esp-idf-partitions
+  flash:
+    driver: command
+    program: espflash
+    arguments: [write-bin, --chip, "{chip}", "{offset}", "{image}"]

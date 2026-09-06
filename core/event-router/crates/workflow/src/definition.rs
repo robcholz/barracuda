@@ -8,7 +8,7 @@ use barracuda_rpc::RpcAddress;
 use getset::Getters;
 use serde_json::Value;
 
-use super::link::{classify, LinkError, LinkKind};
+use super::link::{classify, LinkError, LinkKind, SourceSelector};
 use super::{Rule, Topic};
 
 /// Stable identifier of one Workflow definition.
@@ -80,15 +80,39 @@ pub enum WorkflowIdError {
 /// One ordered RPC step in a Workflow, with its optional link arguments.
 ///
 /// A step with no `arguments` is a `Link::Direct` edge from the Event input or
-/// previous step; `arguments` with `$` references is a `Link::Mapping` edge;
-/// `arguments` without references is a `Link::Literal` edge. The link itself is
-/// never named in the document — it is inferred from this shape.
+/// most recently executed RPC; `arguments` with `$` references is a
+/// `Link::Mapping` edge; `arguments` without references is a `Link::Literal`
+/// edge. The link itself is never named in the document — it is inferred from
+/// this shape.
 #[derive(Clone, Debug, Getters, PartialEq)]
 pub struct WorkflowStep {
     /// RPC address invoked by this step.
     #[getset(get = "pub")]
     address: RpcAddress,
     arguments: Option<Value>,
+}
+
+/// Boolean field reference selecting a branch arm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WorkflowCondition {
+    pub(crate) selector: SourceSelector,
+    pub(crate) field: String,
+}
+
+/// One conditional control node.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WorkflowBranch {
+    pub(crate) condition: WorkflowCondition,
+    pub(crate) then_operations: Vec<WorkflowOperation>,
+    pub(crate) else_operations: Vec<WorkflowOperation>,
+}
+
+/// One executable node in a Workflow control-flow tree.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum WorkflowOperation {
+    Call(usize),
+    Return,
+    Branch(WorkflowBranch),
 }
 
 impl WorkflowStep {
@@ -117,6 +141,8 @@ pub struct WorkflowDefinition {
     topic: Option<Topic>,
     steps: Vec<WorkflowStep>,
     links: Vec<LinkKind>,
+    returns: bool,
+    operations: Vec<WorkflowOperation>,
 }
 
 impl WorkflowDefinition {
@@ -135,7 +161,7 @@ impl WorkflowDefinition {
         event: Rule,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, None, steps)
+        Self::from_parts(id, event, None, steps, false)
     }
 
     /// Creates a Workflow whose Event match also requires a matching topic.
@@ -145,7 +171,7 @@ impl WorkflowDefinition {
         topic: Topic,
         steps: Vec<WorkflowStep>,
     ) -> Result<Self, WorkflowDefinitionError> {
-        Self::from_parts(id, event, Some(topic), steps)
+        Self::from_parts(id, event, Some(topic), steps, false)
     }
 
     fn from_parts(
@@ -153,8 +179,9 @@ impl WorkflowDefinition {
         event: Rule,
         topic: Option<Topic>,
         steps: Vec<WorkflowStep>,
+        returns: bool,
     ) -> Result<Self, WorkflowDefinitionError> {
-        if steps.is_empty() {
+        if steps.is_empty() && !returns {
             return Err(WorkflowDefinitionError::EmptySteps);
         }
         let mut links = Vec::with_capacity(steps.len());
@@ -163,12 +190,38 @@ impl WorkflowDefinition {
                 classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference)?,
             );
         }
+        let operations = linear_operations(steps.len(), returns);
         Ok(Self {
             id,
             event,
             topic,
             steps,
             links,
+            returns,
+            operations,
+        })
+    }
+
+    pub(crate) fn with_operations(
+        id: WorkflowId,
+        event: Rule,
+        topic: Option<Topic>,
+        steps: Vec<WorkflowStep>,
+        operations: Vec<WorkflowOperation>,
+        returns: bool,
+    ) -> Result<Self, WorkflowDefinitionError> {
+        if operations.is_empty() {
+            return Err(WorkflowDefinitionError::EmptySteps);
+        }
+        let links = classify_steps(&steps)?;
+        Ok(Self {
+            id,
+            event,
+            topic,
+            steps,
+            links,
+            returns,
+            operations,
         })
     }
 
@@ -178,15 +231,55 @@ impl WorkflowDefinition {
         self.topic.as_ref()
     }
 
-    /// Returns the ordered RPC call flow.
+    /// Returns every declared RPC call in document order.
     #[must_use]
     pub fn steps(&self) -> &[WorkflowStep] {
         &self.steps
     }
 
-    pub(crate) fn link(&self, step: usize) -> Option<&LinkKind> {
-        self.links.get(step)
+    /// Returns whether this Workflow contains an explicit successful return.
+    #[must_use]
+    pub const fn returns(&self) -> bool {
+        self.returns
     }
+
+    /// Returns whether this Workflow contains a conditional branch.
+    #[must_use]
+    pub fn has_branch(&self) -> bool {
+        operations_have_branch(&self.operations)
+    }
+
+    pub(crate) fn links(&self) -> &[LinkKind] {
+        &self.links
+    }
+
+    pub(crate) fn operations(&self) -> &[WorkflowOperation] {
+        &self.operations
+    }
+}
+
+fn linear_operations(step_count: usize, returns: bool) -> Vec<WorkflowOperation> {
+    let mut operations = (0..step_count)
+        .map(WorkflowOperation::Call)
+        .collect::<Vec<_>>();
+    if returns {
+        operations.push(WorkflowOperation::Return);
+    }
+    operations
+}
+
+fn operations_have_branch(operations: &[WorkflowOperation]) -> bool {
+    operations.iter().any(|operation| match operation {
+        WorkflowOperation::Call(_) | WorkflowOperation::Return => false,
+        WorkflowOperation::Branch(_) => true,
+    })
+}
+
+fn classify_steps(steps: &[WorkflowStep]) -> Result<Vec<LinkKind>, WorkflowDefinitionError> {
+    steps
+        .iter()
+        .map(|step| classify(step.arguments()).map_err(WorkflowDefinitionError::InvalidReference))
+        .collect()
 }
 
 /// Failure while constructing a [`WorkflowDefinition`].

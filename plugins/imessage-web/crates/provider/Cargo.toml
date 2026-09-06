@@ -12,11 +12,12 @@ server = ["dep:barracuda-webserver-plugin"]
 
 [dependencies]
 base64 = { version = "0.22.1", default-features = false, features = ["alloc"] }
-barracuda-webserver-plugin = { path = "../../../webserver/crates/plugin", optional = true }
+barracuda-webserver-plugin = { workspace = true, optional = true }
 embassy-sync.workspace = true
 futures-core = { version = "0.3", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway = { path = "../../../imessage-gateway/crates/gateway" }
+gateway.workspace = true
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }

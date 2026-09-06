@@ -14,17 +14,58 @@
     "steps": {
       "type": "array",
       "items": {
-        "type": "object",
-        "properties": {
-          "call": { "type": "string" },
-          "arguments": { "type": "object" }
-        },
-        "required": ["call"],
-        "additionalProperties": false
+        "oneOf": [
+          { "$ref": "#/$defs/call" },
+          { "$ref": "#/$defs/return" },
+          { "$ref": "#/$defs/branch" }
+        ]
       },
       "minItems": 1
     }
   },
   "required": ["id", "match", "steps"],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "call": {
+      "type": "object",
+      "properties": {
+        "call": { "type": "string" },
+        "arguments": { "type": "object" }
+      },
+      "required": ["call"],
+      "additionalProperties": false
+    },
+    "return": {
+      "type": "object",
+      "properties": {
+        "return": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        }
+      },
+      "required": ["return"],
+      "additionalProperties": false
+    },
+    "branch_arm": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/call" },
+          { "$ref": "#/$defs/return" },
+          { "$ref": "#/$defs/branch" }
+        ]
+      }
+    },
+    "branch": {
+      "type": "object",
+      "properties": {
+        "if": { "type": "string" },
+        "then": { "$ref": "#/$defs/branch_arm" },
+        "else": { "$ref": "#/$defs/branch_arm" }
+      },
+      "required": ["if", "then", "else"],
+      "additionalProperties": false
+    }
+  }
 }

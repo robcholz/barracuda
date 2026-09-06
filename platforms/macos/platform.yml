@@ -1,6 +1,27 @@
 name: macos
+package: barracuda-platform-macos
 crate: barracuda_platform_macos
 type: MacosPlatform
+selection:
+  board-chips:
+    - macos
+  targets:
+    - os: macos
+system-image:
+  layout:
+    driver: file-regions
+  flash:
+    driver: file
+    state-directory: .barracuda
+    flash-image: board.flash
+application:
+  support-binaries:
+    - barracuda-macos-network
+  launcher:
+    program: sudo
+    arguments:
+      - "{support:barracuda-macos-network}"
+      - "{application}"
 settings:
   state-directory: .barracuda
   flash-image: board.flash

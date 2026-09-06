@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-platform-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Barracuda Platform workspace synchronization tool"
+
+[dependencies]
+barracuda-platform-config.workspace = true
+clap = { version = "4", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "barracuda-platform"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

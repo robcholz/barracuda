@@ -5,9 +5,9 @@ edition = "2021"
 description = "Selected Barracuda Platform and Board HAL composition"
 
 [dependencies]
-barracuda-board-selected = { path = "../../boards/selected" }
-barracuda-platform-selected = { path = "../../platforms/selected" }
-barracuda-target-api = { path = "../api" }
+barracuda-board-selected.workspace = true
+barracuda-platform-selected.workspace = true
+barracuda-target-api.workspace = true
 embassy-executor.workspace = true
 thiserror = { version = "2", default-features = false }
 
