@@ -237,7 +237,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
-      fail-fast: true
+      # Collect every Platform result. The Board stage is still gated on the
+      # complete matrix, so any failure prevents the expensive stage.
+      fail-fast: false
       matrix:
         include:
           - name: esp32
@@ -385,7 +387,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
-      fail-fast: true
+      # This is the exhaustive stage: do not let one target hide failures in
+      # another target after all fast gates have already passed.
+      fail-fast: false
       matrix: ${{ fromJSON(needs.preflight.outputs.board_matrix) }}
     env:
       BOARD_GROUP: ${{ toJSON(matrix.boards) }}
@@ -440,23 +444,37 @@ jobs:
       - name: Check, lint & build every Board
         if: matrix.toolchain != 'esp'
         run: |
+          failed=0
           while IFS= read -r board; do
             echo "::group::$board: cargo check, cargo clippy, cargo build"
-            cargo board select "$board"
-            cargo check
-            cargo clippy
-            cargo build
+            if cargo board select "$board" &&
+              cargo check &&
+              cargo clippy &&
+              cargo build; then
+              echo "$board passed"
+            else
+              echo "::error title=Board validation failed::$board"
+              failed=1
+            fi
             echo "::endgroup::"
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+          exit "$failed"
 
       - name: Check, lint & build every Board (Xtensa)
         if: matrix.toolchain == 'esp'
         run: |
+          failed=0
           while IFS= read -r board; do
             echo "::group::$board: cargo +esp check, clippy, build"
-            cargo +esp board select "$board"
-            cargo +esp check -Zbuild-std=core,alloc
-            cargo +esp clippy -Zbuild-std=core,alloc
-            cargo +esp build -Zbuild-std=core,alloc
+            if cargo +esp board select "$board" &&
+              cargo +esp check -Zbuild-std=core,alloc &&
+              cargo +esp clippy -Zbuild-std=core,alloc &&
+              cargo +esp build -Zbuild-std=core,alloc; then
+              echo "$board passed"
+            else
+              echo "::error title=Board validation failed::$board"
+              failed=1
+            fi
             echo "::endgroup::"
           done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+          exit "$failed"
