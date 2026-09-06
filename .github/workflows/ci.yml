@@ -298,7 +298,7 @@ jobs:
 
       - name: Build Platform (Xtensa)
         if: matrix.toolchain == 'esp'
-        run: cargo +esp build -Zbuild-std=core --package ${{ matrix.package }}
+        run: cargo +esp build -Zbuild-std=core,alloc --package ${{ matrix.package }}
 
   python:
     name: Python formatting, lint & test
