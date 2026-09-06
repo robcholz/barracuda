@@ -6,10 +6,13 @@ use barracuda_vm_component::run::{Cancel, Input, Run, cancel_handler, input_hand
 use barracuda_vm_component::{BuiltinPackages, VmLimits, VmRuntime};
 
 fn registry() -> RpcRegistry<4, 512, 4> {
+    registry_with_limits(VmLimits::default())
+}
+
+fn registry_with_limits(limits: VmLimits) -> RpcRegistry<4, 512, 4> {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<4, 512, 4>::new()));
     let registry = RpcRegistry::new(lanes);
     let runtime = VmRuntime::new().expect("create runtime");
-    let limits = VmLimits::default();
     let packages = barracuda_vm_package_api::LuaPackageRegistry::new();
     let _run = registry
         .register_json::<Run, _>(
@@ -56,12 +59,16 @@ fn control_rpcs_are_public_and_return_stable_business_rejections() {
             RpcAddress::try_from(Run::ADDRESS).expect("run address"),
         ]
     );
-    assert!(
+    assert_eq!(
         registry
             .client()
             .rpcs_by_visibility("agent")
-            .expect("query legacy visibility")
-            .is_empty()
+            .expect("discover Agent-visible RPCs"),
+        [
+            RpcAddress::try_from(Cancel::ADDRESS).expect("cancel address"),
+            RpcAddress::try_from(Input::ADDRESS).expect("input address"),
+            RpcAddress::try_from(Run::ADDRESS).expect("run address"),
+        ]
     );
 
     assert_eq!(
@@ -80,21 +87,31 @@ fn control_rpcs_are_public_and_return_stable_business_rejections() {
 
 #[test]
 fn malformed_shapes_are_transport_errors_and_source_limit_is_business_error() {
-    let registry = registry();
-    assert_eq!(
+    let source_limit = 8;
+    let registry = registry_with_limits(VmLimits::new(
+        source_limit,
+        VmLimits::default().max_input_bytes(),
+    ));
+    assert!(matches!(
         call(&registry, Run::ADDRESS, r#"{"script":"return"}"#),
-        Err(RpcError::InvalidJson)
-    );
-    assert_eq!(
+        Err(RpcError::JsonRequestSchema {
+            address: Run::ADDRESS,
+            ..
+        })
+    ));
+    assert!(matches!(
         call(
             &registry,
             Input::ADDRESS,
             r#"{"run_id":7,"input":"x","eof":true}"#,
         ),
-        Err(RpcError::InvalidJson)
-    );
+        Err(RpcError::JsonRequestSchema {
+            address: Input::ADDRESS,
+            ..
+        })
+    ));
 
-    let source = "x".repeat(VmLimits::default().max_source_bytes() + 1);
+    let source = "x".repeat(source_limit + 1);
     let request = format!(r#"{{"source":"{source}"}}"#);
     assert_eq!(
         call(&registry, Run::ADDRESS, &request),

@@ -73,7 +73,13 @@ fn time_now_rejects_non_object_requests() {
     )
     .expect_err("request must be an empty object");
 
-    assert_eq!(error, RpcError::InvalidJson);
+    assert!(matches!(
+        error,
+        RpcError::JsonRequestSchema {
+            address: Now::ADDRESS,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -88,11 +94,11 @@ fn time_now_is_discoverable_by_public_visibility() {
             .expect("discover public RPCs"),
         [RpcAddress::try_from("time.now").expect("valid address")]
     );
-    assert!(
+    assert_eq!(
         registry
             .client()
             .rpcs_by_visibility("agent")
-            .expect("discover old visibility")
-            .is_empty()
+            .expect("discover Agent-visible RPCs"),
+        [RpcAddress::try_from("time.now").expect("valid address")]
     );
 }

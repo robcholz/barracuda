@@ -221,10 +221,17 @@ impl Component<512> for CommandCaller {
                     ));
                 }
             }
-            if !client.rpcs_by_visibility("agent")?.is_empty() {
-                return Err(barracuda_event_router::ComponentError::lifecycle(
-                    CommandRejected(String::from("legacy agent visibility is not empty")),
-                ));
+            let agent = client.rpcs_by_visibility("agent")?;
+            for expected in [
+                GatewaySend::ADDRESS,
+                GatewaySendStream::ADDRESS,
+                GatewaySendMedia::ADDRESS,
+            ] {
+                if !agent.iter().any(|address| address.as_ref() == expected) {
+                    return Err(barracuda_event_router::ComponentError::lifecycle(
+                        CommandRejected(format!("missing Agent-visible RPC {expected}")),
+                    ));
+                }
             }
             for (address, request) in [
                 (

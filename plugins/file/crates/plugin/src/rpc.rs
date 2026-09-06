@@ -665,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn malformed_documents_are_transport_errors() {
+    fn schema_mismatches_are_transport_errors() {
         block_on(async {
             let registry = registry(filesystem().await);
             let address = RpcAddress::try_from(FileRead::ADDRESS).expect("valid address");
@@ -675,30 +675,37 @@ mod tests {
                 .expect("start JSON call")
                 .await
                 .expect_err("request shape must be rejected");
-            assert_eq!(error, RpcError::InvalidJson);
+            assert!(matches!(
+                error,
+                RpcError::JsonRequestSchema {
+                    address: FileRead::ADDRESS,
+                    ..
+                }
+            ));
         });
     }
 
     #[test]
-    fn both_methods_are_only_in_public_visibility() {
+    fn both_methods_are_globally_visible() {
         block_on(async {
             let registry = registry(filesystem().await);
+            let expected = [
+                RpcAddress::try_from("file.read").expect("valid address"),
+                RpcAddress::try_from("file.write").expect("valid address"),
+            ];
             assert_eq!(
                 registry
                     .client()
                     .rpcs_by_visibility("*")
                     .expect("discover public RPCs"),
-                [
-                    RpcAddress::try_from("file.read").expect("valid address"),
-                    RpcAddress::try_from("file.write").expect("valid address"),
-                ]
+                expected
             );
-            assert!(
+            assert_eq!(
                 registry
                     .client()
                     .rpcs_by_visibility("agent")
-                    .expect("discover old visibility")
-                    .is_empty()
+                    .expect("discover Agent-visible RPCs"),
+                expected
             );
         });
     }
