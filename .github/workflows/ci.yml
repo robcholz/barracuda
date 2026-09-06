@@ -19,13 +19,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The catalogs and generated dependency blocks are source code. Validate all
-  # three through the same Cargo aliases maintainers use before compiling a
-  # selected Target.
-  workspace:
-    name: Workspace registries & formatting
+  # Validate generated source and derive the exhaustive Board matrix from the
+  # catalog. Boards are grouped by compilation target so each runner can reuse
+  # dependencies while still selecting and building every Board independently.
+  preflight:
+    name: Preflight & Board matrix
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      board_matrix: ${{ steps.boards.outputs.matrix }}
     steps:
       - uses: actions/checkout@v7
 
@@ -34,10 +36,10 @@ jobs:
         with:
           components: rustfmt
 
-      - name: Cache Cargo build
+      - name: Cache Cargo tools
         uses: Swatinem/rust-cache@v2
         with:
-          key: workspace-tools
+          shared-key: workspace-tools
 
       - name: Check committed lockfile
         run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
@@ -51,11 +53,76 @@ jobs:
       - name: Check Rust formatting
         run: cargo fmt --all --check
 
-  # Run the complete target-independent Rust suite once. Concrete Platforms
-  # whose build scripts require a different Board are tested in platform-host;
-  # the selected Linux Target still drives the full System application here.
-  rust:
-    name: Rust build, lint & test (local-linux)
+      - name: Group all Boards by target
+        id: boards
+        run: |
+          entries='[]'
+          while IFS= read -r board_file; do
+            board="$(basename "$(dirname "$board_file")")"
+
+            # local-linux is already exercised by the faster blocking job.
+            if [[ "$board" == "local-linux" ]]; then
+              continue
+            fi
+
+            target="$(cargo board target "$board")"
+            os=ubuntu-latest
+            toolchain=stable
+            chip=''
+            c_toolchain=none
+            key="$target"
+
+            if [[ -z "$target" ]]; then
+              key="$board"
+              toolchain=host
+              if [[ "$board" == "local-macos" ]]; then
+                os=macos-latest
+              fi
+            elif [[ "$target" == xtensa-* ]]; then
+              toolchain=esp
+              chip="${target#xtensa-}"
+              chip="${chip%-none-elf}"
+            elif [[ "$target" == riscv32* ]]; then
+              c_toolchain=riscv
+            elif [[ "$target" == thumb* ]]; then
+              c_toolchain=arm
+            fi
+
+            entry="$(jq -cn \
+              --arg board "$board" \
+              --arg key "$key" \
+              --arg os "$os" \
+              --arg toolchain "$toolchain" \
+              --arg chip "$chip" \
+              --arg c_toolchain "$c_toolchain" \
+              '{board: $board, key: $key, os: $os, toolchain: $toolchain,
+                chip: $chip, c_toolchain: $c_toolchain}')"
+            entries="$(jq -cn \
+              --argjson entries "$entries" \
+              --argjson entry "$entry" \
+              '$entries + [$entry]')"
+          done < <(find boards/configs -mindepth 2 -maxdepth 2 -type f -name board.yml | sort)
+
+          matrix="$(jq -cn --argjson entries "$entries" '
+            {include: ($entries
+              | sort_by(.key, .board)
+              | group_by(.key)
+              | map({
+                  key: .[0].key,
+                  os: .[0].os,
+                  toolchain: .[0].toolchain,
+                  chip: .[0].chip,
+                  c_toolchain: .[0].c_toolchain,
+                  boards: map(.board)
+                }))}')"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq . <<< "$matrix"
+
+  # This is the shortest complete end-user path and therefore the primary
+  # blocking signal: select a real host Board, build the default application,
+  # then run its tests before spending time on the exhaustive device matrix.
+  linux:
+    name: End-user path (local-linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -77,167 +144,98 @@ jobs:
         with:
           components: clippy
 
-      - name: Cache Cargo build
+      - name: Cache Linux build
         uses: Swatinem/rust-cache@v2
         with:
-          key: local-linux
+          shared-key: local-linux
 
-      - name: Select Linux Target
+      - name: Select Board
         run: cargo board select local-linux
 
-      - name: Build System application
+      - name: Build
         run: cargo build
 
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+      - name: Test selected application
+        run: cargo test
 
-      - name: Test
+      - name: Test portable workspace
         run: cargo test --workspace $PLATFORM_EXCLUDES
 
-  # Platform crates expose host-runnable layout and composition tests even for
-  # device targets. One representative Board per Platform exercises selection,
-  # feature resolution, build scripts, lint, and those tests without duplicating
-  # the entire portable workspace suite. Linux is already covered above.
-  platform-host:
-    name: Platform host tests (${{ matrix.board }})
+      - name: Clippy portable workspace
+        run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
+
+  # Linux is covered by the full end-user path above. Build every other concrete
+  # Platform directly. These jobs are intentionally small and parallel:
+  # target/toolchain regressions fail before the expensive Board stage starts.
+  platforms:
+    name: Platform (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
-          - board: local-macos
+          - name: macos
+            board: local-macos
             os: macos-latest
             package: barracuda-platform-macos
-            build_system: true
-          - board: esp32-devkitc-v4
+            toolchain: stable
+          - name: esp32
+            board: esp32-devkitc-v4
             os: ubuntu-latest
             package: barracuda-platform-esp32
-          - board: esp32c3-devkitc-02
+            toolchain: esp
+            chip: esp32
+          - name: esp32c3
+            board: esp32c3-devkitc-02
             os: ubuntu-latest
             package: barracuda-platform-esp32c3
-          - board: esp32c6-devkitc-1
+            toolchain: stable
+          - name: esp32c6
+            board: esp32c6-devkitc-1
             os: ubuntu-latest
             package: barracuda-platform-esp32c6
-          - board: esp32p4-function-ev-board
+            toolchain: stable
+          - name: esp32p4
+            board: esp32p4-function-ev-board
             os: ubuntu-latest
             package: barracuda-platform-esp32p4
-          - board: esp32s2-saola-1
+            toolchain: stable
+          - name: esp32s2
+            board: esp32s2-saola-1
             os: ubuntu-latest
             package: barracuda-platform-esp32s2
-          - board: esp32s3-devkitc-1
+            toolchain: esp
+            chip: esp32s2
+          - name: esp32s3
+            board: esp32s3-devkitc-1
             os: ubuntu-latest
             package: barracuda-platform-esp32s3
-          - board: stm32f429zi-nucleo
+            toolchain: esp
+            chip: esp32s3
+          - name: stm32
+            board: stm32f429zi-nucleo
             os: ubuntu-latest
             package: barracuda-platform-stm32
+            toolchain: stable
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-
-      - name: Cache Cargo build
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: host-${{ matrix.board }}
-
-      - name: Select Board
-        run: cargo board select ${{ matrix.board }}
-
-      - name: Clippy Platform
-        run: cargo clippy --target host-tuple --package ${{ matrix.package }} --all-targets
-
-      - name: Test Platform
-        run: cargo test --target host-tuple --package ${{ matrix.package }}
-
-      - name: Build macOS System application
-        if: matrix.build_system
-        run: cargo build
-
-  # RISC-V and ARM targets use stable Rust. Build the actual application rather
-  # than only the Platform facade so Target composition, the Board HAL, System,
-  # Plugins, and the Platform entry point are all checked together.
-  device-stable:
-    name: Device build (${{ matrix.board }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - board: esp32c3-devkitc-02
-            c_toolchain: riscv
-          - board: esp32c6-devkitc-1
-            c_toolchain: riscv
-          - board: esp32p4-function-ev-board
-            c_toolchain: riscv
-          - board: stm32f429zi-nucleo
-            c_toolchain: arm
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust toolchain
+      - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install C cross-toolchain
-        run: |
-          sudo apt-get update
-          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
-            sudo apt-get install --no-install-recommends \
-              gcc-riscv64-unknown-elf \
-              picolibc-riscv64-unknown-elf
-          else
-            sudo apt-get install --no-install-recommends \
-              gcc-arm-none-eabi \
-              libnewlib-arm-none-eabi
-          fi
-
-      - name: Cache Cargo build
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: device-${{ matrix.board }}
-
-      - name: Select Board and install Rust target
+      - name: Select representative Board
         run: |
           cargo board select ${{ matrix.board }}
           target="$(cargo board target)"
-          echo "Selected ${{ matrix.board }} ($target)"
-          rustup target add "$target"
           echo "target=$target" >> "$GITHUB_ENV"
-          if [[ "$target" == riscv32* ]]; then
-            cc_variable="CC_${target//[-.]/_}"
-            echo "$cc_variable=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
-          fi
 
-      - name: Build System application
-        run: cargo build --target "$target"
-
-  # Xtensa targets require Espressif's Rust fork and matching GCC toolchain.
-  # Keep this separate from stable device builds so neither toolchain overrides
-  # the other and each Board receives an isolated cache.
-  device-xtensa:
-    name: Device build (${{ matrix.board }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      GITHUB_TOKEN: ${{ github.token }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - board: esp32-devkitc-v4
-            chip: esp32
-          - board: esp32s2-saola-1
-            chip: esp32s2
-          - board: esp32s3-devkitc-1
-            chip: esp32s3
-    steps:
-      - uses: actions/checkout@v7
+      - name: Install stable Rust target
+        if: matrix.toolchain == 'stable' && matrix.name != 'macos'
+        run: rustup target add "$target"
 
       - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp'
         uses: esp-rs/xtensa-toolchain@v1.7
         with:
           buildtargets: ${{ matrix.chip }}
@@ -245,16 +243,21 @@ jobs:
           ldproxy: false
           override: false
 
-      - name: Cache Cargo build
+      - name: Cache Platform build
         uses: Swatinem/rust-cache@v2
         with:
-          key: device-${{ matrix.board }}
+          shared-key: platform-${{ matrix.name }}
 
-      - name: Select Board
-        run: cargo +esp board select ${{ matrix.board }}
+      - name: Build Platform
+        if: matrix.toolchain == 'stable'
+        run: cargo build --package ${{ matrix.package }}
 
-      - name: Build System application
-        run: cargo +esp build
+      - name: Build Platform (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: cargo +esp build -Zbuild-std=core --package ${{ matrix.package }}
+
+      - name: Test Platform on host
+        run: cargo test --target host-tuple --package ${{ matrix.package }}
 
   python:
     name: Python formatting, lint & test
@@ -269,7 +272,7 @@ jobs:
           python-version-file: .python-version
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -294,3 +297,85 @@ jobs:
         run: >-
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
+
+  # Once all fast gates pass, exercise the actual end-user build for every
+  # Board. Target groups run in parallel; Boards sharing a target run serially
+  # on one runner so the expensive dependency graph is compiled only once.
+  boards:
+    name: Boards (${{ matrix.key }})
+    needs: [preflight, linux, platforms, python]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.preflight.outputs.board_matrix) }}
+    env:
+      BOARD_GROUP: ${{ toJSON(matrix.boards) }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install stable Rust target
+        if: matrix.toolchain == 'stable'
+        run: rustup target add ${{ matrix.key }}
+
+      - name: Install C cross-toolchain
+        if: matrix.c_toolchain != 'none'
+        run: |
+          sudo apt-get update
+          if [[ "${{ matrix.c_toolchain }}" == "riscv" ]]; then
+            sudo apt-get install --no-install-recommends \
+              gcc-riscv64-unknown-elf \
+              picolibc-riscv64-unknown-elf
+            target_env="${{ matrix.key }}"
+            target_env="${target_env//[-.]/_}"
+            sysroot="$(dirname "$(find /usr -path '*/riscv64-unknown-elf/include/math.h' -print -quit)")"
+            sysroot="${sysroot%/include}"
+            echo "CC_${target_env}=riscv64-unknown-elf-gcc" >> "$GITHUB_ENV"
+            echo "CFLAGS_${target_env}=--sysroot=$sysroot" >> "$GITHUB_ENV"
+          else
+            sudo apt-get install --no-install-recommends \
+              gcc-arm-none-eabi \
+              libnewlib-arm-none-eabi
+          fi
+
+      - name: Install Rust for Xtensa
+        if: matrix.toolchain == 'esp'
+        uses: esp-rs/xtensa-toolchain@v1.7
+        with:
+          buildtargets: ${{ matrix.chip }}
+          default: false
+          ldproxy: false
+          override: false
+
+      - name: Cache Board builds
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: boards-${{ matrix.key }}
+          add-job-id-key: false
+
+      - name: Build every Board
+        if: matrix.toolchain != 'esp'
+        run: |
+          while IFS= read -r board; do
+            echo "::group::cargo board select $board && cargo build"
+            cargo board select "$board"
+            cargo build
+            if [[ "${{ matrix.toolchain }}" == "host" ]]; then
+              cargo test
+            fi
+            echo "::endgroup::"
+          done < <(jq -r '.[]' <<< "$BOARD_GROUP")
+
+      - name: Build every Board (Xtensa)
+        if: matrix.toolchain == 'esp'
+        run: |
+          while IFS= read -r board; do
+            echo "::group::cargo +esp board select $board && cargo +esp build"
+            cargo +esp board select "$board"
+            cargo +esp build -Zbuild-std=core,alloc
+            echo "::endgroup::"
+          done < <(jq -r '.[]' <<< "$BOARD_GROUP")
