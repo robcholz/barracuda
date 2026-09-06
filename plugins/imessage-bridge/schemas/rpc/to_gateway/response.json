@@ -9,30 +9,21 @@
     {
       "type": "object",
       "properties": {
-        "route": {
-          "$ref": "#/$defs/route"
-        },
+        "route": { "$ref": "#/$defs/route" },
         "reply_to": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1
         }
       },
-      "required": [
-        "route",
-        "reply_to"
-      ],
+      "required": ["route", "reply_to"],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "error": {
-          "const": "invalid_request"
-        }
+        "error": { "const": "invalid_request" }
       },
-      "required": [
-        "error"
-      ],
+      "required": ["error"],
       "additionalProperties": false
     }
   ],
@@ -40,22 +31,11 @@
     "route": {
       "type": "object",
       "properties": {
-        "channel": {
-          "type": "string",
-          "minLength": 1
-        },
-        "conversation_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "thread_id": {
-          "type": "string"
-        }
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" }
       },
-      "required": [
-        "channel",
-        "conversation_id"
-      ],
+      "required": ["channel", "conversation_id"],
       "additionalProperties": false
     }
   }

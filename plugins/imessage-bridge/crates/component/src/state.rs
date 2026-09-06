@@ -1,4 +1,7 @@
-use alloc::{collections::BTreeMap, string::String};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    string::String,
+};
 use core::mem::size_of;
 
 use barracuda_plugin_manager::PluginStorage;
@@ -42,8 +45,14 @@ impl Route {
 pub(crate) struct Mapping {
     session: String,
     route: Route,
-    reply_to: String,
     opened: bool,
+    pending_replies: VecDeque<String>,
+    active_turn: Option<ActiveTurn>,
+}
+
+#[derive(Clone, Debug)]
+struct ActiveTurn {
+    reply_to: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -58,7 +67,16 @@ pub(crate) enum ResolveResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct GatewayTarget {
     pub(crate) route: Route,
-    pub(crate) reply_to: String,
+    pub(crate) reply_to: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GatewayEvent {
+    UserTurnStarted,
+    OtherTurnStarted,
+    TurnEnded,
+    Closed,
+    Continuing,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -123,27 +141,6 @@ impl BridgeBook {
         }
     }
 
-    pub(crate) fn mapping_with_reply(
-        &self,
-        route: &Route,
-        message_id: &str,
-    ) -> Result<Mapping, BridgeError> {
-        if !valid_text(message_id, MESSAGE_ID_MAX) {
-            return Err(BridgeError::InvalidRequest);
-        }
-        let session = self
-            .by_route
-            .get(route)
-            .ok_or(BridgeError::InvalidRequest)?;
-        let mut mapping = self
-            .by_session
-            .get(session)
-            .cloned()
-            .ok_or(BridgeError::InvalidRequest)?;
-        mapping.reply_to = String::from(message_id);
-        Ok(mapping)
-    }
-
     pub(crate) fn commit_mapping(&mut self, mapping: Mapping) {
         self.by_route
             .insert(mapping.route.clone(), mapping.session.clone());
@@ -170,18 +167,22 @@ impl BridgeBook {
         {
             return Err(BridgeError::Conflict);
         }
-        Ok(Mapping {
+        let mut mapping = self.by_session.get(session).cloned().unwrap_or(Mapping {
             session: String::from(session),
             route,
-            reply_to: String::from(message_id),
             opened: true,
-        })
+            pending_replies: VecDeque::new(),
+            active_turn: None,
+        });
+        mapping.opened = true;
+        mapping.pending_replies.push_back(String::from(message_id));
+        Ok(mapping)
     }
 
     pub(crate) fn gateway_target(
         &mut self,
         session: &str,
-        closed: bool,
+        event: GatewayEvent,
     ) -> Result<Option<GatewayTarget>, BridgeError> {
         if !valid_session(session) {
             return Err(BridgeError::InvalidRequest);
@@ -189,19 +190,54 @@ impl BridgeBook {
         let Some(mapping) = self.by_session.get_mut(session) else {
             return Ok(None);
         };
-        if closed {
-            mapping.opened = false;
-            return Ok(None);
+        match event {
+            GatewayEvent::Closed => {
+                mapping.opened = false;
+                mapping.pending_replies.clear();
+                mapping.active_turn = None;
+                return Ok(None);
+            }
+            GatewayEvent::UserTurnStarted => {
+                if mapping.active_turn.is_some() {
+                    return Err(BridgeError::Conflict);
+                }
+                let reply_to = mapping
+                    .pending_replies
+                    .pop_front()
+                    .ok_or(BridgeError::InvalidRequest)?;
+                mapping.active_turn = Some(ActiveTurn {
+                    reply_to: Some(reply_to),
+                });
+            }
+            GatewayEvent::OtherTurnStarted => {
+                if mapping.active_turn.is_some() {
+                    return Err(BridgeError::Conflict);
+                }
+                mapping.active_turn = Some(ActiveTurn { reply_to: None });
+            }
+            GatewayEvent::TurnEnded | GatewayEvent::Continuing => {}
         }
-        Ok(Some(GatewayTarget {
+        let target = mapping.active_turn.as_ref().map(|active| GatewayTarget {
             route: mapping.route.clone(),
-            reply_to: mapping.reply_to.clone(),
-        }))
+            reply_to: active.reply_to.clone(),
+        });
+        if event == GatewayEvent::TurnEnded {
+            mapping.active_turn = None;
+        }
+        Ok(target)
     }
 }
 
 fn valid_text(value: &str, max: usize) -> bool {
     !value.is_empty() && value.len() <= max
+}
+
+pub(crate) fn validate_message_id(value: &str) -> Result<(), BridgeError> {
+    if valid_text(value, MESSAGE_ID_MAX) {
+        Ok(())
+    } else {
+        Err(BridgeError::InvalidRequest)
+    }
 }
 
 fn valid_session(value: &str) -> bool {
@@ -218,11 +254,13 @@ pub(crate) struct PersistedRoute {
     channel_len: u16,
     conversation_len: u16,
     thread_len: u16,
-    message_id_len: u16,
+    // Version 1 stored reply data here. Preserve the bytes so existing records
+    // remain readable while reply state becomes runtime-only.
+    reserved_len: u16,
     channel: [u8; CHANNEL_MAX],
     conversation_id: [u8; CONVERSATION_MAX],
     thread_id: [u8; THREAD_MAX],
-    message_id: [u8; MESSAGE_ID_MAX],
+    reserved: [u8; MESSAGE_ID_MAX],
 }
 
 impl PersistedRoute {
@@ -235,19 +273,17 @@ impl PersistedRoute {
                 .map_err(|_error| BridgeError::InvalidRequest)?,
             thread_len: u16::try_from(mapping.route.thread_id.as_deref().map_or(0, str::len))
                 .map_err(|_error| BridgeError::InvalidRequest)?,
-            message_id_len: u16::try_from(mapping.reply_to.len())
-                .map_err(|_error| BridgeError::InvalidRequest)?,
+            reserved_len: 0,
             channel: [0; CHANNEL_MAX],
             conversation_id: [0; CONVERSATION_MAX],
             thread_id: [0; THREAD_MAX],
-            message_id: [0; MESSAGE_ID_MAX],
+            reserved: [0; MESSAGE_ID_MAX],
         };
         copy_text(&mapping.route.channel, &mut record.channel)?;
         copy_text(&mapping.route.conversation_id, &mut record.conversation_id)?;
         if let Some(thread_id) = &mapping.route.thread_id {
             copy_text(thread_id, &mut record.thread_id)?;
         }
-        copy_text(&mapping.reply_to, &mut record.message_id)?;
         Ok(record)
     }
 
@@ -262,13 +298,13 @@ impl PersistedRoute {
         } else {
             Some(read_text(&self.thread_id, self.thread_len)?)
         };
-        let reply_to = read_text(&self.message_id, self.message_id_len)?;
         let route = Route::new(&channel, &conversation_id, thread_id.as_deref())?;
         Ok(Mapping {
             session: String::from(session),
             route,
-            reply_to,
             opened: false,
+            pending_replies: VecDeque::new(),
+            active_turn: None,
         })
     }
 }

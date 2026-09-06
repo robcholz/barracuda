@@ -100,13 +100,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
     );
 
     let route = r#"{"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"},"message_id":"message-9","text":"hello"}"#;
-    assert_call(
-        &client,
-        &to_agent,
-        route,
-        r#"{}"#,
-    )
-    .await?;
+    assert_call(&client, &to_agent, route, r#"{}"#).await?;
     let bind = r#"{"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"},"message_id":"message-9","session":"session-4"}"#;
     assert_call(&client, &to_agent, bind, r#"{"session":"session-4"}"#).await?;
     assert_call(
@@ -117,12 +111,30 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
     )
     .await?;
 
+    let queued_message = r#"{"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"},"message_id":"message-10","session":"session-4"}"#;
+    assert_call(
+        &client,
+        &to_agent,
+        queued_message,
+        r#"{"session":"session-4"}"#,
+    )
+    .await?;
+
     let started = r#"{"session":"session-4","sequence":0,"type":"turn_started","payload":{"turn":"turn-1","origin":"user"}}"#;
     assert_call(
         &client,
         &to_gateway,
         started,
         r#"{"reply_to":"message-9","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+
+    let next_message = r#"{"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"},"message_id":"message-11","session":"session-4"}"#;
+    assert_call(
+        &client,
+        &to_agent,
+        next_message,
+        r#"{"session":"session-4"}"#,
     )
     .await?;
 
@@ -155,8 +167,62 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
     )
     .await?;
 
+    let next_started = r#"{"session":"session-4","sequence":4,"type":"turn_started","payload":{"turn":"turn-2","origin":"user"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        next_started,
+        r#"{"reply_to":"message-10","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+    let next_ended =
+        r#"{"session":"session-4","sequence":5,"type":"turn_ended","payload":{"turn":"turn-2"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        next_ended,
+        r#"{"reply_to":"message-10","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+
+    let third_started = r#"{"session":"session-4","sequence":6,"type":"turn_started","payload":{"turn":"turn-3","origin":"user"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        third_started,
+        r#"{"reply_to":"message-11","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+    let third_ended =
+        r#"{"session":"session-4","sequence":7,"type":"turn_ended","payload":{"turn":"turn-3"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        third_ended,
+        r#"{"reply_to":"message-11","route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+
+    let tool_started = r#"{"session":"session-4","sequence":8,"type":"turn_started","payload":{"turn":"turn-4","origin":"tool_call"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        tool_started,
+        r#"{"reply_to":null,"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+    let tool_ended =
+        r#"{"session":"session-4","sequence":9,"type":"turn_ended","payload":{"turn":"turn-4"}}"#;
+    assert_call(
+        &client,
+        &to_gateway,
+        tool_ended,
+        r#"{"reply_to":null,"route":{"channel":"imessage","conversation_id":"chat-7","thread_id":"thread-2"}}"#,
+    )
+    .await?;
+
     let closed =
-        r#"{"session":"session-4","sequence":4,"type":"closed","payload":{"reason":"closed"}}"#;
+        r#"{"session":"session-4","sequence":10,"type":"closed","payload":{"reason":"closed"}}"#;
     assert_call(&client, &to_gateway, closed, r#"{}"#).await?;
     assert_call(
         &client,
@@ -168,7 +234,7 @@ async fn exercise_initial(context: RunContext<FRAME_SIZE>) -> Result<(), RpcErro
     assert_call(
         &client,
         &to_gateway,
-        r#"{"session":"session-99","sequence":0,"type":"turn_started","payload":{}}"#,
+        r#"{"session":"session-99","sequence":0,"type":"turn_started","payload":{"turn":"turn-1","origin":"user"}}"#,
         r#"{}"#,
     )
     .await?;

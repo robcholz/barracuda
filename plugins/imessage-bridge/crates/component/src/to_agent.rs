@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::{
     component::BridgeControl,
     json::{bound_response, error_response, resolve_response},
-    state::{BridgeError, Route, persist_mapping},
+    state::{BridgeError, Route, persist_mapping, validate_message_id},
 };
 
 /// Resolves or binds a Gateway route to an Agent session.
@@ -80,42 +80,25 @@ where
                         route_request.conversation_id
                     );
                     match route(route_request) {
-                        Ok(route) => {
-                            let mut book = shared.book.lock().await;
-                            let found = book.resolve(&route);
-                            match &found {
-                                crate::state::ResolveResult::Missing => log::info!(
-                                    "IMessage Bridge found no Agent session for inbound message `{message_id}`"
-                                ),
-                                crate::state::ResolveResult::Found {
-                                    session,
-                                    open_required,
-                                } => log::info!(
-                                    "IMessage Bridge resolved inbound message `{message_id}` to `{session}` (open_required={open_required})"
-                                ),
-                            }
-                            match found {
-                                crate::state::ResolveResult::Missing => {
-                                    Ok(resolve_response(crate::state::ResolveResult::Missing))
+                        Ok(route) => match validate_message_id(message_id) {
+                            Ok(()) => {
+                                let book = shared.book.lock().await;
+                                let found = book.resolve(&route);
+                                match &found {
+                                    crate::state::ResolveResult::Missing => log::info!(
+                                        "IMessage Bridge found no Agent session for inbound message `{message_id}`"
+                                    ),
+                                    crate::state::ResolveResult::Found {
+                                        session,
+                                        open_required,
+                                    } => log::info!(
+                                        "IMessage Bridge resolved inbound message `{message_id}` to `{session}` (open_required={open_required})"
+                                    ),
                                 }
-                                found => match book.mapping_with_reply(&route, message_id) {
-                                    Ok(mapping) => {
-                                        if let Err(error) =
-                                            persist_mapping(&shared.storage, &mapping).await
-                                        {
-                                            Err(error)
-                                        } else {
-                                            book.commit_mapping(mapping);
-                                            log::info!(
-                                                "IMessage Bridge associated reply `{message_id}` with the resolved session"
-                                            );
-                                            Ok(resolve_response(found))
-                                        }
-                                    }
-                                    Err(error) => Err(error),
-                                },
+                                Ok(resolve_response(found))
                             }
-                        }
+                            Err(error) => Err(error),
+                        },
                         Err(error) => Err(error),
                     }
                 }
