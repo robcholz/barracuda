@@ -50,6 +50,13 @@ jobs:
           cargo board sync --check
           cargo plugin sync --check
 
+      - name: Check CI covers every Platform
+        run: |
+          diff -u \
+            <(printf '%s\n' esp32 esp32c3 esp32c6 esp32p4 esp32s2 esp32s3 linux macos stm32 | sort) \
+            <(find platforms -mindepth 2 -maxdepth 2 -type f -name platform.yml \
+              -exec dirname {} \; | xargs -n1 basename | sort)
+
       - name: Check Rust formatting
         run: cargo fmt --all --check
 
@@ -60,8 +67,8 @@ jobs:
           while IFS= read -r board_file; do
             board="$(basename "$(dirname "$board_file")")"
 
-            # local-linux is already exercised by the faster blocking job.
-            if [[ "$board" == "local-linux" ]]; then
+            # Host Boards are already exercised by the two complete test jobs.
+            if [[ "$board" == "local-linux" || "$board" == "local-macos" ]]; then
               continue
             fi
 
@@ -164,9 +171,51 @@ jobs:
       - name: Clippy portable workspace
         run: cargo clippy --workspace --all-targets $PLATFORM_EXCLUDES
 
-  # Linux is covered by the full end-user path above. Build every other concrete
-  # Platform directly. These jobs are intentionally small and parallel:
-  # target/toolchain regressions fail before the expensive Board stage starts.
+  # The same shared production path is tested on the second supported host.
+  # It runs in parallel with Linux: Linux normally reports first, while macOS
+  # adds host/compiler integration coverage without repeating device tests.
+  macos:
+    name: End-user path (local-macos)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      PLATFORM_EXCLUDES: >-
+        --exclude barracuda-platform-esp32
+        --exclude barracuda-platform-esp32c3
+        --exclude barracuda-platform-esp32c6
+        --exclude barracuda-platform-esp32p4
+        --exclude barracuda-platform-esp32s2
+        --exclude barracuda-platform-esp32s3
+        --exclude barracuda-platform-linux
+        --exclude barracuda-platform-stm32
+        --exclude barracuda-board-stm32f429zi-nucleo
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache macOS build
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: local-macos
+
+      - name: Select Board
+        run: cargo board select local-macos
+
+      - name: Build
+        run: cargo build
+
+      - name: Test selected application
+        run: cargo test
+
+      - name: Test portable workspace
+        run: cargo test --workspace $PLATFORM_EXCLUDES
+
+  # The two host Platforms are covered by complete end-user paths above. Build
+  # every device Platform directly for its native target. These jobs are small
+  # and parallel, so toolchain and target regressions fail before the expensive
+  # Board stage starts.
   platforms:
     name: Platform (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
@@ -175,11 +224,6 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - name: macos
-            board: local-macos
-            os: macos-latest
-            package: barracuda-platform-macos
-            toolchain: stable
           - name: esp32
             board: esp32-devkitc-v4
             os: ubuntu-latest
@@ -231,7 +275,7 @@ jobs:
           echo "target=$target" >> "$GITHUB_ENV"
 
       - name: Install stable Rust target
-        if: matrix.toolchain == 'stable' && matrix.name != 'macos'
+        if: matrix.toolchain == 'stable'
         run: rustup target add "$target"
 
       - name: Install Rust for Xtensa
@@ -255,9 +299,6 @@ jobs:
       - name: Build Platform (Xtensa)
         if: matrix.toolchain == 'esp'
         run: cargo +esp build -Zbuild-std=core --package ${{ matrix.package }}
-
-      - name: Test Platform on host
-        run: cargo test --target host-tuple --package ${{ matrix.package }}
 
   python:
     name: Python formatting, lint & test
@@ -303,7 +344,7 @@ jobs:
   # on one runner so the expensive dependency graph is compiled only once.
   boards:
     name: Boards (${{ matrix.key }})
-    needs: [preflight, linux, platforms, python]
+    needs: [preflight, linux, macos, platforms, python]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
