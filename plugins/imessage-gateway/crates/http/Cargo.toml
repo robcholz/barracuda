@@ -2,6 +2,7 @@
 name = "gateway-http"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "HTTP request helpers owned by the IMessage Gateway"
 license = "Apache-2.0"
 
@@ -9,7 +10,7 @@ license = "Apache-2.0"
 embedded-io = "0.7"
 embedded-io-async = "0.7"
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway.workspace = true
+gateway = { path = "../gateway" }
 http-client.workspace = true
 reqwless = { git = "https://github.com/drogue-iot/reqwless.git", rev = "b761705cc654e6f31bc064183e219aa09b33968a", default-features = false }
 thiserror = { version = "2", default-features = false }

@@ -3,63 +3,40 @@
   "oneOf": [
     {
       "type": "object",
-      "properties": { "forward": { "const": false } },
-      "required": ["forward"],
+      "maxProperties": 0,
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "forward": { "const": true },
-        "command_id": { "type": "string", "pattern": "^command-[0-9]+$" }
+        "route": { "$ref": "#/$defs/route" },
+        "reply_to": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
       },
-      "required": ["forward", "command_id"],
+      "required": ["route", "reply_to"],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "action": { "const": "start" },
-        "stream_id": { "type": "string" },
-        "sequence": { "const": 0 },
-        "channel": { "type": "string" },
-        "conversation_id": { "type": "string" },
-        "thread_id": { "type": "string" },
-        "reply_to": { "type": "string" }
-      },
-      "required": ["action", "stream_id", "sequence", "channel", "conversation_id", "reply_to"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "action": { "const": "chunk" },
-        "stream_id": { "type": "string" },
-        "sequence": { "type": "integer", "minimum": 1 },
-        "field": { "const": "text" },
-        "boundary": { "enum": ["more", "complete"] },
-        "text": { "type": "string" }
-      },
-      "required": ["action", "stream_id", "sequence", "field", "boundary", "text"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "action": { "const": "finish" },
-        "stream_id": { "type": "string" },
-        "sequence": { "type": "integer", "minimum": 1 }
-      },
-      "required": ["action", "stream_id", "sequence"],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "error": { "enum": ["invalid_request", "busy", "unknown_command"] }
+        "error": { "const": "invalid_request" }
       },
       "required": ["error"],
       "additionalProperties": false
     }
-  ]
+  ],
+  "$defs": {
+    "route": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" }
+      },
+      "required": ["channel", "conversation_id"],
+      "additionalProperties": false
+    }
+  }
 }

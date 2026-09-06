@@ -1,8 +1,8 @@
 //! WebSocket wire glue shared by the terminal client and the host server.
 //!
-//! Client → server frames are [`web::WebClientFrame`] (defined by the web
-//! provider). Server → client frames are the web channel's own Server-Sent-Events
-//! serialization (`WebDelivery::to_sse`); the client parses them with [`parse_sse`].
+//! Client → server frames are [`barracuda_imessage_web_plugin::WebClientFrame`].
+//! Server → client frames are the web channel's own Server-Sent-Events serialization
+//! (`WebDelivery::to_sse`); the client parses them with [`parse_sse`].
 
 /// One parsed Server-Sent-Events frame received from the server.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

@@ -1,17 +1,14 @@
-use alloc::string::String;
-
 use serde_json::{Value, json};
 
-use crate::state::{BridgeError, GatewayCommand, ResolveResult};
+use crate::state::{BridgeError, GatewayTarget, ResolveResult};
 
 pub(crate) fn resolve_response(result: ResolveResult) -> Value {
     match result {
-        ResolveResult::Missing => json!({"found": false, "open_required": false}),
+        ResolveResult::Missing => json!({}),
         ResolveResult::Found {
             session,
             open_required,
         } => json!({
-            "found": true,
             "open_required": open_required,
             "session": session,
         }),
@@ -22,10 +19,24 @@ pub(crate) fn bound_response(session: &str) -> Value {
     json!({"session": session})
 }
 
-pub(crate) fn forwarding_response(command_id: Option<&str>) -> Value {
-    match command_id {
-        Some(command_id) => json!({"forward": true, "command_id": command_id}),
-        None => json!({"forward": false}),
+pub(crate) fn gateway_target_response(target: Option<GatewayTarget>) -> Value {
+    match target {
+        Some(target) => {
+            let mut route = json!({
+                "channel": target.route.channel,
+                "conversation_id": target.route.conversation_id,
+            });
+            if let Some(thread_id) = target.route.thread_id
+                && let Some(object) = route.as_object_mut()
+            {
+                object.insert("thread_id".into(), Value::String(thread_id));
+            }
+            json!({
+                "route": route,
+                "reply_to": target.reply_to,
+            })
+        }
+        None => json!({}),
     }
 }
 
@@ -33,48 +44,23 @@ pub(crate) fn error_response(error: BridgeError) -> Value {
     json!({"error": error.code()})
 }
 
-pub(crate) fn command_response(command: GatewayCommand) -> Value {
-    match command {
-        GatewayCommand::Start {
-            stream_id,
-            route,
-            reply_to,
-        } => {
-            let mut response = json!({
-                "action": "start",
-                "stream_id": stream_id,
-                "sequence": 0,
-                "channel": route.channel,
-                "conversation_id": route.conversation_id,
-                "reply_to": reply_to,
-            });
-            if let Some(thread_id) = route.thread_id
-                && let Some(object) = response.as_object_mut()
-            {
-                object.insert(String::from("thread_id"), Value::String(thread_id));
-            }
-            response
-        }
-        GatewayCommand::Chunk {
-            stream_id,
-            sequence,
-            boundary,
-            text,
-        } => json!({
-            "action": "chunk",
-            "stream_id": stream_id,
-            "sequence": sequence,
-            "field": "text",
-            "boundary": boundary,
-            "text": text,
-        }),
-        GatewayCommand::Finish {
-            stream_id,
-            sequence,
-        } => json!({
-            "action": "finish",
-            "stream_id": stream_id,
-            "sequence": sequence,
-        }),
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{gateway_target_response, resolve_response};
+    use crate::state::ResolveResult;
+
+    #[test]
+    fn response_shapes_use_json_variants_without_control_flags() {
+        assert_eq!(resolve_response(ResolveResult::Missing), json!({}));
+        assert_eq!(
+            resolve_response(ResolveResult::Found {
+                session: "session-4".into(),
+                open_required: true,
+            }),
+            json!({"open_required":true,"session":"session-4"})
+        );
+        assert_eq!(gateway_target_response(None), json!({}));
     }
 }

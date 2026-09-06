@@ -86,12 +86,6 @@ pub enum WorkflowExecutionError {
         /// Step whose arguments contain the invalid selector.
         step: usize,
     },
-    /// A branch condition selected a field whose runtime value is not boolean.
-    #[error("Workflow branch condition field {field} is not boolean")]
-    ConditionNotBoolean {
-        /// Condition field containing a non-boolean value.
-        field: alloc::string::String,
-    },
     /// Event ingress failed after this execution was provisionally created.
     #[error("Event ingress was cancelled before ownership transfer")]
     IngressCancelled,
@@ -379,16 +373,22 @@ impl WorkflowRuntime {
             match execution.poll(context) {
                 Poll::Pending => self.running.push_back(execution),
                 Poll::Ready(Ok(())) => {
+                    log::debug!("Workflow `{}` completed", execution.id.as_str());
                     self.shared
                         .completed_count
                         .set(self.shared.completed_count.get().saturating_add(1));
                 }
                 Poll::Ready(Err(WorkflowExecutionError::IngressCancelled)) => {
+                    log::warn!(
+                        "Workflow `{}` was cancelled before Event ingress completed",
+                        execution.id.as_str()
+                    );
                     self.shared
                         .cancelled_count
                         .set(self.shared.cancelled_count.get().saturating_add(1));
                 }
                 Poll::Ready(Err(error)) => {
+                    log::error!("Workflow `{}` failed: {error}", execution.id.as_str());
                     self.shared
                         .failed_count
                         .set(self.shared.failed_count.get().saturating_add(1));
@@ -611,28 +611,20 @@ fn condition_value(
 ) -> Result<bool, WorkflowExecutionError> {
     let value: Value = serde_json::from_str(source)
         .map_err(|_error| step_error(branch_step.saturating_sub(1), RpcError::InvalidJson))?;
-    let object = value.as_object().ok_or(match condition.selector {
-        SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-        SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-            step: branch_step.saturating_sub(1),
-        },
-    })?;
-    let value = object
-        .get(&condition.field)
-        .ok_or_else(|| match condition.selector {
-            SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
-                field: condition.field.clone(),
-            },
-            SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
-                step: branch_step.saturating_sub(1),
-                field: condition.field.clone(),
-            },
-        })?;
-    value
-        .as_bool()
-        .ok_or_else(|| WorkflowExecutionError::ConditionNotBoolean {
-            field: condition.field.clone(),
-        })
+    let missing = Value::Null;
+    let actual = match &condition.field {
+        None => &value,
+        Some(field) => {
+            let object = value.as_object().ok_or(match condition.selector {
+                SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
+                    step: branch_step.saturating_sub(1),
+                },
+            })?;
+            object.get(field).unwrap_or(&missing)
+        }
+    };
+    Ok(condition.comparison.matches(actual))
 }
 
 fn mapped_request<'source, 'definition>(
@@ -690,11 +682,15 @@ fn validate_mapping_source(
     {
         return Ok(());
     }
-    if source
-        .as_bytes()
+    let selects_field = references
         .iter()
-        .find(|byte| !byte.is_ascii_whitespace())
-        != Some(&b'{')
+        .any(|reference| reference.selector == selector && reference.source_field.is_some());
+    if selects_field
+        && source
+            .as_bytes()
+            .iter()
+            .find(|byte| !byte.is_ascii_whitespace())
+            != Some(&b'{')
     {
         return Err(match selector {
             SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
@@ -714,18 +710,21 @@ fn validate_mapping_source(
     }
     for reference in references
         .iter()
-        .filter(|reference| reference.selector == selector)
+        .filter(|reference| reference.selector == selector && reference.source_field.is_some())
     {
+        let Some(field) = &reference.source_field else {
+            continue;
+        };
         let matched = count_mapping_values(source, core::slice::from_ref(reference), selector)
             .map_err(|source| step_error(to_step.saturating_sub(1), source))?;
         if matched == 0 {
             return Err(match selector {
                 SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
-                    field: reference.source_field.clone(),
+                    field: field.clone(),
                 },
                 SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
                     step: to_step.saturating_sub(1),
-                    field: reference.source_field.clone(),
+                    field: field.clone(),
                 },
             });
         }
@@ -787,8 +786,22 @@ fn write_mapping_source(
     if expected == 0 {
         return Ok(());
     }
+    let mut matched = 0usize;
+    for reference in references
+        .iter()
+        .filter(|reference| reference.selector == selector && reference.source_field.is_none())
+    {
+        writer.field(&reference.dest_field, source)?;
+        matched = matched.checked_add(1).ok_or(RpcError::InvalidFrameState)?;
+    }
+    if !references
+        .iter()
+        .any(|reference| reference.selector == selector && reference.source_field.is_some())
+    {
+        return Ok(());
+    }
     let mut deserializer = serde_json::Deserializer::from_str(source);
-    let matched = deserializer
+    let field_matches = deserializer
         .deserialize_map(WriteMappingFields {
             writer,
             references,
@@ -796,6 +809,9 @@ fn write_mapping_source(
         })
         .map_err(|_error| RpcError::InvalidJson)?;
     deserializer.end().map_err(|_error| RpcError::InvalidJson)?;
+    matched = matched
+        .checked_add(field_matches)
+        .ok_or(RpcError::InvalidFrameState)?;
     if matched != expected {
         return Err(RpcError::InvalidJson);
     }
@@ -807,6 +823,17 @@ fn count_mapping_values(
     references: &[FieldRef],
     selector: SourceSelector,
 ) -> RpcResult<usize> {
+    let document_count = references
+        .iter()
+        .filter(|reference| reference.selector == selector && reference.source_field.is_none())
+        .count();
+    if !references
+        .iter()
+        .any(|reference| reference.selector == selector && reference.source_field.is_some())
+    {
+        source.encoded_len()?;
+        return Ok(document_count);
+    }
     let mut deserializer = serde_json::Deserializer::from_str(source);
     let matched = deserializer
         .deserialize_map(CountMappingFields {
@@ -815,7 +842,9 @@ fn count_mapping_values(
         })
         .map_err(|_error| RpcError::InvalidJson)?;
     deserializer.end().map_err(|_error| RpcError::InvalidJson)?;
-    Ok(matched)
+    document_count
+        .checked_add(matched)
+        .ok_or(RpcError::InvalidFrameState)
 }
 
 struct CountMappingFields<'a> {
@@ -841,7 +870,8 @@ impl<'de> Visitor<'de> for CountMappingFields<'_> {
                 .references
                 .iter()
                 .filter(|reference| {
-                    reference.selector == self.selector && reference.source_field == name.as_ref()
+                    reference.selector == self.selector
+                        && reference.source_field.as_deref() == Some(name.as_ref())
                 })
                 .count();
             matched = matched
@@ -873,7 +903,8 @@ impl<'de> Visitor<'de> for WriteMappingFields<'_, '_, '_> {
         while let Some(name) = map.next_key::<Cow<'de, str>>()? {
             let value = map.next_value::<&RawValue>()?;
             for reference in self.references.iter().filter(|reference| {
-                reference.selector == self.selector && reference.source_field == name.as_ref()
+                reference.selector == self.selector
+                    && reference.source_field.as_deref() == Some(name.as_ref())
             }) {
                 self.writer
                     .field(&reference.dest_field, value.get())
@@ -934,10 +965,26 @@ fn validate_links(
                         };
                         let response_schema =
                             parse_schema(prev.response_schema().as_str(), from_step)?;
-                        let response_properties = schema_properties(&response_schema)
-                            .ok_or(WorkflowExecutionError::InvalidLink { from_step, to_step })?;
-                        if response_properties.get(&reference.source_field) != Some(destination) {
-                            return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
+                        match &reference.source_field {
+                            Some(source_field) => {
+                                let response_properties =
+                                    schema_properties(&response_schema).ok_or(
+                                        WorkflowExecutionError::InvalidLink { from_step, to_step },
+                                    )?;
+                                if response_properties.get(source_field) != Some(destination) {
+                                    return Err(WorkflowExecutionError::InvalidLink {
+                                        from_step,
+                                        to_step,
+                                    });
+                                }
+                            }
+                            None if &response_schema == destination => {}
+                            None => {
+                                return Err(WorkflowExecutionError::InvalidLink {
+                                    from_step,
+                                    to_step,
+                                });
+                            }
                         }
                     }
                 }
@@ -1094,6 +1141,11 @@ async fn handle_emit(
 ) -> RpcResult<()> {
     let (header, event) = EventInput::accept(request, &event_inputs)?;
     let plans = shared.matching_plans(header.event_id(), header.topic());
+    log::debug!(
+        "Workflow Event `{}` matched {} definition(s)",
+        header.event_id().as_str(),
+        plans.len()
+    );
     if plans.is_empty() {
         return response.write("{}").await;
     }
@@ -1124,7 +1176,10 @@ mod json_workflow_tests {
     #![allow(clippy::expect_used)]
     #![allow(missing_docs)]
 
+    extern crate std;
+
     use alloc::boxed::Box;
+    use alloc::format;
     use alloc::rc::Rc;
     use alloc::string::String;
     use alloc::vec;
@@ -1133,12 +1188,14 @@ mod json_workflow_tests {
     use core::future::{poll_fn, Future};
     use core::pin::Pin;
     use core::task::Poll;
+    use std::sync::Mutex;
 
     use barracuda_rpc::{
         JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcError, RpcFrame,
         RpcLaneStorage, RpcMethod, RpcRegistry, Unary,
     };
     use futures_lite::future::block_on;
+    use log::{LevelFilter, Log, Metadata, Record};
     use serde_json::{json, Value};
 
     use super::{execute_steps, validate_definition, WorkflowRuntime};
@@ -1162,6 +1219,34 @@ mod json_workflow_tests {
     const MODE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"mode":{"type":"string"}},"required":["mode"],"additionalProperties":false}"#,
     );
+    const DOCUMENT_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{"payload":{"type":"object"}},"required":["payload"],"additionalProperties":false}"#,
+    );
+
+    static CAPTURE: CaptureLogger = CaptureLogger {
+        records: Mutex::new(Vec::new()),
+    };
+
+    struct CaptureLogger {
+        records: Mutex<Vec<String>>,
+    }
+
+    impl Log for CaptureLogger {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+            metadata.target().starts_with("barracuda_workflow")
+        }
+
+        fn log(&self, record: &Record<'_>) {
+            if self.enabled(record.metadata()) {
+                self.records
+                    .lock()
+                    .expect("lock captured Workflow logs")
+                    .push(format!("{} {}", record.level(), record.args()));
+            }
+        }
+
+        fn flush(&self) {}
+    }
 
     struct Produce;
 
@@ -1169,6 +1254,16 @@ mod json_workflow_tests {
         const ADDRESS: &'static str = "workflow.produce";
         const REQUEST_SCHEMA: JsonSchema = ANY_SCHEMA;
         const RESPONSE_SCHEMA: JsonSchema = TOKEN_SCHEMA;
+        const MAX_REQUEST_BYTES: usize = 64;
+        const MAX_RESPONSE_BYTES: usize = 64;
+    }
+
+    struct ConditionProduce;
+
+    impl JsonRpcSchema for ConditionProduce {
+        const ADDRESS: &'static str = "workflow.condition-produce";
+        const REQUEST_SCHEMA: JsonSchema = ANY_SCHEMA;
+        const RESPONSE_SCHEMA: JsonSchema = ANY_SCHEMA;
         const MAX_REQUEST_BYTES: usize = 64;
         const MAX_RESPONSE_BYTES: usize = 64;
     }
@@ -1198,6 +1293,16 @@ mod json_workflow_tests {
     impl JsonRpcSchema for LiteralSink {
         const ADDRESS: &'static str = "workflow.literal-sink";
         const REQUEST_SCHEMA: JsonSchema = MODE_SCHEMA;
+        const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+        const MAX_REQUEST_BYTES: usize = 64;
+        const MAX_RESPONSE_BYTES: usize = 2;
+    }
+
+    struct WholeDocumentSink;
+
+    impl JsonRpcSchema for WholeDocumentSink {
+        const ADDRESS: &'static str = "workflow.whole-document-sink";
+        const REQUEST_SCHEMA: JsonSchema = DOCUMENT_SCHEMA;
         const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
         const MAX_REQUEST_BYTES: usize = 64;
         const MAX_RESPONSE_BYTES: usize = 2;
@@ -1261,6 +1366,20 @@ mod json_workflow_tests {
                 },
             )
             .expect("register producer");
+    }
+
+    fn register_condition_producer<const N: usize, const M: usize, const Q: usize>(
+        registry: &RpcRegistry<N, M, Q>,
+        response: &'static str,
+    ) {
+        registry
+            .register_json::<ConditionProduce, _>(
+                "*",
+                move |_context, _request: JsonRef, writer: JsonWriter| async move {
+                    writer.write(response).await
+                },
+            )
+            .expect("register condition producer");
     }
 
     #[test]
@@ -1361,6 +1480,81 @@ mod json_workflow_tests {
 
         assert_eq!(seen.take(), Some(json!({"token":41,"extra":5})));
         assert_eq!(runtime.view().info().completed_count, 1);
+    }
+
+    #[test]
+    fn failed_execution_is_logged_with_workflow_and_step() {
+        const FRAME_SIZE: usize = 128;
+
+        log::set_logger(&CAPTURE).expect("install Workflow capture logger");
+        log::set_max_level(LevelFilter::Trace);
+        CAPTURE
+            .records
+            .lock()
+            .expect("lock captured Workflow logs")
+            .clear();
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_producer(&registry, "{}");
+        registry
+            .register_json::<MappingSink, _>(
+                "*",
+                |_context, _request: JsonRef, writer: JsonWriter| async move {
+                    writer.write("{}").await
+                },
+            )
+            .expect("register mapping sink");
+        let mut runtime = WorkflowRuntime::new();
+        runtime
+            .control()
+            .load(definition(
+                "logged-failure",
+                vec![
+                    WorkflowStep::new(address(Produce::ADDRESS), None),
+                    WorkflowStep::new(
+                        address(MappingSink::ADDRESS),
+                        Some(json!({
+                            "token": "$previous.output.token",
+                            "extra": 5
+                        })),
+                    ),
+                ],
+            ))
+            .expect("load Workflow");
+        registry
+            .register_json::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<4, FRAME_SIZE>(),
+            )
+            .expect("register Event ingress");
+        runtime.start(registry.client());
+        let emitter = EventEmitter::<FRAME_SIZE>::new(registry.client());
+        let mut emit = Box::pin(emitter.emit::<JsonEvent>("{}"));
+        let mut emit_complete = false;
+
+        block_on(poll_fn(|context| {
+            let _pending = Pin::new(&mut runtime).poll(context);
+            if !emit_complete && emit.as_mut().poll(context).is_ready() {
+                emit_complete = true;
+            }
+            if runtime.view().info().failed_count == 1 {
+                Poll::Ready(())
+            } else {
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }));
+
+        let records = CAPTURE.records.lock().expect("lock captured Workflow logs");
+        assert!(
+            records.iter().any(|line| {
+                line.contains("ERROR Workflow `logged-failure` failed")
+                    && line.contains("Workflow RPC step 0 failed")
+                    && line.contains("Required")
+            }),
+            "captured records: {records:?}"
+        );
     }
 
     #[test]
@@ -1635,38 +1829,36 @@ mod json_workflow_tests {
     }
 
     #[test]
-    fn previous_output_condition_type_is_checked_at_execution_time() {
+    fn previous_output_condition_compares_complete_json_objects() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
         let registry = RpcRegistry::new(lanes);
         register_producer(&registry, r#"{"token":41}"#);
         let workflow = parse_definition(
             r#"{
-                "id":"invalid-condition",
+                "id":"object-condition",
                 "match":{"event":"workflow.event"},
                 "steps":[
                     {"call":"workflow.produce","arguments":{}},
-                    {"if":"$previous.output.token","then":[{"return":{}}],"else":[{"return":{}}]}
+                    {
+                        "if":{"source":"$previous.output","equals":{"token":41}},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
                 ]
             }"#,
         )
         .expect("parse conditional Workflow");
 
-        validate_definition(&registry.client(), &workflow).expect("load dynamic condition");
-        let error = block_on(execute_steps(
+        block_on(execute_steps(
             &workflow,
             &event_input("{}"),
             registry.client(),
         ))
-        .expect_err("reject non-boolean condition at execution time");
-
-        assert!(matches!(
-            error,
-            WorkflowExecutionError::ConditionNotBoolean { field } if field == "token"
-        ));
+        .expect("select matching object branch");
     }
 
     #[test]
-    fn event_input_condition_is_checked_at_execution_time() {
+    fn event_input_condition_compares_any_json_field_value() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
         let registry = RpcRegistry::new(lanes);
         let workflow = parse_definition(
@@ -1674,30 +1866,127 @@ mod json_workflow_tests {
                 "id":"event-condition",
                 "match":{"event":"workflow.event"},
                 "steps":[
-                    {"if":"$event.input.forward","then":[{"return":{}}],"else":[{"return":{}}]}
+                    {
+                        "if":{"source":"$event.input.status","equals":"ready"},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
                 ]
             }"#,
         )
         .expect("parse Event conditional Workflow");
 
-        validate_definition(&registry.client(), &workflow).expect("validate Event condition");
         block_on(execute_steps(
             &workflow,
-            &event_input(r#"{"forward":true}"#),
+            &event_input(r#"{"status":"ready"}"#),
             registry.client(),
         ))
-        .expect("execute boolean condition");
-        let error = block_on(execute_steps(
-            &workflow,
-            &event_input(r#"{"forward":"yes"}"#),
-            registry.client(),
-        ))
-        .expect_err("reject non-boolean condition");
+        .expect("compare string field");
+    }
 
-        assert!(matches!(
-            error,
-            WorkflowExecutionError::ConditionNotBoolean { field } if field == "forward"
-        ));
+    #[test]
+    fn missing_condition_field_compares_as_json_null() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"session":"session-1"}"#);
+        let workflow = parse_definition(
+            r#"{
+                "id":"missing-error-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "if":{"source":"$previous.output.error","not_equals":null},
+                        "then":[{"call":"missing.method"}],
+                        "else":[{"return":{}}]
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse missing-field condition");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("missing field compares equal to null");
+    }
+
+    #[test]
+    fn non_null_condition_field_satisfies_json_inequality() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"error":"worker_stopped"}"#);
+        let workflow = parse_definition(
+            r#"{
+                "id":"arbitrary-error-condition",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "if":{"source":"$previous.output.error","not_equals":null},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse non-null condition");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("non-null error selects error branch");
+    }
+
+    #[test]
+    fn mapping_can_embed_a_complete_previous_output_document() {
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 128, 2>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_condition_producer(&registry, r#"{"error":"worker_stopped"}"#);
+        let seen = Rc::new(RefCell::new(None));
+        let handler_seen = Rc::clone(&seen);
+        registry
+            .register_json::<WholeDocumentSink, _>(
+                "*",
+                move |_context, request: JsonRef, writer: JsonWriter| {
+                    let seen = Rc::clone(&handler_seen);
+                    async move {
+                        seen.replace(Some(String::from(request.as_str()?)));
+                        writer.write("{}").await
+                    }
+                },
+            )
+            .expect("register document sink");
+        let workflow = parse_definition(
+            r#"{
+                "id":"whole-output-mapping",
+                "match":{"event":"workflow.event"},
+                "steps":[
+                    {"call":"workflow.condition-produce","arguments":{}},
+                    {
+                        "call":"workflow.whole-document-sink",
+                        "arguments":{"payload":"$previous.output"}
+                    }
+                ]
+            }"#,
+        )
+        .expect("parse whole-document mapping");
+
+        block_on(execute_steps(
+            &workflow,
+            &event_input("{}"),
+            registry.client(),
+        ))
+        .expect("embed complete previous output");
+
+        assert_eq!(
+            seen.borrow().as_deref(),
+            Some(r#"{"payload":{"error":"worker_stopped"}}"#)
+        );
     }
 
     #[test]
@@ -1709,7 +1998,7 @@ mod json_workflow_tests {
                 "id":"unknown-branch-method",
                 "match":{"event":"workflow.event"},
                 "steps":[
-                    {"if":"$event.input.forward","then":[{"call":"missing.method"}],"else":[]}
+                    {"if":{"source":"$event.input.forward","equals":true},"then":[{"call":"missing.method"}],"else":[]}
                 ]
             }"#,
         )

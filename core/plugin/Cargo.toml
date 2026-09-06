@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Public facade for Barracuda Plugin construction and lifecycle"
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+manifest = ["dep:barracuda-plugin-manifest"]
+
+[dependencies]
+barracuda-plugin-api = { path = "crates/api" }
+barracuda-plugin-macros = { path = "crates/macros" }
+barracuda-plugin-manager = { path = "crates/manager" }
+barracuda-plugin-manifest = { path = "crates/manifest", optional = true }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

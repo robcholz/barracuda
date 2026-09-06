@@ -288,7 +288,7 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
         .map(|(members, _after)| members)
         .expect("default members");
 
-    assert!(default_members.contains("apps/barracuda-cli"));
+    assert!(default_members.contains("apps/barracuda-system"));
     assert!(!default_members.contains("tools/barracuda-build"));
     assert!(!manifest.contains("\"tools/barracuda-build\","));
     assert!(manifest.contains("\"boards/configs/*/hal\","));

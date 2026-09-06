@@ -15,7 +15,7 @@ use barracuda_event_router::{
 };
 use futures_lite::{future, future::poll_fn, Stream};
 
-use crate::open_session::{SessionEventDocument, TerminalOutcome};
+use crate::open_session::SessionEventDocument;
 
 /// `SessionControl::append` JSON RPC.
 pub mod append;
@@ -45,8 +45,6 @@ const EVENT_DOCUMENT_FIXED_BYTES: usize =
 struct OpenedSession {
     control: SessionControl,
     events: SessionStream,
-    run: u32,
-    next_sequence: u32,
 }
 
 struct RegistryState {
@@ -100,15 +98,9 @@ impl SessionRegistry {
         let mut state = self.0.state.borrow_mut();
         let run = state.next_run;
         state.next_run = state.next_run.checked_add(1).unwrap_or(1);
-        state.sessions.insert(
-            session,
-            OpenedSession {
-                control,
-                events,
-                run,
-                next_sequence: 0,
-            },
-        );
+        state
+            .sessions
+            .insert(session, OpenedSession { control, events });
         drop(state);
         let _ignored = self.0.changed.try_send(());
         run
@@ -148,23 +140,17 @@ impl SessionRegistry {
         for (session, opened) in &mut state.sessions {
             match Stream::poll_next(Pin::new(&mut opened.events), context) {
                 Poll::Ready(Some(Ok(event))) => {
-                    let terminal = matches!(&event, SessionEvent::Closed(_))
-                        .then_some(TerminalOutcome::Closed);
-                    let sequence = opened.next_sequence;
-                    opened.next_sequence = opened.next_sequence.saturating_add(1);
-                    ready = Some((*session, opened.run, sequence, event.into(), terminal));
+                    let terminal = matches!(&event, SessionEvent::Closed(_));
+                    ready = Some((*session, event.into(), terminal));
                     break;
                 }
                 Poll::Ready(Some(Err(_))) | Poll::Ready(None) => {
-                    let sequence = opened.next_sequence;
                     ready = Some((
                         *session,
-                        opened.run,
-                        sequence,
                         SessionEventDocument::StreamError {
                             error: "worker_stopped",
                         },
-                        Some(TerminalOutcome::WorkerStopped),
+                        true,
                     ));
                     break;
                 }
@@ -172,28 +158,19 @@ impl SessionRegistry {
             }
         }
 
-        let Some((session, run, sequence, event, terminal)) = ready else {
+        let Some((session, event, terminal)) = ready else {
             return Poll::Pending;
         };
-        if terminal.is_some() {
+        if terminal {
             state.sessions.remove(&session);
         }
-        Poll::Ready(Some(PendingEvent {
-            session,
-            run,
-            sequence,
-            event,
-            terminal,
-        }))
+        Poll::Ready(Some(PendingEvent { session, event }))
     }
 }
 
 struct PendingEvent {
     session: SessionId,
-    run: u32,
-    sequence: u32,
     event: SessionEventDocument,
-    terminal: Option<TerminalOutcome>,
 }
 
 /// Drives open runtime streams into bounded `session.event` documents.
@@ -202,191 +179,220 @@ pub(crate) async fn emit_session_events<const M: usize>(
     rpc: RpcClient,
 ) -> ComponentResult<()> {
     let emitter = EventEmitter::<M>::new(rpc);
+    let mut sequence = 0;
     loop {
         let pending = registry.next_event().await;
-        FieldEmitter::new(&emitter, &pending)
+        sequence = SemanticEmitter::new(&emitter, pending.session, sequence)
             .emit_event(pending.event)
             .await?;
     }
 }
 
-struct FieldEmitter<'a, const M: usize> {
+struct SemanticEmitter<'a, const M: usize> {
     emitter: &'a EventEmitter<M>,
     session: SessionId,
-    run: u32,
     sequence: u32,
-    chunk_index: u32,
-    terminal: Option<TerminalOutcome>,
 }
 
-impl<'a, const M: usize> FieldEmitter<'a, M> {
-    const fn new(emitter: &'a EventEmitter<M>, event: &PendingEvent) -> Self {
+impl<'a, const M: usize> SemanticEmitter<'a, M> {
+    const fn new(emitter: &'a EventEmitter<M>, session: SessionId, sequence: u32) -> Self {
         Self {
             emitter,
-            session: event.session,
-            run: event.run,
-            sequence: event.sequence,
-            chunk_index: 0,
-            terminal: event.terminal,
+            session,
+            sequence,
         }
     }
 
-    async fn emit_event(&mut self, event: SessionEventDocument) -> ComponentResult<()> {
+    async fn emit_event(mut self, event: SessionEventDocument) -> ComponentResult<u32> {
         use barracuda_agent_runtime::{InputRequestKind, TurnOrigin};
         use SessionEventDocument as Document;
 
         match event {
             Document::TurnStarted { turn, origin } => {
-                self.field("type", "turn_started", false).await?;
                 let turn = IdText::new(turn)?;
-                self.field("turn", turn.as_str(), false).await?;
                 match origin {
-                    TurnOrigin::User => self.field("origin", "user", true).await,
+                    TurnOrigin::User => {
+                        self.emit(
+                            "turn_started",
+                            EventPayload::TurnStarted {
+                                turn: turn.as_str(),
+                                origin: "user",
+                            },
+                        )
+                        .await?;
+                    }
                     TurnOrigin::ToolCall { call } => {
-                        self.field("origin", "tool_call", false).await?;
-                        self.tool_call(call, true).await
+                        self.emit(
+                            "turn_started",
+                            EventPayload::TurnStarted {
+                                turn: turn.as_str(),
+                                origin: "tool_call",
+                            },
+                        )
+                        .await?;
+                        self.text_events("turn_origin_tool_call_id_delta", &call.id)
+                            .await?;
+                        self.text_events("turn_origin_tool_name_delta", &call.name)
+                            .await?;
+                        self.text_events("turn_origin_arguments_delta", &call.arguments_json)
+                            .await?;
+                        self.emit("turn_origin_ended", EventPayload::Empty).await?;
                     }
                 }
             }
             Document::InputRequested { request, kind } => {
-                self.field("type", "input_requested", false).await?;
                 let request = IdText::new(request)?;
-                self.field("request", request.as_str(), false).await?;
                 match kind {
                     InputRequestKind::PermissionApproval { tool_call, reason } => {
-                        self.field("kind", "permission_approval", false).await?;
-                        self.tool_call(tool_call, false).await?;
-                        self.field("reason", &reason, true).await
+                        self.emit(
+                            "input_request_started",
+                            EventPayload::InputRequestStarted {
+                                request: request.as_str(),
+                                kind: "permission_approval",
+                            },
+                        )
+                        .await?;
+                        self.text_events("input_request_tool_call_id_delta", &tool_call.id)
+                            .await?;
+                        self.text_events("input_request_tool_name_delta", &tool_call.name)
+                            .await?;
+                        self.text_events(
+                            "input_request_arguments_delta",
+                            &tool_call.arguments_json,
+                        )
+                        .await?;
+                        self.text_events("input_request_reason_delta", &reason)
+                            .await?;
+                        self.emit(
+                            "input_requested",
+                            EventPayload::Request {
+                                request: request.as_str(),
+                            },
+                        )
+                        .await?;
                     }
                 }
             }
             Document::IterationStarted { iteration } => {
-                self.field("type", "iteration_started", false).await?;
                 let iteration = IdText::new(iteration)?;
-                self.field("iteration", iteration.as_str(), true).await
+                self.emit(
+                    "iteration_started",
+                    EventPayload::Iteration {
+                        iteration: iteration.as_str(),
+                    },
+                )
+                .await?;
             }
             Document::ReasoningDelta { text } => {
-                self.field("type", "reasoning_delta", false).await?;
-                self.field("text", &text, true).await
+                self.text_events("reasoning_delta", &text).await?;
             }
-            Document::ReasoningEnded => self.field("type", "reasoning_ended", true).await,
+            Document::ReasoningEnded => {
+                self.emit("reasoning_ended", EventPayload::Empty).await?;
+            }
             Document::OutputDelta { text } => {
-                self.field("type", "output_delta", false).await?;
-                self.field("text", &text, true).await
+                self.text_events("output_delta", &text).await?;
             }
-            Document::OutputEnded => self.field("type", "output_ended", true).await,
+            Document::OutputEnded => {
+                self.emit("output_ended", EventPayload::Empty).await?;
+            }
             Document::ToolResult { call, output } => {
-                self.field("type", "tool_result", false).await?;
-                self.tool_call(call, false).await?;
-                self.field("output", &output.content, false).await?;
-                self.field("ok", if output.ok { "true" } else { "false" }, true)
-                    .await
-            }
-            Document::ToolResultsEnded => self.field("type", "tool_results_ended", true).await,
-            Document::IterationEnded => self.field("type", "iteration_ended", true).await,
-            Document::Usage { usage } => self.usage(usage).await,
-            Document::EffectOutputDelta { text } => {
-                self.field("type", "effect_output_delta", false).await?;
-                self.field("text", &text, true).await
-            }
-            Document::EffectOutputEnded => self.field("type", "effect_output_ended", true).await,
-            Document::TurnError { message } => {
-                self.field("type", "turn_error", false).await?;
-                self.field("message", message.as_str(), false).await?;
-                self.field(
-                    "message_truncated",
-                    if message.truncated() { "true" } else { "false" },
-                    true,
+                self.emit("tool_result_started", EventPayload::Empty)
+                    .await?;
+                self.text_events("tool_call_id_delta", &call.id).await?;
+                self.text_events("tool_name_delta", &call.name).await?;
+                self.text_events("tool_arguments_delta", &call.arguments_json)
+                    .await?;
+                self.text_events("tool_output_delta", &output.content)
+                    .await?;
+                self.emit(
+                    "tool_result_ended",
+                    EventPayload::ToolResultEnded { ok: output.ok },
                 )
-                .await
+                .await?;
+            }
+            Document::ToolResultsEnded => {
+                self.emit("tool_results_ended", EventPayload::Empty).await?;
+            }
+            Document::IterationEnded => {
+                self.emit("iteration_ended", EventPayload::Empty).await?;
+            }
+            Document::Usage { usage } => {
+                self.emit("usage", EventPayload::Usage(usage)).await?;
+            }
+            Document::EffectOutputDelta { text } => {
+                self.text_events("effect_output_delta", &text).await?;
+            }
+            Document::EffectOutputEnded => {
+                self.emit("effect_output_ended", EventPayload::Empty)
+                    .await?;
+            }
+            Document::TurnError { message } => {
+                self.emit(
+                    "turn_error",
+                    EventPayload::Error {
+                        message: message.as_str(),
+                        truncated: message.truncated(),
+                    },
+                )
+                .await?;
             }
             Document::TurnEnded { turn } => {
-                self.field("type", "turn_ended", false).await?;
                 let turn = IdText::new(turn)?;
-                self.field("turn", turn.as_str(), true).await
+                self.emit(
+                    "turn_ended",
+                    EventPayload::Turn {
+                        turn: turn.as_str(),
+                    },
+                )
+                .await?;
             }
             Document::SessionError { message } => {
-                self.field("type", "session_error", false).await?;
-                self.field("message", message.as_str(), false).await?;
-                self.field(
-                    "message_truncated",
-                    if message.truncated() { "true" } else { "false" },
-                    true,
+                self.emit(
+                    "session_error",
+                    EventPayload::Error {
+                        message: message.as_str(),
+                        truncated: message.truncated(),
+                    },
                 )
-                .await
+                .await?;
             }
             Document::Closed { reason } => {
-                self.field("type", "closed", false).await?;
-                self.field("reason", reason.code(), true).await
+                self.emit(
+                    "closed",
+                    EventPayload::Reason {
+                        reason: reason.code(),
+                    },
+                )
+                .await?;
             }
             Document::StreamError { error } => {
-                self.field("type", "stream_error", false).await?;
-                self.field("error", error, true).await
+                self.emit("stream_error", EventPayload::StreamError { error })
+                    .await?;
             }
         }
+        Ok(self.sequence)
     }
 
-    async fn tool_call(
-        &mut self,
-        call: barracuda_agent_runtime::ToolCall,
-        last: bool,
-    ) -> ComponentResult<()> {
-        self.field("tool_call_id", &call.id, false).await?;
-        self.field("tool_name", &call.name, false).await?;
-        self.field("tool_arguments_json", &call.arguments_json, last)
-            .await
-    }
-
-    async fn usage(&mut self, usage: ProviderUsage) -> ComponentResult<()> {
-        let values = [
-            ("input_tokens", usage.input_tokens),
-            ("output_tokens", usage.output_tokens),
-            ("cache_read_tokens", usage.cache_read_tokens),
-            ("cache_write_tokens", usage.cache_write_tokens),
-        ];
-        let mut remaining = values.iter().filter(|(_, value)| value.is_some()).count();
-        self.field("type", "usage", remaining == 0).await?;
-        for (name, value) in values {
-            let Some(value) = value else {
-                continue;
-            };
-            remaining = remaining.saturating_sub(1);
-            let value = IdText::new(value)?;
-            self.field(name, value.as_str(), remaining == 0).await?;
-        }
-        Ok(())
-    }
-
-    async fn field(&mut self, name: &str, mut value: &str, last: bool) -> ComponentResult<()> {
+    async fn text_events(&mut self, event_type: &str, mut value: &str) -> ComponentResult<()> {
         loop {
-            let final_payload = EventChunkPayload {
+            let final_payload = SessionEventPayload {
                 session: self.session,
-                run: self.run,
                 sequence: self.sequence,
-                chunk_index: self.chunk_index,
-                field: name,
-                chunk: value,
-                field_complete: true,
-                event_complete: last,
-                terminal: last.then_some(self.terminal).flatten(),
+                event_type,
+                payload: EventPayload::Text { text: value },
             };
             if emitted_document_len(&final_payload)? <= M {
-                return self.emit_chunk(&final_payload).await;
+                return self.emit_payload(&final_payload).await;
             }
             if value.is_empty() {
                 return Err(ComponentError::lifecycle(EventLaneTooSmall));
             }
 
-            let empty_payload = EventChunkPayload {
+            let empty_payload = SessionEventPayload {
                 session: self.session,
-                run: self.run,
                 sequence: self.sequence,
-                chunk_index: self.chunk_index,
-                field: name,
-                chunk: "",
-                field_complete: false,
-                event_complete: false,
-                terminal: None,
+                event_type,
+                payload: EventPayload::Text { text: "" },
             };
             let overhead = emitted_document_len(&empty_payload)?;
             let budget = M
@@ -396,46 +402,117 @@ impl<'a, const M: usize> FieldEmitter<'a, M> {
             if chunk.is_empty() {
                 return Err(ComponentError::lifecycle(EventLaneTooSmall));
             }
-            let payload = EventChunkPayload {
-                chunk,
+            let payload = SessionEventPayload {
+                payload: EventPayload::Text { text: chunk },
                 ..empty_payload
             };
-            self.emit_chunk(&payload).await?;
+            self.emit_payload(&payload).await?;
             value = value
                 .get(chunk.len()..)
                 .ok_or_else(|| ComponentError::lifecycle(EventEncodingFailed))?;
         }
     }
 
-    async fn emit_chunk(&mut self, payload: &EventChunkPayload<'_>) -> ComponentResult<()> {
-        self.emitter
-            .emit::<SessionOutputEvent>(payload)
-            .await
-            .map_err(ComponentError::lifecycle)?;
-        self.chunk_index = self
-            .chunk_index
+    async fn emit(&mut self, event_type: &str, payload: EventPayload<'_>) -> ComponentResult<()> {
+        let payload = SessionEventPayload {
+            session: self.session,
+            sequence: self.sequence,
+            event_type,
+            payload,
+        };
+        if emitted_document_len(&payload)? > M {
+            return Err(ComponentError::lifecycle(EventLaneTooSmall));
+        }
+        self.emit_payload(&payload).await
+    }
+
+    async fn emit_payload(&mut self, payload: &SessionEventPayload<'_>) -> ComponentResult<()> {
+        match payload.event_type {
+            "turn_started" | "turn_ended" | "closed" => log::info!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+            "turn_error" | "session_error" | "stream_error" => log::warn!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+            _ => log::debug!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+        }
+        if let Err(error) = self.emitter.emit::<SessionOutputEvent>(payload).await {
+            log::error!(
+                "Agent failed to emit `{}` for session `{}` at sequence {}: {error}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            );
+            return Err(ComponentError::lifecycle(error));
+        }
+        self.sequence = self
+            .sequence
             .checked_add(1)
             .ok_or_else(|| ComponentError::lifecycle(EventSequenceOverflow))?;
         Ok(())
     }
 }
 
-struct EventChunkPayload<'a> {
+struct SessionEventPayload<'a> {
     session: SessionId,
-    run: u32,
     sequence: u32,
-    chunk_index: u32,
-    field: &'a str,
-    chunk: &'a str,
-    field_complete: bool,
-    event_complete: bool,
-    terminal: Option<TerminalOutcome>,
+    event_type: &'a str,
+    payload: EventPayload<'a>,
 }
 
-impl JsonPayload for EventChunkPayload<'_> {
+enum EventPayload<'a> {
+    Empty,
+    Text {
+        text: &'a str,
+    },
+    TurnStarted {
+        turn: &'a str,
+        origin: &'static str,
+    },
+    InputRequestStarted {
+        request: &'a str,
+        kind: &'static str,
+    },
+    Request {
+        request: &'a str,
+    },
+    Iteration {
+        iteration: &'a str,
+    },
+    ToolResultEnded {
+        ok: bool,
+    },
+    Usage(ProviderUsage),
+    Error {
+        message: &'a str,
+        truncated: bool,
+    },
+    Turn {
+        turn: &'a str,
+    },
+    Reason {
+        reason: &'a str,
+    },
+    StreamError {
+        error: &'a str,
+    },
+}
+
+impl JsonPayload for SessionEventPayload<'_> {
     fn encoded_len(&self) -> Result<usize, RpcError> {
         let mut writer = CountingWriter(0);
-        write_event_chunk(&mut writer, self).map_err(|_error| RpcError::InvalidFrameState)?;
+        write_session_event(&mut writer, self).map_err(|_error| RpcError::InvalidFrameState)?;
         Ok(writer.0)
     }
 
@@ -445,7 +522,7 @@ impl JsonPayload for EventChunkPayload<'_> {
             destination,
             written: 0,
         };
-        write_event_chunk(&mut writer, self).map_err(|_error| RpcError::FrameTooLarge {
+        write_session_event(&mut writer, self).map_err(|_error| RpcError::FrameTooLarge {
             size: capacity.saturating_add(1),
             capacity,
         })?;
@@ -453,28 +530,82 @@ impl JsonPayload for EventChunkPayload<'_> {
     }
 }
 
-fn write_event_chunk(writer: &mut dyn fmt::Write, event: &EventChunkPayload<'_>) -> fmt::Result {
+fn write_session_event(
+    writer: &mut dyn fmt::Write,
+    event: &SessionEventPayload<'_>,
+) -> fmt::Result {
     write!(
         writer,
-        "{{\"session\":\"{}\",\"run\":\"run-{}\",\"sequence\":{},\"chunk_index\":{},\"field\":",
-        event.session, event.run, event.sequence, event.chunk_index
+        "{{\"session\":\"{}\",\"sequence\":{},\"type\":",
+        event.session, event.sequence
     )?;
-    write_json_string(writer, event.field)?;
-    writer.write_str(",\"chunk\":")?;
-    write_json_string(writer, event.chunk)?;
-    write!(
-        writer,
-        ",\"field_complete\":{},\"event_complete\":{},\"terminal\":",
-        event.field_complete, event.event_complete
-    )?;
-    match event.terminal {
-        Some(terminal) => write_json_string(writer, terminal.code())?,
-        None => writer.write_str("null")?,
+    write_json_string(writer, event.event_type)?;
+    writer.write_str(",\"payload\":")?;
+    write_event_payload(writer, &event.payload)?;
+    writer.write_char('}')
+}
+
+fn write_event_payload(writer: &mut dyn fmt::Write, payload: &EventPayload<'_>) -> fmt::Result {
+    writer.write_char('{')?;
+    match payload {
+        EventPayload::Empty => {}
+        EventPayload::Text { text } => write_string_field(writer, "text", text)?,
+        EventPayload::TurnStarted { turn, origin } => {
+            write_string_field(writer, "turn", turn)?;
+            writer.write_char(',')?;
+            write_string_field(writer, "origin", origin)?;
+        }
+        EventPayload::InputRequestStarted { request, kind } => {
+            write_string_field(writer, "request", request)?;
+            writer.write_char(',')?;
+            write_string_field(writer, "kind", kind)?;
+        }
+        EventPayload::Request { request } => write_string_field(writer, "request", request)?,
+        EventPayload::Iteration { iteration } => {
+            write_string_field(writer, "iteration", iteration)?;
+        }
+        EventPayload::ToolResultEnded { ok } => write!(writer, "\"ok\":{ok}")?,
+        EventPayload::Usage(usage) => write_usage(writer, usage)?,
+        EventPayload::Error { message, truncated } => {
+            write_string_field(writer, "message", message)?;
+            write!(writer, ",\"message_truncated\":{truncated}")?;
+        }
+        EventPayload::Turn { turn } => write_string_field(writer, "turn", turn)?,
+        EventPayload::Reason { reason } => write_string_field(writer, "reason", reason)?,
+        EventPayload::StreamError { error } => write_string_field(writer, "error", error)?,
     }
     writer.write_char('}')
 }
 
-fn emitted_document_len(payload: &EventChunkPayload<'_>) -> ComponentResult<usize> {
+fn write_string_field(writer: &mut dyn fmt::Write, name: &str, value: &str) -> fmt::Result {
+    write_json_string(writer, name)?;
+    writer.write_char(':')?;
+    write_json_string(writer, value)
+}
+
+fn write_usage(writer: &mut dyn fmt::Write, usage: &ProviderUsage) -> fmt::Result {
+    let values = [
+        ("input_tokens", usage.input_tokens),
+        ("output_tokens", usage.output_tokens),
+        ("cache_read_tokens", usage.cache_read_tokens),
+        ("cache_write_tokens", usage.cache_write_tokens),
+    ];
+    let mut written = false;
+    for (name, value) in values {
+        let Some(value) = value else {
+            continue;
+        };
+        if written {
+            writer.write_char(',')?;
+        }
+        write_json_string(writer, name)?;
+        write!(writer, ":{value}")?;
+        written = true;
+    }
+    Ok(())
+}
+
+fn emitted_document_len(payload: &SessionEventPayload<'_>) -> ComponentResult<usize> {
     payload
         .encoded_len()
         .and_then(|length| {
@@ -589,7 +720,7 @@ struct EventSequenceOverflow;
 
 impl core::fmt::Display for EventSequenceOverflow {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("session event chunk sequence overflow")
+        formatter.write_str("session event sequence overflow")
     }
 }
 
@@ -600,7 +731,7 @@ struct EventEncodingFailed;
 
 impl core::fmt::Display for EventEncodingFailed {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        formatter.write_str("session event field encoding failed")
+        formatter.write_str("session event encoding failed")
     }
 }
 
@@ -626,16 +757,11 @@ mod tests {
     #[test]
     fn chunk_uses_the_available_event_lane_without_splitting_utf8() {
         let source = format!("{}😀{}", "a".repeat(400), "b".repeat(400));
-        let empty = EventChunkPayload {
+        let empty = SessionEventPayload {
             session: SessionId::new(u32::MAX),
-            run: u32::MAX,
             sequence: u32::MAX,
-            chunk_index: u32::MAX,
-            field: "text",
-            chunk: "",
-            field_complete: false,
-            event_complete: false,
-            terminal: None,
+            event_type: "output_delta",
+            payload: EventPayload::Text { text: "" },
         };
         let budget = 512_usize.saturating_sub(emitted_document_len(&empty).unwrap_or(512));
         let chunk = json_bounded_prefix(&source, budget);
@@ -648,20 +774,18 @@ mod tests {
     #[test]
     fn maximally_escaped_chunk_fits_one_event_lane() {
         let source = "\u{1f}".repeat(512);
-        let empty = EventChunkPayload {
+        let empty = SessionEventPayload {
             session: SessionId::new(u32::MAX),
-            run: u32::MAX,
             sequence: u32::MAX,
-            chunk_index: u32::MAX,
-            field: "tool_arguments_json",
-            chunk: "",
-            field_complete: false,
-            event_complete: false,
-            terminal: None,
+            event_type: "tool_arguments_delta",
+            payload: EventPayload::Text { text: "" },
         };
         let budget = 512_usize.saturating_sub(emitted_document_len(&empty).unwrap_or(512));
         let chunk = json_bounded_prefix(&source, budget);
-        let payload = EventChunkPayload { chunk, ..empty };
+        let payload = SessionEventPayload {
+            payload: EventPayload::Text { text: chunk },
+            ..empty
+        };
         assert!(!chunk.is_empty());
         assert!(emitted_document_len(&payload).is_ok_and(|length| length <= 512));
     }

@@ -3,6 +3,7 @@ name = "barracuda-plugin-manager"
 authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Plugin management and scoped persistent storage for Barracuda"
 readme = "README.md"
 

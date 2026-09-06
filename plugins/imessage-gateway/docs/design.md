@@ -14,26 +14,40 @@ document, rather than an independent text-field limit, must fit one RPC lane.
 
 ## Application streams
 
-`gateway.send_stream` and `gateway.send_media` are unary JSON command APIs.
-Each logical stream is a state machine:
+`gateway.send_stream` is a unary JSON event-ingress API backed by one live typed
+provider stream per active Agent turn:
 
 ```text
-start(sequence=0) -> chunk(sequence=1..n) -> finish(sequence=n+1)
+turn_started -> semantic events -> turn_ended
 ```
 
-Every accepted command returns `accepted_sequence`. Commands are rejected when the
-stream is absent, duplicated, out of order, or its bounded queue is full. A
-`busy` response is backpressure: the caller yields and retries the same
-sequence. `finish` acceptance closes input; provider completion is reported by
-one terminal Event rather than holding an RPC lane.
+A terminal `stream_error` may replace that lifecycle when the producer cannot
+start or continue the turn. Gateway converts it into a typed stream failure;
+providers receive a failed stream rather than a normal semantic event. Gateway
+reads the payload's `error` string and permits producer correlation fields to
+remain in that document. A standalone error creates the delivery for its route
+and immediately terminates it, so clients observe a bounded failure instead of
+waiting for a turn that will never start.
 
-The adapter turns accepted chunks into the existing typed provider stream as
-they arrive. It never gathers a full text or binary body. A queued command owns
-the original `JsonRef`, so the Event Router lane is the queue buffer. When a
-worker consumes it, text and decoded media use inline stream items rather than
-allocating per chunk. Media is Base64 only because JSON cannot carry raw binary.
+Every call contains the route and one complete `session.event` document. The
+Agent session is the correlation key and Agent sequence is the only order. The
+Gateway understands `turn_started`, `turn_ended`, and `stream_error` as stream
+boundaries. It forwards normal records without interpreting their payloads. A
+provider chooses which semantic event types it consumes.
 
-Four text workers and four media workers match the four retained stream slots;
+Every accepted event returns `accepted_sequence`. Events are rejected when the
+stream is absent, duplicated, out of order, changes route, or its bounded queue
+is full. A `busy` response is backpressure: the caller yields and retries the
+same event. Accepting `turn_ended` closes input; provider completion is reported
+by one terminal Event rather than holding an RPC lane. Accepting
+`stream_error` closes input and reports failed delivery through the same
+terminal Event. The complete request,
+including route and payload, must fit one 512-byte RPC lane.
+
+`gateway.send_media` retains its explicit `start -> chunk -> finish` state
+machine. Media is Base64 only because JSON cannot carry raw binary.
+
+Four event-stream workers and four media workers match the four retained stream slots;
 all accepted streams can therefore make progress concurrently.
 
 ## Inbound messages

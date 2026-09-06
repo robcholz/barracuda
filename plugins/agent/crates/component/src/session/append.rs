@@ -36,21 +36,35 @@ pub fn append_handler(registry: SessionRegistry) -> impl JsonHandler {
             let request = request.deserialize::<AppendRequest<'_>>()?;
             let session = match parse_session(request.session) {
                 Ok(session) => session,
-                Err(error) => return response.write(&ErrorResponse(error)).await,
+                Err(error) => {
+                    log::warn!(
+                        "Agent rejected `session.append` for `{}`: {error}",
+                        request.session
+                    );
+                    return response.write(&ErrorResponse(error)).await;
+                }
             };
             let Some(control) = registry.get(session) else {
+                log::warn!("Agent rejected append for unopened session `{session}`");
                 return response
                     .write(&ErrorResponse(AgentRpcError::SessionNotOpen))
                     .await;
             };
 
             // SessionControl owns the message after this lane is released.
+            log::info!(
+                "Agent appending {}-byte user message to session `{session}`",
+                request.text.len()
+            );
             match control.append(Message::text(request.text)).await {
-                Ok(()) => response.write("{}").await,
+                Ok(()) => {
+                    log::info!("Agent accepted user message for session `{session}`");
+                    response.write("{}").await
+                }
                 Err(error) => {
-                    response
-                        .write(&ErrorResponse(map_control_error(error)))
-                        .await
+                    let error = map_control_error(error);
+                    log::warn!("Agent rejected user message for session `{session}`: {error}");
+                    response.write(&ErrorResponse(error)).await
                 }
             }
         }

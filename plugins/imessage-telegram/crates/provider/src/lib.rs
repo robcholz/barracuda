@@ -10,13 +10,13 @@ use alloc::{
 };
 use core::cell::Cell;
 
-use futures_lite::StreamExt as _;
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
     MessageChannel, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SendReceipt,
     SetTypingRequest, StreamError, TextBody,
 };
-use gateway_http::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
@@ -64,7 +64,7 @@ where
         content_type: &str,
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = gateway_http::send(
+        let response = barracuda_imessage_gateway_plugin::send(
             &self.http_clients,
             Method::POST,
             &self.endpoint(method),
@@ -122,7 +122,7 @@ where
     async fn send_stream(
         &self,
         target: MessageTarget,
-        mut stream: gateway::TextStream,
+        mut stream: barracuda_imessage_gateway_plugin::TextStream,
         reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         let draft_id = self.next_id();
@@ -379,7 +379,7 @@ fn parse_response(response: Response) -> Result<Value, ChannelError> {
         })
 }
 
-fn transport_error(error: gateway_http::Error) -> ChannelError {
+fn transport_error(error: barracuda_imessage_gateway_plugin::Error) -> ChannelError {
     ChannelError::Transport {
         message: error.to_string(),
     }

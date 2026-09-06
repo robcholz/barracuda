@@ -4,23 +4,23 @@
     {
       "type": "object",
       "properties": {
-        "stream_id": { "type": "string" },
+        "session": { "type": "string", "pattern": "^session-[0-9]+$" },
         "sequence": { "type": "integer", "minimum": 0 },
         "outcome": { "const": "completed" },
         "message_id": { "type": "string" }
       },
-      "required": ["stream_id", "sequence", "outcome", "message_id"],
+      "required": ["session", "sequence", "outcome", "message_id"],
       "additionalProperties": false
     },
     {
       "type": "object",
       "properties": {
-        "stream_id": { "type": "string" },
+        "session": { "type": "string", "pattern": "^session-[0-9]+$" },
         "sequence": { "type": "integer", "minimum": 0 },
         "outcome": { "const": "failed" },
         "error": { "type": "string" }
       },
-      "required": ["stream_id", "sequence", "outcome", "error"],
+      "required": ["session", "sequence", "outcome", "error"],
       "additionalProperties": false
     }
   ]

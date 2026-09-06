@@ -4,20 +4,17 @@ version = "0.1.0"
 edition = "2021"
 description = "Linux Platform implementation for Barracuda"
 
-[features]
-default = []
-testing = ["embassy-executor/arch-std", "embassy-executor/executor-thread"]
-
 [dependencies]
 barracuda-board.workspace = true
 barracuda-platform.workspace = true
 barracuda-tls = { workspace = true, features = ["pem", "std"] }
 critical-section = { version = "1", features = ["std"] }
 embassy-embedded-hal = "0.5.0"
-embassy-executor.workspace = true
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-net.workspace = true
 embassy-net-driver-channel.workspace = true
 embassy-sync.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 embedded-storage = "0.3"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 heapless = "0.9"
@@ -29,7 +26,6 @@ tokio = { version = "1.52.3", default-features = false, features = ["fs", "io-ut
 tun = { version = "0.7.13", features = ["async"] }
 
 [dev-dependencies]
-embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 tempfile = "3"
 tokio = { version = "1.52.3", features = ["macros", "rt", "rt-multi-thread"] }
 

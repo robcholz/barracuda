@@ -2,6 +2,7 @@
 name = "barracuda-plugin-api"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Construction context shared by Barracuda Plugins"
 
 [lib]
@@ -9,7 +10,6 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-board-hal.workspace = true
-barracuda-plugin-macros.workspace = true
 embassy-net.workspace = true
 http-client.workspace = true
 

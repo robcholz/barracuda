@@ -19,8 +19,8 @@ use barracuda_event_router::{
 };
 use barracuda_imessage_bridge_plugin::ImessageBridgePlugin;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, never_embassy_stack};
-use barracuda_plugin_api::{ClientFactory, PluginContext};
-use barracuda_plugin_manager::PluginManager;
+use barracuda_plugin::api::{ClientFactory, PluginContext};
+use barracuda_plugin::manager::PluginManager;
 use barracuda_vfs::{create_dir_all, write};
 
 const FRAME_SIZE: usize = 512;
@@ -72,6 +72,7 @@ impl Error for WorkflowTestError {}
 struct WorkflowDriver {
     appended: Rc<RefCell<Vec<String>>>,
     gateway_commands: Rc<RefCell<Vec<String>>>,
+    open_calls: Rc<Cell<usize>>,
     completed: Rc<Cell<bool>>,
     failure: Rc<RefCell<Option<String>>>,
 }
@@ -88,12 +89,24 @@ impl Component<FRAME_SIZE> for WorkflowDriver {
                 response.write(r#"{"session":"session-1"}"#).await
             },
         )?;
+        let open_calls = Rc::clone(&self.open_calls);
         context.register_json::<OpenSession, _>(
             "system",
-            |_context, _request, response: JsonWriter| async move {
-                response
-                    .write(r#"{"session":"session-1","run":"run-1"}"#)
-                    .await
+            move |_context, _request, response: JsonWriter| {
+                let open_calls = Rc::clone(&open_calls);
+                async move {
+                    let call = open_calls.get();
+                    open_calls.set(call.saturating_add(1));
+                    if call == 0 {
+                        response
+                            .write(r#"{"session":"session-1","run":"run-1"}"#)
+                            .await
+                    } else {
+                        response
+                            .write(r#"{"session":"session-1","error":"worker_stopped"}"#)
+                            .await
+                    }
+                }
             },
         )?;
         let appended = Rc::clone(&self.appended);
@@ -103,7 +116,7 @@ impl Component<FRAME_SIZE> for WorkflowDriver {
                 let appended = Rc::clone(&appended);
                 async move {
                     appended.borrow_mut().push(request.as_str()?.to_string());
-                    response.write("{}").await
+                    response.write(r#"{"accepted_sequence":0}"#).await
                 }
             },
         )?;
@@ -154,52 +167,107 @@ async fn exercise_workflows(
         .map_err(ComponentError::lifecycle)?;
     wait_for_len(appended, 1, "inbound Workflow did not append to Agent").await?;
 
-    emit_session_field(&emitter, 0, 0, "type", "turn_started", true, false).await?;
+    emit_session_event(
+        &emitter,
+        0,
+        "turn_started",
+        r#"{"turn":"turn-1","origin":"user"}"#,
+    )
+    .await?;
     wait_for_len(
         gateway_commands,
         1,
         "outbound Workflow did not start stream",
     )
     .await?;
-    emit_session_field(&emitter, 1, 0, "type", "reasoning_delta", true, false).await?;
-    emit_session_field(&emitter, 1, 1, "text", "private", true, true).await?;
-    for _iteration in 0..8 {
-        futures_lite::future::yield_now().await;
-    }
-    if gateway_commands.borrow().len() != 1 {
-        return Err(ComponentError::lifecycle(WorkflowTestError(
-            "reasoning text was forwarded",
-        )));
-    }
-    emit_session_field(&emitter, 2, 0, "type", "output_delta", true, false).await?;
-    emit_session_field(&emitter, 2, 1, "text", "hello user", true, true).await?;
+
+    emitter
+        .emit::<GatewayMessageReceived>(
+            r#"{"route":{"channel":"imessage","conversation_id":"chat-1","thread_id":"thread-1"},"message_id":"message-2","text":"queued message"}"#,
+        )
+        .await
+        .map_err(ComponentError::lifecycle)?;
+    wait_for_len(
+        appended,
+        2,
+        "inbound Workflow did not append queued message",
+    )
+    .await?;
+
+    emit_session_event(&emitter, 1, "reasoning_delta", r#"{"text":"private"}"#).await?;
     wait_for_len(
         gateway_commands,
         2,
-        "outbound Workflow did not forward output",
+        "outbound Workflow did not forward reasoning",
     )
     .await?;
-    emit_session_field(&emitter, 3, 0, "type", "turn_ended", true, false).await?;
+    emit_session_event(&emitter, 2, "output_delta", r#"{"text":"hello user"}"#).await?;
     wait_for_len(
         gateway_commands,
         3,
+        "outbound Workflow did not forward output",
+    )
+    .await?;
+    emit_session_event(&emitter, 3, "turn_ended", r#"{"turn":"turn-1"}"#).await?;
+    wait_for_len(
+        gateway_commands,
+        4,
         "outbound Workflow did not finish stream",
+    )
+    .await?;
+
+    emit_session_event(
+        &emitter,
+        4,
+        "turn_started",
+        r#"{"turn":"turn-2","origin":"user"}"#,
+    )
+    .await?;
+    wait_for_len(
+        gateway_commands,
+        5,
+        "outbound Workflow did not start queued stream",
+    )
+    .await?;
+    emit_session_event(&emitter, 5, "output_delta", r#"{"text":"second reply"}"#).await?;
+    wait_for_len(
+        gateway_commands,
+        6,
+        "outbound Workflow did not forward queued output",
+    )
+    .await?;
+    emit_session_event(&emitter, 6, "turn_ended", r#"{"turn":"turn-2"}"#).await?;
+    wait_for_len(
+        gateway_commands,
+        7,
+        "outbound Workflow did not finish queued stream",
+    )
+    .await?;
+
+    emit_session_event(&emitter, 7, "closed", r#"{"reason":"closed"}"#).await?;
+    emitter
+        .emit::<GatewayMessageReceived>(
+            r#"{"route":{"channel":"imessage","conversation_id":"chat-1","thread_id":"thread-1"},"message_id":"message-3","text":"stale session"}"#,
+        )
+        .await
+        .map_err(ComponentError::lifecycle)?;
+    wait_for_len(
+        gateway_commands,
+        8,
+        "stale session error did not reach Gateway",
     )
     .await?;
     Ok(())
 }
 
-async fn emit_session_field(
+async fn emit_session_event(
     emitter: &EventEmitter<FRAME_SIZE>,
     sequence: u64,
-    chunk_index: u64,
-    field: &str,
-    chunk: &str,
-    field_complete: bool,
-    event_complete: bool,
+    event_type: &str,
+    payload: &str,
 ) -> Result<(), ComponentError> {
     let document = format!(
-        r#"{{"session":"session-1","run":"run-1","sequence":{sequence},"chunk_index":{chunk_index},"field":"{field}","chunk":"{chunk}","field_complete":{field_complete},"event_complete":{event_complete},"terminal":null}}"#,
+        r#"{{"session":"session-1","sequence":{sequence},"type":"{event_type}","payload":{payload}}}"#,
     );
     emitter
         .emit::<SessionEvent>(&document)
@@ -244,12 +312,14 @@ fn builtin_workflows_restore_before_plugins_and_bridge_both_directions() {
 
         let appended = Rc::new(RefCell::new(Vec::new()));
         let gateway_commands = Rc::new(RefCell::new(Vec::new()));
+        let open_calls = Rc::new(Cell::new(0));
         let completed = Rc::new(Cell::new(false));
         let failure = Rc::new(RefCell::new(None));
         router
             .load(Box::new(WorkflowDriver {
                 appended: Rc::clone(&appended),
                 gateway_commands: Rc::clone(&gateway_commands),
+                open_calls: Rc::clone(&open_calls),
                 completed: Rc::clone(&completed),
                 failure: Rc::clone(&failure),
             }))
@@ -271,11 +341,39 @@ fn builtin_workflows_restore_before_plugins_and_bridge_both_directions() {
         assert_eq!(failure.borrow().as_deref(), None);
         assert_eq!(
             appended.borrow().as_slice(),
-            &[r#"{"text":"hello agent","session":"session-1"}"#]
+            &[
+                r#"{"text":"hello agent","session":"session-1"}"#,
+                r#"{"text":"queued message","session":"session-1"}"#,
+            ]
         );
-        assert_eq!(gateway_commands.borrow().len(), 3);
-        assert!(gateway_commands.borrow()[0].contains(r#""action":"start""#));
-        assert!(gateway_commands.borrow()[1].contains(r#""text":"hello user""#));
-        assert!(gateway_commands.borrow()[2].contains(r#""action":"finish""#));
+        assert_eq!(gateway_commands.borrow().len(), 8);
+        for (index, event_type) in [
+            "turn_started",
+            "reasoning_delta",
+            "output_delta",
+            "turn_ended",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let command = &gateway_commands.borrow()[index];
+            assert!(command.contains(&format!(r#""type":"{event_type}""#)));
+            assert!(command.contains(r#""route":{"channel":"imessage","conversation_id":"chat-1","thread_id":"thread-1"}"#));
+            assert!(command.contains(r#""reply_to":"message-1""#));
+        }
+        for (offset, event_type) in ["turn_started", "output_delta", "turn_ended"]
+            .iter()
+            .enumerate()
+        {
+            let command = &gateway_commands.borrow()[offset + 4];
+            assert!(command.contains(&format!(r#""type":"{event_type}""#)));
+            assert!(command.contains(r#""route":{"channel":"imessage","conversation_id":"chat-1","thread_id":"thread-1"}"#));
+            assert!(command.contains(r#""reply_to":"message-2""#));
+        }
+        let stale = &gateway_commands.borrow()[7];
+        assert!(stale.contains(r#""type":"stream_error""#));
+        assert!(stale.contains(r#""reply_to":"message-3""#));
+        assert!(stale.contains(r#""payload":{"session":"session-1","error":"worker_stopped"}"#));
+        assert_eq!(appended.borrow().len(), 2);
     });
 }

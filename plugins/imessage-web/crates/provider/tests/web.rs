@@ -3,13 +3,12 @@
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use futures_lite::{future::block_on, stream};
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageGateway, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendStreamField, SendStreamFrame, SendStreamRequest, SetTypingRequest, StreamBoundary,
-    StreamError,
+    SendStreamEvent, SendStreamRequest, SetTypingRequest, StreamError,
 };
+use futures_lite::{future::block_on, stream};
 use web::{
     InboundError, InboundFuture, InboundMedia, InboundMessage, InboundMessageSink, MediaPhase,
     MessageBody, Web, WebDelivery, WebEventData, WebService,
@@ -59,27 +58,29 @@ fn registers_as_web_and_streams_text_as_start_delta_end() {
 }
 
 #[test]
-fn rich_stream_preserves_extra_frames_beside_primary_text() {
+fn rich_stream_preserves_every_semantic_event() {
     block_on(async {
         let web = Web::<16, 1>::new();
         let mut events = web.subscribe("chat-42").expect("subscriber");
-        let frames = stream::iter([
-            Ok(SendStreamFrame::new(
-                SendStreamField::Reasoning,
-                StreamBoundary::Complete,
-                "thinking",
+        let stream_events = stream::iter([
+            Ok(SendStreamEvent::new(
+                "session-1",
+                1,
+                "reasoning_delta",
+                r#"{"text":"thinking"}"#,
             )),
-            Ok(SendStreamFrame::new(
-                SendStreamField::Text,
-                StreamBoundary::Complete,
-                "answer",
+            Ok(SendStreamEvent::new(
+                "session-1",
+                2,
+                "output_delta",
+                r#"{"text":"answer"}"#,
             )),
         ]);
 
         let receipt = web
             .send_stream(SendStreamRequest {
                 target: target(),
-                frames: Box::pin(frames),
+                events: Box::pin(stream_events),
                 reply_to: Some("incoming-1".into()),
             })
             .await
@@ -89,6 +90,7 @@ fn rich_stream_preserves_extra_frames_beside_primary_text() {
         let reasoning = events.next().await.expect("reasoning");
         let text = events.next().await.expect("text");
         let end = events.next().await.expect("end");
+        let reasoning_sse = reasoning.to_sse().expect("serialize semantic event");
 
         assert!(matches!(
             start,
@@ -99,17 +101,21 @@ fn rich_stream_preserves_extra_frames_beside_primary_text() {
         assert!(matches!(
             reasoning,
             WebDelivery::Event(event)
-                if matches!(&event.data, WebEventData::MessageExtra {
-                    field: SendStreamField::Reasoning,
-                    boundary: StreamBoundary::Complete,
-                    content,
+                if matches!(&event.data, WebEventData::MessageEvent {
+                    event,
                     ..
-                } if content == "thinking")
+                } if event.event_type == "reasoning_delta" && event.payload.as_str() == r#"{"text":"thinking"}"#)
         ));
+        assert!(reasoning_sse.contains("event: message.event"));
+        assert!(reasoning_sse.contains(r#""session":"session-1""#));
+        assert!(reasoning_sse.contains(r#""sequence":1"#));
+        assert!(reasoning_sse.contains(r#""type":"reasoning_delta""#));
+        assert!(reasoning_sse.contains(r#""payload":{"text":"thinking"}"#));
         assert!(matches!(
             text,
             WebDelivery::Event(event)
-                if matches!(&event.data, WebEventData::MessageDelta { delta, .. } if delta == "answer")
+                if matches!(&event.data, WebEventData::MessageEvent { event, .. }
+                    if event.event_type == "output_delta" && event.payload.as_str() == r#"{"text":"answer"}"#)
         ));
         assert!(matches!(
             end,

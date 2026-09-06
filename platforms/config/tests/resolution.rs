@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::Path;
 
-use barracuda_platform_config::{resolve_board_platform, resolve_platform, PlatformTarget};
+use barracuda_platform_config::{
+    discover_platforms, resolve_board_platform, resolve_platform, PlatformTarget,
+};
 use tempfile::tempdir;
 
 fn add_platform(root: &Path, name: &str, chip: &str, target: &str) {
@@ -76,6 +78,22 @@ fn platform_owns_cargo_features_for_supported_chips() {
 
     assert_eq!(platform.cargo_features_for_chip("acme123"), ["acme123-hal"]);
     assert!(platform.cargo_features_for_chip("acme999").is_empty());
+}
+
+#[test]
+fn legacy_application_source_is_rejected() {
+    let root = tempdir().expect("temporary workspace");
+    let directory = root.path().join("platforms/acme");
+    fs::create_dir_all(&directory).expect("Platform directory");
+    fs::write(
+        directory.join("platform.yml"),
+        "name: acme\npackage: barracuda-platform-acme\ncrate: barracuda_platform_acme\ntype: AcmePlatform\nselection:\n  board-chips: [acme]\n  targets:\n    - os: acme\nsystem-image:\n  layout:\n    driver: file-regions\n  flash:\n    driver: file\n    state-directory: .state\n    flash-image: flash.bin\napplication:\n  entry:\n    source: application.rs\n",
+    )
+    .expect("Platform manifest");
+
+    let error = discover_platforms(root.path()).expect_err("entry source is no longer metadata");
+
+    assert!(error.to_string().contains("entry"));
 }
 
 #[test]

@@ -350,7 +350,7 @@ fn run_selected_application(
     application: &Path,
     arguments: &[OsString],
 ) -> Result<(), CommandError> {
-    let status = if application.file_stem().and_then(|name| name.to_str()) == Some("barracuda") {
+    let status = if requires_platform_launcher(application) {
         barracuda_platform_tool::launch(workspace_root, platform, application, arguments)?
     } else {
         ProcessCommand::new(application)
@@ -367,6 +367,10 @@ fn run_selected_application(
     } else {
         Err(CommandError::RunnerFailed(status))
     }
+}
+
+fn requires_platform_launcher(application: &Path) -> bool {
+    application.file_stem().and_then(|name| name.to_str()) == Some("barracuda-system")
 }
 
 /// Synchronizes or validates the tracked Board HAL registry.
@@ -795,7 +799,18 @@ mod tests {
     use barracuda_board_config::{read_selected_board, write_selected_board};
     use tempfile::tempdir;
 
-    use super::{run_with_selector, sync_with_report, CommandError, SyncStatus};
+    use super::{
+        requires_platform_launcher, run_with_selector, sync_with_report, CommandError, SyncStatus,
+    };
+
+    #[test]
+    fn target_runner_launches_only_the_system_application_through_platform() {
+        assert!(requires_platform_launcher(Path::new("barracuda-system")));
+        assert!(!requires_platform_launcher(Path::new("barracuda")));
+        assert!(!requires_platform_launcher(Path::new(
+            "channel_boundary-test"
+        )));
+    }
 
     fn add_board(root: &Path, name: &str) {
         let directory = root.join("boards/configs").join(name);

@@ -6,17 +6,17 @@ use core::{
     task::{Context, Poll},
 };
 
+use barracuda_imessage_gateway_plugin::{
+    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
+    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
+    SendReceipt, SendStreamRequest, SetTypingRequest, TextBody,
+};
 use embassy_sync::{
     blocking_mutex::raw::NoopRawMutex,
     pubsub::{PubSubChannel, Subscriber, WaitResult},
 };
 use futures_core::Stream;
 use futures_lite::StreamExt;
-use gateway::{
-    BinaryBody, ChannelError, ChannelFuture, DeleteMessageRequest, EditMessageRequest, MediaKind,
-    MessageChannel, MessageKind, MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest,
-    SendReceipt, SendStreamField, SendStreamRequest, SetTypingRequest, TextBody,
-};
 
 use crate::{MediaPhase, WebDelivery, WebEvent, WebEventData};
 
@@ -202,6 +202,10 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
     fn send_stream(&self, mut request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             let message_id = Self::message_id(self.next_id.get());
+            log::info!(
+                "IMessage Web opening outbound message `{message_id}` for conversation `{}`",
+                request.target.conversation_id
+            );
             self.publish(
                 &request.target,
                 WebEventData::MessageStart {
@@ -211,31 +215,35 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                 },
             )?;
 
-            while let Some(frame) = request.frames.next().await {
-                match frame {
-                    Ok(frame) if frame.field == SendStreamField::Text => {
-                        if !frame.text.is_empty() {
-                            self.publish(
-                                &request.target,
-                                WebEventData::MessageDelta {
-                                    message_id: message_id.clone(),
-                                    delta: frame.text.into_string(),
-                                },
-                            )?;
+            while let Some(event) = request.events.next().await {
+                match event {
+                    Ok(event) => {
+                        match event.event_type.as_str() {
+                            "turn_started" | "turn_ended" => log::info!(
+                                "IMessage Web forwarding `{}` for `{}` at sequence {}",
+                                event.event_type,
+                                event.session,
+                                event.sequence
+                            ),
+                            _ => log::debug!(
+                                "IMessage Web forwarding `{}` for `{}` at sequence {}",
+                                event.event_type,
+                                event.session,
+                                event.sequence
+                            ),
                         }
-                    }
-                    Ok(frame) => {
                         self.publish(
                             &request.target,
-                            WebEventData::MessageExtra {
+                            WebEventData::MessageEvent {
                                 message_id: message_id.clone(),
-                                field: frame.field,
-                                boundary: frame.boundary,
-                                content: frame.text.into_string(),
+                                event,
                             },
                         )?;
                     }
                     Err(error) => {
+                        log::warn!(
+                            "IMessage Web outbound message `{message_id}` failed while reading Agent events: {error}"
+                        );
                         self.publish(
                             &request.target,
                             WebEventData::MessageEnd {
@@ -255,6 +263,10 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                     error: None,
                 },
             )?;
+            log::info!(
+                "IMessage Web completed outbound message `{message_id}` for conversation `{}`",
+                request.target.conversation_id
+            );
             Ok(SendReceipt::new(message_id))
         })
     }
@@ -444,8 +456,8 @@ impl<const CAP: usize, const SUBS: usize> Stream for WebSubscription<'_, CAP, SU
     }
 }
 
-fn stream_error_message(error: &gateway::StreamError) -> String {
+fn stream_error_message(error: &barracuda_imessage_gateway_plugin::StreamError) -> String {
     match error {
-        gateway::StreamError::Failed { message } => message.clone(),
+        barracuda_imessage_gateway_plugin::StreamError::Failed { message } => message.clone(),
     }
 }

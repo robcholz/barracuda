@@ -16,6 +16,7 @@ use futures_lite::future;
 
 use crate::{InboundMessage, InboundMessageSink, Web, WebClientFrame, WebDelivery};
 
+#[allow(clippy::large_enum_variant)] // Keeps the lane-bounded outgoing event inline.
 enum NextMessage {
     Incoming(Result<WebSocketMessage, barracuda_webserver_plugin::WebSocketClosed>),
     Outgoing(Option<WebDelivery>),
@@ -76,7 +77,7 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                             Ok(frame) => {
                                 let message_id = format!("web-in-{next_message}");
                                 next_message = next_message.saturating_add(1);
-                                log::debug!(
+                                log::info!(
                                     "IMessage Web received message `{message_id}` for conversation `{}`",
                                     self.conversation_id
                                 );

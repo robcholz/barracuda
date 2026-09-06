@@ -5,8 +5,8 @@
 extern crate alloc;
 
 use alloc::rc::Rc;
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
 use barracuda_time_component::{
@@ -17,6 +17,13 @@ use barracuda_time_component::{
 use embassy_futures::select::select;
 use embassy_net::Stack;
 
+/// Time Component contracts re-exported by the Plugin facade.
+pub mod component {
+    pub use barracuda_time_component::*;
+}
+
+pub use component::UtcClock;
+
 const SNTP_SERVER: &str = "pool.ntp.org";
 const MINIMUM_UNIX_SECONDS: u64 = 1_704_067_200;
 const RETRY_DELAY_MILLIS: u64 = 30_000;
@@ -24,7 +31,7 @@ const RESYNC_INTERVAL_MILLIS: u64 = 3_600_000;
 const MAX_HOLDOVER_MILLIS: u64 = 86_400_000;
 
 /// Plugin that owns the network-synchronized Time Component.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct TimePlugin {
     network: Stack<'static>,
     runtime: Option<TimeRuntime>,
@@ -52,7 +59,7 @@ impl<const M: usize> Plugin<M> for TimePlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let source = SntpSource::new(
             self.network,
@@ -73,7 +80,7 @@ impl<const M: usize> Plugin<M> for TimePlugin {
 
     fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let runtime = self
             .runtime

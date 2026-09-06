@@ -3,8 +3,8 @@ use alloc::rc::Rc;
 use barracuda_event_router::{
     JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, json_schema,
 };
-use barracuda_plugin_manager::PluginStorage;
-use barracuda_time_component::UtcClock;
+use barracuda_plugin::manager::PluginStorage;
+use barracuda_time_plugin::UtcClock;
 use serde::Deserialize;
 use time::{Date, Month, PrimitiveDateTime, Time};
 

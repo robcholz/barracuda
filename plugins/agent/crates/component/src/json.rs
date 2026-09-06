@@ -73,6 +73,38 @@ impl JsonPayload for ErrorResponse {
     }
 }
 
+/// Allocation-free business error response retaining a parsed session.
+pub struct SessionErrorResponse {
+    /// Session whose operation failed.
+    pub session: SessionId,
+    /// Stable business failure.
+    pub error: AgentRpcError,
+}
+
+impl JsonPayload for SessionErrorResponse {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        measure(|writer| {
+            write!(
+                writer,
+                "{{\"session\":\"{}\",\"error\":\"{}\"}}",
+                self.session,
+                self.error.code()
+            )
+        })
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        write_payload(destination, |writer| {
+            write!(
+                writer,
+                "{{\"session\":\"{}\",\"error\":\"{}\"}}",
+                self.session,
+                self.error.code()
+            )
+        })
+    }
+}
+
 /// Allocation-free JSON response carrying one session identifier.
 pub struct SessionResponse {
     /// Session identifier to expose.
@@ -229,5 +261,32 @@ impl fmt::Write for SliceWriter<'_> {
         output.copy_from_slice(value.as_bytes());
         self.written = end;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(missing_docs)]
+
+    use barracuda_agent_runtime::SessionId;
+    use barracuda_event_router::JsonPayload;
+
+    use super::{AgentRpcError, SessionErrorResponse};
+
+    #[test]
+    fn session_error_response_preserves_correlation() {
+        let response = SessionErrorResponse {
+            session: SessionId::new(9),
+            error: AgentRpcError::WorkerStopped,
+        };
+        let mut output = [0_u8; 64];
+        let length = response.write_json(&mut output).expect("write response");
+
+        assert_eq!(
+            core::str::from_utf8(output.get(..length).expect("response bytes"))
+                .expect("response UTF-8"),
+            r#"{"session":"session-9","error":"worker_stopped"}"#
+        );
     }
 }

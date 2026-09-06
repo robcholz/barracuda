@@ -11,7 +11,9 @@ use barracuda_event_router::{
 };
 use serde::Deserialize;
 
-use crate::json::{parse_session, AgentRpcError, ErrorResponse, OpenedResponse};
+use crate::json::{
+    parse_session, AgentRpcError, ErrorResponse, OpenedResponse, SessionErrorResponse,
+};
 use crate::session::SessionRegistry;
 
 /// Opens a session control lease and subscribes it to `session.event`.
@@ -44,14 +46,28 @@ pub fn open_session_handler(
             let request = request.deserialize::<OpenSessionRequest<'_>>()?;
             let session = match parse_session(request.session) {
                 Ok(session) => session,
-                Err(error) => return response.write(&ErrorResponse(error)).await,
+                Err(error) => {
+                    log::warn!(
+                        "Agent rejected `session.open` for `{}`: {error}",
+                        request.session
+                    );
+                    return response.write(&ErrorResponse(error)).await;
+                }
             };
+            log::info!("Agent opening session `{session}`");
             match runtime.open_session(session).await {
                 Ok((control, events)) => {
                     let run = registry.insert(session, control, events);
+                    log::info!("Agent opened session `{session}` as `run-{run}`");
                     response.write(&OpenedResponse { session, run }).await
                 }
-                Err(error) => response.write(&ErrorResponse(map_open_error(error))).await,
+                Err(error) => {
+                    let error = map_open_error(error);
+                    log::warn!("Agent failed to open session `{session}`: {error}");
+                    response
+                        .write(&SessionErrorResponse { session, error })
+                        .await
+                }
             }
         }
     }
@@ -72,7 +88,7 @@ fn map_open_error(error: RuntimeError) -> AgentRpcError {
     }
 }
 
-/// Owned runtime event awaiting bounded field-by-field Event emission.
+/// Owned runtime event awaiting bounded semantic Event emission.
 pub(crate) enum SessionEventDocument {
     TurnStarted {
         turn: TurnId,
@@ -194,22 +210,6 @@ impl From<SessionCloseReason> for CloseReasonDocument {
             SessionCloseReason::Requested => Self::Requested,
             SessionCloseReason::Deleted => Self::Deleted,
             SessionCloseReason::RuntimeShutdown => Self::RuntimeShutdown,
-        }
-    }
-}
-
-/// Terminal outcome attached to the last chunk of a subscription run.
-#[derive(Clone, Copy)]
-pub(crate) enum TerminalOutcome {
-    Closed,
-    WorkerStopped,
-}
-
-impl TerminalOutcome {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::Closed => "closed",
-            Self::WorkerStopped => "worker_stopped",
         }
     }
 }

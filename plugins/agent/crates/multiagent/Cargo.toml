@@ -3,13 +3,14 @@ name = "barracuda-agent-multiagent"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Multiagent graph, policy, tools, and semantic effects"
 
 [dependencies]
 json-validator.workspace = true
-barracuda-agent = { workspace = true, features = ["multiagent"] }
-barracuda-agent-permission.workspace = true
-barracuda-agent-tool.workspace = true
+barracuda-agent = { path = "../agent", features = ["multiagent"] }
+barracuda-agent-permission = { path = "../permission" }
+barracuda-agent-tool = { path = "../tool" }
 async-channel = { version = "2", default-features = false }
 futures-channel = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-core = { version = "0.3", default-features = false }

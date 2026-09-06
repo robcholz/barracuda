@@ -7,13 +7,13 @@
 
 use std::{boxed::Box, rc::Rc};
 
-use barracuda_platform_test::{ScriptStep, ScriptedStack};
-use bluebubbles::{BlueBubbles, BlueBubblesConfig};
-use futures_lite::{future::block_on, stream};
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     BinaryBody, BinaryChunk, DeleteMessageRequest, EditMessageRequest, MediaKind, MessageChannel,
     MessageTarget, ReactRequest, SendMediaRequest, SendMessageRequest, SetTypingRequest, TextChunk,
 };
+use barracuda_platform_test::{ScriptStep, ScriptedStack};
+use bluebubbles::{BlueBubbles, BlueBubblesConfig};
+use futures_lite::{future::block_on, stream};
 use http_client::ClientFactory;
 
 #[derive(Debug, Eq, PartialEq)]
@@ -318,7 +318,7 @@ fn without_private_api_streaming_falls_back_and_mutations_are_unsupported() {
 
         assert!(matches!(
             edit,
-            Err(gateway::ChannelError::Unsupported { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::Unsupported { .. })
         ));
         let requests = http.requests();
         assert_eq!(requests.len(), 1);
@@ -375,15 +375,24 @@ fn maps_auth_rate_limit_platform_and_invalid_reaction_errors() {
                 .await
                 .expect_err("request should fail");
             assert_eq!(
-                matches!(&error, gateway::ChannelError::Authentication),
+                matches!(
+                    &error,
+                    barracuda_imessage_gateway_plugin::ChannelError::Authentication
+                ),
                 expected == "auth"
             );
             assert_eq!(
-                matches!(&error, gateway::ChannelError::RateLimited),
+                matches!(
+                    &error,
+                    barracuda_imessage_gateway_plugin::ChannelError::RateLimited
+                ),
                 expected == "rate"
             );
             assert_eq!(
-                matches!(&error, gateway::ChannelError::Platform { .. }),
+                matches!(
+                    &error,
+                    barracuda_imessage_gateway_plugin::ChannelError::Platform { .. }
+                ),
                 expected == "platform"
             );
         }
@@ -395,7 +404,7 @@ fn maps_auth_rate_limit_platform_and_invalid_reaction_errors() {
             .await;
         assert!(matches!(
             error,
-            Err(gateway::ChannelError::InvalidRequest { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::InvalidRequest { .. })
         ));
         assert!(http.requests().is_empty());
     });
@@ -427,7 +436,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
             .await;
         assert!(matches!(
             transport,
-            Err(gateway::ChannelError::Transport { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::Transport { .. })
         ));
 
         let http = Rc::new(MockHttp::responding([Response {
@@ -440,7 +449,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
             .await;
         assert!(matches!(
             malformed,
-            Err(gateway::ChannelError::Platform { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::Platform { .. })
         ));
 
         let http = Rc::new(MockHttp::default());
@@ -460,7 +469,7 @@ fn covers_binary_defaults_validation_and_transport_failures() {
             .await;
         assert!(matches!(
             missing_filename,
-            Err(gateway::ChannelError::InvalidRequest { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::InvalidRequest { .. })
         ));
     });
 }
@@ -484,16 +493,18 @@ fn rejects_empty_messages_and_uses_temp_guid_when_server_omits_guid() {
             .await;
         assert!(matches!(
             empty,
-            Err(gateway::ChannelError::InvalidRequest { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::InvalidRequest { .. })
         ));
 
-        let chunks = stream::iter(Vec::<Result<TextChunk, gateway::StreamError>>::new());
+        let chunks = stream::iter(Vec::<
+            Result<TextChunk, barracuda_imessage_gateway_plugin::StreamError>,
+        >::new());
         let empty_stream = channel
             .send_message(SendMessageRequest::stream(target(), Box::pin(chunks)))
             .await;
         assert!(matches!(
             empty_stream,
-            Err(gateway::ChannelError::InvalidRequest { .. })
+            Err(barracuda_imessage_gateway_plugin::ChannelError::InvalidRequest { .. })
         ));
     });
 }

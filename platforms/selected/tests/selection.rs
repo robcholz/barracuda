@@ -35,6 +35,18 @@ fn selected_platform_uses_only_its_persisted_axis() -> Result<(), std::io::Error
 }
 
 #[test]
+fn platform_entry_is_forwarded_only_when_the_application_expands_it() -> Result<(), std::io::Error>
+{
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let selection = std::fs::read_to_string(root.join("platforms/selected/build.rs"))?;
+
+    assert!(selection.contains("macro_rules! platform_entry"));
+    assert!(selection.contains("$crate::__platform::platform_entry!"));
+    assert!(!selection.contains("pub use ::{}::platform_entry"));
+    Ok(())
+}
+
+#[test]
 fn selected_manifest_contains_only_the_generated_concrete_dependency() -> Result<(), std::io::Error>
 {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");

@@ -76,6 +76,18 @@ cargo board select
 cargo run
 ```
 
+`cargo run` owns only the selected System application. Start the external
+terminal Channel in another terminal with `cargo cli [ws://DEVICE_ADDRESS:8787]`.
+The CLI is forced to the development host target, so it can connect while an
+embedded Board remains selected.
+
+The application binary itself is always `barracuda-system`. Its tracked
+`main.rs` is `no_std` and owns Target construction plus the System lifecycle.
+It passes that application callback to the selected Platform's compile-time
+entry macro, so host process startup and embedded firmware startup remain
+Platform-owned without introducing another application package or runtime
+dispatch.
+
 `cargo board select` opens a colored, fuzzy-searchable list and defaults to the
 currently selected Board. It validates the complete bundle before writing the
 ignored workspace-local Board, Platform, and Cargo selection files. Scripts

@@ -92,11 +92,28 @@ pub struct WorkflowStep {
     arguments: Option<Value>,
 }
 
-/// Boolean field reference selecting a branch arm.
+/// Runtime JSON comparison selecting a branch arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkflowCondition {
     pub(crate) selector: SourceSelector,
-    pub(crate) field: String,
+    pub(crate) field: Option<String>,
+    pub(crate) comparison: WorkflowComparison,
+}
+
+/// Comparison applied to a condition's selected JSON value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum WorkflowComparison {
+    Equals(Value),
+    NotEquals(Value),
+}
+
+impl WorkflowComparison {
+    pub(crate) fn matches(&self, actual: &Value) -> bool {
+        match self {
+            Self::Equals(expected) => actual == expected,
+            Self::NotEquals(expected) => actual != expected,
+        }
+    }
 }
 
 /// One conditional control node.

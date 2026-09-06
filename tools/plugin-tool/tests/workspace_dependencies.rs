@@ -1,40 +1,120 @@
-//! Workspace members inherit internal dependencies from the root catalog.
+//! The workspace exposes Plugins, while implementation crates remain private.
 
 use std::path::{Path, PathBuf};
 
 #[test]
-fn member_manifests_do_not_repeat_internal_paths() -> Result<(), std::io::Error> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let mut manifests = Vec::new();
-    collect_manifests(&root, &mut manifests)?;
-
-    let mut offenders = Vec::new();
-    for manifest in manifests {
-        if manifest == root.join("Cargo.toml") {
-            continue;
-        }
-        let mut dependency_section = false;
-        for (index, line) in std::fs::read_to_string(&manifest)?.lines().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') && trimmed.ends_with(']') {
-                dependency_section = trimmed.ends_with("dependencies]");
-            }
-            if dependency_section && line.contains("path =") {
-                offenders.push(format!(
-                    "{}:{}",
-                    manifest.strip_prefix(&root).unwrap_or(&manifest).display(),
-                    index + 1
-                ));
-            }
-        }
-    }
+fn workspace_catalog_exposes_only_plugin_packages() -> Result<(), std::io::Error> {
+    let root = workspace_root();
+    let manifest = std::fs::read_to_string(root.join("Cargo.toml"))?;
+    let offenders = manifest
+        .lines()
+        .filter_map(plugin_path)
+        .filter(|path| !path.ends_with("/crates/plugin"))
+        .collect::<Vec<_>>();
 
     assert!(
         offenders.is_empty(),
-        "member manifests must use `workspace = true`: {}",
+        "workspace dependencies expose Plugin implementation crates: {}",
         offenders.join(", ")
     );
     Ok(())
+}
+
+#[test]
+fn workspace_catalog_exposes_only_core_facades() -> Result<(), std::io::Error> {
+    let manifest = std::fs::read_to_string(workspace_root().join("Cargo.toml"))?;
+
+    for package in [
+        "barracuda-plugin-api",
+        "barracuda-plugin-macros",
+        "barracuda-plugin-manager",
+        "barracuda-plugin-manifest",
+        "barracuda-router",
+        "barracuda-rpc",
+        "barracuda-workflow",
+    ] {
+        assert!(
+            !has_workspace_dependency(&manifest, package),
+            "workspace dependencies expose internal package {package}"
+        );
+    }
+
+    for facade in ["barracuda-event-router", "barracuda-plugin"] {
+        assert!(
+            has_workspace_dependency(&manifest, facade),
+            "workspace dependencies do not expose facade {facade}"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
+fn plugin_implementation_crates_are_not_publishable() -> Result<(), std::io::Error> {
+    let root = workspace_root();
+    let mut manifests = Vec::new();
+    collect_manifests(&root.join("plugins"), &mut manifests)?;
+
+    let offenders = unpublishable_implementation_crates(&root, manifests)?;
+
+    assert!(
+        offenders.is_empty(),
+        "Plugin implementation crates must set `publish = false`: {}",
+        offenders.join(", ")
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_read_errors_are_reported() {
+    let root = workspace_root();
+    let missing = root.join("plugins/missing/crates/internal/Cargo.toml");
+
+    let result = unpublishable_implementation_crates(&root, vec![missing]);
+
+    assert!(matches!(
+        result,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    ));
+}
+
+fn unpublishable_implementation_crates(
+    root: &Path,
+    manifests: Vec<PathBuf>,
+) -> Result<Vec<String>, std::io::Error> {
+    let mut offenders = Vec::new();
+    for manifest in manifests
+        .into_iter()
+        .filter(|manifest| !manifest.ends_with("crates/plugin/Cargo.toml"))
+    {
+        let content = std::fs::read_to_string(&manifest)?;
+        if !content.lines().any(|line| line.trim() == "publish = false") {
+            offenders.push(
+                manifest
+                    .strip_prefix(root)
+                    .unwrap_or(&manifest)
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+    Ok(offenders)
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn plugin_path(line: &str) -> Option<&str> {
+    let path = line.split_once("path = \"")?.1.split_once('"')?.0;
+    path.starts_with("plugins/").then_some(path)
+}
+
+fn has_workspace_dependency(manifest: &str, package: &str) -> bool {
+    manifest.lines().any(|line| {
+        line.split_once('=')
+            .is_some_and(|(name, _value)| name.trim() == package)
+    })
 }
 
 fn collect_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(), std::io::Error> {
@@ -42,10 +122,7 @@ fn collect_manifests(directory: &Path, manifests: &mut Vec<PathBuf>) -> Result<(
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            let name = entry.file_name();
-            if name != ".git" && name != "target" {
-                collect_manifests(&path, manifests)?;
-            }
+            collect_manifests(&path, manifests)?;
         } else if entry.file_name() == "Cargo.toml" {
             manifests.push(path);
         }

@@ -4,10 +4,10 @@ use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, EventEmitter, RegisterContext,
     RunContext, Topic, UnregisterContext,
 };
-use barracuda_plugin_manager::{
+use barracuda_plugin::manager::{
     PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
 };
-use barracuda_time_component::UtcClock;
+use barracuda_time_plugin::UtcClock;
 use embassy_futures::select::{Either, select};
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex, signal::Signal};
 use embassy_time::{Duration, Timer};

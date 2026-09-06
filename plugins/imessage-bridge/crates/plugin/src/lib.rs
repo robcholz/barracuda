@@ -5,11 +5,11 @@
 extern crate alloc;
 
 use barracuda_imessage_bridge_component::ImessageBridgeComponent;
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 
 /// Plugin that owns the persistent iMessage-to-Agent Workflow bridge.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct ImessageBridgePlugin;
 
 impl ImessageBridgePlugin {
@@ -26,7 +26,7 @@ impl<const M: usize> Plugin<M> for ImessageBridgePlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let component =
             embassy_futures::block_on(ImessageBridgeComponent::load(context.storage().clone()))

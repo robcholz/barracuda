@@ -5,10 +5,9 @@
 extern crate alloc;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
-use barracuda_lua::{Error, Lua, Package, Result};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
-use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_vm_plugin::{Error, Lua, LuaPackage, LuaPackageRegistry, Package, Result};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use futures_util::future::{AbortHandle, Abortable};
@@ -24,7 +23,7 @@ pub const MESSAGE_MAX_LEN: usize = 4096;
 pub const QUEUE_DEPTH: usize = 8;
 
 /// Registers the shared `message_queue` Lua package.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct MessageQueuePlugin;
 
 impl MessageQueuePlugin {
@@ -47,10 +46,10 @@ impl<const M: usize> Plugin<M> for MessageQueuePlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let registry = context.require::<LuaPackageRegistry>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let registration = registry
             .register(MessageQueuePackage::new())
@@ -236,7 +235,7 @@ mod tests {
 
     #[test]
     fn declaration_depends_on_vm() {
-        use barracuda_plugin_manager::PluginDeclaration;
+        use barracuda_plugin::manager::PluginDeclaration;
 
         assert_eq!(MessageQueuePlugin::ID, "message-queue");
         assert_eq!(MessageQueuePlugin::DEPENDS_ON, &["vm"]);

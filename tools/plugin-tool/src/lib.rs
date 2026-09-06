@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use barracuda_plugin_manifest::{parse, PluginManifest};
+use barracuda_plugin::manifest::{parse, PluginManifest};
 use dialoguer::{console::Style, theme::ColorfulTheme, Confirm, MultiSelect};
 
 const MANIFEST_BEGIN: &str = "# BEGIN GENERATED PLUGINS";
@@ -652,7 +652,7 @@ mod tests {
 
     use std::fs;
 
-    use barracuda_plugin_manifest::MAX_DESCRIPTION_CHARS;
+    use barracuda_plugin::manifest::MAX_DESCRIPTION_CHARS;
     use tempfile::tempdir;
 
     use super::{

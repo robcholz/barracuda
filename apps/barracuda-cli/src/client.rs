@@ -1,23 +1,21 @@
 //! Terminal WebSocket client: an external IM endpoint for the host server.
 //!
 //! Sends user lines as gateway messages and renders the reply stream. Rich
-//! content arrives as ordinary IM messages tagged with a [`gateway::MessageKind`]
-//! role, rendered distinctly in the terminal.
+//! content arrives as ordinary IM messages tagged with a message-kind role,
+//! rendered distinctly in the terminal.
 
 use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use std::io::IsTerminal;
-use tokio::time::{interval, sleep, Duration, Instant};
+use tokio::time::{interval, Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::line_editor::{ChatLineEditor, LineInput};
 use crate::protocol::parse_sse;
-use web::WebClientFrame;
+use barracuda_imessage_web_plugin::WebClientFrame;
 
 const WAITING_TICK: Duration = Duration::from_millis(400);
-const LOCAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const LOCAL_CONNECT_RETRY: Duration = Duration::from_millis(10);
 
 /// Connects to the host server at `url` and runs the terminal chat loop.
 pub async fn run(url: &str) -> Result<()> {
@@ -25,18 +23,6 @@ pub async fn run(url: &str) -> Result<()> {
         .await
         .map_err(|error| connection_error(url, error))?;
     run_connected(url, websocket).await
-}
-
-/// Connects to a System started concurrently by this process.
-pub(crate) async fn run_when_available(url: &str) -> Result<()> {
-    let deadline = Instant::now() + LOCAL_CONNECT_TIMEOUT;
-    loop {
-        match tokio_tungstenite::connect_async(url).await {
-            Ok((websocket, _response)) => return run_connected(url, websocket).await,
-            Err(_error) if Instant::now() < deadline => sleep(LOCAL_CONNECT_RETRY).await,
-            Err(error) => return Err(connection_error(url, error)),
-        }
-    }
 }
 
 fn connection_error(url: &str, error: tokio_tungstenite::tungstenite::Error) -> anyhow::Error {
@@ -166,6 +152,7 @@ impl Renderer {
                     actions.push(RenderAction::Delta(delta.to_string()));
                 }
             }
+            "message.event" => self.semantic_event(&data, &mut actions),
             "message.extra"
                 if data.get("field").and_then(serde_json::Value::as_str) == Some("notice") =>
             {
@@ -212,6 +199,62 @@ impl Renderer {
         actions
     }
 
+    fn semantic_event(&mut self, data: &serde_json::Value, actions: &mut Vec<RenderAction>) {
+        let Some(event_type) = data.get("type").and_then(serde_json::Value::as_str) else {
+            return;
+        };
+        let payload = data.get("payload").unwrap_or(&serde_json::Value::Null);
+        match event_type {
+            "output_delta" | "effect_output_delta" => {
+                self.stream_reply(event_text(payload), actions);
+            }
+            "reasoning_delta" => {
+                self.stream_extra(MessageKind::Reasoning, event_text(payload), false, actions);
+            }
+            "reasoning_ended" => self.finish_extra(MessageKind::Reasoning, actions),
+            "tool_result_started" => {
+                self.stream_extra(MessageKind::Tool, "", false, actions);
+            }
+            "tool_name_delta" | "tool_arguments_delta" | "tool_output_delta" => {
+                self.stream_extra(MessageKind::Tool, event_text(payload), false, actions);
+            }
+            "tool_result_ended" => self.finish_extra(MessageKind::Tool, actions),
+            "turn_error" | "session_error" => {
+                self.print_notice(payload.get("message"), actions);
+            }
+            "stream_error" => self.print_notice(payload.get("error"), actions),
+            _ => {}
+        }
+    }
+
+    fn stream_reply(&mut self, content: &str, actions: &mut Vec<RenderAction>) {
+        if self.extra.take().is_some() {
+            actions.push(RenderAction::End);
+        }
+        if !content.is_empty() {
+            actions.push(RenderAction::Delta(content.to_string()));
+        }
+    }
+
+    fn finish_extra(&mut self, kind: MessageKind, actions: &mut Vec<RenderAction>) {
+        if self.extra == Some(kind) {
+            self.extra = None;
+            actions.push(RenderAction::End);
+        }
+    }
+
+    fn print_notice(&mut self, value: Option<&serde_json::Value>, actions: &mut Vec<RenderAction>) {
+        if self.extra.take().is_some() {
+            actions.push(RenderAction::End);
+        }
+        if let Some(message) = value
+            .and_then(serde_json::Value::as_str)
+            .filter(|message| !message.is_empty())
+        {
+            actions.push(RenderAction::Print(MessageKind::Notice.render(message)));
+        }
+    }
+
     fn stream_extra(
         &mut self,
         kind: MessageKind,
@@ -233,6 +276,13 @@ impl Renderer {
             actions.push(RenderAction::End);
         }
     }
+}
+
+fn event_text(payload: &serde_json::Value) -> &str {
+    payload
+        .get("text")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
 }
 
 /// Presentation role mirrored from the gateway `kind`.
@@ -419,5 +469,89 @@ mod tests {
                 RenderAction::End,
             ]
         );
+    }
+
+    #[test]
+    fn semantic_output_events_render_as_reply_deltas() {
+        let actions = render_actions(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.event\ndata: {\"type\":\"output_delta\",\"payload\":{\"text\":\"hello\"}}\n\n",
+            "event: message.end\ndata: {\"error\":null}\n\n",
+        ]);
+
+        assert_eq!(
+            actions,
+            vec![
+                RenderAction::Start(MessageKind::Reply),
+                RenderAction::Delta("hello".to_string()),
+                RenderAction::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn semantic_reasoning_and_tool_events_preserve_rich_boundaries() {
+        let actions = render_actions(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.event\ndata: {\"type\":\"reasoning_delta\",\"payload\":{\"text\":\"think\"}}\n\n",
+            "event: message.event\ndata: {\"type\":\"reasoning_ended\",\"payload\":{}}\n\n",
+            "event: message.event\ndata: {\"type\":\"tool_result_started\",\"payload\":{}}\n\n",
+            "event: message.event\ndata: {\"type\":\"tool_name_delta\",\"payload\":{\"text\":\"search\"}}\n\n",
+            "event: message.event\ndata: {\"type\":\"tool_output_delta\",\"payload\":{\"text\":\"done\"}}\n\n",
+            "event: message.event\ndata: {\"type\":\"tool_result_ended\",\"payload\":{\"ok\":true}}\n\n",
+            "event: message.event\ndata: {\"type\":\"output_delta\",\"payload\":{\"text\":\"answer\"}}\n\n",
+            "event: message.end\ndata: {\"error\":null}\n\n",
+        ]);
+
+        assert_eq!(
+            actions,
+            vec![
+                RenderAction::Start(MessageKind::Reply),
+                RenderAction::Start(MessageKind::Reasoning),
+                RenderAction::Delta("think".to_string()),
+                RenderAction::End,
+                RenderAction::Start(MessageKind::Tool),
+                RenderAction::Delta("search".to_string()),
+                RenderAction::Delta("done".to_string()),
+                RenderAction::End,
+                RenderAction::Delta("answer".to_string()),
+                RenderAction::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn semantic_effect_output_renders_as_reply_text() {
+        let actions = render_actions(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.event\ndata: {\"type\":\"effect_output_delta\",\"payload\":{\"text\":\"finished\"}}\n\n",
+            "event: message.event\ndata: {\"type\":\"effect_output_ended\",\"payload\":{}}\n\n",
+            "event: message.end\ndata: {\"error\":null}\n\n",
+        ]);
+
+        assert_eq!(
+            actions,
+            vec![
+                RenderAction::Start(MessageKind::Reply),
+                RenderAction::Delta("finished".to_string()),
+                RenderAction::End,
+            ]
+        );
+    }
+
+    #[test]
+    fn semantic_agent_errors_render_as_notices() {
+        let actions = render_actions(&[
+            "event: message.start\ndata: {\"kind\":\"reply\"}\n\n",
+            "event: message.event\ndata: {\"type\":\"turn_error\",\"payload\":{\"message\":\"LLM request failed\",\"truncated\":false}}\n\n",
+            "event: message.end\ndata: {\"error\":null}\n\n",
+        ]);
+
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0], RenderAction::Start(MessageKind::Reply));
+        assert!(
+            matches!(&actions[1], RenderAction::Print(text) if text.contains("note") && text.contains("LLM request failed"))
+        );
+        assert_eq!(actions[2], RenderAction::End);
     }
 }

@@ -1,6 +1,6 @@
 use alloc::{string::String, vec::Vec};
 
-use gateway::{MediaKind, MessageKind, SendStreamField, StreamBoundary};
+use barracuda_imessage_gateway_plugin::{MediaKind, MessageKind, SendStreamEvent};
 
 /// One sequenced event emitted to Web clients.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,6 +13,7 @@ pub struct WebEvent {
 
 /// Message operation represented by a Web event.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)] // Keeps each lane-bounded semantic payload inline.
 pub enum WebEventData {
     MessageStart {
         message_id: String,
@@ -23,12 +24,10 @@ pub enum WebEventData {
         message_id: String,
         delta: String,
     },
-    /// Optional rich content carried beside the primary text stream.
-    MessageExtra {
+    /// One complete semantic Agent event carried by the message stream.
+    MessageEvent {
         message_id: String,
-        field: SendStreamField,
-        boundary: StreamBoundary,
-        content: String,
+        event: SendStreamEvent,
     },
     MessageEnd {
         message_id: String,
@@ -74,6 +73,7 @@ pub enum MediaPhase {
 
 /// A normal event or an explicit notification that replay history was lost.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)] // Keeps replayed semantic events allocation-free.
 pub enum WebDelivery {
     Event(WebEvent),
     Lagged { missed: u64 },
@@ -84,7 +84,7 @@ impl WebEventData {
         match self {
             Self::MessageStart { .. } => "message.start",
             Self::MessageDelta { .. } => "message.delta",
-            Self::MessageExtra { .. } => "message.extra",
+            Self::MessageEvent { .. } => "message.event",
             Self::MessageEnd { .. } => "message.end",
             Self::Media { kind, .. } => match kind {
                 MediaKind::File => "message.file",

@@ -8,12 +8,12 @@ use alloc::{
     format,
     string::{String, ToString},
 };
-use futures_lite::StreamExt as _;
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MessageChannel, MessageTarget, SendMessageRequest, SendReceipt,
     TextBody,
 };
-use gateway_http::{Method, Response};
+use barracuda_imessage_gateway_plugin::{Method, Response};
+use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
@@ -89,7 +89,7 @@ where
         })?;
         let url = format!("{}{}", self.config.api_base.trim_end_matches('/'), path);
         let authorization = format!("QQBot {}", self.config.access_token);
-        let response = gateway_http::send(
+        let response = barracuda_imessage_gateway_plugin::send(
             &self.http_clients,
             Method::POST,
             &url,
@@ -110,7 +110,7 @@ where
     async fn send_stream(
         &self,
         target: MessageTarget,
-        mut stream: gateway::TextStream,
+        mut stream: barracuda_imessage_gateway_plugin::TextStream,
         reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {
         let mut text = String::new();

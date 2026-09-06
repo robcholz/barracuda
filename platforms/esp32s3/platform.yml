@@ -14,3 +14,7 @@ system-image:
     driver: command
     program: espflash
     arguments: [write-bin, --chip, "{chip}", "{offset}", "{image}"]
+application:
+  launcher:
+    program: espflash
+    arguments: [flash, --monitor, "{application}"]

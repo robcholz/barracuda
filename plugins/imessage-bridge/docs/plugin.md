@@ -8,3 +8,5 @@ RPCs for Workflows.
 
 The Plugin declares no typed capabilities. Workflow integration uses the
 `imessage_bridge.to_agent` and `imessage_bridge.to_gateway` JSON RPC contracts.
+The persisted mapping contains only the stable Gateway route and Agent session.
+Pending inbound replies and the active turn reply are runtime-only FIFO state.

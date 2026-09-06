@@ -6,14 +6,14 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 
-use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginRegisterContext, PluginResult};
-use gateway::{GatewayError, MessageChannel, MessageChannelRegistration, MessageGateway};
-
 pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
+use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
 pub use barracuda_imessage_gateway_component::gateway_message_received::GatewayInboundMessage;
 pub use barracuda_imessage_gateway_component::route::GatewayRoute;
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginRegisterContext, PluginResult};
+pub use gateway::*;
+pub use gateway_http::*;
 
 const GATEWAY_INGRESS_CAPACITY: usize = 16;
 
@@ -57,7 +57,7 @@ impl IMessageGateway {
 }
 
 /// Plugin that owns the shared IMessage Gateway Component and capability.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct IMessageGatewayPlugin;
 
 impl IMessageGatewayPlugin {
@@ -74,7 +74,7 @@ impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let gateway = Rc::new(MessageGateway::new());
         let (component, ingress, runtime) =
@@ -103,8 +103,8 @@ mod tests {
     use barracuda_platform_test::{
         install_global_memory_vfs, memory_partition, never_embassy_stack,
     };
-    use barracuda_plugin_api::{ClientFactory, PluginContext};
-    use barracuda_plugin_manager::{PluginId, PluginManager};
+    use barracuda_plugin::api::{ClientFactory, PluginContext};
+    use barracuda_plugin::manager::{PluginId, PluginManager};
     use futures_lite::future::block_on;
 
     #[test]
@@ -126,7 +126,7 @@ mod tests {
             let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
             let plugin = IMessageGatewayPlugin::new(&mut context);
             assert_eq!(
-                <IMessageGatewayPlugin as barracuda_plugin_manager::PluginDeclaration>::ID,
+                <IMessageGatewayPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
                 "imessage-gateway"
             );
 

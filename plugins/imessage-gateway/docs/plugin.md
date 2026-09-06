@@ -5,7 +5,7 @@
 - Provided typed capabilities: `IMessageGateway`
 - Required typed capabilities: none
 - Owned Components: `GatewayComponent`, `GatewayInboundComponent`, four
-  `GatewayTextStreamComponent` workers, four `GatewayMediaStreamComponent` workers
+  `GatewayEventStreamComponent` workers, four `GatewayMediaStreamComponent` workers
 - Plugin-owned tasks: none
 
 The Plugin owns the provider-neutral message gateway. Provider Plugins require

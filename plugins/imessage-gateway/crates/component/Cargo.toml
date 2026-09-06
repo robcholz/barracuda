@@ -2,14 +2,17 @@
 name = "barracuda-imessage-gateway-component"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Event Router Component adapter for the IMessage Gateway"
 
 [dependencies]
 async-channel = { version = "2", default-features = false }
 barracuda-event-router.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway.workspace = true
+gateway = { path = "../gateway" }
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]

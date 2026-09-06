@@ -69,23 +69,35 @@ selected Board config -> generated Board composition          |
 ~~~
 
 The selected-target composition root validates that the independently selected
-Platform and Board can form one Target. A device entry point acquires the chip
-HAL's singleton exactly once and constructs the selected Target's typed
-`TargetBindings`; the common Target composition then splits those bindings,
-invokes the Platform and Board constructors, and returns their resources to
-System without flattening one axis into the other. The composition follows the
-selected Board declarations; it does not infer an I/O surface from hardware
-that the Board config omitted. Application entries do not parse YAML,
-instantiate peripheral Drivers, or wire individual Board peripherals.
+Platform and Board can form one Target. The selected Platform exposes a
+compile-time entry macro that owns only the target ABI, executor bootstrap, and
+process or firmware termination behavior. The System application owns its
+application callback, receives the selected Target's typed `TargetBindings`,
+constructs Target resources, and runs System. The macro expansion calls that
+callback directly: it introduces no dynamic dispatch, boxed future, or runtime
+registry.
+
+A device Platform acquires the chip HAL's singleton exactly once when producing
+those bindings. The common Target composition then splits the bindings, invokes
+the Platform and Board constructors, and returns their resources to System
+without flattening one axis into the other. The composition follows the selected
+Board declarations; it does not infer an I/O surface from hardware that the
+Board config omitted. Platform entries do not parse YAML, instantiate
+peripheral Drivers, wire individual Board peripherals, or depend on System.
 
 ~~~rust,ignore
-let bindings = selected_device_bindings(chip_hal_singleton);
-let resources = barracuda_target::resources_with_bindings(spawner, bindings).await?;
-let system = System::new(lanes, resources).await?;
+async fn application(spawner: Spawner, bindings: barracuda_target::Bindings) -> Result<(), Error> {
+    let resources = barracuda_target::resources_with_bindings(spawner, bindings).await?;
+    barracuda_system_app::run(spawner, resources).await?;
+    Ok(())
+}
+
+barracuda_target::application_entry!(application);
 ~~~
 
-Host Targets have no chip peripheral singleton and retain the shorter
-`barracuda_target::resources(spawner)` convenience path.
+Host Targets have no chip peripheral singleton. Their selected-target entry
+macro supplies a binding pair whose Platform side is the host's unit binding;
+the application still uses the same `resources_with_bindings` boundary.
 
 The returned shape preserves ownership:
 

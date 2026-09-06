@@ -9,6 +9,8 @@ mod selected {
     include!(concat!(env!("OUT_DIR"), "/selected_platform.rs"));
 }
 
+#[doc(hidden)]
+pub use selected::__platform;
 /// Independently selected concrete Platform.
 pub use selected::SelectedPlatform;
 /// Name of the independently selected Platform.

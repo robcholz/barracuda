@@ -3,6 +3,7 @@ name = "barracuda-agent-context"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Context builder: assembles the LLM request context from memory, history, skills, and other providers"
 
 [lib]

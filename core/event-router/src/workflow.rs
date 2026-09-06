@@ -40,6 +40,10 @@ impl<const N: usize> WorkflowComponent<N> {
         let runtime = WorkflowRuntime::new();
         let view = runtime.view();
         let catalog = restore(&runtime.control()).await?;
+        log::info!(
+            "restored {} builtin Workflow definition(s) from {WORKFLOW_CATALOG_PATH}",
+            catalog.len()
+        );
         Ok((
             Self {
                 runtime,

@@ -31,33 +31,28 @@ JSON escaping and metadata, must fit the 512-byte RPC lane.
 - Maximum response: 128 bytes
 - Terminal Event: `gateway.send_stream.finished`
 
-Start:
+Each call supplies one complete semantic Agent event plus its delivery route:
 
 ```json
-{"action":"start","stream_id":"reply-17","sequence":0,"channel":"telegram","conversation_id":"chat-42","reply_to":"message-100"}
+{"route":{"channel":"telegram","conversation_id":"chat-42"},"reply_to":"message-100","session":"session-1","sequence":3,"type":"output_delta","payload":{"text":"hello"}}
 ```
 
-Chunk:
-
-```json
-{"action":"chunk","stream_id":"reply-17","sequence":1,"field":"text","boundary":"more","text":"hel"}
-```
-
-Finish:
-
-```json
-{"action":"finish","stream_id":"reply-17","sequence":2}
-```
-
-An accepted command returns `{"accepted_sequence":1}`. Rejections are
+An accepted event returns `{"accepted_sequence":3}`. `turn_started` opens the
+provider stream for its `session`; every event is forwarded unchanged; and
+`turn_ended` is forwarded before closing the stream. A `stream_error` payload
+contains a required non-empty `error` string and may retain producer
+correlation fields beside it. It terminates delivery with that error and may
+also be the first input for a session, allowing a Workflow failure to open and
+immediately fail a provider stream for the original route and `reply_to`.
+Rejections are
 `invalid_request`, `duplicate_stream`, `unknown_stream`, `out_of_order`, or
-`busy`. A stream ID uses ASCII letters, digits, `_`, `-`, or `.`. The complete
-command must fit the request lane; text has no second field-level cap. The supported content fields
-are `text`, `reasoning`, `effect_result`, `notice`, `event`, and the structured
-tool-result fields listed in the request schema.
+`busy`. The Agent `session` is the stream correlation key and its `sequence`
+is used directly; Gateway does not add another stream ID, sequence, field, or
+chunk boundary. The complete request must fit the 512-byte request lane.
 
-At most four text streams are active, the start queue holds four jobs, and each
-stream buffers two commands. On `busy`, retry the same sequence after yielding.
+At most four semantic event streams are active, the start queue holds four
+jobs, and each stream buffers two events. On `busy`, retry the same event after
+yielding.
 
 ## `gateway.send_media`
 
@@ -88,10 +83,10 @@ commands retain their RPC lanes; decoded chunks use inline storage.
 
 ## Terminal Events
 
-A successful stream terminal Event is:
+A successful semantic event stream terminal Event is:
 
 ```json
-{"stream_id":"reply-17","sequence":2,"outcome":"completed","message_id":"provider-id"}
+{"session":"session-1","sequence":8,"outcome":"completed","message_id":"provider-id"}
 ```
 
 A failure uses `outcome: "failed"` and `error`. Delivery errors are

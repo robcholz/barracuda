@@ -119,11 +119,16 @@ pub fn launch(
         successful(&mut command, "Platform support binary build")?;
     }
 
-    let launcher = platform.application().launcher().ok_or_else(|| {
-        CommandError::Generated(format!(
-            "Platform `{platform_name}` has no application launcher"
-        ))
-    })?;
+    let Some(launcher) = platform.application().launcher() else {
+        return Command::new(application)
+            .args(application_arguments)
+            .current_dir(root)
+            .status()
+            .map_err(|source| CommandError::Process {
+                kind: "application",
+                source,
+            });
+    };
     let target_directory = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .map_or_else(
@@ -438,5 +443,16 @@ mod tests {
         )
         .expect_err("undeclared support binary");
         assert!(matches!(error, CommandError::UndeclaredSupportBinary(name) if name == "missing"));
+    }
+
+    #[test]
+    fn platform_without_launcher_executes_the_application_directly() {
+        let root = tempdir().expect("temporary workspace");
+        add_platform(root.path(), "direct", "barracuda-platform-direct");
+
+        let status = super::launch(root.path(), "direct", Path::new("/usr/bin/true"), &[])
+            .expect("direct application launch");
+
+        assert!(status.success());
     }
 }

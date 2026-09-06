@@ -2,6 +2,7 @@ include = [{ path = "../.barracuda/cargo.toml", optional = true }]
 
 [alias]
 board = "run --target host-tuple --quiet --package barracuda-board-tool --"
+cli = "run --target host-tuple --package barracuda-cli -- connect"
 platform = "run --target host-tuple --quiet --package barracuda-platform-tool --"
 plugin = "run --target host-tuple --quiet --package barracuda-plugin-tool --"
 system-image = "run --target host-tuple --quiet --package barracuda-system-image --"

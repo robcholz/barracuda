@@ -42,10 +42,11 @@ fn every_agent_operation_is_a_bounded_json_contract() {
 fn open_session_streams_through_the_bounded_event_contract() {
     assert_eq!(SessionOutputEvent::ID, "session.event");
     let schema = include_str!("../../../schemas/event/session_event.json");
-    for field in [
-        "session",
+    for field in ["session", "sequence", "type", "payload"] {
+        assert!(schema.contains(&format!("\"{field}\"")));
+    }
+    for removed in [
         "run",
-        "sequence",
         "chunk_index",
         "field",
         "chunk",
@@ -53,7 +54,7 @@ fn open_session_streams_through_the_bounded_event_contract() {
         "event_complete",
         "terminal",
     ] {
-        assert!(schema.contains(&format!("\"{field}\"")));
+        assert!(!schema.contains(&format!("\"{removed}\"")));
     }
     assert!(!schema.contains("maxLength"));
 }

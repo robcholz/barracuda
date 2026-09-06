@@ -13,10 +13,10 @@
 //!   is built entirely from the literal arguments, independent of the previous
 //!   step.
 //!
-//! A reference has the grammar `$<selector>.<channel>.<field>`. The supported
-//! sources are `$event.input.<field>` and `$previous.output.<field>`. The field
-//! is mandatory and a single top-level name; whole-document passthrough uses a
-//! Direct link and nested paths are rejected.
+//! A reference has the grammar `$<selector>.<channel>[.<field>]`. The supported
+//! sources are `$event.input[.<field>]` and `$previous.output[.<field>]`. A
+//! field is a single top-level name; omitting it embeds the complete source
+//! document as one request field. Nested source paths are rejected.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -39,8 +39,8 @@ pub(crate) struct FieldRef {
     pub(crate) dest_field: String,
     /// Event input or most recently executed step output selected by the reference.
     pub(crate) selector: SourceSelector,
-    /// Top-level JSON field read from the selected source.
-    pub(crate) source_field: String,
+    /// Top-level JSON field read from the selected source, or the whole document.
+    pub(crate) source_field: Option<String>,
 }
 
 /// The classified link feeding one Workflow step.
@@ -81,11 +81,6 @@ pub enum LinkError {
     /// The reference addressed a nested field path.
     #[error("Workflow reference nested field paths are unsupported")]
     NestedFieldPath,
-    /// The reference named a step and channel but no field.
-    #[error(
-        "Workflow reference names no field; use a Direct link to pass the whole source document"
-    )]
-    MissingField,
     /// The reference did not have the `$step.channel.field` shape.
     #[error("Workflow reference is malformed")]
     MalformedReference,
@@ -127,7 +122,7 @@ pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError>
 }
 
 /// Parses a source selector and returns it with its top-level field name.
-pub(crate) fn parse_reference(body: &str) -> Result<(SourceSelector, String), LinkError> {
+pub(crate) fn parse_reference(body: &str) -> Result<(SourceSelector, Option<String>), LinkError> {
     if body.is_empty() {
         return Err(LinkError::EmptyReference);
     }
@@ -140,14 +135,45 @@ pub(crate) fn parse_reference(body: &str) -> Result<(SourceSelector, String), Li
         ("event" | "previous", _) => return Err(LinkError::UnknownChannel),
         _ => return Err(LinkError::UnknownStepSelector),
     };
-    let field = parts.next().ok_or(LinkError::MissingField)?;
+    let Some(field) = parts.next() else {
+        return Ok((selector, None));
+    };
     if parts.next().is_some() {
         return Err(LinkError::NestedFieldPath);
     }
     if field.is_empty() {
         return Err(LinkError::MalformedReference);
     }
-    Ok((selector, field.to_string()))
+    Ok((selector, Some(field.to_string())))
+}
+
+/// Parses a condition source selecting either a whole JSON document or one
+/// top-level field from it.
+pub(crate) fn parse_condition_source(
+    body: &str,
+) -> Result<(SourceSelector, Option<String>), LinkError> {
+    if body.is_empty() {
+        return Err(LinkError::EmptyReference);
+    }
+    let mut parts = body.split('.');
+    let step = parts.next().ok_or(LinkError::MalformedReference)?;
+    let channel = parts.next().ok_or(LinkError::MalformedReference)?;
+    let selector = match (step, channel) {
+        ("event", "input") => SourceSelector::EventInput,
+        ("previous", "output") => SourceSelector::PreviousOutput,
+        ("event" | "previous", _) => return Err(LinkError::UnknownChannel),
+        _ => return Err(LinkError::UnknownStepSelector),
+    };
+    let Some(field) = parts.next() else {
+        return Ok((selector, None));
+    };
+    if parts.next().is_some() {
+        return Err(LinkError::NestedFieldPath);
+    }
+    if field.is_empty() {
+        return Err(LinkError::MalformedReference);
+    }
+    Ok((selector, Some(field.to_string())))
 }
 
 #[cfg(test)]
@@ -157,7 +183,7 @@ mod tests {
     #![allow(clippy::indexing_slicing)]
     #![allow(missing_docs)]
 
-    use super::{classify, LinkError, LinkKind, SourceSelector};
+    use super::{classify, parse_condition_source, LinkError, LinkKind, SourceSelector};
     use serde_json::json;
 
     #[test]
@@ -186,7 +212,7 @@ mod tests {
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].dest_field, "message");
         assert_eq!(references[0].selector, SourceSelector::PreviousOutput);
-        assert_eq!(references[0].source_field, "text");
+        assert_eq!(references[0].source_field.as_deref(), Some("text"));
     }
 
     #[test]
@@ -201,7 +227,22 @@ mod tests {
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].dest_field, "prompt");
         assert_eq!(references[0].selector, SourceSelector::EventInput);
-        assert_eq!(references[0].source_field, "message");
+        assert_eq!(references[0].source_field.as_deref(), Some("message"));
+    }
+
+    #[test]
+    fn whole_document_is_a_mapping_source() {
+        let arguments = json!({ "payload": "$previous.output" });
+        let LinkKind::Mapping { references, .. } =
+            classify(Some(&arguments)).expect("classify whole output reference")
+        else {
+            panic!("expected a mapping link");
+        };
+
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].dest_field, "payload");
+        assert_eq!(references[0].selector, SourceSelector::PreviousOutput);
+        assert_eq!(references[0].source_field, None);
     }
 
     #[test]
@@ -229,14 +270,26 @@ mod tests {
     }
 
     #[test]
-    fn reference_without_a_field_requires_a_direct_link() {
-        assert_eq!(
-            classify(Some(&json!({ "a": "$previous.output" }))),
-            Err(LinkError::MissingField)
-        );
+    fn reference_rejects_an_empty_field_name() {
         assert_eq!(
             classify(Some(&json!({ "a": "$previous.output." }))),
             Err(LinkError::MalformedReference)
+        );
+    }
+
+    #[test]
+    fn condition_source_can_select_a_document_or_top_level_field() {
+        assert_eq!(
+            parse_condition_source("previous.output"),
+            Ok((SourceSelector::PreviousOutput, None))
+        );
+        assert_eq!(
+            parse_condition_source("event.input.status"),
+            Ok((SourceSelector::EventInput, Some("status".into())))
+        );
+        assert_eq!(
+            parse_condition_source("event.input.status.code"),
+            Err(LinkError::NestedFieldPath)
         );
     }
 }

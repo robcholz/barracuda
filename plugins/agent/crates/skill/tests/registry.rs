@@ -111,6 +111,64 @@ fn registry_parses_standard_frontmatter() {
 }
 
 #[test]
+fn unknown_frontmatter_subtrees_are_ignored() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(
+            &filesystem,
+            "example-skill",
+            "---\nname: example-skill\nfuture-field:\n  nested:\n    - unsupported\n    - syntax\ndescription: Use for examples.\n---\nbody",
+        )
+        .await;
+
+        let registry = FsSkillRegistry::new(filesystem)
+            .set_root("skills")
+            .await
+            .unwrap();
+        assert!(registry
+            .catalog()
+            .get(&SkillName::new("example-skill"))
+            .is_some());
+    });
+}
+
+#[test]
+fn known_frontmatter_fields_reject_unsupported_yaml() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(
+            &filesystem,
+            "example-skill",
+            "---\nname: example-skill\ndescription: [not, supported]\n---\nbody",
+        )
+        .await;
+
+        assert!(matches!(
+            registry_error(filesystem).await,
+            SkillError::InvalidYaml(_, _)
+        ));
+    });
+}
+
+#[test]
+fn duplicate_known_frontmatter_fields_are_rejected() {
+    block_on(async {
+        let filesystem = memory_vfs().await.unwrap();
+        write_skill(
+            &filesystem,
+            "example-skill",
+            "---\nname: example-skill\nname: example-skill\ndescription: Use for examples.\n---\nbody",
+        )
+        .await;
+
+        assert!(matches!(
+            registry_error(filesystem).await,
+            SkillError::InvalidYaml(_, _)
+        ));
+    });
+}
+
+#[test]
 fn json_frontmatter_is_not_accepted_as_legacy_format() {
     block_on(async {
         let filesystem = memory_vfs().await.unwrap();

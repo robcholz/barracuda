@@ -1,6 +1,6 @@
 use alloc::rc::Rc;
 
-use barracuda_plugin_manager::PluginTaskToken;
+use barracuda_plugin::manager::PluginTaskToken;
 use embassy_futures::join::join_array;
 use embassy_futures::select::select;
 use embassy_net::{tcp::TcpSocket, Stack};

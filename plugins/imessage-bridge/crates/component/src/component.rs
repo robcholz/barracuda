@@ -4,7 +4,7 @@ use core::future::pending;
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_plugin_manager::{
+use barracuda_plugin::manager::{
     PluginEntryIterator as _, PluginReadTransaction as _, PluginStorage, StorageError,
 };
 use embassy_sync::{blocking_mutex::raw::NoopRawMutex, mutex::Mutex};

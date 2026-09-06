@@ -240,7 +240,7 @@ const BRANCH_WORKFLOW: &str = r#"{
     "steps":[
         {"call":"integration.decide"},
         {
-            "if":"$previous.output.forward",
+            "if":{"source":"$previous.output.forward","equals":true},
             "then":[
                 {"call":"integration.add-one","arguments":{"value":"$previous.output.value"}}
             ],

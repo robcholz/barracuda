@@ -1,0 +1,22 @@
+[package]
+name = "barracuda-minimal-yaml"
+version = "0.1.0"
+edition = "2021"
+description = "Zero-copy no_std parser for Barracuda's strict YAML mapping subset"
+
+[lib]
+crate-type = ["rlib"]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+arithmetic_side_effects = "deny"

@@ -11,12 +11,12 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use barracuda_imessage_gateway_plugin::IMessageGateway;
-use barracuda_plugin_api::PluginContext;
-use barracuda_plugin_manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
+use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
+use barracuda_plugin::api::PluginContext;
+use barracuda_plugin::manager::{Plugin, PluginError, PluginRegisterContext, PluginResult};
 use barracuda_webserver_plugin::{
     HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
 };
-use gateway::{MessageChannel, MessageChannelRegistration};
 use http_client::ClientFactory;
 use serde::Deserialize;
 use wechat::{Wechat, WechatConfig};
@@ -27,7 +27,7 @@ pub const CONFIG_API_PATH: &str = "/api/gateway/wechat";
 const JSON_CONTENT_TYPE: &str = "application/json";
 
 /// Plugin that exposes Wechat configuration and registers the resulting channel.
-#[barracuda_plugin_api::plugin]
+#[barracuda_plugin::macros::plugin]
 pub struct IMessageWechatPlugin {
     http_clients: ClientFactory<'static>,
 }
@@ -48,13 +48,13 @@ impl<const M: usize> Plugin<M> for IMessageWechatPlugin {
         context: &mut PluginRegisterContext<'_, M, Storage>,
     ) -> PluginResult<()>
     where
-        Storage: barracuda_plugin_manager::PluginStorage,
+        Storage: barracuda_plugin::manager::PluginStorage,
     {
         let gateway = context.require::<IMessageGateway>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[0],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;
         let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin_manager::PluginDeclaration>::DEPENDS_ON[1],
+            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[1],
         )?;
         let endpoint = ConfigEndpoint {
             gateway,

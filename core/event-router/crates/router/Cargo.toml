@@ -10,7 +10,7 @@ description = "Cooperative Component router for Barracuda"
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-rpc.workspace = true
+barracuda-rpc = { path = "../rpc" }
 getset = "0.1.7"
 log.workspace = true
 thiserror = { version = "2", default-features = false }

@@ -2,13 +2,13 @@
 name = "inkbox"
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Inkbox iMessage API provider for the IMessage Gateway"
 license = "Apache-2.0"
 
 [dependencies]
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
-gateway.workspace = true
-gateway-http.workspace = true
+barracuda-imessage-gateway-plugin.workspace = true
 http-client.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 

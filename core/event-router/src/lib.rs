@@ -4,7 +4,8 @@
 
 extern crate alloc;
 
-mod workflow;
+#[path = "workflow.rs"]
+mod workflow_component;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -14,7 +15,22 @@ use core::task::{Context, Poll};
 
 use barracuda_workflow::integration::WorkflowRuntimeView;
 
-use workflow::WorkflowComponent;
+use workflow_component::WorkflowComponent;
+
+/// Component lifecycle and cooperative routing primitives.
+pub mod router {
+    pub use barracuda_router::*;
+}
+
+/// Native and JSON RPC contracts, lane storage, and registration APIs.
+pub mod rpc {
+    pub use barracuda_rpc::*;
+}
+
+/// Event and Workflow definition, control, and runtime APIs.
+pub mod workflow {
+    pub use barracuda_workflow::*;
+}
 
 pub use barracuda_router::{
     CleanupError, Component, ComponentCleanupFailure, ComponentError, ComponentFuture, ComponentId,

@@ -3,6 +3,7 @@ name = "barracuda-agent-persistence"
 authors = ["Finn(Ziheng) Sheng"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Persistence interfaces for durable runtime state"
 
 [lib]

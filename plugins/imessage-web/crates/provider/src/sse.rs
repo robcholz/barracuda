@@ -3,8 +3,6 @@ use alloc::{format, string::String};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 
-use gateway::{SendStreamField, StreamBoundary};
-
 use crate::{MediaPhase, WebDelivery, WebEventData};
 
 /// Failure while serializing a Web event as an SSE frame.
@@ -23,7 +21,7 @@ impl WebDelivery {
                 serde_json::to_string(&json!({ "missed": missed }))?
             )),
             Self::Event(event) => {
-                let payload = event_payload(&event.data);
+                let payload = event_payload(&event.data)?;
                 Ok(format!(
                     "id: {}\nevent: {}\ndata: {}\n\n",
                     event.id,
@@ -35,8 +33,8 @@ impl WebDelivery {
     }
 }
 
-fn event_payload(data: &WebEventData) -> Value {
-    match data {
+fn event_payload(data: &WebEventData) -> Result<Value, serde_json::Error> {
+    Ok(match data {
         WebEventData::MessageStart {
             message_id,
             reply_to,
@@ -45,16 +43,12 @@ fn event_payload(data: &WebEventData) -> Value {
         WebEventData::MessageDelta { message_id, delta } => {
             json!({ "message_id": message_id, "delta": delta })
         }
-        WebEventData::MessageExtra {
-            message_id,
-            field,
-            boundary,
-            content,
-        } => json!({
+        WebEventData::MessageEvent { message_id, event } => json!({
             "message_id": message_id,
-            "field": stream_field_name(*field),
-            "boundary": boundary_name(*boundary),
-            "content": content,
+            "session": event.session,
+            "sequence": event.sequence,
+            "type": event.event_type,
+            "payload": serde_json::from_str::<Value>(event.payload.as_str())?,
         }),
         WebEventData::MessageEnd { message_id, error } => {
             json!({ "message_id": message_id, "error": error })
@@ -95,30 +89,5 @@ fn event_payload(data: &WebEventData) -> Value {
             reaction,
         } => json!({ "message_id": message_id, "reaction": reaction }),
         WebEventData::ConversationTyping { typing } => json!({ "typing": typing }),
-    }
-}
-
-const fn boundary_name(boundary: StreamBoundary) -> &'static str {
-    match boundary {
-        StreamBoundary::More => "more",
-        StreamBoundary::Complete => "complete",
-    }
-}
-
-const fn stream_field_name(field: SendStreamField) -> &'static str {
-    match field {
-        SendStreamField::Text => "text",
-        SendStreamField::Reasoning => "reasoning",
-        SendStreamField::EffectResult => "effect_result",
-        SendStreamField::Notice => "notice",
-        SendStreamField::Event => "event",
-        SendStreamField::ToolResultStart => "tool_result_start",
-        SendStreamField::ToolCallId => "tool_call_id",
-        SendStreamField::ToolName => "tool_name",
-        SendStreamField::ToolArguments => "tool_arguments",
-        SendStreamField::ToolOutput => "tool_output",
-        SendStreamField::ToolSucceeded => "tool_succeeded",
-        SendStreamField::ToolFailed => "tool_failed",
-        SendStreamField::ToolResultEnd => "tool_result_end",
-    }
+    })
 }

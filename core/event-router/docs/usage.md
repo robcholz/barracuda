@@ -190,11 +190,11 @@ block:
   "steps": [
     { "call": "imessage_bridge.to_gateway" },
     {
-      "if": "$previous.output.forward",
+      "if": { "source": "$previous.output.error", "not_equals": null },
       "then": [
         {
-          "call": "imessage.send",
-          "arguments": { "message": "$previous.output.message" }
+          "call": "error.report",
+          "arguments": { "error": "$previous.output.error" }
         }
       ],
       "else": []
@@ -204,14 +204,18 @@ block:
 }
 ```
 
-The condition must select a top-level boolean field from `$event.input` or
-`$previous.output`. Only the selected arm runs; arms may be empty or nested.
+The condition compares its `source` with the JSON value in exactly one
+`equals` or `not_equals` operator. A source may select the complete
+`$event.input` or `$previous.output` document, or one top-level field from
+either document. Objects, arrays, strings, numbers, booleans, and null all use
+JSON comparison. A missing selected field is null. Only the selected arm runs;
+arms may be empty or nested.
 After the arm, execution resumes with the following outer operation. A branch
 does not produce or merge an output: `$previous.output` always means the most
 recent RPC that actually completed on the selected path. Branch output schemas
-are not merged or compared at load time; missing fields, non-boolean
-conditions, and incompatible runtime request data fail that execution. A
-`return` inside an arm exits the entire Workflow successfully.
+are not merged or compared at load time; invalid runtime JSON and incompatible
+runtime request data fail that execution. A `return` inside an arm exits the
+entire Workflow successfully.
 
 `match.topic` is an optional exact selector within the 16-byte bound:
 
@@ -244,10 +248,11 @@ the most recently executed RPC response, based on `arguments`:
 | present, literals only | `Literal` — the request comes entirely from the arguments. |
 | present, with a `$` reference | `Mapping` — literals plus fields copied from the previous response. |
 
-A reference looks like `$previous.output.<field>` and names a single top-level
-serde field. For a `Mapping` link, give the destination field `#[serde(default)]`
-or a placeholder in the literal arguments, so the JSON codec can fill it from
-the reference.
+A reference looks like `$previous.output[.<field>]`. With a field, it copies
+one top-level serde value. Without a field, it embeds the complete source JSON
+document as that argument value; for example,
+`{"payload":"$previous.output"}`. Omit `arguments` when the complete source
+document is also the complete next request.
 
 ### Unload a Workflow
 

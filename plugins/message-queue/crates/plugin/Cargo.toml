@@ -6,17 +6,13 @@ description = "Barracuda Plugin providing shared bounded queues to Lua"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-lua.workspace = true
-barracuda-plugin-api.workspace = true
-barracuda-plugin-manager.workspace = true
-barracuda-vm-package-api.workspace = true
+barracuda-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 embassy-sync.workspace = true
-futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
 spin = { version = "0.10", default-features = false, features = ["mutex", "spin_mutex"] }
 
 [dev-dependencies]
-barracuda-lua = { workspace = true, features = ["vendored"] }
 critical-section = { version = "1", features = ["std"] }
 futures-lite = "2"
 

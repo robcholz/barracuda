@@ -9,12 +9,12 @@ use alloc::{
     string::{String, ToString},
 };
 
-use futures_lite::StreamExt as _;
-use gateway::{
+use barracuda_imessage_gateway_plugin::{
     ChannelError, ChannelFuture, MediaKind, MessageChannel, ReactRequest, SendMediaRequest,
     SendMessageRequest, SendReceipt, SetTypingRequest, StreamError, TextBody,
 };
-use gateway_http::{Method, Multipart, RequestBody, Response};
+use barracuda_imessage_gateway_plugin::{Method, Multipart, RequestBody, Response};
+use futures_lite::StreamExt as _;
 use http_client::ClientFactory;
 use serde_json::{json, Value};
 
@@ -75,7 +75,7 @@ where
         content_type: &str,
         body: B,
     ) -> Result<Value, ChannelError> {
-        let response = gateway_http::send(
+        let response = barracuda_imessage_gateway_plugin::send(
             &self.http_clients,
             method,
             url,
@@ -107,7 +107,7 @@ where
 
     async fn send_text(
         &self,
-        target: gateway::MessageTarget,
+        target: barracuda_imessage_gateway_plugin::MessageTarget,
         text: String,
         reply_to: Option<String>,
     ) -> Result<SendReceipt, ChannelError> {

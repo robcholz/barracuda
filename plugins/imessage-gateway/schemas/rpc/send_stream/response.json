@@ -4,7 +4,7 @@
     {
       "type": "object",
       "properties": {
-        "accepted_sequence": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+        "accepted_sequence": { "type": "integer", "minimum": 0 }
       },
       "required": ["accepted_sequence"],
       "additionalProperties": false

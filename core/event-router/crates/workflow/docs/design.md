@@ -50,17 +50,17 @@ response becomes the next request. It is declared implicitly by the step's
 | --- | --- | --- |
 | absent | `Direct` | Previous response frame passed byte-for-byte. |
 | present, no `$` | `Literal` | Request built entirely from the literal arguments, independent of the previous step. |
-| present, with `$` | `Mapping` | Request built from literal arguments, then each referenced field is copied wire-to-wire from the previous response. |
+| present, with `$` | `Mapping` | Request built from literal arguments, then each referenced value is copied wire-to-wire from its source. |
 
-Reference grammar: `$event.input.<field>` selects the triggering Event and
-`$previous.output.<field>` selects the most recently executed RPC response on
-the actual path. An `if` node does not update `$previous`: an empty selected arm
-therefore leaves the last executed RPC as previous without any special merge or
-inheritance rule.
+Mapping reference grammar: `$event.input[.<field>]` selects the triggering Event
+and `$previous.output[.<field>]` selects the most recently executed RPC response
+on the actual path. A field selects one top-level JSON value. Omitting the field
+embeds the complete source document as the destination request field. An `if`
+node does not update `$previous`: an empty selected arm therefore leaves the
+last executed RPC as previous without any special merge or inheritance rule.
 `$previous.input`, `$previous.error`, and absolute step selectors are reserved.
-The field is mandatory and a single top-level JSON name (the serde name); a
-whole-document source reference is rejected with a hint to use a `Direct` link,
-and nested paths are rejected.
+Nested source paths are rejected. A `Direct` link remains the whole-request
+passthrough form.
 
 ## Successful return
 
@@ -71,18 +71,22 @@ consume a matched Event without invoking an application endpoint.
 
 ## Conditional execution
 
-An `if` operation selects `then` or `else` from a top-level boolean field in
-`$event.input.<field>` or `$previous.output.<field>`. The selected block may be
-empty, may contain nested conditionals, and may complete normally into the
+An `if` operation compares a JSON `source` with an arbitrary JSON value using
+exactly one `equals` or `not_equals` operator. The source may be the complete
+`$event.input` or `$previous.output` document, or one top-level field from
+either document. JSON comparison applies uniformly to objects, arrays,
+strings, numbers, booleans, and null. A missing selected field has the JSON
+value null, which lets a Workflow branch on the presence of a non-null protocol
+value without a protocol-specific condition operator. The selected block may
+be empty, may contain nested conditionals, and may complete normally into the
 operations after the `if`. A `return` inside either arm terminates the entire
 Workflow successfully.
 
 Conditions and post-branch links are dynamic. Workflow loading validates the
 document structure, reference grammar, and every declared RPC address, but it
 does not require branch output schemas to agree or attempt to select a merged
-schema. At execution time a missing or non-boolean condition fails that
-execution, and each invoked RPC reports incompatible actual request data in the
-normal way.
+schema. At execution time invalid source JSON fails that execution, and each
+invoked RPC reports incompatible actual request data in the normal way.
 
 ## Unified frame-flow model
 
@@ -104,7 +108,7 @@ The **transform** is the link's per-frame function:
 
 - `Direct`: identity — bytes copied verbatim (frame sizes must match).
 - `Mapping`: encode the literal arguments into the request frame, then patch
-  each `$previous.output.<field>` reference wire-to-wire.
+  each field or whole-document reference wire-to-wire.
 - `Literal`: encode the arguments; the transform is constant (identical for
   every frame), so a streaming source produces one identical request per
   frame.

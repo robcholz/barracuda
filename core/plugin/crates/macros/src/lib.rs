@@ -8,9 +8,9 @@ use syn::{parse_macro_input, ItemStruct};
 /// Bakes a Plugin's identity and dependencies from its `plugin.toml`.
 ///
 /// The calling crate must use the standard `plugins/<name>/crates/plugin`
-/// layout. Apply this attribute to its [`Plugin`](barracuda_plugin_manager::Plugin)
+/// layout. Apply this attribute to its `barracuda_plugin::manager::Plugin`
 /// type; the attribute implements
-/// [`PluginDeclaration`](barracuda_plugin_manager::PluginDeclaration).
+/// `barracuda_plugin::manager::PluginDeclaration`.
 /// Invalid or missing manifests produce a compile error.
 #[proc_macro_attribute]
 pub fn plugin(
@@ -34,7 +34,7 @@ pub fn plugin(
             quote::quote! {
                 #item
 
-                impl #implementation_generics ::barracuda_plugin_manager::PluginDeclaration
+                impl #implementation_generics ::barracuda_plugin::manager::PluginDeclaration
                     for #name #type_generics #where_clause
                 {
                     const ID: &'static str = {

@@ -27,7 +27,7 @@ use futures_lite::future::block_on;
 use futures_lite::StreamExt as _;
 use gateway::{
     BinaryBody, ChannelFuture, MediaKind, MessageChannel, MessageGateway, SendMediaRequest,
-    SendMessageRequest, SendReceipt, SendStreamField, SendStreamFrame, SendStreamRequest, TextBody,
+    SendMessageRequest, SendReceipt, SendStreamEvent, SendStreamRequest, TextBody,
 };
 
 #[test]
@@ -48,9 +48,12 @@ fn publishes_three_bounded_json_contracts_and_terminal_event_ids() {
     assert!(GatewaySend::REQUEST_SCHEMA
         .as_str()
         .contains("conversation_id"));
-    assert!(GatewaySendStream::REQUEST_SCHEMA
-        .as_str()
-        .contains("finish"));
+    for field in ["route", "session", "sequence", "type", "payload"] {
+        assert!(GatewaySendStream::REQUEST_SCHEMA.as_str().contains(field));
+    }
+    for removed in ["action", "stream_id", "field", "boundary", "text"] {
+        assert!(!GatewaySendStream::REQUEST_SCHEMA.as_str().contains(removed));
+    }
     assert!(GatewaySendMedia::REQUEST_SCHEMA
         .as_str()
         .contains("content_base64"));
@@ -96,7 +99,7 @@ fn publishes_three_bounded_json_contracts_and_terminal_event_ids() {
 #[derive(Default)]
 struct State {
     text: RefCell<Vec<String>>,
-    stream: RefCell<Vec<SendStreamFrame>>,
+    stream: RefCell<Vec<SendStreamEvent>>,
     media: RefCell<Vec<u8>>,
     stream_finished: Cell<bool>,
     media_finished: Cell<bool>,
@@ -133,8 +136,8 @@ impl MessageChannel for RecordingChannel {
             state
                 .max_active_streams
                 .set(state.max_active_streams.get().max(active));
-            while let Some(frame) = request.frames.next().await {
-                state.stream.borrow_mut().push(frame?);
+            while let Some(event) = request.events.next().await {
+                state.stream.borrow_mut().push(event?);
             }
             state
                 .active_streams
@@ -243,27 +246,27 @@ impl Component<512> for CommandCaller {
             for (address, request) in [
                 (
                     "gateway.send_stream",
-                    r#"{"action":"start","stream_id":"text-1","sequence":0,"channel":"test","conversation_id":"chat"}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-1","sequence":1,"type":"turn_started","payload":{"turn":"turn-1","origin":"user"}}"#,
                 ),
                 (
                     "gateway.send_stream",
-                    r#"{"action":"start","stream_id":"text-2","sequence":0,"channel":"test","conversation_id":"chat"}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-2","sequence":2,"type":"turn_started","payload":{"turn":"turn-2","origin":"user"}}"#,
                 ),
                 (
                     "gateway.send_stream",
-                    r#"{"action":"chunk","stream_id":"text-1","sequence":1,"field":"reasoning","boundary":"complete","text":"thinking"}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-1","sequence":3,"type":"reasoning_delta","payload":{"text":"thinking"}}"#,
                 ),
                 (
                     "gateway.send_stream",
-                    r#"{"action":"chunk","stream_id":"text-1","sequence":2,"field":"text","boundary":"complete","text":"answer"}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-1","sequence":4,"type":"output_delta","payload":{"text":"answer"}}"#,
                 ),
                 (
                     "gateway.send_stream",
-                    r#"{"action":"finish","stream_id":"text-1","sequence":3}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-1","sequence":5,"type":"turn_ended","payload":{"turn":"turn-1"}}"#,
                 ),
                 (
                     "gateway.send_stream",
-                    r#"{"action":"finish","stream_id":"text-2","sequence":1}"#,
+                    r#"{"route":{"channel":"test","conversation_id":"chat"},"session":"session-2","sequence":6,"type":"turn_ended","payload":{"turn":"turn-2"}}"#,
                 ),
                 (
                     "gateway.send_media",
@@ -296,6 +299,7 @@ impl Component<512> for CommandCaller {
                     }
                     break;
                 }
+                futures_lite::future::yield_now().await;
             }
             self.finished.set(true);
             core::future::pending().await
@@ -351,29 +355,47 @@ fn application_streams_are_chunked_acked_and_delivered_without_aggregation() {
         })
         .await;
 
+        let received = state.stream.borrow();
+        let session_1 = received
+            .iter()
+            .filter(|event| event.session == "session-1")
+            .cloned()
+            .collect::<Vec<_>>();
+        let session_2 = received
+            .iter()
+            .filter(|event| event.session == "session-2")
+            .cloned()
+            .collect::<Vec<_>>();
         assert_eq!(
-            state.stream.borrow().as_slice(),
+            session_1,
             &[
-                SendStreamFrame::new(
-                    SendStreamField::Reasoning,
-                    gateway::StreamBoundary::Complete,
-                    "thinking",
+                SendStreamEvent::new(
+                    "session-1",
+                    1,
+                    "turn_started",
+                    r#"{"turn":"turn-1","origin":"user"}"#,
                 ),
-                SendStreamFrame::new(
-                    SendStreamField::Text,
-                    gateway::StreamBoundary::Complete,
-                    "answer",
+                SendStreamEvent::new("session-1", 3, "reasoning_delta", r#"{"text":"thinking"}"#,),
+                SendStreamEvent::new("session-1", 4, "output_delta", r#"{"text":"answer"}"#,),
+                SendStreamEvent::new("session-1", 5, "turn_ended", r#"{"turn":"turn-1"}"#,),
+            ]
+        );
+        assert_eq!(
+            session_2,
+            &[
+                SendStreamEvent::new(
+                    "session-2",
+                    2,
+                    "turn_started",
+                    r#"{"turn":"turn-2","origin":"user"}"#,
                 ),
+                SendStreamEvent::new("session-2", 6, "turn_ended", r#"{"turn":"turn-2"}"#,),
             ]
         );
         assert_eq!(state.media.borrow().as_slice(), &[0, 1, 255, 128]);
         assert_eq!(state.max_active_streams.get(), 2);
         assert!(state.media_was_inline.get());
-        assert!(state
-            .stream
-            .borrow()
-            .iter()
-            .all(|frame| frame.text.is_inline()));
+        assert!(received.iter().all(|event| event.payload.is_inline()));
     });
 }
 

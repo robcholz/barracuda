@@ -1,0 +1,33 @@
+[package]
+name = "barracuda-system-app"
+version = "0.1.0"
+edition = "2021"
+description = "Portable Barracuda System application and host entry"
+
+[lib]
+crate-type = ["rlib"]
+
+[[bin]]
+name = "barracuda-system"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]
+barracuda-event-router.workspace = true
+barracuda-system.workspace = true
+barracuda-target.workspace = true
+embassy-executor.workspace = true
+static_cell = "2.1.1"
+thiserror = { version = "2", default-features = false }
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
