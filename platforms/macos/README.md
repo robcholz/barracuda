@@ -14,10 +14,14 @@ cargo board select local-macos
 cargo run
 ```
 
+This terminal owns the System and its logs. In another terminal, connect the
+external terminal Channel with `cargo cli`.
+
 The Platform manifest installs a Cargo runner for this selection. `cargo run`
-uses that runner to compile `barracuda-macos-network` for the host, launch it
-through `sudo`, and pass the application its inherited UTUN descriptor. A plain
-`cargo build` compiles the selected application without starting networking.
+uses that runner to compile `barracuda-macos-network` for the host, launch the
+standalone `barracuda-system` application through `sudo`, and pass it the
+inherited UTUN descriptor. A plain `cargo build` compiles the selected
+application without starting networking.
 
 Platform, System, Core, and Plugin logs are written to standard error at
 `info`. Select another level for a build with, for example,

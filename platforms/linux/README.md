@@ -16,6 +16,9 @@ cargo board select local-linux
 cargo run
 ```
 
+This terminal owns the System and its logs. Start `cargo cli` in another
+terminal to connect the external terminal Channel.
+
 - operating-system peer: `10.42.0.1/30`
 - Embassy Net stack: `10.42.0.2/30`
 - WebServer endpoint: `10.42.0.2:8787`

@@ -89,6 +89,8 @@ pub struct SystemImageConfig {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ApplicationConfig {
+    #[serde(default)]
+    entry: Option<ApplicationEntry>,
     #[serde(default, rename = "support-binaries")]
     support_binaries: Vec<String>,
     #[serde(default)]
@@ -96,6 +98,12 @@ pub struct ApplicationConfig {
 }
 
 impl ApplicationConfig {
+    /// Returns the Platform-owned source for the selected application entry.
+    #[must_use]
+    pub const fn entry(&self) -> Option<&ApplicationEntry> {
+        self.entry.as_ref()
+    }
+
     /// Returns Platform package binaries built alongside the application.
     #[must_use]
     pub fn support_binaries(&self) -> &[String] {
@@ -106,6 +114,21 @@ impl ApplicationConfig {
     #[must_use]
     pub const fn launcher(&self) -> Option<&CommandDriver> {
         self.launcher.as_ref()
+    }
+}
+
+/// Source compiled as the application entry for one selected Platform.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationEntry {
+    source: PathBuf,
+}
+
+impl ApplicationEntry {
+    /// Returns the source path relative to the Platform bundle.
+    #[must_use]
+    pub fn source(&self) -> &Path {
+        &self.source
     }
 }
 

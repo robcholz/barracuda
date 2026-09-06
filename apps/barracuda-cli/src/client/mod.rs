@@ -8,7 +8,7 @@ use anstyle::{AnsiColor, Style};
 use anyhow::{anyhow, Result};
 use futures_util::{SinkExt, StreamExt};
 use std::io::IsTerminal;
-use tokio::time::{interval, sleep, Duration, Instant};
+use tokio::time::{interval, Duration};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::line_editor::{ChatLineEditor, LineInput};
@@ -16,8 +16,6 @@ use crate::protocol::parse_sse;
 use web::WebClientFrame;
 
 const WAITING_TICK: Duration = Duration::from_millis(400);
-const LOCAL_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
-const LOCAL_CONNECT_RETRY: Duration = Duration::from_millis(10);
 
 /// Connects to the host server at `url` and runs the terminal chat loop.
 pub async fn run(url: &str) -> Result<()> {
@@ -25,18 +23,6 @@ pub async fn run(url: &str) -> Result<()> {
         .await
         .map_err(|error| connection_error(url, error))?;
     run_connected(url, websocket).await
-}
-
-/// Connects to a System started concurrently by this process.
-pub(crate) async fn run_when_available(url: &str) -> Result<()> {
-    let deadline = Instant::now() + LOCAL_CONNECT_TIMEOUT;
-    loop {
-        match tokio_tungstenite::connect_async(url).await {
-            Ok((websocket, _response)) => return run_connected(url, websocket).await,
-            Err(_error) if Instant::now() < deadline => sleep(LOCAL_CONNECT_RETRY).await,
-            Err(error) => return Err(connection_error(url, error)),
-        }
-    }
 }
 
 fn connection_error(url: &str, error: tokio_tungstenite::tungstenite::Error) -> anyhow::Error {

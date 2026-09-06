@@ -17,3 +17,7 @@ system-image:
     driver: command
     program: probe-rs
     arguments: [download, --chip, "{chip}", --binary-format, bin, --base-address, "{offset}", "{image}"]
+application:
+  launcher:
+    program: probe-rs
+    arguments: [run, --chip, STM32F429ZITx, "{application}"]

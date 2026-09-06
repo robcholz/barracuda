@@ -632,12 +632,6 @@ version = "0.1.0"
 dependencies = [
  "anstyle",
  "anyhow",
- "barracuda-event-router",
- "barracuda-system",
- "barracuda-target",
- "embassy-executor",
- "embassy-sync 0.7.2",
- "embassy-time",
  "futures-util",
  "rustyline",
  "serde",
@@ -1430,6 +1424,18 @@ dependencies = [
  "futures-lite",
  "http-client",
  "log",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-system-app"
+version = "0.1.0"
+dependencies = [
+ "barracuda-event-router",
+ "barracuda-system",
+ "barracuda-target",
+ "embassy-executor",
+ "static_cell",
  "thiserror 2.0.18",
 ]
 

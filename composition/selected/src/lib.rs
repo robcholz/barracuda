@@ -2,6 +2,8 @@
 
 #![no_std]
 
+/// Expands the selected Platform's application entry in the application binary.
+pub use barracuda_platform_selected::application_entry;
 pub use barracuda_target_api::{TargetBindings, TargetResources};
 
 /// Complete move-only bindings required by the selected target axes.

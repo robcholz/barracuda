@@ -18,9 +18,10 @@ members = [
     "tools/plugin-tool",
     "tools/system-image",
     "apps/barracuda-cli",
+    "apps/barracuda-system",
 ]
 default-members = [
-    "apps/barracuda-cli",
+    "apps/barracuda-system",
 ]
 
 [workspace.dependencies]

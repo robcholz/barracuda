@@ -5,14 +5,17 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let system = std::fs::read_to_string(root.join("core/system/src/lib.rs"))?;
     let target = std::fs::read_to_string(root.join("composition/selected/src/lib.rs"))?;
-    let application = std::fs::read_to_string(root.join("apps/barracuda-cli/src/local_native.rs"))?;
+    let application = std::fs::read_to_string(root.join("apps/barracuda-system/src/lib.rs"))?;
+    let application_entry =
+        std::fs::read_to_string(root.join("apps/barracuda-system/src/main.rs"))?;
+    let platform_entry = std::fs::read_to_string(root.join("platforms/macos/application.rs"))?;
 
     assert!(target.contains("barracuda_platform_selected::prepare()"));
     assert!(target.contains("barracuda_board_selected::resources(spawner, board_bindings)"));
     assert!(target.contains("bindings.split()"));
-    assert!(application.contains("barracuda_target::resources(spawner)"));
-    assert!(application.contains("System::new(lanes(), target_resources(spawner).await?, spawner)"));
-    assert!(application.contains(".shutdown()"));
+    assert!(application_entry.contains("barracuda_target::application_entry!()"));
+    assert!(platform_entry.contains("barracuda_target::resources(spawner)"));
+    assert!(application.contains("System::new(lanes, resources, spawner)"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
@@ -29,6 +32,8 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(resources.contains("take_partition("));
     assert!(!application.contains("mod selected"));
     assert!(!application.contains("SelectedPlatform::initialize"));
+    assert!(!application.contains("target_os"));
+    assert!(!application_entry.contains("target_os"));
     assert!(!system.contains("P::initialize(spawner, board)"));
     Ok(())
 }
@@ -114,7 +119,9 @@ fn vfs_scopes_replace_the_custom_agent_sandbox_crate() -> Result<(), std::io::Er
 fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), std::io::Error> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let system_manifest = std::fs::read_to_string(root.join("core/system/Cargo.toml"))?;
-    let application_manifest = std::fs::read_to_string(root.join("apps/barracuda-cli/Cargo.toml"))?;
+    let application_manifest =
+        std::fs::read_to_string(root.join("apps/barracuda-system/Cargo.toml"))?;
+    let channel_manifest = std::fs::read_to_string(root.join("apps/barracuda-cli/Cargo.toml"))?;
 
     assert!(!system_manifest.contains("tokio = ["));
     assert!(!system_manifest.contains("GENERATED PLUGIN FEATURES"));
@@ -122,12 +129,10 @@ fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), s
     assert!(!system_manifest
         .contains("barracuda-webserver-plugin = { workspace = true, features = [\"std\"] }"));
     assert!(application_manifest.contains("barracuda-system.workspace = true"));
-    assert!(application_manifest.contains(
-        "serde = { version = \"1\", default-features = false, features = [\"alloc\", \"derive\"] }"
-    ));
-    assert!(application_manifest.contains(
-        "serde_json = { version = \"1\", default-features = false, features = [\"alloc\"] }"
-    ));
+    assert!(application_manifest.contains("barracuda-target.workspace = true"));
+    assert!(!channel_manifest.contains("barracuda-system.workspace = true"));
+    assert!(!channel_manifest.contains("barracuda-target.workspace = true"));
+    assert!(!channel_manifest.contains("embassy-executor"));
     Ok(())
 }
 

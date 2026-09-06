@@ -12,6 +12,11 @@
   workload-specific harnesses and shared recording fixtures.
 - `tools/` contains project-wide development utilities such as the LLM API
   recorder and deterministic replay proxy.
+- `apps/barracuda-system/` contains the portable System lifecycle and the host
+  binary shell selected by ordinary `cargo run`; the selected Platform supplies
+  the concrete entry source from its own bundle.
+- `apps/barracuda-cli/` is an external terminal Channel that connects to a
+  running Gateway; it never constructs the System.
 - `core/event-router/bench/profile/` contains Event Router heap/allocation
   profiling workloads.
 - `core/event-router/bench/throughput/` contains the Event Router bytes/s
@@ -50,6 +55,8 @@ Board YAML + Platform YAML
      |
 Selected Platform realizes generated Board settings
      |
+System application
+     |
    System
      |
 Plugins [Components + resources]
@@ -78,8 +85,19 @@ records the selection in ignored local state. It resolves the matching
 self-described Platform, updates the static selected-Platform and
 selected-Board-HAL dependency blocks, and writes the target and runner
 configuration locally. After that, ordinary `cargo build` and `cargo run`
-operate directly on the selected application through native Cargo; there is no
-Board-aware build wrapper.
+operate directly on the standalone System application through native Cargo;
+there is no Board-aware build wrapper. System, Platform, Core, and Plugin logs
+remain in that terminal.
+
+Run the external terminal Channel separately. This command is always compiled
+for the development host, even when the selected Board uses an embedded target:
+
+```bash
+cargo cli
+cargo cli ws://DEVICE_ADDRESS:8787
+```
+
+The default endpoint is `ws://10.42.0.2:8787`.
 
 The build defaults Platform logging to `info`. Set `BARRACUDA_LOG_LEVEL` for
 one build to select `off`, `error`, `warn`, `info`, `debug`, or `trace`:
@@ -177,7 +195,7 @@ no extra generator crate or synchronization, but no cross-executor migration.
 Deadlines, retry backoff, and orchestration timeouts use `embassy-time`
 directly. A firmware application supplies the one global Embassy time driver
 through its HAL; it does not implement a framework-specific timer trait. The
-host CLI and host tests enable Embassy's `std` driver and a generic timer queue,
+host Platforms and host tests enable Embassy's native driver and a generic timer queue,
 so they exercise the same timing code as firmware.
 
 Each `ModelApi` owns one client created by the shared HTTP client factory,
