@@ -39,7 +39,12 @@ Each call supplies one complete semantic Agent event plus its delivery route:
 
 An accepted event returns `{"accepted_sequence":3}`. `turn_started` opens the
 provider stream for its `session`; every event is forwarded unchanged; and
-`turn_ended` is forwarded before closing the stream. Rejections are
+`turn_ended` is forwarded before closing the stream. A `stream_error` payload
+contains a required non-empty `error` string and may retain producer
+correlation fields beside it. It terminates delivery with that error and may
+also be the first input for a session, allowing a Workflow failure to open and
+immediately fail a provider stream for the original route and `reply_to`.
+Rejections are
 `invalid_request`, `duplicate_stream`, `unknown_stream`, `out_of_order`, or
 `busy`. The Agent `session` is the stream correlation key and its `sequence`
 is used directly; Gateway does not add another stream ID, sequence, field, or

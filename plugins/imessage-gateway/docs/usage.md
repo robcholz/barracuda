@@ -44,6 +44,12 @@ the route with each event. `turn_started` opens the provider stream and
 used directly; Gateway does not assign another stream identity or order. If the
 response is `{"error":"busy"}`, yield and retry the same document.
 
+Send `type: "stream_error"` with a payload containing a non-empty `error`
+string to terminate an active stream with an error. Other producer correlation
+fields may remain in that payload. The same event may be sent without a
+preceding `turn_started`; Gateway opens delivery for the supplied route and
+`reply_to` and immediately reports the stream failure to the provider.
+
 After `turn_ended` is accepted, match `gateway.send_stream.finished` by
 `session` to obtain the provider receipt or failure. The RPC lane is not held
 for the lifetime of the provider stream.

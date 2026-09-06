@@ -21,17 +21,27 @@ provider stream per active Agent turn:
 turn_started -> semantic events -> turn_ended
 ```
 
+A terminal `stream_error` may replace that lifecycle when the producer cannot
+start or continue the turn. Gateway converts it into a typed stream failure;
+providers receive a failed stream rather than a normal semantic event. Gateway
+reads the payload's `error` string and permits producer correlation fields to
+remain in that document. A standalone error creates the delivery for its route
+and immediately terminates it, so clients observe a bounded failure instead of
+waiting for a turn that will never start.
+
 Every call contains the route and one complete `session.event` document. The
 Agent session is the correlation key and Agent sequence is the only order. The
-Gateway understands only `turn_started` and `turn_ended` as stream boundaries;
-it forwards those records and every record between them without interpreting
-their payloads. A provider chooses which semantic event types it consumes.
+Gateway understands `turn_started`, `turn_ended`, and `stream_error` as stream
+boundaries. It forwards normal records without interpreting their payloads. A
+provider chooses which semantic event types it consumes.
 
 Every accepted event returns `accepted_sequence`. Events are rejected when the
 stream is absent, duplicated, out of order, changes route, or its bounded queue
 is full. A `busy` response is backpressure: the caller yields and retries the
 same event. Accepting `turn_ended` closes input; provider completion is reported
-by one terminal Event rather than holding an RPC lane. The complete request,
+by one terminal Event rather than holding an RPC lane. Accepting
+`stream_error` closes input and reports failed delivery through the same
+terminal Event. The complete request,
 including route and payload, must fit one 512-byte RPC lane.
 
 `gateway.send_media` retains its explicit `start -> chunk -> finish` state
