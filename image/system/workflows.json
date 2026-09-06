@@ -9,10 +9,16 @@
         "call": "imessage_bridge.to_agent"
       },
       {
-        "if": "$previous.output.found",
+        "if": {
+          "source": "$previous.output.found",
+          "equals": true
+        },
         "then": [
           {
-            "if": "$previous.output.open_required",
+            "if": {
+              "source": "$previous.output.open_required",
+              "equals": true
+            },
             "then": [
               {
                 "call": "session.open",
@@ -87,7 +93,10 @@
         "call": "imessage_bridge.to_gateway"
       },
       {
-        "if": "$previous.output.forward",
+        "if": {
+          "source": "$previous.output.forward",
+          "equals": true
+        },
         "then": [
           {
             "call": "gateway.send_stream",

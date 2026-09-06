@@ -13,7 +13,7 @@ use serde_json::Value;
 use crate::definition::{
     WorkflowBranch, WorkflowCondition, WorkflowDefinitionError, WorkflowOperation,
 };
-use crate::link::parse_reference;
+use crate::link::parse_condition_source;
 use crate::{Rule, Topic, WorkflowDefinition, WorkflowId, WorkflowStep};
 
 const CONTROL_RESPONSE_MAX_BYTES: usize = 40;
@@ -232,9 +232,16 @@ struct EmptyReturnDocument {}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct WorkflowConditionDocument {
+    source: String,
+    equals: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WorkflowBranchDocument {
     #[serde(rename = "if")]
-    condition: String,
+    condition: WorkflowConditionDocument,
     then: Vec<WorkflowStepDocument>,
     #[serde(rename = "else")]
     otherwise: Vec<WorkflowStepDocument>,
@@ -307,14 +314,19 @@ fn parse_operations(
             WorkflowStepDocument::Branch(branch) => {
                 let body = branch
                     .condition
+                    .source
                     .strip_prefix('$')
                     .ok_or(WorkflowControlRejection::InvalidControlFlow)?;
-                let (selector, field) = parse_reference(body)
+                let (selector, field) = parse_condition_source(body)
                     .map_err(|_error| WorkflowControlRejection::InvalidControlFlow)?;
                 let (then_operations, then_returns) = parse_operations(branch.then, steps)?;
                 let (else_operations, else_returns) = parse_operations(branch.otherwise, steps)?;
                 parsed.push(WorkflowOperation::Branch(WorkflowBranch {
-                    condition: WorkflowCondition { selector, field },
+                    condition: WorkflowCondition {
+                        selector,
+                        field,
+                        expected: branch.condition.equals,
+                    },
                     then_operations,
                     else_operations,
                 }));
@@ -486,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_json_accepts_dynamic_and_nested_if_else() {
+    fn workflow_json_accepts_json_equality_and_nested_if_else() {
         let definition = parse_definition(
             r#"{
                 "id":"forward-output",
@@ -494,10 +506,10 @@ mod tests {
                 "steps":[
                     {"call":"imessage_bridge.to_gateway"},
                     {
-                        "if":"$previous.output.forward",
+                        "if":{"source":"$previous.output","equals":{"route":{"channel":"imessage"}}},
                         "then":[
                             {
-                                "if":"$event.input.enabled",
+                                "if":{"source":"$event.input.enabled","equals":true},
                                 "then":[{"call":"gateway.send_stream"}],
                                 "else":[]
                             }
@@ -518,14 +530,21 @@ mod tests {
     #[test]
     fn workflow_json_rejects_invalid_branch_control_flow() {
         for json in [
-            r#"{"id":"after-return","match":{"event":"a"},"steps":[{"if":"$event.input.ok","then":[{"return":{}},{"call":"a.b"}],"else":[]}]}"#,
-            r#"{"id":"bad-condition","match":{"event":"a"},"steps":[{"if":"event.input.ok","then":[],"else":[]}]}"#,
-            r#"{"id":"nested-field","match":{"event":"a"},"steps":[{"if":"$event.input.flags.ok","then":[],"else":[]}]}"#,
+            r#"{"id":"after-return","match":{"event":"a"},"steps":[{"if":{"source":"$event.input.ok","equals":true},"then":[{"return":{}},{"call":"a.b"}],"else":[]}]}"#,
+            r#"{"id":"bad-condition","match":{"event":"a"},"steps":[{"if":{"source":"event.input.ok","equals":true},"then":[],"else":[]}]}"#,
+            r#"{"id":"nested-field","match":{"event":"a"},"steps":[{"if":{"source":"$event.input.flags.ok","equals":true},"then":[],"else":[]}]}"#,
         ] {
             assert_eq!(
                 parse_definition(json),
                 Err(WorkflowControlRejection::InvalidControlFlow)
             );
         }
+
+        assert_eq!(
+            parse_definition(
+                r#"{"id":"old-boolean-condition","match":{"event":"a"},"steps":[{"if":"$event.input.ok","then":[],"else":[]}]}"#
+            ),
+            Err(WorkflowControlRejection::InvalidJson)
+        );
     }
 }

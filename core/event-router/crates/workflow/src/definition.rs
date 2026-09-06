@@ -92,11 +92,12 @@ pub struct WorkflowStep {
     arguments: Option<Value>,
 }
 
-/// Boolean field reference selecting a branch arm.
+/// Runtime JSON equality selecting a branch arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct WorkflowCondition {
     pub(crate) selector: SourceSelector,
-    pub(crate) field: String,
+    pub(crate) field: Option<String>,
+    pub(crate) expected: Value,
 }
 
 /// One conditional control node.

@@ -86,12 +86,6 @@ pub enum WorkflowExecutionError {
         /// Step whose arguments contain the invalid selector.
         step: usize,
     },
-    /// A branch condition selected a field whose runtime value is not boolean.
-    #[error("Workflow branch condition field {field} is not boolean")]
-    ConditionNotBoolean {
-        /// Condition field containing a non-boolean value.
-        field: alloc::string::String,
-    },
     /// Event ingress failed after this execution was provisionally created.
     #[error("Event ingress was cancelled before ownership transfer")]
     IngressCancelled,
@@ -611,28 +605,27 @@ fn condition_value(
 ) -> Result<bool, WorkflowExecutionError> {
     let value: Value = serde_json::from_str(source)
         .map_err(|_error| step_error(branch_step.saturating_sub(1), RpcError::InvalidJson))?;
-    let object = value.as_object().ok_or(match condition.selector {
-        SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
-        SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
-            step: branch_step.saturating_sub(1),
-        },
-    })?;
-    let value = object
-        .get(&condition.field)
-        .ok_or_else(|| match condition.selector {
-            SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
-                field: condition.field.clone(),
-            },
-            SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
-                step: branch_step.saturating_sub(1),
-                field: condition.field.clone(),
-            },
-        })?;
-    value
-        .as_bool()
-        .ok_or_else(|| WorkflowExecutionError::ConditionNotBoolean {
-            field: condition.field.clone(),
-        })
+    let actual = match &condition.field {
+        None => &value,
+        Some(field) => {
+            let object = value.as_object().ok_or(match condition.selector {
+                SourceSelector::EventInput => WorkflowExecutionError::EventInputNotObject,
+                SourceSelector::PreviousOutput => WorkflowExecutionError::ResponseNotObject {
+                    step: branch_step.saturating_sub(1),
+                },
+            })?;
+            object.get(field).ok_or_else(|| match condition.selector {
+                SourceSelector::EventInput => WorkflowExecutionError::MissingEventInputField {
+                    field: field.clone(),
+                },
+                SourceSelector::PreviousOutput => WorkflowExecutionError::MissingOutputField {
+                    step: branch_step.saturating_sub(1),
+                    field: field.clone(),
+                },
+            })?
+        }
+    };
+    Ok(actual == &condition.expected)
 }
 
 fn mapped_request<'source, 'definition>(
@@ -1635,38 +1628,36 @@ mod json_workflow_tests {
     }
 
     #[test]
-    fn previous_output_condition_type_is_checked_at_execution_time() {
+    fn previous_output_condition_compares_complete_json_objects() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
         let registry = RpcRegistry::new(lanes);
         register_producer(&registry, r#"{"token":41}"#);
         let workflow = parse_definition(
             r#"{
-                "id":"invalid-condition",
+                "id":"object-condition",
                 "match":{"event":"workflow.event"},
                 "steps":[
                     {"call":"workflow.produce","arguments":{}},
-                    {"if":"$previous.output.token","then":[{"return":{}}],"else":[{"return":{}}]}
+                    {
+                        "if":{"source":"$previous.output","equals":{"token":41}},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
                 ]
             }"#,
         )
         .expect("parse conditional Workflow");
 
-        validate_definition(&registry.client(), &workflow).expect("load dynamic condition");
-        let error = block_on(execute_steps(
+        block_on(execute_steps(
             &workflow,
             &event_input("{}"),
             registry.client(),
         ))
-        .expect_err("reject non-boolean condition at execution time");
-
-        assert!(matches!(
-            error,
-            WorkflowExecutionError::ConditionNotBoolean { field } if field == "token"
-        ));
+        .expect("select matching object branch");
     }
 
     #[test]
-    fn event_input_condition_is_checked_at_execution_time() {
+    fn event_input_condition_compares_any_json_field_value() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
         let registry = RpcRegistry::new(lanes);
         let workflow = parse_definition(
@@ -1674,30 +1665,22 @@ mod json_workflow_tests {
                 "id":"event-condition",
                 "match":{"event":"workflow.event"},
                 "steps":[
-                    {"if":"$event.input.forward","then":[{"return":{}}],"else":[{"return":{}}]}
+                    {
+                        "if":{"source":"$event.input.status","equals":"ready"},
+                        "then":[{"return":{}}],
+                        "else":[{"call":"missing.method"}]
+                    }
                 ]
             }"#,
         )
         .expect("parse Event conditional Workflow");
 
-        validate_definition(&registry.client(), &workflow).expect("validate Event condition");
         block_on(execute_steps(
             &workflow,
-            &event_input(r#"{"forward":true}"#),
+            &event_input(r#"{"status":"ready"}"#),
             registry.client(),
         ))
-        .expect("execute boolean condition");
-        let error = block_on(execute_steps(
-            &workflow,
-            &event_input(r#"{"forward":"yes"}"#),
-            registry.client(),
-        ))
-        .expect_err("reject non-boolean condition");
-
-        assert!(matches!(
-            error,
-            WorkflowExecutionError::ConditionNotBoolean { field } if field == "forward"
-        ));
+        .expect("compare string field");
     }
 
     #[test]
@@ -1709,7 +1692,7 @@ mod json_workflow_tests {
                 "id":"unknown-branch-method",
                 "match":{"event":"workflow.event"},
                 "steps":[
-                    {"if":"$event.input.forward","then":[{"call":"missing.method"}],"else":[]}
+                    {"if":{"source":"$event.input.forward","equals":true},"then":[{"call":"missing.method"}],"else":[]}
                 ]
             }"#,
         )

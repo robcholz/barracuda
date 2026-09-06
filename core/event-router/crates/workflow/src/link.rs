@@ -150,6 +150,35 @@ pub(crate) fn parse_reference(body: &str) -> Result<(SourceSelector, String), Li
     Ok((selector, field.to_string()))
 }
 
+/// Parses a condition source selecting either a whole JSON document or one
+/// top-level field from it.
+pub(crate) fn parse_condition_source(
+    body: &str,
+) -> Result<(SourceSelector, Option<String>), LinkError> {
+    if body.is_empty() {
+        return Err(LinkError::EmptyReference);
+    }
+    let mut parts = body.split('.');
+    let step = parts.next().ok_or(LinkError::MalformedReference)?;
+    let channel = parts.next().ok_or(LinkError::MalformedReference)?;
+    let selector = match (step, channel) {
+        ("event", "input") => SourceSelector::EventInput,
+        ("previous", "output") => SourceSelector::PreviousOutput,
+        ("event" | "previous", _) => return Err(LinkError::UnknownChannel),
+        _ => return Err(LinkError::UnknownStepSelector),
+    };
+    let Some(field) = parts.next() else {
+        return Ok((selector, None));
+    };
+    if parts.next().is_some() {
+        return Err(LinkError::NestedFieldPath);
+    }
+    if field.is_empty() {
+        return Err(LinkError::MalformedReference);
+    }
+    Ok((selector, Some(field.to_string())))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -157,7 +186,7 @@ mod tests {
     #![allow(clippy::indexing_slicing)]
     #![allow(missing_docs)]
 
-    use super::{classify, LinkError, LinkKind, SourceSelector};
+    use super::{classify, parse_condition_source, LinkError, LinkKind, SourceSelector};
     use serde_json::json;
 
     #[test]
@@ -237,6 +266,22 @@ mod tests {
         assert_eq!(
             classify(Some(&json!({ "a": "$previous.output." }))),
             Err(LinkError::MalformedReference)
+        );
+    }
+
+    #[test]
+    fn condition_source_can_select_a_document_or_top_level_field() {
+        assert_eq!(
+            parse_condition_source("previous.output"),
+            Ok((SourceSelector::PreviousOutput, None))
+        );
+        assert_eq!(
+            parse_condition_source("event.input.status"),
+            Ok((SourceSelector::EventInput, Some("status".into())))
+        );
+        assert_eq!(
+            parse_condition_source("event.input.status.code"),
+            Err(LinkError::NestedFieldPath)
         );
     }
 }
