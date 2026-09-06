@@ -54,19 +54,44 @@ impl GatewayIngress {
     /// Event does not fit one lane, or [`GatewayIngressError::Stopped`] after
     /// the ingress Component stops accepting messages.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
+        log::info!(
+            "IMessage Gateway received inbound message `{}` on `{}` conversation `{}` ({} text bytes)",
+            message.message_id,
+            message.route.channel,
+            message.route.conversation_id,
+            message.text.len()
+        );
         match validate_inbound(&message, self.event_input_bytes) {
             Ok(()) => {}
             Err(InboundValidationError::InvalidMessage) => {
+                log::warn!(
+                    "IMessage Gateway rejected inbound message `{}`: invalid metadata",
+                    message.message_id
+                );
                 return Err(GatewayIngressError::InvalidMessage);
             }
             Err(InboundValidationError::MessageTooLarge) => {
+                log::warn!(
+                    "IMessage Gateway rejected inbound message `{}`: Event document exceeds {} bytes",
+                    message.message_id,
+                    self.event_input_bytes
+                );
                 return Err(GatewayIngressError::MessageTooLarge);
             }
         }
-        self.messages
-            .send(message)
-            .await
-            .map_err(|_error| GatewayIngressError::Stopped)
+        let message_id = message.message_id.clone();
+        match self.messages.send(message).await {
+            Ok(()) => {
+                log::debug!("IMessage Gateway queued inbound message `{message_id}`");
+                Ok(())
+            }
+            Err(_error) => {
+                log::warn!(
+                    "IMessage Gateway could not queue inbound message `{message_id}`: ingress stopped"
+                );
+                Err(GatewayIngressError::Stopped)
+            }
+        }
     }
 }
 
@@ -203,9 +228,21 @@ impl<const M: usize> Component<M> for GatewayInboundComponent {
                     Ok(message) => message,
                     Err(_closed) => return pending().await,
                 };
-                emit_inbound(&emitter, &message)
-                    .await
-                    .map_err(ComponentError::lifecycle)?;
+                log::info!(
+                    "IMessage Gateway emitting `gateway.message.received` for message `{}`",
+                    message.message_id
+                );
+                if let Err(error) = emit_inbound(&emitter, &message).await {
+                    log::error!(
+                        "IMessage Gateway failed to emit inbound message `{}`: {error}",
+                        message.message_id
+                    );
+                    return Err(ComponentError::lifecycle(error));
+                }
+                log::debug!(
+                    "IMessage Gateway Event Router accepted inbound message `{}`",
+                    message.message_id
+                );
             }
         })
     }

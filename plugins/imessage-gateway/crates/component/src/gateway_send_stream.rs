@@ -185,6 +185,34 @@ pub(crate) fn gateway_send_stream_handler(
                 )
             };
 
+            match &result {
+                Ok(()) if request.event_type == "turn_started" => log::info!(
+                    "IMessage Gateway opened outbound stream for `{}` on `{}` conversation `{}` at sequence {}",
+                    request.session,
+                    request.route.channel,
+                    request.route.conversation_id,
+                    request.sequence
+                ),
+                Ok(()) if request.event_type == "turn_ended" => log::info!(
+                    "IMessage Gateway accepted terminal event for `{}` at sequence {}",
+                    request.session,
+                    request.sequence
+                ),
+                Ok(()) => log::debug!(
+                    "IMessage Gateway accepted `{}` for `{}` at sequence {}",
+                    request.event_type,
+                    request.session,
+                    request.sequence
+                ),
+                Err(error) => log::warn!(
+                    "IMessage Gateway rejected `{}` for `{}` at sequence {}: {}",
+                    request.event_type,
+                    request.session,
+                    request.sequence,
+                    error.code()
+                ),
+            }
+
             match result {
                 Ok(()) => {
                     response
@@ -275,6 +303,11 @@ pub(crate) async fn deliver_event_stream<const M: usize>(
 ) -> Result<(), barracuda_event_router::EmitError> {
     let session = job.session;
     let terminal_sequence = Rc::clone(&job.terminal_sequence);
+    let channel = job.target.channel.clone();
+    let conversation_id = job.target.conversation_id.clone();
+    log::info!(
+        "IMessage Gateway started provider delivery for `{session}` on `{channel}` conversation `{conversation_id}`"
+    );
     let events = event_stream(job.events);
     let request = SendStreamRequest {
         target: job.target,
@@ -292,6 +325,18 @@ pub(crate) async fn deliver_event_stream<const M: usize>(
         }
         (Err(error), _) => TerminalEvent::failed(&session, sequence, map_gateway_error(error)),
     };
+    match &result {
+        Ok(receipt) if completed_sequence.is_some() => log::info!(
+            "IMessage Gateway completed provider delivery for `{session}` as message `{}` at sequence {sequence}",
+            receipt.message_id
+        ),
+        Ok(_receipt) => log::warn!(
+            "IMessage Gateway provider delivery for `{session}` ended before `turn_ended`"
+        ),
+        Err(error) => log::warn!(
+            "IMessage Gateway provider delivery for `{session}` failed: {error}"
+        ),
+    }
     let event_input_bytes = event_input_capacity::<M>(GatewaySendStreamFinished::ID)?;
     if terminal
         .encoded_len()

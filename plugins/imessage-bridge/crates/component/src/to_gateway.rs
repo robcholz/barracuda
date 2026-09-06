@@ -29,7 +29,7 @@ struct ToGatewayRequest<'a> {
     #[serde(borrow)]
     session: &'a str,
     #[serde(rename = "sequence")]
-    _sequence: u64,
+    sequence: u64,
     #[serde(rename = "type", borrow)]
     event_type: &'a str,
     #[serde(rename = "payload", borrow)]
@@ -44,12 +44,42 @@ where
         let shared = Rc::clone(&control.shared);
         async move {
             let request = request.deserialize::<ToGatewayRequest<'_>>()?;
+            log::debug!(
+                "IMessage Bridge received Agent event `{}` for `{}` at sequence {}",
+                request.event_type,
+                request.session,
+                request.sequence
+            );
             let result = shared
                 .book
                 .lock()
                 .await
                 .gateway_target(request.session, request.event_type == "closed")
                 .map(gateway_target_response);
+            match &result {
+                Ok(_) if request.event_type == "turn_started" => log::info!(
+                    "IMessage Bridge routed Agent turn `{}` at sequence {}",
+                    request.session,
+                    request.sequence
+                ),
+                Ok(_) if request.event_type == "turn_ended" => log::info!(
+                    "IMessage Bridge routed terminal turn event for `{}` at sequence {}",
+                    request.session,
+                    request.sequence
+                ),
+                Ok(_) => log::debug!(
+                    "IMessage Bridge routed `{}` for `{}` at sequence {}",
+                    request.event_type,
+                    request.session,
+                    request.sequence
+                ),
+                Err(error) => log::warn!(
+                    "IMessage Bridge rejected Agent event `{}` for `{}`: {}",
+                    request.event_type,
+                    request.session,
+                    error.code()
+                ),
+            }
             match result {
                 Ok(value) => response.write(&value).await,
                 Err(error) => response.write(&error_response(error)).await,

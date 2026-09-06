@@ -427,10 +427,35 @@ impl<'a, const M: usize> SemanticEmitter<'a, M> {
     }
 
     async fn emit_payload(&mut self, payload: &SessionEventPayload<'_>) -> ComponentResult<()> {
-        self.emitter
-            .emit::<SessionOutputEvent>(payload)
-            .await
-            .map_err(ComponentError::lifecycle)?;
+        match payload.event_type {
+            "turn_started" | "turn_ended" | "closed" => log::info!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+            "turn_error" | "session_error" | "stream_error" => log::warn!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+            _ => log::debug!(
+                "Agent emitting `{}` for session `{}` at sequence {}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            ),
+        }
+        if let Err(error) = self.emitter.emit::<SessionOutputEvent>(payload).await {
+            log::error!(
+                "Agent failed to emit `{}` for session `{}` at sequence {}: {error}",
+                payload.event_type,
+                payload.session,
+                payload.sequence
+            );
+            return Err(ComponentError::lifecycle(error));
+        }
         self.sequence = self
             .sequence
             .checked_add(1)

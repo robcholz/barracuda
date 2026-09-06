@@ -48,13 +48,18 @@ pub fn new_session_handler(runtime: Rc<AgentRuntime>) -> impl JsonHandler {
         async move {
             let request = request.deserialize::<NewSessionRequest>()?;
             match runtime.new_session(request.persistence.into()).await {
-                Ok(session) => response.write(&SessionResponse { session }).await,
+                Ok(session) => {
+                    log::info!("Agent created session `{session}`");
+                    response.write(&SessionResponse { session }).await
+                }
                 Err(RuntimeError::SessionCreate(SessionCreateError::WorkerStopped)) => {
+                    log::warn!("Agent failed to create session: runtime worker stopped");
                     response
                         .write(&ErrorResponse(AgentRpcError::WorkerStopped))
                         .await
                 }
-                Err(_error) => {
+                Err(error) => {
+                    log::warn!("Agent failed to create persistent session: {error}");
                     response
                         .write(&ErrorResponse(AgentRpcError::Persistence))
                         .await

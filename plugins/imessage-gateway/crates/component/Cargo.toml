@@ -9,6 +9,7 @@ async-channel = { version = "2", default-features = false }
 barracuda-event-router.workspace = true
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 gateway.workspace = true
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }

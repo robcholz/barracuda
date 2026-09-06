@@ -23,6 +23,7 @@ barracuda-vfs.workspace = true
 barracuda-router.workspace = true
 barracuda-rpc.workspace = true
 barracuda-workflow.workspace = true
+log.workspace = true
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 

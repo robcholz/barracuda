@@ -77,7 +77,7 @@ impl<const CAP: usize, const SUBS: usize> WebSocketEndpoint for WebBridge<CAP, S
                             Ok(frame) => {
                                 let message_id = format!("web-in-{next_message}");
                                 next_message = next_message.saturating_add(1);
-                                log::debug!(
+                                log::info!(
                                     "IMessage Web received message `{message_id}` for conversation `{}`",
                                     self.conversation_id
                                 );

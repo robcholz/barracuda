@@ -202,6 +202,10 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
     fn send_stream(&self, mut request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
         Box::pin(async move {
             let message_id = Self::message_id(self.next_id.get());
+            log::info!(
+                "IMessage Web opening outbound message `{message_id}` for conversation `{}`",
+                request.target.conversation_id
+            );
             self.publish(
                 &request.target,
                 WebEventData::MessageStart {
@@ -214,6 +218,20 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
             while let Some(event) = request.events.next().await {
                 match event {
                     Ok(event) => {
+                        match event.event_type.as_str() {
+                            "turn_started" | "turn_ended" => log::info!(
+                                "IMessage Web forwarding `{}` for `{}` at sequence {}",
+                                event.event_type,
+                                event.session,
+                                event.sequence
+                            ),
+                            _ => log::debug!(
+                                "IMessage Web forwarding `{}` for `{}` at sequence {}",
+                                event.event_type,
+                                event.session,
+                                event.sequence
+                            ),
+                        }
                         self.publish(
                             &request.target,
                             WebEventData::MessageEvent {
@@ -223,6 +241,9 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                         )?;
                     }
                     Err(error) => {
+                        log::warn!(
+                            "IMessage Web outbound message `{message_id}` failed while reading Agent events: {error}"
+                        );
                         self.publish(
                             &request.target,
                             WebEventData::MessageEnd {
@@ -242,6 +263,10 @@ impl<const CAP: usize, const SUBS: usize> MessageChannel for Web<CAP, SUBS> {
                     error: None,
                 },
             )?;
+            log::info!(
+                "IMessage Web completed outbound message `{message_id}` for conversation `{}`",
+                request.target.conversation_id
+            );
             Ok(SendReceipt::new(message_id))
         })
     }

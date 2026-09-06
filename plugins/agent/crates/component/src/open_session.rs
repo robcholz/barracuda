@@ -44,14 +44,26 @@ pub fn open_session_handler(
             let request = request.deserialize::<OpenSessionRequest<'_>>()?;
             let session = match parse_session(request.session) {
                 Ok(session) => session,
-                Err(error) => return response.write(&ErrorResponse(error)).await,
+                Err(error) => {
+                    log::warn!(
+                        "Agent rejected `session.open` for `{}`: {error}",
+                        request.session
+                    );
+                    return response.write(&ErrorResponse(error)).await;
+                }
             };
+            log::info!("Agent opening session `{session}`");
             match runtime.open_session(session).await {
                 Ok((control, events)) => {
                     let run = registry.insert(session, control, events);
+                    log::info!("Agent opened session `{session}` as `run-{run}`");
                     response.write(&OpenedResponse { session, run }).await
                 }
-                Err(error) => response.write(&ErrorResponse(map_open_error(error))).await,
+                Err(error) => {
+                    let error = map_open_error(error);
+                    log::warn!("Agent failed to open session `{session}`: {error}");
+                    response.write(&ErrorResponse(error)).await
+                }
             }
         }
     }

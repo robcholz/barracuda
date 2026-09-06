@@ -12,6 +12,7 @@ crate-type = ["rlib"]
 [dependencies]
 barracuda-rpc.workspace = true
 getset = "0.1.7"
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
 thiserror = { version = "2", default-features = false }

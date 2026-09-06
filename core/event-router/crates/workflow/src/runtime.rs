@@ -373,16 +373,22 @@ impl WorkflowRuntime {
             match execution.poll(context) {
                 Poll::Pending => self.running.push_back(execution),
                 Poll::Ready(Ok(())) => {
+                    log::debug!("Workflow `{}` completed", execution.id.as_str());
                     self.shared
                         .completed_count
                         .set(self.shared.completed_count.get().saturating_add(1));
                 }
                 Poll::Ready(Err(WorkflowExecutionError::IngressCancelled)) => {
+                    log::warn!(
+                        "Workflow `{}` was cancelled before Event ingress completed",
+                        execution.id.as_str()
+                    );
                     self.shared
                         .cancelled_count
                         .set(self.shared.cancelled_count.get().saturating_add(1));
                 }
                 Poll::Ready(Err(error)) => {
+                    log::error!("Workflow `{}` failed: {error}", execution.id.as_str());
                     self.shared
                         .failed_count
                         .set(self.shared.failed_count.get().saturating_add(1));
@@ -1080,6 +1086,11 @@ async fn handle_emit(
 ) -> RpcResult<()> {
     let (header, event) = EventInput::accept(request, &event_inputs)?;
     let plans = shared.matching_plans(header.event_id(), header.topic());
+    log::debug!(
+        "Workflow Event `{}` matched {} definition(s)",
+        header.event_id().as_str(),
+        plans.len()
+    );
     if plans.is_empty() {
         return response.write("{}").await;
     }
@@ -1110,7 +1121,10 @@ mod json_workflow_tests {
     #![allow(clippy::expect_used)]
     #![allow(missing_docs)]
 
+    extern crate std;
+
     use alloc::boxed::Box;
+    use alloc::format;
     use alloc::rc::Rc;
     use alloc::string::String;
     use alloc::vec;
@@ -1119,12 +1133,14 @@ mod json_workflow_tests {
     use core::future::{poll_fn, Future};
     use core::pin::Pin;
     use core::task::Poll;
+    use std::sync::Mutex;
 
     use barracuda_rpc::{
         JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcError, RpcFrame,
         RpcLaneStorage, RpcMethod, RpcRegistry, Unary,
     };
     use futures_lite::future::block_on;
+    use log::{LevelFilter, Log, Metadata, Record};
     use serde_json::{json, Value};
 
     use super::{execute_steps, validate_definition, WorkflowRuntime};
@@ -1148,6 +1164,31 @@ mod json_workflow_tests {
     const MODE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
         r#"{"type":"object","properties":{"mode":{"type":"string"}},"required":["mode"],"additionalProperties":false}"#,
     );
+
+    static CAPTURE: CaptureLogger = CaptureLogger {
+        records: Mutex::new(Vec::new()),
+    };
+
+    struct CaptureLogger {
+        records: Mutex<Vec<String>>,
+    }
+
+    impl Log for CaptureLogger {
+        fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+            metadata.target().starts_with("barracuda_workflow")
+        }
+
+        fn log(&self, record: &Record<'_>) {
+            if self.enabled(record.metadata()) {
+                self.records
+                    .lock()
+                    .expect("lock captured Workflow logs")
+                    .push(format!("{} {}", record.level(), record.args()));
+            }
+        }
+
+        fn flush(&self) {}
+    }
 
     struct Produce;
 
@@ -1371,6 +1412,81 @@ mod json_workflow_tests {
 
         assert_eq!(seen.take(), Some(json!({"token":41,"extra":5})));
         assert_eq!(runtime.view().info().completed_count, 1);
+    }
+
+    #[test]
+    fn failed_execution_is_logged_with_workflow_and_step() {
+        const FRAME_SIZE: usize = 128;
+
+        log::set_logger(&CAPTURE).expect("install Workflow capture logger");
+        log::set_max_level(LevelFilter::Trace);
+        CAPTURE
+            .records
+            .lock()
+            .expect("lock captured Workflow logs")
+            .clear();
+
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
+        let registry = RpcRegistry::new(lanes);
+        register_producer(&registry, "{}");
+        registry
+            .register_json::<MappingSink, _>(
+                "*",
+                |_context, _request: JsonRef, writer: JsonWriter| async move {
+                    writer.write("{}").await
+                },
+            )
+            .expect("register mapping sink");
+        let mut runtime = WorkflowRuntime::new();
+        runtime
+            .control()
+            .load(definition(
+                "logged-failure",
+                vec![
+                    WorkflowStep::new(address(Produce::ADDRESS), None),
+                    WorkflowStep::new(
+                        address(MappingSink::ADDRESS),
+                        Some(json!({
+                            "token": "$previous.output.token",
+                            "extra": 5
+                        })),
+                    ),
+                ],
+            ))
+            .expect("load Workflow");
+        registry
+            .register_json::<InternalEmit<FRAME_SIZE>, _>(
+                "system",
+                runtime.ingress_handler::<4, FRAME_SIZE>(),
+            )
+            .expect("register Event ingress");
+        runtime.start(registry.client());
+        let emitter = EventEmitter::<FRAME_SIZE>::new(registry.client());
+        let mut emit = Box::pin(emitter.emit::<JsonEvent>("{}"));
+        let mut emit_complete = false;
+
+        block_on(poll_fn(|context| {
+            let _pending = Pin::new(&mut runtime).poll(context);
+            if !emit_complete && emit.as_mut().poll(context).is_ready() {
+                emit_complete = true;
+            }
+            if runtime.view().info().failed_count == 1 {
+                Poll::Ready(())
+            } else {
+                context.waker().wake_by_ref();
+                Poll::Pending
+            }
+        }));
+
+        let records = CAPTURE.records.lock().expect("lock captured Workflow logs");
+        assert!(
+            records.iter().any(|line| {
+                line.contains("ERROR Workflow `logged-failure` failed")
+                    && line.contains("Workflow RPC step 0 failed")
+                    && line.contains("Required")
+            }),
+            "captured records: {records:?}"
+        );
     }
 
     #[test]

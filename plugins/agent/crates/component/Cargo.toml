@@ -13,6 +13,7 @@ barracuda-event-router.workspace = true
 barracuda-vfs.workspace = true
 async-channel = { version = "2", default-features = false }
 futures-lite = { version = "2", default-features = false, features = ["alloc"] }
+log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 
 [dev-dependencies]
