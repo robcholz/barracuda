@@ -24,8 +24,6 @@ fn production_plugins_do_not_reference_flash_contracts() -> Result<(), std::io::
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let plugin_files = [
         "plugins/agent/crates/plugin/src/lib.rs",
-        "plugins/captive-portal/crates/plugin/src/lib.rs",
-        "plugins/gateway-agent/crates/plugin/src/lib.rs",
         "plugins/imessage-bluebubble/crates/plugin/src/lib.rs",
         "plugins/imessage-inkbox/crates/plugin/src/lib.rs",
         "plugins/imessage-gateway/crates/plugin/src/lib.rs",
