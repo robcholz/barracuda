@@ -116,6 +116,9 @@ jobs:
               | group_by(.key)
               | map({
                   key: .[0].key,
+                  label: (if length == 1 then .[0].board
+                    else "\(.[0].board) + \(length - 1) more"
+                    end),
                   os: .[0].os,
                   toolchain: .[0].toolchain,
                   chip: .[0].chip,
@@ -125,11 +128,11 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           jq . <<< "$matrix"
 
-  # This is the shortest complete end-user path and therefore the primary
+  # This is the shortest complete host validation and therefore the primary
   # blocking signal: select a real host Board, build the default application,
   # then run its tests before spending time on the exhaustive device matrix.
   linux:
-    name: End-user path (local-linux)
+    name: Host checks (local-linux)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -181,7 +184,7 @@ jobs:
   # It runs in parallel with Linux: Linux normally reports first, while macOS
   # adds host/compiler integration coverage without repeating device tests.
   macos:
-    name: End-user path (local-macos)
+    name: Host checks (local-macos)
     runs-on: macos-latest
     timeout-minutes: 30
     env:
@@ -378,11 +381,11 @@ jobs:
           uv run --package serial-log pytest
           plugins/agent/crates/trace/scripts/serial_log/tests
 
-  # Once all fast gates pass, exercise the actual end-user check, lint, and
-  # build for every Board. Target groups run in parallel; Boards sharing a
-  # target run serially so the expensive dependency graph is reused.
+  # Once all fast gates pass, check, lint, and build every Board. Target groups
+  # run in parallel; Boards sharing a target run serially so the expensive
+  # dependency graph is reused.
   boards:
-    name: Boards (${{ matrix.key }})
+    name: Boards (${{ matrix.label }})
     needs: [preflight, linux, macos, platforms, python]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
