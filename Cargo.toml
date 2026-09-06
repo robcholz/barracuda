@@ -12,7 +12,6 @@ members = [
     "core/plugin/crates/*",
     "core/system",
     "core/event-router/crates/*",
-    "core/event-router/example-crates/*",
     "plugins/*/crates/*",
     "platforms/*",
     "shared/*",
@@ -34,6 +33,12 @@ embedded-storage-async = "0.4.1"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
 log = { version = "0.4", default-features = false }
+
+[patch.crates-io]
+# picoserve 0.19.0 gates core Error implementations on its `std` feature,
+# which breaks when another workspace crate enables serde/std. This upstream
+# commit keeps the same release API and derives portable Error implementations.
+picoserve = { git = "https://github.com/sammhicks/picoserve.git", rev = "dbe0513e21e6e28a04446e4027e1d337d83d8b24" }
 
 # Device images abort on panic. Dev/test profiles keep the default unwind so
 # the std crates can be unit-tested on the host. LTO remains disabled so final

@@ -87,7 +87,7 @@ fn reserved_payload_is_written_and_read_in_place() {
     let request_pointer = Rc::new(Cell::new(0_usize));
     let handler_pointer = Rc::clone(&request_pointer);
     registry
-        .register::<UnaryBytes, _>(move |_context, request: RpcFrame<[u8; 7]>| {
+        .register::<UnaryBytes, _>("system", move |_context, request: RpcFrame<[u8; 7]>| {
             let pointer = Rc::clone(&handler_pointer);
             async move {
                 assert_eq!(request.view()?.as_ptr() as usize, pointer.get());
@@ -124,7 +124,7 @@ fn reserved_payload_is_written_and_read_in_place() {
 fn write_all_chunks_unknown_sized_input_across_request_frames() {
     let registry = registry::<1, 64, 1>();
     registry
-        .register::<ChunkEcho, _>(echo_chunks)
+        .register::<ChunkEcho, _>("system", echo_chunks)
         .expect("register typed chunk endpoint");
     let address = RpcAddress::try_from(ChunkEcho::ADDRESS).expect("valid address");
     let (writer, reader) = registry
@@ -161,13 +161,16 @@ impl RpcMethod for StreamFailure {
 fn method_error_is_a_terminal_payload_frame() {
     let registry = registry::<1, 64, 1>();
     registry
-        .register::<StreamFailure, _>(|_context, _request: RpcFrame<[u8; 8]>| async move {
-            Ok(RpcStream::new(stream::iter([
-                Ok(Ok(*b"before--")),
-                Ok(Err(*b"failed--")),
-                Ok(Ok(*b"after---")),
-            ])))
-        })
+        .register::<StreamFailure, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 8]>| async move {
+                Ok(RpcStream::new(stream::iter([
+                    Ok(Ok(*b"before--")),
+                    Ok(Err(*b"failed--")),
+                    Ok(Ok(*b"after---")),
+                ])))
+            },
+        )
         .expect("register typed endpoint");
     let address = RpcAddress::try_from(StreamFailure::ADDRESS).expect("valid address");
 
@@ -205,9 +208,10 @@ fn payload_frame_retains_the_lane_until_drop() {
     block_on(async {
         let registry = registry::<1, 64, 2>();
         registry
-            .register::<UnaryBytes, _>(|_context, _request: RpcFrame<[u8; 7]>| async move {
-                Ok(Ok(*b"response"))
-            })
+            .register::<UnaryBytes, _>(
+                "system",
+                |_context, _request: RpcFrame<[u8; 7]>| async move { Ok(Ok(*b"response")) },
+            )
             .expect("register typed endpoint");
         let address = RpcAddress::try_from(UnaryBytes::ADDRESS).expect("valid address");
 
@@ -247,9 +251,10 @@ fn payload_frame_retains_the_lane_until_drop() {
 fn prepared_payload_call_survives_endpoint_unregister() {
     let registry = registry::<1, 64, 1>();
     let registration = registry
-        .register::<UnaryBytes, _>(|_context, _request: RpcFrame<[u8; 7]>| async move {
-            Ok(Ok(*b"response"))
-        })
+        .register::<UnaryBytes, _>(
+            "system",
+            |_context, _request: RpcFrame<[u8; 7]>| async move { Ok(Ok(*b"response")) },
+        )
         .expect("register typed endpoint");
     let address = RpcAddress::try_from(UnaryBytes::ADDRESS).expect("valid address");
     let client = registry.client();
@@ -286,16 +291,19 @@ fn payload_call_obeys_typed_endpoint_self_call_protection() {
     let address = RpcAddress::try_from(RawSelfCall::ADDRESS).expect("valid address");
     let handler_address = address.clone();
     registry
-        .register::<RawSelfCall, _>(move |context: RpcContext, _request: RpcFrame<[u8; 8]>| {
-            let address = handler_address.clone();
-            async move {
-                match context.client().call_payload(&address) {
-                    Err(RpcError::DirectSelfCall(_)) => Ok(Ok(*b"rejected")),
-                    Err(error) => Err(error),
-                    Ok(_) => Ok(Ok(*b"bad-call")),
+        .register::<RawSelfCall, _>(
+            "system",
+            move |context: RpcContext, _request: RpcFrame<[u8; 8]>| {
+                let address = handler_address.clone();
+                async move {
+                    match context.client().call_payload(&address) {
+                        Err(RpcError::DirectSelfCall(_)) => Ok(Ok(*b"rejected")),
+                        Err(error) => Err(error),
+                        Ok(_) => Ok(Ok(*b"bad-call")),
+                    }
                 }
-            }
-        })
+            },
+        )
         .expect("register typed endpoint");
 
     let (writer, reader) = registry
@@ -334,25 +342,29 @@ impl RpcMethod for RawOuter {
 fn nested_payload_write_uses_lane_deadlock_protection() {
     let registry = registry::<1, 64, 1>();
     registry
-        .register::<RawInner, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<RawInner, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 8]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register inner endpoint");
     let inner_address = RpcAddress::try_from(RawInner::ADDRESS).expect("valid address");
     registry
-        .register::<RawOuter, _>(move |context: RpcContext, request: RpcFrame<[u8; 8]>| {
-            let inner_address = inner_address.clone();
-            async move {
-                drop(request);
-                let (mut nested_writer, _nested_reader) =
-                    context.client().call_payload(&inner_address)?;
-                match nested_writer.write(b"nested--").await {
-                    Err(RpcError::NestedLaneExhausted { limit: 1 }) => Ok(Ok(*b"blocked-")),
-                    Err(error) => Err(error),
-                    Ok(_) => Ok(Ok(*b"bad-call")),
+        .register::<RawOuter, _>(
+            "system",
+            move |context: RpcContext, request: RpcFrame<[u8; 8]>| {
+                let inner_address = inner_address.clone();
+                async move {
+                    drop(request);
+                    let (mut nested_writer, _nested_reader) =
+                        context.client().call_payload(&inner_address)?;
+                    match nested_writer.write(b"nested--").await {
+                        Err(RpcError::NestedLaneExhausted { limit: 1 }) => Ok(Ok(*b"blocked-")),
+                        Err(error) => Err(error),
+                        Ok(_) => Ok(Ok(*b"bad-call")),
+                    }
                 }
-            }
-        })
+            },
+        )
         .expect("register outer endpoint");
     let outer_address = RpcAddress::try_from(RawOuter::ADDRESS).expect("valid address");
 
@@ -381,9 +393,10 @@ impl RpcMethod for FourBytes {
 fn oversized_write_returns_the_written_prefix() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<FourBytes, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<FourBytes, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register typed endpoint");
     let address = RpcAddress::try_from(FourBytes::ADDRESS).expect("valid address");
 
@@ -408,9 +421,10 @@ fn oversized_write_returns_the_written_prefix() {
 fn reserve_rejects_commit_larger_than_the_method_frame() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<FourBytes, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<FourBytes, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register typed endpoint");
     let address = RpcAddress::try_from(FourBytes::ADDRESS).expect("valid address");
     let (mut writer, reader) = registry
@@ -434,9 +448,10 @@ fn reserve_rejects_commit_larger_than_the_method_frame() {
 fn dropped_reservation_publishes_nothing_and_can_be_reused() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<FourBytes, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<FourBytes, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register typed endpoint");
     let address = RpcAddress::try_from(FourBytes::ADDRESS).expect("valid address");
 
@@ -464,7 +479,7 @@ fn typed_handler_rejects_an_incomplete_payload_frame() {
     let handler_calls = Rc::new(Cell::new(0_u32));
     let observed_handler_calls = Rc::clone(&handler_calls);
     registry
-        .register::<FourBytes, _>(move |_context, request: RpcFrame<[u8; 4]>| {
+        .register::<FourBytes, _>("system", move |_context, request: RpcFrame<[u8; 4]>| {
             let calls = Rc::clone(&observed_handler_calls);
             async move {
                 calls.set(calls.get().saturating_add(1));
@@ -507,7 +522,7 @@ impl RpcMethod for EmptyRequest {
 fn zero_sized_request_uses_explicit_reserve_and_commit() {
     let registry = registry::<1, 16, 1>();
     registry
-        .register::<EmptyRequest, _>(|_context, request: RpcFrame<()>| async move {
+        .register::<EmptyRequest, _>("system", |_context, request: RpcFrame<()>| async move {
             request.view()?;
             Ok(Ok([7]))
         })

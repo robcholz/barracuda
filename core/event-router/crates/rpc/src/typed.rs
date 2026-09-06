@@ -11,7 +11,6 @@ use futures_core::Stream;
 use getset::{CopyGetters, Getters};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-use super::dynamic::Dynamic;
 use super::frame::{write_frame, write_method_error_frame, FramedReader, RpcFrame};
 use super::lane::{LaneReader, LaneWriter, LANE_FRAME_ALIGNMENT};
 use super::payload::{
@@ -286,23 +285,6 @@ pub trait RpcMethod: 'static {
 
     /// Response-side cardinality.
     type Output: RpcOutputMode<Self::Response, Self::Error>;
-
-    /// Runtime-dynamic surface: JSON transcoder, wire field tables, and schema.
-    ///
-    /// Defaults to `None`, leaving the method reachable only through the typed
-    /// [`call`](crate::RpcClient::call). Annotating the `impl` with
-    /// `#[rpc_dynamic]` overrides this to return
-    /// [`Dynamic::new`](crate::Dynamic::new) built from
-    /// [`JsonCodec::of::<Self>`](crate::JsonCodec::of),
-    /// [`WireSupport::of::<Self>`](crate::WireSupport::of), and the baked
-    /// request schema, which
-    /// [`RpcRegistry::register`](crate::RpcRegistry::register) captures beside
-    /// the endpoint. Overriding it by hand requires the same `serde` bounds as
-    /// [`JsonCodec::of`](crate::JsonCodec::of) and that `Request`/`Response`
-    /// implement [`RpcWire`](crate::RpcWire).
-    fn dynamic() -> Option<Dynamic> {
-        None
-    }
 }
 
 /// Runtime descriptor used to reject client/handler mismatches before IO.

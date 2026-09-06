@@ -10,9 +10,8 @@ use barracuda_event_router::{
 };
 use embassy_time::{Duration, Instant, Timer};
 use getset::CopyGetters;
-use time::OffsetDateTime;
 
-use crate::now::{Now, TimeNow, TimeRpcError, now_handler};
+use crate::now::{Now, now_handler};
 
 /// Future returned by a [`TimeSource`] synchronization attempt.
 pub type TimeSourceFuture<'a> =
@@ -101,85 +100,132 @@ struct ClockAnchor {
     sample: SyncSample,
 }
 
-/// RTC state shared by the synchronization loop and typed RPC handler.
-pub struct ClockState {
+struct ClockState {
     config: TimeConfig,
     anchor: Option<ClockAnchor>,
 }
 
 impl ClockState {
-    /// Creates an unsynchronized RTC.
-    #[must_use]
-    pub const fn new(config: TimeConfig) -> Self {
+    const fn new(config: TimeConfig) -> Self {
         Self {
             config,
             anchor: None,
         }
     }
+}
 
-    /// Replaces the authoritative network anchor.
-    pub fn synchronize(&mut self, sample: SyncSample) {
-        self.anchor = Some(ClockAnchor { sample });
+/// Failure reading the synchronized UTC clock.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, thiserror::Error)]
+pub enum ClockError {
+    /// No successful network synchronization has completed since boot.
+    #[error("UTC clock is not synchronized")]
+    Unsynchronized,
+    /// The last synchronization exceeded the configured holdover.
+    #[error("UTC clock synchronization is stale")]
+    Stale,
+    /// The synchronized value cannot be represented by the requested format.
+    #[error("UTC clock value is out of range")]
+    OutOfRange,
+}
+
+impl ClockError {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::Unsynchronized => "unsynchronized",
+            Self::Stale => "stale",
+            Self::OutOfRange => "out_of_range",
+        }
     }
+}
 
-    /// Reads the RTC at the current local instant.
-    pub fn now(&self) -> Result<TimeNow, TimeRpcError> {
+/// An absolute UTC timestamp measured from the Unix epoch in milliseconds.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct UnixMillis(u64);
+
+impl From<UnixMillis> for u64 {
+    fn from(timestamp: UnixMillis) -> Self {
+        timestamp.0
+    }
+}
+
+/// Shared UTC clock capability published by the Time Plugin.
+pub struct UtcClock {
+    state: RefCell<ClockState>,
+}
+
+impl UtcClock {
+    /// Reads the current absolute UTC timestamp.
+    pub fn now(&self) -> Result<UnixMillis, ClockError> {
         self.now_at(Instant::now())
     }
 
-    /// Reads the RTC at an explicit local instant.
-    pub fn now_at(&self, instant: Instant) -> Result<TimeNow, TimeRpcError> {
-        let anchor = self.anchor.ok_or(TimeRpcError::Unsynchronized)?;
+    /// Reads the UTC timestamp at an explicit monotonic instant.
+    pub fn now_at(&self, instant: Instant) -> Result<UnixMillis, ClockError> {
+        let state = self.state.borrow();
+        let anchor = state.anchor.ok_or(ClockError::Unsynchronized)?;
         let elapsed = instant
             .checked_duration_since(anchor.sample.monotonic_anchor)
-            .ok_or(TimeRpcError::Unsynchronized)?;
-        if elapsed.as_millis() > self.config.max_holdover_millis {
-            return Err(TimeRpcError::Stale);
+            .ok_or(ClockError::Unsynchronized)?;
+        if elapsed.as_millis() > state.config.max_holdover_millis {
+            return Err(ClockError::Stale);
         }
-        let unix_millis = anchor
-            .sample
-            .unix_millis
-            .saturating_add(elapsed.as_millis());
-        let unix_seconds =
-            i64::try_from(unix_millis / 1_000).map_err(|_error| TimeRpcError::OutOfRange)?;
-        let calendar = OffsetDateTime::from_unix_timestamp(unix_seconds)
-            .map_err(|_error| TimeRpcError::OutOfRange)?;
-        let year = u16::try_from(calendar.year()).map_err(|_error| TimeRpcError::OutOfRange)?;
-        Ok(TimeNow::new(
-            year,
-            u8::from(calendar.month()),
-            calendar.day(),
-            calendar.hour(),
-            calendar.minute(),
-            calendar.second(),
+        Ok(UnixMillis(
+            anchor
+                .sample
+                .unix_millis
+                .saturating_add(elapsed.as_millis()),
         ))
     }
 }
 
+/// Time Plugin-owned write side of a [`UtcClock`].
+pub struct UtcClockUpdater {
+    clock: Rc<UtcClock>,
+}
+
+impl UtcClockUpdater {
+    /// Replaces the authoritative network anchor.
+    pub fn synchronize(&self, sample: SyncSample) {
+        self.clock.state.borrow_mut().anchor = Some(ClockAnchor { sample });
+    }
+
+    fn config(&self) -> TimeConfig {
+        self.clock.state.borrow().config
+    }
+}
+
+/// Creates one read-only UTC clock capability and its Plugin-owned updater.
+#[must_use]
+pub fn utc_clock(config: TimeConfig) -> (Rc<UtcClock>, UtcClockUpdater) {
+    let clock = Rc::new(UtcClock {
+        state: RefCell::new(ClockState::new(config)),
+    });
+    let updater = UtcClockUpdater {
+        clock: Rc::clone(&clock),
+    };
+    (clock, updater)
+}
+
 /// Event Router Component exposing a network-synchronized RTC through RPC.
 pub struct TimeComponent {
-    state: Rc<RefCell<ClockState>>,
+    clock: Rc<UtcClock>,
 }
 
 impl TimeComponent {
-    /// Creates an unsynchronized RPC Component.
+    /// Creates the RPC Component backed by the Plugin's UTC clock capability.
     #[must_use]
-    pub fn new(config: TimeConfig) -> Self {
-        Self {
-            state: Rc::new(RefCell::new(ClockState::new(config))),
-        }
-    }
-
-    /// Clones the clock state handle used by the Plugin-owned sync task.
-    #[must_use]
-    pub fn shared_state(&self) -> Rc<RefCell<ClockState>> {
-        Rc::clone(&self.state)
+    pub fn new(clock: Rc<UtcClock>) -> Self {
+        Self { clock }
     }
 }
 
 impl<const M: usize> Component<M> for TimeComponent {
+    fn name(&self) -> &'static str {
+        "time"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<Now, _>(now_handler(Rc::clone(&self.state)))
+        context.register_json::<Now, _>("*", now_handler(Rc::clone(&self.clock)))
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
@@ -192,19 +238,19 @@ impl<const M: usize> Component<M> for TimeComponent {
 }
 
 /// Runs the network synchronization loop owned by the Time Plugin task.
-pub async fn synchronize_clock<Source>(mut source: Source, state: Rc<RefCell<ClockState>>)
+pub async fn synchronize_clock<Source>(mut source: Source, updater: UtcClockUpdater)
 where
     Source: TimeSource,
 {
     loop {
         let synchronized = match source.synchronize().await {
             Ok(sample) => {
-                state.borrow_mut().synchronize(sample);
+                updater.synchronize(sample);
                 true
             }
             Err(_error) => false,
         };
-        let config = state.borrow().config;
+        let config = updater.config();
         let delay = if synchronized {
             config.resync_interval_millis
         } else {

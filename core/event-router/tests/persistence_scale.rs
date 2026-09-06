@@ -10,15 +10,18 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcFrame,
-    RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
-    WorkflowControlError,
+    Component, ComponentFuture, ComponentResult, EventRouter, JsonRpcSchema, JsonSchema,
+    JsonWriter, RegisterContext, RpcError, RpcLaneStorage, RunContext, UnregisterContext,
+    WorkflowClient, WorkflowControlError,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vfs::{read, remove_file};
 use futures_lite::future::block_on;
 
-const FRAME_CAPACITY: usize = 64;
+const FRAME_CAPACITY: usize = 256;
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn reset_global_vfs() -> MutexGuard<'static, ()> {
@@ -30,13 +33,12 @@ fn reset_global_vfs() -> MutexGuard<'static, ()> {
 
 struct Sink;
 
-impl RpcMethod for Sink {
+impl JsonRpcSchema for Sink {
     const ADDRESS: &'static str = "scale.sink";
-    type Request = [u8; 8];
-    type Response = [u8; 8];
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 2;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -52,16 +54,18 @@ struct CatalogLoader {
 }
 
 impl Component<FRAME_CAPACITY> for CatalogLoader {
+    fn name(&self) -> &'static str {
+        "catalog-loader"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,
     ) -> ComponentResult<()> {
-        // Stub endpoint so load-time link validation can resolve the steps
-        // the catalog persists. Response mirrors Request so chained Direct
-        // links of the same method stay type-identical.
-        context.register_rpc::<Sink, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        context
+            .register_json::<Sink, _>("*", |_context, _request, response: JsonWriter| async move {
+                response.write("{}").await
+            })
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_CAPACITY>) -> ComponentFuture<'a> {
@@ -149,7 +153,7 @@ fn hundreds_of_workflows_persist_and_restore_in_load_order() {
 }
 
 #[test]
-fn workflow_json_and_step_count_are_not_bounded_by_lane_frame_capacity() {
+fn workflow_json_is_bounded_by_lane_frame_capacity() {
     let _global_vfs = reset_global_vfs();
     const STEPS: usize = 512;
     let steps = (0..STEPS)
@@ -171,11 +175,10 @@ fn workflow_json_and_step_count_are_not_bounded_by_lane_frame_capacity() {
 
     support::drive_until(&mut event_router, |_router| state.done.get())
         .expect("drive large definition loader");
-    assert!(state.error.borrow().is_none());
-    let definitions = event_router.workflow_definitions();
-    assert_eq!(definitions.len(), 1);
-    assert_eq!(
-        definitions.first().expect("large definition").steps().len(),
-        STEPS
-    );
+    assert!(matches!(
+        state.error.borrow().as_ref(),
+        Some(WorkflowControlError::Rpc(RpcError::FrameTooLarge { capacity, .. }))
+            if *capacity == FRAME_CAPACITY
+    ));
+    assert!(event_router.workflow_definitions().is_empty());
 }

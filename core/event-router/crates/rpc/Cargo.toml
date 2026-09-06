@@ -3,16 +3,17 @@ name = "barracuda-rpc"
 authors = ["Finn(Ziheng) Sheng <zsheng2@ncsu.edu>", "Finn(Ziheng) Sheng <robcholz00@gmail.com>"]
 version = "0.1.0"
 edition = "2021"
+publish = false
 description = "Task-local typed RPC runtime for Barracuda"
 
 [lib]
 crate-type = ["rlib"]
 
 [dependencies]
-barracuda-rpc-macros = { path = "../rpc-macros" }
 futures-core = { version = "0.3", default-features = false }
 getset = "0.1.7"
-serde = { version = "1", default-features = false, features = ["alloc"] }
+json-validator = { path = "../../../../shared/json-validator" }
+serde = { version = "1", default-features = false }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 smallvec = { version = "1", default-features = false }
 thiserror = { version = "2", default-features = false }

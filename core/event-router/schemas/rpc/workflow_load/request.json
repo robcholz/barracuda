@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "properties": {
+    "id": { "type": "string" },
+    "match": {
+      "type": "object",
+      "properties": {
+        "event": { "type": "string" },
+        "topic": { "type": "string" }
+      },
+      "required": ["event"],
+      "additionalProperties": false
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "call": { "type": "string" },
+          "arguments": { "type": "object" }
+        },
+        "required": ["call"],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    }
+  },
+  "required": ["id", "match", "steps"],
+  "additionalProperties": false
+}

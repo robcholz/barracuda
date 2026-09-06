@@ -1,70 +1,101 @@
 #![allow(missing_docs)]
 #![allow(clippy::expect_used)]
+#![allow(clippy::panic)]
 
-use std::cell::RefCell;
-use std::future::Future;
+use std::cell::{Cell, RefCell};
+use std::future::Future as _;
 use std::rc::Rc;
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, EventRouter, RegisterContext, RpcLaneStorage,
-    RpcMethod, RpcStream, RunContext, Streaming, Unary, UnregisterContext,
+    Component, ComponentFuture, ComponentResult, EventRouter, JsonRpcSchema, RegisterContext,
+    RpcAddress, RpcLaneStorage, RpcRegistry, RunContext, UnregisterContext,
 };
-use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
+use barracuda_imessage_gateway_component::component::GatewayComponent;
 use barracuda_imessage_gateway_component::gateway_message_received::{
-    frames_from_gateway_event, gateway_event_from_frames, GatewayInboundMessage,
+    GatewayInboundMessage, GatewayMessageReceived,
 };
-use barracuda_imessage_gateway_component::gateway_send::{
-    gateway_send_handler, GatewaySend, GatewaySendRequest,
-};
+use barracuda_imessage_gateway_component::gateway_send::{gateway_send_handler, GatewaySend};
 use barracuda_imessage_gateway_component::gateway_send_media::{
-    frames_from_gateway_send_media, gateway_send_media_handler, GatewayMediaKind,
-    GatewayOutboundMedia, GatewaySendMedia,
+    GatewaySendMedia, GatewaySendMediaFinished,
 };
 use barracuda_imessage_gateway_component::gateway_send_stream::{
-    frames_from_gateway_send_stream, gateway_send_stream_handler, GatewayOutboundStream,
-    GatewaySendStream,
+    GatewaySendStream, GatewaySendStreamFinished,
 };
 use barracuda_imessage_gateway_component::route::GatewayRoute;
-use barracuda_imessage_gateway_component::wire::GatewaySendReceipt;
 use barracuda_platform_test::install_global_memory_vfs;
 use futures_lite::future::block_on;
-use futures_lite::StreamExt;
+use futures_lite::StreamExt as _;
 use gateway::{
     BinaryBody, ChannelFuture, MediaKind, MessageChannel, MessageGateway, SendMediaRequest,
-    SendMessageRequest, SendReceipt, SendStreamField, SendStreamFrame, SendStreamRequest,
-    StreamBoundary, TextBody,
+    SendMessageRequest, SendReceipt, SendStreamField, SendStreamFrame, SendStreamRequest, TextBody,
 };
 
-fn assert_gateway_send_response_type()
-where
-    GatewaySend: RpcMethod<
-        Request = GatewaySendRequest,
-        Response = GatewaySendReceipt,
-        Input = Unary,
-        Output = Unary,
-    >,
-{
-}
-
-fn assert_gateway_send_stream_shape()
-where
-    GatewaySendStream: RpcMethod<Response = GatewaySendReceipt, Input = Streaming, Output = Unary>,
-{
-}
-
 #[test]
-fn gateway_send_is_dynamic_unary_and_gateway_send_stream_is_typed_streaming() {
-    assert_gateway_send_response_type();
-    assert_gateway_send_stream_shape();
-    assert!(GatewaySend::dynamic().is_some());
-    assert!(GatewaySendStream::dynamic().is_none());
+fn publishes_three_bounded_json_contracts_and_terminal_event_ids() {
+    assert_eq!(GatewaySend::ADDRESS, "gateway.send");
+    assert_eq!(GatewaySendStream::ADDRESS, "gateway.send_stream");
+    assert_eq!(GatewaySendMedia::ADDRESS, "gateway.send_media");
+    for maximum in [
+        GatewaySend::MAX_REQUEST_BYTES,
+        GatewaySend::MAX_RESPONSE_BYTES,
+        GatewaySendStream::MAX_REQUEST_BYTES,
+        GatewaySendStream::MAX_RESPONSE_BYTES,
+        GatewaySendMedia::MAX_REQUEST_BYTES,
+        GatewaySendMedia::MAX_RESPONSE_BYTES,
+    ] {
+        assert!(maximum <= 512);
+    }
+    assert!(GatewaySend::REQUEST_SCHEMA
+        .as_str()
+        .contains("conversation_id"));
+    assert!(GatewaySendStream::REQUEST_SCHEMA
+        .as_str()
+        .contains("finish"));
+    assert!(GatewaySendMedia::REQUEST_SCHEMA
+        .as_str()
+        .contains("content_base64"));
+    for schema in [
+        GatewaySend::REQUEST_SCHEMA,
+        GatewaySendStream::REQUEST_SCHEMA,
+        GatewaySendMedia::REQUEST_SCHEMA,
+    ] {
+        assert!(
+            !schema.as_str().contains("maxLength"),
+            "the complete RPC lane is the request bound"
+        );
+    }
+    assert_eq!(
+        <GatewayMessageReceived as barracuda_event_router::Event>::ID,
+        "gateway.message.received"
+    );
+    assert_eq!(
+        <GatewaySendStreamFinished as barracuda_event_router::Event>::ID,
+        "gateway.send_stream.finished"
+    );
+    assert_eq!(
+        <GatewaySendMediaFinished as barracuda_event_router::Event>::ID,
+        "gateway.send_media.finished"
+    );
+    for schema in [
+        include_str!("../../../schemas/event/gateway_message_received.json"),
+        include_str!("../../../schemas/event/gateway_send_stream_finished.json"),
+        include_str!("../../../schemas/event/gateway_send_media_finished.json"),
+    ] {
+        assert!(schema.contains("\"type\""));
+        assert!(!schema.contains("maxLength"));
+    }
 }
 
 #[derive(Default)]
 struct State {
-    sent: RefCell<Vec<(String, String)>>,
-    streamed: RefCell<Vec<SendStreamFrame>>,
-    media: RefCell<Vec<(MediaKind, String, Vec<u8>)>>,
+    text: RefCell<Vec<String>>,
+    stream: RefCell<Vec<SendStreamFrame>>,
+    media: RefCell<Vec<u8>>,
+    stream_finished: Cell<bool>,
+    media_finished: Cell<bool>,
+    active_streams: Cell<usize>,
+    max_active_streams: Cell<usize>,
+    media_was_inline: Cell<bool>,
 }
 
 struct RecordingChannel(Rc<State>);
@@ -79,314 +110,187 @@ impl MessageChannel for RecordingChannel {
         Box::pin(async move {
             let TextBody::Complete(text) = request.body else {
                 return Err(gateway::ChannelError::InvalidRequest {
-                    message: "expected complete text".into(),
+                    message: "complete text required".into(),
                 });
             };
-            state
-                .sent
-                .borrow_mut()
-                .push((request.target.conversation_id, text));
-            Ok(SendReceipt::new("sent-1"))
+            state.text.borrow_mut().push(text);
+            Ok(SendReceipt::new("message-1"))
         })
     }
 
     fn send_stream(&self, mut request: SendStreamRequest) -> ChannelFuture<'_, SendReceipt> {
         let state = Rc::clone(&self.0);
         Box::pin(async move {
+            let active = state.active_streams.get().saturating_add(1);
+            state.active_streams.set(active);
+            state
+                .max_active_streams
+                .set(state.max_active_streams.get().max(active));
             while let Some(frame) = request.frames.next().await {
-                state.streamed.borrow_mut().push(frame?);
+                state.stream.borrow_mut().push(frame?);
             }
-            Ok(SendReceipt::new("streamed-1"))
+            state
+                .active_streams
+                .set(state.active_streams.get().saturating_sub(1));
+            state.stream_finished.set(true);
+            Ok(SendReceipt::new("stream-1"))
         })
     }
 
     fn send_media(
         &self,
-        kind: MediaKind,
+        _kind: MediaKind,
         request: SendMediaRequest,
     ) -> ChannelFuture<'_, SendReceipt> {
         let state = Rc::clone(&self.0);
         Box::pin(async move {
-            let BinaryBody::Bytes(bytes) = request.body else {
+            let BinaryBody::Stream(mut stream) = request.body else {
                 return Err(gateway::ChannelError::InvalidRequest {
-                    message: "expected complete media".into(),
+                    message: "media stream required".into(),
                 });
             };
-            state
-                .media
-                .borrow_mut()
-                .push((kind, request.target.conversation_id, bytes));
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk?;
+                state.media_was_inline.set(chunk.is_inline());
+                state.media.borrow_mut().extend_from_slice(&chunk);
+            }
+            state.media_finished.set(true);
             Ok(SendReceipt::new("media-1"))
         })
     }
 }
 
 #[test]
-fn gateway_send_stream_preserves_text_and_extra_frames_for_the_provider() {
-    let _ = gateway_send_stream_handler;
+fn complete_send_uses_lane_json_and_returns_a_natural_receipt() {
     block_on(async {
         let state = Rc::new(State::default());
-        let facade = MessageGateway::new();
-        let _registration = facade
+        let gateway = MessageGateway::new();
+        let _registration = gateway
             .register(Rc::new(RecordingChannel(Rc::clone(&state))))
             .expect("register channel");
-        let (component, _ingress): (GatewayComponent, GatewayIngress) =
-            GatewayComponent::new(facade, 4);
-        install_global_memory_vfs()
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 512, 1>::new()));
+        let registry = RpcRegistry::new(lanes);
+        let _rpc = registry
+            .register_json::<GatewaySend, _>("*", gateway_send_handler(Rc::new(gateway)))
+            .expect("register gateway.send");
+        let address = RpcAddress::try_from(GatewaySend::ADDRESS).expect("valid address");
+        let text = "x".repeat(400);
+        let request = format!(
+            r#"{{"channel":"test","conversation_id":"chat","reply_to":"in-1","text":"{text}"}}"#
+        );
+        let response = registry
+            .client()
+            .call_json(&address, &request)
+            .expect("start call")
             .await
-            .expect("install global test VFS");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 512, 2>::new()));
-        let mut router = EventRouter::new(lanes).await.expect("create router");
-        router.load(Box::new(component)).expect("load gateway");
+            .expect("complete call");
 
-        let message = GatewayOutboundStream {
-            route: GatewayRoute::new("test", "conversation-1"),
-            reply_to: Some("incoming-1".into()),
-            frames: vec![
-                SendStreamFrame::new(
-                    SendStreamField::Reasoning,
-                    StreamBoundary::Complete,
-                    "thinking",
+        assert_eq!(
+            response.as_str().expect("response"),
+            r#"{"message_id":"message-1"}"#
+        );
+        assert_eq!(state.text.borrow().as_slice(), &[text]);
+    });
+}
+
+struct CommandCaller {
+    finished: Rc<Cell<bool>>,
+}
+
+impl Component<512> for CommandCaller {
+    fn name(&self) -> &'static str {
+        "command-caller"
+    }
+
+    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
+        Ok(())
+    }
+
+    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
+        Box::pin(async move {
+            let client = context.rpc().clone();
+            let public = client.rpcs_by_visibility("*")?;
+            for expected in [
+                GatewaySend::ADDRESS,
+                GatewaySendStream::ADDRESS,
+                GatewaySendMedia::ADDRESS,
+            ] {
+                if !public.iter().any(|address| address.as_ref() == expected) {
+                    return Err(barracuda_event_router::ComponentError::lifecycle(
+                        CommandRejected(format!("missing public RPC {expected}")),
+                    ));
+                }
+            }
+            let agent = client.rpcs_by_visibility("agent")?;
+            for expected in [
+                GatewaySend::ADDRESS,
+                GatewaySendStream::ADDRESS,
+                GatewaySendMedia::ADDRESS,
+            ] {
+                if !agent.iter().any(|address| address.as_ref() == expected) {
+                    return Err(barracuda_event_router::ComponentError::lifecycle(
+                        CommandRejected(format!("missing Agent-visible RPC {expected}")),
+                    ));
+                }
+            }
+            for (address, request) in [
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"start","stream_id":"text-1","sequence":0,"channel":"test","conversation_id":"chat"}"#,
                 ),
-                SendStreamFrame::new(SendStreamField::Text, StreamBoundary::Complete, "answer"),
-            ],
-        };
-        router
-            .load(Box::new(GatewayStreamCaller {
-                message: Some(message),
-            }))
-            .expect("load caller");
-
-        core::future::poll_fn(|context| {
-            let _ = std::pin::Pin::new(&mut router).poll(context);
-            if state.streamed.borrow().is_empty() {
-                std::task::Poll::Pending
-            } else {
-                std::task::Poll::Ready(())
-            }
-        })
-        .await;
-
-        assert_eq!(
-            state.streamed.borrow().as_slice(),
-            &[
-                SendStreamFrame::new(
-                    SendStreamField::Reasoning,
-                    StreamBoundary::Complete,
-                    "thinking",
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"start","stream_id":"text-2","sequence":0,"channel":"test","conversation_id":"chat"}"#,
                 ),
-                SendStreamFrame::new(SendStreamField::Text, StreamBoundary::Complete, "answer",),
-            ]
-        );
-    });
-}
-
-#[test]
-fn gateway_send_rpc_delivers_through_registered_channel() {
-    let _ = gateway_send_handler;
-    block_on(async {
-        let state = Rc::new(State::default());
-        let facade = MessageGateway::new();
-        let _registration = facade
-            .register(Rc::new(RecordingChannel(Rc::clone(&state))))
-            .expect("register channel");
-        let (component, _ingress): (GatewayComponent, GatewayIngress) =
-            GatewayComponent::new(facade, 4);
-        install_global_memory_vfs()
-            .await
-            .expect("install global test VFS");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 512, 2>::new()));
-        let mut router = EventRouter::new(lanes).await.expect("create router");
-        router.load(Box::new(component)).expect("load gateway");
-
-        let text = "agent reply 你好";
-        let message = GatewaySendRequest::with_reply_to(
-            &GatewayRoute::new("test", "conversation-1"),
-            text,
-            Some("incoming-1"),
-        )
-        .expect("encode request");
-        router
-            .load(Box::new(GatewayCaller {
-                message: Some(message),
-            }))
-            .expect("load caller");
-
-        core::future::poll_fn(|context| {
-            let _ = std::pin::Pin::new(&mut router).poll(context);
-            if state.sent.borrow().is_empty() {
-                std::task::Poll::Pending
-            } else {
-                std::task::Poll::Ready(())
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"chunk","stream_id":"text-1","sequence":1,"field":"reasoning","boundary":"complete","text":"thinking"}"#,
+                ),
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"chunk","stream_id":"text-1","sequence":2,"field":"text","boundary":"complete","text":"answer"}"#,
+                ),
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"finish","stream_id":"text-1","sequence":3}"#,
+                ),
+                (
+                    "gateway.send_stream",
+                    r#"{"action":"finish","stream_id":"text-2","sequence":1}"#,
+                ),
+                (
+                    "gateway.send_media",
+                    r#"{"action":"start","stream_id":"media-1","sequence":0,"channel":"test","conversation_id":"chat","kind":"image","filename":"photo.jpg","mime_type":"image/jpeg"}"#,
+                ),
+                (
+                    "gateway.send_media",
+                    r#"{"action":"chunk","stream_id":"media-1","sequence":1,"content_base64":"AAH/gA=="}"#,
+                ),
+                (
+                    "gateway.send_media",
+                    r#"{"action":"finish","stream_id":"media-1","sequence":2}"#,
+                ),
+            ] {
+                let address = RpcAddress::try_from(address)
+                    .map_err(barracuda_event_router::ComponentError::lifecycle)?;
+                loop {
+                    let response = client.call_json(&address, request)?.await?;
+                    if response.as_str()? == r#"{"error":"busy"}"# {
+                        futures_lite::future::yield_now().await;
+                        continue;
+                    }
+                    if response.as_str()?.contains("\"error\"") {
+                        return Err(barracuda_event_router::ComponentError::lifecycle(
+                            CommandRejected(format!(
+                                "{address} rejected {request}: {}",
+                                response.as_str()?
+                            )),
+                        ));
+                    }
+                    break;
+                }
             }
-        })
-        .await;
-
-        assert_eq!(
-            state.sent.borrow().as_slice(),
-            &[("conversation-1".into(), text.into())]
-        );
-    });
-}
-
-#[test]
-fn gateway_event_typed_frames_round_trip_long_utf8_text() {
-    let message = GatewayInboundMessage {
-        route: GatewayRoute::new("telegram", "chat-42").with_thread("topic-7"),
-        message_id: "message-100".into(),
-        text: "你好 from gateway ".repeat(80),
-    };
-
-    let frames = frames_from_gateway_event(&message).expect("encode event");
-    assert!(frames.len() > 5);
-    let decoded = gateway_event_from_frames(frames).expect("decode event");
-
-    assert_eq!(decoded, message);
-}
-
-#[test]
-fn gateway_send_media_rpc_delivers_through_registered_channel() {
-    let _ = gateway_send_media_handler;
-    block_on(async {
-        let state = Rc::new(State::default());
-        let facade = MessageGateway::new();
-        let _registration = facade
-            .register(Rc::new(RecordingChannel(Rc::clone(&state))))
-            .expect("register channel");
-        let (component, _ingress): (GatewayComponent, GatewayIngress) =
-            GatewayComponent::new(facade, 4);
-        install_global_memory_vfs()
-            .await
-            .expect("install global test VFS");
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 512, 2>::new()));
-        let mut router = EventRouter::new(lanes).await.expect("create router");
-        router.load(Box::new(component)).expect("load gateway");
-
-        let message = GatewayOutboundMedia {
-            route: GatewayRoute::new("test", "conversation-1"),
-            kind: GatewayMediaKind::Image,
-            filename: Some("photo.jpg".into()),
-            mime_type: Some("image/jpeg".into()),
-            caption: Some("photo".into()),
-            reply_to: Some("incoming-1".into()),
-            bytes: vec![7_u8; 700],
-        };
-        router
-            .load(Box::new(GatewayMediaCaller {
-                message: Some(message),
-            }))
-            .expect("load caller");
-
-        core::future::poll_fn(|context| {
-            let _ = std::pin::Pin::new(&mut router).poll(context);
-            if state.media.borrow().is_empty() {
-                std::task::Poll::Pending
-            } else {
-                std::task::Poll::Ready(())
-            }
-        })
-        .await;
-
-        assert_eq!(
-            state.media.borrow().as_slice(),
-            &[(MediaKind::Image, "conversation-1".into(), vec![7_u8; 700])]
-        );
-    });
-}
-
-struct GatewayCaller {
-    message: Option<GatewaySendRequest>,
-}
-
-struct GatewayMediaCaller {
-    message: Option<GatewayOutboundMedia>,
-}
-
-struct GatewayStreamCaller {
-    message: Option<GatewayOutboundStream>,
-}
-
-impl Component<512> for GatewayStreamCaller {
-    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
-        Ok(())
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let Some(message) = self.message.take() else {
-                return Ok(());
-            };
-            let input = RpcStream::new(futures_lite::stream::iter(
-                frames_from_gateway_send_stream(&message)
-                    .map_err(barracuda_event_router::ComponentError::lifecycle)?
-                    .into_iter()
-                    .map(Ok),
-            ));
-            context
-                .rpc()
-                .call::<GatewaySendStream>(input)?
-                .await?
-                .map_err(|_error| {
-                    barracuda_event_router::ComponentError::lifecycle(GatewayMethodFailed)
-                })?;
-            core::future::pending().await
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        Ok(())
-    }
-}
-
-impl Component<512> for GatewayMediaCaller {
-    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
-        Ok(())
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let Some(message) = self.message.take() else {
-                return Ok(());
-            };
-            let input = RpcStream::new(futures_lite::stream::iter(
-                frames_from_gateway_send_media(&message)
-                    .map_err(barracuda_event_router::ComponentError::lifecycle)?
-                    .into_iter()
-                    .map(Ok),
-            ));
-            context
-                .rpc()
-                .call::<GatewaySendMedia>(input)?
-                .await?
-                .map_err(|_error| {
-                    barracuda_event_router::ComponentError::lifecycle(GatewayMethodFailed)
-                })?;
-            core::future::pending().await
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        Ok(())
-    }
-}
-
-impl Component<512> for GatewayCaller {
-    fn register(&mut self, _context: &mut RegisterContext<'_, 512>) -> ComponentResult<()> {
-        Ok(())
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<512>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let Some(message) = self.message.take() else {
-                return Ok(());
-            };
-            context
-                .rpc()
-                .call::<GatewaySend>(message)?
-                .await?
-                .map_err(|_error| {
-                    barracuda_event_router::ComponentError::lifecycle(GatewayMethodFailed)
-                })?;
+            self.finished.set(true);
             core::future::pending().await
         })
     }
@@ -397,5 +301,87 @@ impl Component<512> for GatewayCaller {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("gateway.send returned a method error")]
-struct GatewayMethodFailed;
+#[error("{0}")]
+struct CommandRejected(String);
+
+#[test]
+fn application_streams_are_chunked_acked_and_delivered_without_aggregation() {
+    block_on(async {
+        install_global_memory_vfs().await.expect("install test VFS");
+        let state = Rc::new(State::default());
+        let gateway = MessageGateway::new();
+        let _registration = gateway
+            .register(Rc::new(RecordingChannel(Rc::clone(&state))))
+            .expect("register channel");
+        let (component, _ingress, runtime) = GatewayComponent::new::<512>(gateway, 2);
+        let (inbound, text, media) = runtime.into_parts();
+        let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
+        let mut router = EventRouter::new(lanes).await.expect("create router");
+        router.load(Box::new(component)).expect("load RPC adapter");
+        router.load(Box::new(inbound)).expect("load ingress worker");
+        for worker in text {
+            router.load(Box::new(worker)).expect("load text worker");
+        }
+        for worker in media {
+            router.load(Box::new(worker)).expect("load media worker");
+        }
+        let caller_finished = Rc::new(Cell::new(false));
+        router
+            .load(Box::new(CommandCaller {
+                finished: Rc::clone(&caller_finished),
+            }))
+            .expect("load caller");
+
+        core::future::poll_fn(|context| {
+            if let std::task::Poll::Ready(result) = std::pin::Pin::new(&mut router).poll(context) {
+                panic!("router stopped before delivery completed: {result:?}");
+            }
+            if caller_finished.get() && state.stream_finished.get() && state.media_finished.get() {
+                std::task::Poll::Ready(())
+            } else {
+                std::task::Poll::Pending
+            }
+        })
+        .await;
+
+        assert_eq!(
+            state.stream.borrow().as_slice(),
+            &[
+                SendStreamFrame::new(
+                    SendStreamField::Reasoning,
+                    gateway::StreamBoundary::Complete,
+                    "thinking",
+                ),
+                SendStreamFrame::new(
+                    SendStreamField::Text,
+                    gateway::StreamBoundary::Complete,
+                    "answer",
+                ),
+            ]
+        );
+        assert_eq!(state.media.borrow().as_slice(), &[0, 1, 255, 128]);
+        assert_eq!(state.max_active_streams.get(), 2);
+        assert!(state.media_was_inline.get());
+        assert!(state
+            .stream
+            .borrow()
+            .iter()
+            .all(|frame| frame.text.is_inline()));
+    });
+}
+
+#[test]
+fn inbound_capability_accepts_text_beyond_one_event_lane_for_chunking() {
+    block_on(async {
+        let (component, ingress, _runtime) = GatewayComponent::new::<512>(MessageGateway::new(), 1);
+        let _component = component;
+        ingress
+            .publish(GatewayInboundMessage {
+                route: GatewayRoute::new("test", "chat"),
+                message_id: "message-1".into(),
+                text: "x".repeat(16 * 1024 + 1),
+            })
+            .await
+            .expect("Event chunking, not a field limit, bounds inbound text");
+    });
+}

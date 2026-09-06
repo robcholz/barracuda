@@ -48,12 +48,19 @@ struct CounterService {
 }
 
 impl Component<FRAME_SIZE> for CounterService {
+    fn name(&self) -> &'static str {
+        "counter-service"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-            Ok(Ok(Number {
-                value: request.view()?.value.saturating_add(1),
-            }))
-        })
+        context.register_rpc::<Increment, _>(
+            "system",
+            |_context, request: RpcFrame<Number>| async move {
+                Ok(Ok(Number {
+                    value: request.view()?.value.saturating_add(1),
+                }))
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, _context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -71,6 +78,10 @@ struct StartupCaller {
 }
 
 impl Component<FRAME_SIZE> for StartupCaller {
+    fn name(&self) -> &'static str {
+        "startup-caller"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         Ok(())
     }

@@ -4,25 +4,19 @@ use core::future::pending;
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_lua::Lua;
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
 use getset::CopyGetters;
 
 use crate::VmRuntime;
-use crate::run::{Run, run_handler_with_registry};
-use crate::runtime::task_run_handler;
+use crate::run::{Cancel, Input, Run, cancel_handler, input_handler, run_handler};
 
 /// Default maximum Lua source size accepted by one `vm.run` call.
-pub const DEFAULT_MAX_SOURCE_BYTES: usize = 65_536;
+pub const DEFAULT_MAX_SOURCE_BYTES: usize = 480;
 /// Default maximum size of one logical `io.input()` message.
-pub const DEFAULT_MAX_INPUT_BYTES: usize = 4_096;
+pub const DEFAULT_MAX_INPUT_BYTES: usize = 400;
 /// Default instruction interval between cooperative executor yields.
 pub const DEFAULT_INSTRUCTION_HOOK_INTERVAL: u32 = 10_000;
-
-pub(crate) fn create_lua() -> barracuda_lua::Result<Lua> {
-    Lua::new()
-}
 
 /// Per-call protocol and execution limits enforced by `vm.run`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
@@ -68,21 +62,10 @@ pub struct VmComponent {
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
-    runtime: Option<VmRuntime>,
+    runtime: VmRuntime,
 }
 
 impl VmComponent {
-    /// Creates the Component from the package plan prepared by the VM Plugin.
-    #[must_use]
-    pub fn new(builtin_packages: BuiltinPackages) -> Self {
-        Self {
-            limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
-            builtin_packages,
-            package_registry: LuaPackageRegistry::new(),
-            runtime: None,
-        }
-    }
-
     /// Creates the Component with execution dispatched onto the VM Embassy task pool.
     #[must_use]
     pub fn with_runtime(builtin_packages: BuiltinPackages, runtime: VmRuntime) -> Self {
@@ -90,7 +73,7 @@ impl VmComponent {
             limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
             builtin_packages,
             package_registry: LuaPackageRegistry::new(),
-            runtime: Some(runtime),
+            runtime,
         }
     }
 
@@ -110,27 +93,33 @@ impl VmComponent {
 }
 
 impl<const M: usize> Component<M> for VmComponent {
-    fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        match &self.runtime {
-            Some(runtime) => context.register_rpc::<Run, _>(task_run_handler(
-                runtime.clone(),
-                self.limits,
-                self.builtin_packages,
-                self.package_registry.clone(),
-            )),
-            None => context.register_rpc::<Run, _>(run_handler_with_registry(
-                self.limits,
-                self.builtin_packages,
-                self.package_registry.clone(),
-            )),
-        }
+    fn name(&self) -> &'static str {
+        "vm"
     }
 
-    fn run<'a>(&'a mut self, _context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(pending())
+    fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
+        context.register_json::<Run, _>(
+            "*",
+            run_handler(
+                self.runtime.clone(),
+                self.limits,
+                self.builtin_packages,
+                self.package_registry.clone(),
+            ),
+        )?;
+        context.register_json::<Input, _>("*", input_handler(self.runtime.clone(), self.limits))?;
+        context.register_json::<Cancel, _>("*", cancel_handler(self.runtime.clone()))
+    }
+
+    fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
+        Box::pin(async move {
+            self.runtime.attach_router(context.rpc().clone());
+            pending().await
+        })
     }
 
     fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
+        self.runtime.detach_router();
         Ok(())
     }
 }
@@ -142,16 +131,14 @@ mod tests {
 
     use barracuda_lua::Lua;
 
-    use super::create_lua;
-
     #[test]
     fn creates_a_sandboxed_lua_state() {
-        create_lua().expect("create configured Lua");
+        Lua::new().expect("create configured Lua");
     }
 
     #[test]
     fn default_lua_exposes_only_allowlisted_capabilities() {
-        let mut lua = create_lua().expect("create configured Lua");
+        let mut lua = Lua::new().expect("create configured Lua");
         let sandboxed: bool = lua
             .load(
                 "return package == nil and io == nil and os == nil and debug == nil \

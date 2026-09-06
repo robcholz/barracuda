@@ -16,8 +16,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter, RegisterContext,
-    RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary, UnregisterContext, WorkflowClient,
+    Component, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter, JsonPayload,
+    JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcError, RpcLaneStorage,
+    RunContext, UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use futures_lite::future::{block_on, yield_now};
@@ -27,20 +28,46 @@ const DEFAULT_SAMPLES: usize = 7;
 struct BenchEvent<const P: usize>;
 
 impl<const P: usize> Event for BenchEvent<P> {
-    const ID: &'static str = "bench.event";
-    type Message = [u8; P];
-    type Input = Unary;
+    const ID: &'static str = "e";
 }
 
 struct Sink<const P: usize>;
 
-impl<const P: usize> RpcMethod for Sink<P> {
-    const ADDRESS: &'static str = "bench.sink";
-    type Request = [u8; P];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+impl<const P: usize> JsonRpcSchema for Sink<P> {
+    const ADDRESS: &'static str = "s.x";
+    const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(r#"{"type":"string"}"#);
+    const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+        r#"{"type":"object","properties":{},"additionalProperties":false}"#
+    );
+    const MAX_REQUEST_BYTES: usize = P.saturating_add(2);
+    const MAX_RESPONSE_BYTES: usize = 2;
+}
+
+struct BenchPayload<const P: usize>([u8; P]);
+
+impl<const P: usize> JsonPayload for BenchPayload<P> {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        Ok(P.saturating_add(2))
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        let length = self.encoded_len()?;
+        let capacity = destination.len();
+        let output = destination
+            .get_mut(..length)
+            .ok_or(RpcError::FrameTooLarge {
+                size: length,
+                capacity,
+            })?;
+        let (first, rest) = output
+            .split_first_mut()
+            .ok_or(RpcError::InvalidFrameState)?;
+        *first = b'"';
+        let (last, body) = rest.split_last_mut().ok_or(RpcError::InvalidFrameState)?;
+        body.copy_from_slice(&self.0);
+        *last = b'"';
+        Ok(length)
+    }
 }
 
 #[derive(Default)]
@@ -62,26 +89,32 @@ struct Producer<const N: usize, const M: usize, const P: usize> {
 }
 
 impl<const N: usize, const M: usize, const P: usize> Component<M> for Producer<N, M, P> {
+    fn name(&self) -> &'static str {
+        "throughput-producer"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
         if !self.matched {
             return Ok(());
         }
         let state = Rc::clone(&self.state);
         let sink_yields = self.sink_yields;
-        context.register_rpc::<Sink<P>, _>(move |_context, request: RpcFrame<[u8; P]>| {
-            let state = Rc::clone(&state);
-            async move {
-                let bytes = request.view()?;
-                let edge = u64::from(bytes.first().copied().unwrap_or(0))
-                    .wrapping_add(u64::from(bytes.last().copied().unwrap_or(0)));
-                for _ in 0..sink_yields {
-                    yield_now().await;
+        context.register_json::<Sink<P>, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let state = Rc::clone(&state);
+                async move {
+                    request.as_str()?;
+                    let edge = u64::from(0x5a_u8).wrapping_mul(2);
+                    for _ in 0..sink_yields {
+                        yield_now().await;
+                    }
+                    state.checksum.set(state.checksum.get().wrapping_add(edge));
+                    state.received.set(state.received.get().saturating_add(1));
+                    response.write("{}").await
                 }
-                state.checksum.set(state.checksum.get().wrapping_add(edge));
-                state.received.set(state.received.get().saturating_add(1));
-                Ok(Ok(()))
-            }
-        })
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
@@ -90,7 +123,7 @@ impl<const N: usize, const M: usize, const P: usize> Component<M> for Producer<N
                 let workflow = WorkflowClient::<M>::new(context.rpc().clone());
                 for index in 0..self.fanout {
                     let json = format!(
-                        r#"{{"id":"bench-{index}","match":{{"event":"bench.event"}},"steps":[{{"call":"bench.sink"}}]}}"#
+                        r#"{{"id":"{index}","match":{{"event":"e"}},"steps":[{{"call":"s.x"}}]}}"#
                     );
                     if let Err(error) = workflow.load(&json).await {
                         self.fail(error.to_string()).await;
@@ -187,7 +220,7 @@ async fn emit_phase<const M: usize, const P: usize>(
             }
         }
         emitter
-            .emit::<BenchEvent<P>>(*payload)
+            .emit::<BenchEvent<P>>(&BenchPayload(*payload))
             .await
             .map_err(|error| error.to_string())?;
         if matched {
@@ -247,8 +280,8 @@ fn one_sample<const N: usize, const M: usize, const Q: usize, const P: usize>(
     warmup: usize,
     sample: usize,
 ) -> Result<ResultRow, String> {
-    if matched && N <= fanout {
-        return Err(format!("N={N} must exceed fanout={fanout}"));
+    if matched && N < fanout {
+        return Err(format!("N={N} must cover fanout={fanout}"));
     }
     let lanes = Box::leak(Box::new(RpcLaneStorage::<N, M, Q>::new()));
     block_on(install_global_memory_vfs()).map_err(|error| error.to_string())?;

@@ -57,6 +57,7 @@ fn request_pipe_holds_exactly_one_unconsumed_frame() {
         let handler_gate = Rc::clone(&gate);
         registry
             .register::<GatedEcho, _>(
+                "system",
                 move |context: RpcContext, requests: RpcStream<RpcFrame<[u8; 8]>>| {
                     echo_requests(context, requests, Rc::clone(&handler_gate))
                 },
@@ -113,12 +114,15 @@ fn borrowed_response_frame_blocks_the_next_response_frame() {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 8, 1>::new()));
         let registry = RpcRegistry::new(lanes);
         registry
-            .register::<Burst, _>(|_context, _request: RpcFrame<[u8; 1]>| async move {
-                Ok(RpcStream::new(stream::iter([
-                    Ok(Ok(*b"frame-01")),
-                    Ok(Ok(*b"frame-02")),
-                ])))
-            })
+            .register::<Burst, _>(
+                "system",
+                |_context, _request: RpcFrame<[u8; 1]>| async move {
+                    Ok(RpcStream::new(stream::iter([
+                        Ok(Ok(*b"frame-01")),
+                        Ok(Ok(*b"frame-02")),
+                    ])))
+                },
+            )
             .expect("register burst endpoint");
         let address = RpcAddress::try_from(Burst::ADDRESS).expect("valid address");
         let (mut writer, mut reader) = registry

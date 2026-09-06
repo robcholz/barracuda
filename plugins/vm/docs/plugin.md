@@ -3,28 +3,31 @@
 - Plugin ID: `vm`
 - Direct Plugin dependencies: none
 - Provided typed capabilities: `barracuda_vm_package_api::LuaPackageRegistry`
+- Required typed capabilities: none
 
-During registration, the VM Plugin publishes `LuaPackageRegistry`, selects its
-built-in Lua packages, and loads the standalone Lua VM Component with the same
-registry and an unstarted `VmRuntime`. Plugins that depend on `vm` register
-their require-only Lua packages into this capability during the unified Plugin
-registration phase. During Plugin startup, the runtime receives the
-System-owned Embassy spawner. Each RPC execution then occupies one slot in the
-Component's static four-task Embassy pool and installs the packages in the
-shared registry.
+The Plugin publishes `LuaPackageRegistry` during registration so dependent
+Plugins can install require-only Lua packages. It loads `VmComponent` with the
+same registry and an unstarted `VmRuntime`. During startup, `VmRuntime` receives
+the System-owned Embassy spawner.
 
-The Component creates fresh package instances for each isolated execution and
-exposes the VM RPC and Event contracts documented in this directory. Its Lua
-instruction hook only yields execution; the owning Embassy task performs the
-100 ms async wait before polling Lua again.
+The Agent/Workflow-facing surface consists of the public JSON RPCs `vm.run`,
+`vm.input`, and `vm.cancel`, plus the JSON Events `vm.output`,
+`vm.input_required`, and `vm.finished`. There is no native RPC endpoint at
+`vm.run` and no transport-level streaming cardinality.
 
 Owned resources:
 
-- `VmComponent`
-- `VmRuntime` and its four statically allocated Embassy task slots
-- four reusable 64 KiB Lua allocator slots backed by `embedded_alloc::TlsfHeap`
-- the `BuiltinPackages` plan, currently containing the require-only `io` package
-- the shared `LuaPackageRegistry` capability
+- `VmComponent` and its JSON registrations;
+- `VmRuntime` and four statically allocated Embassy task slots;
+- four reusable 64 KiB Lua allocator slots backed by
+  `embedded_alloc::TlsfHeap`;
+- a one-message input queue and one-message Lua output queue per execution;
+- the built-in package plan, currently containing the require-only `io`
+  package;
+- the shared `LuaPackageRegistry` capability.
 
-It owns the VM Component, provides `LuaPackageRegistry`, and does not require a
-typed Plugin capability.
+Each accepted run receives one isolated Lua state and one task/memory slot.
+Output Event delivery is awaited before the VM proceeds, and output is split
+into bounded chunks. Unloading the Component detaches Event delivery, cancels
+active executions, and closes their input channels; Plugin Manager remains
+responsible for Component and registration teardown.

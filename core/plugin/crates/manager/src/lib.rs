@@ -12,7 +12,7 @@ mod filesystem;
 mod lifecycle;
 mod storage;
 
-pub use barracuda_kv::Value;
+pub use barracuda_kv::{Value, WriteValue};
 pub use filesystem::PluginVfs;
 pub use lifecycle::{
     CapabilityError, Plugin, PluginComponentCleanupFailure, PluginDeclaration, PluginError,
@@ -21,5 +21,6 @@ pub use lifecycle::{
     PluginResult, PluginStartContext, PluginStartError, PluginTaskToken, PluginUnloadError,
 };
 pub use storage::{
-    PluginReadTransaction, PluginStorage, PluginWriteTransaction, StorageError, StorageResult,
+    PluginEntry, PluginEntryIterator, PluginReadTransaction, PluginStorage, PluginWriteTransaction,
+    StorageError, StorageResult,
 };

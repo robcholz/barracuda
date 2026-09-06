@@ -3,40 +3,49 @@
 //! The link between two adjacent RPC steps is implicit in the step JSON and is
 //! never named in the document:
 //!
-//! - no `arguments` → [`LinkKind::Direct`]: the previous response is passed
-//!   through byte-for-byte (validated by response/request type identity).
+//! - no `arguments` → [`LinkKind::Direct`]: the first step receives the Event
+//!   input unchanged; later steps receive the previous JSON response unchanged.
 //! - `arguments` with at least one `$` reference → [`LinkKind::Mapping`]: the
 //!   next request is built from the literal arguments, then each referenced
-//!   field is copied wire-to-wire out of the previous response.
+//!   JSON value is copied out of the selected Event input or previous response.
 //! - `arguments` with no `$` reference → [`LinkKind::Literal`]: the next request
 //!   is built entirely from the literal arguments, independent of the previous
 //!   step.
 //!
-//! A reference has the grammar `$<step>.<channel>.<field>`. Only `previous`
-//! and `output` are defined today; both slots are reserved for future forms
-//! (`$previous.input`, `$previous.error`, absolute step selectors). The field
-//! is mandatory and a single top-level name: a bare `$previous.output` is
-//! rejected, because whole-frame passthrough is `Link::Direct`, and nested
-//! paths are rejected.
+//! A reference has the grammar `$<selector>.<channel>.<field>`. The supported
+//! sources are `$event.input.<field>` and `$previous.output.<field>`. The field
+//! is mandatory and a single top-level name; whole-document passthrough uses a
+//! Direct link and nested paths are rejected.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use serde_json::{Map, Value};
 
-/// One `$previous.output.<source>` reference bound to a request field.
+/// Source selected by one Workflow argument reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SourceSelector {
+    /// The original Event JSON that triggered the Workflow.
+    EventInput,
+    /// The preceding RPC step's response JSON.
+    PreviousOutput,
+}
+
+/// One selected source field bound to a request field.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FieldRef {
     /// Request field the value is written into (the arguments key).
     pub(crate) dest_field: String,
-    /// Response field the value is read from (after `output.`).
+    /// Event input or previous step output selected by the reference.
+    pub(crate) selector: SourceSelector,
+    /// Top-level JSON field read from the selected source.
     pub(crate) source_field: String,
 }
 
 /// The classified link feeding one Workflow step.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LinkKind {
-    /// Byte-for-byte passthrough of the previous response.
+    /// Unchanged JSON passthrough of the Event input or previous response.
     Direct,
     /// Request built solely from literal arguments.
     Literal {
@@ -47,7 +56,7 @@ pub(crate) enum LinkKind {
     Mapping {
         /// Literal arguments object (references removed).
         arguments: Value,
-        /// Fields copied out of the previous response.
+        /// JSON fields copied out of their selected sources.
         references: Vec<FieldRef>,
     },
 }
@@ -62,18 +71,18 @@ pub enum LinkError {
     /// A `$` reference had no body.
     #[error("Workflow reference is empty")]
     EmptyReference,
-    /// The step selector was not `previous`.
-    #[error("Workflow reference step selector is not `previous`")]
+    /// The source selector was neither `event` nor `previous`.
+    #[error("Workflow reference source selector is neither `event` nor `previous`")]
     UnknownStepSelector,
-    /// The channel selector was not `output`.
-    #[error("Workflow reference channel is not `output`")]
+    /// The selected source does not support the requested channel.
+    #[error("Workflow reference channel is invalid for its source selector")]
     UnknownChannel,
     /// The reference addressed a nested field path.
     #[error("Workflow reference nested field paths are unsupported")]
     NestedFieldPath,
     /// The reference named a step and channel but no field.
     #[error(
-        "Workflow reference names no field; use a Direct link to pass the whole previous response"
+        "Workflow reference names no field; use a Direct link to pass the whole source document"
     )]
     MissingField,
     /// The reference did not have the `$step.channel.field` shape.
@@ -93,9 +102,10 @@ pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError>
     for (key, value) in object {
         if let Some(text) = value.as_str() {
             if let Some(body) = text.strip_prefix('$') {
-                let source_field = parse_reference(body)?;
+                let (selector, source_field) = parse_reference(body)?;
                 references.push(FieldRef {
                     dest_field: key.clone(),
+                    selector,
                     source_field,
                 });
                 continue;
@@ -115,20 +125,20 @@ pub(crate) fn classify(arguments: Option<&Value>) -> Result<LinkKind, LinkError>
     }
 }
 
-/// Parses `previous.output.<field>` and returns the source field name.
-fn parse_reference(body: &str) -> Result<String, LinkError> {
+/// Parses a source selector and returns it with its top-level field name.
+fn parse_reference(body: &str) -> Result<(SourceSelector, String), LinkError> {
     if body.is_empty() {
         return Err(LinkError::EmptyReference);
     }
     let mut parts = body.split('.');
     let step = parts.next().ok_or(LinkError::MalformedReference)?;
     let channel = parts.next().ok_or(LinkError::MalformedReference)?;
-    if step != "previous" {
-        return Err(LinkError::UnknownStepSelector);
-    }
-    if channel != "output" {
-        return Err(LinkError::UnknownChannel);
-    }
+    let selector = match (step, channel) {
+        ("event", "input") => SourceSelector::EventInput,
+        ("previous", "output") => SourceSelector::PreviousOutput,
+        ("event" | "previous", _) => return Err(LinkError::UnknownChannel),
+        _ => return Err(LinkError::UnknownStepSelector),
+    };
     let field = parts.next().ok_or(LinkError::MissingField)?;
     if parts.next().is_some() {
         return Err(LinkError::NestedFieldPath);
@@ -136,7 +146,7 @@ fn parse_reference(body: &str) -> Result<String, LinkError> {
     if field.is_empty() {
         return Err(LinkError::MalformedReference);
     }
-    Ok(field.to_string())
+    Ok((selector, field.to_string()))
 }
 
 #[cfg(test)]
@@ -146,7 +156,7 @@ mod tests {
     #![allow(clippy::indexing_slicing)]
     #![allow(missing_docs)]
 
-    use super::{classify, LinkError, LinkKind};
+    use super::{classify, LinkError, LinkKind, SourceSelector};
     use serde_json::json;
 
     #[test]
@@ -174,7 +184,23 @@ mod tests {
         assert_eq!(literal, json!({ "channel": "imessage" }));
         assert_eq!(references.len(), 1);
         assert_eq!(references[0].dest_field, "message");
+        assert_eq!(references[0].selector, SourceSelector::PreviousOutput);
         assert_eq!(references[0].source_field, "text");
+    }
+
+    #[test]
+    fn event_input_field_is_a_mapping_source() {
+        let arguments = json!({ "prompt": "$event.input.message" });
+        let LinkKind::Mapping { references, .. } =
+            classify(Some(&arguments)).expect("classify Event input reference")
+        else {
+            panic!("expected a mapping link");
+        };
+
+        assert_eq!(references.len(), 1);
+        assert_eq!(references[0].dest_field, "prompt");
+        assert_eq!(references[0].selector, SourceSelector::EventInput);
+        assert_eq!(references[0].source_field, "message");
     }
 
     #[test]

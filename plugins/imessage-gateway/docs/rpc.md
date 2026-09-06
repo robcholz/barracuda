@@ -1,139 +1,100 @@
-# IMessage Gateway RPC API
+# IMessage Gateway JSON RPC API
 
-The IMessage Gateway Component exposes outbound delivery independently from
-any Workflow, Agent, or concrete IM provider. All RPCs select their destination
-with `GatewayRoute` and return the provider-assigned identifier in
-`GatewaySendReceipt`.
+All three RPCs have visibility `"*"`, unary JSON input/output, and a 512-byte
+request ceiling. Malformed JSON or a document that does not match the declared
+shape is an Event Router `RpcError`. Stable application rejections are JSON
+responses.
 
 ## `gateway.send`
 
-Sends one bounded complete text message. This is the simple and dynamic API.
+- Schema paths: `schemas/rpc/send/request.json` and `response.json`
+- Maximum request: 512 bytes
+- Maximum response: 512 bytes
 
-- Address: `gateway.send`
-- Request: unary `GatewaySendRequest`
-- Response: unary `GatewaySendReceipt`
-- Method error: `GatewaySendError`
-- Dynamic: yes (`call_json` is supported)
+Request:
 
-`GatewaySendRequest` contains bounded `channel`, `conversation`, `thread`,
-`reply_to`, and `text` fields. Empty `thread` and `reply_to` values mean absent.
-Use `GatewaySendRequest::new` or `GatewaySendRequest::with_reply_to` for typed
-calls.
+```json
+{"channel":"telegram","conversation_id":"chat-42","thread_id":"topic-7","reply_to":"message-100","text":"hello"}
+```
 
-### Response
+Success is `{"message_id":"provider-id"}`. Errors are `invalid_request`,
+`unknown_channel`, `unsupported`, `authentication`, `rate_limited`, `delivery`,
+or `invalid_receipt`.
 
-`GatewaySendReceipt` contains `message_id`, the identifier assigned by the
-selected provider.
-
-### Errors
-
-| Variant | Meaning |
-| --- | --- |
-| `InvalidRequest` | A request field is invalid. |
-| `UnknownChannel` | `route.channel` does not name a registered `MessageChannel`. |
-| `Delivery` | The selected provider rejected the request or its transport failed. |
-| `InvalidReceipt` | The provider returned a message identifier that cannot fit in the Gateway response contract. |
+There are no independent field limits. The complete encoded request, including
+JSON escaping and metadata, must fit the 512-byte RPC lane.
 
 ## `gateway.send_stream`
 
-Streams primary text and optional extra content in one ordered delivery. This
-is the complete typed API.
+- Schema paths: `schemas/rpc/send_stream/request.json` and `response.json`
+- Maximum request: 512 bytes
+- Maximum response: 128 bytes
+- Terminal Event: `gateway.send_stream.finished`
 
-- Address: `gateway.send_stream`
-- Request: streaming `GatewaySendStreamRequestFrame`
-- Response: unary `GatewaySendReceipt`
-- Method error: `GatewaySendStreamError`
-- Dynamic: no
+Start:
 
-Each fixed-layout request frame contains `value` and one
-`GatewaySendStreamField`. The stream begins with `Channel`, `Conversation`,
-optional `Thread`, and optional `ReplyTo`. Content follows as field variants:
+```json
+{"action":"start","stream_id":"reply-17","sequence":0,"channel":"telegram","conversation_id":"chat-42","reply_to":"message-100"}
+```
 
-- `TextMore` / `TextComplete`
-- `ReasoningMore` / `ReasoningComplete`
-- `EffectResultMore` / `EffectResultComplete`
-- `NoticeMore` / `NoticeComplete`
-- `EventMore` / `EventComplete`
-- structured tool fields from `ToolResultStart` through `ToolResultEnd`
+Chunk:
 
-The handler reads only the metadata prefix, then hands the remaining live
-stream to the selected provider. `frames_from_gateway_send_stream` encodes a
-logical buffered value; `frames_from_gateway_stream_frame` incrementally
-encodes one content frame.
+```json
+{"action":"chunk","stream_id":"reply-17","sequence":1,"field":"text","boundary":"more","text":"hel"}
+```
 
-Plain providers use the default projection, which consumes all frames and
-delivers only `Text`. Rich providers override `MessageChannel::send_stream` to
-render extra frames.
+Finish:
 
-Errors are `InvalidRequest`, `UnknownChannel`, `Delivery`, and
-`InvalidReceipt`, with the same routing and receipt meanings as `gateway.send`.
+```json
+{"action":"finish","stream_id":"reply-17","sequence":2}
+```
+
+An accepted command returns `{"accepted_sequence":1}`. Rejections are
+`invalid_request`, `duplicate_stream`, `unknown_stream`, `out_of_order`, or
+`busy`. A stream ID uses ASCII letters, digits, `_`, `-`, or `.`. The complete
+command must fit the request lane; text has no second field-level cap. The supported content fields
+are `text`, `reasoning`, `effect_result`, `notice`, `event`, and the structured
+tool-result fields listed in the request schema.
+
+At most four text streams are active, the start queue holds four jobs, and each
+stream buffers two commands. On `busy`, retry the same sequence after yielding.
 
 ## `gateway.send_media`
 
-Sends one file, image, audio, or video through one common RPC.
+- Schema paths: `schemas/rpc/send_media/request.json` and `response.json`
+- Maximum request: 512 bytes
+- Maximum response: 128 bytes
+- Terminal Event: `gateway.send_media.finished`
 
-- Address: `gateway.send_media`
-- Request: streaming `GatewaySendMediaRequestFrame`
-- Response: unary `GatewaySendReceipt`
-- Method error: `GatewaySendMediaError`
+Start supplies route metadata and `kind` (`file`, `image`, `audio`, or
+`video`). Chunks contain `content_base64`; finish follows the same sequence
+rules as text:
 
-### Logical request
-
-`GatewayOutboundMedia` is the caller-facing logical value encoded by
-`frames_from_gateway_send_media`:
-
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `route` | `GatewayRoute` | Provider channel, conversation, and optional thread. |
-| `kind` | `GatewayMediaKind` | `File`, `Image`, `Audio`, or `Video`. |
-| `filename` | `Option<String>` | Optional provider-visible filename. |
-| `mime_type` | `Option<String>` | Optional MIME type. |
-| `caption` | `Option<String>` | Optional text rendered with the media. |
-| `reply_to` | `Option<String>` | Optional provider message identifier being replied to. |
-| `bytes` | `Vec<u8>` | Complete opaque binary media body. |
-
-Each metadata field occupies one typed frame. Metadata frames precede all
-`Body` frames. A `Body` frame contains a named `GatewayMediaChunk` with a
-`u16` length and opaque bytes. The end of the RPC input stream completes the
-media body; there is no separate end payload.
-
-`GatewayMediaKind` selects the matching Gateway operation:
-
-| Kind | Gateway operation |
-| --- | --- |
-| `File` | `send_file` |
-| `Image` | `send_image` |
-| `Audio` | `send_audio` |
-| `Video` | `send_video` |
-
-### Response
-
-`GatewaySendReceipt` has the same meaning and shape as the response from
-`gateway.send`.
-
-### Errors
-
-| Variant | Meaning |
-| --- | --- |
-| `InvalidRequest` | Required fields are absent, metadata is duplicated, metadata appears after body bytes, media kinds differ between frames, or a frame is invalid. |
-| `UnknownChannel` | `route.channel` does not name a registered `MessageChannel`. |
-| `Unsupported` | The selected provider does not implement the requested media kind. |
-| `Delivery` | The selected provider rejected the request or its transport failed. |
-| `InvalidReceipt` | The provider returned a message identifier that cannot fit in the Gateway response contract. |
-
-## Shared destination
-
-Both RPCs use:
-
-```rust
-pub struct GatewayRoute {
-    pub channel: String,
-    pub conversation_id: String,
-    pub thread_id: Option<String>,
-}
+```json
+{"action":"start","stream_id":"upload-4","sequence":0,"channel":"telegram","conversation_id":"chat-42","kind":"image","filename":"photo.jpg","mime_type":"image/jpeg"}
 ```
 
-`channel` selects a registered provider. `conversation_id` selects the
-provider conversation. `thread_id` selects an optional sub-conversation or
-topic. `reply_to` is separate from the route and selects an existing message
-inside that destination.
+```json
+{"action":"chunk","stream_id":"upload-4","sequence":1,"content_base64":"AAH/gA=="}
+```
+
+```json
+{"action":"finish","stream_id":"upload-4","sequence":2}
+```
+
+Each Base64 command uses the complete request lane. Media has the same
+four-active/four-start/two-command bounds and command responses as text. Queued
+commands retain their RPC lanes; decoded chunks use inline storage.
+
+## Terminal Events
+
+A successful stream terminal Event is:
+
+```json
+{"stream_id":"reply-17","sequence":2,"outcome":"completed","message_id":"provider-id"}
+```
+
+A failure uses `outcome: "failed"` and `error`. Delivery errors are
+`invalid_request`, `unknown_channel`, `unsupported`, `authentication`,
+`rate_limited`, `delivery`, or `invalid_receipt`. Terminal Events use the
+complete Event lane.

@@ -1,44 +1,35 @@
-# IMessage Gateway Events
-
-The IMessage Gateway Component emits normalized inbound provider messages. Its
-Event contract belongs to Gateway and contains no Agent or adapter types.
+# IMessage Gateway JSON Events
 
 ## `gateway.message.received`
 
-- Event ID: `gateway.message.received`
-- Message type: `GatewayEventFrame`
-- Cardinality: streaming
+Providers publish a typed `GatewayInboundMessage` through `IMessageGateway`.
+The Gateway emits one or more bounded JSON Events with this stable Event ID.
 
-### Logical message
+A short message is one terminal document:
 
-`GatewayInboundMessage` contains:
+```json
+{"stream_id":21,"sequence":0,"phase":"complete","terminal":true,"route":{"channel":"telegram","conversation_id":"chat-42","thread_id":"topic-7"},"message_id":"message-100","text":"hello"}
+```
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `route` | `GatewayRoute` | Provider channel, conversation, and optional thread that originated the message. |
-| `message_id` | `String` | Provider-assigned identifier of the inbound message. |
-| `text` | `String` | Complete user-visible message text. |
+If that document would exceed the available Event-input lane, the Plugin emits:
 
-Each frame contains one semantic `GatewayEventField` and one NUL-terminated
-UTF-8 `GatewayText`. Route fields and `message_id` each occupy one frame.
-Message text uses `TextMore` frames followed by exactly one `TextComplete`
-frame. Consumers reconstruct the logical message with
-`gateway_event_from_frames`.
+1. `phase: "start"`, sequence 0, `terminal: false`, with route and message ID.
+2. One or more `phase: "chunk"` documents with consecutive sequences,
+   `terminal: false`, and bounded text.
+3. One `phase: "finish"` document with the next sequence and
+   `terminal: true`.
 
-### Emit timing
+The numeric `stream_id` correlates every document produced from one inbound
+message. Event emission awaits Event Router acceptance one document at a time.
 
-1. A concrete provider normalizes its inbound message into
-   `GatewayInboundMessage`.
-2. The provider awaits `IMessageGateway::publish`. Completion means the
-   bounded Gateway ingress queue accepted the logical message.
-3. `GatewayComponent::run` receives that queued message and encodes its typed
-   Event frames.
-4. The Component awaits `EventEmitter::emit::<GatewayMessageReceived>`.
-5. The Event is emitted when Event Router accepts the complete frame stream.
+Text has no independent total limit and may span any number of chunks. Route
+metadata and message ID must fit the `start` document. The provider ingress
+queue is bounded to 16 messages by the Plugin.
 
-Ingress queue acceptance and Event Router acceptance are separate points.
-Backpressure can occur at either point.
+## Outbound terminal Events
 
-One accepted `GatewayInboundMessage` produces one
-`gateway.message.received` Event stream. Workflow matching and downstream RPC
-execution happen after emission and do not change the Gateway Event contract.
+`gateway.send_stream.finished` and `gateway.send_media.finished` each emit
+exactly once after an accepted stream reaches provider completion or failure.
+Their documents contain `stream_id`, the accepted finish `sequence`, and either
+`outcome: "completed"` with `message_id` or `outcome: "failed"` with `error`.
+Each terminal document uses the complete Event lane.

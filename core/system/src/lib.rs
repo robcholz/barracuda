@@ -144,9 +144,7 @@ where
         // BEGIN GENERATED PLUGINS
         register_plugins!(plugins, router;
             barracuda_agent_plugin::AgentPlugin::new(&mut plugin_context),
-            barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&mut plugin_context),
             barracuda_file_plugin::FilePlugin::new(&mut plugin_context),
-            barracuda_gateway_agent_plugin::GatewayAgentPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),

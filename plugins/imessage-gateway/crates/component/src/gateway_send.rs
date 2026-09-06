@@ -1,151 +1,121 @@
 use alloc::{rc::Rc, string::String};
+use core::fmt;
 
-use barracuda_event_router::{rpc_dynamic, rpc_message, RpcFrame, RpcHandler, RpcMethod, Unary};
-use gateway::{MessageGateway, MessageTarget, SendMessageRequest};
-use serde::{Deserialize, Serialize};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
+use barracuda_event_router::{
+    json_schema, JsonHandler, JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcError,
+};
+use gateway::{ChannelError, GatewayError, MessageGateway, MessageTarget, SendMessageRequest};
+use serde::Deserialize;
 
-use crate::route::GatewayRoute;
-use crate::wire::{GatewaySendReceipt, GatewayText, GatewayWireError};
-
-const CHANNEL_CAPACITY: usize = 32;
-const CONVERSATION_CAPACITY: usize = 96;
-const THREAD_CAPACITY: usize = 48;
-const REPLY_TO_CAPACITY: usize = 96;
-const TEXT_CAPACITY: usize = 238;
-
-/// One bounded complete text message accepted by `gateway.send`.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct GatewaySendRequest {
-    channel: GatewayText<CHANNEL_CAPACITY>,
-    conversation: GatewayText<CONVERSATION_CAPACITY>,
-    thread: GatewayText<THREAD_CAPACITY>,
-    reply_to: GatewayText<REPLY_TO_CAPACITY>,
-    text: GatewayText<TEXT_CAPACITY>,
-}
-
-impl GatewaySendRequest {
-    /// Builds a complete-message request without a reply target.
-    ///
-    /// # Errors
-    ///
-    /// Returns a wire error when any field exceeds its fixed RPC capacity.
-    pub fn new(route: &GatewayRoute, text: &str) -> Result<Self, GatewayWireError> {
-        Self::with_reply_to(route, text, None)
-    }
-
-    /// Builds a complete-message request with an optional provider reply target.
-    ///
-    /// # Errors
-    ///
-    /// Returns a wire error when any field exceeds its fixed RPC capacity.
-    pub fn with_reply_to(
-        route: &GatewayRoute,
-        text: &str,
-        reply_to: Option<&str>,
-    ) -> Result<Self, GatewayWireError> {
-        Ok(Self {
-            channel: GatewayText::new(&route.channel)?,
-            conversation: GatewayText::new(&route.conversation_id)?,
-            thread: GatewayText::new(route.thread_id.as_deref().unwrap_or_default())?,
-            reply_to: GatewayText::new(reply_to.unwrap_or_default())?,
-            text: GatewayText::new(text)?,
-        })
-    }
-
-    fn route(&self) -> Result<GatewayRoute, GatewayWireError> {
-        let mut route = GatewayRoute::new(self.channel.as_str()?, self.conversation.as_str()?);
-        let thread = self.thread.as_str()?;
-        if !thread.is_empty() {
-            route.thread_id = Some(thread.into());
-        }
-        Ok(route)
-    }
-
-    fn reply_to(&self) -> Result<Option<&str>, GatewayWireError> {
-        let reply_to = self.reply_to.as_str()?;
-        Ok((!reply_to.is_empty()).then_some(reply_to))
-    }
-
-    fn text(&self) -> Result<&str, GatewayWireError> {
-        self.text.as_str()
-    }
-}
-
-/// Business failure returned by `gateway.send`.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum GatewaySendError {
-    /// A request frame was not canonical.
-    InvalidRequest,
-    /// No provider is registered for the requested channel.
-    UnknownChannel,
-    /// The selected provider rejected or failed the delivery.
-    Delivery,
-    /// The provider receipt could not fit in the Gateway response contract.
-    InvalidReceipt,
-}
+use crate::json::{
+    encoded_json_len, valid_required, write_encoded_json, write_json_string, EncodedJson,
+    ErrorResponse, GatewayJsonError, FRAME_CAPACITY,
+};
 
 /// Sends one bounded complete text message.
 pub struct GatewaySend;
 
-#[rpc_dynamic]
-impl RpcMethod for GatewaySend {
+impl JsonRpcSchema for GatewaySend {
     const ADDRESS: &'static str = "gateway.send";
-    type Request = GatewaySendRequest;
-    type Response = GatewaySendReceipt;
-    type Error = GatewaySendError;
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("send", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("send", response);
+    const MAX_REQUEST_BYTES: usize = FRAME_CAPACITY;
+    const MAX_RESPONSE_BYTES: usize = FRAME_CAPACITY;
 }
 
-/// Builds the reusable handler for [`GatewaySend`].
-pub fn gateway_send_handler(gateway: Rc<MessageGateway>) -> impl RpcHandler<GatewaySend> {
-    move |_context, frame: RpcFrame<GatewaySendRequest>| {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SendRequest<'a> {
+    #[serde(borrow)]
+    channel: &'a str,
+    #[serde(borrow)]
+    conversation_id: &'a str,
+    #[serde(default, borrow)]
+    thread_id: Option<&'a str>,
+    #[serde(default, borrow)]
+    reply_to: Option<&'a str>,
+    #[serde(borrow)]
+    text: &'a str,
+}
+
+impl SendRequest<'_> {
+    fn is_valid(&self) -> bool {
+        valid_required(self.channel) && valid_required(self.conversation_id)
+    }
+}
+
+struct ReceiptResponse<'a> {
+    message_id: &'a str,
+}
+
+impl EncodedJson for ReceiptResponse<'_> {
+    fn encode(&self, writer: &mut impl fmt::Write) -> fmt::Result {
+        writer.write_str("{\"message_id\":")?;
+        write_json_string(writer, self.message_id)?;
+        writer.write_char('}')
+    }
+}
+
+impl JsonPayload for ReceiptResponse<'_> {
+    fn encoded_len(&self) -> Result<usize, RpcError> {
+        encoded_json_len(self)
+    }
+
+    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
+        write_encoded_json(self, destination)
+    }
+}
+
+pub(crate) fn map_gateway_error(error: &GatewayError) -> GatewayJsonError {
+    match error {
+        GatewayError::UnknownChannel { .. } => GatewayJsonError::UnknownChannel,
+        GatewayError::DuplicateChannel { .. } => GatewayJsonError::Delivery,
+        GatewayError::Channel { source, .. } => match source {
+            ChannelError::Unsupported { .. } => GatewayJsonError::Unsupported,
+            ChannelError::InvalidRequest { .. } => GatewayJsonError::InvalidRequest,
+            ChannelError::Authentication => GatewayJsonError::Authentication,
+            ChannelError::RateLimited => GatewayJsonError::RateLimited,
+            ChannelError::Transport { .. }
+            | ChannelError::Platform { .. }
+            | ChannelError::Stream(_) => GatewayJsonError::Delivery,
+        },
+    }
+}
+
+/// Builds the lane-backed JSON handler for [`GatewaySend`].
+pub fn gateway_send_handler(gateway: Rc<MessageGateway>) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
         let gateway = Rc::clone(&gateway);
         async move {
-            let request = frame.view()?;
-            let route = match request.route() {
-                Ok(route) => route,
-                Err(_error) => return Ok(Err(GatewaySendError::InvalidRequest)),
-            };
-            let text = match request.text() {
-                Ok(text) => String::from(text),
-                Err(_error) => return Ok(Err(GatewaySendError::InvalidRequest)),
-            };
-            let reply_to = match request.reply_to() {
-                Ok(reply_to) => reply_to.map(Into::into),
-                Err(_error) => return Ok(Err(GatewaySendError::InvalidRequest)),
-            };
-            let mut target = MessageTarget::new(route.channel, route.conversation_id);
-            target.thread_id = route.thread_id;
-            let mut outbound = SendMessageRequest::text(target, text);
-            outbound.reply_to = reply_to;
-            let receipt = match gateway.send_message(outbound).await {
-                Ok(receipt) => receipt,
-                Err(gateway::GatewayError::UnknownChannel { .. }) => {
-                    return Ok(Err(GatewaySendError::UnknownChannel));
+            let request = request.deserialize::<SendRequest<'_>>()?;
+            if !request.is_valid() {
+                return response
+                    .write(&ErrorResponse(GatewayJsonError::InvalidRequest))
+                    .await;
+            }
+
+            let mut target = MessageTarget::new(request.channel, request.conversation_id);
+            target.thread_id = request.thread_id.map(String::from);
+            let mut outbound = SendMessageRequest::text(target, request.text);
+            outbound.reply_to = request.reply_to.map(String::from);
+            match gateway.send_message(outbound).await {
+                Ok(receipt) => {
+                    let receipt = ReceiptResponse {
+                        message_id: &receipt.message_id,
+                    };
+                    if receipt.encoded_len()? > GatewaySend::MAX_RESPONSE_BYTES {
+                        response
+                            .write(&ErrorResponse(GatewayJsonError::InvalidReceipt))
+                            .await
+                    } else {
+                        response.write(&receipt).await
+                    }
                 }
-                Err(_error) => return Ok(Err(GatewaySendError::Delivery)),
-            };
-            match GatewaySendReceipt::new(&receipt.message_id) {
-                Ok(receipt) => Ok(Ok(receipt)),
-                Err(_error) => Ok(Err(GatewaySendError::InvalidReceipt)),
+                Err(error) => {
+                    response
+                        .write(&ErrorResponse(map_gateway_error(&error)))
+                        .await
+                }
             }
         }
     }

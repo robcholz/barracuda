@@ -1,32 +1,11 @@
-use alloc::string::String;
-use barracuda_time_component::now::TimeNow;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use time::{Date, Month, PrimitiveDateTime, Time};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
-
 use crate::schedule::ScheduleError;
 
 /// Maximum UTF-8 byte length of a schedule identifier.
 pub const SCHEDULE_ID_MAX_BYTES: usize = 16;
-// Keep the established scheduler RPC layout while reserving one NUL byte.
-const SCHEDULE_ID_CAPACITY: usize = 32;
+const SCHEDULE_ID_CAPACITY: usize = SCHEDULE_ID_MAX_BYTES;
 
 /// Stable fixed-capacity schedule identifier.
-#[repr(transparent)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Eq,
-    Hash,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    TryFromBytes,
-)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ScheduleId([u8; SCHEDULE_ID_CAPACITY]);
 
 /// Failure constructing a [`ScheduleId`].
@@ -75,25 +54,6 @@ impl ScheduleId {
             .position(|byte| *byte == 0)
             .unwrap_or(SCHEDULE_ID_CAPACITY);
         core::str::from_utf8(self.0.get(..end).unwrap_or_default()).unwrap_or_default()
-    }
-}
-
-impl Serialize for ScheduleId {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ScheduleId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        Self::new(&value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -215,15 +175,33 @@ impl DueOccurrence {
     }
 }
 
-/// Snapshot returned when a live schedule is cancelled.
+/// Removed state returned when a live schedule is cancelled.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct CancelledSchedule {
+    spec: ScheduleSpec,
+    next_at_unix_seconds: u64,
     completed_runs: u64,
 }
 
 impl CancelledSchedule {
-    pub(crate) const fn new(completed_runs: u64) -> Self {
-        Self { completed_runs }
+    pub(crate) const fn new(
+        spec: ScheduleSpec,
+        next_at_unix_seconds: u64,
+        completed_runs: u64,
+    ) -> Self {
+        Self {
+            spec,
+            next_at_unix_seconds,
+            completed_runs,
+        }
+    }
+
+    pub(crate) const fn spec(self) -> ScheduleSpec {
+        self.spec
+    }
+
+    pub(crate) const fn next_at_unix_seconds(self) -> u64 {
+        self.next_at_unix_seconds
     }
 
     /// Number of Events committed before cancellation.
@@ -231,16 +209,4 @@ impl CancelledSchedule {
     pub const fn completed_runs(self) -> u64 {
         self.completed_runs
     }
-}
-
-pub(crate) fn unix_seconds(value: TimeNow) -> Result<u64, ScheduleError> {
-    let month = Month::try_from(value.month()).map_err(|_error| ScheduleError::TimeUnavailable)?;
-    let date = Date::from_calendar_date(i32::from(value.year()), month, value.day())
-        .map_err(|_error| ScheduleError::TimeUnavailable)?;
-    let time = Time::from_hms(value.hour(), value.minute(), value.second())
-        .map_err(|_error| ScheduleError::TimeUnavailable)?;
-    let timestamp = PrimitiveDateTime::new(date, time)
-        .assume_utc()
-        .unix_timestamp();
-    u64::try_from(timestamp).map_err(|_error| ScheduleError::TimeUnavailable)
 }

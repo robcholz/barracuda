@@ -57,27 +57,6 @@ impl Topic {
             .unwrap_or(TOPIC_STORAGE_BYTES);
         core::str::from_utf8(self.0.get(..end).unwrap_or_default()).unwrap_or_default()
     }
-
-    pub(crate) const fn wire_bytes(&self) -> &[u8; TOPIC_STORAGE_BYTES] {
-        &self.0
-    }
-
-    pub(crate) fn from_wire(bytes: &[u8]) -> Result<Self, TopicWireError> {
-        let bytes: [u8; TOPIC_STORAGE_BYTES] = bytes.try_into().map_err(|_error| TopicWireError)?;
-        let end = bytes
-            .iter()
-            .position(|byte| *byte == 0)
-            .ok_or(TopicWireError)?;
-        if bytes
-            .get(end..)
-            .is_none_or(|padding| padding.iter().any(|byte| *byte != 0))
-        {
-            return Err(TopicWireError);
-        }
-        let value = core::str::from_utf8(bytes.get(..end).unwrap_or_default())
-            .map_err(|_error| TopicWireError)?;
-        Self::try_from(value).map_err(|_error| TopicWireError)
-    }
 }
 
 impl AsRef<str> for Topic {
@@ -107,9 +86,6 @@ pub enum TopicError {
     InvalidCharacter,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct TopicWireError;
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -122,8 +98,8 @@ mod tests {
         let topic = Topic::try_from("morning.alarm").expect("valid topic");
 
         assert_eq!(topic.as_str(), "morning.alarm");
-        assert_eq!(topic.wire_bytes().len(), TOPIC_STORAGE_BYTES);
-        assert_eq!(topic.wire_bytes()[13], 0);
+        assert_eq!(topic.0.len(), TOPIC_STORAGE_BYTES);
+        assert_eq!(topic.0[13], 0);
     }
 
     #[test]

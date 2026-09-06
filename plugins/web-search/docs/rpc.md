@@ -1,35 +1,61 @@
-# Web Search RPC
+# Web Search JSON RPC
 
 ## `web_search.search`
 
-Dynamic unary-to-streaming RPC used by Agents to search the public web.
+- Visibility: `*`
+- Transport shape: unary JSON request to unary JSON response
+- Maximum request: 320 encoded bytes
+- Maximum response: 512 encoded bytes
+- Request schema: `schemas/rpc/search/request.json`
+- Response schema: `schemas/rpc/search/response.json`
 
-### Request: `WebSearchRequest`
+Request:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `query` | JSON string / bounded UTF-8 wire text | Search query (at most 255 UTF-8 bytes). |
-| `max_results` | `u8` | Requested result count from 1 through 10. |
+```json
+{
+  "query": "embedded Rust async executors",
+  "max_results": 3
+}
+```
 
-### Response stream: `WebSearchResult`
+`query` must contain non-whitespace text and is limited to 255 decoded UTF-8
+bytes. `max_results` is from 1 through 10. Unknown fields, the wrong JSON shape,
+malformed JSON, and oversized documents are transport errors.
 
-Each frame contains one result. Provider text is UTF-8-boundary truncated to the
-fixed RPC capacities so every result remains suitable for the Event Router's
-bounded lanes.
+The call waits for Tavily and returns search results directly:
 
-| Field | Type | Meaning |
-| --- | --- | --- |
-| `title` | string | Page title. |
-| `url` | string | Source URL. |
-| `content` | string | Search excerpt. |
-| `score` | `f32` | Search-provider relevance score. |
+```json
+{
+  "results": [
+    {
+      "title": "Embassy executor",
+      "url": "https://example.com/embassy",
+      "content": "A bounded result excerpt...",
+      "score": 0.91
+    }
+  ],
+  "truncated": false
+}
+```
 
-### Method errors
+The response uses the complete 512-byte JSON document as one budget. Individual
+fields do not have independent byte limits and URLs are never cut. If the next
+complete result cannot fit, the response keeps the complete preceding results
+and sets `truncated` to `true`. When a result's title, URL, and score fit, its
+content may use the remaining response capacity. A result whose metadata cannot
+fit without cutting a field is omitted.
 
-| Variant | Meaning |
-| --- | --- |
-| `NotConfigured` | No Tavily configuration has been posted. |
-| `InvalidRequest` | Query encoding or `max_results` is invalid. |
-| `Transport` | DNS, TCP, TLS, HTTP, or response-body reading failed. |
-| `Service` | The search provider returned a non-success HTTP status. |
-| `InvalidResponse` | The response was too large or malformed. |
+Stable pre-acceptance business failures are:
+
+```json
+{ "error": "not_configured" }
+```
+
+```json
+{ "error": "busy" }
+```
+
+`not_configured` means no valid Tavily configuration has been installed.
+`busy` means the reusable HTTP workspace is occupied by another search.
+Provider failures are returned by the same awaited call as `transport`,
+`service`, or `invalid_response`.

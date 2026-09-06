@@ -1,3 +1,3 @@
 id = "agent"
-depends-on = []
-description = "Runs conversational agents and publishes the agent configuration API."
+depends-on = ["webserver"]
+description = "Runs conversational agents and exposes model configuration over HTTP."

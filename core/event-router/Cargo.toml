@@ -22,22 +22,15 @@ harness = false
 barracuda-vfs = { path = "../../shared/vfs" }
 barracuda-router = { path = "crates/router" }
 barracuda-rpc = { path = "crates/rpc" }
-barracuda-rpc-schema = { path = "crates/rpc-schema", optional = true }
 barracuda-workflow = { path = "crates/workflow" }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
-
-[features]
-# Host-only: re-exports the JSON Schema bake pipeline (schemars) for `build.rs`
-# and wire crates. Off by default so the device build stays no_std.
-schema = ["dep:barracuda-rpc-schema"]
 
 [dev-dependencies]
 barracuda-platform-test = { path = "../../platforms/test" }
 barracuda-vfs-memfs = { path = "../../shared/vfs-memfs" }
 barracuda-profile = { path = "../../shared/profile", features = ["dhat-heap"] }
 futures-lite = "2"
-futures-util = { version = "0.3", default-features = false, features = ["async-await"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 static_cell = "2.1.1"

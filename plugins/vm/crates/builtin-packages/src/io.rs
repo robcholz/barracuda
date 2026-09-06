@@ -5,8 +5,9 @@ use alloc::string::String;
 use async_channel::{Receiver, Sender};
 use barracuda_lua::{Error, Lua, Package, Result};
 
-const INPUT_CAPACITY: usize = 16;
-const OUTPUT_CAPACITY: usize = 16;
+const INPUT_CAPACITY: usize = 1;
+const OUTPUT_CAPACITY: usize = 1;
+const INPUT_REQUEST_CAPACITY: usize = 1;
 
 const INSTALL_PACKAGE: &str = r##"
 local io = require("io")
@@ -29,6 +30,7 @@ end
 /// The installable Lua IO package.
 pub struct Io {
     input: Receiver<String>,
+    input_requests: Sender<()>,
     output: Sender<String>,
 }
 
@@ -38,14 +40,17 @@ impl Io {
     pub fn new() -> (Self, Input, Output) {
         let (input_sender, input_receiver) = async_channel::bounded(INPUT_CAPACITY);
         let (output_sender, output_receiver) = async_channel::bounded(OUTPUT_CAPACITY);
+        let (request_sender, request_receiver) = async_channel::bounded(INPUT_REQUEST_CAPACITY);
 
         (
             Self {
                 input: input_receiver,
+                input_requests: request_sender,
                 output: output_sender,
             },
             Input {
                 sender: input_sender,
+                requests: request_receiver,
             },
             Output {
                 receiver: output_receiver,
@@ -57,11 +62,18 @@ impl Io {
 impl Package for Io {
     fn install(&self, lua: &mut Lua) -> Result<()> {
         let input = self.input.clone();
+        let input_requests = self.input_requests.clone();
         let output = self.output.clone();
         lua.register_lib("io", move |package| {
             package.register_async("input", move |(): ()| {
                 let input = input.clone();
-                async move { Some(Ok(input.recv().await.ok())) }
+                let input_requests = input_requests.clone();
+                async move {
+                    if input_requests.send(()).await.is_err() {
+                        return Some(Ok(None));
+                    }
+                    Some(Ok(input.recv().await.ok()))
+                }
             })?;
             package.register_async("__emit", move |line: String| {
                 let output = output.clone();
@@ -79,6 +91,7 @@ impl Package for Io {
 #[derive(Clone)]
 pub struct Input {
     sender: Sender<String>,
+    requests: Receiver<()>,
 }
 
 impl Input {
@@ -94,6 +107,11 @@ impl Input {
     /// returns `nil`.
     pub fn close(&self) {
         self.sender.close();
+    }
+
+    /// Waits until Lua reaches one `io.input()` call.
+    pub async fn next_request(&self) -> bool {
+        self.requests.recv().await.is_ok()
     }
 }
 

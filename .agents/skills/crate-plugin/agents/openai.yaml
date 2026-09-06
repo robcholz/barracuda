@@ -1,6 +1,0 @@
-interface:
-  display_name: "Barracuda Crate Plugin"
-  short_description: "Create a Plugin crate with contracts and identity docs"
-  default_prompt: "Use $crate-plugin to create a Barracuda Plugin crate with plugin.md, optional Component, capabilities, and RPC/event contracts."
-policy:
-  allow_implicit_invocation: true

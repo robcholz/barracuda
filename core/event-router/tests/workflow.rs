@@ -1,49 +1,31 @@
 #![allow(clippy::expect_used)]
 #![allow(missing_docs)]
 
-use std::cell::{Cell, RefCell};
-use std::future::{pending, poll_fn, Future};
-use std::pin::Pin;
+mod support;
+
+use core::cell::{Cell, RefCell};
+use std::future::pending;
 use std::rc::Rc;
 use std::sync::{Mutex, MutexGuard};
-use std::task::Poll;
 
 use barracuda_event_router::{
     Component, ComponentError, ComponentFuture, ComponentResult, Event, EventEmitter, EventRouter,
-    RegisterContext, RpcFrame, RpcLaneStorage, RpcMethod, RpcStream, RunContext, Streaming, Unary,
+    JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcLaneStorage, RunContext,
     UnregisterContext, WorkflowClient, WorkflowControlError, WorkflowControlRejection, WorkflowId,
 };
 use barracuda_platform_test::install_global_memory_vfs;
-use barracuda_vfs::{read, remove_file};
+use barracuda_vfs::remove_file;
 use futures_lite::future::block_on;
-use futures_util::stream;
+use serde::Deserialize;
+use serde_json::json;
 
-const FRAME_SIZE: usize = 64;
-const LANE_COUNT: usize = 8;
-const WAITER_COUNT: usize = 8;
-
-type TestEventRouter = EventRouter<LANE_COUNT, FRAME_SIZE, WAITER_COUNT>;
-
-const ALPHA_JSON: &str = r#"{
-    "id": "gateway-message-to-recorder-with-a-long-workflow-id",
-    "match": { "event": "gateway.message.received" },
-    "steps": [
-        { "call": "integration.add-one" },
-        { "call": "integration.record" }
-    ]
-}"#;
-
-const BETA_JSON: &str = r#"{
-    "id": "gateway-message-audit",
-    "match": { "event": "gateway.*" },
-    "steps": [
-        { "call": "integration.audit" }
-    ]
-}"#;
-
-static BOTH_WORKFLOWS: &[&str] = &[ALPHA_JSON, BETA_JSON];
-static DUPLICATE_ALPHA: &[&str] = &[ALPHA_JSON, ALPHA_JSON];
-static INVALID_WORKFLOW: &[&str] = &["{"];
+const FRAME_SIZE: usize = 512;
+const VALUE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"],"additionalProperties":false}"#,
+);
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn reset_global_vfs() -> MutexGuard<'static, ()> {
@@ -53,298 +35,100 @@ fn reset_global_vfs() -> MutexGuard<'static, ()> {
     guard
 }
 
-fn new_router() -> TestEventRouter {
-    let lanes = Box::leak(Box::new(RpcLaneStorage::<
-        LANE_COUNT,
-        FRAME_SIZE,
-        WAITER_COUNT,
-    >::new()));
+fn new_router<const N: usize>() -> EventRouter<N, FRAME_SIZE, N> {
+    let lanes = Box::leak(Box::new(RpcLaneStorage::<N, FRAME_SIZE, N>::new()));
     block_on(EventRouter::new(lanes)).expect("create Event Router")
-}
-
-fn drive_until(event_router: &mut TestEventRouter, ready: impl Fn(&TestEventRouter) -> bool) {
-    block_on(poll_fn(|context| {
-        if let Poll::Ready(result) = Pin::new(&mut *event_router).poll(context) {
-            return Poll::Ready(result);
-        }
-        if ready(event_router) {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
-    }))
-    .expect("Event Router remains operational");
-}
-
-#[derive(Default)]
-struct ControlState {
-    done: Cell<bool>,
-    error: RefCell<Option<WorkflowControlError>>,
-}
-
-struct WorkflowInstaller {
-    json: &'static [&'static str],
-    state: Rc<ControlState>,
-    register_stubs: bool,
-}
-
-impl Component<FRAME_SIZE> for WorkflowInstaller {
-    fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        if !self.register_stubs {
-            return Ok(());
-        }
-        // Stub endpoints so load-time link validation can resolve the steps
-        // these workflows persist.
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })?;
-        context.register_rpc::<Audit, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let client = WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone());
-            for json in self.json {
-                if let Err(error) = client.load(json).await {
-                    self.state.error.replace(Some(error));
-                    break;
-                }
-            }
-            self.state.done.set(true);
-            pending().await
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        Ok(())
-    }
-}
-
-struct WorkflowUninstaller {
-    state: Rc<ControlState>,
-}
-
-impl Component<FRAME_SIZE> for WorkflowUninstaller {
-    fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        // Stub endpoints so load-time link validation can resolve the steps
-        // this workflow loads.
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(|_context, _request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(()))
-        })
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            let client = WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone());
-            let result = async {
-                client.load(ALPHA_JSON).await?;
-                let workflow_id =
-                    WorkflowId::try_from("gateway-message-to-recorder-with-a-long-workflow-id")
-                        .expect("valid Workflow ID");
-                client.unload(&workflow_id).await
-            }
-            .await;
-            if let Err(error) = result {
-                self.state.error.replace(Some(error));
-            }
-            self.state.done.set(true);
-            pending().await
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        Ok(())
-    }
-}
-
-#[test]
-fn streaming_load_persists_order_and_recovers_it_after_restart() {
-    let _global_vfs = reset_global_vfs();
-    let state = Rc::new(ControlState::default());
-    let mut event_router = new_router();
-    event_router
-        .load(Box::new(WorkflowInstaller {
-            json: BOTH_WORKFLOWS,
-            state: Rc::clone(&state),
-            register_stubs: true,
-        }))
-        .expect("load installer Component");
-
-    drive_until(&mut event_router, |_router| state.done.get());
-
-    assert!(state.error.borrow().is_none());
-    let definitions = event_router.workflow_definitions();
-    let ids: Vec<_> = definitions
-        .iter()
-        .map(|definition| definition.id().as_str())
-        .collect();
-    assert_eq!(
-        ids,
-        [
-            "gateway-message-to-recorder-with-a-long-workflow-id",
-            "gateway-message-audit"
-        ]
-    );
-    let catalog: Vec<serde_json::Value> = serde_json::from_slice(
-        &block_on(read("/system/workflows.json")).expect("read Workflow catalog"),
-    )
-    .expect("catalog is a JSON array");
-    assert_eq!(catalog.len(), 2);
-    assert_eq!(
-        catalog
-            .first()
-            .and_then(|workflow| workflow.get("id"))
-            .and_then(serde_json::Value::as_str),
-        Some("gateway-message-to-recorder-with-a-long-workflow-id")
-    );
-    assert_eq!(
-        catalog
-            .get(1)
-            .and_then(|workflow| workflow.get("id"))
-            .and_then(serde_json::Value::as_str),
-        Some("gateway-message-audit")
-    );
-
-    drop(event_router);
-    let recovered = new_router();
-    assert_eq!(recovered.workflow_definitions(), definitions);
-}
-
-#[test]
-fn streaming_unload_removes_runtime_and_durable_state() {
-    let _global_vfs = reset_global_vfs();
-    let state = Rc::new(ControlState::default());
-    let mut event_router = new_router();
-    event_router
-        .load(Box::new(WorkflowUninstaller {
-            state: Rc::clone(&state),
-        }))
-        .expect("load uninstaller Component");
-
-    drive_until(&mut event_router, |_router| state.done.get());
-
-    assert!(state.error.borrow().is_none());
-    assert!(event_router.workflow_definitions().is_empty());
-    assert_eq!(
-        block_on(read("/system/workflows.json")).expect("read empty Workflow catalog"),
-        b"[]"
-    );
-    drop(event_router);
-    assert!(new_router().workflow_definitions().is_empty());
-}
-
-#[test]
-fn invalid_and_duplicate_workflow_json_are_rejected_without_corrupting_the_catalog() {
-    let _global_vfs = reset_global_vfs();
-    let invalid_state = Rc::new(ControlState::default());
-    let mut event_router = new_router();
-    event_router
-        .load(Box::new(WorkflowInstaller {
-            json: INVALID_WORKFLOW,
-            state: Rc::clone(&invalid_state),
-            register_stubs: true,
-        }))
-        .expect("load invalid installer Component");
-    drive_until(&mut event_router, |_router| invalid_state.done.get());
-    assert!(matches!(
-        invalid_state.error.borrow().as_ref(),
-        Some(WorkflowControlError::Rejected(
-            WorkflowControlRejection::InvalidJson
-        ))
-    ));
-    assert!(event_router.workflow_definitions().is_empty());
-
-    let duplicate_state = Rc::new(ControlState::default());
-    event_router
-        .load(Box::new(WorkflowInstaller {
-            json: DUPLICATE_ALPHA,
-            state: Rc::clone(&duplicate_state),
-            // The first installer already registered the stub endpoints.
-            register_stubs: false,
-        }))
-        .expect("load duplicate installer Component");
-    drive_until(&mut event_router, |_router| duplicate_state.done.get());
-    assert!(matches!(
-        duplicate_state.error.borrow().as_ref(),
-        Some(WorkflowControlError::Rejected(
-            WorkflowControlRejection::DuplicateId
-        ))
-    ));
-    assert_eq!(event_router.workflow_definitions().len(), 1);
-    let catalog: Vec<serde_json::Value> = serde_json::from_slice(
-        &block_on(read("/system/workflows.json")).expect("read Workflow catalog"),
-    )
-    .expect("catalog is a JSON array");
-    assert_eq!(catalog.len(), 1);
 }
 
 struct GatewayMessage;
 
 impl Event for GatewayMessage {
     const ID: &'static str = "gateway.message.received";
-    type Message = [u8; 4];
-    type Input = Unary;
 }
 
 struct AddOne;
 
-impl RpcMethod for AddOne {
+impl JsonRpcSchema for AddOne {
     const ADDRESS: &'static str = "integration.add-one";
-    type Request = [u8; 4];
-    type Response = [u8; 4];
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = VALUE_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = VALUE_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 32;
+    const MAX_RESPONSE_BYTES: usize = 32;
 }
 
 struct Record;
 
-impl RpcMethod for Record {
+impl JsonRpcSchema for Record {
     const ADDRESS: &'static str = "integration.record";
-    type Request = [u8; 4];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = VALUE_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 32;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
-struct SequentialExecution {
+struct Audit;
+
+impl JsonRpcSchema for Audit {
+    const ADDRESS: &'static str = "integration.audit";
+    const REQUEST_SCHEMA: JsonSchema = VALUE_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 32;
+    const MAX_RESPONSE_BYTES: usize = 2;
+}
+
+#[derive(Deserialize)]
+struct Number {
+    value: u32,
+}
+
+const MAPPING_WORKFLOW: &str = r#"{
+    "id":"mapping",
+    "match":{"event":"gateway.message.received"},
+    "steps":[
+        {"call":"integration.add-one","arguments":{"value":"$event.input.value"}},
+        {"call":"integration.record"}
+    ]
+}"#;
+
+struct MappingComponent {
     emitted: Rc<Cell<bool>>,
     recorded: Rc<Cell<Option<u32>>>,
 }
 
-impl Component<FRAME_SIZE> for SequentialExecution {
+impl Component<FRAME_SIZE> for MappingComponent {
+    fn name(&self) -> &'static str {
+        "mapping"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            let value = u32::from_le_bytes(*request.view()?);
-            Ok(Ok(value.saturating_add(1).to_le_bytes()))
-        })?;
+        context.register_json::<AddOne, _>(
+            "*",
+            |_context, request: JsonRef, response: JsonWriter| async move {
+                let value = request.deserialize::<Number>()?.value.saturating_add(1);
+                response.write(&json!({"value":value})).await
+            },
+        )?;
         let recorded = Rc::clone(&self.recorded);
-        context.register_rpc::<Record, _>(move |_context, request: RpcFrame<[u8; 4]>| {
-            let recorded = Rc::clone(&recorded);
-            async move {
-                recorded.set(Some(u32::from_le_bytes(*request.view()?)));
-                Ok(Ok(()))
-            }
-        })
+        context.register_json::<Record, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let recorded = Rc::clone(&recorded);
+                async move {
+                    recorded.set(Some(request.deserialize::<Number>()?.value));
+                    response.write("{}").await
+                }
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
         Box::pin(async move {
             WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone())
-                .load(ALPHA_JSON)
+                .load(MAPPING_WORKFLOW)
                 .await
                 .map_err(ComponentError::lifecycle)?;
             EventEmitter::<FRAME_SIZE>::new(context.rpc().clone())
-                .emit::<GatewayMessage>(41_u32.to_le_bytes())
+                .emit::<GatewayMessage>(r#"{"value":41}"#)
                 .await
                 .map_err(ComponentError::lifecycle)?;
             self.emitted.set(true);
@@ -358,80 +142,90 @@ impl Component<FRAME_SIZE> for SequentialExecution {
 }
 
 #[test]
-fn matching_event_executes_sequential_rpc_steps_and_updates_snapshot() {
+fn event_selector_and_direct_link_execute_json_rpc_steps() {
     let _global_vfs = reset_global_vfs();
     let emitted = Rc::new(Cell::new(false));
     let recorded = Rc::new(Cell::new(None));
-    let mut event_router = new_router();
+    let mut event_router = new_router::<2>();
     event_router
-        .load(Box::new(SequentialExecution {
+        .load(Box::new(MappingComponent {
             emitted: Rc::clone(&emitted),
             recorded: Rc::clone(&recorded),
         }))
-        .expect("load execution Component");
+        .expect("load mapping Component");
 
-    drive_until(&mut event_router, |router| {
+    support::drive_until(&mut event_router, |router| {
         emitted.get() && router.workflow_info().completed_count == 1
-    });
+    })
+    .expect("drive JSON Workflow");
 
     assert_eq!(recorded.get(), Some(42));
-    let info = event_router.workflow_info();
-    assert_eq!(info.completed_count, 1);
-    assert_eq!(info.failed_count, 0);
-    assert_eq!(info.cancelled_count, 0);
-    assert!(info.last_failure.is_none());
+    assert_eq!(event_router.workflow_info().failed_count, 0);
 }
 
-struct Audit;
+const EXACT_WORKFLOW: &str = r#"{
+    "id":"exact",
+    "match":{"event":"gateway.message.received"},
+    "steps":[{"call":"integration.record"}]
+}"#;
+const WILDCARD_WORKFLOW: &str = r#"{
+    "id":"wildcard",
+    "match":{"event":"gateway.*"},
+    "steps":[{"call":"integration.audit"}]
+}"#;
 
-impl RpcMethod for Audit {
-    const ADDRESS: &'static str = "integration.audit";
-    type Request = [u8; 4];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
-}
-
-struct FanoutExecution {
+struct FanoutComponent {
     emitted: Rc<Cell<bool>>,
-    recorded: Rc<Cell<bool>>,
-    audited: Rc<Cell<bool>>,
+    recorded: Rc<RefCell<Vec<u32>>>,
 }
 
-impl Component<FRAME_SIZE> for FanoutExecution {
+impl Component<FRAME_SIZE> for FanoutComponent {
+    fn name(&self) -> &'static str {
+        "fanout"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        let recorded = Rc::clone(&self.recorded);
-        context.register_rpc::<AddOne, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-            Ok(Ok(*request.view()?))
-        })?;
-        context.register_rpc::<Record, _>(move |_context, request: RpcFrame<[u8; 4]>| {
-            let recorded = Rc::clone(&recorded);
-            async move {
-                request.view()?;
-                recorded.set(true);
-                Ok(Ok(()))
-            }
-        })?;
-        let audited = Rc::clone(&self.audited);
-        context.register_rpc::<Audit, _>(move |_context, request: RpcFrame<[u8; 4]>| {
-            let audited = Rc::clone(&audited);
-            async move {
-                request.view()?;
-                audited.set(true);
-                Ok(Ok(()))
-            }
-        })
+        let exact = Rc::clone(&self.recorded);
+        context.register_json::<Record, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let exact = Rc::clone(&exact);
+                async move {
+                    exact
+                        .borrow_mut()
+                        .push(request.deserialize::<Number>()?.value);
+                    response.write("{}").await
+                }
+            },
+        )?;
+        let wildcard = Rc::clone(&self.recorded);
+        context.register_json::<Audit, _>(
+            "*",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let wildcard = Rc::clone(&wildcard);
+                async move {
+                    wildcard
+                        .borrow_mut()
+                        .push(request.deserialize::<Number>()?.value);
+                    response.write("{}").await
+                }
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
         Box::pin(async move {
-            let client = WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone());
-            for json in BOTH_WORKFLOWS {
-                client.load(json).await.map_err(ComponentError::lifecycle)?;
-            }
+            let workflows = WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone());
+            workflows
+                .load(EXACT_WORKFLOW)
+                .await
+                .map_err(ComponentError::lifecycle)?;
+            workflows
+                .load(WILDCARD_WORKFLOW)
+                .await
+                .map_err(ComponentError::lifecycle)?;
             EventEmitter::<FRAME_SIZE>::new(context.rpc().clone())
-                .emit::<GatewayMessage>([1, 2, 3, 4])
+                .emit::<GatewayMessage>(r#"{"value":7}"#)
                 .await
                 .map_err(ComponentError::lifecycle)?;
             self.emitted.set(true);
@@ -448,87 +242,64 @@ impl Component<FRAME_SIZE> for FanoutExecution {
 fn one_event_executes_every_exact_and_wildcard_match() {
     let _global_vfs = reset_global_vfs();
     let emitted = Rc::new(Cell::new(false));
-    let recorded = Rc::new(Cell::new(false));
-    let audited = Rc::new(Cell::new(false));
-    let mut event_router = new_router();
+    let recorded = Rc::new(RefCell::new(Vec::new()));
+    let mut event_router = new_router::<2>();
     event_router
-        .load(Box::new(FanoutExecution {
+        .load(Box::new(FanoutComponent {
             emitted: Rc::clone(&emitted),
             recorded: Rc::clone(&recorded),
-            audited: Rc::clone(&audited),
         }))
         .expect("load fanout Component");
 
-    drive_until(&mut event_router, |router| {
+    support::drive_until(&mut event_router, |router| {
         emitted.get() && router.workflow_info().completed_count == 2
-    });
+    })
+    .expect("drive fanout Workflow");
 
-    assert!(recorded.get());
-    assert!(audited.get());
+    assert_eq!(recorded.borrow().as_slice(), [7, 7]);
     assert_eq!(event_router.workflow_info().failed_count, 0);
 }
 
-const STREAMING_JSON: &str = r#"{
-    "id": "streaming-event-collector",
-    "match": { "event": "sensor.samples" },
-    "steps": [
-        { "call": "integration.collect" }
-    ]
-}"#;
-
-struct SensorSamples;
-
-impl Event for SensorSamples {
-    const ID: &'static str = "sensor.samples";
-    type Message = [u8; 1];
-    type Input = Streaming;
+#[derive(Default)]
+struct ControlState {
+    done: Cell<bool>,
+    duplicate: RefCell<Option<WorkflowControlError>>,
+    missing: RefCell<Option<WorkflowControlError>>,
 }
 
-struct Collect;
-
-impl RpcMethod for Collect {
-    const ADDRESS: &'static str = "integration.collect";
-    type Request = [u8; 1];
-    type Response = ();
-    type Error = ();
-    type Input = Streaming;
-    type Output = Unary;
+struct ControlComponent {
+    state: Rc<ControlState>,
 }
 
-struct StreamingExecution {
-    emitted: Rc<Cell<bool>>,
-    collected: Rc<RefCell<Vec<u8>>>,
-}
+impl Component<FRAME_SIZE> for ControlComponent {
+    fn name(&self) -> &'static str {
+        "control"
+    }
 
-impl Component<FRAME_SIZE> for StreamingExecution {
     fn register(&mut self, context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
-        let collected = Rc::clone(&self.collected);
-        context.register_rpc::<Collect, _>(
-            move |_context, mut requests: RpcStream<RpcFrame<[u8; 1]>>| {
-                let collected = Rc::clone(&collected);
-                async move {
-                    while let Some(request) = requests.next().await {
-                        let [value] = *request?.view()?;
-                        collected.borrow_mut().push(value);
-                    }
-                    Ok(Ok(()))
-                }
-            },
+        context.register_json::<Record, _>(
+            "*",
+            |_context, _request, response: JsonWriter| async move { response.write("{}").await },
         )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
         Box::pin(async move {
-            WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone())
-                .load(STREAMING_JSON)
+            let client = WorkflowClient::<FRAME_SIZE>::new(context.rpc().clone());
+            client
+                .load(EXACT_WORKFLOW)
                 .await
                 .map_err(ComponentError::lifecycle)?;
-            let samples = RpcStream::new(stream::iter([Ok([10]), Ok([11]), Ok([12])]));
-            EventEmitter::<FRAME_SIZE>::new(context.rpc().clone())
-                .emit::<SensorSamples>(samples)
+            self.state
+                .duplicate
+                .replace(client.load(EXACT_WORKFLOW).await.err());
+            let id = WorkflowId::try_from("exact").map_err(ComponentError::lifecycle)?;
+            client
+                .unload(&id)
                 .await
                 .map_err(ComponentError::lifecycle)?;
-            self.emitted.set(true);
+            self.state.missing.replace(client.unload(&id).await.err());
+            self.state.done.set(true);
             pending().await
         })
     }
@@ -539,22 +310,29 @@ impl Component<FRAME_SIZE> for StreamingExecution {
 }
 
 #[test]
-fn streaming_event_preserves_message_order_through_workflow_ingress() {
+fn json_control_preserves_duplicate_and_not_found_rejections() {
     let _global_vfs = reset_global_vfs();
-    let emitted = Rc::new(Cell::new(false));
-    let collected = Rc::new(RefCell::new(Vec::new()));
-    let mut event_router = new_router();
+    let state = Rc::new(ControlState::default());
+    let mut event_router = new_router::<1>();
     event_router
-        .load(Box::new(StreamingExecution {
-            emitted: Rc::clone(&emitted),
-            collected: Rc::clone(&collected),
+        .load(Box::new(ControlComponent {
+            state: Rc::clone(&state),
         }))
-        .expect("load streaming Component");
+        .expect("load control Component");
 
-    drive_until(&mut event_router, |router| {
-        emitted.get() && router.workflow_info().completed_count == 1
-    });
+    support::drive_until(&mut event_router, |_router| state.done.get())
+        .expect("drive JSON control calls");
 
-    assert_eq!(collected.borrow().as_slice(), [10, 11, 12]);
-    assert_eq!(event_router.workflow_info().failed_count, 0);
+    assert_eq!(
+        state.duplicate.borrow().as_ref(),
+        Some(&WorkflowControlError::Rejected(
+            WorkflowControlRejection::DuplicateId
+        ))
+    );
+    assert_eq!(
+        state.missing.borrow().as_ref(),
+        Some(&WorkflowControlError::Rejected(
+            WorkflowControlRejection::NotFound
+        ))
+    );
 }

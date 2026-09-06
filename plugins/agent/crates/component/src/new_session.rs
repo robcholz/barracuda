@@ -1,43 +1,65 @@
 use alloc::rc::Rc;
 
-use barracuda_agent_runtime::{AgentRuntime, RuntimeError, SessionCreateError};
-use barracuda_event_router::{rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, Unary};
+use barracuda_agent_runtime::{AgentRuntime, RuntimeError, SessionCreateError, SessionPersistence};
+use barracuda_event_router::{
+    json_schema, JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
+};
+use serde::Deserialize;
 
-use crate::convert;
+use crate::json::{AgentRpcError, ErrorResponse, SessionResponse};
 
-pub use crate::dto::{NewSessionError, NewSessionRequest, NewSessionResponse};
-
-/// RPC corresponding to `AgentRuntime::new_session`.
+/// Creates one Agent session.
 pub struct NewSession;
 
-#[rpc_dynamic]
-impl RpcMethod for NewSession {
+impl JsonRpcSchema for NewSession {
     const ADDRESS: &'static str = "session.new";
-    type Request = NewSessionRequest;
-    type Response = NewSessionResponse;
-    type Error = NewSessionError;
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("new", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("new", response);
+    const MAX_REQUEST_BYTES: usize = 64;
+    const MAX_RESPONSE_BYTES: usize = 32;
 }
 
-/// Builds the reusable handler for [`NewSession`].
-pub fn new_session_handler(runtime: Rc<AgentRuntime>) -> impl RpcHandler<NewSession>
-where
-{
-    move |_context, request: RpcFrame<NewSessionRequest>| {
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Persistence {
+    Persistent,
+    Ephemeral,
+}
+
+impl From<Persistence> for SessionPersistence {
+    fn from(value: Persistence) -> Self {
+        match value {
+            Persistence::Persistent => Self::Persistent,
+            Persistence::Ephemeral => Self::Ephemeral,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NewSessionRequest {
+    persistence: Persistence,
+}
+
+/// Builds the JSON handler for [`NewSession`].
+pub fn new_session_handler(runtime: Rc<AgentRuntime>) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
         let runtime = Rc::clone(&runtime);
         async move {
-            let persistence = convert::persistence_from_wire(request.view()?.persistence);
-            let response = match runtime.new_session(persistence).await {
-                Ok(session) => Ok(NewSessionResponse {
-                    session: convert::session_to_wire(session),
-                }),
+            let request = request.deserialize::<NewSessionRequest>()?;
+            match runtime.new_session(request.persistence.into()).await {
+                Ok(session) => response.write(&SessionResponse { session }).await,
                 Err(RuntimeError::SessionCreate(SessionCreateError::WorkerStopped)) => {
-                    Err(NewSessionError::WorkerStopped)
+                    response
+                        .write(&ErrorResponse(AgentRpcError::WorkerStopped))
+                        .await
                 }
-                Err(_error) => Err(NewSessionError::Persistence),
-            };
-            Ok(response)
+                Err(_error) => {
+                    response
+                        .write(&ErrorResponse(AgentRpcError::Persistence))
+                        .await
+                }
+            }
         }
     }
 }

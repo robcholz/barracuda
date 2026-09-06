@@ -1,26 +1,16 @@
-# IMessage Gateway Component
+# IMessage Gateway Components
 
-The IMessage Gateway integration is an Event Router `Component`. The base
-Plugin publishes `IMessageGateway`; concrete provider Plugins require that
-capability to register a `MessageChannel` and publish inbound messages. Gateway
-contracts remain independent from Workflows, Agents, and adapters.
+The Plugin loads ten independently polled Event Router Components:
 
-The Component provides:
+- `GatewayComponent` owns `gateway.send`, `gateway.send_stream`, and
+  `gateway.send_media` JSON registrations.
+- `GatewayInboundComponent` drains the bounded provider-ingress queue and emits
+  `gateway.message.received` Events.
+- Four `GatewayTextStreamComponent` workers concurrently drive the four
+  accepted text-stream slots and emit their terminal Events.
+- Four `GatewayMediaStreamComponent` workers do the same for binary media.
 
-- `gateway.send` for one bounded complete text message.
-- `gateway.send_stream` for live primary text plus optional extra frames.
-- `gateway.send_media` for outbound files, images, audio, and video.
-- `gateway.message.received` for normalized inbound text messages.
-
-All outbound RPCs use the same `GatewayRoute` and return the same
-`GatewaySendReceipt`. Their reusable public handlers live beside their
-`RpcMethod` definitions. `component.rs` contains registration and lifecycle
-state.
-
-Read the caller-facing documents:
-
-- [`rpc.md`](rpc.md) — RPC addresses, request/response contracts, and every
-  method error.
-- [`event.md`](event.md) — Event payload, cardinality, and exact emit timing.
-- [`usage.md`](usage.md) — loading the Component, publishing ingress, and
-  making typed calls.
+Separating these workers prevents one active provider stream from blocking
+another stream or inbound Event emission. A queued chunk retains its RPC input
+lane until its worker consumes it; the queue does not allocate another text or
+binary payload.

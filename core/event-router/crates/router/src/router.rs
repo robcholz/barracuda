@@ -93,6 +93,8 @@ pub enum CleanupError {
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct ComponentCleanupFailure {
+    /// Stable human-readable Component type name.
+    pub name: &'static str,
     /// Component whose teardown was incomplete.
     pub id: ComponentId,
     /// Teardown failure for that Component.
@@ -104,14 +106,18 @@ pub struct ComponentCleanupFailure {
 #[non_exhaustive]
 pub enum RouterError {
     /// A Component's long-lived run future ended successfully without being unloaded.
-    #[error("Component exited while still loaded: {id}")]
+    #[error("Component {name} ({id}) exited while still loaded")]
     ComponentExited {
+        /// Stable human-readable Component type name.
+        name: &'static str,
         /// Component that exited.
         id: ComponentId,
     },
     /// A Component's long-lived run future failed.
-    #[error("Component failed while running: {id}: {source}")]
+    #[error("Component {name} ({id}) failed while running: {source}")]
     ComponentFailed {
+        /// Stable human-readable Component type name.
+        name: &'static str,
         /// Component that failed.
         id: ComponentId,
         /// Component lifecycle failure.
@@ -141,6 +147,7 @@ impl core::fmt::Display for ComponentId {
 type SharedComponent<const M: usize> = Rc<RefCell<Box<dyn Component<M>>>>;
 
 struct ComponentEntry<const M: usize> {
+    name: &'static str,
     component: SharedComponent<M>,
     run: Option<ComponentFuture<'static>>,
     registrations: Vec<RpcRegistration>,
@@ -187,13 +194,14 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
             return Err(LoadError::RouterTerminated);
         }
         let id = self.allocate_component_id()?;
-        log::debug!("registering Component {id}");
+        let name = component.name();
+        log::debug!("registering Component {name} ({id})");
         let registry: &dyn RpcRegistryApi<M> = &self.registry;
         let mut registrations = Vec::new();
         if let Err(source) =
             component.register(&mut RegisterContext::new(registry, &mut registrations))
         {
-            log::error!("Component {id} registration failed: {source}");
+            log::error!("Component {name} ({id}) registration failed: {source}");
             let component_error = component.unregister(&mut UnregisterContext::new()).err();
             let rpc_errors = unregister_all(registry, registrations);
             return match cleanup_error(component_error, rpc_errors) {
@@ -210,12 +218,13 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
         self.components.insert(
             id,
             ComponentEntry {
+                name,
                 component,
                 run: Some(run),
                 registrations,
             },
         );
-        log::info!("loaded Component {id}");
+        log::info!("loaded Component {name} ({id})");
         Ok(id)
     }
 
@@ -235,7 +244,7 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
             log::warn!("cannot unload unknown Component {id}");
             return Err(UnloadError::NotFound(id));
         };
-        log::info!("unloading Component {id}");
+        log::info!("unloading Component {} ({id})", entry.name);
         drop(entry.run.take());
         let registry: &dyn RpcRegistryApi<M> = &self.registry;
         let (remaining, rpc_errors) = revoke_all(registry, entry.registrations);
@@ -251,12 +260,12 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
         };
         match cleanup_error(component_error, rpc_errors) {
             Some(error) => {
-                log::error!("Component {id} unload failed: {error}");
+                log::error!("Component {} ({id}) unload failed: {error}", entry.name);
                 self.components.insert(id, entry);
                 Err(UnloadError::Cleanup(error))
             }
             None => {
-                log::info!("unloaded Component {id}");
+                log::info!("unloaded Component {} ({id})", entry.name);
                 Ok(())
             }
         }
@@ -294,7 +303,11 @@ impl<const N: usize, const M: usize, const Q: usize> Router<N, M, Q> {
                 .unregister(&mut UnregisterContext::new())
                 .err();
             if let Some(error) = cleanup_error(component_error, rpc_errors) {
-                failures.push(ComponentCleanupFailure { id, error });
+                failures.push(ComponentCleanupFailure {
+                    name: entry.name,
+                    id,
+                    error,
+                });
             }
         }
         failures
@@ -306,7 +319,8 @@ impl<const N: usize, const M: usize, const Q: usize> Drop for Router<N, M, Q> {
         let failures = self.cleanup_all();
         for failure in failures {
             log::error!(
-                "Component {} cleanup failed while dropping Event Router: {}",
+                "Component {} ({}) cleanup failed while dropping Event Router: {}",
+                failure.name,
                 failure.id,
                 failure.error
             );
@@ -332,17 +346,17 @@ impl<const N: usize, const M: usize, const Q: usize> Future for Router<N, M, Q> 
                     Poll::Pending => None,
                 });
             if let Some(result) = outcome {
-                completed = Some((*id, result));
+                completed = Some((entry.name, *id, result));
                 break;
             }
         }
-        let Some((id, result)) = completed else {
+        let Some((name, id, result)) = completed else {
             return Poll::Pending;
         };
         this.terminated = true;
         let cause = match result {
-            Ok(()) => RouterError::ComponentExited { id },
-            Err(source) => RouterError::ComponentFailed { id, source },
+            Ok(()) => RouterError::ComponentExited { name, id },
+            Err(source) => RouterError::ComponentFailed { name, id, source },
         };
         let failures = this.cleanup_all();
         if failures.is_empty() {
@@ -463,6 +477,10 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for PendingComponent {
+        fn name(&self) -> &'static str {
+            "pending"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -557,13 +575,20 @@ mod tests {
     struct RpcComponent;
 
     impl Component<FRAME_SIZE> for RpcComponent {
+        fn name(&self) -> &'static str {
+            "rpc"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(Number(request.view()?.0.saturating_add(1))))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move {
+                    Ok(Ok(Number(request.view()?.0.saturating_add(1))))
+                },
+            )
         }
 
         fn run<'a>(&'a mut self, _context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -609,12 +634,16 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for HangingRpcComponent {
+        fn name(&self) -> &'static str {
+            "hanging-rpc"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             let handler_polls = Rc::clone(&self.handler_polls);
-            context.register_rpc::<Increment, _>(move |_context, _request| {
+            context.register_rpc::<Increment, _>("system", move |_context, _request| {
                 let handler_polls = Rc::clone(&handler_polls);
                 poll_fn(move |_context| {
                     handler_polls.set(handler_polls.get().saturating_add(1));
@@ -676,16 +705,22 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for DuplicateRpcComponent {
+        fn name(&self) -> &'static str {
+            "duplicate-rpc"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             context.register_rpc::<Increment, _>(
+                "system",
                 |_context, request: RpcFrame<Number>| async move { Ok(Ok(*request.view()?)) },
             )?;
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(*request.view()?))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move { Ok(Ok(*request.view()?)) },
+            )
         }
 
         fn run<'a>(&'a mut self, _context: RunContext<FRAME_SIZE>) -> ComponentFuture<'a> {
@@ -740,6 +775,10 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for RetryCleanupComponent {
+        fn name(&self) -> &'static str {
+            "retry-cleanup"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -821,6 +860,10 @@ mod tests {
     struct SelfWakingComponent;
 
     impl Component<FRAME_SIZE> for SelfWakingComponent {
+        fn name(&self) -> &'static str {
+            "self-waking"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -869,6 +912,10 @@ mod tests {
     struct FailingComponent;
 
     impl Component<FRAME_SIZE> for FailingComponent {
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -910,6 +957,10 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for CompletingComponent {
+        fn name(&self) -> &'static str {
+            "completing"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -948,7 +999,7 @@ mod tests {
 
         assert!(matches!(
             poll_router(&mut router),
-            Poll::Ready(Err(RouterError::ComponentExited { id })) if id == component
+            Poll::Ready(Err(RouterError::ComponentExited { id, .. })) if id == component
         ));
         assert!(completing_state.unregistered.get());
         assert!(pending_state.unregistered.get());
@@ -967,6 +1018,10 @@ mod tests {
     struct CompletingWithFailedCleanup;
 
     impl Component<FRAME_SIZE> for CompletingWithFailedCleanup {
+        fn name(&self) -> &'static str {
+            "completing-with-failed-cleanup"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -996,9 +1051,11 @@ mod tests {
         assert!(matches!(
             poll_router(&mut router),
             Poll::Ready(Err(RouterError::CleanupFailed { cause, failures }))
-                if matches!(*cause, RouterError::ComponentExited { id } if id == component)
+                if matches!(*cause, RouterError::ComponentExited { id, .. } if id == component)
                     && failures.len() == 1
-                    && failures.first().is_some_and(|failure| failure.id == component)
+                    && failures.first().is_some_and(|failure| {
+                        failure.name == "completing-with-failed-cleanup" && failure.id == component
+                    })
         ));
     }
 
@@ -1021,12 +1078,16 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for TeardownOrderRpcComponent {
+        fn name(&self) -> &'static str {
+            "teardown-order-rpc"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, FRAME_SIZE>,
         ) -> Result<(), ComponentError> {
             let handler_dropped = Rc::clone(&self.handler_dropped);
-            context.register_rpc::<Increment, _>(move |_context, _request| {
+            context.register_rpc::<Increment, _>("system", move |_context, _request| {
                 let signal = HandlerDropSignal {
                     dropped: Rc::clone(&handler_dropped),
                 };
@@ -1056,6 +1117,10 @@ mod tests {
     struct RpcCallingComponent;
 
     impl Component<FRAME_SIZE> for RpcCallingComponent {
+        fn name(&self) -> &'static str {
+            "rpc-calling"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,
@@ -1098,7 +1163,7 @@ mod tests {
 
         assert!(matches!(
             poll_router(&mut router),
-            Poll::Ready(Err(RouterError::ComponentExited { id })) if id == completing
+            Poll::Ready(Err(RouterError::ComponentExited { id, .. })) if id == completing
         ));
         assert!(handler_dropped.get());
     }

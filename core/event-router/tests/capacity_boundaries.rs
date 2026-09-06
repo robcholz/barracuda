@@ -10,14 +10,17 @@ use std::sync::{Mutex, MutexGuard};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EmitError, Event, EventEmitter, EventRouter,
-    RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
+    JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcLaneStorage, RunContext,
     UnregisterContext, WorkflowClient, WorkflowControlError,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vfs::remove_file;
 use futures_lite::future::block_on;
 
-const FRAME_CAPACITY: usize = 64;
+const FRAME_CAPACITY: usize = 256;
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn reset_global_vfs() -> MutexGuard<'static, ()> {
@@ -31,19 +34,16 @@ struct CapacityEvent;
 
 impl Event for CapacityEvent {
     const ID: &'static str = "capacity.event";
-    type Message = [u8; 1];
-    type Input = Unary;
 }
 
 struct Sink;
 
-impl RpcMethod for Sink {
+impl JsonRpcSchema for Sink {
     const ADDRESS: &'static str = "capacity.sink";
-    type Request = [u8; 1];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 2;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -59,17 +59,20 @@ struct FanoutComponent {
 }
 
 impl Component<FRAME_CAPACITY> for FanoutComponent {
+    fn name(&self) -> &'static str {
+        "fanout"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,
     ) -> ComponentResult<()> {
         let state = Rc::clone(&self.state);
-        context.register_rpc::<Sink, _>(move |_context, request: RpcFrame<[u8; 1]>| {
+        context.register_json::<Sink, _>("*", move |_context, _request, response: JsonWriter| {
             let state = Rc::clone(&state);
             async move {
-                request.view()?;
                 state.received.set(state.received.get().saturating_add(1));
-                Ok(Ok(()))
+                response.write("{}").await
             }
         })
     }
@@ -89,7 +92,7 @@ impl Component<FRAME_CAPACITY> for FanoutComponent {
             }
 
             if let Err(error) = EventEmitter::<FRAME_CAPACITY>::new(context.rpc().clone())
-                .emit::<CapacityEvent>([7])
+                .emit::<CapacityEvent>("{}")
                 .await
             {
                 self.state.failure.replace(Some(Ok(error)));
@@ -110,29 +113,7 @@ fn new_router<const N: usize, const Q: usize>() -> EventRouter<N, FRAME_CAPACITY
 }
 
 #[test]
-fn matched_fanout_can_use_every_lane_except_the_ingress_lane() {
-    let _global_vfs = reset_global_vfs();
-    let state = Rc::new(State::default());
-    let mut event_router = new_router::<4, 4>();
-    event_router
-        .load(Box::new(FanoutComponent {
-            workflows: 3,
-            state: Rc::clone(&state),
-        }))
-        .expect("load fanout Component");
-
-    support::drive_until(&mut event_router, |router| {
-        state.done.get() && router.workflow_info().completed_count == 3
-    })
-    .expect("drive Event Router to expected state");
-
-    assert!(state.failure.borrow().is_none());
-    assert_eq!(state.received.get(), 3);
-    assert_eq!(event_router.workflow_info().completed_count, 3);
-}
-
-#[test]
-fn matched_fanout_equal_to_lane_count_is_rejected_as_nested_exhaustion() {
+fn fanout_can_use_every_lane_after_event_ingress_returns() {
     let _global_vfs = reset_global_vfs();
     let state = Rc::new(State::default());
     let mut event_router = new_router::<4, 4>();
@@ -143,15 +124,12 @@ fn matched_fanout_equal_to_lane_count_is_rejected_as_nested_exhaustion() {
         }))
         .expect("load fanout Component");
 
-    support::drive_until(&mut event_router, |_router| state.done.get())
-        .expect("drive Event Router to expected state");
+    support::drive_until(&mut event_router, |router| {
+        state.done.get() && router.workflow_info().completed_count == 4
+    })
+    .expect("drive Event Router to expected state");
 
-    assert!(matches!(
-        state.failure.borrow().as_ref(),
-        Some(Ok(EmitError::Rpc(RpcError::NestedLaneExhausted {
-            limit: 4
-        })))
-    ));
-    assert_eq!(state.received.get(), 0);
-    assert_eq!(event_router.workflow_info().completed_count, 0);
+    assert!(state.failure.borrow().is_none());
+    assert_eq!(state.received.get(), 4);
+    assert_eq!(event_router.workflow_info().failed_count, 0);
 }

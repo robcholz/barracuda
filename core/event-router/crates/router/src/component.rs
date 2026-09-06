@@ -7,7 +7,10 @@ use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
 
-use barracuda_rpc::{RpcClient, RpcError, RpcHandler, RpcMethod, RpcRegistration, RpcRegistryApi};
+use barracuda_rpc::{
+    JsonHandler, JsonRpcSchema, RpcClient, RpcError, RpcHandler, RpcMethod, RpcRegistration,
+    RpcRegistryApi,
+};
 use getset::Getters;
 
 /// Result returned by Component lifecycle operations.
@@ -85,6 +88,7 @@ impl<'a, const M: usize> RegisterContext<'a, M> {
     ///
     /// fn register(context: &mut RegisterContext<'_, 64>) -> ComponentResult<()> {
     ///     context.register_rpc::<TooLarge, _>(
+    ///         "system",
     ///         |_context, _request: RpcFrame<[u8; 65]>| async move { Ok(Ok([0])) },
     ///     )
     /// }
@@ -97,12 +101,35 @@ impl<'a, const M: usize> RegisterContext<'a, M> {
     ///     let _ = register(context());
     /// }
     /// ```
-    pub fn register_rpc<Method, H>(&mut self, handler: H) -> ComponentResult<()>
+    pub fn register_rpc<Method, H>(&mut self, visibility: &str, handler: H) -> ComponentResult<()>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
-        let registration = self.registry.register_rpc::<Method, H>(handler)?;
+        let registration = self
+            .registry
+            .register_rpc::<Method, H>(visibility, handler)?;
+        self.registrations.push(registration);
+        Ok(())
+    }
+
+    /// Registers one lane-native JSON RPC handler owned by the Component.
+    ///
+    /// The registration is recorded and receives the same rollback and unload
+    /// behavior as a native typed RPC.
+    ///
+    /// # Errors
+    ///
+    /// Returns an RPC error when the method address is invalid or already
+    /// occupied.
+    pub fn register_json<Method, H>(&mut self, visibility: &str, handler: H) -> ComponentResult<()>
+    where
+        Method: JsonRpcSchema,
+        H: JsonHandler + 'static,
+    {
+        let registration = self
+            .registry
+            .register_json_rpc::<Method, H>(visibility, handler)?;
         self.registrations.push(registration);
         Ok(())
     }
@@ -141,6 +168,13 @@ impl UnregisterContext<'_> {
 /// [`RegisterContext::register_rpc`] reject oversized method frames at compile
 /// time while the lane count and waiter capacity remain hidden.
 pub trait Component<const M: usize> {
+    /// Returns the stable human-readable name of this Component type.
+    ///
+    /// Names identify Component types for diagnostics and need not be unique
+    /// across loaded instances. [`crate::ComponentId`] remains the unique
+    /// identity of each loaded instance.
+    fn name(&self) -> &'static str;
+
     /// Registers the Component's interfaces and initializes local resources.
     ///
     /// # Errors
@@ -193,7 +227,8 @@ mod tests {
         Component, ComponentError, ComponentFuture, RegisterContext, RunContext, UnregisterContext,
     };
     use barracuda_rpc::{
-        RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RpcRegistry, RpcRegistryApi, Unary,
+        JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcError, RpcFrame,
+        RpcLaneStorage, RpcMethod, RpcRegistry, RpcRegistryApi, Unary,
     };
 
     #[repr(C)]
@@ -203,6 +238,16 @@ mod tests {
     struct Number(u32);
 
     struct Increment;
+
+    struct ComponentJson;
+
+    impl JsonRpcSchema for ComponentJson {
+        const ADDRESS: &'static str = "component.json";
+        const REQUEST_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+        const RESPONSE_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!("{}");
+        const MAX_REQUEST_BYTES: usize = 64;
+        const MAX_RESPONSE_BYTES: usize = 64;
+    }
 
     #[derive(Debug, thiserror::Error)]
     #[error("increment RPC returned a method error")]
@@ -222,13 +267,20 @@ mod tests {
     }
 
     impl Component<256> for IncrementComponent {
+        fn name(&self) -> &'static str {
+            "increment"
+        }
+
         fn register(
             &mut self,
             context: &mut RegisterContext<'_, 256>,
         ) -> Result<(), ComponentError> {
-            context.register_rpc::<Increment, _>(|_context, request: RpcFrame<Number>| async move {
-                Ok(Ok(Number(request.view()?.0.saturating_add(1))))
-            })
+            context.register_rpc::<Increment, _>(
+                "system",
+                |_context, request: RpcFrame<Number>| async move {
+                    Ok(Ok(Number(request.view()?.0.saturating_add(1))))
+                },
+            )
         }
 
         fn run<'a>(&'a mut self, context: RunContext<256>) -> ComponentFuture<'a> {
@@ -286,9 +338,39 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn register_context_registers_json_beside_native_rpc() {
+        let registry = registry::<1, 256, 1>();
+        let registry_api: &dyn RpcRegistryApi<256> = &registry;
+        let mut registrations = Vec::new();
+        RegisterContext::new(registry_api, &mut registrations)
+            .register_json::<ComponentJson, _>(
+                "agent",
+                |_context, request: JsonRef, response: JsonWriter| async move {
+                    response.write(request.as_str()?).await
+                },
+            )
+            .expect("register component JSON RPC");
+
+        let address = RpcAddress::try_from("component.json").expect("valid address");
+        let client = registry.client();
+        let response = block_on(
+            client
+                .call_json(&address, r#"{"value":42}"#)
+                .expect("start component JSON RPC"),
+        )
+        .expect("call component JSON RPC");
+        assert_eq!(response.as_str().expect("valid JSON"), r#"{"value":42}"#);
+        assert_eq!(registrations.len(), 1);
+    }
+
     struct PassiveComponent;
 
     impl Component<64> for PassiveComponent {
+        fn name(&self) -> &'static str {
+            "passive"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, 64>,

@@ -11,14 +11,17 @@ use std::time::{Duration, Instant};
 
 use barracuda_event_router::{
     Component, ComponentFuture, ComponentResult, EmitError, Event, EventEmitter, EventRouter,
-    RegisterContext, RpcError, RpcFrame, RpcLaneStorage, RpcMethod, RunContext, Unary,
+    JsonRpcSchema, JsonSchema, JsonWriter, RegisterContext, RpcError, RpcLaneStorage, RunContext,
     UnregisterContext, WorkflowClient,
 };
 use barracuda_platform_test::install_global_memory_vfs;
 use barracuda_vfs::remove_file;
 use futures_lite::future::{block_on, yield_now};
 
-const FRAME_CAPACITY: usize = 64;
+const FRAME_CAPACITY: usize = 256;
+const EMPTY_SCHEMA: JsonSchema = barracuda_rpc::json_schema_inline!(
+    r#"{"type":"object","properties":{},"additionalProperties":false}"#
+);
 static GLOBAL_VFS_TEST_LOCK: Mutex<()> = Mutex::new(());
 const WORKFLOW_JSON: &str = r#"{
     "id": "stress-workflow",
@@ -30,19 +33,16 @@ struct StressEvent;
 
 impl Event for StressEvent {
     const ID: &'static str = "stress.event";
-    type Message = [u8; 8];
-    type Input = Unary;
 }
 
 struct Sink;
 
-impl RpcMethod for Sink {
+impl JsonRpcSchema for Sink {
     const ADDRESS: &'static str = "stress.sink";
-    type Request = [u8; 8];
-    type Response = ();
-    type Error = ();
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const RESPONSE_SCHEMA: JsonSchema = EMPTY_SCHEMA;
+    const MAX_REQUEST_BYTES: usize = 2;
+    const MAX_RESPONSE_BYTES: usize = 2;
 }
 
 #[derive(Default)]
@@ -60,17 +60,20 @@ struct Producer {
 }
 
 impl Component<FRAME_CAPACITY> for Producer {
+    fn name(&self) -> &'static str {
+        "producer"
+    }
+
     fn register(
         &mut self,
         context: &mut RegisterContext<'_, FRAME_CAPACITY>,
     ) -> ComponentResult<()> {
         let state = Rc::clone(&self.state);
-        context.register_rpc::<Sink, _>(move |_context, request: RpcFrame<[u8; 8]>| {
+        context.register_json::<Sink, _>("*", move |_context, _request, response: JsonWriter| {
             let state = Rc::clone(&state);
             async move {
-                request.view()?;
                 state.received.set(state.received.get().saturating_add(1));
-                Ok(Ok(()))
+                response.write("{}").await
             }
         })
     }
@@ -83,11 +86,8 @@ impl Component<FRAME_CAPACITY> for Producer {
                 .map_err(barracuda_event_router::ComponentError::lifecycle)?;
             let emitter = EventEmitter::<FRAME_CAPACITY>::new(context.rpc().clone());
             let started = Instant::now();
-            for value in 0..self.events {
-                if let Err(error) = emitter
-                    .emit::<StressEvent>((value as u64).to_le_bytes())
-                    .await
-                {
+            for _event in 0..self.events {
+                if let Err(error) = emitter.emit::<StressEvent>("{}").await {
                     self.state.error.replace(Some(error));
                     break;
                 }
@@ -151,7 +151,7 @@ fn cooperative_producer_drives_thousands_of_events_through_two_lanes() {
 }
 
 #[test]
-fn non_cooperative_burst_exhausts_nested_lanes_instead_of_queueing() {
+fn non_cooperative_burst_is_bounded_by_fixed_event_input_storage() {
     let _global_vfs = reset_global_vfs();
     const LANES: usize = 4;
 
@@ -166,16 +166,17 @@ fn non_cooperative_burst_exhausts_nested_lanes_instead_of_queueing() {
         .expect("load burst producer");
 
     support::drive_until(&mut event_router, |router| {
-        state.done.get() && router.workflow_info().completed_count == LANES - 1
+        state.done.get() && router.workflow_info().completed_count == LANES
     })
     .expect("drive burst Event Router");
 
     assert!(matches!(
         state.error.borrow().as_ref(),
-        Some(EmitError::Rpc(RpcError::NestedLaneExhausted {
-            limit: LANES
+        Some(EmitError::Rpc(RpcError::ResourceExhausted {
+            resource: "Workflow Event inputs",
+            limit: LANES,
         }))
     ));
-    assert_eq!(state.received.get(), LANES - 1);
-    assert_eq!(event_router.workflow_info().completed_count, LANES - 1);
+    assert_eq!(state.received.get(), LANES);
+    assert_eq!(event_router.workflow_info().completed_count, LANES);
 }

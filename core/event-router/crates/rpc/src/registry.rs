@@ -1,6 +1,7 @@
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::rc::{Rc, Weak};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::any::type_name;
 use core::cell::{Cell, RefCell};
@@ -10,20 +11,19 @@ use core::mem::size_of;
 use core::pin::Pin;
 
 use getset::{CopyGetters, Getters};
-use serde_json::Value;
 use smallvec::{smallvec, SmallVec};
 
 use super::address::{RpcAddress, RpcAddressError, RpcGroup};
 use super::context::{RpcCallId, RpcContext, RpcEndpointId};
-use super::dynamic::Dynamic;
-use super::json::{envelope, JsonCallDriver, JsonCodec};
+use super::json::{
+    JsonCall, JsonHandler, JsonHandlerAdapter, JsonPayload, JsonRpcInfo, JsonRpcSchema,
+};
 use super::lane::{LaneAcquireSet, LaneIoSet, LanePool, LaneReader, LaneWriter, RpcLaneStorage};
 use super::payload::{RpcMulticastBranch, RpcPayloadReader, RpcPayloadWriter};
 use super::typed::{
     HandlerAdapter, RpcCardinality, RpcHandler, RpcInputMode, RpcMessage, RpcMethod,
-    RpcMethodDescriptor, RpcOutputMode, RpcStream,
+    RpcMethodDescriptor, RpcOutputMode,
 };
-use super::wire::WireSupport;
 
 /// Request or response side of one full-duplex RPC lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -54,13 +54,13 @@ pub(crate) trait ErasedRpcHandler {
 /// not need access to the erased handler or wire descriptor stored inside.
 pub struct RpcEndpoint<const M: usize> {
     address: RpcAddress,
+    visibility: String,
     handler: Rc<dyn ErasedRpcHandler>,
-    descriptor: RpcMethodDescriptor,
-    dynamic: Option<Dynamic>,
+    contract: EndpointContract,
 }
 
 impl<const M: usize> RpcEndpoint<M> {
-    pub(crate) fn typed<Method, H>(handler: H) -> RpcResult<Self>
+    pub(crate) fn typed<Method, H>(visibility: &str, handler: H) -> RpcResult<Self>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
@@ -82,10 +82,57 @@ impl<const M: usize> RpcEndpoint<M> {
         let descriptor = RpcMethodDescriptor::for_method::<Method>()?;
         Ok(Self {
             address: descriptor.address().clone(),
+            visibility: visibility.into(),
             handler: Rc::new(HandlerAdapter::<Method, H>::new(handler)),
-            descriptor,
-            dynamic: Method::dynamic(),
+            contract: EndpointContract::Typed(descriptor),
         })
+    }
+
+    pub(crate) fn json<Method, H>(visibility: &str, handler: H) -> RpcResult<Self>
+    where
+        Method: JsonRpcSchema,
+        H: JsonHandler + 'static,
+    {
+        const {
+            assert!(
+                Method::MAX_REQUEST_BYTES > 0,
+                "JSON RPC request capacity must be nonzero"
+            );
+            assert!(
+                Method::MAX_REQUEST_BYTES <= M,
+                "JSON RPC request exceeds lane frame capacity"
+            );
+            assert!(
+                Method::MAX_RESPONSE_BYTES > 0,
+                "JSON RPC response capacity must be nonzero"
+            );
+            assert!(
+                Method::MAX_RESPONSE_BYTES <= M,
+                "JSON RPC response exceeds lane frame capacity"
+            );
+        }
+        let info = JsonRpcInfo::for_method::<Method>()?;
+        Ok(Self {
+            address: info.address().clone(),
+            visibility: visibility.into(),
+            handler: Rc::new(JsonHandlerAdapter::<Method, H>::new(handler)),
+            contract: EndpointContract::Json(info),
+        })
+    }
+}
+
+#[derive(Clone)]
+enum EndpointContract {
+    Typed(RpcMethodDescriptor),
+    Json(JsonRpcInfo),
+}
+
+impl EndpointContract {
+    fn request_frame_capacity(&self) -> usize {
+        match self {
+            Self::Typed(descriptor) => descriptor.request_frame_size(),
+            Self::Json(info) => info.max_request_bytes(),
+        }
     }
 }
 
@@ -136,12 +183,33 @@ impl<const M: usize> dyn RpcRegistryApi<M> + '_ {
     /// # Errors
     ///
     /// Returns an RPC error when the method cannot be registered.
-    pub fn register_rpc<Method, H>(&self, handler: H) -> RpcResult<RpcRegistration>
+    pub fn register_rpc<Method, H>(
+        &self,
+        visibility: &str,
+        handler: H,
+    ) -> RpcResult<RpcRegistration>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
-        self.register_endpoint(RpcEndpoint::<M>::typed::<Method, H>(handler)?)
+        self.register_endpoint(RpcEndpoint::<M>::typed::<Method, H>(visibility, handler)?)
+    }
+
+    /// Registers a lane-native JSON RPC handler.
+    ///
+    /// # Errors
+    ///
+    /// Returns an RPC error when the method address is invalid or occupied.
+    pub fn register_json_rpc<Method, H>(
+        &self,
+        visibility: &str,
+        handler: H,
+    ) -> RpcResult<RpcRegistration>
+    where
+        Method: JsonRpcSchema,
+        H: JsonHandler + 'static,
+    {
+        self.register_endpoint(RpcEndpoint::<M>::json::<Method, H>(visibility, handler)?)
     }
 }
 
@@ -221,6 +289,17 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
         addresses
     }
 
+    /// Returns a sorted snapshot of RPC addresses with `visibility`.
+    ///
+    /// Visibility is independent of the address-derived [`RpcGroup`]. An
+    /// Endpoints registered with `"*"` are included in every visibility
+    /// snapshot. Registering or unregistering an RPC does not mutate a
+    /// previously returned snapshot.
+    #[must_use]
+    pub fn rpcs_by_visibility(&self, visibility: &str) -> Vec<RpcAddress> {
+        self.core.rpcs_by_visibility(visibility)
+    }
+
     /// Registers a handler for method `M`.
     ///
     /// The method descriptor is retained with the endpoint so typed clients can
@@ -251,6 +330,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     ///     ConstStaticCell::new(RpcLaneStorage::new());
     /// let registry = RpcRegistry::new(LANES.take());
     /// let _ = registry.register::<TooLargeError, _>(
+    ///     "system",
     ///     |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Ok([0])) },
     /// )?;
     /// # Ok::<(), barracuda_rpc::RpcError>(())
@@ -285,6 +365,7 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     ///     ConstStaticCell::new(RpcLaneStorage::new());
     /// let registry = RpcRegistry::new(LANES.take());
     /// let _ = registry.register::<InvalidAlignment, _>(
+    ///     "system",
     ///     |_context, _request: RpcFrame<[u8; 1]>| async move { Ok(Ok([0])) },
     /// )?;
     /// # Ok::<(), barracuda_rpc::RpcError>(())
@@ -298,13 +379,32 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistry<N, M, Q> {
     /// Compilation fails if the fixed request, response, or method-error type is
     /// larger than the registry's `M`-byte lane frames or requires stricter
     /// alignment than the lane frame provides.
-    pub fn register<Method, H>(&self, handler: H) -> RpcResult<RpcRegistration>
+    pub fn register<Method, H>(&self, visibility: &str, handler: H) -> RpcResult<RpcRegistration>
     where
         Method: RpcMethod,
         H: RpcHandler<Method> + 'static,
     {
         let registry: &dyn RpcRegistryApi<M> = self;
-        registry.register_rpc::<Method, H>(handler)
+        registry.register_rpc::<Method, H>(visibility, handler)
+    }
+
+    /// Registers a lane-native JSON handler for `Method`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address is invalid, occupied, or endpoint
+    /// identities are exhausted.
+    pub fn register_json<Method, H>(
+        &self,
+        visibility: &str,
+        handler: H,
+    ) -> RpcResult<RpcRegistration>
+    where
+        Method: JsonRpcSchema,
+        H: JsonHandler + 'static,
+    {
+        let registry: &dyn RpcRegistryApi<M> = self;
+        registry.register_json_rpc::<Method, H>(visibility, handler)
     }
 
     /// Unregisters the exact endpoint instance represented by `registration`.
@@ -353,9 +453,9 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
     fn register_endpoint(&self, endpoint: RpcEndpoint<M>) -> RpcResult<RpcRegistration> {
         self.core.insert_handler(
             endpoint.address,
+            endpoint.visibility,
             endpoint.handler,
-            endpoint.descriptor,
-            endpoint.dynamic,
+            endpoint.contract,
         )
     }
 
@@ -369,12 +469,26 @@ impl<const N: usize, const M: usize, const Q: usize> RpcRegistryApi<M> for RpcRe
 }
 
 impl RegistryCore {
+    fn rpcs_by_visibility(&self, visibility: &str) -> Vec<RpcAddress> {
+        let mut addresses: Vec<_> = self
+            .endpoints
+            .borrow()
+            .iter()
+            .filter(|(_address, endpoint)| {
+                endpoint.visibility == visibility || endpoint.visibility == "*"
+            })
+            .map(|(address, _endpoint)| address.clone())
+            .collect();
+        addresses.sort_unstable();
+        addresses
+    }
+
     fn insert_handler(
         &self,
         address: RpcAddress,
+        visibility: String,
         handler: Rc<dyn ErasedRpcHandler>,
-        descriptor: RpcMethodDescriptor,
-        dynamic: Option<Dynamic>,
+        contract: EndpointContract,
     ) -> RpcResult<RpcRegistration> {
         if self.endpoints.borrow().contains_key(&address) {
             return Err(RpcError::AlreadyRegistered(address));
@@ -392,24 +506,13 @@ impl RegistryCore {
             address,
             EndpointEntry {
                 endpoint_id,
+                visibility,
                 handler,
-                descriptor,
+                contract,
                 lifecycle,
-                dynamic,
             },
         );
         Ok(registration)
-    }
-
-    fn json_codec(&self, address: &RpcAddress) -> RpcResult<JsonCodec> {
-        self.endpoints
-            .borrow()
-            .get(address)
-            .ok_or_else(|| RpcError::NotFound(address.clone()))?
-            .dynamic
-            .as_ref()
-            .map(|dynamic| dynamic.json().clone())
-            .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))
     }
 
     fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
@@ -419,10 +522,23 @@ impl RegistryCore {
             .get(address)
             .cloned()
             .ok_or_else(|| RpcError::NotFound(address.clone()))?;
-        Ok(RpcMethodInfo {
-            descriptor: entry.descriptor,
-            dynamic: entry.dynamic,
-        })
+        match entry.contract {
+            EndpointContract::Typed(descriptor) => Ok(RpcMethodInfo { descriptor }),
+            EndpointContract::Json(_) => Err(RpcError::NotTypedEndpoint(address.clone())),
+        }
+    }
+
+    fn json_method_info(&self, address: &RpcAddress) -> RpcResult<JsonRpcInfo> {
+        let entry = self
+            .endpoints
+            .borrow()
+            .get(address)
+            .cloned()
+            .ok_or_else(|| RpcError::NotFound(address.clone()))?;
+        match entry.contract {
+            EndpointContract::Typed(_) => Err(RpcError::NotJsonEndpoint(address.clone())),
+            EndpointContract::Json(info) => Ok(info),
+        }
     }
 
     fn prepare_typed_call<M>(self: &Rc<Self>, caller: &RpcClient) -> RpcResult<PreparedCalls>
@@ -434,12 +550,34 @@ impl RegistryCore {
         let Some(endpoint) = endpoint else {
             return Err(RpcError::NotFound(RpcAddress::try_from(M::ADDRESS)?));
         };
-        if !endpoint.descriptor.is_method::<M>() {
+        let EndpointContract::Typed(descriptor) = &endpoint.contract else {
+            return Err(RpcError::NotTypedEndpoint(
+                endpoint.lifecycle.address.clone(),
+            ));
+        };
+        if !descriptor.is_method::<M>() {
             return Err(RpcError::SignatureMismatch {
-                address: endpoint.descriptor.address().clone(),
+                address: descriptor.address().clone(),
                 expected: type_name::<M>(),
-                registered: endpoint.descriptor.method_type_name(),
+                registered: descriptor.method_type_name(),
             });
+        }
+        self.prepare_resolved_call(caller, endpoint)
+    }
+
+    fn prepare_json_call(
+        self: &Rc<Self>,
+        caller: &RpcClient,
+        address: &RpcAddress,
+    ) -> RpcResult<PreparedCalls> {
+        let endpoint = self
+            .endpoints
+            .borrow()
+            .get(address)
+            .cloned()
+            .ok_or_else(|| RpcError::NotFound(address.clone()))?;
+        if !matches!(endpoint.contract, EndpointContract::Json(_)) {
+            return Err(RpcError::NotJsonEndpoint(address.clone()));
         }
         self.prepare_resolved_call(caller, endpoint)
     }
@@ -484,7 +622,7 @@ impl RegistryCore {
             nested_client,
         );
         Ok(PreparedCalls {
-            request_frame_size: endpoint.descriptor.request_frame_size(),
+            request_frame_capacity: endpoint.contract.request_frame_capacity(),
             targets: smallvec![PreparedTarget { endpoint, context }],
             lanes: LaneAcquireSet::new(self.lanes, caller.caller_endpoint_id.is_some(), 1),
         })
@@ -503,14 +641,20 @@ impl RegistryCore {
             .get(first_address)
             .cloned()
             .ok_or_else(|| RpcError::NotFound(first_address.clone()))?;
-        let input_descriptor = first.descriptor.clone();
+        let EndpointContract::Typed(input_descriptor) = &first.contract else {
+            return Err(RpcError::NotTypedEndpoint(first_address.clone()));
+        };
+        let input_descriptor = input_descriptor.clone();
         let mut resolved = SmallVec::<[_; 1]>::with_capacity(addresses.len());
         for address in addresses {
             let endpoint = endpoints
                 .get(address)
                 .cloned()
                 .ok_or_else(|| RpcError::NotFound(address.clone()))?;
-            if !input_descriptor.has_same_input(&endpoint.descriptor) {
+            let EndpointContract::Typed(descriptor) = &endpoint.contract else {
+                return Err(RpcError::NotTypedEndpoint(address.clone()));
+            };
+            if !input_descriptor.has_same_input(descriptor) {
                 return Err(RpcError::MulticastInputMismatch {
                     expected: first_address.clone(),
                     actual: address.clone(),
@@ -546,7 +690,7 @@ impl RegistryCore {
             targets.push(PreparedTarget { endpoint, context });
         }
         Ok(PreparedCalls {
-            request_frame_size: input_descriptor.request_frame_size(),
+            request_frame_capacity: input_descriptor.request_frame_size(),
             lanes: LaneAcquireSet::new(
                 self.lanes,
                 caller.caller_endpoint_id.is_some(),
@@ -570,13 +714,16 @@ impl RegistryCore {
             let endpoint = endpoints
                 .get(address)
                 .ok_or_else(|| RpcError::NotFound(address.clone()))?;
-            if !endpoint.descriptor.accepts_input::<T, Mode>() {
+            let EndpointContract::Typed(descriptor) = &endpoint.contract else {
+                return Err(RpcError::NotTypedEndpoint(address.clone()));
+            };
+            if !descriptor.accepts_input::<T, Mode>() {
                 return Err(RpcError::MulticastCallerInputMismatch {
                     address: address.clone(),
                     expected_request: type_name::<T>(),
                     expected_mode: type_name::<Mode>(),
-                    registered_request: endpoint.descriptor.request_type_name(),
-                    registered_mode: endpoint.descriptor.input_mode_type_name(),
+                    registered_request: descriptor.request_type_name(),
+                    registered_mode: descriptor.input_mode_type_name(),
                 });
             }
         }
@@ -610,24 +757,21 @@ fn take_identifier(next: &Cell<u64>) -> RpcResult<u64> {
 #[derive(Clone)]
 struct EndpointEntry {
     endpoint_id: RpcEndpointId,
+    visibility: String,
     handler: Rc<dyn ErasedRpcHandler>,
-    descriptor: RpcMethodDescriptor,
+    contract: EndpointContract,
     lifecycle: Rc<EndpointLifecycle>,
-    dynamic: Option<Dynamic>,
 }
 
-/// Read-only projection of one registered method's signature and dynamic
-/// surface.
+/// Read-only projection of one registered method's signature.
 ///
 /// Returned by [`RpcClient::method_info`]. It exposes type identity and frame
-/// size for signature checks and, for dynamic methods, the JSON codec and
-/// wire tables.
+/// size for signature checks.
 #[derive(Clone, Getters)]
 pub struct RpcMethodInfo {
     /// Read-only view of the registered method's signature descriptor.
     #[getset(get = "pub")]
     descriptor: RpcMethodDescriptor,
-    dynamic: Option<Dynamic>,
 }
 
 impl RpcMethodInfo {
@@ -648,27 +792,6 @@ impl RpcMethodInfo {
     pub fn output_mode(&self) -> RpcCardinality {
         RpcCardinality::from_type_id(self.descriptor.output_mode_type_id())
     }
-
-    /// Returns this method's wire field tables, when it is runtime-dynamic.
-    #[must_use]
-    pub fn wire(&self) -> Option<&WireSupport> {
-        self.dynamic.as_ref().map(Dynamic::wire)
-    }
-
-    /// Encodes a JSON request value into this method's fixed request bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RpcError::NotJsonCallable`] when the method is not dynamic, or
-    /// [`RpcError::JsonRequestInvalid`] when the value does not match the
-    /// request message.
-    pub fn encode_request(&self, address: &RpcAddress, value: &Value) -> RpcResult<Vec<u8>> {
-        self.dynamic
-            .as_ref()
-            .ok_or_else(|| RpcError::NotJsonCallable(address.clone()))?
-            .json()
-            .encode_request(value)
-    }
 }
 
 struct EndpointLifecycle {
@@ -685,7 +808,7 @@ impl EndpointLifecycle {
 #[derive(CopyGetters)]
 pub(crate) struct PreparedCalls {
     #[getset(get_copy = "pub(crate)")]
-    request_frame_size: usize,
+    request_frame_capacity: usize,
     targets: SmallVec<[PreparedTarget; 1]>,
     lanes: LaneAcquireSet,
 }
@@ -744,6 +867,16 @@ pub struct RpcClient {
 }
 
 impl RpcClient {
+    /// Returns a sorted snapshot of RPC addresses with `visibility`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RpcError::RegistryDropped`] when the registry is gone.
+    pub fn rpcs_by_visibility(&self, visibility: &str) -> RpcResult<Vec<RpcAddress>> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        Ok(registry.rpcs_by_visibility(visibility))
+    }
+
     /// Starts a typed call for method `M`.
     ///
     /// The one method selects its input and output shape through `M`; callers do
@@ -771,14 +904,43 @@ impl RpcClient {
         Ok(super::typed::make_typed_call::<M>(prepared, input))
     }
 
-    /// Starts an untyped wire-level call to the typed endpoint at `address`.
+    /// Starts a lane-native JSON call at `address`.
+    ///
+    /// The raw document is syntax-checked without building a
+    /// `serde_json::Value`. Polling the returned call copies it directly into
+    /// the request lane; the endpoint validates its request contract before
+    /// invoking the handler and returns a [`JsonRef`] retaining the response
+    /// lane.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the JSON is invalid or too large, the endpoint is
+    /// absent or not a JSON endpoint, call preparation fails, or the polled
+    /// request or response violates the endpoint schema.
+    pub fn call_json<'a, J>(&self, address: &RpcAddress, request: &'a J) -> RpcResult<JsonCall<'a>>
+    where
+        J: JsonPayload + ?Sized,
+    {
+        let request_len = request.encoded_len()?;
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        let prepared = registry.prepare_json_call(self, address)?;
+        let capacity = prepared.request_frame_capacity();
+        if request_len > capacity {
+            return Err(RpcError::FrameTooLarge {
+                size: request_len,
+                capacity,
+            });
+        }
+        let (writer, reader) = super::payload::make_payload_call(prepared);
+        Ok(JsonCall::new(request, request_len, writer, reader))
+    }
+
+    /// Starts a format-agnostic payload call to the endpoint at `address`.
     ///
     /// The returned [`RpcPayloadWriter`] and [`RpcPayloadReader`] expose
-    /// full-duplex asynchronous frame IO. Each written frame must match the
-    /// registered [`RpcMethod::Request`] wire layout. Response and method-error
-    /// frames remain borrowed from the lane until dropped. This entry point
-    /// intentionally cannot perform compile-time signature or cardinality
-    /// checks.
+    /// full-duplex asynchronous frame IO. The registered native or JSON adapter
+    /// determines how each frame is interpreted. Response and method-error
+    /// frames remain borrowed from the lane until dropped.
     ///
     /// # Errors
     ///
@@ -795,84 +957,8 @@ impl RpcClient {
         Ok(super::payload::make_payload_call(prepared))
     }
 
-    /// Calls the typed endpoint at `address` with a JSON payload.
-    ///
-    /// The endpoint must be registered as JSON-callable (its method's `impl`
-    /// carries `#[rpc_dynamic]`). The captured [`JsonCodec`] transcodes the request
-    /// value into the method's fixed `Request` wire bytes, so the bytes on the
-    /// lane are identical to a typed [`call`](Self::call) and the ordinary
-    /// handler serves them — no JSON travels the router. The single response or
-    /// method-error frame is transcoded back to JSON.
-    ///
-    /// Success returns `{ "ok": true, "value": <response> }`; a terminal
-    /// method-error frame returns `{ "ok": false, "error": <error> }`. A method
-    /// whose `Response` is `()` yields a `null` value.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RpcError::NotJsonCallable`] when the endpoint has no codec,
-    /// [`RpcError::JsonRequestInvalid`] when the value does not match the
-    /// request message, [`RpcError::JsonResponseInvalid`] when a response or
-    /// error frame cannot be encoded as JSON, or any transport error surfaced by
-    /// the underlying payload call.
-    pub async fn call_json(&self, address: &RpcAddress, request: &Value) -> RpcResult<Value> {
-        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
-        let codec = registry.json_codec(address)?;
-        drop(registry);
-
-        let request_bytes = codec.encode_request(request)?;
-        let (mut writer, mut reader) = self.call_payload(address)?;
-        writer.write_all(&request_bytes).await?;
-        writer.close().await?;
-
-        match reader.read().await? {
-            Some(Ok(frame)) => Ok(envelope(true, codec.decode_response(frame.as_ref())?)),
-            Some(Err(frame)) => Ok(envelope(false, codec.decode_error(frame.as_ref())?)),
-            None => Err(RpcError::MissingUnaryFrame),
-        }
-    }
-
-    /// Calls a JSON-callable endpoint frame for frame, mirroring a typed call.
-    ///
-    /// Every JSON value in `inputs` is transcoded into one request frame and
-    /// written before the request direction closes, exactly like a typed
-    /// streaming input. Each response or method-error frame is then transcoded
-    /// back to a JSON value, so streaming inputs and outputs work the same way
-    /// they do in a typed call. The stream yields `Ok(Ok(response))`,
-    /// `Ok(Err(error))`, or a transport `Err`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`RpcError::NotJsonCallable`] when the endpoint has no codec,
-    /// [`RpcError::JsonRequestInvalid`] when an input value does not match the
-    /// request message, or any transport error surfaced while opening the call.
-    pub fn call_json_stream(
-        &self,
-        address: &RpcAddress,
-        inputs: impl IntoIterator<Item = Value> + 'static,
-    ) -> RpcResult<RpcStream<Result<Value, Value>>> {
-        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
-        let codec = registry.json_codec(address)?;
-        drop(registry);
-
-        let mut blobs = Vec::new();
-        for value in inputs {
-            blobs.push(codec.encode_request(&value)?);
-        }
-        let (writer, reader) = self.call_payload(address)?;
-        let input: RpcFuture<'static> = Box::pin(async move {
-            let mut writer = writer;
-            for blob in blobs {
-                writer.write_all(&blob).await?;
-            }
-            writer.close().await
-        });
-        Ok(RpcStream::new(JsonCallDriver::new(input, reader, codec)))
-    }
-
     /// Returns a read-only projection of the method registered at `address`:
-    /// signature identity checks, cardinality, and the JSON codec and wire
-    /// tables when the method is dynamic.
+    /// signature identity checks and cardinality.
     ///
     /// # Errors
     ///
@@ -881,6 +967,17 @@ impl RpcClient {
     pub fn method_info(&self, address: &RpcAddress) -> RpcResult<RpcMethodInfo> {
         let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
         registry.method_info(address)
+    }
+
+    /// Returns the schema and byte limits registered for a JSON method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the registry is gone, the address is absent, or
+    /// the endpoint is not a JSON method.
+    pub fn json_method_info(&self, address: &RpcAddress) -> RpcResult<JsonRpcInfo> {
+        let registry = self.registry.upgrade().ok_or(RpcError::RegistryDropped)?;
+        registry.json_method_info(address)
     }
 
     /// Starts a wire-level multicast with one shared request direction.
@@ -960,6 +1057,31 @@ pub enum RpcError {
     /// No handler currently owns the requested address.
     #[error("RPC endpoint not found: {0}")]
     NotFound(RpcAddress),
+    /// A typed API was used with a lane-native JSON endpoint.
+    #[error("RPC endpoint is not typed: {0}")]
+    NotTypedEndpoint(RpcAddress),
+    /// A JSON API was used with a typed endpoint.
+    #[error("RPC endpoint is not JSON: {0}")]
+    NotJsonEndpoint(RpcAddress),
+    /// A JSON document was syntactically invalid or not UTF-8.
+    #[error("invalid JSON document")]
+    InvalidJson,
+    /// A JSON request did not satisfy its registered method schema.
+    #[error("JSON RPC request does not match the schema for {address}: {source}")]
+    JsonRequestSchema {
+        /// Registered JSON RPC address.
+        address: &'static str,
+        /// Schema validation failure.
+        source: json_validator::ValidationError,
+    },
+    /// A JSON response did not satisfy its registered method schema.
+    #[error("JSON RPC response does not match the schema for {address}: {source}")]
+    JsonResponseSchema {
+        /// Registered JSON RPC address.
+        address: &'static str,
+        /// Schema validation failure.
+        source: json_validator::ValidationError,
+    },
     /// An endpoint attempted to synchronously invoke itself.
     #[error("direct RPC self-call is forbidden: {0}")]
     DirectSelfCall(RpcAddress),
@@ -1035,6 +1157,14 @@ pub enum RpcError {
         /// Configured active lane count.
         limit: usize,
     },
+    /// A handler-owned fixed-capacity resource has no free slot.
+    #[error("{resource} capacity {limit} is exhausted")]
+    ResourceExhausted {
+        /// Stable name of the exhausted resource.
+        resource: &'static str,
+        /// Configured resource capacity.
+        limit: usize,
+    },
     /// The bounded root-call waiter table is full.
     #[error("RPC lane waiter capacity {limit} is exhausted")]
     LaneWaiterCapacityExceeded {
@@ -1067,45 +1197,6 @@ pub enum RpcError {
     /// A non-empty `write_all` operation could not make forward progress.
     #[error("RPC payload writer accepted zero bytes")]
     PayloadWriteZero,
-    /// A [`call_json`](RpcClient::call_json) targeted an endpoint with no codec.
-    #[error("RPC endpoint is not JSON-callable: {0}")]
-    NotJsonCallable(RpcAddress),
-    /// A JSON request value did not match the endpoint's request message.
-    #[error("invalid JSON request for {message_type}: {message}")]
-    JsonRequestInvalid {
-        /// Rust request type that rejected the JSON value.
-        message_type: &'static str,
-        /// Serde error detail describing why the value was rejected.
-        message: alloc::string::String,
-    },
-    /// A response or method-error frame could not be encoded as JSON.
-    #[error("RPC frame for {message_type} could not be encoded as JSON")]
-    JsonResponseInvalid {
-        /// Rust message type that failed to serialize.
-        message_type: &'static str,
-    },
-    /// A wire field name did not exist in the method's request or response table.
-    #[error("unknown wire field: {field}")]
-    WireFieldUnknown {
-        /// Requested field name.
-        field: alloc::string::String,
-    },
-    /// A frame was shorter than a wire field's recorded byte region.
-    #[error("wire field {field} region falls outside the frame")]
-    WireFieldRegion {
-        /// Field whose region exceeded the frame.
-        field: alloc::string::String,
-    },
-    /// Wire content exceeded the destination field's capacity.
-    #[error("wire field {field} content {size} exceeds capacity {capacity}")]
-    WireFieldTooLarge {
-        /// Destination field name.
-        field: alloc::string::String,
-        /// Provided content length.
-        size: usize,
-        /// Destination field capacity.
-        capacity: usize,
-    },
 }
 
 #[cfg(test)]
@@ -1192,24 +1283,30 @@ mod tests {
 
             let handler_pointer = Rc::clone(&pointer_a);
             registry
-                .register::<MulticastUnaryA, _>(move |_context, request: RpcFrame<[u8; 8]>| {
-                    let pointer = Rc::clone(&handler_pointer);
-                    async move {
-                        pointer.set(request.view()?.as_ptr() as usize);
-                        Ok(Ok(*b"response"))
-                    }
-                })
+                .register::<MulticastUnaryA, _>(
+                    "system",
+                    move |_context, request: RpcFrame<[u8; 8]>| {
+                        let pointer = Rc::clone(&handler_pointer);
+                        async move {
+                            pointer.set(request.view()?.as_ptr() as usize);
+                            Ok(Ok(*b"response"))
+                        }
+                    },
+                )
                 .expect("register first multicast endpoint");
 
             let handler_pointer = Rc::clone(&pointer_b);
             registry
-                .register::<MulticastUnaryB, _>(move |_context, request: RpcFrame<[u8; 8]>| {
-                    let pointer = Rc::clone(&handler_pointer);
-                    async move {
-                        pointer.set(request.view()?.as_ptr() as usize);
-                        Ok(Ok(*b"done"))
-                    }
-                })
+                .register::<MulticastUnaryB, _>(
+                    "system",
+                    move |_context, request: RpcFrame<[u8; 8]>| {
+                        let pointer = Rc::clone(&handler_pointer);
+                        async move {
+                            pointer.set(request.view()?.as_ptr() as usize);
+                            Ok(Ok(*b"done"))
+                        }
+                    },
+                )
                 .expect("register second multicast endpoint");
 
             let addresses = [address::<MulticastUnaryA>(), address::<MulticastUnaryB>()];
@@ -1257,16 +1354,22 @@ mod tests {
             let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 64, 2>::new()));
             let registry = RpcRegistry::new(lanes);
             registry
-                .register::<MulticastUnaryA, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-                    assert_eq!(request.view()?, b"request-");
-                    Ok(Ok(*b"response"))
-                })
+                .register::<MulticastUnaryA, _>(
+                    "system",
+                    |_context, request: RpcFrame<[u8; 8]>| async move {
+                        assert_eq!(request.view()?, b"request-");
+                        Ok(Ok(*b"response"))
+                    },
+                )
                 .expect("register first typed multicast endpoint");
             registry
-                .register::<MulticastUnaryB, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-                    assert_eq!(request.view()?, b"request-");
-                    Ok(Ok(*b"done"))
-                })
+                .register::<MulticastUnaryB, _>(
+                    "system",
+                    |_context, request: RpcFrame<[u8; 8]>| async move {
+                        assert_eq!(request.view()?, b"request-");
+                        Ok(Ok(*b"done"))
+                    },
+                )
                 .expect("register second typed multicast endpoint");
 
             let addresses = [address::<MulticastUnaryA>(), address::<MulticastUnaryB>()];
@@ -1304,14 +1407,16 @@ mod tests {
         let lanes = Box::leak(Box::new(RpcLaneStorage::<2, 64, 2>::new()));
         let registry = RpcRegistry::new(lanes);
         registry
-            .register::<MulticastUnaryA, _>(|_context, _request: RpcFrame<[u8; 8]>| async {
-                Ok(Ok(*b"response"))
-            })
+            .register::<MulticastUnaryA, _>(
+                "system",
+                |_context, _request: RpcFrame<[u8; 8]>| async { Ok(Ok(*b"response")) },
+            )
             .expect("register matching endpoint");
         registry
-            .register::<DifferentInput, _>(|_context, request: RpcFrame<[u8; 4]>| async move {
-                Ok(Ok(*request.view()?))
-            })
+            .register::<DifferentInput, _>(
+                "system",
+                |_context, request: RpcFrame<[u8; 4]>| async move { Ok(Ok(*request.view()?)) },
+            )
             .expect("register mismatched endpoint");
 
         let addresses = [address::<MulticastUnaryA>(), address::<DifferentInput>()];
@@ -1330,6 +1435,7 @@ mod tests {
 
             registry
                 .register::<MulticastStreamA, _>(
+                    "system",
                     |_context, requests: RpcStream<RpcFrame<[u8; 8]>>| async move {
                         Ok(RpcStream::new(stream::unfold(
                             requests,
@@ -1347,6 +1453,7 @@ mod tests {
             let handler_gate = Rc::clone(&allow_second_reader);
             registry
                 .register::<MulticastStreamB, _>(
+                    "system",
                     move |_context, requests: RpcStream<RpcFrame<[u8; 8]>>| {
                         let gate = Rc::clone(&handler_gate);
                         async move {

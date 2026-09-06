@@ -28,6 +28,10 @@ struct PendingComponent {
 }
 
 impl Component<FRAME_CAPACITY> for PendingComponent {
+    fn name(&self) -> &'static str {
+        "pending"
+    }
+
     fn register(
         &mut self,
         _context: &mut RegisterContext<'_, FRAME_CAPACITY>,

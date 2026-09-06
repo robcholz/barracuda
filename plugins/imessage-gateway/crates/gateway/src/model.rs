@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
-use core::pin::Pin;
+use core::{fmt, ops::Deref, pin::Pin};
 
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,214 @@ pub enum MessageKind {
     Notice,
 }
 
+const INLINE_TEXT_BYTES: usize = 512;
+const INLINE_BINARY_BYTES: usize = 384;
+
+/// UTF-8 stream chunk stored inline unless a provider already owns a String.
+#[derive(Clone)]
+pub struct TextChunk {
+    storage: TextChunkStorage,
+}
+
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)] // Deliberately avoids one heap allocation per stream chunk.
+enum TextChunkStorage {
+    Owned(String),
+    Inline {
+        bytes: [u8; INLINE_TEXT_BYTES],
+        len: u16,
+    },
+}
+
+impl TextChunk {
+    /// Copies one lane-bounded UTF-8 chunk into inline storage.
+    #[must_use]
+    pub fn inline(text: &str) -> Option<Self> {
+        let len = u16::try_from(text.len()).ok()?;
+        let length = usize::from(len);
+        if length > INLINE_TEXT_BYTES {
+            return None;
+        }
+        let mut bytes = [0_u8; INLINE_TEXT_BYTES];
+        bytes.get_mut(..length)?.copy_from_slice(text.as_bytes());
+        Some(Self {
+            storage: TextChunkStorage::Inline { bytes, len },
+        })
+    }
+
+    /// Borrows the UTF-8 chunk.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match &self.storage {
+            TextChunkStorage::Owned(text) => text,
+            TextChunkStorage::Inline { bytes, len } => {
+                core::str::from_utf8(bytes.get(..usize::from(*len)).unwrap_or_default())
+                    .unwrap_or_default()
+            }
+        }
+    }
+
+    /// Converts the chunk into provider-owned text when retention is required.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        match self.storage {
+            TextChunkStorage::Owned(text) => text,
+            TextChunkStorage::Inline { bytes, len } => String::from(
+                core::str::from_utf8(bytes.get(..usize::from(len)).unwrap_or_default())
+                    .unwrap_or_default(),
+            ),
+        }
+    }
+
+    /// Returns whether the chunk occupies only its inline storage.
+    #[must_use]
+    pub const fn is_inline(&self) -> bool {
+        matches!(&self.storage, TextChunkStorage::Inline { .. })
+    }
+}
+
+impl From<String> for TextChunk {
+    fn from(text: String) -> Self {
+        Self {
+            storage: TextChunkStorage::Owned(text),
+        }
+    }
+}
+
+impl From<&str> for TextChunk {
+    fn from(text: &str) -> Self {
+        Self::from(String::from(text))
+    }
+}
+
+impl Deref for TextChunk {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl PartialEq for TextChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for TextChunk {}
+
+impl fmt::Debug for TextChunk {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_str().fmt(formatter)
+    }
+}
+
+/// Binary stream chunk stored inline unless a provider already owns a Vec.
+#[derive(Clone)]
+pub struct BinaryChunk {
+    storage: BinaryChunkStorage,
+}
+
+#[derive(Clone)]
+#[allow(clippy::large_enum_variant)] // Deliberately avoids one heap allocation per stream chunk.
+enum BinaryChunkStorage {
+    Owned(Vec<u8>),
+    Inline {
+        bytes: [u8; INLINE_BINARY_BYTES],
+        len: u16,
+    },
+}
+
+impl BinaryChunk {
+    /// Creates empty inline storage for one JSON lane's decoded Base64 payload.
+    #[must_use]
+    pub const fn empty_inline() -> Self {
+        Self {
+            storage: BinaryChunkStorage::Inline {
+                bytes: [0; INLINE_BINARY_BYTES],
+                len: 0,
+            },
+        }
+    }
+
+    /// Appends one decoded byte, returning false when inline storage is full.
+    pub fn push(&mut self, byte: u8) -> bool {
+        let BinaryChunkStorage::Inline { bytes, len } = &mut self.storage else {
+            return false;
+        };
+        let Some(destination) = bytes.get_mut(usize::from(*len)) else {
+            return false;
+        };
+        *destination = byte;
+        let Some(next) = len.checked_add(1) else {
+            return false;
+        };
+        *len = next;
+        true
+    }
+
+    /// Borrows the binary chunk.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        match &self.storage {
+            BinaryChunkStorage::Owned(bytes) => bytes,
+            BinaryChunkStorage::Inline { bytes, len } => {
+                bytes.get(..usize::from(*len)).unwrap_or_default()
+            }
+        }
+    }
+
+    /// Converts the chunk into provider-owned bytes when retention is required.
+    #[must_use]
+    pub fn into_vec(self) -> Vec<u8> {
+        match self.storage {
+            BinaryChunkStorage::Owned(bytes) => bytes,
+            BinaryChunkStorage::Inline { bytes, len } => bytes
+                .get(..usize::from(len))
+                .map(Vec::from)
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Returns whether the chunk occupies only its inline storage.
+    #[must_use]
+    pub const fn is_inline(&self) -> bool {
+        matches!(&self.storage, BinaryChunkStorage::Inline { .. })
+    }
+}
+
+impl From<Vec<u8>> for BinaryChunk {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self {
+            storage: BinaryChunkStorage::Owned(bytes),
+        }
+    }
+}
+
+impl Deref for BinaryChunk {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.as_slice()
+    }
+}
+
+impl PartialEq for BinaryChunk {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+
+impl Eq for BinaryChunk {}
+
+impl fmt::Debug for BinaryChunk {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_slice().fmt(formatter)
+    }
+}
+
 /// Asynchronous append-only chunks for one text message.
-pub type TextStream = Pin<Box<dyn Stream<Item = Result<String, StreamError>> + 'static>>;
+pub type TextStream = Pin<Box<dyn Stream<Item = Result<TextChunk, StreamError>> + 'static>>;
 
 /// Ordered content field carried by one full Gateway send stream.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -79,7 +285,7 @@ pub struct SendStreamFrame {
     /// Current field's chunk boundary.
     pub boundary: StreamBoundary,
     /// UTF-8 content; marker fields carry an empty string.
-    pub text: String,
+    pub text: TextChunk,
 }
 
 impl SendStreamFrame {
@@ -89,8 +295,18 @@ impl SendStreamFrame {
         Self {
             field,
             boundary,
-            text: text.into(),
+            text: TextChunk::from(text.into()),
         }
+    }
+
+    /// Creates a frame whose text remains inline with the stream item.
+    #[must_use]
+    pub fn inline(field: SendStreamField, boundary: StreamBoundary, text: &str) -> Option<Self> {
+        Some(Self {
+            field,
+            boundary,
+            text: TextChunk::inline(text)?,
+        })
     }
 }
 
@@ -98,7 +314,7 @@ impl SendStreamFrame {
 pub type SendStream = Pin<Box<dyn Stream<Item = Result<SendStreamFrame, StreamError>> + 'static>>;
 
 /// Asynchronous chunks for one binary payload.
-pub type BinaryStream = Pin<Box<dyn Stream<Item = Result<Vec<u8>, StreamError>> + 'static>>;
+pub type BinaryStream = Pin<Box<dyn Stream<Item = Result<BinaryChunk, StreamError>> + 'static>>;
 
 /// Destination selected by its registered channel name.
 #[derive(Clone, Debug, Eq, PartialEq)]

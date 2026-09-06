@@ -1,361 +1,235 @@
 use alloc::rc::Rc;
 
 use barracuda_event_router::{
-    RpcContext, RpcFrame, RpcHandler, RpcMethod, Unary, rpc_dynamic, rpc_message,
+    JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, json_schema,
 };
-use getset::CopyGetters;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct as _};
+use barracuda_plugin_manager::PluginStorage;
+use barracuda_time_component::UtcClock;
+use serde::Deserialize;
 use time::{Date, Month, PrimitiveDateTime, Time};
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
-
-use barracuda_time_component::now::{Now, TimeNowRequest};
 
 use crate::{
-    ScheduleId, SchedulerControl,
-    model::{ScheduleSpec, unix_seconds},
+    component::SchedulerControl,
+    json::{ScheduleAccepted, ScheduleRejected},
+    model::{ScheduleId, ScheduleSpec},
 };
-
-/// Absolute UTC calendar time at which a trigger begins.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
-pub struct TriggerAt {
-    /// UTC year.
-    #[getset(get_copy = "pub")]
-    year: u16,
-    /// UTC month in the range 1 through 12.
-    #[getset(get_copy = "pub")]
-    month: u8,
-    /// UTC day of month.
-    #[getset(get_copy = "pub")]
-    day: u8,
-    /// UTC hour in the range 0 through 23.
-    #[getset(get_copy = "pub")]
-    hour: u8,
-    /// UTC minute in the range 0 through 59.
-    #[getset(get_copy = "pub")]
-    minute: u8,
-    /// UTC second in the range 0 through 59.
-    #[getset(get_copy = "pub")]
-    second: u8,
-    #[serde(skip)]
-    reserved: u8,
-}
-
-impl TriggerAt {
-    /// Creates one UTC calendar value. The schedule RPC validates its ranges.
-    #[must_use]
-    pub const fn new(year: u16, month: u8, day: u8, hour: u8, minute: u8, second: u8) -> Self {
-        Self {
-            year,
-            month,
-            day,
-            hour,
-            minute,
-            second,
-            reserved: 0,
-        }
-    }
-
-    fn unix_seconds(self) -> Result<u64, ScheduleError> {
-        let month = Month::try_from(self.month).map_err(|_error| ScheduleError::InvalidSchedule)?;
-        let date = Date::from_calendar_date(i32::from(self.year), month, self.day)
-            .map_err(|_error| ScheduleError::InvalidSchedule)?;
-        let time = Time::from_hms(self.hour, self.minute, self.second)
-            .map_err(|_error| ScheduleError::InvalidSchedule)?;
-        let timestamp = PrimitiveDateTime::new(date, time)
-            .assume_utc()
-            .unix_timestamp();
-        u64::try_from(timestamp).map_err(|_error| ScheduleError::InvalidSchedule)
-    }
-}
-
-/// Kind of trigger rule stored by the Scheduler.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Eq, Immutable, IntoBytes, KnownLayout, PartialEq, TryFromBytes)]
-pub enum TriggerKind {
-    /// Trigger exactly once at `at`.
-    Once = 0,
-    /// Trigger first at `at`, then at a fixed interval.
-    Interval = 1,
-}
-
-/// One-time or fixed-interval trigger rule.
-#[repr(C)]
-#[derive(
-    Clone, Copy, Debug, Eq, Immutable, IntoBytes, KnownLayout, PartialEq, TryFromBytes, CopyGetters,
-)]
-pub struct Trigger {
-    /// Trigger rule kind.
-    #[getset(get_copy = "pub")]
-    kind: TriggerKind,
-    reserved_before_at: u8,
-    /// Absolute UTC time of the first trigger.
-    #[getset(get_copy = "pub")]
-    at: TriggerAt,
-    reserved_before_interval: [u8; 6],
-    /// Interval between triggers; zero for a one-time trigger.
-    #[getset(get_copy = "pub")]
-    every_seconds: u64,
-    /// Total number of triggers, including the first.
-    #[getset(get_copy = "pub")]
-    count: u32,
-    reserved: u32,
-}
-
-impl Trigger {
-    /// Creates a one-time trigger.
-    #[must_use]
-    pub const fn once(at: TriggerAt) -> Self {
-        Self {
-            kind: TriggerKind::Once,
-            reserved_before_at: 0,
-            at,
-            reserved_before_interval: [0; 6],
-            every_seconds: 0,
-            count: 1,
-            reserved: 0,
-        }
-    }
-
-    /// Creates an interval trigger whose `count` includes the first trigger.
-    #[must_use]
-    pub const fn interval(at: TriggerAt, every_seconds: u64, count: u32) -> Self {
-        Self {
-            kind: TriggerKind::Interval,
-            reserved_before_at: 0,
-            at,
-            reserved_before_interval: [0; 6],
-            every_seconds,
-            count,
-            reserved: 0,
-        }
-    }
-
-    const fn validate(self) -> Result<(), ScheduleError> {
-        match self.kind {
-            TriggerKind::Once if self.every_seconds == 0 && self.count == 1 => Ok(()),
-            TriggerKind::Interval if self.every_seconds != 0 && self.count != 0 => Ok(()),
-            TriggerKind::Once | TriggerKind::Interval => Err(ScheduleError::InvalidSchedule),
-        }
-    }
-}
-
-impl Serialize for Trigger {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self.kind {
-            TriggerKind::Once => {
-                let mut state = serializer.serialize_struct("Trigger", 2)?;
-                state.serialize_field("type", "once")?;
-                state.serialize_field("at", &self.at)?;
-                state.end()
-            }
-            TriggerKind::Interval => {
-                let mut state = serializer.serialize_struct("Trigger", 4)?;
-                state.serialize_field("type", "interval")?;
-                state.serialize_field("at", &self.at)?;
-                state.serialize_field("every_seconds", &self.every_seconds)?;
-                state.serialize_field("count", &self.count)?;
-                state.end()
-            }
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Trigger {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-        enum TriggerJson {
-            Once {
-                at: TriggerAt,
-            },
-            Interval {
-                at: TriggerAt,
-                every_seconds: u64,
-                count: u32,
-            },
-        }
-
-        Ok(match TriggerJson::deserialize(deserializer)? {
-            TriggerJson::Once { at } => Self::once(at),
-            TriggerJson::Interval {
-                at,
-                every_seconds,
-                count,
-            } => Self::interval(at, every_seconds, count),
-        })
-    }
-}
-
-/// Request accepted by [`Schedule`].
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
-pub struct ScheduleRequest {
-    /// Stable caller-selected schedule identifier.
-    #[getset(get_copy = "pub")]
-    id: ScheduleId,
-    /// One-time or interval trigger rule.
-    #[getset(get_copy = "pub")]
-    trigger: Trigger,
-}
-
-impl ScheduleRequest {
-    /// Creates one request.
-    #[must_use]
-    pub const fn new(id: ScheduleId, trigger: Trigger) -> Self {
-        Self { id, trigger }
-    }
-
-    fn spec(self, now_unix_seconds: u64) -> Result<ScheduleSpec, ScheduleError> {
-        self.trigger.validate()?;
-        let first_at_unix_seconds = self.trigger.at.unix_seconds()?;
-        if first_at_unix_seconds < now_unix_seconds {
-            return Err(ScheduleError::TriggerInPast);
-        }
-        Ok(ScheduleSpec::new(
-            self.id,
-            first_at_unix_seconds,
-            self.trigger.every_seconds,
-            self.trigger.count,
-        ))
-    }
-}
-
-/// Accepted schedule identity and first deadline.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
-pub struct ScheduleResponse {
-    /// Accepted schedule identifier.
-    #[getset(get_copy = "pub")]
-    id: ScheduleId,
-}
-
-impl ScheduleResponse {
-    const fn new(id: ScheduleId) -> Self {
-        Self { id }
-    }
-}
-
-/// Business-level rejection returned by scheduler mutation RPCs.
-#[repr(u8)]
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Immutable,
-    IntoBytes,
-    KnownLayout,
-    PartialEq,
-    Serialize,
-    TryFromBytes,
-)]
-pub enum ScheduleError {
-    /// Calendar or trigger-rule fields do not describe a valid schedule.
-    InvalidSchedule = 0,
-    /// A live schedule already owns the requested identifier.
-    DuplicateId = 1,
-    /// The configured in-memory task capacity is full.
-    CapacityExceeded = 2,
-    /// No live schedule owns the requested identifier.
-    NotFound = 3,
-    /// `time.now` is unavailable or returned an invalid UTC calendar value.
-    TimeUnavailable = 4,
-    /// The requested `at` time is earlier than the current RTC value.
-    TriggerInPast = 5,
-}
 
 /// Creates one absolute UTC trigger schedule.
 pub struct Schedule;
 
-#[rpc_dynamic]
-impl RpcMethod for Schedule {
+impl JsonRpcSchema for Schedule {
     const ADDRESS: &'static str = "scheduler.schedule";
-    type Request = ScheduleRequest;
-    type Response = ScheduleResponse;
-    type Error = ScheduleError;
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("schedule", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("schedule", response);
+    const MAX_REQUEST_BYTES: usize = 512;
+    const MAX_RESPONSE_BYTES: usize = 32;
 }
 
-/// Builds the reusable handler for [`Schedule`].
-pub fn schedule_handler(control: SchedulerControl) -> impl RpcHandler<Schedule> {
-    move |context: RpcContext, request: RpcFrame<ScheduleRequest>| {
-        let result = request.view().copied();
-        let shared = Rc::clone(&control.shared);
-        async move {
-            let request = result?;
-            let call = match context.client().call::<Now>(TimeNowRequest::new()) {
-                Ok(call) => call,
-                Err(_error) => return Ok(Err(ScheduleError::TimeUnavailable)),
-            };
-            let outcome = match call.await {
-                Ok(outcome) => outcome,
-                Err(_error) => return Ok(Err(ScheduleError::TimeUnavailable)),
-            };
-            let frame = match outcome {
-                Ok(frame) => frame,
-                Err(_error) => return Ok(Err(ScheduleError::TimeUnavailable)),
-            };
-            let now_unix_seconds = match unix_seconds(*frame.view()?) {
-                Ok(value) => value,
-                Err(error) => return Ok(Err(error)),
-            };
-            let spec = match request.spec(now_unix_seconds) {
-                Ok(spec) => spec,
-                Err(error) => return Ok(Err(error)),
-            };
-            if let Err(error) = shared.book.borrow_mut().add(spec) {
-                return Ok(Err(error));
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScheduleRequest<'a> {
+    #[serde(borrow)]
+    id: &'a str,
+    #[serde(borrow)]
+    trigger: TriggerRequest<'a>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+enum TriggerRequest<'a> {
+    Once {
+        #[serde(borrow)]
+        at: &'a str,
+    },
+    Interval {
+        #[serde(borrow)]
+        at: &'a str,
+        every_seconds: u64,
+        count: u32,
+    },
+}
+
+impl TriggerRequest<'_> {
+    fn parts(self) -> Result<(u64, u64, u32), ScheduleError> {
+        match self {
+            Self::Once { at } => Ok((parse_utc_seconds(at)?, 0, 1)),
+            Self::Interval {
+                at,
+                every_seconds,
+                count,
+            } if every_seconds != 0 && count != 0 => {
+                Ok((parse_utc_seconds(at)?, every_seconds, count))
             }
-            shared.changed.signal(());
-            Ok(Ok(ScheduleResponse::new(request.id)))
+            Self::Interval { .. } => Err(ScheduleError::InvalidSchedule),
         }
     }
+}
+
+fn parse_utc_seconds(value: &str) -> Result<u64, ScheduleError> {
+    let bytes = value.as_bytes();
+    if bytes.len() != 24
+        || bytes.get(4) != Some(&b'-')
+        || bytes.get(7) != Some(&b'-')
+        || bytes.get(10) != Some(&b'T')
+        || bytes.get(13) != Some(&b':')
+        || bytes.get(16) != Some(&b':')
+        || bytes.get(19) != Some(&b'.')
+        || bytes.get(23) != Some(&b'Z')
+    {
+        return Err(ScheduleError::InvalidSchedule);
+    }
+    let year = decimal(bytes.get(0..4).unwrap_or_default())?;
+    let month = decimal(bytes.get(5..7).unwrap_or_default())?;
+    let day = decimal(bytes.get(8..10).unwrap_or_default())?;
+    let hour = decimal(bytes.get(11..13).unwrap_or_default())?;
+    let minute = decimal(bytes.get(14..16).unwrap_or_default())?;
+    let second = decimal(bytes.get(17..19).unwrap_or_default())?;
+    let millisecond = decimal(bytes.get(20..23).unwrap_or_default())?;
+
+    let month =
+        Month::try_from(u8::try_from(month).map_err(|_error| ScheduleError::InvalidSchedule)?)
+            .map_err(|_error| ScheduleError::InvalidSchedule)?;
+    let date = Date::from_calendar_date(
+        i32::try_from(year).map_err(|_error| ScheduleError::InvalidSchedule)?,
+        month,
+        u8::try_from(day).map_err(|_error| ScheduleError::InvalidSchedule)?,
+    )
+    .map_err(|_error| ScheduleError::InvalidSchedule)?;
+    let time = Time::from_hms_milli(
+        u8::try_from(hour).map_err(|_error| ScheduleError::InvalidSchedule)?,
+        u8::try_from(minute).map_err(|_error| ScheduleError::InvalidSchedule)?,
+        u8::try_from(second).map_err(|_error| ScheduleError::InvalidSchedule)?,
+        u16::try_from(millisecond).map_err(|_error| ScheduleError::InvalidSchedule)?,
+    )
+    .map_err(|_error| ScheduleError::InvalidSchedule)?;
+    let seconds = PrimitiveDateTime::new(date, time)
+        .assume_utc()
+        .unix_timestamp();
+    u64::try_from(seconds).map_err(|_error| ScheduleError::InvalidSchedule)
+}
+
+fn decimal(bytes: &[u8]) -> Result<u32, ScheduleError> {
+    bytes.iter().try_fold(0_u32, |value, byte| {
+        let digit = byte
+            .checked_sub(b'0')
+            .filter(|digit| *digit <= 9)
+            .ok_or(ScheduleError::InvalidSchedule)?;
+        value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u32::from(digit)))
+            .ok_or(ScheduleError::InvalidSchedule)
+    })
+}
+
+/// Business-level rejection returned by Scheduler mutation RPCs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ScheduleError {
+    InvalidSchedule,
+    DuplicateId,
+    NotFound,
+    TimeUnavailable,
+    TriggerInPast,
+    StorageUnavailable,
+}
+
+impl ScheduleError {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::InvalidSchedule => "invalid_schedule",
+            Self::DuplicateId => "duplicate_id",
+            Self::NotFound => "not_found",
+            Self::TimeUnavailable => "time_unavailable",
+            Self::TriggerInPast => "trigger_in_past",
+            Self::StorageUnavailable => "storage_unavailable",
+        }
+    }
+}
+
+/// Builds the reusable JSON handler for [`Schedule`].
+pub(crate) fn schedule_handler<Storage>(
+    control: SchedulerControl<Storage>,
+    clock: Rc<UtcClock>,
+) -> impl JsonHandler
+where
+    Storage: PluginStorage,
+{
+    move |_context, request: JsonRef, response: JsonWriter| {
+        let shared = Rc::clone(&control.shared);
+        let clock = Rc::clone(&clock);
+        async move {
+            let request = request.deserialize::<ScheduleRequest<'_>>()?;
+            let result = schedule(&shared, &clock, request).await;
+            match result {
+                Ok(id) => response.write(&ScheduleAccepted::new(id)).await,
+                Err(error) => response.write(&ScheduleRejected::new(error)).await,
+            }
+        }
+    }
+}
+
+async fn schedule(
+    shared: &crate::component::SchedulerShared<impl PluginStorage>,
+    clock: &UtcClock,
+    request: ScheduleRequest<'_>,
+) -> Result<ScheduleId, ScheduleError> {
+    let id = ScheduleId::new(request.id).map_err(|_error| ScheduleError::InvalidSchedule)?;
+    let now_unix_seconds = u64::from(
+        clock
+            .now()
+            .map_err(|_error| ScheduleError::TimeUnavailable)?,
+    ) / 1_000;
+    let (first_at_unix_seconds, every_seconds, count) = request.trigger.parts()?;
+    if first_at_unix_seconds < now_unix_seconds {
+        return Err(ScheduleError::TriggerInPast);
+    }
+    let mut book = shared.book.lock().await;
+    book.add(ScheduleSpec::new(
+        id,
+        first_at_unix_seconds,
+        every_seconds,
+        count,
+    ))?;
+    let Some(persisted) = book.persisted(&id) else {
+        let _cancelled = book.cancel(&id);
+        return Err(ScheduleError::StorageUnavailable);
+    };
+    if shared.write(id, &persisted).await.is_err() {
+        let _cancelled = book.cancel(&id);
+        return Err(ScheduleError::StorageUnavailable);
+    }
+    drop(book);
+    shared.changed.signal(());
+    Ok(id)
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
-    use super::{ScheduleError, ScheduleRequest, Trigger, TriggerAt};
-    use crate::ScheduleId;
-
-    fn id() -> ScheduleId {
-        ScheduleId::new("calendar-trigger").expect("valid schedule id")
-    }
+    use super::{ScheduleError, TriggerRequest, parse_utc_seconds};
 
     #[test]
-    fn rejects_at_before_current_rtc_value() {
-        let request =
-            ScheduleRequest::new(id(), Trigger::once(TriggerAt::new(2027, 1, 15, 8, 0, 0)));
+    fn parses_rfc3339_utc_at_second_precision() {
         assert_eq!(
-            request.spec(1_800_000_001),
-            Err(ScheduleError::TriggerInPast)
+            parse_utc_seconds("2027-01-15T08:00:00.123Z"),
+            Ok(1_800_000_000)
+        );
+        assert_eq!(
+            parse_utc_seconds("2027-01-15T08:00:00Z"),
+            Err(ScheduleError::InvalidSchedule)
+        );
+        assert_eq!(
+            parse_utc_seconds("2027-01-15T08:00:00.123+00:00"),
+            Err(ScheduleError::InvalidSchedule)
         );
     }
 
     #[test]
-    fn rejects_invalid_at_calendar_fields() {
-        let request =
-            ScheduleRequest::new(id(), Trigger::once(TriggerAt::new(2027, 13, 15, 8, 0, 0)));
-        assert_eq!(request.spec(0), Err(ScheduleError::InvalidSchedule));
-    }
-
-    #[test]
-    fn rejects_trigger_kind_and_interval_mismatch() {
-        let mut trigger = Trigger::once(TriggerAt::new(2027, 1, 15, 8, 0, 0));
-        trigger.every_seconds = 60;
-        let request = ScheduleRequest::new(id(), trigger);
-        assert_eq!(request.spec(0), Err(ScheduleError::InvalidSchedule));
+    fn rejects_invalid_interval_shape() {
+        let trigger = TriggerRequest::Interval {
+            at: "2027-01-15T08:00:00.000Z",
+            every_seconds: 0,
+            count: 3,
+        };
+        assert_eq!(trigger.parts(), Err(ScheduleError::InvalidSchedule));
     }
 }

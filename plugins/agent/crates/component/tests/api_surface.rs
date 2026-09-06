@@ -1,151 +1,69 @@
 #![allow(missing_docs)]
 
-use barracuda_agent_component::delete_session::{
-    delete_session_handler, DeleteSession, DeleteSessionError, DeleteSessionRequest,
+use barracuda_agent_component::{
+    delete_session::DeleteSession,
+    list_sessions::ListSessions,
+    new_session::NewSession,
+    open_session::OpenSession,
+    session::{self, SessionOutputEvent},
 };
-use barracuda_agent_component::list_sessions::{
-    list_sessions_handler, ListSessions, ListSessionsResponse,
-};
-use barracuda_agent_component::new_session::{
-    new_session_handler, NewSession, NewSessionError, NewSessionRequest, NewSessionResponse,
-};
-use barracuda_agent_component::open_session::{
-    open_session_handler, OpenSession, OpenSessionError, OpenSessionRequest,
-    OpenSessionResponseFrame,
-};
-use barracuda_agent_component::session;
-use barracuda_event_router::{
-    RpcInputMode, RpcMessage, RpcMethod, RpcOutputMode, Streaming, Unary,
-};
+use barracuda_event_router::{Event, JsonRpcSchema};
 
-fn assert_method<M, Request, Response, Error, Input, Output>()
-where
-    M: RpcMethod<
-        Request = Request,
-        Response = Response,
-        Error = Error,
-        Input = Input,
-        Output = Output,
-    >,
-    Request: RpcMessage,
-    Response: RpcMessage,
-    Error: RpcMessage,
-    Input: RpcInputMode<Request>,
-    Output: RpcOutputMode<Response, Error>,
-{
+fn assert_json_method<Method: JsonRpcSchema>(address: &str) {
+    assert_eq!(Method::ADDRESS, address);
+    assert!(Method::MAX_REQUEST_BYTES > 0);
+    assert!(Method::MAX_REQUEST_BYTES <= 512);
+    assert!(Method::MAX_RESPONSE_BYTES > 0);
+    assert!(Method::MAX_RESPONSE_BYTES <= 512);
+    assert!(Method::REQUEST_SCHEMA.as_str().contains("\"type\""));
+    assert!(Method::RESPONSE_SCHEMA.as_str().contains("\"type\""));
 }
 
 #[test]
-fn runtime_rpcs_are_exposed_at_the_component_root() {
-    let _ = new_session_handler;
-    let _ = list_sessions_handler;
-    let _ = open_session_handler;
-    let _ = delete_session_handler;
-    assert_eq!(NewSession::ADDRESS, "session.new");
-    assert_method::<NewSession, NewSessionRequest, NewSessionResponse, NewSessionError, Unary, Unary>(
+fn every_agent_operation_is_a_bounded_json_contract() {
+    assert_json_method::<NewSession>("session.new");
+    assert_json_method::<ListSessions>("session.list");
+    assert_json_method::<OpenSession>("session.open");
+    assert_json_method::<DeleteSession>("session.delete");
+    assert_json_method::<session::append::Append>("session.append");
+    assert_json_method::<session::respond::Respond>("session.respond");
+    assert_json_method::<session::set_reasoning_effort::SetReasoningEffort>(
+        "session.set_reasoning_effort",
     );
-
-    assert_eq!(ListSessions::ADDRESS, "session.list");
-    assert_method::<ListSessions, (), ListSessionsResponse, (), Unary, Streaming>();
-
-    assert_eq!(OpenSession::ADDRESS, "session.open");
-    assert_method::<
-        OpenSession,
-        OpenSessionRequest,
-        OpenSessionResponseFrame,
-        OpenSessionError,
-        Unary,
-        Streaming,
-    >();
-
-    assert_eq!(DeleteSession::ADDRESS, "session.delete");
-    assert_method::<DeleteSession, DeleteSessionRequest, (), DeleteSessionError, Unary, Unary>();
+    assert_json_method::<session::set_permission_level::SetPermissionLevel>(
+        "session.set_permission_level",
+    );
+    assert_json_method::<session::interrupt::Interrupt>("session.interrupt");
+    assert_json_method::<session::cancel::Cancel>("session.cancel");
+    assert_json_method::<session::close::Close>("session.close");
 }
 
 #[test]
-fn session_control_rpcs_live_in_the_session_module() {
-    let _public_handlers = (
-        session::append::append_handler,
-        session::respond::respond_handler,
-        session::set_reasoning_effort::set_reasoning_effort_handler,
-        session::set_permission_level::set_permission_level_handler,
-        session::interrupt::interrupt_handler,
-        session::cancel::cancel_handler,
-        session::close::close_handler,
-    );
-    assert_eq!(session::append::Append::ADDRESS, "session.append");
-    assert_method::<
-        session::append::Append,
-        session::append::AppendRequestFrame,
-        (),
-        session::SessionRpcError,
-        Streaming,
-        Unary,
-    >();
+fn open_session_streams_through_the_bounded_event_contract() {
+    assert_eq!(SessionOutputEvent::ID, "session.event");
+    let schema = include_str!("../../../schemas/event/session_event.json");
+    for field in [
+        "session",
+        "run",
+        "sequence",
+        "chunk_index",
+        "field",
+        "chunk",
+        "field_complete",
+        "event_complete",
+        "terminal",
+    ] {
+        assert!(schema.contains(&format!("\"{field}\"")));
+    }
+    assert!(!schema.contains("maxLength"));
+}
 
-    assert_eq!(session::respond::Respond::ADDRESS, "session.respond");
-    assert_method::<
-        session::respond::Respond,
-        session::respond::RespondRequestFrame,
-        (),
-        session::SessionRpcError,
-        Streaming,
-        Unary,
-    >();
-
-    assert_eq!(
-        session::set_reasoning_effort::SetReasoningEffort::ADDRESS,
-        "session.set_reasoning_effort"
-    );
-    assert_method::<
-        session::set_reasoning_effort::SetReasoningEffort,
-        session::set_reasoning_effort::SetReasoningEffortRequest,
-        (),
-        session::SessionRpcError,
-        Unary,
-        Unary,
-    >();
-
-    assert_eq!(
-        session::set_permission_level::SetPermissionLevel::ADDRESS,
-        "session.set_permission_level"
-    );
-    assert_method::<
-        session::set_permission_level::SetPermissionLevel,
-        session::set_permission_level::SetPermissionLevelRequest,
-        (),
-        session::SessionRpcError,
-        Unary,
-        Unary,
-    >();
-
-    assert_eq!(session::interrupt::Interrupt::ADDRESS, "session.interrupt");
-    assert_method::<
-        session::interrupt::Interrupt,
-        session::interrupt::InterruptRequest,
-        (),
-        session::SessionRpcError,
-        Unary,
-        Unary,
-    >();
-
-    assert_eq!(session::cancel::Cancel::ADDRESS, "session.cancel");
-    assert_method::<
-        session::cancel::Cancel,
-        session::cancel::CancelRequest,
-        (),
-        session::SessionRpcError,
-        Unary,
-        Unary,
-    >();
-
-    assert_eq!(session::close::Close::ADDRESS, "session.close");
-    assert_method::<
-        session::close::Close,
-        session::close::CloseRequest,
-        (),
-        session::SessionRpcError,
-        Unary,
-        Unary,
-    >();
+#[test]
+fn message_text_uses_the_complete_request_lane() {
+    for schema in [
+        include_str!("../../../schemas/rpc/append/request.json"),
+        include_str!("../../../schemas/rpc/respond/request.json"),
+    ] {
+        assert!(!schema.contains("maxLength"));
+    }
 }

@@ -22,26 +22,22 @@ pub use barracuda_router::{
     UnregisterContext,
 };
 pub use barracuda_rpc::{
-    rpc_dynamic, rpc_message, Dynamic, JsonCodec, RpcAddress, RpcAddressError, RpcCallId,
-    RpcCardinality, RpcClient, RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup,
-    RpcGroupError, RpcHandler, RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode,
-    RpcLaneStorage, RpcMessage, RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode,
-    RpcPayloadFrame, RpcPayloadReader, RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration,
-    RpcRegistry, RpcResult, RpcStream, RpcUnaryCall, RpcWire, Streaming, Unary, WireField,
-    WireSupport,
+    json_schema, json_schema_inline, JsonCall, JsonHandler, JsonHandlerFuture, JsonObjectFields,
+    JsonObjectPayload, JsonObjectWriter, JsonPayload, JsonRef, JsonRpcInfo, JsonRpcSchema,
+    JsonSchema, JsonWriter, RpcAddress, RpcAddressError, RpcCallId, RpcCardinality, RpcClient,
+    RpcContext, RpcEndpointId, RpcError, RpcFrame, RpcGroup, RpcGroupError, RpcHandler,
+    RpcHandlerFuture, RpcHandlerInput, RpcHandlerOutput, RpcInputMode, RpcLaneStorage, RpcMessage,
+    RpcMethod, RpcMethodInfo, RpcMulticastBranch, RpcOutputMode, RpcPayloadFrame, RpcPayloadReader,
+    RpcPayloadWriteFrame, RpcPayloadWriter, RpcRegistration, RpcRegistry, RpcResult, RpcStream,
+    RpcUnaryCall, Streaming, Unary,
 };
-/// Host-side JSON Schema bake pipeline, surfaced through the facade for
-/// `build.rs` and wire crates. Requires the `schema` feature and never ships to
-/// the device.
-#[cfg(feature = "schema")]
-pub use barracuda_rpc_schema::{bake_all, register, SchemaEntry};
 pub use barracuda_vfs::FsError;
 pub use barracuda_workflow::{
-    validate_definition, EmitError, EmitRejection, Event, EventEmitter, EventId, EventIdError,
-    EventInputMode, Rule, RuleError, Topic, TopicError, WorkflowClient, WorkflowControlError,
-    WorkflowControlRejection, WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError,
-    WorkflowFailure, WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError,
-    WorkflowUnloadError, TOPIC_MAX_BYTES,
+    validate_definition, EmitError, Event, EventEmitter, EventId, EventIdError, Rule, RuleError,
+    Topic, TopicError, WorkflowClient, WorkflowControlError, WorkflowControlRejection,
+    WorkflowDefinition, WorkflowDefinitionError, WorkflowExecutionError, WorkflowFailure,
+    WorkflowId, WorkflowIdError, WorkflowInfo, WorkflowLoadError, WorkflowUnloadError,
+    TOPIC_MAX_BYTES,
 };
 
 /// Failure while constructing Event Router and restoring durable Workflows.
@@ -91,7 +87,7 @@ impl<const N: usize, const M: usize, const Q: usize> EventRouter<N, M, Q> {
         lanes: &'static RpcLaneStorage<N, M, Q>,
     ) -> Result<Self, EventRouterCreateError> {
         let mut router = Router::new(lanes);
-        let (workflow_component, workflow) = WorkflowComponent::new().await?;
+        let (workflow_component, workflow) = WorkflowComponent::<N>::new().await?;
         router.load(Box::new(workflow_component))?;
         Ok(Self { router, workflow })
     }
@@ -158,6 +154,10 @@ mod tests {
     }
 
     impl Component<FRAME_SIZE> for PendingComponent {
+        fn name(&self) -> &'static str {
+            "pending"
+        }
+
         fn register(
             &mut self,
             _context: &mut RegisterContext<'_, FRAME_SIZE>,

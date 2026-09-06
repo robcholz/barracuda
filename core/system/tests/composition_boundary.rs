@@ -65,7 +65,6 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         "TimePlugin",
         "SchedulerPlugin",
         "AgentPlugin",
-        "CaptivePortalPlugin",
         "IMessageGatewayPlugin",
         "IMessageBlueBubblePlugin",
         "IMessageInkboxPlugin",
@@ -73,7 +72,6 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
         "IMessageTelegramPlugin",
         "IMessageWechatPlugin",
         "IMessageWebPlugin",
-        "GatewayAgentPlugin",
     ] {
         assert!(
             system.contains(&format!("{plugin}::new(&mut plugin_context)")),
@@ -109,6 +107,27 @@ fn vfs_scopes_replace_the_custom_agent_sandbox_crate() -> Result<(), std::io::Er
             }
         }
     }
+    Ok(())
+}
+
+#[test]
+fn selected_platform_does_not_require_a_system_runtime_feature() -> Result<(), std::io::Error> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let system_manifest = std::fs::read_to_string(root.join("core/system/Cargo.toml"))?;
+    let application_manifest = std::fs::read_to_string(root.join("apps/barracuda-cli/Cargo.toml"))?;
+
+    assert!(!system_manifest.contains("tokio = ["));
+    assert!(!system_manifest.contains("GENERATED PLUGIN FEATURES"));
+    assert!(!system_manifest.contains("target_os"));
+    assert!(!system_manifest
+        .contains("barracuda-webserver-plugin = { workspace = true, features = [\"std\"] }"));
+    assert!(application_manifest.contains("barracuda-system = { path = \"../../core/system\" }"));
+    assert!(application_manifest.contains(
+        "serde = { version = \"1\", default-features = false, features = [\"alloc\", \"derive\"] }"
+    ));
+    assert!(application_manifest.contains(
+        "serde_json = { version = \"1\", default-features = false, features = [\"alloc\"] }"
+    ));
     Ok(())
 }
 

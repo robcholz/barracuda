@@ -133,7 +133,7 @@ where
             if chunk.is_empty() {
                 continue;
             }
-            text.push_str(&chunk);
+            text.push_str(chunk.as_str());
             if last_draft_len != 0
                 && text.len().saturating_sub(last_draft_len)
                     < self.config.draft_min_delta_bytes.max(1)

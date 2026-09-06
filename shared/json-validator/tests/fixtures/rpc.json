@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "start" },
+        "id": { "$ref": "#/$defs/id" },
+        "sequence": { "const": 0 },
+        "at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["action", "id", "sequence", "at"],
+      "maxProperties": 4,
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "action": { "const": "chunk" },
+        "id": { "$ref": "#/$defs/id" },
+        "sequence": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "data": { "type": "string", "contentEncoding": "base64" }
+      },
+      "required": ["action", "id", "sequence", "data"],
+      "additionalProperties": false
+    }
+  ]
+}

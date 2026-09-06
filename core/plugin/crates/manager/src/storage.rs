@@ -6,8 +6,9 @@ use alloc::string::String;
 use core::fmt::Debug;
 
 use barracuda_kv::{
-    Database, Error as KvError, ReadTransaction as KvReadTransaction, Value,
-    WriteTransaction as KvWriteTransaction, MAX_KEY_SIZE,
+    Database, EntryIterator as KvEntryIterator, Error as KvError,
+    ReadTransaction as KvReadTransaction, Value, WriteTransaction as KvWriteTransaction,
+    WriteValue, MAX_KEY_SIZE,
 };
 use embedded_storage_async::nor_flash::NorFlash;
 
@@ -60,25 +61,77 @@ pub trait PluginStorage: Clone + 'static {
     /// Reads one typed value, returning `None` when the key does not exist.
     async fn get<T: Value>(&self, key: &str) -> StorageResult<Option<T>>;
 
-    /// Inserts or replaces one typed value atomically.
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()>;
+    /// Inserts or replaces one byte-representable value atomically.
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()>;
 
     /// Deletes one key atomically.
     async fn delete(&self, key: &str) -> StorageResult<()>;
 }
 
 /// Plugin-facing read transaction contract.
+///
+/// This transaction and its iterators retain a shared database reader. Drain
+/// or drop them promptly instead of holding them across unrelated async work,
+/// because they can delay write transaction commits.
 #[allow(async_fn_in_trait)]
 pub trait PluginReadTransaction {
+    /// Streaming entry iterator created by this transaction.
+    type EntryIterator<'a>: PluginEntryIterator
+    where
+        Self: 'a;
     /// Reads and validates one typed value.
     async fn read<T: Value>(&self, key: &str) -> StorageResult<T>;
+
+    /// Opens a streaming iterator over this Plugin's live entries.
+    async fn entries(&self) -> StorageResult<Self::EntryIterator<'_>>;
+}
+
+/// One borrowed entry from a Plugin namespace.
+#[derive(Debug, PartialEq, Eq)]
+pub struct PluginEntry<'iterator> {
+    key: &'iterator str,
+    value: &'iterator [u8],
+}
+
+impl PluginEntry<'_> {
+    /// Returns the key relative to the Plugin namespace.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        self.key
+    }
+
+    /// Validates and copies the entry value as a fixed-layout type.
+    pub fn value<T: Value>(&self) -> StorageResult<T> {
+        if self.value.len() != core::mem::size_of::<T>() {
+            return Err(StorageError::Database(KvError::InvalidValue));
+        }
+        T::try_read_from_bytes(self.value)
+            .map_err(|_error| StorageError::Database(KvError::InvalidValue))
+    }
+
+    /// Returns the stored value bytes.
+    #[must_use]
+    pub fn value_bytes(&self) -> &[u8] {
+        self.value
+    }
+}
+
+/// Streaming iterator over entries in one Plugin namespace.
+///
+/// Each returned entry is relative to the Plugin namespace, borrows the
+/// iterator, and remains valid until the next call to [`Self::next`]. Drain or
+/// drop it promptly because it retains the underlying read transaction.
+#[allow(async_fn_in_trait)]
+pub trait PluginEntryIterator {
+    /// Advances to the next live Plugin entry in lexical key order.
+    async fn next(&mut self) -> StorageResult<Option<PluginEntry<'_>>>;
 }
 
 /// Plugin-facing atomic write transaction contract.
 #[allow(async_fn_in_trait)]
 pub trait PluginWriteTransaction: Sized {
     /// Stages one insert or replacement.
-    async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()>;
+    async fn write<T: WriteValue + ?Sized>(&mut self, key: &str, value: &T) -> StorageResult<()>;
 
     /// Stages deletion of one key.
     async fn delete(&mut self, key: &str) -> StorageResult<()>;
@@ -91,6 +144,7 @@ pub trait PluginWriteTransaction: Sized {
 pub(crate) struct ScopedStorage<P: NorFlash + 'static> {
     database: Rc<Database<P>>,
     prefix: String,
+    prefix_end: String,
 }
 
 impl<P: NorFlash + 'static> Clone for ScopedStorage<P> {
@@ -98,6 +152,7 @@ impl<P: NorFlash + 'static> Clone for ScopedStorage<P> {
         Self {
             database: Rc::clone(&self.database),
             prefix: self.prefix.clone(),
+            prefix_end: self.prefix_end.clone(),
         }
     }
 }
@@ -114,7 +169,16 @@ where
             namespace.len(),
             plugin_id.as_str()
         );
-        Self { database, prefix }
+        let prefix_end = format!(
+            "{NAMESPACE_FORMAT}:{}:{};",
+            namespace.len(),
+            plugin_id.as_str()
+        );
+        Self {
+            database,
+            prefix,
+            prefix_end,
+        }
     }
 
     /// Returns the maximum caller key length available in this scope.
@@ -128,6 +192,7 @@ where
         ScopedReadTransaction {
             inner: self.database.read_transaction().await,
             prefix: self.prefix.as_str(),
+            prefix_end: self.prefix_end.as_str(),
         }
     }
 
@@ -152,8 +217,8 @@ where
         }
     }
 
-    /// Inserts or replaces one typed zerocopy value in a committed transaction.
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()> {
+    /// Inserts or replaces one byte-representable value in a committed transaction.
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         let mut transaction = self.write_transaction().await;
         transaction.write(key, value).await?;
         transaction.commit().await
@@ -191,7 +256,7 @@ where
         ScopedStorage::get(self, key).await
     }
 
-    async fn put<T: Value>(&self, key: &str, value: &T) -> StorageResult<()> {
+    async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         ScopedStorage::put(self, key, value).await
     }
 
@@ -204,6 +269,7 @@ where
 pub(crate) struct ScopedReadTransaction<'database, P: NorFlash + 'database> {
     inner: KvReadTransaction<'database, P>,
     prefix: &'database str,
+    prefix_end: &'database str,
 }
 
 impl<P> ScopedReadTransaction<'_, P>
@@ -216,6 +282,19 @@ where
         let key = scoped_key(self.prefix, key)?;
         self.inner.read(&key).await.map_err(StorageError::from)
     }
+
+    /// Opens a streaming entry iterator restricted to this Plugin namespace.
+    pub async fn entries(&self) -> StorageResult<ScopedEntryIterator<'_, P>> {
+        Ok(ScopedEntryIterator {
+            inner: self
+                .inner
+                .entries_in_range(self.prefix, self.prefix_end)
+                .await?,
+            prefix_length: self.prefix.len(),
+            key: [0; MAX_KEY_SIZE],
+            key_length: 0,
+        })
+    }
 }
 
 impl<P> PluginReadTransaction for ScopedReadTransaction<'_, P>
@@ -223,8 +302,56 @@ where
     P: NorFlash,
     P::Error: Debug,
 {
+    type EntryIterator<'a>
+        = ScopedEntryIterator<'a, P>
+    where
+        Self: 'a;
     async fn read<T: Value>(&self, key: &str) -> StorageResult<T> {
         ScopedReadTransaction::read(self, key).await
+    }
+
+    async fn entries(&self) -> StorageResult<Self::EntryIterator<'_>> {
+        ScopedReadTransaction::entries(self).await
+    }
+}
+
+/// Iterator that removes the physical namespace from every returned entry.
+pub(crate) struct ScopedEntryIterator<'database, P: NorFlash + 'database> {
+    inner: KvEntryIterator<'database, P>,
+    prefix_length: usize,
+    key: [u8; MAX_KEY_SIZE],
+    key_length: usize,
+}
+
+impl<P> PluginEntryIterator for ScopedEntryIterator<'_, P>
+where
+    P: NorFlash,
+    P::Error: Debug,
+{
+    async fn next(&mut self) -> StorageResult<Option<PluginEntry<'_>>> {
+        let Some(entry) = self.inner.next().await? else {
+            return Ok(None);
+        };
+        let relative = entry
+            .key()
+            .get(self.prefix_length..)
+            .ok_or(StorageError::Database(KvError::Corrupted))?;
+        let destination = self
+            .key
+            .get_mut(..relative.len())
+            .ok_or(StorageError::Database(KvError::Corrupted))?;
+        destination.copy_from_slice(relative.as_bytes());
+        self.key_length = relative.len();
+        let key = self
+            .key
+            .get(..self.key_length)
+            .ok_or(StorageError::Database(KvError::Corrupted))?;
+        let key = core::str::from_utf8(key)
+            .map_err(|_error| StorageError::Database(KvError::Corrupted))?;
+        Ok(Some(PluginEntry {
+            key,
+            value: entry.value_bytes(),
+        }))
     }
 }
 
@@ -240,7 +367,11 @@ where
     P::Error: Debug,
 {
     /// Stages one scoped insert or replacement.
-    pub async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()> {
+    pub async fn write<T: WriteValue + ?Sized>(
+        &mut self,
+        key: &str,
+        value: &T,
+    ) -> StorageResult<()> {
         let key = scoped_key(self.prefix, key)?;
         self.inner
             .write(&key, value)
@@ -265,7 +396,7 @@ where
     P: NorFlash,
     P::Error: Debug,
 {
-    async fn write<T: Value>(&mut self, key: &str, value: &T) -> StorageResult<()> {
+    async fn write<T: WriteValue + ?Sized>(&mut self, key: &str, value: &T) -> StorageResult<()> {
         ScopedWriteTransaction::write(self, key, value).await
     }
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": { "message_id": { "type": "string" } },
+      "required": ["message_id"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "invalid_request",
+            "unknown_channel",
+            "unsupported",
+            "authentication",
+            "rate_limited",
+            "delivery",
+            "invalid_receipt"
+          ]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

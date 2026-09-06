@@ -16,9 +16,10 @@ use barracuda_event_router::{
 use barracuda_kv::MAX_CAPACITY;
 use barracuda_platform_test::{install_global_memory_vfs, memory_partition, MemoryPartition};
 use barracuda_plugin_manager::{
-    CapabilityError, Plugin, PluginDeclaration, PluginError, PluginId, PluginIdError,
-    PluginManager, PluginRegisterContext, PluginRegisterError, PluginResult, PluginStartContext,
-    PluginStartError, PluginTaskToken, PluginUnloadError, PluginWriteTransaction,
+    CapabilityError, Plugin, PluginDeclaration, PluginEntryIterator, PluginError, PluginId,
+    PluginIdError, PluginManager, PluginReadTransaction, PluginRegisterContext,
+    PluginRegisterError, PluginResult, PluginStartContext, PluginStartError, PluginTaskToken,
+    PluginUnloadError, PluginWriteTransaction,
 };
 use futures_lite::future::{block_on, poll_once};
 
@@ -64,6 +65,10 @@ struct PendingComponent<Storage: barracuda_plugin_manager::PluginStorage> {
 impl<Storage: barracuda_plugin_manager::PluginStorage> Component<FRAME_SIZE>
     for PendingComponent<Storage>
 {
+    fn name(&self) -> &'static str {
+        "pending"
+    }
+
     fn register(&mut self, _context: &mut RegisterContext<'_, FRAME_SIZE>) -> ComponentResult<()> {
         self.registered.set(self.registered.get() + 1);
         Ok(())
@@ -503,6 +508,102 @@ fn scoped_storage_preserves_ekv_write_transactions() {
     manager.start(&mut router).unwrap();
 
     assert_eq!(*observed.borrow(), (Some(1), Some(2)));
+}
+
+struct KeyWriterPlugin;
+
+declare_plugin!(KeyWriterPlugin, "key-writer");
+
+impl Plugin<FRAME_SIZE> for KeyWriterPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        block_on(context.storage().put("private", &1_u32))?;
+        Ok(())
+    }
+}
+
+struct LateKeyWriterPlugin;
+
+declare_plugin!(LateKeyWriterPlugin, "zzzzzzzzzzzz");
+
+impl Plugin<FRAME_SIZE> for LateKeyWriterPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        block_on(context.storage().put("also-private", &2_u32))?;
+        Ok(())
+    }
+}
+
+type ObservedEntries = Rc<RefCell<Vec<(String, Vec<u8>)>>>;
+
+struct EntryIteratorPlugin {
+    observed: ObservedEntries,
+}
+
+declare_plugin!(EntryIteratorPlugin, "entry-iterator");
+
+impl Plugin<FRAME_SIZE> for EntryIteratorPlugin {
+    fn register<Storage>(
+        &mut self,
+        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+    ) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin_manager::PluginStorage,
+    {
+        block_on(async {
+            let mut write = context.storage().write_transaction().await;
+            write.write("api_base", "https://api.tavily.com").await?;
+            write.write("api_key", "secret").await?;
+            write.commit().await?;
+            let read = context.storage().read_transaction().await;
+            let mut entries = read.entries().await?;
+            while let Some(entry) = entries.next().await? {
+                self.observed
+                    .borrow_mut()
+                    .push((String::from(entry.key()), Vec::from(entry.value_bytes())));
+            }
+            Ok::<(), PluginError>(())
+        })
+    }
+}
+
+#[test]
+fn plugin_entry_iterator_streams_relative_keys_and_values_only_from_its_namespace() {
+    let mut manager = manager();
+    let mut router = router();
+    let observed = Rc::new(RefCell::new(Vec::new()));
+
+    manager.register(&mut router, KeyWriterPlugin).unwrap();
+    manager.register(&mut router, LateKeyWriterPlugin).unwrap();
+    manager
+        .register(
+            &mut router,
+            EntryIteratorPlugin {
+                observed: Rc::clone(&observed),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        observed.borrow().as_slice(),
+        [
+            (
+                String::from("api_base"),
+                Vec::from(b"https://api.tavily.com")
+            ),
+            (String::from("api_key"), Vec::from(b"secret"))
+        ]
+    );
 }
 
 #[derive(Debug, PartialEq, Eq)]

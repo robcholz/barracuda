@@ -1,76 +1,72 @@
 use alloc::rc::Rc;
 
-use barracuda_event_router::{RpcFrame, RpcHandler, RpcMethod, Unary, rpc_dynamic, rpc_message};
-use getset::CopyGetters;
+use barracuda_event_router::{
+    JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, json_schema,
+};
+use barracuda_plugin_manager::PluginStorage;
+use serde::Deserialize;
 
-use crate::{ScheduleId, SchedulerControl, schedule::ScheduleError};
-
-/// Request accepted by [`Cancel`].
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
-pub struct CancelRequest {
-    /// Schedule to cancel.
-    #[getset(get_copy = "pub")]
-    id: ScheduleId,
-}
-
-impl CancelRequest {
-    /// Creates one cancellation request.
-    #[must_use]
-    pub const fn new(id: ScheduleId) -> Self {
-        Self { id }
-    }
-}
-
-/// Cancellation result.
-#[repr(C)]
-#[rpc_message]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
-pub struct CancelResponse {
-    /// Cancelled schedule identifier.
-    #[getset(get_copy = "pub")]
-    id: ScheduleId,
-    /// Number of Events committed before cancellation.
-    #[getset(get_copy = "pub")]
-    completed_runs: u64,
-}
-
-impl CancelResponse {
-    const fn new(id: ScheduleId, completed_runs: u64) -> Self {
-        Self { id, completed_runs }
-    }
-}
+use crate::{
+    component::SchedulerControl,
+    json::{ScheduleCancelled, ScheduleRejected},
+    model::ScheduleId,
+    schedule::ScheduleError,
+};
 
 /// Cancels one live schedule.
 pub struct Cancel;
 
-#[rpc_dynamic]
-impl RpcMethod for Cancel {
+impl JsonRpcSchema for Cancel {
     const ADDRESS: &'static str = "scheduler.cancel";
-    type Request = CancelRequest;
-    type Response = CancelResponse;
-    type Error = ScheduleError;
-    type Input = Unary;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("cancel", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("cancel", response);
+    const MAX_REQUEST_BYTES: usize = 512;
+    const MAX_RESPONSE_BYTES: usize = 64;
 }
 
-/// Builds the reusable handler for [`Cancel`].
-pub fn cancel_handler(control: SchedulerControl) -> impl RpcHandler<Cancel> {
-    move |_context, request: RpcFrame<CancelRequest>| {
-        let result = request.view().copied();
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CancelRequest<'a> {
+    #[serde(borrow)]
+    id: &'a str,
+}
+
+/// Builds the reusable JSON handler for [`Cancel`].
+pub(crate) fn cancel_handler<Storage>(control: SchedulerControl<Storage>) -> impl JsonHandler
+where
+    Storage: PluginStorage,
+{
+    move |_context, request: JsonRef, response: JsonWriter| {
         let shared = Rc::clone(&control.shared);
         async move {
-            let request = result?;
-            let cancelled = match shared.book.borrow_mut().cancel(&request.id) {
-                Ok(cancelled) => cancelled,
-                Err(error) => return Ok(Err(error)),
+            let request = request.deserialize::<CancelRequest<'_>>()?;
+            let result = match ScheduleId::new(request.id) {
+                Ok(id) => {
+                    let mut book = shared.book.lock().await;
+                    match book.cancel(&id) {
+                        Ok(cancelled) => {
+                            if shared.delete(id).await.is_err() {
+                                let _restored = book.restore_cancelled(cancelled);
+                                Err(ScheduleError::StorageUnavailable)
+                            } else {
+                                Ok((id, cancelled))
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(_error) => Err(ScheduleError::InvalidSchedule),
             };
-            shared.changed.signal(());
-            Ok(Ok(CancelResponse::new(
-                request.id,
-                cancelled.completed_runs(),
-            )))
+
+            match result {
+                Ok((id, cancelled)) => {
+                    shared.changed.signal(());
+                    response
+                        .write(&ScheduleCancelled::new(id, cancelled.completed_runs()))
+                        .await
+                }
+                Err(error) => response.write(&ScheduleRejected::new(error)).await,
+            }
         }
     }
 }

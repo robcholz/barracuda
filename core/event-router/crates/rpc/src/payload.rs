@@ -412,7 +412,7 @@ impl PayloadCallShared {
 ///
 /// [`write`](Self::write) publishes at most one request frame and returns the
 /// number of bytes accepted. [`write_all`](Self::write_all) repeats that
-/// operation across frames. The target Method's fixed request wire size is the
+/// operation across frames. The endpoint adapter's request capacity is the
 /// per-frame capacity; callers do not provide a separate size limit.
 pub struct RpcPayloadWriter {
     shared: Rc<PayloadCallShared>,
@@ -440,8 +440,8 @@ impl RpcPayloadWriter {
 
     /// Waits for writable lane storage and reserves one request frame in place.
     ///
-    /// The returned slice has exactly the target Method's fixed request wire
-    /// size. Dropping the reservation publishes nothing.
+    /// The returned slice has exactly the endpoint adapter's request capacity.
+    /// Dropping the reservation publishes nothing.
     pub async fn reserve(&mut self) -> RpcResult<RpcPayloadWriteFrame<'_>> {
         let frame_capacity = self.frame_capacity;
         let frame = core::future::poll_fn(|context| {
@@ -465,7 +465,7 @@ impl RpcPayloadWriter {
 
     /// Writes at most one request frame and returns the number of bytes written.
     ///
-    /// A slice larger than the Method's request frame is partially written;
+    /// A slice larger than the endpoint's request frame is partially written;
     /// pass the remaining suffix to another call or use [`write_all`](Self::write_all).
     pub async fn write(&mut self, bytes: &[u8]) -> RpcResult<usize> {
         if bytes.is_empty() || self.frame_capacity == 0 {
@@ -672,7 +672,7 @@ impl core::fmt::Debug for RpcMulticastBranch {
 }
 
 pub(crate) fn make_payload_call(prepared: PreparedCalls) -> (RpcPayloadWriter, RpcPayloadReader) {
-    let frame_capacity = prepared.request_frame_size();
+    let frame_capacity = prepared.request_frame_capacity();
     let shared = Rc::new(PayloadCallShared::new(prepared, 1));
     (
         RpcPayloadWriter {
@@ -695,7 +695,7 @@ pub(crate) fn make_payload_calls(
     prepared: PreparedCalls,
     addresses: Vec<RpcAddress>,
 ) -> (RpcPayloadWriter, Vec<RpcMulticastBranch>) {
-    let frame_capacity = prepared.request_frame_size();
+    let frame_capacity = prepared.request_frame_capacity();
     let branch_count = addresses.len();
     let shared = Rc::new(PayloadCallShared::new(prepared, branch_count));
     let writer = RpcPayloadWriter {

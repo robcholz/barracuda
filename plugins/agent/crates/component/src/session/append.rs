@@ -1,48 +1,58 @@
 use barracuda_agent_runtime::Message;
 use barracuda_event_router::{
-    rpc_dynamic, RpcFrame, RpcHandler, RpcMethod, RpcStream, Streaming, Unary,
+    json_schema, JsonHandler, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter,
 };
+use serde::Deserialize;
 
-use crate::convert;
+use crate::json::{map_control_error, parse_session, AgentRpcError, ErrorResponse};
 
-use super::{SessionRegistry, SessionRpcError};
+use super::SessionRegistry;
 
-pub use crate::dto::AppendRequestFrame;
-
-/// RPC corresponding to `SessionControl::append`.
+/// Appends one complete user message to an open session.
 pub struct Append;
 
-#[rpc_dynamic]
-impl RpcMethod for Append {
+impl JsonRpcSchema for Append {
     const ADDRESS: &'static str = "session.append";
-    type Request = AppendRequestFrame;
-    type Response = ();
-    type Error = SessionRpcError;
-    type Input = Streaming;
-    type Output = Unary;
+    const REQUEST_SCHEMA: JsonSchema = json_schema!("append", request);
+    const RESPONSE_SCHEMA: JsonSchema = json_schema!("append", response);
+    const MAX_REQUEST_BYTES: usize = 512;
+    const MAX_RESPONSE_BYTES: usize = 34;
 }
 
-/// Builds the reusable handler for [`Append`].
-pub fn append_handler(registry: SessionRegistry) -> impl RpcHandler<Append> {
-    move |_context, mut frames: RpcStream<RpcFrame<AppendRequestFrame>>| {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppendRequest<'a> {
+    #[serde(borrow)]
+    session: &'a str,
+    #[serde(borrow)]
+    text: &'a str,
+}
+
+/// Builds the JSON handler for [`Append`].
+pub fn append_handler(registry: SessionRegistry) -> impl JsonHandler {
+    move |_context, request: JsonRef, response: JsonWriter| {
         let registry = registry.clone();
         async move {
-            while let Some(frame) = frames.next().await {
-                let frame = *frame?.view()?;
-                let session = convert::session_from_wire(frame.session);
-                let message = Message::text(frame.text.as_str());
-                let Some(control) = registry.get(session) else {
-                    return Ok(Err(SessionRpcError::SessionNotOpen));
-                };
-                let outcome = control
-                    .append(message)
-                    .await
-                    .map_err(convert::session_error_from_control);
-                if let Err(error) = outcome {
-                    return Ok(Err(error));
+            let request = request.deserialize::<AppendRequest<'_>>()?;
+            let session = match parse_session(request.session) {
+                Ok(session) => session,
+                Err(error) => return response.write(&ErrorResponse(error)).await,
+            };
+            let Some(control) = registry.get(session) else {
+                return response
+                    .write(&ErrorResponse(AgentRpcError::SessionNotOpen))
+                    .await;
+            };
+
+            // SessionControl owns the message after this lane is released.
+            match control.append(Message::text(request.text)).await {
+                Ok(()) => response.write("{}").await,
+                Err(error) => {
+                    response
+                        .write(&ErrorResponse(map_control_error(error)))
+                        .await
                 }
             }
-            Ok(Ok(()))
         }
     }
 }

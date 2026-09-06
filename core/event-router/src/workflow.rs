@@ -9,11 +9,11 @@ use core::cell::RefCell;
 use barracuda_router::{
     Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
 };
-use barracuda_rpc::RpcContext;
+use barracuda_rpc::{JsonRef, JsonWriter, RpcContext};
 use barracuda_vfs::{create_dir_all, read, remove_file, rename, write, FsError};
 use barracuda_workflow::integration::{
-    InternalEmit, WorkflowJsonRequest, WorkflowLoad, WorkflowRuntime, WorkflowRuntimeControl,
-    WorkflowRuntimeView, WorkflowUnload,
+    parse_definition, parse_workflow_id, write_control_response, InternalEmit, WorkflowLoad,
+    WorkflowRuntime, WorkflowRuntimeControl, WorkflowRuntimeView, WorkflowUnload,
 };
 use barracuda_workflow::{validate_definition, WorkflowControlRejection, WorkflowId};
 
@@ -29,12 +29,12 @@ struct PersistedWorkflow {
     json: Vec<u8>,
 }
 
-pub(super) struct WorkflowComponent {
+pub(super) struct WorkflowComponent<const N: usize> {
     runtime: WorkflowRuntime,
     catalog: Rc<RefCell<Vec<PersistedWorkflow>>>,
 }
 
-impl WorkflowComponent {
+impl<const N: usize> WorkflowComponent<N> {
     pub(super) async fn new() -> Result<(Self, WorkflowRuntimeView), EventRouterCreateError> {
         create_dir_all(SYSTEM_DIRECTORY).await?;
         let runtime = WorkflowRuntime::new();
@@ -50,85 +50,120 @@ impl WorkflowComponent {
     }
 }
 
-impl<const M: usize> Component<M> for WorkflowComponent {
+impl<const N: usize, const M: usize> Component<M> for WorkflowComponent<N> {
+    fn name(&self) -> &'static str {
+        "workflow-runtime"
+    }
+
     fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_rpc::<InternalEmit<M>, _>(self.runtime.ingress_handler::<M>())?;
+        context.register_json::<InternalEmit<M>, _>(
+            "system",
+            self.runtime.ingress_handler::<N, M>(),
+        )?;
 
         let load_control = self.runtime.control();
         let load_catalog = Rc::clone(&self.catalog);
-        context.register_rpc::<WorkflowLoad<M>, _>(move |context: RpcContext, frames| {
-            let control = load_control.clone();
-            let catalog = Rc::clone(&load_catalog);
-            async move {
-                let request = match WorkflowJsonRequest::accept(frames).await? {
-                    Ok(request) => request,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                let definition = match request.definition() {
-                    Ok(definition) => definition,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                if let Err(rejection) = validate_definition(context.client(), &definition) {
-                    return Ok(Err(rejection));
-                }
-                if control.contains(definition.id()) {
-                    return Ok(Err(WorkflowControlRejection::DuplicateId));
-                }
-
-                let mut next_catalog = catalog.borrow().clone();
-                next_catalog.push(PersistedWorkflow {
-                    id: definition.id().clone(),
-                    json: request.bytes().to_vec(),
-                });
-                if write_catalog(&next_catalog).await.is_err() {
-                    return Ok(Err(WorkflowControlRejection::Persistence));
-                }
-                match control.load(definition) {
-                    Ok(()) => {
-                        *catalog.borrow_mut() = next_catalog;
-                        Ok(Ok(()))
+        context.register_json::<WorkflowLoad<M>, _>(
+            "system",
+            move |context: RpcContext, request: JsonRef, response: JsonWriter| {
+                let control = load_control.clone();
+                let catalog = Rc::clone(&load_catalog);
+                async move {
+                    let json = request.as_str()?;
+                    let definition = match parse_definition(json) {
+                        Ok(definition) => definition,
+                        Err(rejection) => {
+                            return write_control_response(response, Err(rejection)).await;
+                        }
+                    };
+                    if let Err(rejection) = validate_definition(context.client(), &definition) {
+                        return write_control_response(response, Err(rejection)).await;
                     }
-                    Err(_error) => Ok(Err(WorkflowControlRejection::DuplicateId)),
+                    if control.contains(definition.id()) {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::DuplicateId),
+                        )
+                        .await;
+                    }
+
+                    let mut next_catalog = catalog.borrow().clone();
+                    next_catalog.push(PersistedWorkflow {
+                        id: definition.id().clone(),
+                        json: json.as_bytes().to_vec(),
+                    });
+                    if write_catalog(&next_catalog).await.is_err() {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::Persistence),
+                        )
+                        .await;
+                    }
+                    let result = match control.load(definition) {
+                        Ok(()) => {
+                            *catalog.borrow_mut() = next_catalog;
+                            Ok(())
+                        }
+                        Err(_error) => Err(WorkflowControlRejection::DuplicateId),
+                    };
+                    write_control_response(response, result).await
                 }
-            }
-        })?;
+            },
+        )?;
 
         let unload_control = self.runtime.control();
         let unload_catalog = Rc::clone(&self.catalog);
-        context.register_rpc::<WorkflowUnload<M>, _>(move |_context, frames| {
-            let control = unload_control.clone();
-            let catalog = Rc::clone(&unload_catalog);
-            async move {
-                let request = match WorkflowJsonRequest::accept(frames).await? {
-                    Ok(request) => request,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                let workflow_id = match request.workflow_id() {
-                    Ok(workflow_id) => workflow_id,
-                    Err(rejection) => return Ok(Err(rejection)),
-                };
-                if !control.contains(&workflow_id) {
-                    return Ok(Err(WorkflowControlRejection::NotFound));
-                }
+        context.register_json::<WorkflowUnload<M>, _>(
+            "system",
+            move |_context, request: JsonRef, response: JsonWriter| {
+                let control = unload_control.clone();
+                let catalog = Rc::clone(&unload_catalog);
+                async move {
+                    let workflow_id = match parse_workflow_id(request.as_str()?) {
+                        Ok(workflow_id) => workflow_id,
+                        Err(rejection) => {
+                            return write_control_response(response, Err(rejection)).await;
+                        }
+                    };
+                    if !control.contains(&workflow_id) {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::NotFound),
+                        )
+                        .await;
+                    }
 
-                let mut next_catalog = catalog.borrow().clone();
-                let Some(position) = next_catalog
-                    .iter()
-                    .position(|workflow| workflow.id == workflow_id)
-                else {
-                    return Ok(Err(WorkflowControlRejection::Persistence));
-                };
-                next_catalog.remove(position);
-                if write_catalog(&next_catalog).await.is_err() {
-                    return Ok(Err(WorkflowControlRejection::Persistence));
+                    let mut next_catalog = catalog.borrow().clone();
+                    let Some(position) = next_catalog
+                        .iter()
+                        .position(|workflow| workflow.id == workflow_id)
+                    else {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::Persistence),
+                        )
+                        .await;
+                    };
+                    next_catalog.remove(position);
+                    if write_catalog(&next_catalog).await.is_err() {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::Persistence),
+                        )
+                        .await;
+                    }
+                    if control.unload(&workflow_id).is_err() {
+                        return write_control_response(
+                            response,
+                            Err(WorkflowControlRejection::NotFound),
+                        )
+                        .await;
+                    }
+                    *catalog.borrow_mut() = next_catalog;
+                    write_control_response(response, Ok(())).await
                 }
-                if control.unload(&workflow_id).is_err() {
-                    return Ok(Err(WorkflowControlRejection::NotFound));
-                }
-                *catalog.borrow_mut() = next_catalog;
-                Ok(Ok(()))
-            }
-        })
+            },
+        )
     }
 
     fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
@@ -162,8 +197,9 @@ async fn restore(
     for document in documents {
         let json = serde_json::to_vec(&document)
             .map_err(|_error| invalid_catalog(WorkflowControlRejection::InvalidJson))?;
-        let request = WorkflowJsonRequest::try_from(json.clone()).map_err(invalid_catalog)?;
-        let definition = request.definition().map_err(invalid_catalog)?;
+        let source = core::str::from_utf8(&json)
+            .map_err(|_error| invalid_catalog(WorkflowControlRejection::InvalidJson))?;
+        let definition = parse_definition(source).map_err(invalid_catalog)?;
         let id = definition.id().clone();
         control
             .load(definition)

@@ -28,9 +28,10 @@ fn one_lane_is_reused_across_many_sequential_calls() {
     let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 8, 1>::new()));
     let registry = RpcRegistry::new(lanes);
     registry
-        .register::<Echo, _>(|_context, request: RpcFrame<[u8; 8]>| async move {
-            Ok(Ok(*request.view()?))
-        })
+        .register::<Echo, _>(
+            "system",
+            |_context, request: RpcFrame<[u8; 8]>| async move { Ok(Ok(*request.view()?)) },
+        )
         .expect("register echo endpoint");
     let client = registry.client();
     let started = Instant::now();
@@ -68,7 +69,7 @@ fn exact_active_plus_waiter_window_drains_repeatedly() {
     let gate = Rc::new(Cell::new(false));
     let handler_gate = Rc::clone(&gate);
     registry
-        .register::<Echo, _>(move |_context, request: RpcFrame<[u8; 8]>| {
+        .register::<Echo, _>("system", move |_context, request: RpcFrame<[u8; 8]>| {
             let gate = Rc::clone(&handler_gate);
             async move {
                 core::future::poll_fn(|_context| {

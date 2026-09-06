@@ -66,16 +66,17 @@ Installing the IO package creates no global `io`, `input`, or `print` aliases.
 
 These functions are message flows, not process standard input or standard
 output. They do not read a terminal, write a console, or grant access to host
-file descriptors. Both internal queues hold up to 16 complete messages and
-apply backpressure when full.
+file descriptors. The internal input and output queues each hold one complete
+message and apply backpressure when full.
 
 `Lua::run()` only executes the already-configured sandbox. It does not install
 an Environment, packages, or any globals.
 
-At the `vm.run` RPC boundary, source and messages are transported in bounded
-frames. The default complete-source limit is 65,536 UTF-8 bytes and the default
-limit for one logical input message is 4,096 UTF-8 bytes. See [rpc.md](rpc.md)
-for framing, completion, and error behavior.
+At the JSON RPC boundary, the default logical source limit is 480 UTF-8 bytes
+and the default limit for one complete input message is 400 UTF-8 bytes. Each
+encoded request must also fit one 512-byte Event Router lane. See
+[rpc.md](rpc.md) for control and rejection behavior and [event.md](event.md)
+for output and completion.
 
 ## Native modules
 
@@ -145,10 +146,8 @@ yield, the VM executor task performs `Timer::after_millis(100).await` and then
 resumes polling the same Lua execution. The default interval is 10,000
 instructions and the pool supports four concurrent executions.
 
-`VmComponent::new` remains a direct, inline construction path for tests and
-special embedding. It does not install the task-owned instruction scheduler.
-Normal system composition uses `VmPlugin`, `VmRuntime`, and
-`VmComponent::with_runtime`.
+Every `VmComponent` uses `VmRuntime` and the task-owned instruction scheduler.
+Normal system composition constructs both through `VmPlugin`.
 
 ## Lua memory pool
 
@@ -160,18 +159,17 @@ Lua allocation, reallocation, garbage collection, and state destruction all
 use that allocator; dropping the Lua state returns the allocator slot to the
 pool.
 
-Exceeding the fixed per-execution Lua heap terminates the execution with
-`RunErrorKind::LuaMemory`. `VmRuntime::with_memory_bytes` can replace the
-default per-slot capacity when constructing the runtime.
+Exceeding the fixed per-execution Lua heap terminates the execution with a
+`vm.finished` Event whose error is `lua_memory`.
+`VmRuntime::with_memory_bytes` can replace the default per-slot capacity when
+constructing the runtime.
 
-The Lua heap limit does not include Rust-side RPC source/input/output buffers,
-native callback objects, or Embassy task storage. `VmComponent::new`, the
-direct inline construction path, continues to use Lua's normal Rust global
-allocator; normal Plugin composition uses the bounded pool.
+The Lua heap limit does not include the fixed 480-byte task-owned source copy,
+one bounded input message, native callback objects, or Embassy task storage.
+Normal Plugin composition uses the bounded Lua pool.
 
-Dropping an RPC response stream is observed by its VM task. For CPU-bound Lua,
-cleanup happens at an instruction-hook boundary or after the current 100 ms
-task delay.
+`vm.cancel` is observed by a blocked input immediately or by CPU-bound Lua at
+an instruction-hook boundary or after the current 100 ms task delay.
 
 ## Resource limits not yet implemented
 

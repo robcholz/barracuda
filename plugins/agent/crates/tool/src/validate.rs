@@ -1,26 +1,20 @@
 use alloc::string::ToString;
 
-use serde_json::Value;
+use serde::de::IgnoredAny;
 
 use super::definition::{ToolError, ToolInvokeError, ToolResult};
 
-pub(super) fn normalize_arguments_json(arguments_json: &str) -> ToolResult<(&str, Value)> {
+pub(super) fn normalize_arguments_json(arguments_json: &str) -> ToolResult<&str> {
     let text = normalized_arguments_json(arguments_json);
-    let value = parse_arguments_json(text)?;
-    Ok((text, value))
-}
-
-pub(super) fn parse_arguments_json(arguments_json: &str) -> ToolResult<Value> {
-    let text = normalized_arguments_json(arguments_json);
-    let value: Value = serde_json::from_str(text).map_err(|error| {
+    serde_json::from_str::<IgnoredAny>(text).map_err(|error| {
         ToolInvokeError::new(ToolError::InvalidArgumentsJson(error.to_string()))
     })?;
-    if !value.is_object() {
+    if !text.starts_with('{') {
         return Err(ToolInvokeError::new(ToolError::InvalidArgumentsJson(
             "tool arguments must be a JSON object".into(),
         )));
     }
-    Ok(value)
+    Ok(text)
 }
 
 fn normalized_arguments_json(arguments_json: &str) -> &str {
