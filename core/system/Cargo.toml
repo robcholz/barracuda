@@ -49,6 +49,9 @@ embedded-storage = "0.3"
 embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+barracuda-webserver-plugin = { workspace = true, features = ["std"] }
+
 [dev-dependencies]
 barracuda-model-api.workspace = true
 barracuda-platform-test.workspace = true
