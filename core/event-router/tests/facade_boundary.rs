@@ -61,6 +61,9 @@ fn collect_sources_and_manifests(
     directory: &std::path::Path,
     files: &mut Vec<std::path::PathBuf>,
 ) -> Result<(), std::io::Error> {
+    if !directory.exists() {
+        return Ok(());
+    }
     for entry in std::fs::read_dir(directory)? {
         let path = entry?.path();
         if path.is_dir() {
