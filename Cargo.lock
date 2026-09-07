@@ -1257,6 +1257,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-build"
+version = "0.1.0"
+dependencies = [
+ "barracuda-plugin-manifest",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-plugin-macros"
 version = "0.1.0"
 dependencies = [
@@ -1300,6 +1310,7 @@ dependencies = [
  "anstyle",
  "barracuda-cli-style",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "clap",
  "ctrlc",
  "dialoguer",

@@ -114,6 +114,9 @@ impl SyncReport {
 /// Failure while discovering, selecting, or synchronizing Plugins.
 #[derive(Debug, thiserror::Error)]
 pub enum CommandError {
+    /// An author-declared task failed.
+    #[error(transparent)]
+    Task(#[from] barracuda_plugin_build::TaskError),
     /// A filesystem operation failed.
     #[error("failed to access `{path}`: {source}")]
     Io {
@@ -138,6 +141,44 @@ pub enum CommandError {
     /// The requested Plugin does not exist.
     #[error("unknown Plugin `{0}`")]
     NotFound(String),
+}
+
+/// Runs an author task for selected Plugins, or explicitly for one enabled Plugin.
+/// Missing tasks are skipped in batch mode and rejected for an explicit Plugin.
+///
+/// # Errors
+/// Returns an error on invalid selection, unavailable tasks, or the first failed task.
+pub fn run(root: &Path, task: &str, name: Option<&str>) -> Result<(), CommandError> {
+    let plugins = discover(root)?;
+    let disabled = read_disabled(root)?;
+    if let Some(name) = name {
+        let plugin = plugins
+            .iter()
+            .find(|plugin| plugin.id == name || plugin.directory == name)
+            .ok_or_else(|| CommandError::NotFound(name.to_owned()))?;
+        if disabled.contains(&plugin.directory) {
+            return Err(CommandError::Metadata(format!(
+                "Plugin `{name}` is disabled"
+            )));
+        }
+        if !barracuda_plugin_build::run(&root.join("plugins").join(&plugin.directory), task)? {
+            return Err(CommandError::Metadata(format!(
+                "Plugin `{name}` has no task `{task}`"
+            )));
+        }
+    } else {
+        let mut count = 0;
+        for plugin in plugins
+            .iter()
+            .filter(|plugin| !disabled.contains(&plugin.directory))
+        {
+            if barracuda_plugin_build::run(&root.join("plugins").join(&plugin.directory), task)? {
+                count += 1;
+            }
+        }
+        eprintln!("Completed `{task}` for {count} Plugin(s)");
+    }
+    Ok(())
 }
 
 /// Loads display metadata for one Plugin, addressed by identity or directory.
