@@ -9,7 +9,10 @@ name = "barracuda-board"
 path = "src/main.rs"
 
 [dependencies]
+anstream = "1"
+anstyle = "1"
 barracuda-board-config.workspace = true
+barracuda-cli-style.workspace = true
 barracuda-platform-config.workspace = true
 barracuda-platform-tool.workspace = true
 clap = { version = "4", features = ["derive"] }

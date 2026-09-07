@@ -6,7 +6,9 @@ use std::{
     process::{self, ExitCode},
 };
 
-use barracuda_board_tool::{execute, Cli, Command};
+use anstream::{eprintln, AutoStream};
+use barracuda_board_tool::{execute_colored, Cli, Command};
+use barracuda_cli_style::ERROR;
 use clap::Parser;
 use dialoguer::console::Term;
 
@@ -15,19 +17,20 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     if matches!(&cli.command, Command::Select { name: None }) {
         if let Err(error) = install_interrupt_handler() {
-            eprintln!("error: failed to install Ctrl-C handler: {error}");
+            eprintln!("{ERROR}error:{ERROR:#} failed to install Ctrl-C handler: {error}");
             return ExitCode::FAILURE;
         }
     }
-    let mut output = io::stdout().lock();
-    match execute(cli, &workspace_root, &mut output) {
+    let output = io::stdout().lock();
+    let mut output = AutoStream::auto(output);
+    match execute_colored(cli, &workspace_root, &mut output) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) if is_interrupted_prompt(&error) => {
             let _ = Term::stderr().show_cursor();
             ExitCode::from(130)
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
             ExitCode::FAILURE
         }
     }

@@ -86,7 +86,13 @@ impl SyncReport {
 
 /// Command-line interface for `cargo board`.
 #[derive(Debug, Parser)]
-#[command(name = "cargo board", bin_name = "cargo board", version, about)]
+#[command(
+    name = "cargo board",
+    bin_name = "cargo board",
+    version,
+    about,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 pub struct Cli {
     /// Board operation to perform.
     #[command(subcommand)]
@@ -275,7 +281,7 @@ where
                 .map(|argument| argument.as_ref().to_owned()),
         ),
     )?;
-    execute_with_selector(cli, workspace_root, output, prompt_for_board)
+    execute_with_selector(cli, workspace_root, output, prompt_for_board, false)
 }
 
 /// Executes a parsed Board command.
@@ -287,7 +293,16 @@ pub fn execute<W: Write>(
     workspace_root: &Path,
     output: &mut W,
 ) -> Result<(), CommandError> {
-    execute_with_selector(cli, workspace_root, output, prompt_for_board)
+    execute_with_selector(cli, workspace_root, output, prompt_for_board, false)
+}
+
+/// Executes a parsed Board command with terminal styling enabled.
+pub fn execute_colored<W: Write>(
+    cli: Cli,
+    workspace_root: &Path,
+    output: &mut W,
+) -> Result<(), CommandError> {
+    execute_with_selector(cli, workspace_root, output, prompt_for_board, true)
 }
 
 fn execute_with_selector<W, F>(
@@ -295,6 +310,7 @@ fn execute_with_selector<W, F>(
     workspace_root: &Path,
     output: &mut W,
     selector: F,
+    color: bool,
 ) -> Result<(), CommandError>
 where
     W: Write,
@@ -309,7 +325,9 @@ where
             };
             writeln!(
                 output,
-                "{action} Board registry ({} Boards, {} HALs).",
+                "{}{action} {} registry ({} Boards, {} HALs).",
+                prefix(color, barracuda_cli_style::SUCCESS, "✔"),
+                styled(color, barracuda_cli_style::EMPHASIS, "Board"),
                 report.boards(),
                 report.board_hals()
             )
@@ -322,15 +340,20 @@ where
                 .as_ref()
                 .and_then(|current| boards.iter().position(|board| board == current));
             let Some(index) = selector(&boards, default)? else {
-                writeln!(output, "Board selection cancelled.").map_err(CommandError::Output)?;
+                writeln!(
+                    output,
+                    "{}Board selection cancelled.",
+                    prefix(color, barracuda_cli_style::WARNING, "⚠")
+                )
+                .map_err(CommandError::Output)?;
                 return Ok(());
             };
             let name = boards
                 .get(index)
                 .ok_or(CommandError::InvalidSelectionIndex { index })?;
-            select_board(workspace_root, name, output)
+            select_board(workspace_root, name, output, color)
         }
-        Command::Select { name: Some(name) } => select_board(workspace_root, &name, output),
+        Command::Select { name: Some(name) } => select_board(workspace_root, &name, output, color),
         Command::Target { name: None } => {
             let name = read_selected_board(workspace_root)?.ok_or(CommandError::NoSelection)?;
             print_target(workspace_root, &name, output)
@@ -549,7 +572,7 @@ where
                 .map(|argument| argument.as_ref().to_owned()),
         ),
     )?;
-    execute_with_selector(cli, workspace_root, output, selector)
+    execute_with_selector(cli, workspace_root, output, selector, false)
 }
 
 fn prompt_for_board(
@@ -646,10 +669,27 @@ fn print_target<W: Write>(
     }
 }
 
+fn styled(color: bool, style: anstyle::Style, value: &str) -> String {
+    if color {
+        format!("{style}{value}{style:#}")
+    } else {
+        value.to_owned()
+    }
+}
+
+fn prefix(color: bool, style: anstyle::Style, value: &str) -> String {
+    if color {
+        format!("{style}{value}{style:#} ")
+    } else {
+        String::new()
+    }
+}
+
 fn select_board<W: Write>(
     workspace_root: &Path,
     name: &str,
     output: &mut W,
+    color: bool,
 ) -> Result<(), CommandError> {
     let bundle = workspace_root.join("boards/configs").join(name);
     let board = read_board(workspace_root, name)?;
@@ -663,8 +703,23 @@ fn select_board<W: Write>(
 
     write_selected_build(workspace_root, &board)?;
     write_selected_board(workspace_root, name)?;
-    writeln!(output, "Selected Board `{name}`.").map_err(CommandError::Output)?;
-    writeln!(output, "Run `cargo run` to build and start it.").map_err(CommandError::Output)
+    writeln!(
+        output,
+        "{}Selected Board `{}`.",
+        prefix(color, barracuda_cli_style::SUCCESS, "✔"),
+        styled(color, barracuda_cli_style::EMPHASIS, name)
+    )
+    .map_err(CommandError::Output)?;
+    writeln!(
+        output,
+        "{}",
+        styled(
+            color,
+            barracuda_cli_style::DIM,
+            "Run `cargo run` to build and start it.",
+        )
+    )
+    .map_err(CommandError::Output)
 }
 
 fn write_selected_build(
