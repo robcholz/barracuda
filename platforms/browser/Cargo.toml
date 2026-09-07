@@ -1,0 +1,29 @@
+[package]
+name = "barracuda-platform-browser"
+version = "0.1.0"
+edition = "2021"
+description = "Browser Web Worker Platform implementation for Barracuda"
+
+[dependencies]
+barracuda-net-gateway-protocol.workspace = true
+embassy-executor = { workspace = true, features = ["arch-wasm", "executor-thread"] }
+embassy-net.workspace = true
+embassy-net-driver-channel.workspace = true
+heapless = "0.9"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Crypto", "DedicatedWorkerGlobalScope", "Event", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemSyncAccessHandle", "MessageEvent", "Request", "RequestInit", "RequestMode", "Response", "WebSocket", "WorkerGlobalScope", "WorkerNavigator"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
