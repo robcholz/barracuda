@@ -23,6 +23,26 @@ fn lua_new_has_only_the_allowlist_sandbox_environment() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn lua_new_includes_safe_computation_standard_libraries() -> Result<()> {
+    let mut lua = Lua::new()?;
+    let libraries_work: bool = lua
+        .load(
+            "return string == require('string') \
+             and table == require('table') \
+             and math == require('math') \
+             and utf8 == require('utf8') \
+             and string.upper('barracuda') == 'BARRACUDA' \
+             and table.concat({'bar', 'rac', 'uda'}) == 'barracuda' \
+             and math.floor(4.2) == 4 \
+             and utf8.len('汉字') == 2",
+        )
+        .eval()?;
+
+    assert!(libraries_work);
+    Ok(())
+}
+
 struct FlagPackage {
     name: &'static str,
 }

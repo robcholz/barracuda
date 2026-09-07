@@ -11,7 +11,9 @@ use core::{
 
 use lunka::Thread;
 use lunka::cdef::auxlib::{LOADED_TABLE, PRELOAD_TABLE, luaL_loadbufferx, luaL_ref};
-use lunka::cdef::stdlibs::{luaopen_base, luaopen_package};
+use lunka::cdef::stdlibs::{
+    luaopen_base, luaopen_math, luaopen_package, luaopen_string, luaopen_table, luaopen_utf8,
+};
 use lunka::cdef::{
     DEFAULT_EXTRA_SPACE, EventMask, MAX_ALIGN, REGISTRY_GLOBALS, REGISTRY_INDEX, Status,
     lua_CFunction, lua_Debug, lua_KContext, lua_State, lua_createtable, lua_getextraspace,
@@ -45,7 +47,7 @@ pub(crate) struct Task {
 static ASYNC_MARKER: u8 = 0xA5;
 static ERROR_MARKER: u8 = 0xE1;
 
-const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 13] = [
+const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 17] = [
     c"assert",
     c"error",
     c"ipairs",
@@ -58,6 +60,10 @@ const ENVIRONMENT_GLOBALS: [&core::ffi::CStr; 13] = [
     c"tostring",
     c"type",
     c"xpcall",
+    c"string",
+    c"table",
+    c"math",
+    c"utf8",
     c"_VERSION",
 ];
 
@@ -235,6 +241,14 @@ impl Lua {
             lunka::cdef::auxlib::luaL_requiref(state, c"_G".as_ptr(), luaopen_base, 1);
             lua_pop(state, 1);
             lunka::cdef::auxlib::luaL_requiref(state, c"package".as_ptr(), luaopen_package, 1);
+            lua_pop(state, 1);
+            lunka::cdef::auxlib::luaL_requiref(state, c"string".as_ptr(), luaopen_string, 1);
+            lua_pop(state, 1);
+            lunka::cdef::auxlib::luaL_requiref(state, c"table".as_ptr(), luaopen_table, 1);
+            lua_pop(state, 1);
+            lunka::cdef::auxlib::luaL_requiref(state, c"math".as_ptr(), luaopen_math, 1);
+            lua_pop(state, 1);
+            lunka::cdef::auxlib::luaL_requiref(state, c"utf8".as_ptr(), luaopen_utf8, 1);
             lua_pop(state, 1);
         }
         let environment = unsafe {

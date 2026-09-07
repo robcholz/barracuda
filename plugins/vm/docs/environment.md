@@ -30,6 +30,10 @@ remain local to that one Lua state.
 | `select` | Select variadic arguments. |
 | `tonumber`, `tostring`, `type` | Basic value conversion and inspection. |
 | `require` | Load a native package installed into this Lua state. |
+| `string` | Lua's standard string manipulation library. |
+| `table` | Lua's standard table manipulation library. |
+| `math` | Lua's standard mathematical library. |
+| `utf8` | Lua's standard UTF-8 library. |
 
 Lua syntax and language primitives remain available: values, tables, functions,
 closures, conditionals, loops, operators, and multiple return values do not
@@ -86,11 +90,12 @@ completed, failed, and cancelled executions are omitted.
 
 ## Native modules
 
-`require` only searches the internal preload table populated through Rust
-`register_lib`. Filesystem Lua modules, native shared libraries, and arbitrary
-searchers are not supported. The `package` table is not exposed, and the
-bootstrap entries for `_G` and `package` are removed from the loaded-module
-cache, so `require("_G")` and `require("package")` fail.
+`require` resolves the already-loaded `string`, `table`, `math`, and `utf8`
+standard libraries, then only searches the internal preload table populated
+through Rust `register_lib`. Filesystem Lua modules, native shared libraries,
+and arbitrary searchers are not supported. The `package` table is not exposed,
+and the bootstrap entries for `_G` and `package` are removed from the
+loaded-module cache, so `require("_G")` and `require("package")` fail.
 
 The VM composes one built-in native package: `io`. It is our
 message-based package, not Lua's filesystem and process-oriented standard
@@ -124,7 +129,7 @@ The Rust return contract is:
 
 The following Lua standard-library surfaces are not available:
 
-- `package`, `coroutine`, `string`, `table`, `math`, and `utf8`;
+- `package` and `coroutine`;
 - the standard Lua `io` library, plus `os` and `debug`;
 - `load`, `loadfile`, and `dofile`;
 - `collectgarbage` and `warn`;
