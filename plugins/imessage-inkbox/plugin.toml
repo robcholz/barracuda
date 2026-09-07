@@ -1,3 +1,9 @@
 id = "imessage-inkbox"
-depends-on = ["imessage-gateway", "webserver"]
+depends-on = ["imessage-gateway", "webserver", "captive-portal"]
 description = "Adds Inkbox as an iMessage Gateway channel."
+
+[tasks.build]
+cwd = "."
+command = ["bun", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
+outputs = ["filesystem/resources/entry.js"]

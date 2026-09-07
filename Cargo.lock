@@ -441,9 +441,11 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-agent-runtime",
+ "barracuda-captive-portal-plugin",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
@@ -624,7 +626,9 @@ name = "barracuda-agent-websearch-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-captive-portal-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "embassy-futures",
  "embedded-io-async 0.7.0",
@@ -717,6 +721,7 @@ dependencies = [
  "allocation-counter",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-vfs",
  "barracuda-vfs-memfs",
  "barracuda-webserver-plugin",
@@ -802,8 +807,10 @@ dependencies = [
 name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "bluebubbles",
  "http-client",
@@ -845,8 +852,10 @@ dependencies = [
 name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "inkbox",
@@ -859,8 +868,10 @@ dependencies = [
 name = "barracuda-imessage-qq-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",
@@ -873,8 +884,10 @@ dependencies = [
 name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",
@@ -887,8 +900,10 @@ dependencies = [
 name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "log",
  "web",
@@ -898,8 +913,10 @@ dependencies = [
 name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",

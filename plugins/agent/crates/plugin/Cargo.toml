@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Barracuda Plugin that owns the Agent runtime and Workflow adapter"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
+barracuda-captive-portal-plugin.workspace = true
 async-channel = { version = "2", default-features = false }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }

@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "IMessage Web provider Plugin"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
+barracuda-captive-portal-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true

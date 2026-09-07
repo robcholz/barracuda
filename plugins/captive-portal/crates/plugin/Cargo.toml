@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Captive portal web entry and resource aggregation"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true

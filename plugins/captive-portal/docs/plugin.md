@@ -77,10 +77,10 @@ Future scaffold output belongs in
 responsible for including only enabled plugin contributions. No web-specific
 packager, cross-plugin Bun bundle, or `include_bytes!` asset embedding is added.
 
-The scaffold is implemented in `web/src/` using TypeScript, semantic HTML, and
+The scaffold is implemented in `resources/web/src/` using TypeScript, semantic HTML, and
 CSS without a browser runtime framework or external fonts/CDNs. Bun emits
 `index.html`, `app.js`, and `app.css` into `filesystem/resources/`. Build tools
-and test dependencies remain in `web/`, outside the packaged resource tree.
+and test dependencies are managed at the repository root, outside the packaged resource tree.
 A mounted volume without the scaffold
 returns 404; an absent resource volume returns 503. System currently mounts
 the durable `/data` volume; provisioning and mounting `/resources` remains a
@@ -94,13 +94,27 @@ and runtime route removal are distinct: runtime unload does not erase image file
 
 ## Bun build and module contract
 
-From `plugins/captive-portal/web/`:
+From the repository root, `cargo plugin run build` builds resources for every
+enabled contributor. `cargo plugin run build --plugin captive-portal` builds
+only this shell. The same build task runs automatically through this Plugin's
+Cargo build hook; ordinary `cargo build`, `cargo run`, and `cargo check` do not
+require a separate resource-build command. This produces resource files, not a
+System image or a mounted device volume.
+
+The Plugin declares its commands in `plugin.toml`. `inputs` and `outputs` are
+relative to the Plugin root, while `cwd` selects where the executable runs.
+Only `build` is automatic. Frontend dependencies, formatting, lint, type checking,
+and the test runner are shared across the repository. Bun must already be installed.
+
+From the repository root:
 
 ```sh
 bun install --frozen-lockfile
+bun run format:check
+bun run lint
 bun run check
+cargo plugin run build
 bun run test
-bun run build
 bun run dev
 ```
 
@@ -134,6 +148,21 @@ resolve from the contributor's resource URL. Prefer content-hashed module
 filenames across firmware versions; JavaScript module caching is browser-owned.
 
 ## Verification
+
+Built-in contributors are `agent` (model configuration), `agent-websearch`
+(Tavily), `imessage-qq`, `imessage-wechat`, `imessage-bluebubble`,
+`imessage-telegram`, `imessage-inkbox`, and `imessage-web` (live text chat).
+Each owns its `resources/web/entry.ts`, tests, build declaration, and resource output.
+Ordinary entries use `tools/web/build.ts`; this shell retains its custom build script.
+The shell provides common form styling; chat-specific styles live in the chat
+module and are removed on unmount. No dependency scan creates navigation entries.
+
+After changing a contributor or the build-time `resources/web/ui/form.ts` helper, rebuild
+the affected contributor(s) with `cargo plugin run build` from the repository root.
+The portal frontend tests verify all checked-in contributor outputs against a
+fresh in-memory Bun build, as well as form payloads, cancellation, secret cleanup,
+WebSocket framing, and module cleanup. These are DOM/protocol tests, not device
+or visual browser verification.
 
 Tests cover entry validation, duplicate IDs, namespace separation, resource
 path traversal rejection, cached dispatch allocation counts, actual HTTP
