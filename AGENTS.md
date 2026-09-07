@@ -14,3 +14,8 @@ capabilities, and for the required capability declaration in `plugin.md`.
 See [.agents/docs/execution-ownership.md](.agents/docs/execution-ownership.md)
 for the authoritative boundary between Event Router Components and
 owner-managed Embassy tasks.
+
+## Local verification
+
+Do not run the full workspace test suite locally. Use focused tests and checks
+for the affected packages and targets; leave the complete test matrix to CI.
