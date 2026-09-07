@@ -1,0 +1,15 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_delete",
+    "description": "Delete one file or one empty directory inside the scoped filesystem.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    }
+  }
+}

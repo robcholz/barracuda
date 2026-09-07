@@ -1,0 +1,1 @@
+Use `file_write` to create a complete UTF-8 file. Parent directories are created automatically. It refuses an existing path unless `overwrite` is true. Prefer `file_edit` when changing part of an existing file.

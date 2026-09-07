@@ -41,6 +41,7 @@ barracuda-board-stm32f429zi-nucleo = { path = "boards/configs/stm32f429zi-nucleo
 # END GENERATED BOARD WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
+barracuda-agent-file-plugin = { path = "plugins/agent-file/crates/plugin" }
 barracuda-agent-http-plugin = { path = "plugins/agent-http/crates/plugin" }
 barracuda-agent-imessage-gateway-plugin = { path = "plugins/agent-imessage-gateway/crates/plugin" }
 barracuda-agent-scheduler-plugin = { path = "plugins/agent-scheduler/crates/plugin" }

@@ -1,0 +1,17 @@
+{
+  "type": "function",
+  "function": {
+    "name": "file_write",
+    "description": "Atomically create or explicitly replace one UTF-8 file inside the scoped filesystem.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "content": { "type": "string", "maxLength": 32768 },
+        "overwrite": { "type": "boolean" }
+      },
+      "required": ["path", "content"],
+      "additionalProperties": false
+    }
+  }
+}

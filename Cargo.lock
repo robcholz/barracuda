@@ -348,6 +348,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent-file-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "embassy-futures",
+ "json-validator",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-agent-http-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1400,6 +1414,7 @@ dependencies = [
 name = "barracuda-system"
 version = "0.1.0"
 dependencies = [
+ "barracuda-agent-file-plugin",
  "barracuda-agent-http-plugin",
  "barracuda-agent-imessage-gateway-plugin",
  "barracuda-agent-plugin",

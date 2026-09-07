@@ -1,0 +1,1 @@
+Use `file_edit` for focused changes. By default `old_text` must occur exactly once; include more surrounding context if it is ambiguous. Set `replace_all` only when every exact occurrence should change. The write is atomic after validation.

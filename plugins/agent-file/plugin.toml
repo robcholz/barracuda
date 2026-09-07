@@ -1,0 +1,3 @@
+id = "agent-file"
+depends-on = ["agent"]
+description = "Exposes the Plugin filesystem to Agents as bounded native file Tools."
