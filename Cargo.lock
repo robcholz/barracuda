@@ -1433,6 +1433,7 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
+ "barracuda-vfs-memfs",
  "barracuda-vm-agent-plugin",
  "barracuda-vm-plugin",
  "barracuda-webserver-plugin",

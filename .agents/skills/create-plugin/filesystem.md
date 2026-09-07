@@ -23,7 +23,7 @@ The private scope has four reserved mount points:
 | `/resources` | Read-only files supplied by the built image. They follow the image version and may be replaced by an upgrade. |
 | `/data` | Durable read-write files required for correctness. They survive restart and are never automatically evicted. |
 | `/cache` | Read-write, reproducible files that System may remove at any time. Callers must handle absence. |
-| `/media` | Durable large runtime content on optional or removable storage. Callers must handle the mount being unavailable. |
+| `/media` | Durable large runtime content stored separately from correctness-critical Plugin data. |
 
 The same `ScopedVfs` exposes three shared Workspace mount points:
 
@@ -31,7 +31,7 @@ The same `ScopedVfs` exposes three shared Workspace mount points:
 | --- | --- |
 | `/workspace/resources` | Shared read-only files supplied by the System image. |
 | `/workspace/cache` | Shared reproducible or short-lived exchange files that System may remove at any time. |
-| `/workspace/media` | Shared durable runtime files. Callers must handle the mount being unavailable. |
+| `/workspace/media` | Shared durable runtime files. |
 
 Do not store files directly at the scoped root or `/workspace`. Select one
 reserved mount from the file's lifecycle and ownership semantics.
@@ -83,11 +83,9 @@ path. System-owned image inputs populate the shared Workspace resources.
 Mount policy enforces the contract:
 
 - mutations below `/resources` and `/workspace/resources` return `ReadOnly`;
-- an unavailable optional volume returns `NotMounted`;
 - rename across reserved mount points returns `CrossMount`;
 - `..` and absolute backend paths cannot escape the Plugin scope;
 - unload does not delete `/data`, `/media`, or `/workspace/media`.
 
-Plugins must treat `/cache` and `/workspace/cache` as disposable, and `/media`
-and `/workspace/media` as potentially absent. They must not depend on the
-concrete backing filesystem for correctness.
+Plugins must treat `/cache` and `/workspace/cache` as disposable. They must not
+depend on the concrete backing filesystem for correctness.

@@ -23,14 +23,19 @@ async fn manager() -> PluginManager<MemoryPartition> {
         .await
         .expect("open Plugin storage");
     let mut filesystem = Vfs::new();
+    let durable = MemFs::new().into_backend();
     filesystem
-        .mount(
-            "/data",
-            MemFs::new().into_backend(),
-            MountOptions::read_write(),
-        )
+        .mount("/data", durable.clone(), MountOptions::read_write())
         .await
         .expect("mount Plugin data volume");
+    filesystem
+        .create_dir_all("/data/media")
+        .await
+        .expect("create durable media root");
+    filesystem
+        .mount_scoped("/media", durable, "/media", MountOptions::read_write())
+        .await
+        .expect("mount media volume");
     let resources = MemFs::new();
     resources
         .create_dir_all("/plugins/first")
@@ -38,6 +43,12 @@ async fn manager() -> PluginManager<MemoryPartition> {
     resources
         .write_file("/plugins/first/config.json", br#"{"enabled":true}"#)
         .expect("write Plugin resource");
+    resources
+        .create_dir_all("/workspace")
+        .expect("create Workspace resource directory");
+    resources
+        .write_file("/workspace/common.txt", b"shared")
+        .expect("write Workspace resource");
     filesystem
         .mount(
             "/resources",
@@ -46,6 +57,14 @@ async fn manager() -> PluginManager<MemoryPartition> {
         )
         .await
         .expect("mount Plugin resources volume");
+    filesystem
+        .mount(
+            "/cache",
+            MemFs::new().into_backend(),
+            MountOptions::read_write(),
+        )
+        .await
+        .expect("mount cache volume");
     manager.install_vfs(filesystem);
     manager
 }
@@ -144,8 +163,54 @@ fn declared_plugins_receive_isolated_filesystem_roots() {
             first.rename("/data/state", "/resources/state").await,
             Err(FsError::CrossMount)
         );
-        assert_eq!(first.read("/cache/file").await, Err(FsError::NotMounted));
-        assert_eq!(first.read("/media/file").await, Err(FsError::NotMounted));
+        first.write("/cache/private", b"first-cache").await.unwrap();
+        second
+            .write("/cache/private", b"second-cache")
+            .await
+            .unwrap();
+        assert_eq!(first.read("/cache/private").await.unwrap(), b"first-cache");
+        assert_eq!(
+            second.read("/cache/private").await.unwrap(),
+            b"second-cache"
+        );
+
+        assert_eq!(
+            first.read("/workspace/resources/common.txt").await.unwrap(),
+            b"shared"
+        );
+        assert_eq!(
+            first
+                .write("/workspace/resources/common.txt", b"changed")
+                .await,
+            Err(FsError::ReadOnly)
+        );
+
+        first
+            .write("/workspace/cache/vm-output", b"temporary")
+            .await
+            .unwrap();
+        assert_eq!(
+            second.read("/workspace/cache/vm-output").await.unwrap(),
+            b"temporary"
+        );
+        second
+            .write("/workspace/media/report.txt", b"durable")
+            .await
+            .unwrap();
+        assert_eq!(
+            first.read("/workspace/media/report.txt").await.unwrap(),
+            b"durable"
+        );
+        assert_eq!(
+            first
+                .rename("/workspace/cache/vm-output", "/workspace/media/vm-output")
+                .await,
+            Err(FsError::CrossMount)
+        );
+        assert_eq!(
+            first.read("/workspace/data/state").await,
+            Err(FsError::NotMounted)
+        );
         assert_eq!(first.read("/state").await, Err(FsError::NotMounted));
         assert_eq!(
             first.write("/state", b"root").await,

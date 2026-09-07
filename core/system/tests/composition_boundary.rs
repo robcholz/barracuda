@@ -35,12 +35,19 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("MountOptions::read_only()"));
     assert!(system.contains("mount(\"/resources\", resources, MountOptions::read_only())"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
-    assert!(system.contains("mount(\"/data\", backend, MountOptions::read_write())"));
+    assert!(system.contains("mount(\"/data\", backend.clone(), MountOptions::read_write())"));
+    assert!(system.contains("create_dir_all(\"/data/media\")"));
+    assert!(system
+        .contains("mount_scoped(\"/media\", backend, \"/media\", MountOptions::read_write())"));
+    assert!(system.contains("MemFs::new().into_backend()"));
+    assert!(system.contains("mount(\"/cache\", cache, MountOptions::read_write())"));
     assert!(system.contains("$manager.register_all()"));
     assert!(system.contains("plugins.start()"));
     assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
     assert!(!system.contains("StorageNotConstructed"));
     let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;
+    let manifest = std::fs::read_to_string(root.join("core/system/Cargo.toml"))?;
+    assert!(manifest.contains("barracuda-vfs-memfs.workspace = true"));
     assert!(resources.contains("SYSTEM_PARTITION: &str = \"system\""));
     assert!(resources.contains("KV_DATABASE_PARTITION: &str = \"kv_database\""));
     assert!(resources.contains("RESOURCES_PARTITION: &str = \"resources\""));
