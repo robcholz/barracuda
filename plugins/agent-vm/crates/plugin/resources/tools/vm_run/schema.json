@@ -1,0 +1,15 @@
+{
+  "type": "function",
+  "function": {
+    "name": "vm_run",
+    "description": "Start one isolated Lua execution and return its run ID.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source": { "type": "string" }
+      },
+      "required": ["source"],
+      "additionalProperties": false
+    }
+  }
+}

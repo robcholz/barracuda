@@ -1,0 +1,1 @@
+Use `time_now` when an exact current UTC timestamp is needed. It returns RFC3339 UTC with millisecond precision. An `error` response means the clock has not synchronized or its last synchronization is stale.

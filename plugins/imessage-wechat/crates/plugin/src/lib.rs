@@ -42,10 +42,10 @@ impl IMessageWechatPlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for IMessageWechatPlugin {
+impl Plugin for IMessageWechatPlugin {
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,

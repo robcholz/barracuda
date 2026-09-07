@@ -3,28 +3,19 @@
 #![allow(clippy::expect_used)]
 
 #[test]
-fn component_loading_is_explicitly_registration_only() {
+fn plugin_lifecycle_has_no_event_router_boundary() {
     let source = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lifecycle.rs"),
     )
     .expect("read Plugin lifecycle source");
 
-    assert!(source.contains("pub struct PluginEventRouterContext"));
-    assert!(source.contains("pub event_router: PluginEventRouterContext"));
     assert!(source.contains("pub struct PluginRegisterContext"));
     assert!(!source.contains("pub struct PluginContext"));
     assert!(source.contains("pub struct PluginStartContext"));
-
-    let start_context = source
-        .split("pub struct PluginStartContext")
-        .nth(1)
-        .expect("PluginStartContext declaration")
-        .split("impl<Storage")
-        .next()
-        .expect("PluginStartContext fields");
-    assert!(!start_context.contains("registrar"));
-    assert!(!start_context.contains("component_ids"));
-    assert!(!start_context.contains("event_router"));
+    assert!(!source.contains("EventRouter"));
+    assert!(!source.contains("PluginEventRouterContext"));
+    assert!(!source.contains("EventRouterRegistrar"));
+    assert!(!source.contains("component_ids"));
 }
 
 #[test]
@@ -35,7 +26,7 @@ fn plugin_start_uses_the_hook_only_context() {
     .expect("read Plugin lifecycle source");
 
     let plugin_trait = source
-        .split("pub trait Plugin<const M: usize>")
+        .split("pub trait Plugin: PluginDeclaration")
         .nth(1)
         .expect("Plugin trait")
         .split("trait ManagedPlugin")
@@ -56,7 +47,7 @@ fn embassy_task_spawner_is_available_only_during_startup() {
         .split("pub struct PluginRegisterContext")
         .nth(1)
         .expect("PluginRegisterContext declaration")
-        .split("impl<const M")
+        .split("impl<Storage")
         .next()
         .expect("PluginRegisterContext fields");
     assert!(!register_context.contains("task_spawner"));
@@ -85,7 +76,7 @@ fn plugin_registration_and_start_hooks_are_synchronous() {
     assert!(source.contains("pub async fn unload"));
 
     let plugin_trait = source
-        .split("pub trait Plugin<const M: usize>")
+        .split("pub trait Plugin: PluginDeclaration")
         .nth(1)
         .expect("Plugin trait")
         .split("trait ManagedPlugin")

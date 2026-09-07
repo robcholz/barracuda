@@ -9,28 +9,32 @@ crate-type = ["rlib"]
 
 [dependencies]
 barracuda-board-hal.workspace = true
-barracuda-event-router.workspace = true
 # BEGIN GENERATED PLUGINS
 barracuda-agent-plugin.workspace = true
-barracuda-file-plugin.workspace = true
-barracuda-gpio-plugin.workspace = true
+barracuda-agent-http-plugin.workspace = true
+barracuda-agent-imessage-gateway-plugin.workspace = true
+barracuda-agent-scheduler-plugin.workspace = true
+barracuda-agent-time-plugin.workspace = true
+barracuda-agent-vm-plugin.workspace = true
+barracuda-agent-websearch-plugin.workspace = true
+barracuda-agent-workflow-plugin.workspace = true
 barracuda-http-plugin.workspace = true
-barracuda-i2c-plugin.workspace = true
 barracuda-imessage-bluebubble-plugin.workspace = true
-barracuda-imessage-bridge-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-imessage-inkbox-plugin.workspace = true
 barracuda-imessage-qq-plugin.workspace = true
 barracuda-imessage-telegram-plugin.workspace = true
 barracuda-imessage-web-plugin.workspace = true
 barracuda-imessage-wechat-plugin.workspace = true
-barracuda-message-queue-plugin.workspace = true
 barracuda-scheduler-plugin.workspace = true
-barracuda-spi-plugin.workspace = true
 barracuda-time-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
-barracuda-web-search-plugin.workspace = true
+barracuda-gpio-plugin.workspace = true
+barracuda-i2c-plugin.workspace = true
+barracuda-message-queue-plugin.workspace = true
+barracuda-spi-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
 # END GENERATED PLUGINS
 barracuda-plugin.workspace = true
 barracuda-platform.workspace = true

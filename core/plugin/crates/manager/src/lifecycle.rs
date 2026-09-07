@@ -1,4 +1,4 @@
-//! Plugin identity, registration, and grouped Component lifecycle.
+//! Plugin identity, registration, capability, and task lifecycle.
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -11,7 +11,6 @@ use core::any::{type_name, Any, TypeId};
 use core::error::Error;
 use core::fmt::{self, Debug};
 
-use barracuda_event_router::{Component, ComponentId, EventRouter, LoadError, UnloadError};
 use barracuda_kv::Database;
 use barracuda_vfs::{FsError, Vfs};
 use embassy_executor::Spawner;
@@ -102,13 +101,10 @@ impl TryFrom<&'static str> for PluginId {
 /// Result returned by Plugin initialization.
 pub type PluginResult<T> = Result<T, PluginError>;
 
-/// Failure while a Plugin initializes its Components or storage state.
+/// Failure while a Plugin initializes its capabilities or storage state.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PluginError {
-    /// Event Router rejected one Component.
-    #[error(transparent)]
-    Component(#[from] LoadError),
     /// Scoped persistent storage failed.
     #[error(transparent)]
     Storage(#[from] StorageError),
@@ -143,18 +139,18 @@ pub trait PluginDeclaration {
     const DEPENDS_ON: &'static [&'static str] = &[];
 }
 
-/// One system-managed Plugin that may register multiple Components.
-pub trait Plugin<const M: usize>: PluginDeclaration {
+/// One system-managed Plugin.
+pub trait Plugin: PluginDeclaration {
     /// Resources that Plugin Manager must prepare before registration.
     const REQUIREMENTS: PluginRequirements = PluginRequirements::new();
 
-    /// Registers the Plugin's capabilities and Event Router Components.
+    /// Registers the Plugin's capabilities and retained resources.
     ///
-    /// Component graph construction belongs exclusively to this phase. The
+    /// Capability graph construction belongs exclusively to this phase. The
     /// default registration phase performs no work.
     fn register<Storage>(
         &mut self,
-        _context: &mut PluginRegisterContext<'_, M, Storage>,
+        _context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: PluginStorage,
@@ -164,10 +160,9 @@ pub trait Plugin<const M: usize>: PluginDeclaration {
 
     /// Runs the Plugin's startup hook after every Plugin has registered.
     ///
-    /// This hook cannot load Event Router Components or publish capabilities;
-    /// those operations belong to [`Self::register`]. A returned error causes
-    /// the manager to unload the Plugin's registered Components in reverse
-    /// order.
+    /// This hook cannot publish capabilities; that operation belongs to
+    /// [`Self::register`]. A returned error causes the manager to roll back the
+    /// Plugin's registered capabilities and retained resources.
     fn start<Storage>(&mut self, _context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
     where
         Storage: PluginStorage,
@@ -176,18 +171,17 @@ pub trait Plugin<const M: usize>: PluginDeclaration {
     }
 }
 
-trait ManagedPlugin<const M: usize, Storage: PluginStorage> {
+trait ManagedPlugin<Storage: PluginStorage> {
     fn identity(&self) -> &'static str;
     fn dependencies(&self) -> &'static [&'static str];
     fn requirements(&self) -> PluginRequirements;
-    fn register(&mut self, context: &mut PluginRegisterContext<'_, M, Storage>)
-        -> PluginResult<()>;
+    fn register(&mut self, context: &mut PluginRegisterContext<'_, Storage>) -> PluginResult<()>;
     fn start(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>;
 }
 
-impl<T, const M: usize, Storage> ManagedPlugin<M, Storage> for T
+impl<T, Storage> ManagedPlugin<Storage> for T
 where
-    T: Plugin<M>,
+    T: Plugin,
     Storage: PluginStorage,
 {
     fn identity(&self) -> &'static str {
@@ -202,10 +196,7 @@ where
         T::REQUIREMENTS
     }
 
-    fn register(
-        &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
-    ) -> PluginResult<()> {
+    fn register(&mut self, context: &mut PluginRegisterContext<'_, Storage>) -> PluginResult<()> {
         Plugin::register(self, context)
     }
 
@@ -214,58 +205,9 @@ where
     }
 }
 
-trait ComponentRegistrar<const M: usize> {
-    fn register_component(
-        &mut self,
-        component: Box<dyn Component<M>>,
-    ) -> Result<ComponentId, LoadError>;
-}
-
-struct EventRouterRegistrar<'a, const N: usize, const M: usize, const Q: usize> {
-    router: &'a mut EventRouter<N, M, Q>,
-}
-
-impl<const N: usize, const M: usize, const Q: usize> ComponentRegistrar<M>
-    for EventRouterRegistrar<'_, N, M, Q>
-{
-    fn register_component(
-        &mut self,
-        component: Box<dyn Component<M>>,
-    ) -> Result<ComponentId, LoadError> {
-        self.router.load(component)
-    }
-}
-
-/// Registration-only access to Event Router Component loading.
-pub struct PluginEventRouterContext<'a, const M: usize> {
-    registrar: &'a mut dyn ComponentRegistrar<M>,
-    component_ids: &'a mut Vec<ComponentId>,
-}
-
-impl<const M: usize> PluginEventRouterContext<'_, M> {
-    /// Loads one Component owned by the registering Plugin.
-    ///
-    /// The manager records the returned identity for Plugin-wide rollback and
-    /// unload.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when Event Router cannot load the Component.
-    pub fn load<C>(&mut self, component: C) -> PluginResult<ComponentId>
-    where
-        C: Component<M> + 'static,
-    {
-        let id = self.registrar.register_component(Box::new(component))?;
-        self.component_ids.push(id);
-        Ok(id)
-    }
-}
-
 /// Context provided exclusively during [`Plugin::register`].
 #[derive(Getters)]
-pub struct PluginRegisterContext<'a, const M: usize, Storage: PluginStorage> {
-    /// Explicit Event Router registration boundary.
-    pub event_router: PluginEventRouterContext<'a, M>,
+pub struct PluginRegisterContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
     storage: Storage,
@@ -277,7 +219,7 @@ pub struct PluginRegisterContext<'a, const M: usize, Storage: PluginStorage> {
     retained_resources: &'a mut Vec<Box<dyn Any>>,
 }
 
-impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storage> {
+impl<Storage: PluginStorage> PluginRegisterContext<'_, Storage> {
     /// Returns this Plugin's private VFS when it declared one.
     ///
     /// # Errors
@@ -327,7 +269,7 @@ impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storag
     ///
     /// Registration guards can use `Drop` to undo entries installed into a
     /// required capability. Retained resources are dropped on rollback or after
-    /// the Plugin's Components unload successfully.
+    /// the Plugin unloads.
     pub fn retain<T>(&mut self, resource: T)
     where
         T: Any,
@@ -338,17 +280,8 @@ impl<const M: usize, Storage: PluginStorage> PluginRegisterContext<'_, M, Storag
 
 /// Hook-only context provided during [`Plugin::start`].
 ///
-/// Event Router loading and capability publication are intentionally absent.
-/// The complete Component and capability graph must already exist before any
-/// startup hook runs.
-///
-/// ```compile_fail
-/// use barracuda_plugin_manager::{PluginStartContext, PluginStorage};
-///
-/// fn load_late<Storage: PluginStorage>(context: &mut PluginStartContext<'_, Storage>) {
-///     let _router = &mut context.event_router;
-/// }
-/// ```
+/// Capability publication is intentionally absent. The complete capability
+/// graph must already exist before any startup hook runs.
 #[derive(Getters)]
 pub struct PluginStartContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
@@ -453,7 +386,7 @@ impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
     /// Returns the Embassy spawner installed by the System composition root.
     ///
     /// Task spawning is intentionally available only during Plugin startup,
-    /// after the complete capability and Component graph has registered.
+    /// after the complete capability graph has registered.
     ///
     /// # Errors
     ///
@@ -612,25 +545,14 @@ pub enum CapabilityError {
     },
 }
 
-struct LoadedPlugin<const M: usize, Storage: PluginStorage> {
-    plugin: Box<dyn ManagedPlugin<M, Storage>>,
-    available: bool,
+struct LoadedPlugin<Storage: PluginStorage> {
+    plugin: Box<dyn ManagedPlugin<Storage>>,
     started: bool,
-    component_ids: Vec<ComponentId>,
     dependencies: Vec<PluginId>,
     provided_capabilities: Vec<CapabilityKey>,
     retained_resources: Vec<Box<dyn Any>>,
     task_cancellations: Vec<PluginTaskCancellation>,
     filesystem: Option<PluginVfs>,
-}
-
-/// Component cleanup failure associated with a Plugin lifecycle operation.
-#[derive(Debug)]
-pub struct PluginComponentCleanupFailure {
-    /// Component whose cleanup remains incomplete.
-    pub id: ComponentId,
-    /// Event Router unload failure.
-    pub error: UnloadError,
 }
 
 /// Failure while registering one Plugin.
@@ -667,36 +589,18 @@ pub enum PluginRegisterError {
     /// Plugin filesystem namespace preparation failed.
     #[error(transparent)]
     Filesystem(#[from] FsError),
-    /// Plugin initialization failed and every Component was rolled back.
+    /// Plugin initialization failed and its published state was rolled back.
     #[error("Plugin registration failed: {0}")]
     Registration(#[source] PluginError),
-    /// Plugin initialization failed and at least one Component could not be rolled back.
-    #[error("Plugin registration failed and Component rollback was incomplete")]
-    Rollback {
-        /// Original Plugin initialization failure.
-        #[source]
-        source: PluginError,
-        /// Component cleanup failures retained for a later unload retry.
-        cleanup: Vec<PluginComponentCleanupFailure>,
-    },
 }
 
 /// Failure while starting one registered Plugin.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PluginStartError {
-    /// Plugin startup failed and every Component was rolled back.
+    /// Plugin startup failed and its published state was rolled back.
     #[error("Plugin start failed: {0}")]
     Start(#[source] PluginError),
-    /// Plugin startup failed and at least one Component could not be rolled back.
-    #[error("Plugin start failed and Component rollback was incomplete")]
-    Rollback {
-        /// Original Plugin startup failure.
-        #[source]
-        source: PluginError,
-        /// Component cleanup failures retained for a later unload retry.
-        cleanup: Vec<PluginComponentCleanupFailure>,
-    },
 }
 
 /// Failure while unloading one Plugin.
@@ -714,9 +618,6 @@ pub enum PluginUnloadError {
         /// Loaded consumers, in stable identity order.
         dependents: Vec<PluginId>,
     },
-    /// At least one owned Component could not be unloaded.
-    #[error("Plugin Component cleanup was incomplete")]
-    Cleanup(Vec<PluginComponentCleanupFailure>),
 }
 
 /// Failure while opening Plugin Manager persistence.
@@ -728,11 +629,8 @@ pub enum PluginManagerInitError {
     Database(#[from] barracuda_kv::OpenError),
 }
 
-/// Manages Plugin identities, scoped storage, and grouped Components.
-///
-/// Event Router continues to own Component execution. The manager only uses a
-/// mutable Router reference while registering, starting, or unloading a Plugin.
-pub struct PluginManager<const M: usize, DatabaseRegion>
+/// Manages Plugin identities, scoped storage, capabilities, and owned tasks.
+pub struct PluginManager<DatabaseRegion>
 where
     DatabaseRegion: NorFlash + 'static,
     DatabaseRegion::Error: Debug,
@@ -741,12 +639,12 @@ where
     capabilities: CapabilityRegistry,
     task_spawner: Option<Spawner>,
     vfs_root: Option<Vfs>,
-    loaded: BTreeMap<PluginId, LoadedPlugin<M, ScopedStorage<DatabaseRegion>>>,
-    pending: BTreeMap<PluginId, Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>>,
+    loaded: BTreeMap<PluginId, LoadedPlugin<ScopedStorage<DatabaseRegion>>>,
+    pending: BTreeMap<PluginId, Box<dyn ManagedPlugin<ScopedStorage<DatabaseRegion>>>>,
     registration_order: Vec<PluginId>,
 }
 
-impl<const M: usize, DatabaseRegion> PluginManager<M, DatabaseRegion>
+impl<DatabaseRegion> PluginManager<DatabaseRegion>
 where
     DatabaseRegion: NorFlash + 'static,
     DatabaseRegion::Error: Debug,
@@ -790,19 +688,15 @@ where
     /// Runs one Plugin's registration phase and retains it for startup.
     ///
     /// Plugin initialization may use its durable scoped storage. If it fails,
-    /// Components already registered by that call are unloaded in reverse
-    /// order. Persistent data is not deleted by rollback or unload.
+    /// Capabilities and retained resources published by a failed registration
+    /// are released. Persistent data is not deleted by rollback or unload.
     ///
     /// # Errors
     ///
     /// Returns an error for an invalid or duplicate identity, Plugin
-    /// initialization failure, or incomplete Component rollback.
-    pub fn register<const N: usize, const Q: usize, T: Plugin<M> + 'static>(
-        &mut self,
-        router: &mut EventRouter<N, M, Q>,
-        plugin: T,
-    ) -> Result<(), PluginRegisterError> {
-        self.register_managed(router, Box::new(plugin))
+    /// initialization failure.
+    pub fn register<T: Plugin + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
+        self.register_managed(Box::new(plugin))
     }
 
     /// Adds one Plugin to the graph awaiting dependency-safe registration.
@@ -813,7 +707,7 @@ where
     /// # Errors
     ///
     /// Returns an error for an invalid, duplicate, or self-dependent identity.
-    pub fn add<T: Plugin<M> + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
+    pub fn add<T: Plugin + 'static>(&mut self, plugin: T) -> Result<(), PluginRegisterError> {
         let id = PluginId::try_from(T::ID)?;
         if self.loaded.contains_key(&id) || self.pending.contains_key(&id) {
             log::warn!("refusing duplicate Plugin registration: {id}");
@@ -830,10 +724,7 @@ where
     ///
     /// Returns an error when a dependency is absent, the graph contains a
     /// cycle, or one Plugin registration fails.
-    pub fn register_all<const N: usize, const Q: usize>(
-        &mut self,
-        router: &mut EventRouter<N, M, Q>,
-    ) -> Result<(), PluginRegisterError> {
+    pub fn register_all(&mut self) -> Result<(), PluginRegisterError> {
         for plugin in self.pending.values() {
             for dependency in plugin.dependencies() {
                 let dependency = PluginId::try_from(*dependency).map_err(|source| {
@@ -869,15 +760,14 @@ where
                 .pending
                 .remove(&id)
                 .ok_or_else(|| PluginRegisterError::DependencyCycle(Vec::new()))?;
-            self.register_managed(router, plugin)?;
+            self.register_managed(plugin)?;
         }
         Ok(())
     }
 
-    fn register_managed<const N: usize, const Q: usize>(
+    fn register_managed(
         &mut self,
-        router: &mut EventRouter<N, M, Q>,
-        mut plugin: Box<dyn ManagedPlugin<M, ScopedStorage<DatabaseRegion>>>,
+        mut plugin: Box<dyn ManagedPlugin<ScopedStorage<DatabaseRegion>>>,
     ) -> Result<(), PluginRegisterError> {
         let id = PluginId::try_from(plugin.identity())?;
         if self.loaded.contains_key(&id) {
@@ -900,17 +790,11 @@ where
             }
         };
 
-        let mut component_ids = Vec::new();
         let mut provided_capabilities = Vec::new();
         let mut retained_resources = Vec::new();
         let storage = ScopedStorage::new(Rc::clone(&self.database), &id);
         let result = {
-            let mut registrar = EventRouterRegistrar { router };
             let mut context = PluginRegisterContext {
-                event_router: PluginEventRouterContext {
-                    registrar: &mut registrar,
-                    component_ids: &mut component_ids,
-                },
                 storage,
                 filesystem: filesystem.clone(),
                 plugin_id: &id,
@@ -930,9 +814,7 @@ where
                     id,
                     LoadedPlugin {
                         plugin,
-                        available: true,
                         started: false,
-                        component_ids,
                         dependencies,
                         provided_capabilities,
                         retained_resources,
@@ -944,27 +826,8 @@ where
             }
             Err(source) => {
                 log::error!("Plugin {id} registration failed: {source}");
-                let (remaining, cleanup) = rollback_components(router, component_ids);
-                if cleanup.is_empty() {
-                    self.capabilities.remove_all(&provided_capabilities);
-                    Err(PluginRegisterError::Registration(source))
-                } else {
-                    self.loaded.insert(
-                        id,
-                        LoadedPlugin {
-                            plugin,
-                            available: false,
-                            started: false,
-                            component_ids: remaining,
-                            dependencies,
-                            provided_capabilities,
-                            retained_resources,
-                            task_cancellations: Vec::new(),
-                            filesystem,
-                        },
-                    );
-                    Err(PluginRegisterError::Rollback { source, cleanup })
-                }
+                self.capabilities.remove_all(&provided_capabilities);
+                Err(PluginRegisterError::Registration(source))
             }
         }
     }
@@ -973,18 +836,15 @@ where
     ///
     /// # Errors
     ///
-    /// Returns an error when one Plugin fails to start. Components owned by the
-    /// failing Plugin are rolled back in reverse registration order.
-    pub fn start<const N: usize, const Q: usize>(
-        &mut self,
-        router: &mut EventRouter<N, M, Q>,
-    ) -> Result<(), PluginStartError> {
+    /// Returns an error when one Plugin fails to start. State owned by the
+    /// failing Plugin is rolled back.
+    pub fn start(&mut self) -> Result<(), PluginStartError> {
         let order = self.registration_order.clone();
         for id in order {
             let Some(mut plugin) = self.loaded.remove(&id) else {
                 continue;
             };
-            if plugin.started || !plugin.available {
+            if plugin.started {
                 self.loaded.insert(id, plugin);
                 continue;
             }
@@ -1013,39 +873,27 @@ where
                 Err(source) => {
                     log::error!("Plugin {id} start failed: {source}");
                     plugin.task_cancellations.clear();
-                    let (remaining, cleanup) = rollback_components(router, plugin.component_ids);
-                    if cleanup.is_empty() {
-                        self.capabilities.remove_all(&plugin.provided_capabilities);
-                        self.registration_order
-                            .retain(|registered| registered != &id);
-                        return Err(PluginStartError::Start(source));
-                    }
-                    plugin.available = false;
-                    plugin.component_ids = remaining;
-                    self.loaded.insert(id, plugin);
-                    return Err(PluginStartError::Rollback { source, cleanup });
+                    self.capabilities.remove_all(&plugin.provided_capabilities);
+                    self.registration_order
+                        .retain(|registered| registered != &id);
+                    return Err(PluginStartError::Start(source));
                 }
             }
         }
         Ok(())
     }
 
-    /// Unloads every Component owned by one Plugin in reverse registration order.
+    /// Unloads one Plugin.
     ///
     /// The Plugin's `ekv` namespace remains durable and will be reused if the
-    /// same stable identity is loaded again. After Component cleanup succeeds,
-    /// this signals every Plugin task and waits for its token to be dropped
-    /// before releasing capabilities and retained resources.
+    /// same stable identity is loaded again. This signals every Plugin task and
+    /// waits for its token to be dropped before releasing capabilities and
+    /// retained resources.
     ///
     /// # Errors
     ///
-    /// Returns an error when the Plugin is unknown or Component cleanup is
-    /// incomplete. Failed Component identities remain tracked for retry.
-    pub async fn unload<const N: usize, const Q: usize>(
-        &mut self,
-        router: &mut EventRouter<N, M, Q>,
-        id: &PluginId,
-    ) -> Result<(), PluginUnloadError> {
+    /// Returns an error when the Plugin is unknown or still has dependents.
+    pub async fn unload(&mut self, id: &PluginId) -> Result<(), PluginUnloadError> {
         let dependents = self
             .loaded
             .iter()
@@ -1062,61 +910,34 @@ where
             return Err(PluginUnloadError::NotFound(id.clone()));
         };
         let LoadedPlugin {
-            plugin: managed_plugin,
-            available,
-            started,
-            component_ids,
-            dependencies,
             provided_capabilities,
             retained_resources,
             task_cancellations,
-            filesystem,
+            ..
         } = plugin;
-        let (remaining, cleanup) = rollback_components(router, component_ids);
-        if cleanup.is_empty() {
-            for cancellation in task_cancellations {
-                cancellation.cancel_and_wait().await;
-            }
-            self.capabilities.remove_all(&provided_capabilities);
-            drop(retained_resources);
-            self.registration_order
-                .retain(|registered| registered != id);
-            Ok(())
-        } else {
-            self.loaded.insert(
-                id.clone(),
-                LoadedPlugin {
-                    plugin: managed_plugin,
-                    available,
-                    started,
-                    component_ids: remaining,
-                    dependencies,
-                    provided_capabilities,
-                    retained_resources,
-                    task_cancellations,
-                    filesystem,
-                },
-            );
-            Err(PluginUnloadError::Cleanup(cleanup))
+        for cancellation in task_cancellations {
+            cancellation.cancel_and_wait().await;
         }
+        self.capabilities.remove_all(&provided_capabilities);
+        drop(retained_resources);
+        self.registration_order
+            .retain(|registered| registered != id);
+        Ok(())
     }
 
     /// Unloads the complete Plugin graph in reverse dependency order.
     ///
-    /// Each Plugin follows the same Component cleanup, task cancellation, and
-    /// retained-resource release path as [`Self::unload`].
+    /// Each Plugin follows the same task cancellation and retained-resource
+    /// release path as [`Self::unload`].
     ///
     /// # Errors
     ///
     /// Returns the first Plugin unload failure. Plugins already unloaded before
     /// that failure remain unloaded.
-    pub async fn shutdown<const N: usize, const Q: usize>(
-        &mut self,
-        router: &mut EventRouter<N, M, Q>,
-    ) -> Result<(), PluginUnloadError> {
+    pub async fn shutdown(&mut self) -> Result<(), PluginUnloadError> {
         let order = self.registration_order.clone();
         for id in order.iter().rev() {
-            self.unload(router, id).await?;
+            self.unload(id).await?;
         }
         Ok(())
     }
@@ -1125,14 +946,6 @@ where
     #[must_use]
     pub fn is_loaded(&self, id: &PluginId) -> bool {
         self.loaded.contains_key(id)
-    }
-
-    /// Returns Component identities owned by one loaded Plugin.
-    #[must_use]
-    pub fn component_ids(&self, id: &PluginId) -> Option<&[ComponentId]> {
-        self.loaded
-            .get(id)
-            .map(|plugin| plugin.component_ids.as_slice())
     }
 }
 
@@ -1154,10 +967,10 @@ fn validate_dependency_ids(
     Ok(())
 }
 
-fn resolve_dependencies<const M: usize, Storage: PluginStorage>(
+fn resolve_dependencies<Storage: PluginStorage>(
     plugin: &PluginId,
     declared: &[&'static str],
-    loaded: &BTreeMap<PluginId, LoadedPlugin<M, Storage>>,
+    loaded: &BTreeMap<PluginId, LoadedPlugin<Storage>>,
 ) -> Result<Vec<PluginId>, PluginRegisterError> {
     let mut dependencies = BTreeSet::new();
     for dependency in declared {
@@ -1170,27 +983,12 @@ fn resolve_dependencies<const M: usize, Storage: PluginStorage>(
         if id == *plugin {
             return Err(PluginRegisterError::SelfDependency(id));
         }
-        if !loaded.get(&id).is_some_and(|plugin| plugin.available) {
+        if !loaded.contains_key(&id) {
             return Err(PluginRegisterError::MissingDependency(id));
         }
         dependencies.insert(id);
     }
     Ok(dependencies.into_iter().collect())
-}
-
-fn rollback_components<const N: usize, const M: usize, const Q: usize>(
-    router: &mut EventRouter<N, M, Q>,
-    component_ids: Vec<ComponentId>,
-) -> (Vec<ComponentId>, Vec<PluginComponentCleanupFailure>) {
-    let mut remaining = Vec::new();
-    let mut cleanup = Vec::new();
-    for id in component_ids.into_iter().rev() {
-        if let Err(error) = router.unload(id) {
-            remaining.push(id);
-            cleanup.push(PluginComponentCleanupFailure { id, error });
-        }
-    }
-    (remaining, cleanup)
 }
 
 #[cfg(test)]

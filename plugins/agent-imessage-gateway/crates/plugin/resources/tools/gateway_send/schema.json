@@ -1,0 +1,19 @@
+{
+  "type": "function",
+  "function": {
+    "name": "gateway_send",
+    "description": "Send one complete text message through a registered Gateway channel.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "channel": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" },
+        "reply_to": { "type": "string" },
+        "text": { "type": "string" }
+      },
+      "required": ["channel", "conversation_id", "text"],
+      "additionalProperties": false
+    }
+  }
+}

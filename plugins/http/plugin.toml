@@ -1,3 +1,3 @@
 id = "http"
-depends-on = []
-description = "Provides outbound HTTP and HTTPS through the Event Router."
+depends-on = ["workflow"]
+description = "Provides typed outbound HTTP and the http.request Workflow Action."

@@ -2,7 +2,7 @@
 name = "barracuda-vm-plugin"
 version = "0.1.0"
 edition = "2021"
-description = "Barracuda Plugin that owns the Lua VM Component"
+description = "Barracuda Plugin that publishes the Lua VM capability"
 
 [dependencies]
 barracuda-lua = { path = "../lua", features = ["vendored"] }
@@ -10,15 +10,10 @@ barracuda-plugin.workspace = true
 barracuda-vm-builtin-packages = { path = "../builtin-packages" }
 barracuda-vm-component = { path = "../component", features = ["vendored"] }
 barracuda-vm-package-api = { path = "../package-api" }
+barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
+serde = { version = "1", default-features = false, features = ["derive"] }
 thiserror = { version = "2", default-features = false }
-
-[dev-dependencies]
-barracuda-platform-test.workspace = true
-barracuda-event-router.workspace = true
-critical-section = { version = "1", features = ["std"] }
-embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
-embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-futures-lite = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

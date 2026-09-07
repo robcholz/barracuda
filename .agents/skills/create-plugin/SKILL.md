@@ -40,6 +40,8 @@ Use the parts required by the Plugin:
 ```text
 plugins/<plugin>/
 ├── plugin.toml
+├── filesystem/                   # optional prebuilt scoped files
+│   └── resources/                # runtime read-only files
 ├── crates/
 │   ├── plugin/
 │   │   ├── Cargo.toml
@@ -67,6 +69,12 @@ dependencies, and concise description. Apply `#[barracuda_plugin_api::plugin]`
 to the Plugin type rather than duplicating that metadata in Rust. Run
 `cargo plugin sync` when adding or renaming a Plugin, changing its selection
 metadata, or otherwise changing the generated System registry inputs.
+
+## Plugin filesystem
+
+When a Plugin reads, writes, or contributes files, read and follow
+[`filesystem.md`](filesystem.md). A Plugin receives an ordinary `ScopedVfs`;
+do not introduce a Plugin-specific VFS type or expose mount-table ownership.
 
 ## Lifecycle ownership
 

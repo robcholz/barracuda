@@ -1,0 +1,35 @@
+[package]
+name = "barracuda-workflow-plugin"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Barracuda Plugin that owns the Workflow runtime"
+
+[dependencies]
+barracuda-plugin.workspace = true
+barracuda-vfs.workspace = true
+barracuda-workflow-runtime = { path = "../runtime" }
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+log.workspace = true
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+barracuda-platform-test.workspace = true
+barracuda-vfs-memfs.workspace = true
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

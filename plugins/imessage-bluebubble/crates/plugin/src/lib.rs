@@ -42,10 +42,10 @@ impl IMessageBlueBubblePlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for IMessageBlueBubblePlugin {
+impl Plugin for IMessageBlueBubblePlugin {
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,

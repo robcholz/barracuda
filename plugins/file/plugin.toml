@@ -1,3 +1,0 @@
-id = "file"
-depends-on = []
-description = "Provides filesystem operations through the Event Router."

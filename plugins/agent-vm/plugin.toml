@@ -1,0 +1,3 @@
+id = "agent-vm"
+depends-on = ["agent", "vm"]
+description = "Exposes the VM capability to Agents as native Tools."

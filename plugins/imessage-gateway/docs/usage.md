@@ -1,8 +1,6 @@
 # IMessage Gateway Usage
 
-Provider Plugins use the typed capability; Agents and Workflows use JSON.
-
-## Provider registration and ingress
+## 1. Register a provider and publish inbound messages
 
 ```rust
 let gateway = context.require::<IMessageGateway>("imessage-gateway")?;
@@ -20,42 +18,51 @@ gateway
     .await?;
 ```
 
-`publish` awaits the bounded ingress queue. The route, message ID, and complete
-text are emitted as one Event document. It returns `MessageTooLarge` before
-queueing when that encoded document does not fit one Event lane.
+Publishing emits one `gateway.message.received` Workflow Event.
 
-## Complete JSON send
+## 2. Send one complete message
 
 ```rust
-let address = RpcAddress::try_from("gateway.send")?;
-let response = client
-    .call_json(
-        &address,
-        r#"{"channel":"telegram","conversation_id":"chat-42","text":"hello"}"#,
-    )?
+let receipt = gateway
+    .send(GatewaySendRequest {
+        channel: "telegram".into(),
+        conversation_id: "chat-42".into(),
+        thread_id: None,
+        reply_to: None,
+        text: "hello".into(),
+    })
     .await?;
 ```
 
-## Streaming JSON send
+The same operation is available to Workflows as `gateway.send` and to Agents
+as `gateway_send`.
 
-Call `gateway.send_stream` once for every complete semantic Agent event. Supply
-the route with each event. `turn_started` opens the provider stream and
-`turn_ended` closes it after being forwarded. The Agent session and sequence are
-used directly; Gateway does not assign another stream identity or order. If the
-response is `{"error":"busy"}`, yield and retry the same document.
+## 3. Forward semantic Agent events
 
-Send `type: "stream_error"` with a payload containing a non-empty `error`
-string to terminate an active stream with an error. Other producer correlation
-fields may remain in that payload. The same event may be sent without a
-preceding `turn_started`; Gateway opens delivery for the supplied route and
-`reply_to` and immediately reports the stream failure to the provider.
+Call `send_stream` for each complete event. `turn_started` opens a provider
+stream; `turn_ended` closes it after delivery.
 
-After `turn_ended` is accepted, match `gateway.send_stream.finished` by
-`session` to obtain the provider receipt or failure. The RPC lane is not held
-for the lifetime of the provider stream.
+```rust
+gateway.send_stream(GatewaySendStreamRequest {
+    route: GatewayRoute::new("telegram", "chat-42"),
+    reply_to: None,
+    session: "session-1".into(),
+    sequence: 0,
+    event_type: "turn_started".into(),
+    payload: serde_json::json!({}),
+})?;
+```
 
-`gateway.send_media` keeps the explicit `start`, bounded `chunk`, and `finish`
-commands documented in `rpc.md`.
+Match `gateway.send_stream.finished` by `session` to receive the provider
+receipt or delivery error. Retry the same sequence after yielding when the
+operation returns `busy`.
 
-See `rpc.md` for exact JSON and `event.md` for inbound and terminal Event
-documents.
+## 4. Send streamed media
+
+Use `GatewaySendMediaRequest::Start`, one or more `Chunk` commands containing
+canonical base64, and `Finish`. Match `gateway.send_media.finished` by
+`stream_id` for the terminal result. The same commands are exposed as the
+`gateway.send_media` Workflow Action and `gateway_send_media` Agent tool.
+
+See [action.md](action.md) for the JSON contracts and [event.md](event.md) for
+Workflow Event documents.

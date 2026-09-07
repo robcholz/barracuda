@@ -7,7 +7,6 @@ use core::future::Future;
 use core::pin::Pin;
 
 use barracuda_agent_permission::{Action, RiskClass};
-use barracuda_event_router::{JsonRpcInfo, RpcClient};
 use getset::CopyGetters;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -101,9 +100,6 @@ mod invocation_tests {
     use core::cell::Cell;
 
     use super::{Tool, ToolError, ToolFuture, ToolHandler, ToolInvocation, ToolOutput, ToolSpec};
-    use barracuda_event_router::{
-        JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcAddress, RpcLaneStorage, RpcRegistry,
-    };
     use futures_lite::future::block_on;
     use serde::Deserialize;
 
@@ -157,88 +153,6 @@ mod invocation_tests {
         let arguments: BusinessArgs = invocation.arguments()?;
         assert_eq!(arguments.name, "lamp");
         assert!(arguments.enabled);
-        Ok(())
-    }
-
-    struct RpcEcho;
-
-    impl JsonRpcSchema for RpcEcho {
-        const ADDRESS: &'static str = "demo.rpc_echo";
-        const REQUEST_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
-            r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#
-        );
-        const RESPONSE_SCHEMA: JsonSchema = barracuda_event_router::json_schema_inline!(
-            r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#
-        );
-        const MAX_REQUEST_BYTES: usize = 128;
-        const MAX_RESPONSE_BYTES: usize = 128;
-    }
-
-    #[test]
-    fn json_rpc_tool_uses_the_rpc_address_schema_and_lane(
-    ) -> Result<(), Box<dyn core::error::Error>> {
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
-        let registry = RpcRegistry::new(lanes);
-        registry.register_json::<RpcEcho, _>(
-            "agent",
-            |_context, request: JsonRef, response: JsonWriter| async move {
-                response.write(request.as_str()?).await
-            },
-        )?;
-        let client = registry.client();
-        let address = RpcAddress::try_from(RpcEcho::ADDRESS)?;
-        let info = client.json_method_info(&address)?;
-        let tool = Tool::from_json_rpc(client, info);
-
-        assert_eq!(tool.name(), RpcEcho::ADDRESS);
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(tool.schema())?,
-            serde_json::json!({
-                "type": "function",
-                "function": {
-                    "name": RpcEcho::ADDRESS,
-                    "parameters": serde_json::from_str::<serde_json::Value>(
-                        RpcEcho::REQUEST_SCHEMA.as_str()
-                    )?
-                }
-            })
-        );
-
-        let call = ToolInvocation::try_new(None, RpcEcho::ADDRESS, r#"{"message":"hello"}"#)?;
-        let output = block_on(tool.invoke(&call))?;
-        assert_eq!(output.content, r#"{"message":"hello"}"#);
-        assert!(output.ok);
-        Ok(())
-    }
-
-    #[test]
-    fn json_rpc_tool_reuses_the_rpc_request_validator_before_calling(
-    ) -> Result<(), Box<dyn core::error::Error>> {
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<1, 128, 1>::new()));
-        let registry = RpcRegistry::new(lanes);
-        let invoked = Rc::new(Cell::new(false));
-        let handler_invoked = Rc::clone(&invoked);
-        registry.register_json::<RpcEcho, _>(
-            "agent",
-            move |_context, _request: JsonRef, response: JsonWriter| {
-                handler_invoked.set(true);
-                async move { response.write(r#"{"message":"unexpected"}"#).await }
-            },
-        )?;
-        let client = registry.client();
-        let address = RpcAddress::try_from(RpcEcho::ADDRESS)?;
-        let tool = Tool::from_json_rpc(client.clone(), client.json_method_info(&address)?);
-        let call = ToolInvocation::try_new(None, RpcEcho::ADDRESS, r#"{"message":1}"#)?;
-
-        assert!(matches!(
-            tool.classify(&call),
-            Err(error) if matches!(error.error, ToolError::ArgumentsSchema(_))
-        ));
-        assert!(matches!(
-            block_on(tool.invoke(&call)),
-            Err(error) if matches!(error.error, ToolError::ArgumentsSchema(_))
-        ));
-        assert!(!invoked.get());
         Ok(())
     }
 
@@ -307,8 +221,6 @@ pub enum ToolError {
     InvalidArguments(String),
     #[error("invalid arguments: {0}")]
     ArgumentsSchema(#[from] json_validator::ValidationError),
-    #[error("RPC call failed: {0}")]
-    Rpc(#[from] barracuda_event_router::RpcError),
     #[error("tool invocation rejected: {0}")]
     InvokeRejected(String),
 }
@@ -491,28 +403,6 @@ pub struct Tool {
 enum ToolInner {
     Handler(Box<dyn ErasedToolHandler>),
     Detached(Box<dyn ErasedDetachedToolHandler>),
-    JsonRpc(JsonRpcTool),
-}
-
-struct JsonRpcTool {
-    client: RpcClient,
-    info: JsonRpcInfo,
-    schema: String,
-}
-
-impl JsonRpcTool {
-    fn new(client: RpcClient, info: JsonRpcInfo) -> Self {
-        let schema = alloc::format!(
-            r#"{{"type":"function","function":{{"name":"{}","parameters":{}}}}}"#,
-            info.address(),
-            info.request_schema().as_str()
-        );
-        Self {
-            client,
-            info,
-            schema,
-        }
-    }
 }
 
 impl Tool {
@@ -530,15 +420,6 @@ impl Tool {
         }
     }
 
-    /// Creates a Tool backed by one registered JSON RPC endpoint.
-    #[must_use]
-    pub fn from_json_rpc(client: RpcClient, info: JsonRpcInfo) -> Self {
-        Self {
-            inner: Arc::new(ToolInner::JsonRpc(JsonRpcTool::new(client, info))),
-            config: ToolConfig::default(),
-        }
-    }
-
     pub fn with_config(mut self, config: ToolConfig) -> Self {
         self.config = config;
         self
@@ -548,7 +429,6 @@ impl Tool {
         match self.inner.as_ref() {
             ToolInner::Handler(handler) => handler.name(),
             ToolInner::Detached(handler) => handler.name(),
-            ToolInner::JsonRpc(rpc) => rpc.info.address().as_ref(),
         }
     }
 
@@ -556,7 +436,6 @@ impl Tool {
         match self.inner.as_ref() {
             ToolInner::Handler(handler) => handler.schema(),
             ToolInner::Detached(handler) => handler.schema(),
-            ToolInner::JsonRpc(rpc) => &rpc.schema,
         }
     }
 
@@ -564,7 +443,6 @@ impl Tool {
         match self.inner.as_ref() {
             ToolInner::Handler(handler) => handler.usage(),
             ToolInner::Detached(handler) => handler.usage(),
-            ToolInner::JsonRpc(_) => None,
         }
     }
 
@@ -573,9 +451,6 @@ impl Tool {
         match self.inner.as_ref() {
             ToolInner::Handler(handler) => Ok(handler.classify(call)),
             ToolInner::Detached(handler) => Ok(handler.classify(call)),
-            ToolInner::JsonRpc(rpc) => {
-                Ok(Action::new(rpc.info.address().as_ref(), RiskClass::High))
-            }
         }
     }
 
@@ -587,18 +462,6 @@ impl Tool {
                 "dynamically detached tool requires detached execution".to_owned(),
             )
             .into()),
-            ToolInner::JsonRpc(rpc) => {
-                let response = rpc
-                    .client
-                    .call_json(rpc.info.address(), call.arguments_json())
-                    .map_err(ToolError::from)?
-                    .await
-                    .map_err(ToolError::from)?;
-                Ok(ToolOutput {
-                    content: response.as_str().map_err(ToolError::from)?.to_owned(),
-                    ok: true,
-                })
-            }
         }
     }
 
@@ -617,10 +480,6 @@ impl Tool {
                 "tool does not support dynamic detached execution".to_owned(),
             )
             .into()),
-            ToolInner::JsonRpc(_) => Err(ToolError::InvokeRejected(
-                "tool does not support dynamic detached execution".to_owned(),
-            )
-            .into()),
         }
     }
 
@@ -633,11 +492,6 @@ impl Tool {
             ToolInner::Detached(handler) => handler
                 .arguments_validator()
                 .validate_str(call.arguments_json())
-                .map_err(ToolError::from)?,
-            ToolInner::JsonRpc(rpc) => rpc
-                .info
-                .request_schema()
-                .validate(call.arguments_json())
                 .map_err(ToolError::from)?,
         }
         Ok(())

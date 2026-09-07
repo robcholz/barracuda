@@ -1,0 +1,30 @@
+[package]
+name = "barracuda-agent-websearch-plugin"
+version = "0.1.0"
+edition = "2024"
+description = "Tavily-backed Web Search Tool for the Barracuda Agent"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-agent-plugin.workspace = true
+barracuda-plugin.workspace = true
+barracuda-webserver-plugin.workspace = true
+embassy-futures.workspace = true
+embedded-io-async = "0.7"
+http-client.workspace = true
+json-validator.workspace = true
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

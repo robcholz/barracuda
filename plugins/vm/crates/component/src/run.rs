@@ -1,69 +1,22 @@
-use alloc::string::String;
+use alloc::rc::Rc;
+use alloc::string::{String, ToString};
 use core::future::Future as _;
 use core::task::Poll;
 
-use barracuda_event_router::{
-    Event, EventEmitter, JsonHandler, JsonObjectFields, JsonObjectPayload, JsonObjectWriter,
-    JsonPayload, JsonRef, JsonRpcSchema, JsonSchema, JsonWriter, RpcError, json_schema,
-};
 use barracuda_lua::{Error as LuaError, ErrorKind as LuaErrorKind, LuaExecution};
 use barracuda_vm_builtin_packages::{
     BuiltinPackages,
     io::{Input as LuaInput, Output as LuaOutput},
 };
 use barracuda_vm_package_api::LuaPackageRegistry;
-use serde::Deserialize;
+use barracuda_workflow_plugin::{Event, WorkflowService};
+use serde::Serialize;
 
 use crate::VmLimits;
-use crate::component::DEFAULT_MAX_SOURCE_BYTES;
 use crate::memory::VmMemoryLease;
-use crate::runtime::{ControlError, RunControl, VM_YIELD_DELAY_MILLIS, VmRuntime, VmYieldSignal};
+use crate::runtime::{RunControl, VM_YIELD_DELAY_MILLIS, VmYieldSignal};
 
-/// Maximum encoded JSON document accepted by VM control RPCs.
-pub const VM_JSON_REQUEST_BYTES: usize = 512;
-/// Maximum encoded JSON document returned by VM control RPCs.
-pub const VM_JSON_RESPONSE_BYTES: usize = 48;
-/// Maximum raw UTF-8 bytes carried by one output Event chunk.
-pub const VM_OUTPUT_CHUNK_BYTES: usize = 48;
-/// Maximum diagnostic bytes included in a terminal Event.
-pub const VM_DIAGNOSTIC_BYTES: usize = 48;
-/// Maximum encoded JSON input document emitted by any VM Event.
-pub const VM_EVENT_INPUT_BYTES: usize = 416;
-
-/// Starts one isolated Lua execution.
-pub struct Run;
-
-impl JsonRpcSchema for Run {
-    const ADDRESS: &'static str = "vm.run";
-    const REQUEST_SCHEMA: JsonSchema = json_schema!("run", request);
-    const RESPONSE_SCHEMA: JsonSchema = json_schema!("run", response);
-    const MAX_REQUEST_BYTES: usize = VM_JSON_REQUEST_BYTES;
-    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
-}
-
-/// Supplies one complete input value, or EOF, to an active execution.
-pub struct Input;
-
-impl JsonRpcSchema for Input {
-    const ADDRESS: &'static str = "vm.input";
-    const REQUEST_SCHEMA: JsonSchema = json_schema!("input", request);
-    const RESPONSE_SCHEMA: JsonSchema = json_schema!("input", response);
-    const MAX_REQUEST_BYTES: usize = VM_JSON_REQUEST_BYTES;
-    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
-}
-
-/// Cancels one active execution.
-pub struct Cancel;
-
-impl JsonRpcSchema for Cancel {
-    const ADDRESS: &'static str = "vm.cancel";
-    const REQUEST_SCHEMA: JsonSchema = json_schema!("cancel", request);
-    const RESPONSE_SCHEMA: JsonSchema = json_schema!("cancel", response);
-    const MAX_REQUEST_BYTES: usize = 32;
-    const MAX_RESPONSE_BYTES: usize = VM_JSON_RESPONSE_BYTES;
-}
-
-/// One bounded output chunk emitted by an active execution.
+/// One complete output message emitted by an active execution.
 pub struct Output;
 
 impl Event for Output {
@@ -82,28 +35,6 @@ pub struct Finished;
 
 impl Event for Finished {
     const ID: &'static str = "vm.finished";
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RunRequest<'a> {
-    #[serde(borrow)]
-    source: &'a str,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct InputRequest<'a> {
-    run_id: u32,
-    #[serde(borrow)]
-    input: Option<&'a str>,
-    eof: Option<bool>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RunReference {
-    run_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,164 +62,22 @@ impl ExecutionErrorKind {
 
 struct ExecutionError {
     kind: ExecutionErrorKind,
-    diagnostic: Diagnostic,
+    diagnostic: String,
 }
 
 impl ExecutionError {
     fn new(kind: ExecutionErrorKind, diagnostic: &str) -> Self {
         Self {
             kind,
-            diagnostic: Diagnostic::new(diagnostic),
+            diagnostic: diagnostic.to_string(),
         }
-    }
-}
-
-struct Diagnostic {
-    bytes: [u8; VM_DIAGNOSTIC_BYTES],
-    length: usize,
-}
-
-impl Diagnostic {
-    fn new(diagnostic: &str) -> Self {
-        let diagnostic = truncate_utf8(diagnostic, VM_DIAGNOSTIC_BYTES);
-        let mut bytes = [0_u8; VM_DIAGNOSTIC_BYTES];
-        if let Some(output) = bytes.get_mut(..diagnostic.len()) {
-            output.copy_from_slice(diagnostic.as_bytes());
-        }
-        Self {
-            bytes,
-            length: diagnostic.len(),
-        }
-    }
-
-    fn as_str(&self) -> &str {
-        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
-    }
-}
-
-pub(crate) struct OwnedSource {
-    bytes: [u8; DEFAULT_MAX_SOURCE_BYTES],
-    length: usize,
-}
-
-impl OwnedSource {
-    pub(crate) fn new(source: &str) -> Option<Self> {
-        let mut bytes = [0_u8; DEFAULT_MAX_SOURCE_BYTES];
-        bytes
-            .get_mut(..source.len())?
-            .copy_from_slice(source.as_bytes());
-        Some(Self {
-            bytes,
-            length: source.len(),
-        })
-    }
-
-    fn as_str(&self) -> &str {
-        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
-    }
-}
-
-/// Builds the JSON handler for [`Run`].
-pub fn run_handler(
-    runtime: VmRuntime,
-    limits: VmLimits,
-    builtin_packages: BuiltinPackages,
-    package_registry: LuaPackageRegistry,
-) -> impl JsonHandler {
-    move |_context, request: JsonRef, response: JsonWriter| {
-        let runtime = runtime.clone();
-        let package_registry = package_registry.clone();
-        async move {
-            let request = request.deserialize::<RunRequest<'_>>()?;
-            if request.source.len() > limits.max_source_bytes() {
-                return response
-                    .write(&ErrorResponse("source_limit_exceeded"))
-                    .await;
-            }
-            match runtime.dispatch(request.source, limits, builtin_packages, package_registry) {
-                Ok(run_id) => response.write(&RunAccepted(run_id)).await,
-                Err(error) => response.write(&ErrorResponse(error.code())).await,
-            }
-        }
-    }
-}
-
-/// Builds the JSON handler for [`Input`].
-pub fn input_handler(runtime: VmRuntime, limits: VmLimits) -> impl JsonHandler {
-    move |_context, request: JsonRef, response: JsonWriter| {
-        let runtime = runtime.clone();
-        async move {
-            let request = request.deserialize::<InputRequest<'_>>()?;
-            let result = match (request.input, request.eof) {
-                (Some(input), None | Some(false)) if input.len() <= limits.max_input_bytes() => {
-                    runtime.send_input(request.run_id, input)
-                }
-                (Some(_input), None | Some(false)) => Err(ControlError::InputLimitExceeded),
-                (None, Some(true)) => runtime.close_input(request.run_id),
-                _ => return Err(RpcError::InvalidJson),
-            };
-            match result {
-                Ok(()) => response.write("{}").await,
-                Err(error) => response.write(&ErrorResponse(error.code())).await,
-            }
-        }
-    }
-}
-
-/// Builds the JSON handler for [`Cancel`].
-pub fn cancel_handler(runtime: VmRuntime) -> impl JsonHandler {
-    move |_context, request: JsonRef, response: JsonWriter| {
-        let runtime = runtime.clone();
-        async move {
-            let request = request.deserialize::<RunReference>()?;
-            match runtime.cancel(request.run_id) {
-                Ok(()) => response.write("{}").await,
-                Err(error) => response.write(&ErrorResponse(error.code())).await,
-            }
-        }
-    }
-}
-
-struct RunAccepted(u32);
-
-impl JsonPayload for RunAccepted {
-    fn encoded_len(&self) -> Result<usize, RpcError> {
-        JsonObjectPayload::new(self).encoded_len()
-    }
-
-    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
-        JsonObjectPayload::new(self).write_json(destination)
-    }
-}
-
-impl JsonObjectFields for RunAccepted {
-    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
-        writer.field("run_id", &JsonInteger(u64::from(self.0)))
-    }
-}
-
-struct ErrorResponse(&'static str);
-
-impl JsonPayload for ErrorResponse {
-    fn encoded_len(&self) -> Result<usize, RpcError> {
-        JsonObjectPayload::new(self).encoded_len()
-    }
-
-    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
-        JsonObjectPayload::new(self).write_json(destination)
-    }
-}
-
-impl JsonObjectFields for ErrorResponse {
-    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
-        writer.string_field("error", self.0)
     }
 }
 
 pub(crate) struct ExecutionJob {
-    pub(crate) emitter: EventEmitter<VM_JSON_REQUEST_BYTES>,
+    pub(crate) workflow: Rc<WorkflowService>,
     pub(crate) run_id: u32,
-    pub(crate) source: OwnedSource,
+    pub(crate) source: String,
     pub(crate) control: RunControl,
     pub(crate) memory: VmMemoryLease,
     pub(crate) limits: VmLimits,
@@ -298,7 +87,7 @@ pub(crate) struct ExecutionJob {
 
 pub(crate) async fn execute_run(job: ExecutionJob) {
     let ExecutionJob {
-        emitter,
+        workflow,
         run_id,
         source,
         control,
@@ -307,7 +96,7 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
         builtin_packages,
         package_registry,
     } = job;
-    let mut events = RunEvents::new(emitter, run_id);
+    let mut events = RunEvents::new(workflow, run_id);
     let result = drive_execution(
         &mut events,
         ExecutionSetup {
@@ -329,11 +118,11 @@ pub(crate) async fn execute_run(job: ExecutionJob) {
             Err(error) => TerminalOutcome::Error(error),
         }
     };
-    let _result = events.finished(terminal).await;
+    let _result = events.finished(terminal);
 }
 
 struct ExecutionSetup<'a> {
-    source: OwnedSource,
+    source: String,
     control: &'a RunControl,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
@@ -362,7 +151,7 @@ async fn drive_execution(
     })
     .map_err(|error| ExecutionError::new(ExecutionErrorKind::VmConfigure, error.message()))?;
 
-    let mut execution = start_execution(lua, setup.source);
+    let mut execution = lua.run(&setup.source);
     loop {
         match next_execution_event(
             &lua_input,
@@ -373,10 +162,10 @@ async fn drive_execution(
         )
         .await
         {
-            ExecutionEvent::Output(Some(message)) => events.output(&message).await?,
+            ExecutionEvent::Output(Some(message)) => events.output(&message)?,
             ExecutionEvent::Output(None) => {}
             ExecutionEvent::InputRequired(true) => {
-                events.input_required().await?;
+                events.input_required()?;
                 match setup.control.next_input().await {
                     Some(input) => lua_input.send(input.as_str()).await.map_err(|error| {
                         ExecutionError::new(ExecutionErrorKind::LuaRuntime, error.message())
@@ -389,7 +178,7 @@ async fn drive_execution(
             ExecutionEvent::Complete(result) => {
                 lua_input.close();
                 while let Some(message) = output.next().await {
-                    events.output(&message).await?;
+                    events.output(&message)?;
                 }
                 return result.map_err(|error| execution_error(&error));
             }
@@ -399,10 +188,6 @@ async fn drive_execution(
             ExecutionEvent::Cancelled => return Ok(()),
         }
     }
-}
-
-fn start_execution(lua: barracuda_lua::Lua, source: OwnedSource) -> LuaExecution {
-    lua.run(source.as_str())
 }
 
 enum ExecutionEvent {
@@ -442,77 +227,71 @@ async fn next_execution_event(
 }
 
 struct RunEvents {
-    emitter: EventEmitter<VM_JSON_REQUEST_BYTES>,
+    workflow: Rc<WorkflowService>,
     run_id: u32,
     sequence: u64,
 }
 
 impl RunEvents {
-    const fn new(emitter: EventEmitter<VM_JSON_REQUEST_BYTES>, run_id: u32) -> Self {
+    fn new(workflow: Rc<WorkflowService>, run_id: u32) -> Self {
         Self {
-            emitter,
+            workflow,
             run_id,
             sequence: 0,
         }
     }
 
-    async fn output(&mut self, message: &str) -> Result<(), ExecutionError> {
-        if message.is_empty() {
-            self.emit_output("", true).await?;
-            return Ok(());
-        }
-        let mut remaining = message;
-        while !remaining.is_empty() {
-            let end = utf8_prefix(remaining, VM_OUTPUT_CHUNK_BYTES);
-            let (chunk, rest) = remaining.split_at(end);
-            self.emit_output(chunk, rest.is_empty()).await?;
-            remaining = rest;
-        }
-        Ok(())
-    }
-
-    async fn emit_output(&mut self, chunk: &str, message_end: bool) -> Result<(), ExecutionError> {
-        let fields = OutputFields {
+    fn output(&mut self, message: &str) -> Result<(), ExecutionError> {
+        self.emit::<Output, _>(&OutputFields {
             run_id: self.run_id,
             sequence: self.sequence,
-            chunk,
-            message_end,
-        };
-        self.emitter
-            .emit::<Output>(&JsonObjectPayload::new(&fields))
-            .await
-            .map_err(|_error| {
-                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
-            })?;
+            chunk: message,
+            message_end: true,
+        })?;
         self.advance_sequence()
     }
 
-    async fn input_required(&mut self) -> Result<(), ExecutionError> {
-        let fields = OrderedFields {
+    fn input_required(&mut self) -> Result<(), ExecutionError> {
+        self.emit::<InputRequired, _>(&OrderedFields {
             run_id: self.run_id,
             sequence: self.sequence,
-        };
-        self.emitter
-            .emit::<InputRequired>(&JsonObjectPayload::new(&fields))
-            .await
-            .map_err(|_error| {
-                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
-            })?;
+        })?;
         self.advance_sequence()
     }
 
-    async fn finished(&mut self, outcome: TerminalOutcome) -> Result<(), ExecutionError> {
-        let fields = FinishedFields {
+    fn finished(&mut self, outcome: TerminalOutcome) -> Result<(), ExecutionError> {
+        let (outcome, error, diagnostic) = match &outcome {
+            TerminalOutcome::Success => ("success", None, None),
+            TerminalOutcome::Cancelled => ("cancelled", None, None),
+            TerminalOutcome::Error(error) => (
+                "error",
+                Some(error.kind.code()),
+                Some(error.diagnostic.as_str()),
+            ),
+        };
+        self.emit::<Finished, _>(&FinishedFields {
             run_id: self.run_id,
             sequence: self.sequence,
             outcome,
-        };
-        self.emitter
-            .emit::<Finished>(&JsonObjectPayload::new(&fields))
-            .await
-            .map_err(|_error| {
-                ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
-            })
+            error,
+            diagnostic,
+        })
+    }
+
+    fn emit<E, Payload>(&self, payload: &Payload) -> Result<(), ExecutionError>
+    where
+        E: Event,
+        Payload: Serialize,
+    {
+        let input = serde_json::to_value(payload).map_err(|_error| {
+            ExecutionError::new(
+                ExecutionErrorKind::VmConfigure,
+                "Event serialization failed",
+            )
+        })?;
+        self.workflow.emit::<E>(input).map_err(|_error| {
+            ExecutionError::new(ExecutionErrorKind::VmConfigure, "Event delivery failed")
+        })
     }
 
     fn advance_sequence(&mut self) -> Result<(), ExecutionError> {
@@ -526,35 +305,18 @@ impl RunEvents {
     }
 }
 
+#[derive(Serialize)]
 struct OrderedFields {
     run_id: u32,
     sequence: u64,
 }
 
-impl JsonObjectFields for OrderedFields {
-    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
-        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
-        writer.field("sequence", &JsonInteger(self.sequence))
-    }
-}
-
+#[derive(Serialize)]
 struct OutputFields<'a> {
     run_id: u32,
     sequence: u64,
     chunk: &'a str,
     message_end: bool,
-}
-
-impl JsonObjectFields for OutputFields<'_> {
-    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
-        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
-        writer.field("sequence", &JsonInteger(self.sequence))?;
-        writer.string_field("chunk", self.chunk)?;
-        writer.field(
-            "message_end",
-            if self.message_end { "true" } else { "false" },
-        )
-    }
 }
 
 enum TerminalOutcome {
@@ -563,76 +325,15 @@ enum TerminalOutcome {
     Error(ExecutionError),
 }
 
-struct FinishedFields {
+#[derive(Serialize)]
+struct FinishedFields<'a> {
     run_id: u32,
     sequence: u64,
-    outcome: TerminalOutcome,
-}
-
-impl JsonObjectFields for FinishedFields {
-    fn write_fields(&self, writer: &mut JsonObjectWriter<'_>) -> Result<(), RpcError> {
-        writer.field("run_id", &JsonInteger(u64::from(self.run_id)))?;
-        writer.field("sequence", &JsonInteger(self.sequence))?;
-        match &self.outcome {
-            TerminalOutcome::Success => writer.string_field("outcome", "success"),
-            TerminalOutcome::Cancelled => writer.string_field("outcome", "cancelled"),
-            TerminalOutcome::Error(error) => {
-                writer.string_field("outcome", "error")?;
-                writer.string_field("error", error.kind.code())?;
-                writer.string_field("diagnostic", error.diagnostic.as_str())
-            }
-        }
-    }
-}
-
-struct JsonInteger(u64);
-
-impl JsonPayload for JsonInteger {
-    fn encoded_len(&self) -> Result<usize, RpcError> {
-        Ok(decimal_len(self.0))
-    }
-
-    fn write_json(&self, destination: &mut [u8]) -> Result<usize, RpcError> {
-        let length = decimal_len(self.0);
-        let capacity = destination.len();
-        let output = destination
-            .get_mut(..length)
-            .ok_or(RpcError::FrameTooLarge {
-                size: length,
-                capacity,
-            })?;
-        let mut value = self.0;
-        for index in (0..length).rev() {
-            let digit = u8::try_from(value % 10).map_err(|_error| RpcError::InvalidFrameState)?;
-            let encoded = b'0'.checked_add(digit).ok_or(RpcError::InvalidFrameState)?;
-            *output.get_mut(index).ok_or(RpcError::InvalidFrameState)? = encoded;
-            value /= 10;
-        }
-        Ok(length)
-    }
-}
-
-const fn decimal_len(mut value: u64) -> usize {
-    let mut length = 1_usize;
-    while value >= 10 {
-        value /= 10;
-        length = length.saturating_add(1);
-    }
-    length
-}
-
-fn utf8_prefix(value: &str, max_bytes: usize) -> usize {
-    let mut end = core::cmp::min(value.len(), max_bytes);
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    end
-}
-
-fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
-    value
-        .get(..utf8_prefix(value, max_bytes))
-        .unwrap_or_default()
+    outcome: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<&'a str>,
 }
 
 fn factory_error(error: &LuaError) -> ExecutionError {
@@ -657,69 +358,4 @@ fn execution_error(error: &LuaError) -> ExecutionError {
         }
     };
     ExecutionError::new(kind, error.message())
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use super::{
-        ExecutionError, ExecutionErrorKind, FinishedFields, JsonInteger, JsonObjectPayload,
-        JsonPayload, OutputFields, TerminalOutcome, VM_DIAGNOSTIC_BYTES, VM_EVENT_INPUT_BYTES,
-        VM_OUTPUT_CHUNK_BYTES, decimal_len, truncate_utf8, utf8_prefix,
-    };
-
-    #[test]
-    fn integer_payload_writes_without_an_intermediate_string() {
-        let mut output = [0_u8; 20];
-        let written = JsonInteger(u64::MAX)
-            .write_json(&mut output)
-            .expect("write integer");
-        assert_eq!(
-            output.get(..written).expect("written integer range"),
-            b"18446744073709551615"
-        );
-        assert_eq!(decimal_len(u64::MAX), 20);
-        assert_eq!(decimal_len(0), 1);
-    }
-
-    #[test]
-    fn utf8_chunks_and_diagnostics_end_at_character_boundaries() {
-        assert_eq!(utf8_prefix("abc", 2), 2);
-        assert_eq!(utf8_prefix("aé", 2), 1);
-        assert_eq!(truncate_utf8("aé", 2), "a");
-    }
-
-    #[test]
-    fn worst_case_event_inputs_fit_the_declared_bound() {
-        let text = "\0".repeat(VM_OUTPUT_CHUNK_BYTES);
-        let output = OutputFields {
-            run_id: u32::MAX,
-            sequence: u64::MAX,
-            chunk: &text,
-            message_end: false,
-        };
-        assert!(
-            JsonObjectPayload::new(&output)
-                .encoded_len()
-                .expect("measure output Event")
-                <= VM_EVENT_INPUT_BYTES
-        );
-
-        let diagnostic = "\0".repeat(VM_DIAGNOSTIC_BYTES);
-        let finished = FinishedFields {
-            run_id: u32::MAX,
-            sequence: u64::MAX,
-            outcome: TerminalOutcome::Error(ExecutionError::new(
-                ExecutionErrorKind::UnexpectedYield,
-                &diagnostic,
-            )),
-        };
-        assert!(
-            JsonObjectPayload::new(&finished)
-                .encoded_len()
-                .expect("measure finished Event")
-                <= VM_EVENT_INPUT_BYTES
-        );
-    }
 }

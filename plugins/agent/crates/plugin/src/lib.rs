@@ -1,4 +1,4 @@
-//! Plugin that owns the Agent Component.
+//! Plugin that owns the Agent runtime and exposes it to Workflow.
 
 #![no_std]
 
@@ -8,51 +8,66 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 mod model_api_http;
+mod workflow;
 
-use barracuda_agent_component::component::AgentComponent;
-use barracuda_agent_runtime::{AgentRuntime, ModelApiFactory, RuntimeStorageConfig};
+use barracuda_agent_runtime::{
+    AgentRuntime, ModelApiFactory, RuntimeService, RuntimeStorageConfig,
+};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginFilesystem, PluginRegisterContext, PluginRequirements, PluginResult,
+    PluginStartContext, PluginTaskToken,
 };
 use barracuda_webserver_plugin::WebServer;
+use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
+use embassy_futures::select::select;
 use http_client::ClientFactory;
+use workflow::AgentWorkflowAdapter;
 
+pub use barracuda_agent_runtime::{tools, AgentToolRegistry};
 pub use model_api_http::SET_API_PATH;
 
 const PERSISTENCE_ROOT: &str = "/";
 
-/// Plugin that constructs and owns the Agent runtime and Component.
+/// Plugin that constructs the Agent runtime and registers its Workflow Actions.
 #[barracuda_plugin::macros::plugin]
 pub struct AgentPlugin {
     http_clients: ClientFactory<'static>,
+    runtime: Option<Rc<AgentRuntime>>,
+    runtime_service: Option<RuntimeService>,
+    workflow_adapter: Option<AgentWorkflowAdapter>,
+    workflow_service: Option<Rc<WorkflowService>>,
 }
 
 impl AgentPlugin {
-    /// Creates the Plugin with Platform HTTP resources.
+    /// Creates the unregistered Agent Plugin.
     #[must_use]
     pub fn new<Builtins, Io>(context: &mut PluginContext<Builtins, Io>) -> Self {
         Self {
             http_clients: context.http_clients.clone(),
+            runtime: None,
+            runtime_service: None,
+            workflow_adapter: None,
+            workflow_service: None,
         }
     }
 }
 
-impl<const M: usize> Plugin<M> for AgentPlugin {
+impl Plugin for AgentPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
-        let webserver = context.require::<WebServer>(
-            <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
-        )?;
+        let webserver = context.require::<WebServer>("webserver")?;
+        let actions = context.require::<WorkflowActionRegistry>("workflow")?;
+        let workflow_service = context.require::<WorkflowService>("workflow")?;
         let filesystem = context.filesystem()?.clone();
         let http_clients = self.http_clients.clone();
         let model_api_factory = ModelApiFactory::new(move || ModelApi::new(http_clients.clone()));
@@ -62,97 +77,89 @@ impl<const M: usize> Plugin<M> for AgentPlugin {
         };
         let (runtime, service) = AgentRuntime::new(filesystem, storage, model_api_factory)
             .map_err(PluginError::registration)?;
-        runtime.start_all().map_err(PluginError::registration)?;
         let runtime = Rc::new(runtime);
-        let registration = webserver
+        let workflow_adapter = AgentWorkflowAdapter::new(Rc::clone(&runtime));
+        let action_registrations = workflow_adapter
+            .register_actions(&actions)
+            .map_err(PluginError::registration)?;
+
+        context.retain(action_registrations);
+        context.provide(Rc::new(runtime.tool_registry()))?;
+        let route_registration = webserver
             .serve_http(
                 SET_API_PATH,
                 model_api_http::SetApiEndpoint::new(Rc::clone(&runtime)),
             )
             .map_err(PluginError::registration)?;
-        context.retain(registration);
-        context
-            .event_router
-            .load(AgentComponent::from_shared(runtime, service))?;
+        context.retain(route_registration);
+
+        self.runtime = Some(runtime);
+        self.runtime_service = Some(service);
+        self.workflow_adapter = Some(workflow_adapter);
+        self.workflow_service = Some(workflow_service);
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use alloc::boxed::Box;
-    use alloc::rc::Rc;
-    use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{
-        install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
-    };
-    use barracuda_plugin::api::PluginContext;
-    use barracuda_plugin::manager::{
-        Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
-    };
-    use barracuda_webserver_plugin::WebServer;
-    use futures_lite::future::block_on;
-
-    use http_client::ClientFactory;
-
-    use super::AgentPlugin;
-
-    struct WebServerProvider(Rc<WebServer>);
-
-    impl PluginDeclaration for WebServerProvider {
-        const ID: &'static str = "webserver";
-    }
-
-    impl Plugin<512> for WebServerProvider {
-        fn register<Storage>(
-            &mut self,
-            context: &mut PluginRegisterContext<'_, 512, Storage>,
-        ) -> PluginResult<()>
-        where
-            Storage: barracuda_plugin::manager::PluginStorage,
-        {
-            context.provide(Rc::clone(&self.0))?;
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn plugin_loads_its_agent_component() {
-        block_on(async {
-            let partition = memory_partition(64 * 1024)
-                .await
-                .expect("create database partition");
-            let mut manager = PluginManager::open(partition)
-                .await
-                .expect("open Plugin storage");
-            manager.install_vfs(memory_vfs_root().await.expect("create System VFS"));
-            install_global_memory_vfs()
-                .await
-                .expect("install global test VFS");
-            let lanes = Box::leak(Box::new(RpcLaneStorage::<16, 512, 8>::new()));
-            let mut router = EventRouter::new(lanes).await.expect("create router");
-            let id = PluginId::try_from("agent").expect("valid Plugin ID");
-
-            manager
-                .register(&mut router, WebServerProvider(Rc::new(WebServer::new())))
-                .expect("register WebServer provider");
-
-            let stack = never_embassy_stack();
-            let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-            let plugin = AgentPlugin::new(&mut context);
-            assert_eq!(
-                <AgentPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
-                "agent"
-            );
-
-            manager
-                .register(&mut router, plugin)
-                .expect("register Agent Plugin");
-            manager.start(&mut router).expect("start Plugins");
-
-            assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(1));
-        });
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        self.runtime
+            .as_ref()
+            .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?
+            .start_all()
+            .map_err(PluginError::registration)?;
+        let workflow_adapter = self
+            .workflow_adapter
+            .take()
+            .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
+        let runtime_service = self
+            .runtime_service
+            .take()
+            .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
+        let workflow_service = self
+            .workflow_service
+            .take()
+            .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
+        let cancellation = context.task_token();
+        context
+            .task_spawner()?
+            .spawn(agent_task(
+                runtime_service,
+                workflow_adapter,
+                workflow_service,
+                cancellation,
+            ))
+            .map_err(PluginError::registration)
     }
 }
+
+#[embassy_executor::task]
+async fn agent_task(
+    runtime_service: RuntimeService,
+    workflow_adapter: AgentWorkflowAdapter,
+    workflow_service: Rc<WorkflowService>,
+    cancellation: PluginTaskToken,
+) {
+    let running = async move {
+        let runtime = async move {
+            runtime_service.await;
+            log::info!("Agent runtime service stopped");
+        };
+        let events = async move {
+            if let Err(error) = workflow_adapter
+                .forward_session_events(workflow_service)
+                .await
+            {
+                log::error!("Agent session Event forwarding stopped: {error}");
+            }
+        };
+        let _completed = select(runtime, events).await;
+    };
+    let _completed = select(cancellation.cancelled(), running).await;
+    log::info!("stopped Agent runtime task");
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Agent runtime was not prepared during Plugin registration")]
+struct AgentRuntimeUnavailable;

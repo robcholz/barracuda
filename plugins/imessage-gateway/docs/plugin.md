@@ -1,18 +1,13 @@
 # IMessage Gateway Plugin
 
 - Plugin ID: `imessage-gateway`
-- Direct Plugin dependencies: none
-- Provided typed capabilities: `IMessageGateway`
-- Required typed capabilities: none
-- Owned Components: `GatewayComponent`, `GatewayInboundComponent`, four
-  `GatewayEventStreamComponent` workers, four `GatewayMediaStreamComponent` workers
-- Plugin-owned tasks: none
+- Direct dependency: `workflow`
+- Provided capability: `IMessageGateway`
+- Workflow Actions: `gateway.send`, `gateway.send_stream`, `gateway.send_media`
+- Workflow Events: `gateway.message.received`,
+  `gateway.send_stream.finished`, `gateway.send_media.finished`
 
-The Plugin owns the provider-neutral message gateway. Provider Plugins require
-`IMessageGateway`, register a typed `MessageChannel`, retain its registration
-guard, and publish normalized inbound messages through `GatewayIngress`.
-Dropping the guard unregisters that provider channel.
-
-Agent and Workflow callers do not use this capability. They discover the three
-public JSON RPCs with visibility `"*"` and receive asynchronous Gateway facts
-as JSON Events.
+`IMessageGateway` is the shared typed API. Provider Plugins register channels
+and publish inbound messages through it; Workflow Actions and the separate
+`agent-imessage-gateway` adapter call the same send methods. The Plugin owns four
+text stream workers and four media workers.

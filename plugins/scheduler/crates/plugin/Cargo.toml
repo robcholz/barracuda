@@ -2,17 +2,26 @@
 name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Barracuda Plugin that owns the RTC-authoritative Scheduler Component"
+description = "Barracuda Plugin that publishes persistent RTC-authoritative scheduling"
 license = "Apache-2.0"
 
 [dependencies]
 barracuda-plugin.workspace = true
-barracuda-scheduler-component = { path = "../component" }
 barracuda-time-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
 embassy-futures.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+getset = "0.1"
+log.workspace = true
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+time = { version = "0.3.55", default-features = false }
+zerocopy = { version = "0.8", features = ["derive"] }
 
 [dev-dependencies]
-barracuda-event-router.workspace = true
 barracuda-platform-test.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

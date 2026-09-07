@@ -562,10 +562,17 @@ fn plugin_entry(source: &str) -> Option<String> {
         .lines()
         .filter_map(|line| {
             let line = line.trim();
-            line.starts_with("impl<")
-                .then(|| line.split_once(" Plugin<M> for "))
-                .flatten()
-                .map(|(_parameters, implementation)| implementation)
+            let declaration = line.strip_prefix("impl")?;
+            if !declaration.starts_with(char::is_whitespace) && !declaration.starts_with('<') {
+                return None;
+            }
+            let (trait_implementation, implementation) = declaration.split_once(" for ")?;
+            let trait_name = trait_implementation.split_whitespace().next_back()?;
+            (trait_name == "Plugin"
+                || trait_name
+                    .strip_prefix("Plugin<")
+                    .is_some_and(|parameters| parameters.ends_with('>')))
+            .then_some(implementation)
         })
         .filter_map(|implementation| implementation.split_whitespace().next())
         .filter_map(|implementation| implementation.split('<').next())
@@ -610,7 +617,7 @@ fn render_registrations(plugins: &[&Plugin]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    format!("        register_plugins!(plugins, router;\n{entries}\n        );")
+    format!("        register_plugins!(plugins;\n{entries}\n        );")
 }
 fn replace_block(text: &str, begin: &str, end: &str, body: &str) -> Result<String, CommandError> {
     let begin_offset = text.find(begin).ok_or_else(|| {
@@ -658,8 +665,8 @@ mod tests {
     use super::{
         cascade_disabled, format_cascade_dependencies, format_selection_summary, info,
         package_name, parse_metadata, persist_disabled_selection, plugin_entry,
-        render_dependencies, replace_block, sync_with_report, validate_dependency_graph,
-        CascadeDependency, Plugin, SyncStatus,
+        render_dependencies, render_registrations, replace_block, sync_with_report,
+        validate_dependency_graph, CascadeDependency, Plugin, SyncStatus,
     };
 
     fn plugin(directory: &str, id: &str, dependencies: &[&str]) -> Plugin {
@@ -697,18 +704,22 @@ mod tests {
             Some(String::from("barracuda-demo-plugin"))
         );
         assert_eq!(
-            plugin_entry("impl<const M: usize> Plugin<M> for DemoPlugin {\n}"),
+            plugin_entry("impl Plugin for DemoPlugin {\n}"),
             Some(String::from("DemoPlugin"))
         );
         assert_eq!(
             plugin_entry(
-                "impl<Hardware, const M: usize> Plugin<M> for HardwarePlugin<Hardware>\n\
+                "impl<Hardware> Plugin for HardwarePlugin<Hardware>\n\
                  where\n\
                      Hardware: Send,\n\
                  {\n\
                  }",
             ),
             Some(String::from("HardwarePlugin"))
+        );
+        assert_eq!(
+            plugin_entry("impl<const M: usize> Plugin<M> for LegacyPlugin {\n}"),
+            Some(String::from("LegacyPlugin"))
         );
         let metadata = parse_metadata(
             std::path::Path::new("plugin.toml"),
@@ -923,6 +934,20 @@ mod tests {
     }
 
     #[test]
+    fn renders_plugin_registrations_without_an_event_router() {
+        let demo = plugin("demo", "demo", &[]);
+
+        assert_eq!(
+            render_registrations(&[&demo]),
+            concat!(
+                "        register_plugins!(plugins;\n",
+                "            barracuda_demo_plugin::TestPlugin::new(&mut plugin_context),\n",
+                "        );"
+            )
+        );
+    }
+
+    #[test]
     fn disabled_plugins_are_reported_and_omitted_from_registration() {
         let root = tempdir().expect("temporary workspace");
         let plugin = root.path().join("plugins/demo/crates/plugin");
@@ -937,11 +962,8 @@ mod tests {
             "id = \"demo\"\ndepends-on = []\ndescription = \"Demonstrates Plugin discovery.\"\n",
         )
         .expect("Plugin metadata");
-        fs::write(
-            plugin.join("src/lib.rs"),
-            "impl<const M: usize> Plugin<M> for DemoPlugin {}\n",
-        )
-        .expect("Plugin source");
+        fs::write(plugin.join("src/lib.rs"), "impl Plugin for DemoPlugin {}\n")
+            .expect("Plugin source");
         fs::create_dir_all(root.path().join("core/system/src")).expect("System source directory");
         fs::write(
             root.path().join("Cargo.toml"),

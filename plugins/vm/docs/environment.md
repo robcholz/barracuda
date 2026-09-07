@@ -72,11 +72,10 @@ message and apply backpressure when full.
 `Lua::run()` only executes the already-configured sandbox. It does not install
 an Environment, packages, or any globals.
 
-At the JSON RPC boundary, the default logical source limit is 480 UTF-8 bytes
-and the default limit for one complete input message is 400 UTF-8 bytes. Each
-encoded request must also fit one 512-byte Event Router lane. See
-[rpc.md](rpc.md) for control and rejection behavior and [event.md](event.md)
-for output and completion.
+The typed `Vm` capability accepts owned source and input strings. It does not
+impose a transport-derived length limit. See [action.md](action.md) for
+Workflow control and rejection behavior and [event.md](event.md) for output
+and completion.
 
 ## Native modules
 
@@ -146,7 +145,7 @@ yield, the VM executor task performs `Timer::after_millis(100).await` and then
 resumes polling the same Lua execution. The default interval is 10,000
 instructions and the pool supports four concurrent executions.
 
-Every `VmComponent` uses `VmRuntime` and the task-owned instruction scheduler.
+The `Vm` capability uses `VmRuntime` and the task-owned instruction scheduler.
 Normal system composition constructs both through `VmPlugin`.
 
 ## Lua memory pool
@@ -162,11 +161,8 @@ pool.
 Exceeding the fixed per-execution Lua heap terminates the execution with a
 `vm.finished` Event whose error is `lua_memory`.
 `VmRuntime::with_memory_bytes` can replace the default per-slot capacity when
-constructing the runtime.
-
-The Lua heap limit does not include the fixed 480-byte task-owned source copy,
-one bounded input message, native callback objects, or Embassy task storage.
-Normal Plugin composition uses the bounded Lua pool.
+constructing the runtime. The Lua heap limit does not include owned source and
+input strings, native callback objects, or Embassy task storage.
 
 `vm.cancel` is observed by a blocked input immediately or by CPU-bound Lua at
 an instruction-hook boundary or after the current 100 ms task delay.
