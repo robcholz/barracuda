@@ -3,6 +3,7 @@
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt::Debug;
 
 use barracuda_kv::{
@@ -61,6 +62,9 @@ pub trait PluginStorage: Clone + 'static {
     /// Reads one typed value, returning `None` when the key does not exist.
     async fn get<T: Value>(&self, key: &str) -> StorageResult<Option<T>>;
 
+    /// Reads one variable-length value, returning `None` when the key does not exist.
+    async fn get_bytes(&self, key: &str) -> StorageResult<Option<Vec<u8>>>;
+
     /// Inserts or replaces one byte-representable value atomically.
     async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()>;
 
@@ -81,6 +85,9 @@ pub trait PluginReadTransaction {
         Self: 'a;
     /// Reads and validates one typed value.
     async fn read<T: Value>(&self, key: &str) -> StorageResult<T>;
+
+    /// Reads one variable-length value into owned bytes.
+    async fn read_bytes(&self, key: &str) -> StorageResult<Vec<u8>>;
 
     /// Opens a streaming iterator over this Plugin's live entries.
     async fn entries(&self) -> StorageResult<Self::EntryIterator<'_>>;
@@ -217,6 +224,16 @@ where
         }
     }
 
+    /// Reads one variable-length value from this Plugin's scope.
+    async fn get_bytes(&self, key: &str) -> StorageResult<Option<Vec<u8>>> {
+        let transaction = self.read_transaction().await;
+        match transaction.read_bytes(key).await {
+            Ok(value) => Ok(Some(value)),
+            Err(StorageError::Database(KvError::KeyNotFound)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     /// Inserts or replaces one byte-representable value in a committed transaction.
     async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         let mut transaction = self.write_transaction().await;
@@ -256,6 +273,10 @@ where
         ScopedStorage::get(self, key).await
     }
 
+    async fn get_bytes(&self, key: &str) -> StorageResult<Option<Vec<u8>>> {
+        ScopedStorage::get_bytes(self, key).await
+    }
+
     async fn put<T: WriteValue + ?Sized>(&self, key: &str, value: &T) -> StorageResult<()> {
         ScopedStorage::put(self, key, value).await
     }
@@ -283,6 +304,15 @@ where
         self.inner.read(&key).await.map_err(StorageError::from)
     }
 
+    /// Reads one variable-length value from this Plugin's scope.
+    pub async fn read_bytes(&self, key: &str) -> StorageResult<Vec<u8>> {
+        let key = scoped_key(self.prefix, key)?;
+        self.inner
+            .read_bytes(&key)
+            .await
+            .map_err(StorageError::from)
+    }
+
     /// Opens a streaming entry iterator restricted to this Plugin namespace.
     pub async fn entries(&self) -> StorageResult<ScopedEntryIterator<'_, P>> {
         Ok(ScopedEntryIterator {
@@ -308,6 +338,10 @@ where
         Self: 'a;
     async fn read<T: Value>(&self, key: &str) -> StorageResult<T> {
         ScopedReadTransaction::read(self, key).await
+    }
+
+    async fn read_bytes(&self, key: &str) -> StorageResult<Vec<u8>> {
+        ScopedReadTransaction::read_bytes(self, key).await
     }
 
     async fn entries(&self) -> StorageResult<Self::EntryIterator<'_>> {

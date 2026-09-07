@@ -81,6 +81,27 @@ fn write_transaction_accepts_variable_length_utf8_values() {
 }
 
 #[test]
+fn read_transaction_returns_owned_variable_length_bytes() {
+    block_on(async {
+        let database = database().await;
+        let mut write = database.write_transaction().await;
+        write
+            .write("configuration", br#"{"token":"secret"}"#.as_slice())
+            .await
+            .expect("write configuration");
+        write.commit().await.expect("commit configuration");
+
+        let read = database.read_transaction().await;
+        assert_eq!(
+            read.read_bytes("configuration")
+                .await
+                .expect("read configuration"),
+            br#"{"token":"secret"}"#
+        );
+    });
+}
+
+#[test]
 fn dropping_write_transaction_rolls_back_every_write() {
     block_on(async {
         let database = database().await;
