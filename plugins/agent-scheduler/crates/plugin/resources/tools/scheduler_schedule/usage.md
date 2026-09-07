@@ -1,0 +1,1 @@
+Use `scheduler_schedule` with a unique ID and an absolute UTC timestamp. The same ID is emitted as the topic of each `scheduler.triggered` Workflow Event. Interval schedules require a positive interval and count.

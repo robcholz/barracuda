@@ -16,7 +16,6 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-event-router.workspace = true
 barracuda-platform-test.workspace = true
 barracuda-vfs-memfs.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }

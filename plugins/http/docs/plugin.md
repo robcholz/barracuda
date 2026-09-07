@@ -1,19 +1,16 @@
 # HTTP Plugin
 
 - Plugin ID: `http`
-- Direct Plugin dependencies: none
-- Provided typed capabilities: none
-- Required typed capabilities: none
-- Owned Components: inline HTTP Component
+- Direct Plugin dependencies: `workflow`
+- Provided typed capabilities: `Http`
+- Required typed capabilities: `WorkflowActionRegistry`
+- Owned Components: none
 
-The HTTP Plugin adapts System's shared `http_client::ClientFactory` into the
-public `http.request` JSON RPC. It performs bounded, buffered outbound HTTP and
-HTTPS requests without depending on a concrete Platform or creating a second
-HTTP transport implementation.
+The HTTP Plugin adapts System's shared `http_client::ClientFactory` into a typed
+capability and registers the same operation as the `http.request` Workflow
+Action.
 
-The Component decodes all request strings into one lane-sized fixed scratch
-buffer and retains ranges into that shared storage. It preallocates two reusable
-HTTP workspaces when the Plugin is registered. Each workspace owns its response-
-header and response-body buffers, so network calls do not allocate those large
-buffers per request. A third simultaneous request fails with
-`RpcError::ResourceExhausted` instead of allocating more memory.
+The capability preallocates two reusable HTTP workspaces. Each workspace owns
+its response-header and read buffers and retains the response body's high-water
+capacity. A third simultaneous request returns `busy`. Response bodies are
+bounded at 64 KiB; there is no Event Router lane or 512-byte response limit.

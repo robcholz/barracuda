@@ -1,175 +1,192 @@
-use alloc::boxed::Box;
-use core::future::pending;
+use alloc::rc::Rc;
+use alloc::string::String;
 
-use barracuda_event_router::{
-    Component, ComponentFuture, ComponentResult, RegisterContext, RunContext, UnregisterContext,
-};
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_workflow_plugin::WorkflowService;
+use embassy_executor::Spawner;
 use getset::CopyGetters;
+use serde::{Deserialize, Serialize};
 
-use crate::VmRuntime;
-use crate::run::{Cancel, Input, Run, cancel_handler, input_handler, run_handler};
+use crate::runtime::{ControlError, DispatchError};
+use crate::{VmMemoryPoolError, VmRuntime, VmRuntimeStartError};
 
-/// Default maximum Lua source size accepted by one `vm.run` call.
-pub const DEFAULT_MAX_SOURCE_BYTES: usize = 480;
-/// Default maximum size of one logical `io.input()` message.
-pub const DEFAULT_MAX_INPUT_BYTES: usize = 400;
 /// Default instruction interval between cooperative executor yields.
 pub const DEFAULT_INSTRUCTION_HOOK_INTERVAL: u32 = 10_000;
 
-/// Per-call protocol and execution limits enforced by `vm.run`.
+/// Lua execution limits independent of any transport framing.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, CopyGetters)]
 pub struct VmLimits {
-    /// Maximum UTF-8 byte length of the complete Lua source.
-    #[getset(get_copy = "pub")]
-    max_source_bytes: usize,
-    /// Maximum UTF-8 byte length of one complete `io.input()` message.
-    #[getset(get_copy = "pub")]
-    max_input_bytes: usize,
     /// Lua instruction count between cooperative executor yields.
     #[getset(get_copy = "pub")]
     instruction_hook_interval: u32,
 }
 
 impl VmLimits {
-    /// Creates explicit source and input-message limits.
+    /// Creates limits with an explicit cooperative-yield interval.
     #[must_use]
-    pub const fn new(max_source_bytes: usize, max_input_bytes: usize) -> Self {
+    pub const fn new(instruction_hook_interval: u32) -> Self {
         Self {
-            max_source_bytes,
-            max_input_bytes,
-            instruction_hook_interval: DEFAULT_INSTRUCTION_HOOK_INTERVAL,
+            instruction_hook_interval,
         }
-    }
-
-    /// Replaces the instruction interval between cooperative VM yields.
-    #[must_use]
-    pub const fn with_instruction_hook_interval(mut self, instruction_hook_interval: u32) -> Self {
-        self.instruction_hook_interval = instruction_hook_interval;
-        self
     }
 }
 
 impl Default for VmLimits {
     fn default() -> Self {
-        Self::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES)
+        Self::new(DEFAULT_INSTRUCTION_HOOK_INTERVAL)
     }
 }
 
-/// Event Router Component exposing the `vm.run` RPC.
-pub struct VmComponent {
+/// Request to start one isolated Lua execution.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmRunRequest {
+    /// Complete Lua source document.
+    pub source: String,
+}
+
+/// Accepted VM execution.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub struct VmRunAccepted {
+    /// Runtime-generated execution identifier.
+    pub run_id: u32,
+}
+
+/// Request to provide input or EOF to an active execution.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmInputRequest {
+    /// Execution identifier returned by [`Vm::run`].
+    pub run_id: u32,
+    /// One complete input value.
+    pub input: Option<String>,
+    /// Set to `true` instead of `input` to close the input stream.
+    pub eof: Option<bool>,
+}
+
+/// Reference to one active execution.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct VmRunReference {
+    /// Execution identifier returned by [`Vm::run`].
+    pub run_id: u32,
+}
+
+/// Empty successful control response.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+pub struct VmControlAccepted {}
+
+/// Business rejection returned by the VM capability.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum VmError {
+    /// The runtime has not started yet.
+    #[error("VM runtime is unavailable")]
+    RuntimeUnavailable,
+    /// All execution slots are occupied.
+    #[error("VM runtime is busy")]
+    Busy,
+    /// The referenced execution does not exist.
+    #[error("VM execution was not found")]
+    RunNotFound,
+    /// One input value is already waiting to be consumed.
+    #[error("VM input queue is full")]
+    InputBackpressure,
+    /// The execution no longer accepts input.
+    #[error("VM input is closed")]
+    InputClosed,
+    /// Exactly one of `input` or `eof: true` must be supplied.
+    #[error("invalid VM input request")]
+    InvalidInput,
+}
+
+impl From<DispatchError> for VmError {
+    fn from(error: DispatchError) -> Self {
+        match error {
+            DispatchError::RuntimeUnavailable => Self::RuntimeUnavailable,
+            DispatchError::Busy => Self::Busy,
+        }
+    }
+}
+
+impl From<ControlError> for VmError {
+    fn from(error: ControlError) -> Self {
+        match error {
+            ControlError::RunNotFound => Self::RunNotFound,
+            ControlError::InputBackpressure => Self::InputBackpressure,
+            ControlError::InputClosed => Self::InputClosed,
+        }
+    }
+}
+
+/// Typed capability for starting and controlling isolated Lua executions.
+pub struct Vm {
+    runtime: VmRuntime,
     limits: VmLimits,
     builtin_packages: BuiltinPackages,
     package_registry: LuaPackageRegistry,
-    runtime: VmRuntime,
 }
 
-impl VmComponent {
-    /// Creates the Component with execution dispatched onto the VM Embassy task pool.
-    #[must_use]
-    pub fn with_runtime(builtin_packages: BuiltinPackages, runtime: VmRuntime) -> Self {
-        Self {
-            limits: VmLimits::new(DEFAULT_MAX_SOURCE_BYTES, DEFAULT_MAX_INPUT_BYTES),
-            builtin_packages,
-            package_registry: LuaPackageRegistry::new(),
-            runtime,
-        }
+impl Vm {
+    /// Creates the VM capability with its fixed execution pool.
+    pub fn new(package_registry: LuaPackageRegistry) -> Result<Self, VmMemoryPoolError> {
+        Ok(Self {
+            runtime: VmRuntime::new()?,
+            limits: VmLimits::default(),
+            builtin_packages: BuiltinPackages::all(),
+            package_registry,
+        })
     }
 
-    /// Uses the registry whose current packages are installed into each new Lua state.
-    #[must_use]
-    pub fn with_package_registry(mut self, package_registry: LuaPackageRegistry) -> Self {
-        self.package_registry = package_registry;
-        self
-    }
-
-    /// Replaces the limits used by this Component.
+    /// Replaces Lua execution limits.
     #[must_use]
     pub fn with_limits(mut self, limits: VmLimits) -> Self {
         self.limits = limits;
         self
     }
-}
 
-impl<const M: usize> Component<M> for VmComponent {
-    fn name(&self) -> &'static str {
-        "vm"
+    /// Installs the task spawner and Workflow Event destination.
+    pub fn start(
+        &self,
+        spawner: Spawner,
+        workflow: Rc<WorkflowService>,
+    ) -> Result<(), VmRuntimeStartError> {
+        self.runtime.start(spawner, workflow)
     }
 
-    fn register(&mut self, context: &mut RegisterContext<'_, M>) -> ComponentResult<()> {
-        context.register_json::<Run, _>(
-            "*",
-            run_handler(
-                self.runtime.clone(),
+    /// Stops accepting executions and cancels every active run.
+    pub fn stop(&self) {
+        self.runtime.stop();
+    }
+
+    /// Starts one isolated Lua execution and returns immediately after acceptance.
+    pub fn run(&self, request: VmRunRequest) -> Result<VmRunAccepted, VmError> {
+        self.runtime
+            .dispatch(
+                request.source,
                 self.limits,
                 self.builtin_packages,
                 self.package_registry.clone(),
-            ),
-        )?;
-        context.register_json::<Input, _>("*", input_handler(self.runtime.clone(), self.limits))?;
-        context.register_json::<Cancel, _>("*", cancel_handler(self.runtime.clone()))
-    }
-
-    fn run<'a>(&'a mut self, context: RunContext<M>) -> ComponentFuture<'a> {
-        Box::pin(async move {
-            self.runtime.attach_router(context.rpc().clone());
-            pending().await
-        })
-    }
-
-    fn unregister(&mut self, _context: &mut UnregisterContext<'_>) -> ComponentResult<()> {
-        self.runtime.detach_router();
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-    #![allow(missing_docs)]
-
-    use barracuda_lua::Lua;
-
-    #[test]
-    fn creates_a_sandboxed_lua_state() {
-        Lua::new().expect("create configured Lua");
-    }
-
-    #[test]
-    fn default_lua_exposes_only_allowlisted_capabilities() {
-        let mut lua = Lua::new().expect("create configured Lua");
-        let sandboxed: bool = lua
-            .load(
-                "return package == nil and io == nil and os == nil and debug == nil \
-                 and load == nil and loadfile == nil and dofile == nil \
-                 and collectgarbage == nil and warn == nil and print == nil \
-                 and getmetatable == nil and setmetatable == nil \
-                 and rawget == nil and rawset == nil and rawlen == nil and rawequal == nil \
-                 and type(require) == 'function' and type(pcall) == 'function' \
-                 and type(tostring) == 'function' and type(select) == 'function'",
             )
-            .eval()
-            .expect("inspect sandbox globals");
-
-        assert!(sandboxed);
+            .map(|run_id| VmRunAccepted { run_id })
+            .map_err(VmError::from)
     }
 
-    #[test]
-    fn default_lua_require_resolves_only_registered_modules() {
-        let mut lua = Lua::new().expect("create Lua");
-        lua.register_lib("allowed", |library| library.set("version", 1_i64))
-            .expect("register allowed module");
+    /// Supplies one input value or EOF to an active execution.
+    pub fn input(&self, request: VmInputRequest) -> Result<VmControlAccepted, VmError> {
+        let result = match (request.input, request.eof) {
+            (Some(input), None | Some(false)) => self.runtime.send_input(request.run_id, input),
+            (None, Some(true)) => self.runtime.close_input(request.run_id),
+            _ => return Err(VmError::InvalidInput),
+        };
+        result.map_err(VmError::from)?;
+        Ok(VmControlAccepted {})
+    }
 
-        let allowlisted_only: bool = lua
-            .load(
-                "local allowed = require('allowed') \
-                 local unknown_loaded = pcall(require, 'unknown') \
-                 return allowed.version == 1 and not unknown_loaded and package == nil",
-            )
-            .eval()
-            .expect("evaluate require policy");
-
-        assert!(allowlisted_only);
+    /// Cancels one active execution.
+    pub fn cancel(&self, request: VmRunReference) -> Result<VmControlAccepted, VmError> {
+        self.runtime.cancel(request.run_id).map_err(VmError::from)?;
+        Ok(VmControlAccepted {})
     }
 }

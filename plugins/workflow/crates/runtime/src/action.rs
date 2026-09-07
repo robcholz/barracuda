@@ -129,13 +129,13 @@ macro_rules! workflow_action_schema {
 /// Compiles inline request and response schemas for a Workflow Action.
 #[macro_export]
 macro_rules! workflow_action_schema_inline {
-    ($address:literal, $request:literal, $response:literal $(,)?) => {
-        $crate::WorkflowActionSchema::new(
-            $address,
-            $crate::__private::json_validator::json_schema_inline!($request),
-            $crate::__private::json_validator::json_schema_inline!($response),
-        )
-    };
+    ($address:literal, $request:literal, $response:literal $(,)?) => {{
+        const REQUEST: $crate::__private::json_validator::JsonSchema =
+            $crate::__private::json_validator::json_schema_inline!($request);
+        const RESPONSE: $crate::__private::json_validator::JsonSchema =
+            $crate::__private::json_validator::json_schema_inline!($response);
+        $crate::WorkflowActionSchema::new($address, REQUEST, RESPONSE)
+    }};
 }
 
 /// Static metadata used to discover and link one registered Workflow Action.
@@ -404,7 +404,7 @@ mod tests {
     #![allow(clippy::expect_used)]
     #![allow(missing_docs)]
 
-    use alloc::boxed::Box;
+    use alloc::{boxed::Box, string::String};
 
     use futures_lite::future::block_on;
     use serde::{Deserialize, Serialize};
@@ -414,8 +414,6 @@ mod tests {
         WorkflowActionAddress, WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler,
         WorkflowActionRegistry, WorkflowActionSchema,
     };
-    use crate::workflow_action_schema_inline;
-
     #[derive(Deserialize)]
     struct EchoRequest {
         message: String,

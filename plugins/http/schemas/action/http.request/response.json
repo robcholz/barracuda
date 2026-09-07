@@ -1,0 +1,31 @@
+{
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "body": { "type": "string" }
+      },
+      "required": ["status", "body"],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "error": {
+          "enum": [
+            "invalid_url",
+            "tls_not_configured",
+            "invalid_header",
+            "busy",
+            "transport",
+            "invalid_response_text",
+            "response_too_large"
+          ]
+        }
+      },
+      "required": ["error"],
+      "additionalProperties": false
+    }
+  ]
+}

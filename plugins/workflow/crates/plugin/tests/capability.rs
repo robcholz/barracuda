@@ -6,13 +6,12 @@ use std::boxed::Box;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use barracuda_event_router::{EventRouter, RpcLaneStorage};
 use barracuda_platform_test::{
     install_global_memory_vfs, memory_partition, memory_vfs_root, never_embassy_stack,
 };
 use barracuda_plugin::api::{ClientFactory, PluginContext};
 use barracuda_plugin::manager::{
-    Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
+    Plugin, PluginDeclaration, PluginManager, PluginRegisterContext, PluginResult,
 };
 use barracuda_workflow_plugin::{
     workflow_action_schema_inline, WorkflowActionFuture, WorkflowActionHandler,
@@ -20,8 +19,6 @@ use barracuda_workflow_plugin::{
 };
 use futures_lite::future::block_on;
 use serde_json::Value;
-
-const FRAME_SIZE: usize = 64;
 
 struct EchoAction;
 
@@ -46,10 +43,10 @@ impl PluginDeclaration for Consumer {
     const DEPENDS_ON: &'static [&'static str] = &["workflow"];
 }
 
-impl Plugin<FRAME_SIZE> for Consumer {
+impl Plugin for Consumer {
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, FRAME_SIZE, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,
@@ -78,24 +75,19 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
             .await
             .expect("open Plugin storage");
         manager.install_vfs(memory_vfs_root().await.expect("create System VFS"));
-        let lanes = Box::leak(Box::new(RpcLaneStorage::<4, FRAME_SIZE, 4>::new()));
-        let mut router = EventRouter::new(lanes).await.expect("create Event Router");
         let stack = never_embassy_stack();
         let mut plugin_context = PluginContext::new(stack, ClientFactory::plaintext(stack));
         let actions = Rc::new(RefCell::new(None));
         let service = Rc::new(RefCell::new(None));
 
         manager
-            .register(&mut router, WorkflowPlugin::new(&mut plugin_context))
+            .register(WorkflowPlugin::new(&mut plugin_context))
             .expect("register Workflow Plugin");
         manager
-            .register(
-                &mut router,
-                Consumer {
-                    actions: Rc::clone(&actions),
-                    service: Rc::clone(&service),
-                },
-            )
+            .register(Consumer {
+                actions: Rc::clone(&actions),
+                service: Rc::clone(&service),
+            })
             .expect("register Workflow capability consumer");
 
         assert_eq!(
@@ -126,8 +118,5 @@ fn plugin_publishes_direct_action_and_runtime_control_capabilities() {
             .await
             .expect("durably unload Workflow at runtime");
         assert!(service.definitions().is_empty());
-
-        let workflow_id = PluginId::try_from("workflow").expect("valid Plugin ID");
-        assert_eq!(manager.component_ids(&workflow_id).map(<[_]>::len), Some(0));
     });
 }

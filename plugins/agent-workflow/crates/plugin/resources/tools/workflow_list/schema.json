@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "workflow_list",
+    "description": "List the IDs of currently loaded Workflows.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

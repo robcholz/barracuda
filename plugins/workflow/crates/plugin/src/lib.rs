@@ -224,13 +224,13 @@ impl WorkflowPlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for WorkflowPlugin {
+impl Plugin for WorkflowPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,

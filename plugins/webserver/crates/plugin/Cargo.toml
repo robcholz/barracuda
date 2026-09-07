@@ -17,7 +17,6 @@ picoserve = { version = "0.19.0", default-features = false, features = ["alloc",
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-event-router.workspace = true
 barracuda-platform-test.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }

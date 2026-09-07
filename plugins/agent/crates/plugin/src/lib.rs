@@ -54,13 +54,13 @@ impl AgentPlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for AgentPlugin {
+impl Plugin for AgentPlugin {
     const REQUIREMENTS: PluginRequirements =
         PluginRequirements::new().with_filesystem(PluginFilesystem::Private);
 
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,

@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "time_now",
+    "description": "Read the current network-synchronized UTC time.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

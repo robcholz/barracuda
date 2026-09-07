@@ -2,15 +2,14 @@ use alloc::rc::Rc;
 use core::cell::{Cell, RefCell};
 use core::task::{Poll, Waker};
 
-use barracuda_event_router::{EventEmitter, RpcClient};
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
+use barracuda_workflow_plugin::WorkflowService;
 use embassy_executor::Spawner;
 
 use crate::VmLimits;
-use crate::component::DEFAULT_MAX_INPUT_BYTES;
 use crate::memory::{VmMemoryPool, VmMemoryPoolError};
-use crate::run::{ExecutionJob, OwnedSource, VM_JSON_REQUEST_BYTES, execute_run};
+use crate::run::{ExecutionJob, execute_run};
 
 /// Number of statically allocated Embassy task slots available to Lua executions.
 pub(crate) const VM_TASK_SLOTS: usize = 4;
@@ -33,24 +32,16 @@ impl VmYieldSignal {
 }
 
 pub(crate) struct InputMessage {
-    bytes: [u8; DEFAULT_MAX_INPUT_BYTES],
-    length: usize,
+    value: alloc::string::String,
 }
 
 impl InputMessage {
-    fn new(input: &str) -> Option<Self> {
-        let mut bytes = [0_u8; DEFAULT_MAX_INPUT_BYTES];
-        bytes
-            .get_mut(..input.len())?
-            .copy_from_slice(input.as_bytes());
-        Some(Self {
-            bytes,
-            length: input.len(),
-        })
+    fn new(input: alloc::string::String) -> Self {
+        Self { value: input }
     }
 
     pub(crate) fn as_str(&self) -> &str {
-        core::str::from_utf8(self.bytes.get(..self.length).unwrap_or_default()).unwrap_or_default()
+        &self.value
     }
 }
 
@@ -104,7 +95,7 @@ impl RunSlot {
 
 struct RuntimeState {
     spawner: Cell<Option<Spawner>>,
-    rpc: RefCell<Option<RpcClient>>,
+    workflow: RefCell<Option<Rc<WorkflowService>>>,
     slots: [RunSlot; VM_TASK_SLOTS],
     next_run_id: Cell<u32>,
 }
@@ -135,7 +126,7 @@ impl VmRuntime {
         Ok(Self {
             state: Rc::new(RuntimeState {
                 spawner: Cell::new(None),
-                rpc: RefCell::new(None),
+                workflow: RefCell::new(None),
                 slots: core::array::from_fn(|_index| RunSlot::new()),
                 next_run_id: Cell::new(1),
             }),
@@ -148,20 +139,22 @@ impl VmRuntime {
     /// # Errors
     ///
     /// Returns [`VmRuntimeStartError::AlreadyStarted`] when called more than once.
-    pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
+    pub fn start(
+        &self,
+        spawner: Spawner,
+        workflow: Rc<WorkflowService>,
+    ) -> Result<(), VmRuntimeStartError> {
         if self.state.spawner.get().is_some() {
             return Err(VmRuntimeStartError::AlreadyStarted);
         }
         self.state.spawner.set(Some(spawner));
+        *self.state.workflow.borrow_mut() = Some(workflow);
         Ok(())
     }
 
-    pub(crate) fn attach_router(&self, rpc: RpcClient) {
-        *self.state.rpc.borrow_mut() = Some(rpc);
-    }
-
-    pub(crate) fn detach_router(&self) {
-        *self.state.rpc.borrow_mut() = None;
+    pub(crate) fn stop(&self) {
+        self.state.spawner.set(None);
+        *self.state.workflow.borrow_mut() = None;
         for slot in &self.state.slots {
             if slot.active.get() {
                 slot.cancelled.set(true);
@@ -173,7 +166,7 @@ impl VmRuntime {
 
     pub(crate) fn dispatch(
         &self,
-        source: &str,
+        source: alloc::string::String,
         limits: VmLimits,
         builtin_packages: BuiltinPackages,
         package_registry: LuaPackageRegistry,
@@ -183,19 +176,18 @@ impl VmRuntime {
             .spawner
             .get()
             .ok_or(DispatchError::RuntimeUnavailable)?;
-        let rpc = self
+        let workflow = self
             .state
-            .rpc
+            .workflow
             .borrow()
             .clone()
             .ok_or(DispatchError::RuntimeUnavailable)?;
-        let source = OwnedSource::new(source).ok_or(DispatchError::SourceLimitExceeded)?;
         let memory = self.memory_pool.acquire().ok_or(DispatchError::Busy)?;
         let control = self.reserve_run()?;
         let run_id = control.run_id;
         if spawner
             .spawn(vm_execution_task(ExecutionJob {
-                emitter: EventEmitter::<VM_JSON_REQUEST_BYTES>::new(rpc),
+                workflow,
                 run_id,
                 source,
                 control,
@@ -211,12 +203,16 @@ impl VmRuntime {
         Ok(run_id)
     }
 
-    pub(crate) fn send_input(&self, run_id: u32, input: &str) -> Result<(), ControlError> {
+    pub(crate) fn send_input(
+        &self,
+        run_id: u32,
+        input: alloc::string::String,
+    ) -> Result<(), ControlError> {
         let slot = self.active_slot(run_id)?;
         if !slot.input_open.get() {
             return Err(ControlError::InputClosed);
         }
-        let input = InputMessage::new(input).ok_or(ControlError::InputLimitExceeded)?;
+        let input = InputMessage::new(input);
         let mut queued = slot.input.borrow_mut();
         if queued.is_some() {
             return Err(ControlError::InputBackpressure);
@@ -343,39 +339,16 @@ impl Drop for RunControl {
 /// Business rejection returned by `vm.run` before a task is accepted.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DispatchError {
-    SourceLimitExceeded,
     RuntimeUnavailable,
     Busy,
-}
-
-impl DispatchError {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::SourceLimitExceeded => "source_limit_exceeded",
-            Self::RuntimeUnavailable => "runtime_unavailable",
-            Self::Busy => "busy",
-        }
-    }
 }
 
 /// Business rejection returned by `vm.input` and `vm.cancel`.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ControlError {
     RunNotFound,
-    InputLimitExceeded,
     InputBackpressure,
     InputClosed,
-}
-
-impl ControlError {
-    pub(crate) const fn code(self) -> &'static str {
-        match self {
-            Self::RunNotFound => "run_not_found",
-            Self::InputLimitExceeded => "input_limit_exceeded",
-            Self::InputBackpressure => "input_backpressure",
-            Self::InputClosed => "input_closed",
-        }
-    }
 }
 
 /// Failure while starting one VM runtime.

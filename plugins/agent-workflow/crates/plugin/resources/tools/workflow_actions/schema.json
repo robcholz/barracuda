@@ -1,0 +1,12 @@
+{
+  "type": "function",
+  "function": {
+    "name": "workflow_actions",
+    "description": "List Workflow Action addresses and their static request and response schemas.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+}

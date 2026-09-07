@@ -1,3 +1,0 @@
-id = "web-search"
-depends-on = ["webserver"]
-description = "Provides Tavily-backed web search through the Event Router."
