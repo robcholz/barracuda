@@ -250,6 +250,31 @@ fn workspace_build_bundles_enabled_plugin_resources_under_the_manifest_id() {
 }
 
 #[test]
+fn workspace_build_ignores_empty_plugin_directories() {
+    let workspace = tempdir().expect("workspace directory");
+    fs::create_dir_all(workspace.path().join("plugins/abandoned")).expect("empty Plugin directory");
+
+    let image = build_workspace(workspace.path(), CAPACITY).expect("build workspace image");
+    let filesystem = mounted_fat(image);
+
+    assert!(futures_lite::future::block_on(filesystem.metadata("/plugins")).is_err());
+}
+
+#[test]
+fn workspace_build_rejects_nonempty_directory_without_a_plugin_manifest() {
+    let workspace = tempdir().expect("workspace directory");
+    let plugin = workspace.path().join("plugins/incomplete");
+    fs::create_dir_all(&plugin).expect("incomplete Plugin directory");
+    fs::write(plugin.join("README.md"), "incomplete").expect("stray Plugin file");
+    let manifest = plugin.join("plugin.toml");
+
+    assert!(matches!(
+        build_workspace(workspace.path(), CAPACITY),
+        Err(ImageBuildError::SourceRead { path, .. }) if path == manifest
+    ));
+}
+
+#[test]
 fn workspace_build_merges_enabled_plugin_workspace_resources() {
     let workspace = tempdir().expect("workspace directory");
     for (directory, id, file, contents) in [

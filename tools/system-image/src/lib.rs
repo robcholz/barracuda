@@ -789,6 +789,9 @@ fn collect_plugin_resources(
         if disabled.contains(&directory) {
             continue;
         }
+        if read_directory(&plugin.path())?.is_empty() {
+            continue;
+        }
 
         let manifest_path = plugin.path().join("plugin.toml");
         let manifest_text =
