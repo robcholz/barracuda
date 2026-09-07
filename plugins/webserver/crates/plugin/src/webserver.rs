@@ -30,7 +30,6 @@ const WEBSOCKET_QUEUE_CAPACITY: usize = 4;
 
 type ReaderSpace = [usize; 16];
 type ReadSpace = [usize; 64];
-type HandlerSpace = [usize; 256];
 type InlineFuture<'a, T, S> = smallbox::SmallBox<dyn Future<Output = T> + 'a, S>;
 
 fn inline_future<'a, T, F, S>(value: F) -> InlineFuture<'a, T, S>
@@ -269,13 +268,32 @@ pub trait HttpProvider: 'static {
     fn serve(&self, path: &str) -> impl Future<Output = HttpResponse>;
 }
 
-trait ErasedProvider {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, HandlerSpace>;
+trait ErasedProvider<const WORDS: usize> {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]>;
 }
 
-impl<P: HttpProvider> ErasedProvider for P {
-    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, HandlerSpace> {
+impl<P: HttpProvider, const WORDS: usize> ErasedProvider<WORDS> for P {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]> {
         inline_future(HttpProvider::serve(self, path))
+    }
+}
+
+/// Shared leaf provider for aggregators that select a provider before awaiting it.
+/// Construction allocates once; cloning and dispatch do not allocate.
+/// Leaf futures must fit 128 machine words, leaving room inside the server's
+/// 256-word handler storage for the aggregator's own state.
+#[derive(Clone)]
+pub struct HttpProviderHandle(Rc<dyn ErasedProvider<128>>);
+
+impl HttpProviderHandle {
+    /// Captures a concrete leaf provider for shared dispatch.
+    pub fn new(provider: impl HttpProvider) -> Self {
+        Self(Rc::new(provider))
+    }
+
+    /// Runs the selected provider without allocating a future.
+    pub async fn serve(&self, path: &str) -> HttpResponse {
+        self.0.serve(path).await
     }
 }
 
@@ -343,7 +361,7 @@ pub trait WebSocketEndpoint: 'static {
 enum Endpoint {
     WebSocket(Rc<dyn WebSocketEndpoint>),
     Http(Rc<dyn HttpEndpoint>),
-    Provider(Rc<dyn ErasedProvider>),
+    Provider(Rc<dyn ErasedProvider<256>>),
 }
 
 #[derive(Clone)]

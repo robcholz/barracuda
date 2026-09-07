@@ -1,0 +1,3 @@
+id = "captive-portal"
+depends-on = ["webserver"]
+description = "Aggregates pluggable web entries and resource providers for the portal."

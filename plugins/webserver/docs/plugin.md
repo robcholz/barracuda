@@ -72,6 +72,10 @@ Oversized or over-aligned implementations fail at compile time; there is no
 heap fallback. On 32-bit targets those capacities are 64, 256, and 1024 bytes.
 The copy buffer is a separate 1024 bytes per active stream. These are storage
 capacities, not a measurement of the entire Embassy worker's memory footprint.
+An aggregator may retain `HttpProviderHandle` values for its leaf providers:
+those futures have a 128-word inline budget, leaving room in the 256-word outer
+handler for provider selection and ownership. The handle allocates only at
+construction and does not register an additional HTTP endpoint.
 No extra channel or task is created for a streaming connection. Registration
 still allocates the route table and provider ownership.
 

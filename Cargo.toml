@@ -48,6 +48,7 @@ barracuda-agent-time-plugin = { path = "plugins/agent-time/crates/plugin" }
 barracuda-agent-vm-plugin = { path = "plugins/agent-vm/crates/plugin" }
 barracuda-agent-websearch-plugin = { path = "plugins/agent-websearch/crates/plugin" }
 barracuda-agent-workflow-plugin = { path = "plugins/agent-workflow/crates/plugin" }
+barracuda-captive-portal-plugin = { path = "plugins/captive-portal/crates/plugin" }
 barracuda-http-plugin = { path = "plugins/http/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "plugins/imessage-bluebubble/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "plugins/imessage-gateway/crates/plugin" }

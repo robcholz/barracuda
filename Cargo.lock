@@ -711,6 +711,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-captive-portal-plugin"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-webserver-plugin",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-cli"
 version = "0.1.0"
 dependencies = [
@@ -1353,6 +1375,7 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-board-hal",
+ "barracuda-captive-portal-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
