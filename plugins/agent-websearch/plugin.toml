@@ -1,0 +1,3 @@
+id = "agent-websearch"
+depends-on = ["agent", "webserver"]
+description = "Registers Tavily-backed Web Search directly with the Agent runtime."

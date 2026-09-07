@@ -2,22 +2,16 @@
 name = "barracuda-http-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Outbound HTTP JSON RPC Plugin for Barracuda"
+description = "Typed outbound HTTP capability and Workflow Action for Barracuda"
 license = "Apache-2.0"
 
 [dependencies]
-barracuda-event-router.workspace = true
 barracuda-plugin.workspace = true
-embedded-io = "0.7"
+barracuda-workflow-plugin.workspace = true
 embedded-io-async = "0.7"
 http-client.workspace = true
-serde = { version = "1", default-features = false, features = ["derive"] }
-serde_json = { version = "1", default-features = false, features = ["alloc", "raw_value"] }
-
-[dev-dependencies]
-barracuda-platform-test.workspace = true
-embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
-futures-lite = "2"
+serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
+thiserror = { version = "2", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -4,9 +4,8 @@
 
 - `plugins/` contains every system-managed Plugin together with its private
   Component and support crates under that Plugin's `crates/` directory.
-- Every Event Router Component integration documents its emitted Events,
-  provided RPCs, wire contracts, errors, and lifecycle under its owning
-  Plugin's `docs/` directory.
+- Every Plugin documents its capabilities, Agent Tools, Workflow Actions and
+  Events, errors, and lifecycle under its own `docs/` directory.
 - `shared/` contains crates shared across Plugins and applications.
 - `bench/` contains project-wide measurement and profiling workloads, including
   workload-specific harnesses and shared recording fixtures.
@@ -17,10 +16,6 @@
   ABI and executor entry wrapper.
 - `apps/barracuda-cli/` is an external terminal Channel that connects to a
   running Gateway; it never constructs the System.
-- `core/event-router/bench/profile/` contains Event Router heap/allocation
-  profiling workloads.
-- `core/event-router/bench/throughput/` contains the Event Router bytes/s
-  throughput benchmark and its uv-driven regression pipeline.
 
 ## System composition
 
@@ -42,11 +37,11 @@ platform implementations:
   dependency order, and then starts the complete set. System and Plugins never
   select a host/device executor, filesystem, network stack, or listener and do not
   construct a Plugin's component-specific services.
-- **Plugins** own and load their Components, component-specific runtime
-  resources, and other Plugin-scoped resources. Built-in Plugins establish
-  their own defaults instead of receiving an assembled component dependency
-  bundle from Host. Components and higher-level crates depend on traits and
-  portable services, not on a particular concrete Platform.
+- **Plugins** own their typed capabilities, Workflow integrations, runtime
+  tasks, and other Plugin-scoped resources. Built-in Plugins establish their
+  own defaults instead of receiving an assembled service bundle from Host.
+  Higher-level crates depend on traits and portable services, not on a
+  particular concrete Platform.
 
 ```text
 Embassy entry
@@ -59,7 +54,7 @@ System application
      |
    System
      |
-Plugins [Components + resources]
+Plugins [capabilities + Workflow + resources]
 ```
 
 Cross-platform services remain single portable implementations. For example,

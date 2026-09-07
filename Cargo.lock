@@ -329,25 +329,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-agent-component"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "barracuda-agent-runtime",
- "barracuda-event-router",
- "barracuda-model-api",
- "barracuda-platform-test",
- "barracuda-vfs",
- "embassy-time",
- "futures-lite",
- "http-client",
- "log",
- "serde",
- "serde_json",
- "static_cell",
-]
-
-[[package]]
 name = "barracuda-agent-context"
 version = "0.1.0"
 dependencies = [
@@ -358,6 +339,36 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+]
+
+[[package]]
+name = "barracuda-agent-http-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-http-plugin",
+ "barracuda-plugin",
+ "json-validator",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-agent-imessage-gateway-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-imessage-gateway-plugin",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-futures",
+ "embassy-sync 0.7.2",
+ "json-validator",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zerocopy",
 ]
 
 [[package]]
@@ -422,22 +433,26 @@ dependencies = [
 name = "barracuda-agent-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-component",
+ "async-channel",
  "barracuda-agent-runtime",
- "barracuda-event-router",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-time",
  "embedded-io-async 0.7.0",
  "futures-lite",
  "http-client",
+ "json-validator",
  "log",
  "picoserve",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -490,6 +505,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent-scheduler-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-scheduler-plugin",
+ "json-validator",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "barracuda-agent-session"
 version = "0.1.0"
 dependencies = [
@@ -532,13 +559,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-agent-time-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-time-plugin",
+ "json-validator",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "barracuda-agent-tool"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
- "barracuda-event-router",
  "barracuda-platform-test",
  "futures-channel",
  "futures-core",
@@ -561,6 +599,46 @@ dependencies = [
  "log",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "barracuda-agent-vm-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-vm-plugin",
+ "json-validator",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-agent-websearch-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-webserver-plugin",
+ "embassy-futures",
+ "embedded-io-async 0.7.0",
+ "http-client",
+ "json-validator",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "barracuda-agent-workflow-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-agent-plugin",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "json-validator",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -654,42 +732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-event-router"
-version = "0.1.0"
-dependencies = [
- "barracuda-platform-test",
- "barracuda-profile",
- "barracuda-router",
- "barracuda-rpc",
- "barracuda-vfs",
- "barracuda-vfs-memfs",
- "barracuda-workflow",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "static_cell",
- "thiserror 2.0.18",
- "tokio",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-file-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-plugin",
- "barracuda-vfs",
- "barracuda-vfs-memfs",
- "critical-section",
- "embedded-io-async 0.7.0",
- "futures-lite",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "barracuda-gpio-plugin"
 version = "0.1.0"
 dependencies = [
@@ -706,16 +748,12 @@ dependencies = [
 name = "barracuda-http-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
- "barracuda-platform-test",
  "barracuda-plugin",
- "embassy-time",
- "embedded-io 0.7.1",
+ "barracuda-workflow-plugin",
  "embedded-io-async 0.7.0",
- "futures-lite",
  "http-client",
  "serde",
- "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -747,43 +785,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-imessage-bridge-component"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-platform-test",
- "barracuda-plugin",
- "embassy-sync 0.7.2",
- "futures-lite",
- "log",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-imessage-bridge-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-imessage-bridge-component",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-vfs",
- "embassy-executor",
- "embassy-futures",
- "embassy-time",
- "futures-lite",
-]
-
-[[package]]
 name = "barracuda-imessage-gateway-component"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "barracuda-event-router",
- "barracuda-platform-test",
+ "barracuda-workflow-plugin",
  "futures-lite",
  "gateway",
  "log",
@@ -796,13 +802,15 @@ dependencies = [
 name = "barracuda-imessage-gateway-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-imessage-gateway-component",
- "barracuda-platform-test",
  "barracuda-plugin",
- "futures-lite",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "gateway",
  "gateway-http",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1233,7 +1241,6 @@ dependencies = [
 name = "barracuda-plugin-manager"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-kv",
  "barracuda-platform-test",
  "barracuda-vfs",
@@ -1279,38 +1286,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-router"
-version = "0.1.0"
-dependencies = [
- "barracuda-rpc",
- "futures-lite",
- "getset",
- "log",
- "static_cell",
- "thiserror 2.0.18",
- "tokio",
- "zerocopy",
-]
-
-[[package]]
-name = "barracuda-rpc"
-version = "0.1.0"
-dependencies = [
- "futures-core",
- "futures-lite",
- "futures-util",
- "getset",
- "json-validator",
- "serde",
- "serde_json",
- "smallvec",
- "static_cell",
- "thiserror 2.0.18",
- "tokio",
- "zerocopy",
-]
-
-[[package]]
 name = "barracuda-runtime-utils"
 version = "0.1.0"
 dependencies = [
@@ -1323,39 +1298,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-scheduler-component"
+name = "barracuda-scheduler-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-time-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
  "embassy-futures",
  "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
  "getset",
+ "log",
  "serde",
  "serde_json",
- "static_cell",
  "thiserror 2.0.18",
  "time",
  "zerocopy",
-]
-
-[[package]]
-name = "barracuda-scheduler-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-scheduler-component",
- "barracuda-time-plugin",
- "embassy-executor",
- "embassy-futures",
- "embassy-time",
- "futures-lite",
 ]
 
 [[package]]
@@ -1376,15 +1337,19 @@ dependencies = [
 name = "barracuda-system"
 version = "0.1.0"
 dependencies = [
+ "barracuda-agent-http-plugin",
+ "barracuda-agent-imessage-gateway-plugin",
  "barracuda-agent-plugin",
+ "barracuda-agent-scheduler-plugin",
+ "barracuda-agent-time-plugin",
+ "barracuda-agent-vm-plugin",
+ "barracuda-agent-websearch-plugin",
+ "barracuda-agent-workflow-plugin",
  "barracuda-board-hal",
- "barracuda-event-router",
- "barracuda-file-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
  "barracuda-imessage-bluebubble-plugin",
- "barracuda-imessage-bridge-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-imessage-inkbox-plugin",
  "barracuda-imessage-qq-plugin",
@@ -1404,8 +1369,8 @@ dependencies = [
  "barracuda-vfs",
  "barracuda-vfs-littlefs",
  "barracuda-vm-plugin",
- "barracuda-web-search-plugin",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-net",
@@ -1423,11 +1388,9 @@ dependencies = [
 name = "barracuda-system-app"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-system",
  "barracuda-target",
  "embassy-executor",
- "static_cell",
  "thiserror 2.0.18",
 ]
 
@@ -1467,36 +1430,21 @@ name = "barracuda-target-api"
 version = "0.1.0"
 
 [[package]]
-name = "barracuda-time-component"
+name = "barracuda-time-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
  "getset",
- "serde_json",
+ "log",
  "sntpc",
  "static_cell",
- "thiserror 2.0.18",
- "time",
-]
-
-[[package]]
-name = "barracuda-time-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-platform-test",
- "barracuda-plugin",
- "barracuda-time-component",
- "embassy-executor",
- "embassy-futures",
- "embassy-net",
- "embassy-time",
- "futures-lite",
- "log",
  "thiserror 2.0.18",
 ]
 
@@ -1574,16 +1522,14 @@ dependencies = [
 name = "barracuda-vm-component"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-lua",
- "barracuda-platform-test",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
+ "barracuda-workflow-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
- "futures-lite",
  "getset",
  "serde",
  "serde_json",
@@ -1603,33 +1549,15 @@ dependencies = [
 name = "barracuda-vm-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-event-router",
  "barracuda-lua",
- "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-component",
  "barracuda-vm-package-api",
- "critical-section",
+ "barracuda-workflow-plugin",
  "embassy-executor",
- "embassy-time",
- "futures-lite",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-web-search-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-event-router",
- "barracuda-plugin",
- "barracuda-webserver-plugin",
- "embassy-futures",
- "embedded-io-async 0.7.0",
- "http-client",
- "log",
  "serde",
- "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1637,7 +1565,6 @@ name = "barracuda-webserver-plugin"
 version = "0.1.0"
 dependencies = [
  "async-channel",
- "barracuda-event-router",
  "barracuda-platform-test",
  "barracuda-plugin",
  "embassy-executor",
@@ -1653,12 +1580,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-workflow"
+name = "barracuda-workflow-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-rpc",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-workflow-runtime",
+ "embassy-executor",
+ "embassy-futures",
+ "embassy-time",
+ "futures-lite",
+ "log",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-workflow-runtime"
+version = "0.1.0"
+dependencies = [
  "futures-lite",
  "getset",
+ "json-validator",
  "log",
  "serde",
  "serde_json",

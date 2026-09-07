@@ -1,11 +1,34 @@
 #![allow(clippy::expect_used)]
 
-use json_validator::{validator, ErrorKind, Type, Validator};
+use json_validator::{
+    json_schema, json_schema_inline, validator, ErrorKind, JsonSchema, Type, Validator,
+};
 use serde_json::json;
 
 const TOOL_ARGUMENTS: Validator = validator!("tests/fixtures/tool.json");
 const RPC_DOCUMENT: Validator = validator!("tests/fixtures/rpc.json");
 const RECURSIVE_DOCUMENT: Validator = validator!("tests/fixtures/recursive.json");
+const STATIC_DOCUMENT: JsonSchema = json_schema!("tests/fixtures/rpc.json");
+const INLINE_DOCUMENT: JsonSchema = json_schema_inline!(
+    r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"]}"#
+);
+
+#[test]
+fn static_schema_pairs_source_with_its_compiled_validator() {
+    assert!(STATIC_DOCUMENT.as_str().contains("properties"));
+    assert!(STATIC_DOCUMENT
+        .validate(&json!({
+            "action": "start",
+            "id": "task-1",
+            "sequence": 0,
+            "at": "2026-09-05T12:30:45.123Z"
+        }))
+        .is_ok());
+    assert!(INLINE_DOCUMENT
+        .validate(&json!({ "message": "hello" }))
+        .is_ok());
+    assert!(INLINE_DOCUMENT.validate(&json!({ "message": 7 })).is_err());
+}
 
 #[test]
 fn validates_the_current_tool_schema_subset() {

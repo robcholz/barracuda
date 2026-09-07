@@ -1,41 +1,41 @@
-//! Base IMessage Gateway Plugin and its provider-registration capability.
+//! Base IMessage Gateway Plugin and provider-registration capability.
 
 #![no_std]
 
 extern crate alloc;
 
+mod workflow;
+
 use alloc::rc::Rc;
 
-pub use barracuda_imessage_gateway_component::component::GatewayIngressError;
-use barracuda_imessage_gateway_component::component::{GatewayComponent, GatewayIngress};
-pub use barracuda_imessage_gateway_component::gateway_message_received::GatewayInboundMessage;
-pub use barracuda_imessage_gateway_component::route::GatewayRoute;
+use barracuda_imessage_gateway_component::{GatewayIngress, GatewayRuntime};
 use barracuda_plugin::api::PluginContext;
-use barracuda_plugin::manager::{Plugin, PluginRegisterContext, PluginResult};
+use barracuda_plugin::manager::{
+    Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
+};
+use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
+use embassy_futures::select::select;
+
+pub use barracuda_imessage_gateway_component::{
+    GatewayAccepted, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
+    GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
+    GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,
+    GatewaySendStreamRequest,
+};
 pub use gateway::*;
 pub use gateway_http::*;
 
-const GATEWAY_INGRESS_CAPACITY: usize = 16;
+const STREAM_WORKERS: usize = 4;
 
-/// Typed capability used by IMessage provider Plugins.
-///
-/// Providers require this capability during registration, register one channel,
-/// and retain the returned guard for their Plugin lifetime. Inbound providers
-/// also publish normalized messages through the same capability.
+/// Typed capability shared by channel providers, Agent tools, and Workflow Actions.
 pub struct IMessageGateway {
     gateway: Rc<MessageGateway>,
     ingress: GatewayIngress,
+    runtime: Rc<GatewayRuntime>,
 }
 
 impl IMessageGateway {
     /// Registers one outbound message channel.
-    ///
-    /// Dropping the returned guard unregisters the channel.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GatewayError::DuplicateChannel`] when another provider owns
-    /// the same stable channel name.
     pub fn register(
         &self,
         channel: Rc<dyn MessageChannel>,
@@ -43,99 +43,115 @@ impl IMessageGateway {
         self.gateway.register(channel)
     }
 
-    /// Publishes one normalized inbound message into the Gateway Component.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`GatewayIngressError::InvalidMessage`] when required metadata
-    /// is absent, [`GatewayIngressError::MessageTooLarge`] when the complete
-    /// Event does not fit one lane, or [`GatewayIngressError::Stopped`] after
-    /// the Gateway Component stops accepting messages.
+    /// Publishes one normalized inbound message into Workflow matching.
     pub async fn publish(&self, message: GatewayInboundMessage) -> Result<(), GatewayIngressError> {
         self.ingress.publish(message).await
     }
+
+    /// Sends one complete text message.
+    pub async fn send(
+        &self,
+        request: GatewaySendRequest,
+    ) -> Result<GatewaySendResponse, GatewayOperationError> {
+        self.runtime.send(request).await
+    }
+
+    /// Accepts one semantic event for an outbound text stream.
+    pub fn send_stream(
+        &self,
+        request: GatewaySendStreamRequest,
+    ) -> Result<GatewayAccepted, GatewayOperationError> {
+        self.runtime.send_stream(request)
+    }
+
+    /// Accepts one command for an outbound binary media stream.
+    pub fn send_media(
+        &self,
+        request: GatewaySendMediaRequest,
+    ) -> Result<GatewayAccepted, GatewayOperationError> {
+        self.runtime.send_media(request)
+    }
 }
 
-/// Plugin that owns the shared IMessage Gateway Component and capability.
+/// Plugin that owns the shared IMessage Gateway capability and workers.
 #[barracuda_plugin::macros::plugin]
-pub struct IMessageGatewayPlugin;
+pub struct IMessageGatewayPlugin {
+    runtime: Option<Rc<GatewayRuntime>>,
+}
 
 impl IMessageGatewayPlugin {
     /// Creates the base IMessage Gateway Plugin.
     #[must_use]
     pub const fn new<Builtins, Io>(_context: &mut PluginContext<Builtins, Io>) -> Self {
-        Self
+        Self { runtime: None }
     }
 }
 
-impl<const M: usize> Plugin<M> for IMessageGatewayPlugin {
+impl Plugin for IMessageGatewayPlugin {
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let workflow_service = context.require::<WorkflowService>("workflow")?;
+        let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let gateway = Rc::new(MessageGateway::new());
-        let (component, ingress, runtime) =
-            GatewayComponent::new::<M>(gateway.as_ref().clone(), GATEWAY_INGRESS_CAPACITY);
-        context.event_router.load(component)?;
-        let (inbound, text, media) = runtime.into_parts();
-        context.event_router.load(inbound)?;
-        for worker in text {
-            context.event_router.load(worker)?;
+        let (runtime, ingress) =
+            GatewayRuntime::new(Rc::clone(&gateway), Rc::clone(&workflow_service));
+        let capability = Rc::new(IMessageGateway {
+            gateway,
+            ingress,
+            runtime: Rc::clone(&runtime),
+        });
+        for registration in workflow::register_actions(&actions, Rc::clone(&capability))
+            .map_err(PluginError::registration)?
+        {
+            context.retain(registration);
         }
-        for worker in media {
-            context.event_router.load(worker)?;
+        context.provide(capability)?;
+        self.runtime = Some(runtime);
+        Ok(())
+    }
+
+    fn start<Storage>(&mut self, context: &mut PluginStartContext<'_, Storage>) -> PluginResult<()>
+    where
+        Storage: barracuda_plugin::manager::PluginStorage,
+    {
+        let runtime = self
+            .runtime
+            .take()
+            .ok_or_else(|| PluginError::registration(GatewayRuntimeUnavailable))?;
+        let spawner = context.task_spawner()?;
+        for _worker in 0..STREAM_WORKERS {
+            spawner
+                .spawn(gateway_event_worker(
+                    Rc::clone(&runtime),
+                    context.task_token(),
+                ))
+                .map_err(PluginError::registration)?;
+            spawner
+                .spawn(gateway_media_worker(
+                    Rc::clone(&runtime),
+                    context.task_token(),
+                ))
+                .map_err(PluginError::registration)?;
         }
-        context.provide(Rc::new(IMessageGateway { gateway, ingress }))?;
         Ok(())
     }
 }
 
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use super::IMessageGatewayPlugin;
-    use alloc::boxed::Box;
-    use barracuda_event_router::{EventRouter, RpcLaneStorage};
-    use barracuda_platform_test::{
-        install_global_memory_vfs, memory_partition, never_embassy_stack,
-    };
-    use barracuda_plugin::api::{ClientFactory, PluginContext};
-    use barracuda_plugin::manager::{PluginId, PluginManager};
-    use futures_lite::future::block_on;
-
-    #[test]
-    fn plugin_loads_the_shared_gateway_component() {
-        block_on(async {
-            let partition = memory_partition(64 * 1024)
-                .await
-                .expect("create database partition");
-            let mut manager = PluginManager::open(partition)
-                .await
-                .expect("open Plugin storage");
-            install_global_memory_vfs()
-                .await
-                .expect("install global test VFS");
-            let lanes = Box::leak(Box::new(RpcLaneStorage::<8, 512, 8>::new()));
-            let mut router = EventRouter::new(lanes).await.expect("create router");
-            let id = PluginId::try_from("imessage-gateway").expect("valid Plugin ID");
-            let stack = never_embassy_stack();
-            let mut context = PluginContext::new(stack, ClientFactory::plaintext(stack));
-            let plugin = IMessageGatewayPlugin::new(&mut context);
-            assert_eq!(
-                <IMessageGatewayPlugin as barracuda_plugin::manager::PluginDeclaration>::ID,
-                "imessage-gateway"
-            );
-
-            manager
-                .register(&mut router, plugin)
-                .expect("register IMessage Gateway Plugin");
-            manager.start(&mut router).expect("start Plugins");
-
-            assert_eq!(manager.component_ids(&id).map(<[_]>::len), Some(10));
-        });
-    }
+#[embassy_executor::task(pool_size = STREAM_WORKERS)]
+async fn gateway_event_worker(runtime: Rc<GatewayRuntime>, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime.run_event_worker()).await;
 }
+
+#[embassy_executor::task(pool_size = STREAM_WORKERS)]
+async fn gateway_media_worker(runtime: Rc<GatewayRuntime>, cancellation: PluginTaskToken) {
+    let _completed = select(cancellation.cancelled(), runtime.run_media_worker()).await;
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Gateway runtime was not prepared during Plugin registration")]
+struct GatewayRuntimeUnavailable;

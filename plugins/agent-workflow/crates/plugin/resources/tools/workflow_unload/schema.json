@@ -1,0 +1,18 @@
+{
+  "type": "function",
+  "function": {
+    "name": "workflow_unload",
+    "description": "Durably unload one Workflow by ID.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        }
+      },
+      "required": ["id"],
+      "additionalProperties": false
+    }
+  }
+}

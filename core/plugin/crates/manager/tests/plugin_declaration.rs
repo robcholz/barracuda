@@ -11,7 +11,7 @@ impl PluginDeclaration for DeclaredPlugin {
     const DEPENDS_ON: &'static [&'static str] = &["provider"];
 }
 
-impl Plugin<64> for DeclaredPlugin {}
+impl Plugin for DeclaredPlugin {}
 
 #[test]
 fn declaration_is_independent_of_frame_size() {

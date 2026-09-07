@@ -1,0 +1,274 @@
+use alloc::{boxed::Box, rc::Rc, string::String, vec, vec::Vec};
+use core::cell::RefCell;
+
+use http_client::{
+    ClientFactory,
+    embedded_nal_async::{Dns, TcpConnect},
+    reqwless::request::{Method, RequestBuilder as _},
+};
+use serde::{Deserialize, Serialize};
+
+const HEADER_BUFFER_SIZE: usize = 16 * 1024;
+const READ_BUFFER_SIZE: usize = 4 * 1024;
+const MAX_RESPONSE_BODY_BYTES: usize = 64 * 1024;
+const WORKSPACE_CAPACITY: usize = 2;
+
+/// HTTP method supported by [`Http::request`].
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum HttpMethod {
+    /// GET.
+    Get,
+    /// POST.
+    Post,
+    /// PUT.
+    Put,
+    /// PATCH.
+    Patch,
+    /// DELETE.
+    Delete,
+    /// HEAD.
+    Head,
+}
+
+impl From<HttpMethod> for Method {
+    fn from(method: HttpMethod) -> Self {
+        match method {
+            HttpMethod::Get => Self::GET,
+            HttpMethod::Post => Self::POST,
+            HttpMethod::Put => Self::PUT,
+            HttpMethod::Patch => Self::PATCH,
+            HttpMethod::Delete => Self::DELETE,
+            HttpMethod::Head => Self::HEAD,
+        }
+    }
+}
+
+/// One ordered outbound HTTP header.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpHeader {
+    /// Header name.
+    pub name: String,
+    /// Header value.
+    pub value: String,
+}
+
+/// Typed outbound HTTP request.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpRequest {
+    /// Request method.
+    pub method: HttpMethod,
+    /// Absolute HTTP or HTTPS URL.
+    pub url: String,
+    /// Ordered request headers.
+    #[serde(default)]
+    pub headers: Vec<HttpHeader>,
+    /// UTF-8 request body.
+    #[serde(default)]
+    pub body: String,
+}
+
+impl HttpRequest {
+    fn validate(&self, tls: bool) -> Result<(), HttpError> {
+        if !self.url.starts_with("http://") && !self.url.starts_with("https://") {
+            return Err(HttpError::InvalidUrl);
+        }
+        if self.url.starts_with("https://") && !tls {
+            return Err(HttpError::TlsNotConfigured);
+        }
+        for header in &self.headers {
+            if header.name.is_empty()
+                || header.name.bytes().any(|byte| byte <= b' ' || byte == b':')
+                || header.value.contains('\r')
+                || header.value.contains('\n')
+            {
+                return Err(HttpError::InvalidHeader);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Successful buffered HTTP response.
+#[derive(Debug, Eq, PartialEq, Serialize)]
+pub struct HttpResponse {
+    /// Upstream HTTP status.
+    pub status: u16,
+    /// Complete UTF-8 response body.
+    pub body: String,
+}
+
+/// Stable outbound HTTP failure.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, thiserror::Error)]
+#[serde(rename_all = "snake_case")]
+pub enum HttpError {
+    /// URL is not absolute HTTP or HTTPS.
+    #[error("invalid URL")]
+    InvalidUrl,
+    /// HTTPS was requested without configured TLS.
+    #[error("TLS is not configured")]
+    TlsNotConfigured,
+    /// A request header is invalid.
+    #[error("invalid header")]
+    InvalidHeader,
+    /// Both reusable HTTP workspaces are occupied.
+    #[error("HTTP request capacity is busy")]
+    Busy,
+    /// DNS, TCP, TLS, HTTP, or body reading failed.
+    #[error("HTTP transport failed")]
+    Transport,
+    /// Upstream body is not UTF-8.
+    #[error("response body is not UTF-8")]
+    InvalidResponseText,
+    /// Upstream body exceeds the defensive bound.
+    #[error("response body is too large")]
+    ResponseTooLarge,
+}
+
+struct HttpWorkspace {
+    header_buffer: Box<[u8]>,
+    read_buffer: Box<[u8]>,
+    response_body: Vec<u8>,
+}
+
+impl HttpWorkspace {
+    fn new() -> Self {
+        Self {
+            header_buffer: vec![0; HEADER_BUFFER_SIZE].into_boxed_slice(),
+            read_buffer: vec![0; READ_BUFFER_SIZE].into_boxed_slice(),
+            response_body: Vec::with_capacity(READ_BUFFER_SIZE),
+        }
+    }
+}
+
+struct WorkspacePool {
+    slots: RefCell<[Option<Box<HttpWorkspace>>; WORKSPACE_CAPACITY]>,
+}
+
+impl WorkspacePool {
+    fn new() -> Self {
+        Self {
+            slots: RefCell::new(core::array::from_fn(|_| {
+                Some(Box::new(HttpWorkspace::new()))
+            })),
+        }
+    }
+
+    fn acquire(self: &Rc<Self>) -> Result<WorkspaceLease, HttpError> {
+        let workspace = self
+            .slots
+            .borrow_mut()
+            .iter_mut()
+            .find_map(Option::take)
+            .ok_or(HttpError::Busy)?;
+        Ok(WorkspaceLease {
+            pool: Rc::clone(self),
+            workspace: Some(workspace),
+        })
+    }
+}
+
+struct WorkspaceLease {
+    pool: Rc<WorkspacePool>,
+    workspace: Option<Box<HttpWorkspace>>,
+}
+
+impl WorkspaceLease {
+    fn get_mut(&mut self) -> Result<&mut HttpWorkspace, HttpError> {
+        self.workspace.as_deref_mut().ok_or(HttpError::Transport)
+    }
+}
+
+impl Drop for WorkspaceLease {
+    fn drop(&mut self) {
+        let Some(workspace) = self.workspace.take() else {
+            return;
+        };
+        if let Some(slot) = self
+            .pool
+            .slots
+            .borrow_mut()
+            .iter_mut()
+            .find(|slot| slot.is_none())
+        {
+            *slot = Some(workspace);
+        }
+    }
+}
+
+/// Shared typed capability for buffered outbound HTTP requests.
+pub struct Http<T: 'static = http_client::Tcp, D: 'static = http_client::Resolver> {
+    clients: ClientFactory<'static, T, D>,
+    workspaces: Rc<WorkspacePool>,
+}
+
+impl<T, D> Http<T, D> {
+    /// Creates the capability from System's shared HTTP client factory.
+    #[must_use]
+    pub fn new(clients: ClientFactory<'static, T, D>) -> Self {
+        Self {
+            clients,
+            workspaces: Rc::new(WorkspacePool::new()),
+        }
+    }
+}
+
+impl<T: TcpConnect + 'static, D: Dns + 'static> Http<T, D> {
+    /// Executes one buffered outbound request.
+    pub async fn request(&self, request: HttpRequest) -> Result<HttpResponse, HttpError> {
+        let mut workspace = self.workspaces.acquire()?;
+        let workspace = workspace.get_mut()?;
+        let (mut client, tls) = self.clients.create();
+        request.validate(tls)?;
+        let headers = request
+            .headers
+            .iter()
+            .map(|header| (header.name.as_str(), header.value.as_str()))
+            .collect::<Vec<_>>();
+        let outbound = client
+            .request(request.method.into(), &request.url)
+            .await
+            .map_err(|_error| HttpError::Transport)?;
+        let mut outbound = outbound.headers(&headers).body(request.body.as_bytes());
+        let response = outbound
+            .send(&mut workspace.header_buffer)
+            .await
+            .map_err(|_error| HttpError::Transport)?;
+        let status = response.status.0;
+        if !(100..=599).contains(&status) {
+            return Err(HttpError::Transport);
+        }
+        workspace.response_body.clear();
+        let mut reader = response.body().reader();
+        loop {
+            let read = embedded_io_async::Read::read(&mut reader, &mut workspace.read_buffer)
+                .await
+                .map_err(|_error| HttpError::Transport)?;
+            if read == 0 {
+                break;
+            }
+            let next_len = workspace
+                .response_body
+                .len()
+                .checked_add(read)
+                .ok_or(HttpError::ResponseTooLarge)?;
+            if next_len > MAX_RESPONSE_BODY_BYTES {
+                return Err(HttpError::ResponseTooLarge);
+            }
+            workspace.response_body.extend_from_slice(
+                workspace
+                    .read_buffer
+                    .get(..read)
+                    .ok_or(HttpError::Transport)?,
+            );
+        }
+        let body = core::str::from_utf8(&workspace.response_body)
+            .map_err(|_error| HttpError::InvalidResponseText)?;
+        Ok(HttpResponse {
+            status,
+            body: String::from(body),
+        })
+    }
+}

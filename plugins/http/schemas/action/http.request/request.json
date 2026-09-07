@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] },
+    "url": { "type": "string", "trimmedNonEmpty": true },
+    "headers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "trimmedNonEmpty": true },
+          "value": { "type": "string" }
+        },
+        "required": ["name", "value"],
+        "additionalProperties": false
+      }
+    },
+    "body": { "type": "string" }
+  },
+  "required": ["method", "url"],
+  "additionalProperties": false
+}

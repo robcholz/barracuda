@@ -1,0 +1,3 @@
+id = "agent-http"
+depends-on = ["agent", "http"]
+description = "Exposes the HTTP capability to Agents as a native Tool."

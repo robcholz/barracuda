@@ -1,8 +1,8 @@
 //! Plugin management and scoped persistent storage.
 //!
-//! A Plugin is a system-managed group of Components. Each Plugin receives one
-//! durable storage capability whose keys are isolated from every other Plugin.
-//! The Plugin decides what to store and which of its Components share access.
+//! A Plugin is a system-managed capability and task owner. Each Plugin receives
+//! one durable storage capability whose keys are isolated from every other
+//! Plugin.
 
 #![no_std]
 
@@ -15,10 +15,10 @@ mod storage;
 pub use barracuda_kv::{Value, WriteValue};
 pub use filesystem::PluginVfs;
 pub use lifecycle::{
-    CapabilityError, Plugin, PluginComponentCleanupFailure, PluginDeclaration, PluginError,
-    PluginEventRouterContext, PluginFilesystem, PluginId, PluginIdError, PluginManager,
-    PluginManagerInitError, PluginRegisterContext, PluginRegisterError, PluginRequirements,
-    PluginResult, PluginStartContext, PluginStartError, PluginTaskToken, PluginUnloadError,
+    CapabilityError, Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginId,
+    PluginIdError, PluginManager, PluginManagerInitError, PluginRegisterContext,
+    PluginRegisterError, PluginRequirements, PluginResult, PluginStartContext, PluginStartError,
+    PluginTaskToken, PluginUnloadError,
 };
 pub use storage::{
     PluginEntry, PluginEntryIterator, PluginReadTransaction, PluginStorage, PluginWriteTransaction,

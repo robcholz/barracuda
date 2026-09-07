@@ -1,25 +1,28 @@
 # Agent Plugin
 
 - Plugin ID: `agent`
-- Direct Plugin dependencies: `webserver`
-- Provided typed capabilities: none
-- Required typed capabilities: `WebServer` from `webserver`
-- Owned Components: `AgentComponent`
-- Plugin-owned tasks: none
+- Direct Plugin dependencies: `webserver`, `workflow`
+- Provided typed capabilities: `AgentToolRegistry`
+- Required typed capabilities: `WebServer` from `webserver`,
+  `WorkflowActionRegistry` and `WorkflowService` from `workflow`
+- Owned Components: none
+- Plugin-owned tasks: Agent runtime and `session.event` forwarding
 
-System constructs the Agent Plugin from the common `PluginContext`. The Plugin
-clones its HTTP client factory from the context, receives its private filesystem
-during registration, starts its services, and loads the standalone
-`barracuda-agent-component` into Event Router.
+System constructs the Agent Plugin from the common `PluginContext`. During
+registration it creates the Agent runtime, publishes `AgentToolRegistry`, and
+registers the former Agent session RPC surface as direct Workflow Actions. The
+Workflow Plugin remains independent of Agent; Agent is the capability consumer.
 
-It requires the shared `WebServer` capability and registers
-`POST /api/model-api` during registration. The endpoint accepts model API
-configurations for root Agents, subagents, memory extraction, and context
-compaction. The retained route registration is released automatically when the
-Plugin unloads.
+The Plugin owns and drives `RuntimeService` directly. Alongside it, the
+Agent-to-Workflow adapter only forwards open-session output as `session.event`;
+it does not own or run either the Agent runtime or the Workflow runtime. No
+Event Router component, RPC lane, frame-size constant, or RPC-to-Action
+conversion remains in this path.
 
-The Plugin publishes no typed capability. System-owned callers, including
-Workflow, use the Component's `"system"` JSON RPCs and consume the
-`session.event` JSON Event. The Component directly owns the runtime service and
-the open-session event streams, so Event Router polling advances both without a
-separate task or a native RPC compatibility layer.
+Dependent Plugins may still register native Agent `ToolGroup`s through
+`AgentToolRegistry` before startup. The Agent startup hook starts that complete
+Tool Registry before spawning the runtime task.
+
+The shared `WebServer` capability continues to own `POST /api/model-api`.
+The retained route registration is released automatically when the Agent Plugin
+unloads.

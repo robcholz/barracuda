@@ -1,28 +1,25 @@
-//! Plugin entry point for the network-synchronized Time Component.
+//! Network-synchronized UTC capability Plugin.
 
 #![no_std]
 
 extern crate alloc;
 
-use alloc::rc::Rc;
+mod clock;
+/// SNTP source implementation owned by the Time Plugin.
+pub mod sntp;
+
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
-use barracuda_time_component::{
-    TimeComponent, TimeConfig, UtcClockUpdater,
-    sntp::{SntpConfig, SntpSource},
-    synchronize_clock, utc_clock,
-};
 use embassy_futures::select::select;
 use embassy_net::Stack;
+use sntp::{SntpConfig, SntpSource};
 
-/// Time Component contracts re-exported by the Plugin facade.
-pub mod component {
-    pub use barracuda_time_component::*;
-}
-
-pub use component::UtcClock;
+pub use clock::{
+    ClockError, SyncSample, TimeConfig, TimeSource, TimeSourceError, TimeSourceFuture, UnixMillis,
+    UtcClock, UtcClockUpdater, synchronize_clock, utc_clock,
+};
 
 const SNTP_SERVER: &str = "pool.ntp.org";
 const MINIMUM_UNIX_SECONDS: u64 = 1_704_067_200;
@@ -30,7 +27,7 @@ const RETRY_DELAY_MILLIS: u64 = 30_000;
 const RESYNC_INTERVAL_MILLIS: u64 = 3_600_000;
 const MAX_HOLDOVER_MILLIS: u64 = 86_400_000;
 
-/// Plugin that owns the network-synchronized Time Component.
+/// Plugin that owns and publishes the network-synchronized UTC clock.
 #[barracuda_plugin::macros::plugin]
 pub struct TimePlugin {
     network: Stack<'static>,
@@ -53,10 +50,10 @@ impl TimePlugin {
     }
 }
 
-impl<const M: usize> Plugin<M> for TimePlugin {
+impl Plugin for TimePlugin {
     fn register<Storage>(
         &mut self,
-        context: &mut PluginRegisterContext<'_, M, Storage>,
+        context: &mut PluginRegisterContext<'_, Storage>,
     ) -> PluginResult<()>
     where
         Storage: barracuda_plugin::manager::PluginStorage,
@@ -71,9 +68,7 @@ impl<const M: usize> Plugin<M> for TimePlugin {
             MAX_HOLDOVER_MILLIS,
         );
         let (clock, updater) = utc_clock(config);
-        let component = TimeComponent::new(Rc::clone(&clock));
-        context.provide(Rc::clone(&clock))?;
-        context.event_router.load(component)?;
+        context.provide(clock)?;
         self.runtime = Some(TimeRuntime { source, updater });
         Ok(())
     }

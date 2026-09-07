@@ -8,11 +8,9 @@ members = [
     "boards/configs/*/hal",
     "bench/crates/*",
     "composition/*",
-    "core/event-router",
     "core/plugin",
     "core/plugin/crates/*",
     "core/system",
-    "core/event-router/crates/*",
     "plugins/*/crates/*",
     "platforms/*",
     "shared/*",
@@ -43,25 +41,30 @@ barracuda-board-stm32f429zi-nucleo = { path = "boards/configs/stm32f429zi-nucleo
 # END GENERATED BOARD WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
-barracuda-file-plugin = { path = "plugins/file/crates/plugin" }
-barracuda-gpio-plugin = { path = "plugins/gpio/crates/plugin" }
+barracuda-agent-http-plugin = { path = "plugins/agent-http/crates/plugin" }
+barracuda-agent-imessage-gateway-plugin = { path = "plugins/agent-imessage-gateway/crates/plugin" }
+barracuda-agent-scheduler-plugin = { path = "plugins/agent-scheduler/crates/plugin" }
+barracuda-agent-time-plugin = { path = "plugins/agent-time/crates/plugin" }
+barracuda-agent-vm-plugin = { path = "plugins/agent-vm/crates/plugin" }
+barracuda-agent-websearch-plugin = { path = "plugins/agent-websearch/crates/plugin" }
+barracuda-agent-workflow-plugin = { path = "plugins/agent-workflow/crates/plugin" }
 barracuda-http-plugin = { path = "plugins/http/crates/plugin" }
-barracuda-i2c-plugin = { path = "plugins/i2c/crates/plugin" }
 barracuda-imessage-bluebubble-plugin = { path = "plugins/imessage-bluebubble/crates/plugin" }
-barracuda-imessage-bridge-plugin = { path = "plugins/imessage-bridge/crates/plugin" }
 barracuda-imessage-gateway-plugin = { path = "plugins/imessage-gateway/crates/plugin" }
 barracuda-imessage-inkbox-plugin = { path = "plugins/imessage-inkbox/crates/plugin" }
 barracuda-imessage-qq-plugin = { path = "plugins/imessage-qq/crates/plugin" }
 barracuda-imessage-telegram-plugin = { path = "plugins/imessage-telegram/crates/plugin" }
 barracuda-imessage-web-plugin = { path = "plugins/imessage-web/crates/plugin" }
 barracuda-imessage-wechat-plugin = { path = "plugins/imessage-wechat/crates/plugin" }
-barracuda-message-queue-plugin = { path = "plugins/message-queue/crates/plugin" }
 barracuda-scheduler-plugin = { path = "plugins/scheduler/crates/plugin" }
-barracuda-spi-plugin = { path = "plugins/spi/crates/plugin" }
 barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
-barracuda-web-search-plugin = { path = "plugins/web-search/crates/plugin" }
+barracuda-gpio-plugin = { path = "plugins/vm-gpio/crates/plugin" }
+barracuda-i2c-plugin = { path = "plugins/vm-i2c/crates/plugin" }
+barracuda-message-queue-plugin = { path = "plugins/vm-message-queue/crates/plugin" }
+barracuda-spi-plugin = { path = "plugins/vm-spi/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }
+barracuda-workflow-plugin = { path = "plugins/workflow/crates/plugin" }
 # END GENERATED PLUGIN WORKSPACE DEPENDENCIES
 
 barracuda-board = { path = "boards/api" }
@@ -70,7 +73,6 @@ barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-cli-style = { path = "shared/cli-style" }
-barracuda-event-router = { path = "core/event-router" }
 barracuda-indicator-led = { path = "drivers/indicator-led" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-minimal-yaml = { path = "shared/minimal-yaml" }

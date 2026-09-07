@@ -1,0 +1,3 @@
+id = "agent-time"
+depends-on = ["agent", "time"]
+description = "Exposes the Time capability to Agents as a native Tool."

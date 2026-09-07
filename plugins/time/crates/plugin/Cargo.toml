@@ -2,24 +2,27 @@
 name = "barracuda-time-plugin"
 version = "0.1.0"
 edition = "2024"
-description = "Barracuda Plugin that owns the network-synchronized Time Component"
+description = "Barracuda Plugin that publishes a network-synchronized UTC clock"
 license = "Apache-2.0"
 
 [dependencies]
 barracuda-plugin.workspace = true
-barracuda-time-component = { path = "../component" }
 embassy-executor.workspace = true
 embassy-futures.workspace = true
 embassy-net.workspace = true
+embassy-sync.workspace = true
+embassy-time.workspace = true
+getset = "0.1"
 log.workspace = true
+sntpc = { version = "0.11.0", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-event-router.workspace = true
 barracuda-platform-test.workspace = true
 embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
 embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
 futures-lite = "2"
+static_cell = "2"
 
 [lints.rust]
 unsafe_code = "forbid"

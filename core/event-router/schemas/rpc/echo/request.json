@@ -1,8 +1,0 @@
-{
-  "type": "object",
-  "properties": {
-    "city": { "type": "string" },
-    "days": { "type": "integer" }
-  },
-  "required": ["city", "days"]
-}

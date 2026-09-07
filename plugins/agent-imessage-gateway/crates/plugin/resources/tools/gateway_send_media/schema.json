@@ -1,0 +1,62 @@
+{
+  "type": "function",
+  "function": {
+    "name": "gateway_send_media",
+    "description": "Submit one ordered command to an outbound Gateway media stream.",
+    "parameters": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": { "const": "start" },
+            "stream_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "sequence": { "const": 0 },
+            "channel": { "type": "string", "minLength": 1 },
+            "conversation_id": { "type": "string", "minLength": 1 },
+            "thread_id": { "type": "string" },
+            "kind": { "enum": ["file", "image", "audio", "video"] },
+            "filename": { "type": "string" },
+            "mime_type": { "type": "string" },
+            "caption": { "type": "string" },
+            "reply_to": { "type": "string" }
+          },
+          "required": ["action", "stream_id", "sequence", "channel", "conversation_id", "kind"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": { "const": "chunk" },
+            "stream_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "sequence": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+            "content_base64": { "type": "string", "contentEncoding": "base64" }
+          },
+          "required": ["action", "stream_id", "sequence", "content_base64"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": { "const": "finish" },
+            "stream_id": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "sequence": { "type": "integer", "minimum": 1, "maximum": 4294967295 }
+          },
+          "required": ["action", "stream_id", "sequence"],
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

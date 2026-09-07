@@ -1,0 +1,3 @@
+id = "agent-scheduler"
+depends-on = ["agent", "scheduler"]
+description = "Exposes the Scheduler capability to Agents as native Tools."

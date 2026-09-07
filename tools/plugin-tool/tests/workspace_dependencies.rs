@@ -39,12 +39,17 @@ fn workspace_catalog_exposes_only_core_facades() -> Result<(), std::io::Error> {
         );
     }
 
-    for facade in ["barracuda-event-router", "barracuda-plugin"] {
+    for facade in ["barracuda-plugin"] {
         assert!(
             has_workspace_dependency(&manifest, facade),
             "workspace dependencies do not expose facade {facade}"
         );
     }
+
+    assert!(!has_workspace_dependency(
+        &manifest,
+        "barracuda-event-router"
+    ));
 
     Ok(())
 }

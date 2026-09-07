@@ -1,0 +1,3 @@
+id = "agent-workflow"
+depends-on = ["agent", "workflow"]
+description = "Exposes Workflow discovery and durable control as native Agent Tools."

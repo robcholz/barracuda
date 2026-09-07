@@ -7,12 +7,13 @@ description = "Base IMessage Gateway Plugin and provider-registration capability
 [dependencies]
 barracuda-imessage-gateway-component = { path = "../component" }
 barracuda-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
 gateway = { path = "../gateway" }
 gateway-http = { path = "../http" }
-[dev-dependencies]
-barracuda-platform-test.workspace = true
-barracuda-event-router.workspace = true
-futures-lite = "2"
+serde = { version = "1", default-features = false, features = ["derive"] }
+thiserror = { version = "2", default-features = false }
 
 [lints.rust]
 unsafe_code = "forbid"
