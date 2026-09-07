@@ -2,7 +2,6 @@
 
 use alloc::boxed::Box;
 use alloc::collections::{BTreeMap, BTreeSet};
-use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::sync::Arc;
@@ -12,7 +11,7 @@ use core::error::Error;
 use core::fmt::{self, Debug};
 
 use barracuda_kv::Database;
-use barracuda_vfs::{FsError, Vfs};
+use barracuda_vfs::{FsError, ScopedVfs, Vfs};
 use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
@@ -20,7 +19,7 @@ use embedded_storage_async::nor_flash::NorFlash;
 use getset::Getters;
 
 use crate::storage::ScopedStorage;
-use crate::{PluginStorage, PluginVfs, StorageError};
+use crate::{PluginStorage, StorageError};
 
 /// Filesystem access requested by one Plugin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -28,7 +27,7 @@ pub enum PluginFilesystem {
     /// The Plugin has no file namespace.
     #[default]
     None,
-    /// The Plugin receives a private namespace on System's writable VFS.
+    /// The Plugin receives an isolated semantic filesystem namespace.
     Private,
 }
 
@@ -112,7 +111,7 @@ pub enum PluginError {
     #[error(transparent)]
     Capability(#[from] CapabilityError),
     /// The Plugin attempted to obtain VFS access without declaring it.
-    #[error("Plugin did not declare private filesystem access")]
+    #[error("Plugin did not declare filesystem access")]
     FilesystemNotDeclared,
     /// System did not install an Embassy task spawner for Plugin startup.
     #[error("Plugin task spawner is unavailable during startup")]
@@ -211,7 +210,7 @@ pub struct PluginRegisterContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
     storage: Storage,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
     plugin_id: &'a PluginId,
     dependencies: &'a [PluginId],
     capabilities: &'a mut CapabilityRegistry,
@@ -220,12 +219,12 @@ pub struct PluginRegisterContext<'a, Storage: PluginStorage> {
 }
 
 impl<Storage: PluginStorage> PluginRegisterContext<'_, Storage> {
-    /// Returns this Plugin's private VFS when it declared one.
+    /// Returns this Plugin's isolated semantic VFS when it declared one.
     ///
     /// # Errors
     ///
     /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
-    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+    pub fn filesystem(&self) -> PluginResult<&ScopedVfs> {
         self.filesystem
             .as_ref()
             .ok_or(PluginError::FilesystemNotDeclared)
@@ -287,7 +286,7 @@ pub struct PluginStartContext<'a, Storage: PluginStorage> {
     /// Persistent typed key-value storage restricted to this Plugin's namespace.
     #[getset(get = "pub")]
     storage: Storage,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
     dependencies: &'a [PluginId],
     capabilities: &'a CapabilityRegistry,
     task_spawner: Option<Spawner>,
@@ -359,12 +358,12 @@ fn plugin_task_cancellation() -> (PluginTaskCancellation, PluginTaskToken) {
 }
 
 impl<Storage: PluginStorage> PluginStartContext<'_, Storage> {
-    /// Returns this Plugin's declared private VFS.
+    /// Returns this Plugin's declared semantic VFS.
     ///
     /// # Errors
     ///
     /// Returns [`PluginError::FilesystemNotDeclared`] for KV-only Plugins.
-    pub fn filesystem(&self) -> PluginResult<&PluginVfs> {
+    pub fn filesystem(&self) -> PluginResult<&ScopedVfs> {
         self.filesystem
             .as_ref()
             .ok_or(PluginError::FilesystemNotDeclared)
@@ -552,7 +551,7 @@ struct LoadedPlugin<Storage: PluginStorage> {
     provided_capabilities: Vec<CapabilityKey>,
     retained_resources: Vec<Box<dyn Any>>,
     task_cancellations: Vec<PluginTaskCancellation>,
-    filesystem: Option<PluginVfs>,
+    filesystem: Option<ScopedVfs>,
 }
 
 /// Failure while registering one Plugin.
@@ -583,8 +582,8 @@ pub enum PluginRegisterError {
     /// The queued Plugin graph contains a dependency cycle.
     #[error("Plugin dependency graph contains a cycle: {0:?}")]
     DependencyCycle(Vec<PluginId>),
-    /// The Plugin declared a private VFS but System did not install one.
-    #[error("Plugin {0} requires a private filesystem, but System did not install a VFS")]
+    /// The Plugin declared filesystem access but System did not install a VFS.
+    #[error("Plugin {0} requires a filesystem, but System did not install a VFS")]
     FilesystemUnavailable(PluginId),
     /// Plugin filesystem namespace preparation failed.
     #[error(transparent)]
@@ -785,8 +784,7 @@ where
                     .vfs_root
                     .as_ref()
                     .ok_or_else(|| PluginRegisterError::FilesystemUnavailable(id.clone()))?;
-                let source_root = format!("/plugins/{id}");
-                Some(root.scoped(&source_root)?)
+                Some(crate::filesystem::scoped_filesystem(root, &id)?)
             }
         };
 

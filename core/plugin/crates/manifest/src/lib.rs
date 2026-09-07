@@ -1,9 +1,15 @@
 //! Canonical parsing for Barracuda `plugin.toml` declarations.
 
+use std::sync::OnceLock;
+
+use regex::Regex;
 use serde::Deserialize;
 
 /// Maximum number of Unicode scalar values in a Plugin description.
 pub const MAX_DESCRIPTION_CHARS: usize = 80;
+
+/// Regular expression matched by every Plugin identity.
+pub const PLUGIN_ID_PATTERN: &str = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 
 /// One parsed Plugin declaration.
 #[derive(Debug, Deserialize, Eq, PartialEq)]
@@ -47,12 +53,18 @@ pub enum ManifestError {
     /// The Plugin identity contains leading or trailing whitespace.
     #[error("Plugin identity `{0}` must not contain leading or trailing whitespace")]
     NonCanonicalId(String),
+    /// The Plugin identity does not match [`PLUGIN_ID_PATTERN`].
+    #[error("Plugin identity `{0}` must match {PLUGIN_ID_PATTERN}")]
+    InvalidId(String),
     /// One dependency identity is empty.
     #[error("Plugin dependency at index {0} must not be empty")]
     EmptyDependency(usize),
     /// One dependency identity contains leading or trailing whitespace.
     #[error("Plugin dependency `{0}` must not contain leading or trailing whitespace")]
     NonCanonicalDependency(String),
+    /// One dependency identity does not match [`PLUGIN_ID_PATTERN`].
+    #[error("Plugin dependency `{0}` must match {PLUGIN_ID_PATTERN}")]
+    InvalidDependency(String),
     /// The same direct dependency is declared more than once.
     #[error("Plugin dependency `{0}` is declared more than once")]
     DuplicateDependency(String),
@@ -85,6 +97,9 @@ pub fn parse(contents: &str) -> Result<PluginManifest, ManifestError> {
         if dependency.trim() != dependency {
             return Err(ManifestError::NonCanonicalDependency(dependency.clone()));
         }
+        if !matches_plugin_id_pattern(dependency) {
+            return Err(ManifestError::InvalidDependency(dependency.clone()));
+        }
         if manifest.dependencies[..index].contains(dependency) {
             return Err(ManifestError::DuplicateDependency(dependency.clone()));
         }
@@ -111,5 +126,17 @@ fn validate_identity(identity: &str) -> Result<(), ManifestError> {
     if identity.trim() != identity {
         return Err(ManifestError::NonCanonicalId(identity.to_owned()));
     }
+    if !matches_plugin_id_pattern(identity) {
+        return Err(ManifestError::InvalidId(identity.to_owned()));
+    }
     Ok(())
+}
+
+fn matches_plugin_id_pattern(identity: &str) -> bool {
+    static REGEX: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
+
+    REGEX
+        .get_or_init(|| Regex::new(PLUGIN_ID_PATTERN))
+        .as_ref()
+        .is_ok_and(|regex| regex.is_match(identity))
 }

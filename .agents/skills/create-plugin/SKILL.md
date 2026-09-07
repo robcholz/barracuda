@@ -36,8 +36,8 @@ Use only the parts required by the Plugin:
 ```text
 plugins/<plugin>/
 ├── plugin.toml
-├── filesystem/                   # optional prebuilt scoped files
-│   └── resources/                # runtime read-only files
+├── filesystem/                   # only home for bundled runtime assets
+│   └── resources/                # only supported bundled subtree today
 ├── crates/
 │   ├── plugin/
 │   │   ├── Cargo.toml
@@ -68,12 +68,15 @@ dependencies, and concise description. Apply
 that metadata in Rust. Run `cargo plugin sync` when adding or renaming a Plugin,
 changing its selection metadata, or otherwise changing generated System
 registry inputs.
+Plugin IDs and every `depends-on` entry must match
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`; each identity is a portable lowercase path
+segment, not a path.
 
 ## Plugin filesystem
 
 When a Plugin reads, writes, or contributes files, read and follow
-[`filesystem.md`](filesystem.md). A Plugin receives an ordinary `PluginVfs`;
-do not introduce a Plugin-specific VFS wrapper or expose mount-table ownership.
+[`filesystem.md`](filesystem.md). A Plugin receives an ordinary `ScopedVfs`;
+do not introduce a Plugin-specific VFS type or expose mount-table ownership.
 
 ## Lifecycle ownership
 

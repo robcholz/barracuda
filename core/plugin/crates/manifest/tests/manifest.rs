@@ -2,7 +2,7 @@
 
 #![allow(clippy::expect_used)]
 
-use barracuda_plugin_manifest::{parse, MAX_DESCRIPTION_CHARS};
+use barracuda_plugin_manifest::{parse, ManifestError, MAX_DESCRIPTION_CHARS, PLUGIN_ID_PATTERN};
 
 const VALID: &str = r#"
 id = "web-search"
@@ -20,12 +20,36 @@ fn parses_a_canonical_manifest() {
 }
 
 #[test]
+fn publishes_the_plugin_identity_pattern() {
+    assert_eq!(PLUGIN_ID_PATTERN, "^[a-z0-9]+(?:-[a-z0-9]+)*$");
+}
+
+#[test]
 fn rejects_empty_or_noncanonical_identity() {
-    for id in ["", "   ", " web-search", "web-search "] {
+    for id in [
+        "",
+        "   ",
+        " web-search",
+        "web-search ",
+        "Web-search",
+        "web_search",
+        "web.search",
+        "web/search",
+        r"web\search",
+        "web search",
+        "-web-search",
+        "web-search-",
+        "web--search",
+        "..",
+        "搜索",
+    ] {
         let manifest =
             format!("id = {id:?}\ndepends-on = []\ndescription = \"Valid description.\"\n");
         assert!(parse(&manifest).is_err(), "accepted identity {id:?}");
     }
+
+    let manifest = "id = \"Web-search\"\ndepends-on = []\ndescription = \"Valid.\"\n";
+    assert!(matches!(parse(manifest), Err(ManifestError::InvalidId(_))));
 }
 
 #[test]
@@ -35,6 +59,11 @@ fn rejects_empty_noncanonical_duplicate_and_self_dependencies() {
         "[\"   \"]",
         "[\" base\"]",
         "[\"base \"]",
+        "[\"Base\"]",
+        "[\"base_plugin\"]",
+        "[\"base/plugin\"]",
+        "[\"base--plugin\"]",
+        "[\"..\"]",
         "[\"base\", \"base\"]",
         "[\"demo\"]",
     ] {
@@ -46,6 +75,12 @@ fn rejects_empty_noncanonical_duplicate_and_self_dependencies() {
             "accepted dependencies {dependencies}"
         );
     }
+
+    let manifest = "id = \"demo\"\ndepends-on = [\"base/plugin\"]\ndescription = \"Valid.\"\n";
+    assert!(matches!(
+        parse(manifest),
+        Err(ManifestError::InvalidDependency(_))
+    ));
 }
 
 #[test]

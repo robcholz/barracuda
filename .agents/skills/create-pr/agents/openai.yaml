@@ -1,0 +1,6 @@
+interface:
+  display_name: "Barracuda Create PR"
+  short_description: "Review and publish repository-standard pull requests"
+  default_prompt: "Use $create-pr to review my branch and open a Barracuda pull request with the repository-standard body."
+policy:
+  allow_implicit_invocation: true

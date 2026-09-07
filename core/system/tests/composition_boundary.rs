@@ -26,7 +26,7 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
-    assert!(system.contains("mount(\"/\", backend, MountOptions::read_write())"));
+    assert!(system.contains("mount(\"/data\", backend, MountOptions::read_write())"));
     assert!(system.contains("$manager.register_all()"));
     assert!(system.contains("plugins.start()"));
     assert!(system.contains("plugins.install_vfs(global_namespace().await)"));

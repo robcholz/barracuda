@@ -4,28 +4,24 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use embedded_io_async::{Read, Seek, Write};
 
-use crate::path::normalize;
+use crate::path::{backend_path, matches_mount, normalize};
 use crate::{File, FsError, Metadata, OpenOptions, ReadDir, SeekFrom, Vfs};
 
 static TEMP_FILE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
 
-/// A cloneable filesystem view rooted beneath one path in an existing VFS.
+/// A cloneable filesystem view exposing selected paths from an existing VFS.
 ///
 /// It exposes file operations only; mount-table ownership remains with the
 /// [`Vfs`] that created the view.
 #[derive(Clone)]
 pub struct ScopedVfs {
     vfs: Vfs,
-    root: String,
+    mounts: Vec<ScopedMount>,
 }
 
 impl ScopedVfs {
-    pub(crate) fn new(vfs: Vfs, root: String) -> Self {
-        Self { vfs, root }
-    }
-
-    async fn ensure_root(&self) -> Result<(), FsError> {
-        self.vfs.create_dir_all(&self.root).await
+    pub(crate) fn with_mounts(vfs: Vfs, mounts: Vec<ScopedMount>) -> Self {
+        Self { vfs, mounts }
     }
 
     fn path(&self, path: &str) -> Result<String, FsError> {
@@ -37,17 +33,16 @@ impl ScopedVfs {
             relative.push_str(path);
             normalize(&relative)?
         };
-        if path == "/" {
-            return Ok(self.root.clone());
-        }
-        let mut scoped = String::with_capacity(self.root.len().saturating_add(path.len()));
-        scoped.push_str(&self.root);
-        scoped.push_str(&path);
-        Ok(scoped)
+        let mount = self
+            .mounts
+            .iter()
+            .filter(|mount| matches_mount(&path, &mount.point))
+            .max_by_key(|mount| mount.point.len())
+            .ok_or(FsError::NotMounted)?;
+        Ok(backend_path(&path, &mount.point, &mount.source_root))
     }
 
     async fn prepare_file_path(&self, path: &str) -> Result<String, FsError> {
-        self.ensure_root().await?;
         let path = self.path(path)?;
         if let Some((parent, _name)) = path.rsplit_once('/') {
             let parent = if parent.is_empty() { "/" } else { parent };
@@ -58,7 +53,6 @@ impl ScopedVfs {
 
     /// Opens an existing file for reading.
     pub async fn open(&self, path: &str) -> Result<File, FsError> {
-        self.ensure_root().await?;
         self.vfs.open(&self.path(path)?).await
     }
 
@@ -70,13 +64,16 @@ impl ScopedVfs {
 
     /// Opens a file with explicit options.
     pub async fn open_with(&self, path: &str, options: &OpenOptions) -> Result<File, FsError> {
-        self.ensure_root().await?;
-        self.vfs.open_with(&self.path(path)?, options).await
+        let path = if options.should_create() {
+            self.prepare_file_path(path).await?
+        } else {
+            self.path(path)?
+        };
+        self.vfs.open_with(&path, options).await
     }
 
     /// Reads an entire file.
     pub async fn read(&self, path: &str) -> Result<Vec<u8>, FsError> {
-        self.ensure_root().await?;
         self.vfs.read(&self.path(path)?).await
     }
 
@@ -162,37 +159,43 @@ impl ScopedVfs {
 
     /// Returns metadata for one path.
     pub async fn metadata(&self, path: &str) -> Result<Metadata, FsError> {
-        self.ensure_root().await?;
         self.vfs.metadata(&self.path(path)?).await
     }
 
     /// Lists immediate directory children.
     pub async fn read_dir(&self, path: &str) -> Result<ReadDir, FsError> {
-        self.ensure_root().await?;
         self.vfs.read_dir(&self.path(path)?).await
     }
 
     /// Creates a directory and missing ancestors.
     pub async fn create_dir_all(&self, path: &str) -> Result<(), FsError> {
-        self.ensure_root().await?;
         self.vfs.create_dir_all(&self.path(path)?).await
     }
 
     /// Removes one regular file.
     pub async fn remove_file(&self, path: &str) -> Result<(), FsError> {
-        self.ensure_root().await?;
         self.vfs.remove_file(&self.path(path)?).await
     }
 
     /// Removes one empty directory.
     pub async fn remove_dir(&self, path: &str) -> Result<(), FsError> {
-        self.ensure_root().await?;
         self.vfs.remove_dir(&self.path(path)?).await
     }
 
     /// Renames a path without leaving this scoped root.
     pub async fn rename(&self, from: &str, to: &str) -> Result<(), FsError> {
-        self.ensure_root().await?;
         self.vfs.rename(&self.path(from)?, &self.path(to)?).await
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ScopedMount {
+    pub(crate) point: String,
+    source_root: String,
+}
+
+impl ScopedMount {
+    pub(crate) const fn new(point: String, source_root: String) -> Self {
+        Self { point, source_root }
     }
 }

@@ -28,7 +28,7 @@ use workflow::AgentWorkflowAdapter;
 pub use barracuda_agent_runtime::{tools, AgentToolRegistry};
 pub use model_api_http::SET_API_PATH;
 
-const PERSISTENCE_ROOT: &str = "/";
+const PERSISTENCE_ROOT: &str = "/data";
 
 /// Plugin that constructs the Agent runtime and registers its Workflow Actions.
 #[barracuda_plugin::macros::plugin]

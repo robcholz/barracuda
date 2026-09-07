@@ -13,7 +13,6 @@ mod lifecycle;
 mod storage;
 
 pub use barracuda_kv::{Value, WriteValue};
-pub use filesystem::PluginVfs;
 pub use lifecycle::{
     CapabilityError, Plugin, PluginDeclaration, PluginError, PluginFilesystem, PluginId,
     PluginIdError, PluginManager, PluginManagerInitError, PluginRegisterContext,

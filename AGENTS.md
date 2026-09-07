@@ -14,3 +14,8 @@ and Agent Tools, and for the required declarations in `plugin.md`.
 See [.agents/docs/execution-ownership.md](.agents/docs/execution-ownership.md)
 for the authoritative ownership and cancellation rules for long-lived Embassy
 tasks.
+
+## Local verification
+
+Do not run the full workspace test suite locally. Use focused tests and checks
+for the affected packages and targets; leave the complete test matrix to CI.

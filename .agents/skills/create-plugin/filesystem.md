@@ -40,14 +40,22 @@ both are large.
 
 ## Repository contribution
 
-Repository files below
-`plugins/<plugin>/filesystem/resources/` contribute to that Plugin's
-`/resources` tree in the prebuilt filesystem:
+Put every asset intended for the bundled runtime filesystem below
+`plugins/<plugin>/filesystem/`. The only supported bundled subtree is currently
+`filesystem/resources/`; do not add `filesystem/data/`, `filesystem/cache/`,
+`filesystem/media/`, or another sibling until the image builder defines that
+contract.
+
+Files below `plugins/<plugin>/filesystem/resources/` contribute to that
+Plugin's `/resources` tree in the prebuilt filesystem:
 
 ```text
 plugins/example/filesystem/resources/index.html
 -> /resources/index.html
 ```
+
+Crate-local directories such as `crates/<crate>/resources/` are compile-time
+inputs only. They are not discovered or bundled into the Plugin filesystem.
 
 Do not prebuild `/data`, `/cache`, or `/media`. When mutable state needs
 defaults, read the default from `/resources` and initialize `/data` only when
