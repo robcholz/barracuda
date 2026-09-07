@@ -323,6 +323,17 @@ pub fn flash_selected(workspace: &Path) -> Result<FlashedImage, String> {
     })
 }
 
+/// Builds and then flashes the resource image for the selected Board.
+///
+/// # Errors
+///
+/// Returns an error when building the selected image fails or when the newly
+/// built image cannot be flashed.
+pub fn deploy_selected(workspace: &Path) -> Result<FlashedImage, String> {
+    build_selected(workspace)?;
+    flash_selected(workspace)
+}
+
 /// Resolves the read-only resource region from the selected Board's native layout.
 ///
 /// # Errors
@@ -787,6 +798,9 @@ fn collect_plugin_resources(
             .into_string()
             .map_err(|_name| ImageBuildError::InvalidPath(plugin.path()))?;
         if disabled.contains(&directory) {
+            continue;
+        }
+        if read_directory(&plugin.path())?.is_empty() {
             continue;
         }
 

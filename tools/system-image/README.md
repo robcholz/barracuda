@@ -6,14 +6,16 @@ resources and flashes it into the selected Board's read-only-at-runtime
 
 ```sh
 cargo board select
-cargo system-image build
-cargo system-image flash
+cargo image build
+cargo image flash
+cargo image deploy
 ```
 
-Both operations read `.barracuda/selected-board`; neither accepts a Board or
+All operations read `.barracuda/selected-board`; none accepts a Board or
 Platform argument. `build` reads the Board's native physical layout and writes
 `target/barracuda-system.img`. `flash` requires that complete image to already
 exist and writes it only to the selected Board's native `resources` region.
+`deploy` builds a fresh image and then flashes it.
 The Board-native `resources` partition entry chooses `fatfs` or `littlefs`:
 file-region layouts use that region's `filesystem` field, ESP layouts use its
 partition subtype, and linker layouts use its inline `filesystem` annotation.

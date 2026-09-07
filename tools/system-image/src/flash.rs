@@ -34,13 +34,13 @@ pub(crate) struct FlashRequest<'a> {
 pub(crate) fn flash(request: FlashRequest<'_>) -> Result<String, String> {
     let bytes = fs::read(request.image).map_err(|error| {
         format!(
-            "failed to read System image `{}`: {error}; run `cargo system-image build` first",
+            "failed to read System image `{}`: {error}; run `cargo image build` first",
             request.image.display()
         )
     })?;
     if bytes.len() != request.size {
         return Err(format!(
-            "System image `{}` is {} bytes, but the selected Board has a {}-byte `system` partition; run `cargo system-image build` again",
+            "System image `{}` is {} bytes, but the selected Board has a {}-byte `resources` partition; run `cargo image build` again",
             request.image.display(),
             bytes.len(),
             request.size
