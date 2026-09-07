@@ -8,14 +8,16 @@ use alloc::rc::{Rc, Weak};
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use core::future::Future;
 use core::pin::Pin;
+use core::task::Poll;
 
 use async_channel::{Receiver, Sender};
 use futures_lite::future;
 use picoserve::futures::Either;
 use picoserve::io::Write;
+use picoserve::io::{Error as _, ErrorKind, Read};
 use picoserve::request::{Path, Request};
 use picoserve::response::ws::{Message, SocketRx, SocketTx, WebSocketCallback};
 use picoserve::response::{Content, IntoResponse, Response, ResponseWriter, StatusCode};
@@ -25,6 +27,22 @@ use picoserve::{Config, DisconnectionInfo, NoGracefulShutdown, Server};
 
 const WEBSOCKET_BUFFER_BYTES: usize = 8 * 1024;
 const WEBSOCKET_QUEUE_CAPACITY: usize = 4;
+
+type ReaderSpace = [usize; 16];
+type ReadSpace = [usize; 64];
+type InlineFuture<'a, T, S> = smallbox::SmallBox<dyn Future<Output = T> + 'a, S>;
+
+fn inline_future<'a, T, F, S>(value: F) -> InlineFuture<'a, T, S>
+where
+    F: Future<Output = T> + 'a,
+{
+    // Reject oversized implementations at compile time, never fall back to the heap.
+    const {
+        assert!(core::mem::size_of::<F>() <= core::mem::size_of::<S>());
+        assert!(core::mem::align_of::<F>() <= core::mem::align_of::<S>());
+    }
+    smallbox::smallbox!(value)
+}
 
 /// Cooperative future returned by a WebSocket endpoint.
 pub type WebSocketFuture<'a> = Pin<Box<dyn Future<Output = ()> + 'a>>;
@@ -72,6 +90,7 @@ impl HttpMethod {
 /// Owned HTTP request passed to a portable endpoint.
 pub struct HttpRequest {
     method: HttpMethod,
+    path: String,
     body: Vec<u8>,
 }
 
@@ -79,7 +98,24 @@ impl HttpRequest {
     /// Creates a request value.
     #[must_use]
     pub const fn new(method: HttpMethod, body: Vec<u8>) -> Self {
-        Self { method, body }
+        Self {
+            method,
+            path: String::new(),
+            body,
+        }
+    }
+
+    /// Creates a request with its encoded URL path, excluding the query string.
+    #[must_use]
+    pub fn with_path(method: HttpMethod, path: String, body: Vec<u8>) -> Self {
+        Self { method, path, body }
+    }
+
+    /// Returns the encoded path. Synthetic requests created with `new` have an empty path.
+    /// Consumers mapping URLs to resources must validate and decode that mapping themselves.
+    #[must_use]
+    pub fn path(&self) -> &str {
+        &self.path
     }
 
     /// Returns the request method.
@@ -99,7 +135,45 @@ impl HttpRequest {
 pub struct HttpResponse {
     status: u16,
     content_type: &'static str,
-    body: Vec<u8>,
+    body: HttpBody,
+}
+
+enum HttpBody {
+    Bytes(Vec<u8>),
+    Stream {
+        length: usize,
+        reader: smallbox::SmallBox<dyn BodyReader, ReaderSpace>,
+    },
+}
+
+trait BodyReader {
+    fn read<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+    ) -> InlineFuture<'a, Result<usize, ErrorKind>, ReadSpace>;
+}
+
+impl<T: Read> BodyReader for T {
+    fn read<'a>(
+        &'a mut self,
+        buffer: &'a mut [u8],
+    ) -> InlineFuture<'a, Result<usize, ErrorKind>, ReadSpace> {
+        inline_future(async move { Read::read(self, buffer).await.map_err(|error| error.kind()) })
+    }
+}
+
+/// Failure producing a streamed HTTP body. The connection is terminated on failure.
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum HttpStreamError {
+    /// The producer returned an I/O error.
+    #[error("HTTP response source failed: {0:?}")]
+    Read(ErrorKind),
+    /// The source ended before the declared Content-Length.
+    #[error("HTTP response source ended before Content-Length")]
+    UnexpectedEof,
+    /// The producer violated the Read buffer contract.
+    #[error("HTTP response source returned an invalid read length")]
+    InvalidRead,
 }
 
 impl HttpResponse {
@@ -109,7 +183,32 @@ impl HttpResponse {
         Self {
             status,
             content_type,
-            body,
+            body: HttpBody::Bytes(body),
+        }
+    }
+
+    /// Streams exactly `length` bytes from an owned async reader using bounded buffers.
+    /// Excess source bytes are not sent. Early EOF or read failure closes the connection.
+    /// The reader must fit 16 machine words and its read future 64 machine words,
+    /// both with at most machine-word alignment (checked at compile time).
+    #[must_use]
+    pub fn stream<R: Read + 'static>(
+        status: u16,
+        content_type: &'static str,
+        length: usize,
+        reader: R,
+    ) -> Self {
+        const {
+            assert!(core::mem::size_of::<R>() <= core::mem::size_of::<ReaderSpace>());
+            assert!(core::mem::align_of::<R>() <= core::mem::align_of::<ReaderSpace>());
+        }
+        Self {
+            status,
+            content_type,
+            body: HttpBody::Stream {
+                length,
+                reader: smallbox::smallbox!(reader),
+            },
         }
     }
 
@@ -125,10 +224,13 @@ impl HttpResponse {
         self.content_type
     }
 
-    /// Returns the response body.
+    /// Returns buffered response bytes, or `None` for a streaming response.
     #[must_use]
-    pub fn body(&self) -> &[u8] {
-        &self.body
+    pub fn body(&self) -> Option<&[u8]> {
+        match &self.body {
+            HttpBody::Bytes(bytes) => Some(bytes),
+            HttpBody::Stream { .. } => None,
+        }
     }
 }
 
@@ -136,6 +238,63 @@ impl HttpResponse {
 pub trait HttpEndpoint: 'static {
     /// Handles one complete request.
     fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a>;
+}
+
+/// Resource provider receiving a borrowed encoded URL path (without its query).
+/// No request body is collected. Providers choose their own storage and path policy.
+/// The returned future must fit 256 machine words with machine-word alignment;
+/// incompatible implementations fail to compile rather than allocating.
+///
+/// ```
+/// use barracuda_webserver_plugin::{HttpProvider, HttpResponse, WebServer};
+/// struct Assets;
+/// impl HttpProvider for Assets {
+///     async fn serve(&self, path: &str) -> HttpResponse {
+///         match path {
+///             "/assets/app.js" => {
+///                 let bytes: &'static [u8] = b"console.log('ready');";
+///                 HttpResponse::stream(200, "application/javascript", bytes.len(), bytes)
+///             }
+///             _ => HttpResponse::new(404, "text/plain", Vec::new()),
+///         }
+///     }
+/// }
+/// let server = WebServer::new();
+/// let registration = server.serve("/assets/*", Assets)?;
+/// # Ok::<(), barracuda_webserver_plugin::WebServerError>(())
+/// ```
+pub trait HttpProvider: 'static {
+    /// Opens a resource response. The future is stored inline by the server.
+    fn serve(&self, path: &str) -> impl Future<Output = HttpResponse>;
+}
+
+trait ErasedProvider<const WORDS: usize> {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]>;
+}
+
+impl<P: HttpProvider, const WORDS: usize> ErasedProvider<WORDS> for P {
+    fn serve<'a>(&'a self, path: &'a str) -> InlineFuture<'a, HttpResponse, [usize; WORDS]> {
+        inline_future(HttpProvider::serve(self, path))
+    }
+}
+
+/// Shared leaf provider for aggregators that select a provider before awaiting it.
+/// Construction allocates once; cloning and dispatch do not allocate.
+/// Leaf futures must fit 128 machine words, leaving room inside the server's
+/// 256-word handler storage for the aggregator's own state.
+#[derive(Clone)]
+pub struct HttpProviderHandle(Rc<dyn ErasedProvider<128>>);
+
+impl HttpProviderHandle {
+    /// Captures a concrete leaf provider for shared dispatch.
+    pub fn new(provider: impl HttpProvider) -> Self {
+        Self(Rc::new(provider))
+    }
+
+    /// Runs the selected provider without allocating a future.
+    pub async fn serve(&self, path: &str) -> HttpResponse {
+        self.0.serve(path).await
+    }
 }
 
 /// One client message delivered to a registered WebSocket endpoint.
@@ -202,20 +361,39 @@ pub trait WebSocketEndpoint: 'static {
 enum Endpoint {
     WebSocket(Rc<dyn WebSocketEndpoint>),
     Http(Rc<dyn HttpEndpoint>),
+    Provider(Rc<dyn ErasedProvider<256>>),
 }
 
 #[derive(Clone)]
 struct RegisteredEndpoint {
     path: &'static str,
+    prefix: bool,
     endpoint: Endpoint,
 }
 
 #[derive(Clone)]
-struct EndpointRouter {
-    endpoints: Vec<RegisteredEndpoint>,
+struct EndpointRouter<'a> {
+    endpoints: Rc<RefCell<Vec<RegisteredEndpoint>>>,
+    stream_error: &'a Cell<Option<HttpStreamError>>,
 }
 
-impl PathRouterService for EndpointRouter {
+fn resolve(endpoints: &[RegisteredEndpoint], path: &str) -> Option<RegisteredEndpoint> {
+    endpoints
+        .iter()
+        .filter(|entry| {
+            if !entry.prefix {
+                return entry.path == path;
+            }
+            path == entry.path
+                || path
+                    .strip_prefix(entry.path)
+                    .is_some_and(|suffix| entry.path.ends_with('/') || suffix.starts_with('/'))
+        })
+        .max_by_key(|entry| (!entry.prefix, entry.path.len()))
+        .cloned()
+}
+
+impl PathRouterService for EndpointRouter<'_> {
     async fn call_path_router_service<R, W>(
         &self,
         _state: &(),
@@ -228,16 +406,33 @@ impl PathRouterService for EndpointRouter {
         R: picoserve::io::Read,
         W: ResponseWriter<Error = R::Error>,
     {
-        let Some(registered) = self
-            .endpoints
-            .iter()
-            .find(|endpoint| endpoint.path == path.encoded())
-        else {
+        let registered = resolve(&self.endpoints.borrow(), path.encoded());
+        let Some(registered) = registered else {
             return (StatusCode::NOT_FOUND, "Web endpoint not found")
                 .write_to(request.body_connection.finalize().await?, response_writer)
                 .await;
         };
         match registered.endpoint.clone() {
+            Endpoint::Provider(provider) => {
+                let connection = request.body_connection.finalize().await?;
+                if request.parts.method() != "GET" {
+                    return Response::new(StatusCode::METHOD_NOT_ALLOWED, "Only GET is supported")
+                        .with_header("Allow", "GET")
+                        .write_to(connection, response_writer)
+                        .await;
+                }
+                let response = provider.serve(path.encoded()).await;
+                Response::new(
+                    StatusCode::new(response.status),
+                    HttpContent {
+                        content_type: response.content_type,
+                        body: response.body,
+                        stream_error: self.stream_error,
+                    },
+                )
+                .write_to(connection, response_writer)
+                .await
+            }
             Endpoint::WebSocket(endpoint) => {
                 let callback = EndpointCallback { endpoint };
                 get(move |upgrade: picoserve::response::ws::WebSocketUpgrade| {
@@ -257,12 +452,19 @@ impl PathRouterService for EndpointRouter {
                             .await;
                     }
                 };
-                let response = endpoint.handle(HttpRequest::new(method, body)).await;
+                let response = endpoint
+                    .handle(HttpRequest::with_path(
+                        method,
+                        path.encoded().to_string(),
+                        body,
+                    ))
+                    .await;
                 let response = Response::new(
                     StatusCode::new(response.status),
                     HttpContent {
                         content_type: response.content_type,
                         body: response.body,
+                        stream_error: self.stream_error,
                     },
                 );
                 response
@@ -273,22 +475,52 @@ impl PathRouterService for EndpointRouter {
     }
 }
 
-struct HttpContent {
+struct HttpContent<'a> {
     content_type: &'static str,
-    body: Vec<u8>,
+    body: HttpBody,
+    stream_error: &'a Cell<Option<HttpStreamError>>,
 }
 
-impl Content for HttpContent {
+impl Content for HttpContent<'_> {
     fn content_type(&self) -> &'static str {
         self.content_type
     }
 
     fn content_length(&self) -> usize {
-        self.body.len()
+        match &self.body {
+            HttpBody::Bytes(bytes) => bytes.len(),
+            HttpBody::Stream { length, .. } => *length,
+        }
     }
 
-    async fn write_content<W: Write>(self, writer: W) -> Result<(), W::Error> {
-        self.body.write_content(writer).await
+    async fn write_content<W: Write>(self, mut writer: W) -> Result<(), W::Error> {
+        match self.body {
+            HttpBody::Bytes(bytes) => bytes.write_content(writer).await,
+            HttpBody::Stream { length, mut reader } => {
+                let mut remaining = length;
+                let mut buffer = [0_u8; 1024];
+                while remaining > 0 {
+                    let capacity = remaining.min(buffer.len());
+                    let result = match reader.read(&mut buffer[..capacity]).await {
+                        Ok(0) => Err(HttpStreamError::UnexpectedEof),
+                        Ok(count) if count <= capacity => Ok(count),
+                        Ok(_) => Err(HttpStreamError::InvalidRead),
+                        Err(error) => Err(HttpStreamError::Read(error)),
+                    };
+                    let count = match result {
+                        Ok(count) => count,
+                        Err(error) => {
+                            // Wake serve_connection, which drops this response and its socket.
+                            self.stream_error.set(Some(error));
+                            return core::future::pending().await;
+                        }
+                    };
+                    writer.write_all(&buffer[..count]).await?;
+                    remaining -= count;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -375,6 +607,7 @@ pub enum WebServerError {
 pub struct WebRouteRegistration {
     endpoints: Weak<RefCell<Vec<RegisteredEndpoint>>>,
     path: &'static str,
+    prefix: bool,
 }
 
 impl Drop for WebRouteRegistration {
@@ -382,7 +615,7 @@ impl Drop for WebRouteRegistration {
         if let Some(endpoints) = self.endpoints.upgrade() {
             endpoints
                 .borrow_mut()
-                .retain(|endpoint| endpoint.path != self.path);
+                .retain(|endpoint| endpoint.path != self.path || endpoint.prefix != self.prefix);
         }
     }
 }
@@ -390,6 +623,9 @@ impl Drop for WebRouteRegistration {
 /// Failure while serving one Platform-provided connection.
 #[derive(Debug, thiserror::Error)]
 pub enum ServeConnectionError<E: picoserve::io::Error + 'static> {
+    /// A response source failed; the connection has been dropped.
+    #[error(transparent)]
+    ResponseSource(#[from] HttpStreamError),
     /// No Plugin registered an endpoint before the connection was served.
     #[error("WebServer has no registered endpoint")]
     EndpointMissing,
@@ -408,10 +644,7 @@ impl WebServer {
     /// Creates an unconfigured server with picoserve's default connection policy.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            endpoints: Rc::new(RefCell::new(Vec::new())),
-            config: Config::const_default(),
-        }
+        Config::const_default().into()
     }
 
     /// Registers one portable WebSocket endpoint during Plugin registration.
@@ -420,7 +653,7 @@ impl WebServer {
     ///
     /// Returns a scoped registration that removes the endpoint when dropped.
     /// Returns an error for a relative path or a duplicate path.
-    pub fn serve<E>(
+    pub fn serve_websocket<E>(
         &self,
         path: &'static str,
         endpoint: E,
@@ -432,16 +665,59 @@ impl WebServer {
             return Err(WebServerError::InvalidPath);
         }
         let mut endpoints = self.endpoints.borrow_mut();
-        if endpoints.iter().any(|endpoint| endpoint.path == path) {
+        if endpoints
+            .iter()
+            .any(|endpoint| endpoint.path == path && !endpoint.prefix)
+        {
             return Err(WebServerError::DuplicatePath);
         }
         endpoints.push(RegisteredEndpoint {
             path,
+            prefix: false,
             endpoint: Endpoint::WebSocket(Rc::new(endpoint)),
         });
         Ok(WebRouteRegistration {
             endpoints: Rc::downgrade(&self.endpoints),
             path,
+            prefix: false,
+        })
+    }
+
+    /// Registers a resource provider at an exact path or a trailing `/*` subtree.
+    /// Exact routes take priority. Keep the returned guard for the Plugin lifetime.
+    ///
+    /// # Errors
+    /// Rejects relative paths, misplaced wildcards, and duplicate registrations.
+    pub fn serve<P: HttpProvider>(
+        &self,
+        pattern: &'static str,
+        provider: P,
+    ) -> Result<WebRouteRegistration, WebServerError> {
+        let prefix = pattern.ends_with("/*");
+        let path = if prefix {
+            &pattern[..pattern.len() - 1]
+        } else {
+            pattern
+        };
+        if !path.starts_with('/') || path.contains('*') {
+            return Err(WebServerError::InvalidPath);
+        }
+        let mut endpoints = self.endpoints.borrow_mut();
+        if endpoints
+            .iter()
+            .any(|entry| entry.path == path && entry.prefix == prefix)
+        {
+            return Err(WebServerError::DuplicatePath);
+        }
+        endpoints.push(RegisteredEndpoint {
+            path,
+            prefix,
+            endpoint: Endpoint::Provider(Rc::new(provider)),
+        });
+        Ok(WebRouteRegistration {
+            endpoints: Rc::downgrade(&self.endpoints),
+            path,
+            prefix,
         })
     }
 
@@ -459,20 +735,48 @@ impl WebServer {
     where
         E: HttpEndpoint,
     {
+        self.register_http(path, false, endpoint)
+    }
+
+    /// Registers an HTTP subtree. Exact routes win, followed by the longest matching prefix.
+    /// `/assets` matches itself and `/assets/...`, but not `/assets-other`.
+    /// `/` is a fallback for every path without an exact or more specific prefix route.
+    ///
+    /// # Errors
+    /// Rejects relative paths and duplicate prefixes. Exact and prefix routes may coexist.
+    pub fn serve_http_prefix<E: HttpEndpoint>(
+        &self,
+        path: &'static str,
+        endpoint: E,
+    ) -> Result<WebRouteRegistration, WebServerError> {
+        self.register_http(path, true, endpoint)
+    }
+
+    fn register_http<E: HttpEndpoint>(
+        &self,
+        path: &'static str,
+        prefix: bool,
+        endpoint: E,
+    ) -> Result<WebRouteRegistration, WebServerError> {
         if !path.starts_with('/') {
             return Err(WebServerError::InvalidPath);
         }
         let mut endpoints = self.endpoints.borrow_mut();
-        if endpoints.iter().any(|endpoint| endpoint.path == path) {
+        if endpoints
+            .iter()
+            .any(|endpoint| endpoint.path == path && endpoint.prefix == prefix)
+        {
             return Err(WebServerError::DuplicatePath);
         }
         endpoints.push(RegisteredEndpoint {
             path,
+            prefix,
             endpoint: Endpoint::Http(Rc::new(endpoint)),
         });
         Ok(WebRouteRegistration {
             endpoints: Rc::downgrade(&self.endpoints),
             path,
+            prefix,
         })
     }
 
@@ -495,21 +799,39 @@ impl WebServer {
         T: Timer<Runtime>,
         S: picoserve::io::Socket<Runtime>,
     {
-        let endpoints = self.endpoints.borrow().clone();
-        if endpoints.is_empty() {
+        if self.endpoints.borrow().is_empty() {
             return Err(ServeConnectionError::EndpointMissing);
         }
-        let app = Router::from_service(EndpointRouter { endpoints });
-        Server::custom(&app, timer, &self.config, http_buffer)
-            .serve(socket)
-            .await
-            .map_err(ServeConnectionError::Connection)
+        let stream_error = Cell::new(None);
+        let app = Router::from_service(EndpointRouter {
+            endpoints: Rc::clone(&self.endpoints),
+            stream_error: &stream_error,
+        });
+        let server = Server::custom(&app, timer, &self.config, http_buffer);
+        let error =
+            core::future::poll_fn(|_| stream_error.take().map_or(Poll::Pending, Poll::Ready));
+        // select polls the server first, then observes its stack-local error slot.
+        match embassy_futures::select::select(server.serve(socket), error).await {
+            embassy_futures::select::Either::First(result) => {
+                result.map_err(ServeConnectionError::Connection)
+            }
+            embassy_futures::select::Either::Second(error) => Err(error.into()),
+        }
     }
 }
 
 impl Default for WebServer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl From<Config> for WebServer {
+    fn from(config: Config) -> Self {
+        Self {
+            endpoints: Rc::new(RefCell::new(Vec::new())),
+            config,
+        }
     }
 }
 
@@ -526,6 +848,54 @@ mod tests {
     };
 
     struct EmptyEndpoint;
+
+    #[test]
+    fn prefix_routes_use_segments_and_exact_routes_win() {
+        let server = WebServer::new();
+        let _root = server
+            .serve_http_prefix("/", EmptyHttpEndpoint)
+            .expect("root");
+        let assets = server
+            .serve_http_prefix("/assets", EmptyHttpEndpoint)
+            .expect("assets");
+        let exact = server
+            .serve_http("/assets", EmptyHttpEndpoint)
+            .expect("exact");
+        assert!(
+            !super::resolve(&server.endpoints.borrow(), "/assets")
+                .expect("match")
+                .prefix
+        );
+        assert_eq!(
+            super::resolve(&server.endpoints.borrow(), "/assets/file.js")
+                .expect("match")
+                .path,
+            "/assets"
+        );
+        assert_eq!(
+            super::resolve(&server.endpoints.borrow(), "/assets-other")
+                .expect("match")
+                .path,
+            "/"
+        );
+        drop(exact);
+        assert!(
+            super::resolve(&server.endpoints.borrow(), "/assets")
+                .expect("match")
+                .prefix
+        );
+        drop(assets);
+        assert_eq!(
+            super::resolve(&server.endpoints.borrow(), "/assets/file.js")
+                .expect("match")
+                .path,
+            "/"
+        );
+        assert!(server
+            .serve_http_prefix("relative", EmptyHttpEndpoint)
+            .is_err());
+        assert!(server.serve_http_prefix("/", EmptyHttpEndpoint).is_err());
+    }
 
     impl WebSocketEndpoint for EmptyEndpoint {
         fn connected<'a>(&'a self, _connection: WebSocketConnection) -> WebSocketFuture<'a> {
@@ -546,15 +916,17 @@ mod tests {
         let server = WebServer::new();
 
         assert!(matches!(
-            server.serve("relative", EmptyEndpoint),
+            server.serve_websocket("relative", EmptyEndpoint),
             Err(WebServerError::InvalidPath)
         ));
-        let _root = server.serve("/", EmptyEndpoint).expect("register root");
+        let _root = server
+            .serve_websocket("/", EmptyEndpoint)
+            .expect("register root");
         let second = server
-            .serve("/second", EmptyEndpoint)
+            .serve_websocket("/second", EmptyEndpoint)
             .expect("register second endpoint");
         assert!(matches!(
-            server.serve("/second", EmptyEndpoint),
+            server.serve_websocket("/second", EmptyEndpoint),
             Err(WebServerError::DuplicatePath)
         ));
         assert!(matches!(
@@ -568,7 +940,7 @@ mod tests {
 
         drop(second);
         let _replacement = server
-            .serve("/second", EmptyEndpoint)
+            .serve_websocket("/second", EmptyEndpoint)
             .expect("register released endpoint");
     }
 }

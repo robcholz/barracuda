@@ -1,3 +1,9 @@
 id = "agent-websearch"
-depends-on = ["agent", "webserver"]
+depends-on = ["agent", "webserver", "captive-portal"]
 description = "Registers Tavily-backed Web Search directly with the Agent runtime."
+
+[tasks.build]
+cwd = "."
+command = ["bun", "../../tools/web/build.ts"]
+inputs = ["resources/web/entry.ts", "../../package.json", "../../bun.lock", "../captive-portal/resources/web/ui", "../../tools/web/build.ts"]
+outputs = ["filesystem/resources/entry.js"]

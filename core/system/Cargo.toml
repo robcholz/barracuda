@@ -18,6 +18,7 @@ barracuda-agent-time-plugin.workspace = true
 barracuda-agent-vm-plugin.workspace = true
 barracuda-agent-websearch-plugin.workspace = true
 barracuda-agent-workflow-plugin.workspace = true
+barracuda-captive-portal-plugin.workspace = true
 barracuda-http-plugin.workspace = true
 barracuda-imessage-bluebubble-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true

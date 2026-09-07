@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use barracuda_platform_test::loopback_network;
 use barracuda_webserver_plugin::{
-    HttpEndpoint, HttpFuture, HttpMethod, HttpRequest, HttpResponse, WebServer,
+    HttpEndpoint, HttpFuture, HttpMethod, HttpProvider, HttpRequest, HttpResponse, WebServer,
     WebSocketConnection, WebSocketEndpoint, WebSocketFuture,
 };
 use embassy_net::{tcp::TcpSocket, Ipv4Address, Stack};
@@ -18,6 +18,260 @@ use embedded_io_async::Write as _;
 use picoserve::time::EmbassyTimer;
 
 const PORT: u16 = 8787;
+
+struct PathEndpoint;
+
+impl HttpEndpoint for PathEndpoint {
+    fn handle<'a>(&'a self, request: HttpRequest) -> HttpFuture<'a> {
+        Box::pin(
+            async move { HttpResponse::new(200, "text/plain", request.path().as_bytes().to_vec()) },
+        )
+    }
+}
+
+struct StreamEndpoint {
+    declared: usize,
+    available: usize,
+    fail: bool,
+    reads: Rc<RefCell<Vec<usize>>>,
+}
+
+struct Reader {
+    remaining: usize,
+    fail: bool,
+    reads: Rc<RefCell<Vec<usize>>>,
+}
+
+impl embedded_io_async::ErrorType for Reader {
+    type Error = embedded_io_async::ErrorKind;
+}
+
+impl embedded_io_async::Read for Reader {
+    async fn read(&mut self, buffer: &mut [u8]) -> Result<usize, Self::Error> {
+        self.reads.borrow_mut().push(buffer.len());
+        if self.fail {
+            return Err(embedded_io_async::ErrorKind::Other);
+        }
+        let count = self.remaining.min(buffer.len()).min(333);
+        buffer[..count].fill(b'x');
+        self.remaining -= count;
+        Ok(count)
+    }
+}
+
+impl HttpProvider for StreamEndpoint {
+    async fn serve(&self, _path: &str) -> HttpResponse {
+        HttpResponse::stream(
+            200,
+            "application/octet-stream",
+            self.declared,
+            Reader {
+                remaining: self.available,
+                fail: self.fail,
+                reads: Rc::clone(&self.reads),
+            },
+        )
+    }
+}
+
+async fn roundtrip(server: Rc<WebServer>, path: &str) -> (Vec<u8>, Result<(), String>) {
+    let network = loopback_network();
+    let stack = network.stack();
+    let exchange = async {
+        let client = async {
+            let mut socket = connect(stack).await;
+            socket
+                .write_all(
+                    format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                        .as_bytes(),
+                )
+                .await
+                .expect("request");
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 512];
+            loop {
+                match socket.read(&mut buffer).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+                }
+                if let Some(boundary) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&bytes[..boundary]).expect("headers");
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            name.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().expect("length"))
+                        })
+                        .expect("content length");
+                    if bytes.len() >= boundary + 4 + length {
+                        break;
+                    }
+                }
+            }
+            bytes
+        };
+        tokio::select! {
+            result = serve_once(server, stack) => (result, Vec::new()),
+            bytes = client => (Ok(()), bytes),
+        }
+    };
+    let (result, bytes) = tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::select! {
+            () = network.run() => panic!("network stopped"),
+            result = exchange => result,
+        }
+    })
+    .await
+    .expect("roundtrip timeout");
+    (bytes, result)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn prefix_dispatch_preserves_encoded_path_and_exact_precedence() {
+    let server = Rc::new(WebServer::new());
+    let _prefix = server
+        .serve_http_prefix("/assets", PathEndpoint)
+        .expect("prefix");
+    let exact = server
+        .serve_http(
+            "/assets/exact",
+            RecordingHttpEndpoint {
+                received: Rc::new(RefCell::new(None)),
+            },
+        )
+        .expect("exact");
+    let (bytes, result) = roundtrip(Rc::clone(&server), "/assets/a%20b.js?version=1").await;
+    result.expect("serve prefix");
+    assert!(bytes.ends_with(b"/assets/a%20b.js"));
+    let (bytes, result) = roundtrip(Rc::clone(&server), "/assets/exact").await;
+    result.expect("serve exact");
+    assert!(bytes.starts_with(b"HTTP/1.1 201"));
+    drop(exact);
+    let (bytes, result) = roundtrip(Rc::clone(&server), "/assets/exact").await;
+    result.expect("fallback after unload");
+    assert!(bytes.ends_with(b"/assets/exact"));
+    let (bytes, result) = roundtrip(server, "/assets-other").await;
+    result.expect("serve 404");
+    assert!(bytes.starts_with(b"HTTP/1.1 404"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn streams_large_and_empty_bodies_with_bounded_reads() {
+    for length in [0, 40_000] {
+        let server = Rc::new(WebServer::new());
+        let reads = Rc::new(RefCell::new(Vec::new()));
+        let _route = server
+            .serve(
+                "/file",
+                StreamEndpoint {
+                    declared: length,
+                    available: length + 10,
+                    fail: false,
+                    reads: Rc::clone(&reads),
+                },
+            )
+            .expect("stream route");
+        let (bytes, result) = roundtrip(server, "/file").await;
+        result.expect("stream response");
+        let boundary = bytes
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .expect("headers")
+            + 4;
+        let headers = std::str::from_utf8(&bytes[..boundary])
+            .expect("headers UTF-8")
+            .to_lowercase();
+        assert!(headers.contains(&format!("content-length: {length}\r\n")));
+        assert_eq!(&bytes[boundary..], vec![b'x'; length]);
+        assert!(reads.borrow().iter().all(|size| *size <= 1024));
+        if length == 0 {
+            assert!(reads.borrow().is_empty());
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_or_short_sources_terminate_the_connection() {
+    for fail in [false, true] {
+        let server = Rc::new(WebServer::new());
+        let _route = server
+            .serve(
+                "/file",
+                StreamEndpoint {
+                    declared: 40_000,
+                    available: 100,
+                    fail,
+                    reads: Rc::new(RefCell::new(Vec::new())),
+                },
+            )
+            .expect("stream route");
+        let (_, result) = roundtrip(server, "/file").await;
+        let error = result.expect_err("must report source failure");
+        assert!(error.contains(if fail {
+            "source failed"
+        } else {
+            "before Content-Length"
+        }));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn keep_alive_requests_observe_route_removal() {
+    let network = loopback_network();
+    let stack = network.stack();
+    let server = Rc::new(WebServer::from(
+        picoserve::Config::const_default().keep_connection_alive(),
+    ));
+    let root = server
+        .serve_http_prefix("/", PathEndpoint)
+        .expect("fallback");
+    let route = server
+        .serve_http(
+            "/api",
+            RecordingHttpEndpoint {
+                received: Rc::new(RefCell::new(None)),
+            },
+        )
+        .expect("exact");
+    let exchange = async {
+        let client = async {
+            let mut socket = connect(stack).await;
+            socket
+                .write_all(b"GET /api HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .expect("first request");
+            let bytes = read_response(&mut socket, br#"{"ok":true}"#).await;
+            assert!(bytes.starts_with(b"HTTP/1.1 201"));
+            drop(route);
+            socket
+                .write_all(b"GET /api HTTP/1.1\r\nHost: localhost\r\n\r\n")
+                .await
+                .expect("second request");
+            let bytes = read_response(&mut socket, b"/api").await;
+            assert!(bytes.starts_with(b"HTTP/1.1 200"));
+            drop(root);
+            socket
+                .write_all(b"GET /api HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await
+                .expect("third request");
+            let bytes = read_response(&mut socket, b"Web endpoint not found").await;
+            assert!(bytes.starts_with(b"HTTP/1.1 404"));
+        };
+        tokio::select! {
+            result = serve_once(server, stack) => panic!("server stopped: {result:?}"),
+            () = client => {}
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(3), async {
+        tokio::select! {
+            () = network.run() => panic!("network stopped"),
+            () = exchange => {}
+        }
+    })
+    .await
+    .expect("keep-alive exchange");
+}
 
 struct EmptyEndpoint;
 struct HoldingEndpoint;
@@ -93,8 +347,11 @@ async fn embassy_stack_accepts_a_real_websocket_upgrade() {
     let network = loopback_network();
     let stack = network.stack();
     let server = Rc::new(WebServer::new());
+    let _fallback = server
+        .serve_http_prefix("/", PathEndpoint)
+        .expect("HTTP fallback");
     let _route = server
-        .serve("/chat", EmptyEndpoint)
+        .serve_websocket("/chat", EmptyEndpoint)
         .expect("register test route");
 
     let exchange = async {
@@ -185,7 +442,7 @@ async fn long_lived_websocket_does_not_block_http_endpoint() {
     let received = Rc::new(RefCell::new(None));
     let server = Rc::new(WebServer::new());
     let _websocket_route = server
-        .serve("/chat", HoldingEndpoint)
+        .serve_websocket("/chat", HoldingEndpoint)
         .expect("register WebSocket route");
     let _http_route = server
         .serve_http(

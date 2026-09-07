@@ -27,6 +27,14 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Run an author-declared task for enabled Plugins.
+    Run {
+        /// Task name from plugin.toml.
+        task: String,
+        /// Run only this enabled Plugin's task.
+        #[arg(long)]
+        plugin: Option<String>,
+    },
     /// Synchronize discovered Plugins into the System registry.
     Sync {
         /// Check whether generated files are current without writing them.
@@ -52,6 +60,9 @@ fn main() -> ExitCode {
         }
     }
     let result = match command {
+        Command::Run { task, plugin } => {
+            barracuda_plugin_tool::run(&root, &task, plugin.as_deref())
+        }
         Command::Sync { check } => sync_with_report(&root, check).map(|report| {
             print_report(&report);
         }),

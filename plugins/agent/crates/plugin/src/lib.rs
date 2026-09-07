@@ -13,6 +13,7 @@ mod workflow;
 use barracuda_agent_runtime::{
     AgentRuntime, ModelApiFactory, RuntimeService, RuntimeStorageConfig,
 };
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -65,6 +66,19 @@ impl Plugin for AgentPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        context.retain(
+            portal
+                .register(
+                    WebEntry {
+                        id: "agent",
+                        title: "模型配置",
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                )
+                .map_err(PluginError::registration)?,
+        );
         let webserver = context.require::<WebServer>("webserver")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let workflow_service = context.require::<WorkflowService>("workflow")?;

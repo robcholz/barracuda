@@ -672,6 +672,98 @@ Agent Tools lives in [`plugin-communication.md`](plugin-communication.md).
 Execution ownership for long-lived Plugin work lives in
 [`execution-ownership.md`](execution-ownership.md).
 
+### Plugin directory ownership
+
+The framework owns the top-level namespace of `plugins/<id>/`. Plugin authors
+organize custom content under `resources/`, leaving the root available for
+framework-defined directories and future framework extensions. The framework
+defines `plugin.toml`, `crates/`, `docs/`, `filesystem/`, and the `resources/`
+container; authors choose the organization within that container.
+
+~~~text
+plugins/<id>/
+├── plugin.toml
+├── crates/
+├── docs/
+├── filesystem/
+│   └── resources/       # bundled read-only runtime files
+└── resources/          # author-owned source content and build inputs
+    ├── web/
+    ├── agent-tools/
+    └── workflow-schema/
+~~~
+
+Web source and Plugin-owned tests live in `resources/web/`. Agent Tool
+definitions and Workflow schemas belong under the
+same author-owned container, grouped by their purpose. Consumers locate these
+inputs through explicit paths or a documented resource contract; arbitrary
+subdirectory names do not create framework behavior or Plugin dependencies.
+
+Repository `resources/` is separate from the Plugin's runtime `/resources`
+mount. Its contents are not automatically packaged. A Plugin's build process
+places deployable outputs in `filesystem/resources/`, which the generic image
+builder includes for selected Plugins. For example, Bun compiles
+`resources/web/entry.ts` into `filesystem/resources/entry.js`. Each Plugin owns
+its output; the portal shell loads independently registered entries on demand.
+
+Custom author directories stay within `resources/`; adding one does not reserve
+a new Plugin-root name. Existing root-level custom directories and crate-local
+resource collections are migration work. Their consuming paths and resource
+contracts must change together when they move.
+
+Frontend development tools are repository-owned: one root `package.json`,
+`bun.lock`, TypeScript configuration, formatter, and linter cover all Plugins.
+Install dependencies once at the repository root. Run `bun run format`,
+`bun run format:check`, `bun run lint`, `bun run check`, and `bun run test`
+there. Tests remain with their owning Plugins; shared test helpers and the
+ordinary browser-module builder live in `tools/web/`.
+
+Each Plugin declares its build command, inputs, and isolated outputs in
+`plugin.toml`. Ordinary web entries use the shared builder. A Plugin with
+different output needs, such as the portal shell's HTML/CSS/JS scaffold, owns
+its custom build script in `resources/web/`. Repository-wide development
+commands are not repeated as per-Plugin tasks or package manifests. Shared
+tooling does not merge Plugin assets or change image-selection semantics.
+
+### Plugin host tasks
+
+Plugins declare named host tasks in `plugin.toml`. Each task defines an
+executable and literal arguments, a working directory relative to the Plugin
+root, and optional input paths, output paths, and environment dependencies.
+The host executor treats Bun, npm, generators, and other commands uniformly.
+It executes trusted repository code with the developer's permissions and
+environment; this is a build integration boundary, not a sandbox.
+
+`cargo plugin run <task>` runs that task sequentially for enabled Plugins in
+directory order. Plugins without the task are skipped. `--plugin <id>` selects
+one enabled Plugin and requires the task to exist. A failure stops execution.
+Plugin `depends-on` describes capability dependencies, not a host-task DAG.
+
+Each Plugin with automatic resource generation installs a `build.rs` hook
+calling the shared `barracuda-plugin-build` executor. Cargo invokes only its
+`build` task before compiling the Plugin, including during `cargo build`,
+`cargo run`, and `cargo check`. Hooks follow Cargo's actual package graph;
+explicitly building a disabled package with `-p` still builds that package.
+The selected System registry determines the normal application's Plugin graph.
+
+Cargo watches the manifest, declared input and output paths, PATH, and declared
+environment variables. When both inputs and outputs are declared, the hook
+uses content fingerprints in Cargo's OUT_DIR to skip unchanged commands and
+recreate missing or changed outputs. Inputs may include explicitly named
+shared source paths; outputs and the working directory stay Plugin-relative.
+Without explicit inputs, Cargo watches the working directory. Without both
+input and output declarations, the command runs whenever the hook runs.
+Watched paths are literal files/directories, not glob expressions; fingerprinted
+trees contain ordinary files/directories rather than symlinks.
+
+The CLI invokes tasks unconditionally, allowing explicit rebuilds after tool
+updates. A per-Plugin host lock serializes manual execution with Cargo hooks.
+Tasks inherit terminal interrupt behavior and must remain foreground processes.
+Tool installation is an explicit developer action, never an implicit build step.
+Automatic build tasks must not re-enter Cargo, which may hold its build lock.
+Image collection consumes completed outputs; it is a separate operation and
+does not depend on accidental ordering between Cargo build scripts.
+
 ## Dependency and repository direction
 
 ~~~text

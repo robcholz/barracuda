@@ -22,3 +22,7 @@ trace.json
 
 # Local Barracuda runtime state
 .barracuda/
+
+# Repository-wide frontend tooling
+node_modules/
+coverage/

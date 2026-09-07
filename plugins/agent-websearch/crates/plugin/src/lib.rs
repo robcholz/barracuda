@@ -12,6 +12,7 @@ use barracuda_agent_plugin::{
     AgentToolRegistry,
     tools::{Tool, ToolGroup},
 };
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginEntryIterator, PluginError, PluginReadTransaction, PluginRegisterContext,
@@ -48,6 +49,10 @@ impl AgentWebsearchPlugin {
 }
 
 impl Plugin for AgentWebsearchPlugin {
+    const REQUIREMENTS: barracuda_plugin::manager::PluginRequirements =
+        barracuda_plugin::manager::PluginRequirements::new()
+            .with_filesystem(barracuda_plugin::manager::PluginFilesystem::Private);
+
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
@@ -55,6 +60,19 @@ impl Plugin for AgentWebsearchPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        context.retain(
+            portal
+                .register(
+                    WebEntry {
+                        id: "agent-websearch",
+                        title: "网页搜索",
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                )
+                .map_err(PluginError::registration)?,
+        );
         let tools = context.require::<AgentToolRegistry>("agent")?;
         let webserver = context.require::<WebServer>("webserver")?;
         let config = Rc::new(RefCell::new(

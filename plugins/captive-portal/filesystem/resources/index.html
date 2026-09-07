@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#141c24" />
+    <title>Barracuda · 设备控制台</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/portal/app.css" />
+    <script type="module" src="/portal/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#workspace">跳到内容</a>
+    <aside class="sidebar">
+      <a class="brand" href="#"
+        ><span class="brand-mark" aria-hidden="true">B</span
+        ><span>Barracuda<small>DEVICE CONSOLE</small></span></a
+      >
+      <div class="nav-label">工作空间</div>
+      <nav id="navigation" aria-label="主导航">
+        <button class="nav-item active" data-home>概览</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="local-dot"></span>本地设备界面<small
+          >所有模块由设备提供</small
+        >
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <span
+          >控制台 <span class="divider">/</span>
+          <span id="breadcrumb">概览</span></span
+        >
+        <div class="actions">
+          <span id="connection" class="connection" role="status">正在连接</span
+          ><button id="refresh" class="button" type="button">
+            ↻ <span>刷新模块</span>
+          </button>
+        </div>
+      </header>
+      <main id="workspace" tabindex="-1">
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">YOUR DEVICE, YOUR WORKSPACE</p>
+            <h1 id="page-title">设备工作台</h1>
+            <p id="subtitle">在一个地方，访问设备的全部已启用模块。</p>
+          </div>
+          <span class="page-badge">Barracuda / Portal</span>
+        </div>
+        <p id="notice" class="notice" role="status" hidden></p>
+        <section id="overview" aria-label="设备模块">
+          <div class="section-heading">
+            <h2>已启用模块 <span id="count" class="count">—</span></h2>
+            <span>按需加载 · 独立运行</span>
+          </div>
+          <div id="cards" class="cards"></div>
+          <div id="empty" class="empty">
+            <div class="empty-symbol" aria-hidden="true">＋</div>
+            <h2 id="empty-title">正在读取模块</h2>
+            <p id="empty-description">正在获取这台设备的模块清单。</p>
+          </div>
+        </section>
+        <section
+          id="module-panel"
+          class="module-panel"
+          aria-label="模块内容"
+          hidden
+        ></section>
+        <footer class="workspace-footer">
+          <span>BARRACUDA</span><span>轻量、可组合的设备工作空间</span>
+        </footer>
+      </main>
+    </div>
+    <noscript>请启用 JavaScript 以使用设备控制台。</noscript>
+  </body>
+</html>

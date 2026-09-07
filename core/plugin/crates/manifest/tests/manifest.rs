@@ -11,6 +11,22 @@ description = "Provides Web search."
 "#;
 
 #[test]
+fn parses_generic_tasks_and_rejects_invalid_commands() {
+    let source = format!("{VALID}\n[tasks.build]\ncwd = 'resources/web'\ncommand = ['bun', 'run', 'build']\ninputs = ['resources/web/src']\noutputs = ['filesystem/resources/entry.js']\n");
+    let manifest = parse(&source).expect("task manifest");
+    assert_eq!(manifest.tasks["build"].command, ["bun", "run", "build"]);
+    for task in [
+        "command = []",
+        "command = ['']",
+        "command = ['x']\ncwd = '../outside'",
+        "command = ['x']\noutputs = ['/outside']",
+        "command = ['x']\nunknown = true",
+    ] {
+        assert!(parse(&format!("{VALID}\n[tasks.build]\n{task}\n")).is_err());
+    }
+}
+
+#[test]
 fn parses_a_canonical_manifest() {
     let manifest = parse(VALID).expect("valid Plugin manifest");
 
