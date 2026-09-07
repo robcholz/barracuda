@@ -69,6 +69,9 @@ dependencies, and concise description. Apply `#[barracuda_plugin_api::plugin]`
 to the Plugin type rather than duplicating that metadata in Rust. Run
 `cargo plugin sync` when adding or renaming a Plugin, changing its selection
 metadata, or otherwise changing the generated System registry inputs.
+Plugin IDs and every `depends-on` entry must match
+`^[a-z0-9]+(?:-[a-z0-9]+)*$`; each identity is a portable lowercase path
+segment, not a path.
 
 ## Plugin filesystem
 

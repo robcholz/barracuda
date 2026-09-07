@@ -1245,6 +1245,7 @@ dependencies = [
 name = "barracuda-plugin-manifest"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde",
  "thiserror 2.0.18",
  "toml",
