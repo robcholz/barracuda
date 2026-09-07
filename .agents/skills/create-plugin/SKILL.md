@@ -37,7 +37,9 @@ Use only the parts required by the Plugin:
 plugins/<plugin>/
 ├── plugin.toml
 ├── filesystem/                   # only home for bundled runtime assets
-│   └── resources/                # only supported bundled subtree today
+│   ├── resources/                # private read-only Plugin resources
+│   └── workspace/
+│       └── resources/            # shared read-only Workspace resources
 ├── crates/
 │   ├── plugin/
 │   │   ├── Cargo.toml

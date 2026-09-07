@@ -56,10 +56,11 @@ media are distinct even when both are large.
 ## Repository contribution
 
 Put every asset intended for the bundled runtime filesystem below
-`plugins/<plugin>/filesystem/`. The only supported bundled subtree is currently
-`filesystem/resources/`; do not add `filesystem/data/`, `filesystem/cache/`,
-`filesystem/media/`, or another sibling until the image builder defines that
-contract.
+`plugins/<plugin>/filesystem/`. The supported bundled subtrees are
+`filesystem/resources/` for Plugin-private files and
+`filesystem/workspace/resources/` for shared immutable files. Do not add
+`filesystem/data/`, `filesystem/cache/`, `filesystem/media/`, or a mutable
+subtree below `filesystem/workspace/`.
 
 Files below `plugins/<plugin>/filesystem/resources/` contribute to that
 Plugin's `/resources` tree in the prebuilt filesystem:
@@ -69,14 +70,25 @@ plugins/example/filesystem/resources/index.html
 -> /resources/index.html
 ```
 
+Files below the shared subtree contribute to every filesystem-enabled Plugin's
+`/workspace/resources` tree:
+
+```text
+plugins/example/filesystem/workspace/resources/models/common.bin
+-> /workspace/resources/models/common.bin
+```
+
+Shared contributions from enabled Plugins are merged by image path. Two
+Plugins may contribute different files below the same directory, but the image
+build rejects file/file and file/directory collisions at the same shared path.
+
 Crate-local directories such as `crates/<crate>/resources/` are compile-time
 inputs only. They are not discovered or bundled into the Plugin filesystem.
 
 Do not prebuild `/data`, `/cache`, or `/media`. When mutable state needs
 defaults, read the default from `/resources` and initialize `/data` only when
-it is absent. A Plugin contribution is always scoped to the contributing
-Plugin; it cannot contribute to `/workspace/resources` or target another image
-path. System-owned image inputs populate the shared Workspace resources.
+it is absent. A Plugin may contribute only to its private `/resources` or the
+shared `/workspace/resources`; it cannot target another Plugin's image path.
 
 ## Required behavior
 

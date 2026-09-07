@@ -39,5 +39,9 @@ Files below `plugins/<directory>/filesystem/resources/` are collected using
 the stable ID from `plugin.toml` and become `/plugins/<id>/` in the selected
 filesystem image. System mounts the image at `/resources`, and Plugin Manager
 maps global `/resources/plugins/<id>/` to that Plugin's logical `/resources/`.
-Disabled Plugins are not bundled, and `/data`, `/cache`, and `/media` can never
-be prebuilt.
+Files below `plugins/<directory>/filesystem/workspace/resources/` merge into
+the image's `/workspace/` tree, which Plugin Manager exposes as the shared
+logical `/workspace/resources/` mount. Conflicting shared paths fail the build
+instead of making Plugin discovery order observable. Disabled Plugins are not
+bundled, and mutable `/data`, `/cache`, and `/media` trees can never be
+prebuilt.

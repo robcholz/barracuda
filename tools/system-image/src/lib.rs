@@ -1,6 +1,6 @@
 //! Host-side construction of Barracuda resource images.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs;
 use std::ops::Range;
@@ -195,6 +195,8 @@ pub enum ImageBuildError {
     },
     /// Two bundled Plugin directories declare the same stable identity.
     DuplicatePluginId(String),
+    /// Two Plugins contribute incompatible entries at one shared Workspace path.
+    DuplicateWorkspaceResource(String),
     /// A source path cannot be represented by the image path contract.
     InvalidPath(PathBuf),
     /// The image capacity is incompatible with the selected filesystem.
@@ -226,7 +228,7 @@ impl fmt::Display for ImageBuildError {
             ),
             Self::UnsupportedPluginFilesystemEntry(path) => write!(
                 formatter,
-                "Plugin filesystem may prebuild only `resources`, found `{}`",
+                "Plugin filesystem may prebuild only `resources` or `workspace/resources`, found `{}`",
                 path.display()
             ),
             Self::PluginManifest { path, source } => {
@@ -239,6 +241,10 @@ impl fmt::Display for ImageBuildError {
             Self::DuplicatePluginId(id) => {
                 write!(formatter, "more than one bundled Plugin declares ID `{id}`")
             }
+            Self::DuplicateWorkspaceResource(path) => write!(
+                formatter,
+                "more than one Plugin contributes Workspace resource `{path}`"
+            ),
             Self::InvalidPath(path) => write!(
                 formatter,
                 "image path cannot be represented in the resource image: `{}`",
@@ -476,8 +482,10 @@ pub fn build_directory(
 /// Builds a System image exclusively from enabled Plugin resources.
 ///
 /// A file at `plugins/<directory>/filesystem/resources/<path>` is placed at
-/// `/plugins/<manifest-id>/<path>`. Mutable Plugin mounts are never
-/// accepted as image sources.
+/// `/plugins/<manifest-id>/<path>`. A file at
+/// `plugins/<directory>/filesystem/workspace/resources/<path>` is placed at
+/// `/workspace/<path>`. Mutable Plugin mounts are never accepted as image
+/// sources.
 ///
 /// # Errors
 ///
@@ -762,6 +770,8 @@ fn collect_plugin_resources(
     let disabled = disabled_plugins(workspace)?;
     let mut ids = BTreeSet::new();
     let mut has_plugins_root = false;
+    let mut has_workspace_root = false;
+    let mut workspace_paths = BTreeMap::new();
     for plugin in read_directory(&plugins_root)? {
         let file_type = plugin
             .file_type()
@@ -827,32 +837,77 @@ fn collect_plugin_resources(
             }
         }
 
-        let filesystem_entries = read_directory(&filesystem_root)?;
-        for entry in &filesystem_entries {
-            if entry.file_name() != "resources"
-                || !entry
-                    .file_type()
-                    .map_err(|source| ImageBuildError::SourceRead {
-                        path: entry.path(),
-                        source,
-                    })?
-                    .is_dir()
-            {
+        for entry in read_directory(&filesystem_root)? {
+            let entry_path = entry.path();
+            let is_directory = entry
+                .file_type()
+                .map_err(|source| ImageBuildError::SourceRead {
+                    path: entry_path.clone(),
+                    source,
+                })?
+                .is_dir();
+            if entry.file_name() == "resources" && is_directory {
+                collect_entries(&entry_path, &entry_path, &plugin_image_root, entries)?;
+                continue;
+            }
+            if entry.file_name() != "workspace" || !is_directory {
                 return Err(ImageBuildError::UnsupportedPluginFilesystemEntry(
-                    entry.path(),
+                    entry_path,
                 ));
             }
+
+            for workspace_entry in read_directory(&entry_path)? {
+                let workspace_entry_path = workspace_entry.path();
+                let is_resource_directory = workspace_entry.file_name() == "resources"
+                    && workspace_entry
+                        .file_type()
+                        .map_err(|source| ImageBuildError::SourceRead {
+                            path: workspace_entry_path.clone(),
+                            source,
+                        })?
+                        .is_dir();
+                if !is_resource_directory {
+                    return Err(ImageBuildError::UnsupportedPluginFilesystemEntry(
+                        workspace_entry_path,
+                    ));
+                }
+
+                if !has_workspace_root {
+                    entries.push(SourceEntry::Directory {
+                        path: String::from("/workspace"),
+                    });
+                    has_workspace_root = true;
+                }
+                let mut contribution = Vec::new();
+                collect_entries(
+                    &workspace_entry_path,
+                    &workspace_entry_path,
+                    "/workspace",
+                    &mut contribution,
+                )?;
+                merge_workspace_entries(entries, contribution, &mut workspace_paths)?;
+            }
         }
-        let Some(resources) = filesystem_entries.into_iter().next() else {
-            continue;
-        };
-        let resources_root = resources.path();
-        collect_entries(
-            &resources_root,
-            &resources_root,
-            &plugin_image_root,
-            entries,
-        )?;
+    }
+    Ok(())
+}
+
+fn merge_workspace_entries(
+    entries: &mut Vec<SourceEntry>,
+    contribution: Vec<SourceEntry>,
+    workspace_paths: &mut BTreeMap<String, bool>,
+) -> Result<(), ImageBuildError> {
+    for entry in contribution {
+        let path = entry.path().to_owned();
+        let is_directory = matches!(&entry, SourceEntry::Directory { .. });
+        match workspace_paths.get(&path) {
+            None => {
+                workspace_paths.insert(path, is_directory);
+                entries.push(entry);
+            }
+            Some(true) if is_directory => {}
+            Some(_) => return Err(ImageBuildError::DuplicateWorkspaceResource(path)),
+        }
     }
     Ok(())
 }
