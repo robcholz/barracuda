@@ -140,6 +140,7 @@ where
             barracuda_scheduler_plugin::SchedulerPlugin::new(&mut plugin_context),
             barracuda_time_plugin::TimePlugin::new(&mut plugin_context),
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
+            barracuda_vm_agent_plugin::VmAgentPlugin::new(&mut plugin_context),
             barracuda_gpio_plugin::GpioPlugin::new(&mut plugin_context),
             barracuda_i2c_plugin::I2cPlugin::new(&mut plugin_context),
             barracuda_message_queue_plugin::MessageQueuePlugin::new(&mut plugin_context),
