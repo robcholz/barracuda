@@ -1676,6 +1676,7 @@ version = "0.1.0"
 dependencies = [
  "futures-lite",
  "getset",
+ "json-validator",
  "log",
  "serde",
  "serde_json",

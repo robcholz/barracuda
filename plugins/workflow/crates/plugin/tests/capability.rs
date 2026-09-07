@@ -15,24 +15,23 @@ use barracuda_plugin::manager::{
     Plugin, PluginDeclaration, PluginId, PluginManager, PluginRegisterContext, PluginResult,
 };
 use barracuda_workflow_plugin::{
-    WorkflowAction, WorkflowActionAddress, WorkflowActionDescriptor, WorkflowActionFuture,
-    WorkflowActionRegistry, WorkflowPlugin, WorkflowService,
+    workflow_action_schema_inline, WorkflowActionFuture, WorkflowActionHandler,
+    WorkflowActionRegistry, WorkflowActionSchema, WorkflowPlugin, WorkflowService,
 };
 use futures_lite::future::block_on;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const FRAME_SIZE: usize = 64;
 
-struct EchoAction {
-    descriptor: WorkflowActionDescriptor,
-}
+struct EchoAction;
 
-impl WorkflowAction for EchoAction {
-    fn descriptor(&self) -> &WorkflowActionDescriptor {
-        &self.descriptor
-    }
+impl WorkflowActionHandler for EchoAction {
+    type Request = Value;
+    type Response = Value;
 
-    fn invoke(&self, input: Value) -> WorkflowActionFuture<'_> {
+    const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!("test.echo", "{}", "{}");
+
+    fn invoke(&self, input: Value) -> WorkflowActionFuture<'_, Value> {
         Box::pin(async move { Ok(input) })
     }
 }
@@ -57,15 +56,7 @@ impl Plugin<FRAME_SIZE> for Consumer {
     {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let registration = actions
-            .register(EchoAction {
-                descriptor: WorkflowActionDescriptor::new(
-                    WorkflowActionAddress::try_from("test.echo")
-                        .expect("valid Workflow Action address"),
-                    "Echoes its JSON input",
-                    json!({}),
-                    json!({}),
-                ),
-            })
+            .add_action(EchoAction)
             .expect("register dummy Workflow Action");
         context.retain(registration);
         *self.actions.borrow_mut() = Some(actions);

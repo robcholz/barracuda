@@ -14,9 +14,9 @@ mod runtime;
 mod topic;
 
 pub use action::{
-    WorkflowAction, WorkflowActionAddress, WorkflowActionAddressError, WorkflowActionDescriptor,
-    WorkflowActionError, WorkflowActionFuture, WorkflowActionRegistration, WorkflowActionRegistry,
-    WorkflowActionRegistryError,
+    WorkflowActionAddress, WorkflowActionAddressError, WorkflowActionDescriptor,
+    WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistration,
+    WorkflowActionRegistry, WorkflowActionRegistryError, WorkflowActionSchema,
 };
 pub use control::{parse_definition, parse_workflow_id, WorkflowControlRejection};
 pub use definition::{
@@ -34,3 +34,9 @@ pub use topic::{Topic, TopicError, TOPIC_MAX_BYTES};
 
 /// Owned JSON value passed directly between Workflow Actions.
 pub type WorkflowValue = serde_json::Value;
+
+/// Dependencies used by exported schema macros.
+#[doc(hidden)]
+pub mod __private {
+    pub use json_validator;
+}

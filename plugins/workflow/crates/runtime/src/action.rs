@@ -1,6 +1,7 @@
 //! Typed Plugin capability for direct Workflow Actions.
 
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::rc::{Rc, Weak};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -9,7 +10,10 @@ use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
 
-use getset::Getters;
+use getset::{CopyGetters, Getters};
+use json_validator::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use crate::WorkflowValue;
 
@@ -73,52 +77,175 @@ pub enum WorkflowActionAddressError {
     },
 }
 
-/// Static metadata used to validate and discover one Workflow Action.
-#[derive(Clone, Debug, Getters, PartialEq)]
-pub struct WorkflowActionDescriptor {
+/// Static request and response contract for one Workflow Action.
+#[derive(Clone, Copy, Debug, PartialEq, CopyGetters)]
+pub struct WorkflowActionSchema {
     /// Stable Action address referenced by the Workflow DSL.
-    #[getset(get = "pub")]
-    address: WorkflowActionAddress,
-    /// Human-readable Action description.
-    #[getset(get = "pub")]
-    description: String,
-    /// JSON Schema for the Action input.
-    #[getset(get = "pub")]
-    request_schema: WorkflowValue,
-    /// JSON Schema for the Action output.
-    #[getset(get = "pub")]
-    response_schema: WorkflowValue,
+    #[getset(get_copy = "pub")]
+    address: &'static str,
+    /// Static request JSON Schema and validator.
+    #[getset(get_copy = "pub")]
+    request: JsonSchema,
+    /// Static response JSON Schema and validator.
+    #[getset(get_copy = "pub")]
+    response: JsonSchema,
 }
 
-impl WorkflowActionDescriptor {
-    /// Creates Action metadata from an address and JSON schemas.
+impl WorkflowActionSchema {
+    /// Creates a static Action contract.
     #[must_use]
-    pub fn new(
-        address: WorkflowActionAddress,
-        description: impl Into<String>,
-        request_schema: WorkflowValue,
-        response_schema: WorkflowValue,
-    ) -> Self {
+    pub const fn new(address: &'static str, request: JsonSchema, response: JsonSchema) -> Self {
         Self {
             address,
-            description: description.into(),
-            request_schema,
-            response_schema,
+            request,
+            response,
         }
     }
 }
 
-/// Boxed local future returned by a [`WorkflowAction`].
-pub type WorkflowActionFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<WorkflowValue, WorkflowActionError>> + 'a>>;
+/// Includes conventional request and response schemas for one Workflow Action.
+///
+/// The calling crate resolves both documents below
+/// `../../schemas/action/<address>/`.
+#[macro_export]
+macro_rules! workflow_action_schema {
+    ($address:literal $(,)?) => {
+        $crate::WorkflowActionSchema::new(
+            $address,
+            $crate::__private::json_validator::json_schema!(
+                "../../schemas/action/",
+                $address,
+                "/request.json"
+            ),
+            $crate::__private::json_validator::json_schema!(
+                "../../schemas/action/",
+                $address,
+                "/response.json"
+            ),
+        )
+    };
+}
 
-/// Direct operation that may be placed in a Workflow definition.
-pub trait WorkflowAction: 'static {
-    /// Returns the Action metadata.
+/// Compiles inline request and response schemas for a Workflow Action.
+#[macro_export]
+macro_rules! workflow_action_schema_inline {
+    ($address:literal, $request:literal, $response:literal $(,)?) => {
+        $crate::WorkflowActionSchema::new(
+            $address,
+            $crate::__private::json_validator::json_schema_inline!($request),
+            $crate::__private::json_validator::json_schema_inline!($response),
+        )
+    };
+}
+
+/// Static metadata used to discover and link one registered Workflow Action.
+#[derive(Clone, Debug, Getters, CopyGetters, PartialEq)]
+pub struct WorkflowActionDescriptor {
+    /// Stable Action address referenced by the Workflow DSL.
+    #[getset(get = "pub")]
+    address: WorkflowActionAddress,
+    /// Static request JSON Schema and validator.
+    #[getset(get_copy = "pub")]
+    request_schema: JsonSchema,
+    /// Static response JSON Schema and validator.
+    #[getset(get_copy = "pub")]
+    response_schema: JsonSchema,
+    request_shape: WorkflowValue,
+    response_shape: WorkflowValue,
+}
+
+impl WorkflowActionDescriptor {
+    fn try_from_schema(schema: WorkflowActionSchema) -> Result<Self, WorkflowActionRegistryError> {
+        let address = WorkflowActionAddress::try_from(schema.address())
+            .map_err(WorkflowActionRegistryError::InvalidAddress)?;
+        let request_shape = serde_json::from_str(schema.request().as_str())
+            .map_err(|_error| WorkflowActionRegistryError::InvalidRequestSchema(address.clone()))?;
+        let response_shape =
+            serde_json::from_str(schema.response().as_str()).map_err(|_error| {
+                WorkflowActionRegistryError::InvalidResponseSchema(address.clone())
+            })?;
+        Ok(Self {
+            address,
+            request_schema: schema.request(),
+            response_schema: schema.response(),
+            request_shape,
+            response_shape,
+        })
+    }
+
+    pub(crate) fn request_shape(&self) -> &WorkflowValue {
+        &self.request_shape
+    }
+
+    pub(crate) fn response_shape(&self) -> &WorkflowValue {
+        &self.response_shape
+    }
+}
+
+/// Boxed local future returned by a [`WorkflowActionHandler`].
+pub type WorkflowActionFuture<'a, Response> =
+    Pin<Box<dyn Future<Output = Result<Response, WorkflowActionError>> + 'a>>;
+
+/// Typed operation registered as one Workflow Action.
+pub trait WorkflowActionHandler: 'static {
+    /// Request decoded with Serde after schema validation.
+    type Request: DeserializeOwned;
+    /// Response encoded with Serde before schema validation.
+    type Response: Serialize;
+
+    /// Static address, request schema, response schema, and validators.
+    const SCHEMA: WorkflowActionSchema;
+
+    /// Executes the Action with its typed request.
+    fn invoke(&self, request: Self::Request) -> WorkflowActionFuture<'_, Self::Response>;
+}
+
+pub(crate) trait ErasedWorkflowAction {
     fn descriptor(&self) -> &WorkflowActionDescriptor;
+    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue>;
+}
 
-    /// Invokes the Action with one owned JSON value.
-    fn invoke(&self, input: WorkflowValue) -> WorkflowActionFuture<'_>;
+struct TypedWorkflowAction<Handler> {
+    descriptor: WorkflowActionDescriptor,
+    handler: Handler,
+}
+
+impl<Handler> ErasedWorkflowAction for TypedWorkflowAction<Handler>
+where
+    Handler: WorkflowActionHandler,
+{
+    fn descriptor(&self) -> &WorkflowActionDescriptor {
+        &self.descriptor
+    }
+
+    fn invoke_erased(&self, input: WorkflowValue) -> WorkflowActionFuture<'_, WorkflowValue> {
+        Box::pin(async move {
+            Handler::SCHEMA
+                .request()
+                .validate(&input)
+                .map_err(|error| {
+                    WorkflowActionError::new(format!("invalid Workflow Action request: {error}"))
+                })?;
+            let request = serde_json::from_value::<Handler::Request>(input).map_err(|error| {
+                WorkflowActionError::new(format!(
+                    "failed to decode Workflow Action request: {error}"
+                ))
+            })?;
+            let response = self.handler.invoke(request).await?;
+            let response = serde_json::to_value(response).map_err(|error| {
+                WorkflowActionError::new(format!(
+                    "failed to encode Workflow Action response: {error}"
+                ))
+            })?;
+            Handler::SCHEMA
+                .response()
+                .validate(&response)
+                .map_err(|error| {
+                    WorkflowActionError::new(format!("invalid Workflow Action response: {error}"))
+                })?;
+            Ok(response)
+        })
+    }
 }
 
 /// Stable failure returned by a direct Workflow Action.
@@ -146,7 +273,7 @@ impl WorkflowActionError {
 
 struct RegisteredAction {
     registration_id: usize,
-    action: Rc<dyn WorkflowAction>,
+    action: Rc<dyn ErasedWorkflowAction>,
 }
 
 struct RegistryState {
@@ -154,7 +281,7 @@ struct RegistryState {
     actions: RefCell<Vec<RegisteredAction>>,
 }
 
-/// Typed capability through which Plugins register Workflow Actions.
+/// Typed capability through which Plugins add Workflow Actions.
 #[derive(Clone)]
 pub struct WorkflowActionRegistry {
     state: Rc<RegistryState>,
@@ -172,15 +299,16 @@ impl WorkflowActionRegistry {
         }
     }
 
-    /// Registers one Action until the returned guard is dropped.
-    pub fn register<A>(
+    /// Adds one typed Action until the returned registration is dropped.
+    pub fn add_action<Handler>(
         &self,
-        action: A,
+        handler: Handler,
     ) -> Result<WorkflowActionRegistration, WorkflowActionRegistryError>
     where
-        A: WorkflowAction,
+        Handler: WorkflowActionHandler,
     {
-        let address = action.descriptor().address().clone();
+        let descriptor = WorkflowActionDescriptor::try_from_schema(Handler::SCHEMA)?;
+        let address = descriptor.address().clone();
         let mut actions = self.state.actions.borrow_mut();
         if actions
             .iter()
@@ -194,7 +322,10 @@ impl WorkflowActionRegistry {
             .set(registration_id.saturating_add(1));
         actions.push(RegisteredAction {
             registration_id,
-            action: Rc::new(action),
+            action: Rc::new(TypedWorkflowAction {
+                descriptor,
+                handler,
+            }),
         });
         Ok(WorkflowActionRegistration {
             state: Rc::downgrade(&self.state),
@@ -216,7 +347,7 @@ impl WorkflowActionRegistry {
     pub(crate) fn resolve(
         &self,
         address: &WorkflowActionAddress,
-    ) -> Option<Rc<dyn WorkflowAction>> {
+    ) -> Option<Rc<dyn ErasedWorkflowAction>> {
         self.state
             .actions
             .borrow()
@@ -232,10 +363,19 @@ impl Default for WorkflowActionRegistry {
     }
 }
 
-/// Failure returned while registering a Workflow Action.
+/// Failure returned while adding a Workflow Action.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum WorkflowActionRegistryError {
+    /// The Action schema declares an invalid address.
+    #[error("invalid Workflow Action address: {0}")]
+    InvalidAddress(WorkflowActionAddressError),
+    /// The Action's static request schema was not valid JSON.
+    #[error("Workflow Action request schema is invalid: {0}")]
+    InvalidRequestSchema(WorkflowActionAddress),
+    /// The Action's static response schema was not valid JSON.
+    #[error("Workflow Action response schema is invalid: {0}")]
+    InvalidResponseSchema(WorkflowActionAddress),
     /// Another registered Action already owns this address.
     #[error("Workflow Action is already registered: {0}")]
     DuplicateAddress(WorkflowActionAddress),
@@ -256,5 +396,81 @@ impl Drop for WorkflowActionRegistration {
             .actions
             .borrow_mut()
             .retain(|registered| registered.registration_id != self.registration_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+    #![allow(missing_docs)]
+
+    use alloc::boxed::Box;
+
+    use futures_lite::future::block_on;
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+
+    use super::{
+        WorkflowActionAddress, WorkflowActionError, WorkflowActionFuture, WorkflowActionHandler,
+        WorkflowActionRegistry, WorkflowActionSchema,
+    };
+    use crate::workflow_action_schema_inline;
+
+    #[derive(Deserialize)]
+    struct EchoRequest {
+        message: String,
+    }
+
+    #[derive(Serialize)]
+    struct EchoResponse {
+        message: String,
+    }
+
+    struct Echo;
+
+    impl WorkflowActionHandler for Echo {
+        type Request = EchoRequest;
+        type Response = EchoResponse;
+
+        const SCHEMA: WorkflowActionSchema = workflow_action_schema_inline!(
+            "test.echo",
+            r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#,
+            r#"{"type":"object","properties":{"message":{"type":"string"}},"required":["message"],"additionalProperties":false}"#,
+        );
+
+        fn invoke(&self, request: EchoRequest) -> WorkflowActionFuture<'_, EchoResponse> {
+            Box::pin(async move {
+                Ok(EchoResponse {
+                    message: request.message,
+                })
+            })
+        }
+    }
+
+    #[test]
+    fn typed_handler_uses_static_validation_and_serde_conversion() {
+        block_on(async {
+            let registry = WorkflowActionRegistry::new();
+            let _registration = registry.add_action(Echo).expect("register typed Action");
+            let address = WorkflowActionAddress::try_from("test.echo").expect("valid address");
+            let action = registry.resolve(&address).expect("resolve typed Action");
+
+            let response = action
+                .invoke_erased(json!({ "message": "hello" }))
+                .await
+                .expect("invoke typed Action");
+            assert_eq!(response, json!({ "message": "hello" }));
+
+            let error = action
+                .invoke_erased(json!({ "message": 7 }))
+                .await
+                .expect_err("reject request before Serde conversion");
+            assert!(error.message().contains("invalid Workflow Action request"));
+        });
+    }
+
+    #[allow(dead_code)]
+    fn action_error_is_public() -> WorkflowActionError {
+        WorkflowActionError::new("failed")
     }
 }

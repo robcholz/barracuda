@@ -13,7 +13,7 @@ use core::task::{Context, Poll, Waker};
 use getset::Getters;
 use serde_json::{Map, Value};
 
-use crate::action::WorkflowAction;
+use crate::action::ErasedWorkflowAction;
 use crate::definition::{WorkflowCondition, WorkflowOperation};
 use crate::link::{FieldRef, LinkKind, SourceSelector};
 use crate::{
@@ -422,7 +422,7 @@ impl WorkflowExecution {
 async fn execute_steps(
     definition: &WorkflowDefinition,
     event_input: &WorkflowValue,
-    actions: &[Rc<dyn WorkflowAction>],
+    actions: &[Rc<dyn ErasedWorkflowAction>],
 ) -> Result<(), WorkflowExecutionError> {
     let mut frames = Vec::new();
     frames.push(OperationFrame {
@@ -483,7 +483,7 @@ async fn execute_call(
     definition: &WorkflowDefinition,
     to_step: usize,
     event_input: &WorkflowValue,
-    actions: &[Rc<dyn WorkflowAction>],
+    actions: &[Rc<dyn ErasedWorkflowAction>],
     previous: Option<WorkflowValue>,
     _previous_step: Option<usize>,
 ) -> Result<WorkflowValue, WorkflowExecutionError> {
@@ -513,7 +513,7 @@ async fn execute_call(
         .get(to_step)
         .ok_or(WorkflowExecutionError::UnknownAction { step: to_step })?;
     action
-        .invoke(request)
+        .invoke_erased(request)
         .await
         .map_err(|source| WorkflowExecutionError::Action {
             step: to_step,
@@ -608,7 +608,7 @@ fn mapped_request(
 fn resolve_actions(
     registry: &WorkflowActionRegistry,
     definition: &WorkflowDefinition,
-) -> Result<Vec<Rc<dyn WorkflowAction>>, WorkflowExecutionError> {
+) -> Result<Vec<Rc<dyn ErasedWorkflowAction>>, WorkflowExecutionError> {
     definition
         .steps()
         .iter()
@@ -644,19 +644,19 @@ fn validate_links(
                     .checked_sub(1)
                     .and_then(|index| descriptors.get(index))
                 {
-                    if previous.response_schema() != this.request_schema() {
+                    if previous.response_shape() != this.request_shape() {
                         return Err(WorkflowExecutionError::InvalidLink { from_step, to_step });
                     }
                 }
             }
             LinkKind::Literal { arguments } => {
-                validate_request_shape(this.request_schema(), arguments, &[], from_step, to_step)?;
+                validate_request_shape(this.request_shape(), arguments, &[], from_step, to_step)?;
             }
             LinkKind::Mapping {
                 arguments,
                 references,
             } => {
-                let properties = schema_properties(this.request_schema())
+                let properties = schema_properties(this.request_shape())
                     .ok_or(WorkflowExecutionError::InvalidLink { from_step, to_step })?;
                 for reference in references {
                     let Some(destination) = properties.get(&reference.dest_field) else {
@@ -673,10 +673,10 @@ fn validate_links(
                         };
                         match &reference.source_field {
                             Some(field)
-                                if schema_properties(previous.response_schema())
+                                if schema_properties(previous.response_shape())
                                     .and_then(|properties| properties.get(field))
                                     == Some(destination) => {}
-                            None if previous.response_schema() == destination => {}
+                            None if previous.response_shape() == destination => {}
                             _ => {
                                 return Err(WorkflowExecutionError::InvalidLink {
                                     from_step,
@@ -687,7 +687,7 @@ fn validate_links(
                     }
                 }
                 validate_request_shape(
-                    this.request_schema(),
+                    this.request_shape(),
                     arguments,
                     references,
                     from_step,
@@ -770,8 +770,9 @@ mod tests {
     use serde_json::{json, Value};
 
     use crate::{
-        parse_definition, Event, WorkflowAction, WorkflowActionAddress, WorkflowActionDescriptor,
-        WorkflowActionError, WorkflowActionFuture, WorkflowActionRegistry, WorkflowRuntime,
+        parse_definition, workflow_action_schema_inline, Event, WorkflowActionError,
+        WorkflowActionFuture, WorkflowActionHandler, WorkflowActionRegistry, WorkflowActionSchema,
+        WorkflowRuntime,
     };
 
     struct Trigger;
@@ -780,18 +781,22 @@ mod tests {
         const ID: &'static str = "test.trigger";
     }
 
-    struct YieldOnceAction {
-        descriptor: WorkflowActionDescriptor,
+    struct YieldOnceAction<const ACTION: u8> {
         name: &'static str,
         trace: Rc<RefCell<Vec<String>>>,
     }
 
-    impl WorkflowAction for YieldOnceAction {
-        fn descriptor(&self) -> &WorkflowActionDescriptor {
-            &self.descriptor
-        }
+    impl<const ACTION: u8> WorkflowActionHandler for YieldOnceAction<ACTION> {
+        type Request = Value;
+        type Response = Value;
 
-        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_> {
+        const SCHEMA: WorkflowActionSchema = match ACTION {
+            0 => workflow_action_schema_inline!("a.first", "{}", "{}"),
+            1 => workflow_action_schema_inline!("b.first", "{}", "{}"),
+            _ => workflow_action_schema_inline!("test.invalid", "{}", "{}"),
+        };
+
+        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_, Value> {
             let yielded = Cell::new(false);
             let trace = Rc::clone(&self.trace);
             let name = self.name;
@@ -807,48 +812,58 @@ mod tests {
         }
     }
 
-    struct ReadyAction {
-        descriptor: WorkflowActionDescriptor,
+    struct ReadyAction<const ACTION: u8> {
         name: &'static str,
         trace: Rc<RefCell<Vec<String>>>,
     }
 
-    struct FixedAction {
-        descriptor: WorkflowActionDescriptor,
+    struct FixedAction<const ACTION: u8> {
         output: Value,
         inputs: Rc<RefCell<Vec<Value>>>,
     }
 
-    impl WorkflowAction for FixedAction {
-        fn descriptor(&self) -> &WorkflowActionDescriptor {
-            &self.descriptor
-        }
+    impl<const ACTION: u8> WorkflowActionHandler for FixedAction<ACTION> {
+        type Request = Value;
+        type Response = Value;
 
-        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_> {
+        const SCHEMA: WorkflowActionSchema = match ACTION {
+            0 => workflow_action_schema_inline!(
+                "test.produce",
+                "{}",
+                r#"{"type":"object","properties":{"token":{"type":"integer"}},"required":["token"]}"#
+            ),
+            1 => workflow_action_schema_inline!(
+                "test.sink",
+                r#"{"type":"object","properties":{"token":{"type":"integer"},"extra":{"type":"integer"}},"required":["token","extra"]}"#,
+                r#"{"type":"object","properties":{"ok":{"type":"boolean"}}}"#
+            ),
+            2 => workflow_action_schema_inline!("test.then", "{}", "{}"),
+            3 => workflow_action_schema_inline!("test.else", "{}", "{}"),
+            _ => workflow_action_schema_inline!("test.invalid", "{}", "{}"),
+        };
+
+        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_, Value> {
             self.inputs.borrow_mut().push(input);
             let output = self.output.clone();
             Box::pin(async move { Ok(output) })
         }
     }
 
-    impl WorkflowAction for ReadyAction {
-        fn descriptor(&self) -> &WorkflowActionDescriptor {
-            &self.descriptor
-        }
+    impl<const ACTION: u8> WorkflowActionHandler for ReadyAction<ACTION> {
+        type Request = Value;
+        type Response = Value;
 
-        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_> {
+        const SCHEMA: WorkflowActionSchema = match ACTION {
+            0 => workflow_action_schema_inline!("a.second", "{}", "{}"),
+            1 => workflow_action_schema_inline!("b.second", "{}", "{}"),
+            2 => workflow_action_schema_inline!("test.ready", "{}", "{}"),
+            _ => workflow_action_schema_inline!("test.invalid", "{}", "{}"),
+        };
+
+        fn invoke(&self, input: Value) -> WorkflowActionFuture<'_, Value> {
             self.trace.borrow_mut().push(self.name.to_string());
             Box::pin(async move { Ok(input) })
         }
-    }
-
-    fn descriptor(address: &str) -> WorkflowActionDescriptor {
-        WorkflowActionDescriptor::new(
-            WorkflowActionAddress::try_from(address).expect("valid Action address"),
-            address,
-            json!({}),
-            json!({}),
-        )
     }
 
     #[test]
@@ -858,29 +873,25 @@ mod tests {
             let actions = WorkflowActionRegistry::new();
             let _registrations = [
                 actions
-                    .register(YieldOnceAction {
-                        descriptor: descriptor("a.first"),
+                    .add_action(YieldOnceAction::<0> {
                         name: "a.first",
                         trace: Rc::clone(&trace),
                     })
                     .expect("register a.first"),
                 actions
-                    .register(ReadyAction {
-                        descriptor: descriptor("a.second"),
+                    .add_action(ReadyAction::<0> {
                         name: "a.second",
                         trace: Rc::clone(&trace),
                     })
                     .expect("register a.second"),
                 actions
-                    .register(YieldOnceAction {
-                        descriptor: descriptor("b.first"),
+                    .add_action(YieldOnceAction::<1> {
                         name: "b.first",
                         trace: Rc::clone(&trace),
                     })
                     .expect("register b.first"),
                 actions
-                    .register(ReadyAction {
-                        descriptor: descriptor("b.second"),
+                    .add_action(ReadyAction::<1> {
                         name: "b.second",
                         trace: Rc::clone(&trace),
                     })
@@ -912,8 +923,7 @@ mod tests {
     fn definitions_can_load_and_unload_while_runtime_exists() {
         let actions = WorkflowActionRegistry::new();
         let _registration = actions
-            .register(ReadyAction {
-                descriptor: descriptor("test.ready"),
+            .add_action(ReadyAction::<2> {
                 name: "ready",
                 trace: Rc::new(RefCell::new(Vec::new())),
             })
@@ -935,8 +945,7 @@ mod tests {
     fn dropping_registration_removes_action() {
         let registry = WorkflowActionRegistry::new();
         let registration = registry
-            .register(ReadyAction {
-                descriptor: descriptor("test.ready"),
+            .add_action(ReadyAction::<2> {
                 name: "ready",
                 trace: Rc::new(RefCell::new(Vec::new())),
             })
@@ -954,50 +963,31 @@ mod tests {
             let sink_inputs = Rc::new(RefCell::new(Vec::new()));
             let then_inputs = Rc::new(RefCell::new(Vec::new()));
             let else_inputs = Rc::new(RefCell::new(Vec::new()));
-            let token_schema = json!({
-                "type": "object",
-                "properties": { "token": { "type": "integer" } },
-                "required": ["token"]
-            });
-            let delivery_schema = json!({
-                "type": "object",
-                "properties": {
-                    "token": { "type": "integer" },
-                    "extra": { "type": "integer" }
-                },
-                "required": ["token", "extra"]
-            });
             let registrations = [
-                actions.register(FixedAction {
-                    descriptor: WorkflowActionDescriptor::new(
-                        WorkflowActionAddress::try_from("test.produce").expect("address"),
-                        "produce",
-                        json!({}),
-                        token_schema,
-                    ),
-                    output: json!({ "token": 7 }),
-                    inputs: Rc::clone(&produced_inputs),
-                }).expect("register producer"),
-                actions.register(FixedAction {
-                    descriptor: WorkflowActionDescriptor::new(
-                        WorkflowActionAddress::try_from("test.sink").expect("address"),
-                        "sink",
-                        delivery_schema,
-                        json!({ "type": "object", "properties": { "ok": { "type": "boolean" } } }),
-                    ),
-                    output: json!({ "ok": true }),
-                    inputs: Rc::clone(&sink_inputs),
-                }).expect("register sink"),
-                actions.register(FixedAction {
-                    descriptor: descriptor("test.then"),
-                    output: json!({}),
-                    inputs: Rc::clone(&then_inputs),
-                }).expect("register then"),
-                actions.register(FixedAction {
-                    descriptor: descriptor("test.else"),
-                    output: json!({}),
-                    inputs: Rc::clone(&else_inputs),
-                }).expect("register else"),
+                actions
+                    .add_action(FixedAction::<0> {
+                        output: json!({ "token": 7 }),
+                        inputs: Rc::clone(&produced_inputs),
+                    })
+                    .expect("register producer"),
+                actions
+                    .add_action(FixedAction::<1> {
+                        output: json!({ "ok": true }),
+                        inputs: Rc::clone(&sink_inputs),
+                    })
+                    .expect("register sink"),
+                actions
+                    .add_action(FixedAction::<2> {
+                        output: json!({}),
+                        inputs: Rc::clone(&then_inputs),
+                    })
+                    .expect("register then"),
+                actions
+                    .add_action(FixedAction::<3> {
+                        output: json!({}),
+                        inputs: Rc::clone(&else_inputs),
+                    })
+                    .expect("register else"),
             ];
             let mut runtime = WorkflowRuntime::new(actions);
             runtime.control().load(parse_definition(

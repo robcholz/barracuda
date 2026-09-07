@@ -10,6 +10,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 getset = "0.1.7"
+json-validator.workspace = true
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

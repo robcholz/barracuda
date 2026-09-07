@@ -17,6 +17,67 @@ use serde_json::{value::RawValue, Value};
 
 pub use json_validator_macros::{rpc_validator, rpc_validator_source, validator, validator_source};
 
+/// Static JSON Schema source paired with its compile-time validator.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct JsonSchema {
+    source: &'static str,
+    validator: Validator,
+}
+
+impl JsonSchema {
+    /// Creates a static JSON Schema contract from its source and compiled validator.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn from_parts(source: &'static str, validator: Validator) -> Self {
+        Self { source, validator }
+    }
+
+    /// Returns the embedded JSON Schema source.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.source
+    }
+
+    /// Validates one parsed JSON value.
+    pub fn validate(self, value: &Value) -> Result<(), ValidationError> {
+        self.validator.validate(value)
+    }
+
+    /// Validates one borrowed JSON document without constructing a value tree.
+    pub fn validate_str(self, json: &str) -> Result<(), ValidationError> {
+        self.validator.validate_str(json)
+    }
+}
+
+/// Includes a manifest-relative JSON Schema and compiles its static validator.
+#[macro_export]
+macro_rules! json_schema {
+    ($first:literal $(, $rest:literal)* $(,)?) => {
+        $crate::JsonSchema::from_parts(
+            ::core::include_str!(::core::concat!(
+                ::core::env!("CARGO_MANIFEST_DIR"),
+                "/",
+                $first,
+                $(
+                    $rest,
+                )*
+            )),
+            $crate::rpc_validator!($crate; $first $(, $rest)*),
+        )
+    };
+}
+
+/// Compiles one inline JSON Schema into a static contract.
+#[macro_export]
+macro_rules! json_schema_inline {
+    ($source:literal $(,)?) => {
+        $crate::JsonSchema::from_parts(
+            $source,
+            $crate::rpc_validator_source!($crate; $source),
+        )
+    };
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Validator {
     schema: &'static Schema,
