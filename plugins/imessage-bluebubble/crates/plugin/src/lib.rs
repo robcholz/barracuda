@@ -10,6 +10,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
 use barracuda_imessage_gateway_plugin::IMessageGateway;
 use barracuda_imessage_gateway_plugin::{MessageChannel, MessageChannelRegistration};
 use barracuda_plugin::api::PluginContext;
@@ -43,6 +44,10 @@ impl IMessageBlueBubblePlugin {
 }
 
 impl Plugin for IMessageBlueBubblePlugin {
+    const REQUIREMENTS: barracuda_plugin::manager::PluginRequirements =
+        barracuda_plugin::manager::PluginRequirements::new()
+            .with_filesystem(barracuda_plugin::manager::PluginFilesystem::Private);
+
     fn register<Storage>(
         &mut self,
         context: &mut PluginRegisterContext<'_, Storage>,
@@ -50,6 +55,19 @@ impl Plugin for IMessageBlueBubblePlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        context.retain(
+            portal
+                .register(
+                    WebEntry {
+                        id: "imessage-bluebubble",
+                        title: "BlueBubbles",
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                )
+                .map_err(PluginError::registration)?,
+        );
         let gateway = context.require::<IMessageGateway>(
             <Self as barracuda_plugin::manager::PluginDeclaration>::DEPENDS_ON[0],
         )?;

@@ -1,0 +1,39 @@
+[package]
+name = "barracuda-captive-portal-plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Captive portal web entry and resource aggregation"
+
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
+[dependencies]
+barracuda-plugin.workspace = true
+barracuda-webserver-plugin.workspace = true
+barracuda-vfs.workspace = true
+embedded-io-async = "0.7"
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+thiserror = { version = "2", default-features = false }
+
+[dev-dependencies]
+allocation-counter = "0.8"
+barracuda-platform-test.workspace = true
+barracuda-vfs-memfs.workspace = true
+embassy-executor = { workspace = true, features = ["arch-std", "executor-thread"] }
+embassy-net.workspace = true
+embassy-time = { workspace = true, features = ["std", "generic-queue-64"] }
+futures-lite = "2"
+picoserve = { version = "0.19.0", default-features = false, features = ["alloc", "embassy"] }
+tokio = { version = "1", features = ["macros", "rt", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"

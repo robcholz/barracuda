@@ -3,15 +3,16 @@
 #![allow(clippy::expect_used)]
 
 use barracuda_board::{Board, Hardware, NativeLayout};
+use barracuda_platform::PartitionFilesystem;
 use barracuda_platform_linux::{
     FileLayout, FileRegion, LinuxPlatform, LinuxPlatformError, LinuxSettings,
 };
 use barracuda_tls::ClientTls as _;
 
 const REGIONS: &[FileRegion] = &[
-    FileRegion::read_write("fs", 0, 4096),
-    FileRegion::read_only("assets", 4096, 4096),
-    FileRegion::read_write("kv", 8192, 4096),
+    FileRegion::read_write("fs", 0, 4096, PartitionFilesystem::LittleFs),
+    FileRegion::read_only("assets", 4096, 4096, PartitionFilesystem::FatFs),
+    FileRegion::read_write("kv", 8192, 4096, PartitionFilesystem::Raw),
 ];
 const LAYOUT: FileLayout = FileLayout::new(12_288, REGIONS);
 static BOARD: Board = Board::new(
@@ -53,6 +54,12 @@ async fn linux_platform_realizes_board_native_region_names() {
         .expect("initialize Linux Platform storage");
     assert_eq!(partitions.len(), 3);
     assert!(partitions.get("kv").is_some());
+    assert_eq!(
+        partitions
+            .get("assets")
+            .map(|partition| partition.filesystem()),
+        Some(PartitionFilesystem::FatFs)
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

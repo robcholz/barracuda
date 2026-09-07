@@ -7,10 +7,12 @@ extern crate alloc;
 use alloc::rc::Rc;
 use alloc::vec::Vec;
 
+mod bundled_workflows;
 mod model_api_http;
 mod workflow;
 
 use barracuda_agent_runtime::{ModelApiFactory, RuntimeService, RuntimeStorageConfig};
+use barracuda_captive_portal_plugin::{CaptivePortal, ResourceFiles, WebEntry};
 use barracuda_model_api::ModelApi;
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
@@ -66,6 +68,19 @@ impl Plugin for AgentPlugin {
     where
         Storage: barracuda_plugin::manager::PluginStorage,
     {
+        let portal = context.require::<CaptivePortal>("captive-portal")?;
+        context.retain(
+            portal
+                .register(
+                    WebEntry {
+                        id: "agent",
+                        title: "模型配置",
+                        module: "entry.js",
+                    },
+                    ResourceFiles::from(context.filesystem()?.clone()),
+                )
+                .map_err(PluginError::registration)?,
+        );
         let webserver = context.require::<WebServer>("webserver")?;
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
         let workflow_service = context.require::<WorkflowService>("workflow")?;
@@ -124,12 +139,14 @@ impl Plugin for AgentPlugin {
             .take()
             .ok_or_else(|| PluginError::registration(AgentRuntimeUnavailable))?;
         let cancellation = context.task_token();
+        let filesystem = context.filesystem()?.clone();
         context
             .task_spawner()?
             .spawn(agent_task(
                 runtime_service,
                 workflow_adapter,
                 workflow_service,
+                filesystem,
                 cancellation,
             ))
             .map_err(PluginError::registration)
@@ -141,9 +158,14 @@ async fn agent_task(
     runtime_service: RuntimeService,
     workflow_adapter: AgentWorkflowAdapter,
     workflow_service: Rc<WorkflowService>,
+    filesystem: barracuda_vfs::ScopedVfs,
     cancellation: PluginTaskToken,
 ) {
     let running = async move {
+        if let Err(error) = bundled_workflows::load(&filesystem, &workflow_service).await {
+            log::error!("failed to load Agent bundled workflows: {error}");
+            return;
+        }
         let runtime = async move {
             runtime_service.await;
             log::info!("Agent runtime service stopped");

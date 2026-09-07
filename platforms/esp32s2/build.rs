@@ -3,7 +3,7 @@
 use std::{env, error::Error, fs, path::PathBuf};
 
 use barracuda_board_config::{parse, read_selected_board, SELECTED_BOARD_PATH};
-use esp_idf_part::{AppType, Flags, Partition, PartitionTable, SubType, Type};
+use esp_idf_part::{AppType, DataType, Flags, Partition, PartitionTable, SubType, Type};
 
 fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rerun-if-env-changed=BARRACUDA_LOG_LEVEL");
@@ -119,8 +119,13 @@ fn render_region(partition: &Partition) -> String {
     } else {
         "Esp32S2RegionAccess::ReadWrite"
     };
+    let filesystem = match partition.subtype() {
+        SubType::Data(DataType::Fat) => "barracuda_platform::PartitionFilesystem::FatFs",
+        SubType::Data(DataType::Littlefs) => "barracuda_platform::PartitionFilesystem::LittleFs",
+        _ => "barracuda_platform::PartitionFilesystem::Raw",
+    };
     format!(
-        "    Esp32S2Region::new({:?}, {}, {}, {access}),\n",
+        "    Esp32S2Region::new({:?}, {}, {}, {access}, {filesystem}),\n",
         partition.name(),
         partition.offset(),
         partition.size()

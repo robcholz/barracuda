@@ -1,7 +1,9 @@
 //! Platform resource-boundary tests.
 #![allow(clippy::expect_used)]
 
-use barracuda_platform::{NamedPartition, PartitionAccess, Partitions, PlatformResources};
+use barracuda_platform::{
+    NamedPartition, PartitionAccess, PartitionFilesystem, Partitions, PlatformResources,
+};
 
 #[test]
 fn platform_resources_expose_exact_ip_tls_and_partition_capabilities() {
@@ -23,16 +25,23 @@ fn partitions_are_an_extensible_named_collection() {
         .insert(NamedPartition::new(
             "runtime",
             PartitionAccess::ReadWrite,
+            PartitionFilesystem::LittleFs,
             1,
         ))
         .expect("insert runtime partition");
     partitions
-        .insert(NamedPartition::new("assets", PartitionAccess::ReadOnly, 2))
+        .insert(NamedPartition::new(
+            "assets",
+            PartitionAccess::ReadOnly,
+            PartitionFilesystem::FatFs,
+            2,
+        ))
         .expect("insert asset partition");
     partitions
         .insert(NamedPartition::new(
             "future-plugin-region",
             PartitionAccess::ReadWrite,
+            PartitionFilesystem::Raw,
             3,
         ))
         .expect("insert arbitrary partition");
@@ -41,6 +50,10 @@ fn partitions_are_an_extensible_named_collection() {
     assert_eq!(
         partitions.get("assets").map(NamedPartition::access),
         Some(PartitionAccess::ReadOnly)
+    );
+    assert_eq!(
+        partitions.get("assets").map(NamedPartition::filesystem),
+        Some(PartitionFilesystem::FatFs)
     );
     assert_eq!(
         partitions
@@ -55,12 +68,18 @@ fn partitions_are_an_extensible_named_collection() {
 fn partitions_reject_empty_and_duplicate_native_names() {
     let mut partitions = Partitions::<u8, 2>::new();
     assert!(partitions
-        .insert(NamedPartition::new("", PartitionAccess::ReadWrite, 1))
+        .insert(NamedPartition::new(
+            "",
+            PartitionAccess::ReadWrite,
+            PartitionFilesystem::Raw,
+            1,
+        ))
         .is_err());
     partitions
         .insert(NamedPartition::new(
             "native-name",
             PartitionAccess::ReadWrite,
+            PartitionFilesystem::LittleFs,
             1,
         ))
         .expect("insert first partition");
@@ -68,6 +87,7 @@ fn partitions_reject_empty_and_duplicate_native_names() {
         .insert(NamedPartition::new(
             "native-name",
             PartitionAccess::ReadOnly,
+            PartitionFilesystem::FatFs,
             2,
         ))
         .is_err());
@@ -79,9 +99,8 @@ fn platform_api_has_no_business_storage_fields() -> Result<(), std::io::Error> {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"),
     )?;
     for forbidden in [
-        "filesystem:",
         "database_region:",
-        "web_assets",
+        "resources_partition",
         "plugin_partition",
         "type FileSystem",
         "type DatabaseRegion",

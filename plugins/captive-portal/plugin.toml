@@ -1,0 +1,9 @@
+id = "captive-portal"
+depends-on = ["webserver"]
+description = "Aggregates pluggable web entries and resource providers for the portal."
+
+[tasks.build]
+cwd = "."
+command = ["bun", "resources/web/build.ts"]
+inputs = ["resources/web/src", "resources/web/build.ts", "../../package.json", "../../bun.lock"]
+outputs = ["filesystem/resources/index.html", "filesystem/resources/app.js", "filesystem/resources/app.css"]

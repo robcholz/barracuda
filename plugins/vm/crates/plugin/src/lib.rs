@@ -3,6 +3,8 @@
 #![no_std]
 
 extern crate alloc;
+#[cfg(test)]
+extern crate std;
 
 mod workflow;
 
@@ -12,15 +14,16 @@ use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
 };
-use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
+use barracuda_workflow_plugin::WorkflowActionRegistry;
 
 pub use barracuda_lua::{
     Context, Error, Lua, MetaMethod, Package, Result, UserData, UserDataHandle, UserDataMethods,
 };
 pub use barracuda_vm_package_api::{LuaPackage, LuaPackageRegistry};
 pub use barracuda_vm_runtime::{
-    Vm, VmControlAccepted, VmError, VmInputRequest, VmLimits, VmRunAccepted, VmRunReference,
-    VmRunRequest,
+    Vm, VmControlAccepted, VmError, VmExecutionError, VmInputRequest, VmLimits, VmListResponse,
+    VmRun, VmRunCompletion, VmRunInfo, VmRunOutcome, VmRunProgress, VmRunReference, VmRunRequest,
+    VmRunState, VmRunUpdate,
 };
 
 /// Registers the VM capability and its Workflow-facing operations.
@@ -32,7 +35,6 @@ pub struct VmPlugin {
 
 struct VmPluginRuntime {
     vm: Rc<Vm>,
-    workflow: Rc<WorkflowService>,
 }
 
 impl VmPlugin {
@@ -55,7 +57,6 @@ impl Plugin for VmPlugin {
         Storage: barracuda_plugin::manager::PluginStorage,
     {
         let actions = context.require::<WorkflowActionRegistry>("workflow")?;
-        let workflow = context.require::<WorkflowService>("workflow")?;
         let vm =
             Rc::new(Vm::new(self.package_registry.clone()).map_err(PluginError::registration)?);
         for registration in workflow::register_actions(&actions, Rc::clone(&vm))
@@ -65,7 +66,7 @@ impl Plugin for VmPlugin {
         }
         context.provide(Rc::new(self.package_registry.clone()))?;
         context.provide(Rc::clone(&vm))?;
-        self.runtime = Some(VmPluginRuntime { vm, workflow });
+        self.runtime = Some(VmPluginRuntime { vm });
         Ok(())
     }
 
@@ -79,7 +80,7 @@ impl Plugin for VmPlugin {
             .ok_or_else(|| PluginError::registration(VmRuntimeUnavailable))?;
         runtime
             .vm
-            .start(context.task_spawner()?, runtime.workflow)
+            .start(context.task_spawner()?)
             .map_err(PluginError::registration)?;
         context
             .task_spawner()?

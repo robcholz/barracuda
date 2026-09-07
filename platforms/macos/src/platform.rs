@@ -127,6 +127,7 @@ impl MacosPlatform {
             partitions.insert(NamedPartition::new(
                 region.name(),
                 access,
+                region.filesystem(),
                 BlockingPartition::new(physical_flash, region.offset(), region.size()),
             ))?;
         }

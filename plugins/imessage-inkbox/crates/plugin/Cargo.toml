@@ -5,7 +5,11 @@ edition = "2021"
 description = "IMessage Inkbox provider Plugin"
 license = "Apache-2.0"
 
+[build-dependencies]
+barracuda-plugin-build = { path = "../../../../core/plugin/crates/build" }
+
 [dependencies]
+barracuda-captive-portal-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true

@@ -20,20 +20,41 @@ pub enum PartitionAccess {
     ReadWrite,
 }
 
+/// On-media format declared by the native partition table.
+///
+/// This is layout metadata, not content detection. Consumers select a driver
+/// from this declaration and must not inspect partition bytes to guess it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PartitionFilesystem {
+    /// The partition has no filesystem contract.
+    Raw,
+    /// The partition contains a FAT filesystem.
+    FatFs,
+    /// The partition contains a LittleFS filesystem.
+    LittleFs,
+}
+
 /// One named native partition and its platform-specific region handle.
 pub struct NamedPartition<Region> {
     name: &'static str,
     access: PartitionAccess,
+    filesystem: PartitionFilesystem,
     region: Region,
 }
 
 impl<Region> NamedPartition<Region> {
     /// Creates a partition entry from a validated native layout.
     #[must_use]
-    pub const fn new(name: &'static str, access: PartitionAccess, region: Region) -> Self {
+    pub const fn new(
+        name: &'static str,
+        access: PartitionAccess,
+        filesystem: PartitionFilesystem,
+        region: Region,
+    ) -> Self {
         Self {
             name,
             access,
+            filesystem,
             region,
         }
     }
@@ -48,6 +69,12 @@ impl<Region> NamedPartition<Region> {
     #[must_use]
     pub const fn access(&self) -> PartitionAccess {
         self.access
+    }
+
+    /// Returns the on-media format declared by the native layout.
+    #[must_use]
+    pub const fn filesystem(&self) -> PartitionFilesystem {
+        self.filesystem
     }
 
     /// Returns the platform-specific region handle.

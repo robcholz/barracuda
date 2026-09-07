@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+mod read_only_flash;
 mod resources;
 
 use barracuda_board_hal::{BoardHalResources, ConfigurableDigitalPin, ExposedIo, ResourceSet};
@@ -24,6 +25,7 @@ use barracuda_vfs_littlefs::mount_or_format_partition;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
 use embedded_storage::nor_flash::NorFlash;
+use read_only_flash::mount_resources_partition;
 
 macro_rules! register_plugins {
     ($manager:ident; $($plugin:expr),* $(,)?) => {
@@ -42,7 +44,6 @@ pub use resources::SystemResourceError;
 /// System owns the portable handles and fixed Plugin graph.
 pub struct System<Region: NorFlash + Send + 'static, Builtins, Io, const P: usize> {
     plugins: PluginManager<BlockingAsync<Region>>,
-    _web_assets: Region,
     _remaining_partitions: Partitions<Region, P>,
     _plugin_context: PluginContext<Builtins, Io>,
 }
@@ -54,7 +55,7 @@ pub enum SystemCreateError {
     /// Selected Target resources cannot be assigned to required System roles.
     #[error(transparent)]
     Resources(#[from] SystemResourceError),
-    /// The writable System partition could not be mounted as LittleFS.
+    /// A required System-owned filesystem could not be mounted.
     #[error(transparent)]
     Filesystem(#[from] FsError),
     /// A Plugin failed during registration.
@@ -108,6 +109,15 @@ where
         let backend = mount_or_format_partition(prepared.partitions.system)?;
         mount("/data", backend, MountOptions::read_write()).await?;
         log::info!("mounted System data filesystem");
+        let resources_filesystem = prepared.partitions.resources.filesystem;
+        let resources =
+            mount_resources_partition(prepared.partitions.resources.region, resources_filesystem)
+                .await?;
+        mount("/resources", resources, MountOptions::read_only()).await?;
+        log::info!(
+            "mounted bundled Plugin resources from read-only {:?}",
+            resources_filesystem
+        );
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");
@@ -129,6 +139,7 @@ where
             barracuda_agent_vm_plugin::AgentVmPlugin::new(&mut plugin_context),
             barracuda_agent_websearch_plugin::AgentWebsearchPlugin::new(&mut plugin_context),
             barracuda_agent_workflow_plugin::AgentWorkflowPlugin::new(&mut plugin_context),
+            barracuda_captive_portal_plugin::CaptivePortalPlugin::new(&mut plugin_context),
             barracuda_http_plugin::HttpPlugin::new(&mut plugin_context),
             barracuda_imessage_bluebubble_plugin::IMessageBlueBubblePlugin::new(&mut plugin_context),
             barracuda_imessage_gateway_plugin::IMessageGatewayPlugin::new(&mut plugin_context),
@@ -154,7 +165,6 @@ where
 
         Ok(Self {
             plugins,
-            _web_assets: prepared.partitions.web_assets,
             _remaining_partitions: prepared.partitions.remaining,
             _plugin_context: plugin_context,
         })

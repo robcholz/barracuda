@@ -18,6 +18,7 @@ pub struct Esp32c6Region {
     offset: u32,
     size: u32,
     access: Esp32c6RegionAccess,
+    filesystem: barracuda_platform::PartitionFilesystem,
 }
 
 impl Esp32c6Region {
@@ -28,12 +29,14 @@ impl Esp32c6Region {
         offset: u32,
         size: u32,
         access: Esp32c6RegionAccess,
+        filesystem: barracuda_platform::PartitionFilesystem,
     ) -> Self {
         Self {
             name,
             offset,
             size,
             access,
+            filesystem,
         }
     }
 
@@ -59,6 +62,12 @@ impl Esp32c6Region {
     #[must_use]
     pub const fn access(&self) -> Esp32c6RegionAccess {
         self.access
+    }
+
+    /// Returns the filesystem declared by the ESP-IDF partition subtype.
+    #[must_use]
+    pub const fn filesystem(&self) -> barracuda_platform::PartitionFilesystem {
+        self.filesystem
     }
 }
 
@@ -200,6 +209,7 @@ mod internal_flash {
             partitions.insert(NamedPartition::new(
                 region.name(),
                 access,
+                region.filesystem(),
                 BlockingPartition::new(flash, region.offset(), region.size()),
             ))?;
         }

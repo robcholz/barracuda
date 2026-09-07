@@ -18,6 +18,7 @@ barracuda-agent-time-plugin.workspace = true
 barracuda-agent-vm-plugin.workspace = true
 barracuda-agent-websearch-plugin.workspace = true
 barracuda-agent-workflow-plugin.workspace = true
+barracuda-captive-portal-plugin.workspace = true
 barracuda-http-plugin.workspace = true
 barracuda-imessage-bluebubble-plugin.workspace = true
 barracuda-imessage-gateway-plugin.workspace = true
@@ -43,6 +44,7 @@ barracuda-target-api.workspace = true
 barracuda-tls.workspace = true
 http-client = { workspace = true, features = ["mbedtls"] }
 barracuda-vfs.workspace = true
+barracuda-vfs-fat.workspace = true
 barracuda-vfs-littlefs.workspace = true
 embassy-executor.workspace = true
 embassy-embedded-hal = "0.5.0"
@@ -50,6 +52,8 @@ embassy-net.workspace = true
 log.workspace = true
 thiserror = { version = "2", default-features = false }
 embedded-storage = "0.3"
+embedded-io = "0.7"
+embedded-io-async = "0.7"
 embedded-hal.workspace = true
 embedded-hal-async.workspace = true
 

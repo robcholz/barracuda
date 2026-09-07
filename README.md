@@ -128,6 +128,27 @@ benchmark:
 cargo run --profile profiling -p barracuda-agent-profile -- agent-init
 ```
 
+## Frontend tooling
+
+Install Bun (CI uses 1.4.0). Frontend tools and dependencies are shared at the
+repository root; Plugin source and tests stay in `plugins/<id>/resources/web/`.
+
+```sh
+bun install --frozen-lockfile
+bun run format          # format frontend source
+bun run format:check    # verify formatting without changes
+bun run lint
+bun run check           # TypeScript types
+bun run test            # all frontend tests
+```
+
+`cargo build` and `cargo run` automatically build Plugin resources. For
+frontend-only work, use `cargo plugin run build`, optionally with
+`--plugin <id>`. Each Plugin writes only its own `filesystem/resources/`.
+Run the resource build before testing changed frontend source; tests also
+verify that committed bundles match their source. `bun run dev` previews the
+portal shell locally with an empty manifest, without simulating a device.
+
 ## Python tooling
 
 Python tools are members of the root uv workspace and share one `uv.lock` and

@@ -1,16 +1,23 @@
-use barracuda_platform::{PartitionAccess, Partitions, PlatformResources};
+use barracuda_platform::{
+    NamedPartition, PartitionAccess, PartitionFilesystem, Partitions, PlatformResources,
+};
 use barracuda_target_api::TargetResources;
 use embassy_net::Stack;
 
 const SYSTEM_PARTITION: &str = "system";
 const KV_DATABASE_PARTITION: &str = "kv_database";
-const WEB_ASSETS_PARTITION: &str = "web_assets";
+const RESOURCES_PARTITION: &str = "resources";
 
 pub(super) struct PreparedPartitions<Region, const P: usize> {
     pub(super) system: Region,
     pub(super) kv_database: Region,
-    pub(super) web_assets: Region,
+    pub(super) resources: PreparedFilesystemPartition<Region>,
     pub(super) remaining: Partitions<Region, P>,
+}
+
+pub(super) struct PreparedFilesystemPartition<Region> {
+    pub(super) region: Region,
+    pub(super) filesystem: PartitionFilesystem,
 }
 
 pub(super) struct PreparedTarget<Region, Tls, BoardHal, const P: usize> {
@@ -63,9 +70,9 @@ pub(super) fn prepare<Region, Tls, BoardHal, const P: usize>(
         KV_DATABASE_PARTITION,
         PartitionAccess::ReadWrite,
     )?;
-    let web_assets = take_partition(
+    let resources = take_partition(
         &mut partitions,
-        WEB_ASSETS_PARTITION,
+        RESOURCES_PARTITION,
         PartitionAccess::ReadOnly,
     )?;
 
@@ -73,9 +80,12 @@ pub(super) fn prepare<Region, Tls, BoardHal, const P: usize>(
         ip_stack,
         tls,
         partitions: PreparedPartitions {
-            system,
-            kv_database,
-            web_assets,
+            system: system.into_region(),
+            kv_database: kv_database.into_region(),
+            resources: PreparedFilesystemPartition {
+                filesystem: resources.filesystem(),
+                region: resources.into_region(),
+            },
             remaining: partitions,
         },
         board_hal,
@@ -86,7 +96,7 @@ fn take_partition<Region, const P: usize>(
     partitions: &mut Partitions<Region, P>,
     name: &'static str,
     expected: PartitionAccess,
-) -> Result<Region, SystemResourceError> {
+) -> Result<NamedPartition<Region>, SystemResourceError> {
     let partition = partitions
         .take(name)
         .ok_or(SystemResourceError::MissingPartition { name })?;
@@ -98,14 +108,16 @@ fn take_partition<Region, const P: usize>(
             actual,
         });
     }
-    Ok(partition.into_region())
+    Ok(partition)
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::panic)]
 
-    use barracuda_platform::{NamedPartition, PartitionAccess, Partitions, PlatformResources};
+    use barracuda_platform::{
+        NamedPartition, PartitionAccess, PartitionFilesystem, Partitions, PlatformResources,
+    };
     use barracuda_platform_test::never_embassy_stack;
     use barracuda_target_api::TargetResources;
 
@@ -115,7 +127,12 @@ mod tests {
     struct BoardHal(u8);
 
     fn partition(name: &'static str, access: PartitionAccess, region: u8) -> NamedPartition<u8> {
-        NamedPartition::new(name, access, region)
+        let filesystem = match name {
+            "system" => PartitionFilesystem::LittleFs,
+            "resources" => PartitionFilesystem::FatFs,
+            _ => PartitionFilesystem::Raw,
+        };
+        NamedPartition::new(name, access, filesystem, region)
     }
 
     fn target(
@@ -143,8 +160,8 @@ mod tests {
             .insert(partition("system", PartitionAccess::ReadWrite, 1))
             .expect("insert System partition");
         partitions
-            .insert(partition("web_assets", PartitionAccess::ReadOnly, 3))
-            .expect("insert unassigned Web assets partition");
+            .insert(partition("resources", PartitionAccess::ReadOnly, 3))
+            .expect("insert unassigned Plugin resources partition");
         partitions
     }
 
@@ -154,7 +171,11 @@ mod tests {
 
         assert_eq!(prepared.partitions.system, 1);
         assert_eq!(prepared.partitions.kv_database, 2);
-        assert_eq!(prepared.partitions.web_assets, 3);
+        assert_eq!(prepared.partitions.resources.region, 3);
+        assert_eq!(
+            prepared.partitions.resources.filesystem,
+            PartitionFilesystem::FatFs
+        );
         assert_eq!(prepared.board_hal, BoardHal(7));
         assert_eq!(prepared.partitions.remaining.len(), 1);
         assert_eq!(
@@ -169,7 +190,7 @@ mod tests {
 
     #[test]
     fn rejects_each_missing_required_partition() {
-        for missing in ["system", "kv_database", "web_assets"] {
+        for missing in ["system", "kv_database", "resources"] {
             let mut partitions = complete_partitions();
             let _removed = partitions.take(missing);
 
@@ -198,7 +219,7 @@ mod tests {
                 PartitionAccess::ReadOnly,
             ),
             (
-                "web_assets",
+                "resources",
                 PartitionAccess::ReadOnly,
                 PartitionAccess::ReadWrite,
             ),

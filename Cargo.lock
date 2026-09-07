@@ -88,6 +88,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocation-counter"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "beb9e990c0a33699f1984d85a6abead615ccc72dd8130bf3e15dcabe2ca149c9"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -435,9 +441,12 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "barracuda-agent-runtime",
+ "barracuda-captive-portal-plugin",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
  "barracuda-webserver-plugin",
  "barracuda-workflow-plugin",
  "embassy-executor",
@@ -606,8 +615,13 @@ name = "barracuda-agent-vm-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-agent-tool",
  "barracuda-plugin",
  "barracuda-vm-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
+ "futures-lite",
  "json-validator",
  "serde",
  "serde_json",
@@ -618,7 +632,9 @@ name = "barracuda-agent-websearch-plugin"
 version = "0.1.0"
 dependencies = [
  "barracuda-agent-plugin",
+ "barracuda-captive-portal-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "embassy-futures",
  "embedded-io-async 0.7.0",
@@ -705,6 +721,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-captive-portal-plugin"
+version = "0.1.0"
+dependencies = [
+ "allocation-counter",
+ "barracuda-platform-test",
+ "barracuda-plugin",
+ "barracuda-plugin-build",
+ "barracuda-vfs",
+ "barracuda-vfs-memfs",
+ "barracuda-webserver-plugin",
+ "embassy-executor",
+ "embassy-net",
+ "embassy-time",
+ "embedded-io-async 0.7.0",
+ "futures-lite",
+ "picoserve",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "barracuda-cli"
 version = "0.1.0"
 dependencies = [
@@ -774,8 +813,10 @@ dependencies = [
 name = "barracuda-imessage-bluebubble-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "bluebubbles",
  "http-client",
@@ -817,8 +858,10 @@ dependencies = [
 name = "barracuda-imessage-inkbox-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "inkbox",
@@ -831,8 +874,10 @@ dependencies = [
 name = "barracuda-imessage-qq-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",
@@ -845,8 +890,10 @@ dependencies = [
 name = "barracuda-imessage-telegram-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",
@@ -859,8 +906,10 @@ dependencies = [
 name = "barracuda-imessage-web-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "log",
  "web",
@@ -870,8 +919,10 @@ dependencies = [
 name = "barracuda-imessage-wechat-plugin"
 version = "0.1.0"
 dependencies = [
+ "barracuda-captive-portal-plugin",
  "barracuda-imessage-gateway-plugin",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "barracuda-webserver-plugin",
  "http-client",
  "log",
@@ -1229,6 +1280,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-plugin-build"
+version = "0.1.0"
+dependencies = [
+ "barracuda-plugin-manifest",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "barracuda-plugin-macros"
 version = "0.1.0"
 dependencies = [
@@ -1272,6 +1333,7 @@ dependencies = [
  "anstyle",
  "barracuda-cli-style",
  "barracuda-plugin",
+ "barracuda-plugin-build",
  "clap",
  "ctrlc",
  "dialoguer",
@@ -1347,6 +1409,7 @@ dependencies = [
  "barracuda-agent-websearch-plugin",
  "barracuda-agent-workflow-plugin",
  "barracuda-board-hal",
+ "barracuda-captive-portal-plugin",
  "barracuda-gpio-plugin",
  "barracuda-http-plugin",
  "barracuda-i2c-plugin",
@@ -1368,6 +1431,7 @@ dependencies = [
  "barracuda-time-plugin",
  "barracuda-tls",
  "barracuda-vfs",
+ "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "barracuda-vm-agent-plugin",
  "barracuda-vm-plugin",
@@ -1379,6 +1443,8 @@ dependencies = [
  "embassy-time",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-storage",
  "futures-lite",
  "http-client",
@@ -1404,15 +1470,22 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-cli-style",
  "barracuda-platform-config",
+ "barracuda-plugin",
+ "barracuda-vfs",
+ "barracuda-vfs-fat",
  "barracuda-vfs-littlefs",
  "clap",
+ "critical-section",
+ "embedded-io 0.7.1",
+ "embedded-io-async 0.7.0",
  "embedded-storage",
  "esp-idf-part",
+ "fatfs",
+ "futures-lite",
  "generic-array",
  "littlefs2",
  "serde",
  "tempfile",
- "typenum",
  "yaml-peg",
 ]
 
@@ -1556,8 +1629,11 @@ dependencies = [
  "barracuda-vm-package-api",
  "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
+ "critical-section",
  "embassy-executor",
+ "embassy-time",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1568,14 +1644,13 @@ dependencies = [
  "barracuda-lua",
  "barracuda-vm-builtin-packages",
  "barracuda-vm-package-api",
- "barracuda-workflow-plugin",
  "critical-section",
  "embassy-executor",
  "embassy-time",
  "embedded-alloc",
+ "futures-channel",
  "getset",
  "serde",
- "serde_json",
  "thiserror 2.0.18",
 ]
 
@@ -1583,6 +1658,7 @@ dependencies = [
 name = "barracuda-webserver-plugin"
 version = "0.1.0"
 dependencies = [
+ "allocation-counter",
  "async-channel",
  "barracuda-platform-test",
  "barracuda-plugin",
@@ -1594,6 +1670,7 @@ dependencies = [
  "futures-lite",
  "log",
  "picoserve",
+ "smallbox",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -1609,6 +1686,7 @@ dependencies = [
  "barracuda-workflow-runtime",
  "embassy-executor",
  "embassy-futures",
+ "embassy-sync 0.7.2",
  "embassy-time",
  "futures-lite",
  "log",
@@ -3494,6 +3572,17 @@ name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
+
+[[package]]
+name = "fatfs"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05669f8e7e2d7badc545c513710f0eba09c2fbef683eb859fd79c46c355048e0"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "log",
+]
 
 [[package]]
 name = "ff"
@@ -5548,6 +5637,12 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "smallbox"
+version = "0.8.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aca054fd9f8c2ebe8557a2433f307e038c0716124efd045daa0388afa5172189"
 
 [[package]]
 name = "smallvec"

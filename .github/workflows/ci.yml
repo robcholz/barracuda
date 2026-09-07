@@ -14,6 +14,7 @@ permissions:
   contents: read
 
 env:
+  BUN_VERSION: "1.4.0"
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
   CARGO_TERM_COLOR: always
@@ -162,6 +163,11 @@ jobs:
       - name: Select Board
         run: cargo board select local-linux
 
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
       - name: Check selected application
         run: cargo check
 
@@ -213,6 +219,11 @@ jobs:
 
       - name: Select Board
         run: cargo board select local-macos
+
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Check selected application
         run: cargo check
@@ -342,6 +353,45 @@ jobs:
         if: matrix.toolchain == 'esp'
         run: cargo +esp build -Zbuild-std=core,alloc --package ${{ matrix.package }}
 
+  frontend:
+    name: Frontend formatting, lint, types & tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install shared frontend tools
+        run: bun install --frozen-lockfile
+
+      - name: Check formatting
+        run: bun run format:check
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Type check
+        run: bun run check
+
+      - name: Build independent Plugin resources
+        run: cargo plugin run build
+
+      - name: Verify committed resource outputs
+        run: |
+          changes=$(git status --porcelain --untracked-files=all -- 'plugins/*/filesystem/resources')
+          if [ -n "$changes" ]; then
+            printf '%s\n' "$changes"
+            exit 1
+          fi
+
+      - name: Test all frontend modules
+        run: bun run test
+
   python:
     name: Python formatting, lint & test
     runs-on: ubuntu-latest
@@ -386,7 +436,7 @@ jobs:
   # dependency graph is reused.
   boards:
     name: Boards (${{ matrix.label }})
-    needs: [preflight, linux, macos, platforms, python]
+    needs: [preflight, linux, macos, platforms, python, frontend]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -428,6 +478,11 @@ jobs:
               gcc-arm-none-eabi \
               libnewlib-arm-none-eabi
           fi
+
+      - name: Install Bun for Plugin build hooks
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install Rust for Xtensa
         if: matrix.toolchain == 'esp'

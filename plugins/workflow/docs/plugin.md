@@ -18,8 +18,10 @@ Workflow builder without turning the Action itself into an Agent Tool.
 
 Production Actions use `workflow_action_schema!("address")`, which loads
 `schemas/action/<address>/request.json` and `response.json` from the owning
-Plugin. `WorkflowService` loads and unloads definitions at runtime, lists the
-loaded catalog, and emits Events.
+Plugin. `WorkflowService::load` and `WorkflowService::unload` manage
+user-created definitions in the durable catalog. `WorkflowService::load_transient`
+registers Plugin-owned definitions for the current boot without modifying that
+catalog. The capability also lists loaded definitions and emits Events.
 
 ```rust
 #[derive(serde::Deserialize)]
@@ -52,7 +54,10 @@ let registration = actions.add_action(SendMessage)?;
 context.retain(registration);
 ```
 
-The Plugin stores its durable catalog at `/data/workflows.json` in its scoped
-filesystem. Its Embassy task restores that catalog before it starts advancing
-emitted executions. Removing a definition prevents later Events from starting
-it and does not cancel execution snapshots that already started.
+The Plugin stores only user-created definitions in `/data/workflows.json` in
+its scoped filesystem. Its Embassy task restores that catalog before it starts
+advancing emitted executions. Durable and transient load calls ensure user
+restoration first and serialize with catalog changes, so a persisted user
+definition takes precedence over a transient definition with the same ID.
+Removing a definition prevents later Events from starting it and does not
+cancel execution snapshots that already started.

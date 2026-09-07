@@ -75,16 +75,23 @@ pub struct Stm32Region {
     name: &'static str,
     region: LinkerRegion,
     access: Stm32RegionAccess,
+    filesystem: barracuda_platform::PartitionFilesystem,
 }
 
 impl Stm32Region {
     /// Creates a linker-resolved native region.
     #[must_use]
-    pub const fn new(name: &'static str, region: LinkerRegion, access: Stm32RegionAccess) -> Self {
+    pub const fn new(
+        name: &'static str,
+        region: LinkerRegion,
+        access: Stm32RegionAccess,
+        filesystem: barracuda_platform::PartitionFilesystem,
+    ) -> Self {
         Self {
             name,
             region,
             access,
+            filesystem,
         }
     }
 
@@ -104,6 +111,12 @@ impl Stm32Region {
     #[must_use]
     pub const fn access(&self) -> Stm32RegionAccess {
         self.access
+    }
+
+    /// Returns the filesystem declared by the linker partition table.
+    #[must_use]
+    pub const fn filesystem(&self) -> barracuda_platform::PartitionFilesystem {
+        self.filesystem
     }
 }
 
@@ -218,6 +231,7 @@ mod internal_flash {
             partitions.insert(NamedPartition::new(
                 region.name(),
                 access,
+                region.filesystem(),
                 BlockingPartition::new(flash, bounds.offset(), bounds.size()),
             ))?;
         }
