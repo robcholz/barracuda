@@ -13,6 +13,13 @@ use embedded_hal::{
     i2c, spi,
 };
 
+/// Stable built-in display capability API implemented by display Drivers.
+pub use barracuda_driver::display;
+/// Stable built-in indicator capability API implemented by indicator Drivers.
+pub use barracuda_driver::indicator;
+/// Stable factory contract implemented by every peripheral Driver.
+pub use barracuda_driver::PeripheralDriver;
+
 /// Input bias selected while a GPIO operates as a digital input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Pull {

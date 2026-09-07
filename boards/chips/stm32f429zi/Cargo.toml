@@ -1,0 +1,25 @@
+[package]
+name = "barracuda-chip-stm32f429zi"
+version = "0.1.0"
+edition = "2024"
+description = "STM32F429ZI Board binding adapter for generated Barracuda HALs"
+license = "Apache-2.0"
+
+[dependencies]
+barracuda-board-hal.workspace = true
+embedded-hal.workspace = true
+
+[target.'cfg(target_arch = "arm")'.dependencies]
+embassy-stm32 = { version = "0.6.0", default-features = false, features = ["stm32f429zi"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

@@ -119,7 +119,7 @@ fn select_uses_platform_owned_features_for_the_board_chip() {
 }
 
 #[test]
-fn select_discovers_a_board_hal_from_the_board_bundle() {
+fn select_uses_a_chip_adapter_without_a_board_hal_crate() {
     let root = tempdir().expect("temporary workspace");
     add_board(root.path(), "local-macos", "local-macos");
     let board_path = root.path().join("boards/configs/local-macos/board.yml");
@@ -129,19 +129,19 @@ fn select_discovers_a_board_hal_from_the_board_bundle() {
         format!("{board}exposed-io:\n  gpio:\n    button:\n      pin: P0\n"),
     )
     .expect("Board hardware surface");
-    let hal = root.path().join("boards/configs/local-macos/hal");
-    fs::create_dir_all(&hal).expect("Board HAL directory");
+    let adapter = root.path().join("boards/chips/macos");
+    fs::create_dir_all(&adapter).expect("chip adapter directory");
     fs::write(
-        hal.join("Cargo.toml"),
-        "[package]\nname = \"barracuda-board-local-macos\"\nversion = \"0.1.0\"\n",
+        adapter.join("Cargo.toml"),
+        "[package]\nname = \"barracuda-chip-macos\"\nversion = \"0.1.0\"\n",
     )
-    .expect("Board HAL manifest");
+    .expect("chip adapter manifest");
 
     run(["select", "local-macos"], root.path(), &mut Vec::new()).expect("select Board");
 
     let selected = fs::read_to_string(root.path().join("boards/selected/Cargo.toml"))
         .expect("selected Board manifest");
-    assert!(selected.contains("barracuda-board-local-macos.workspace = true"));
+    assert!(selected.contains("barracuda-chip-macos.workspace = true"));
 }
 
 #[test]
@@ -291,7 +291,8 @@ fn normal_cargo_build_targets_the_selected_application_directly() {
     assert!(default_members.contains("apps/barracuda-system"));
     assert!(!default_members.contains("tools/barracuda-build"));
     assert!(!manifest.contains("\"tools/barracuda-build\","));
-    assert!(manifest.contains("\"boards/configs/*/hal\","));
+    assert!(manifest.contains("\"boards/chips/*\","));
+    assert!(!manifest.contains("\"boards/configs/*/hal\","));
     assert!(!manifest.contains("\"boards/stm32f429zi-nucleo\","));
 }
 

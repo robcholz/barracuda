@@ -2,21 +2,38 @@
 
 #![no_std]
 
+use core::{convert::Infallible, marker::PhantomData};
+
+use barracuda_driver::{
+    PeripheralDriver,
+    indicator::{Indicator, IndicatorConfig},
+};
 use embedded_hal::digital::{OutputPin, StatefulOutputPin};
 
 /// Electrical level that turns an indicator on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ActiveLevel {
-    /// The indicator is on while the pin is low.
-    Low,
-    /// The indicator is on while the pin is high.
-    High,
-}
+pub use barracuda_driver::indicator::ActiveLevel;
 
 /// Built-in indicator backed by one concrete `embedded-hal` output pin.
 pub struct IndicatorLed<Pin> {
     pin: Pin,
     active: ActiveLevel,
+}
+
+/// Static Driver factory used by generated Board HAL composition.
+pub struct IndicatorLedDriver<Pin>(PhantomData<fn() -> Pin>);
+
+impl<Pin: 'static> PeripheralDriver for IndicatorLedDriver<Pin> {
+    type Bindings = Pin;
+    type Config = IndicatorConfig;
+    type Capability = IndicatorLed<Pin>;
+    type Error = Infallible;
+
+    async fn initialize(
+        pin: Self::Bindings,
+        config: Self::Config,
+    ) -> Result<Self::Capability, Self::Error> {
+        Ok(IndicatorLed::new(pin, config.active_level()))
+    }
 }
 
 impl<Pin> IndicatorLed<Pin> {
@@ -73,12 +90,25 @@ impl<Pin: StatefulOutputPin> IndicatorLed<Pin> {
     }
 }
 
+impl<Pin: StatefulOutputPin> Indicator for IndicatorLed<Pin> {
+    type Error = Pin::Error;
+
+    fn set_enabled(&mut self, enabled: bool) -> Result<(), Self::Error> {
+        if enabled { self.on() } else { self.off() }
+    }
+
+    fn is_enabled(&mut self) -> Result<bool, Self::Error> {
+        self.is_on()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use barracuda_driver::{PeripheralDriver, indicator::Indicator};
     use core::convert::Infallible;
     use embedded_hal::digital::{ErrorType, OutputPin, StatefulOutputPin};
 
-    use super::{ActiveLevel, IndicatorLed};
+    use super::{ActiveLevel, IndicatorConfig, IndicatorLed, IndicatorLedDriver};
 
     struct Pin(bool);
 
@@ -117,5 +147,24 @@ mod tests {
         let mut low = IndicatorLed::new(Pin(true), ActiveLevel::Low);
         low.on().expect("turn active-low indicator on");
         assert!(low.is_on().expect("read active-low indicator"));
+    }
+
+    #[test]
+    fn implements_the_stable_indicator_capability() {
+        fn set_semantic_state<I: Indicator>(indicator: &mut I) -> Result<bool, I::Error> {
+            indicator.set_enabled(true)?;
+            indicator.is_enabled()
+        }
+
+        let mut indicator = IndicatorLed::new(Pin(false), ActiveLevel::High);
+        assert!(set_semantic_state(&mut indicator).expect("stable indicator API"));
+    }
+
+    #[test]
+    fn initializes_through_the_stable_driver_contract() {
+        let _future = IndicatorLedDriver::<Pin>::initialize(
+            Pin(false),
+            IndicatorConfig::new(ActiveLevel::High),
+        );
     }
 }

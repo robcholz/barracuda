@@ -1,0 +1,19 @@
+id: gdeh0154d67-display
+api-version: 1
+capability: display
+implementation:
+  package: barracuda-gdeh0154d67-display
+  crate: barracuda_gdeh0154d67_display
+  driver-type: Gdeh0154d67DisplayDriver
+bindings:
+  spi:
+    kind: spi-device
+  busy:
+    kind: digital-input
+  dc:
+    kind: digital-output
+  reset:
+    kind: digital-output
+  power-hold:
+    kind: digital-output
+parameters: {}

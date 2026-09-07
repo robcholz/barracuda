@@ -1,18 +1,18 @@
 [package]
-name = "barracuda-board-stm32f429zi-nucleo"
+name = "barracuda-chip-esp32s3"
 version = "0.1.0"
 edition = "2024"
-description = "Board HAL adapter for the STM32F429ZI Nucleo-144"
+description = "ESP32-S3 Board binding adapter for generated Barracuda HALs"
 license = "Apache-2.0"
 
 [dependencies]
 barracuda-board-hal.workspace = true
-barracuda-indicator-led.workspace = true
-embassy-executor.workspace = true
 embedded-hal.workspace = true
+embedded-hal-bus.workspace = true
+static_cell.workspace = true
 
-[target.'cfg(target_arch = "arm")'.dependencies]
-embassy-stm32 = { version = "0.6.0", default-features = false, features = ["stm32f429zi"] }
+[target.'cfg(target_arch = "xtensa")'.dependencies]
+esp-hal = { version = "1.2.0-rc.0", default-features = false, features = ["critical-section", "esp32s3", "unstable"] }
 
 [lints.rust]
 unsafe_code = "forbid"

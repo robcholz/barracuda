@@ -16,8 +16,10 @@ fn selected_board_exports_no_platform_identity() -> Result<(), std::io::Error> {
     assert!(!build.contains("default_board("));
     assert!(!build.contains("selected_feature_board"));
     assert!(build.contains("read_selected_board"));
-    assert!(build.contains("board_hal_dependency"));
-    assert!(build.contains("SelectedBoardHal"));
+    assert!(build.contains("load_catalog"));
+    assert!(build.contains("resolve_board"));
+    assert!(build.contains("render_board_hal"));
+    assert!(build.contains("render_board_hal"));
     assert!(!build.contains("board.board_hal()"));
     assert!(!build.contains("stm32f429zi-nucleo"));
     assert!(!manifest.contains("[features]"));

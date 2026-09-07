@@ -6,6 +6,7 @@ description = "Reusable indicator LED driver over embedded-hal"
 license = "Apache-2.0"
 
 [dependencies]
+barracuda-driver.workspace = true
 embedded-hal.workspace = true
 
 [lints.rust]

@@ -165,6 +165,50 @@ builtin-peripherals:
 }
 
 #[test]
+fn parses_internal_spi_device_reserved_for_a_builtin_driver() {
+    let yaml = r#"
+name: display-board
+hardware:
+  chip: esp32s3
+native-layout:
+  artifact: partitions.csv
+internal-io:
+  spi-device:
+    display-bus:
+      peripheral: SPI2
+      sck: GPIO6
+      mosi: GPIO5
+      chip-select: GPIO7
+      frequency-hz: 80000000
+builtin-peripherals:
+  display:
+    driver: mipi-dbi-display
+    bindings:
+      spi: display-bus
+      dc: GPIO4
+      reset: GPIO8
+    parameters:
+      controller: gc9a01
+      width: 240
+      height: 240
+"#;
+
+    let board = parse(yaml).expect("valid internal display bus");
+    let spi = board
+        .internal_io()
+        .spi_device("display-bus")
+        .expect("display SPI device");
+
+    assert!(board.has_hardware_surface());
+    assert_eq!(spi.peripheral(), "SPI2");
+    assert_eq!(spi.sck(), "GPIO6");
+    assert_eq!(spi.mosi(), Some("GPIO5"));
+    assert_eq!(spi.miso(), None);
+    assert_eq!(spi.chip_select(), "GPIO7");
+    assert_eq!(spi.frequency_hz(), 80_000_000);
+}
+
+#[test]
 fn board_without_io_or_builtins_has_no_hardware_surface() {
     let board = parse(VALID).expect("valid Board YAML");
 

@@ -100,6 +100,8 @@ pub struct BoardDefinition {
     native_layout: NativeLayoutDefinition,
     #[serde(default, rename = "exposed-io")]
     exposed_io: ExposedIoDefinition,
+    #[serde(default, rename = "internal-io")]
+    internal_io: InternalIoDefinition,
     #[serde(default, rename = "builtin-peripherals")]
     builtin_peripherals: BTreeMap<String, BuiltinPeripheralDefinition>,
 }
@@ -141,6 +143,12 @@ impl BoardDefinition {
         &self.exposed_io
     }
 
+    /// Returns move-only I/O resources reserved for built-in peripheral Drivers.
+    #[must_use]
+    pub const fn internal_io(&self) -> &InternalIoDefinition {
+        &self.internal_io
+    }
+
     /// Finds a built-in peripheral declaration by its Board-level name.
     #[must_use]
     pub fn builtin_peripheral(&self, name: &str) -> Option<&BuiltinPeripheralDefinition> {
@@ -153,10 +161,21 @@ impl BoardDefinition {
         self.builtin_peripherals.len()
     }
 
+    /// Iterates built-in peripherals in stable Board-name order.
+    pub fn builtin_peripherals(
+        &self,
+    ) -> impl Iterator<Item = (&str, &BuiltinPeripheralDefinition)> {
+        self.builtin_peripherals
+            .iter()
+            .map(|(name, peripheral)| (name.as_str(), peripheral))
+    }
+
     /// Returns whether this Board declares any built-in or exposed hardware.
     #[must_use]
     pub fn has_hardware_surface(&self) -> bool {
-        !self.builtin_peripherals.is_empty() || !self.exposed_io.is_empty()
+        !self.builtin_peripherals.is_empty()
+            || !self.exposed_io.is_empty()
+            || !self.internal_io.is_empty()
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -181,6 +200,7 @@ impl BoardDefinition {
             return Err(ConfigError::InvalidNativeLayoutArtifact);
         }
         self.exposed_io.validate()?;
+        self.internal_io.validate()?;
         for (name, peripheral) in &self.builtin_peripherals {
             validate_resource_name("builtin-peripherals", name)?;
             validate_identifier(name, "driver", &peripheral.driver)?;
@@ -191,6 +211,49 @@ impl BoardDefinition {
             for parameter in peripheral.parameters.keys() {
                 validate_resource_name("builtin parameter", parameter)?;
             }
+        }
+        Ok(())
+    }
+}
+
+/// Named protocol resources consumed exclusively by built-in peripheral Drivers.
+///
+/// Internal resources are never returned through [`ExposedIoDefinition`]. A
+/// built-in binds to one by its stable Board-local name, allowing chip-native
+/// controller and pin tokens to remain in `board.yml`.
+#[derive(Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InternalIoDefinition {
+    #[serde(default, rename = "spi-device")]
+    spi_devices: BTreeMap<String, SpiDeviceDefinition>,
+}
+
+impl InternalIoDefinition {
+    /// Returns whether no internal resources are declared.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.spi_devices.is_empty()
+    }
+
+    /// Finds one statically selected SPI device by its Board-local name.
+    #[must_use]
+    pub fn spi_device(&self, name: &str) -> Option<&SpiDeviceDefinition> {
+        self.spi_devices.get(name)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (name, spi) in &self.spi_devices {
+            validate_resource_name("internal spi-device", name)?;
+            validate_identifier(name, "peripheral", &spi.peripheral)?;
+            validate_identifier(name, "sck", &spi.sck)?;
+            validate_identifier(name, "chip-select", &spi.chip_select)?;
+            if let Some(mosi) = &spi.mosi {
+                validate_identifier(name, "mosi", mosi)?;
+            }
+            if let Some(miso) = &spi.miso {
+                validate_identifier(name, "miso", miso)?;
+            }
+            validate_frequency(name, spi.frequency_hz)?;
         }
         Ok(())
     }
@@ -236,6 +299,11 @@ impl ExposedIoDefinition {
     #[must_use]
     pub fn gpio(&self, name: &str) -> Option<&GpioDefinition> {
         self.gpio.get(name)
+    }
+
+    /// Iterates exposed GPIO declarations in stable Board-name order.
+    pub fn gpios(&self) -> impl Iterator<Item = (&str, &GpioDefinition)> {
+        self.gpio.iter().map(|(name, gpio)| (name.as_str(), gpio))
     }
 
     /// Finds an analog input channel by its Board-level name.
@@ -435,6 +503,60 @@ pub struct SpiDefinition {
     frequency_hz: u32,
 }
 
+/// One internal SPI device, including the chip-select owned by its Driver.
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpiDeviceDefinition {
+    peripheral: String,
+    sck: String,
+    #[serde(default)]
+    mosi: Option<String>,
+    #[serde(default)]
+    miso: Option<String>,
+    #[serde(rename = "chip-select")]
+    chip_select: String,
+    #[serde(rename = "frequency-hz")]
+    frequency_hz: u32,
+}
+
+impl SpiDeviceDefinition {
+    /// Returns the chip-native SPI controller identifier.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// Returns the chip-native clock pin identifier.
+    #[must_use]
+    pub fn sck(&self) -> &str {
+        &self.sck
+    }
+
+    /// Returns the optional controller-output pin identifier.
+    #[must_use]
+    pub fn mosi(&self) -> Option<&str> {
+        self.mosi.as_deref()
+    }
+
+    /// Returns the optional controller-input pin identifier.
+    #[must_use]
+    pub fn miso(&self) -> Option<&str> {
+        self.miso.as_deref()
+    }
+
+    /// Returns the chip-select pin owned by this selected device.
+    #[must_use]
+    pub fn chip_select(&self) -> &str {
+        &self.chip_select
+    }
+
+    /// Returns the initial bus frequency for this device.
+    #[must_use]
+    pub const fn frequency_hz(&self) -> u32 {
+        self.frequency_hz
+    }
+}
+
 impl SpiDefinition {
     /// Returns the chip-native SPI peripheral identifier.
     #[must_use]
@@ -491,10 +613,24 @@ impl BuiltinPeripheralDefinition {
         self.bindings.get(role).map(String::as_str)
     }
 
+    /// Iterates chip-native bindings in stable role-name order.
+    pub fn bindings(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.bindings
+            .iter()
+            .map(|(role, identifier)| (role.as_str(), identifier.as_str()))
+    }
+
     /// Finds one Driver-defined construction parameter.
     #[must_use]
     pub fn parameter(&self, name: &str) -> Option<&PeripheralParameter> {
         self.parameters.get(name)
+    }
+
+    /// Iterates Driver parameters in stable name order.
+    pub fn parameters(&self) -> impl Iterator<Item = (&str, &PeripheralParameter)> {
+        self.parameters
+            .iter()
+            .map(|(name, value)| (name.as_str(), value))
     }
 }
 

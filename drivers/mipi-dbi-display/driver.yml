@@ -1,0 +1,47 @@
+id: mipi-dbi-display
+api-version: 1
+capability: display
+implementation:
+  package: barracuda-mipi-dbi-display
+  crate: barracuda_mipi_dbi_display
+  driver-type: MipiDbiDisplayDriver
+bindings:
+  spi:
+    kind: spi-device
+  dc:
+    kind: digital-output
+  reset:
+    kind: digital-output
+  backlight:
+    kind: digital-output
+parameters:
+  controller:
+    type: enum
+    values: [ili9342c, st7789, st7735s, gc9107, gc9a01]
+    required: true
+  width:
+    type: integer
+    required: true
+  height:
+    type: integer
+    required: true
+  offset-x:
+    type: integer
+    default: 0
+  offset-y:
+    type: integer
+    default: 0
+  color-order:
+    type: enum
+    values: [rgb, bgr]
+    default: bgr
+  invert-colors:
+    type: boolean
+    default: false
+  orientation:
+    type: enum
+    values: [deg0, deg90, deg180, deg270]
+    default: deg0
+  backlight-active-high:
+    type: boolean
+    default: true

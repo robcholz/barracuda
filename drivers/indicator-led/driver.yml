@@ -1,0 +1,15 @@
+id: indicator-led
+api-version: 1
+capability: indicator
+implementation:
+  package: barracuda-indicator-led
+  crate: barracuda_indicator_led
+  driver-type: IndicatorLedDriver
+bindings:
+  pin:
+    kind: digital-output
+parameters:
+  active-level:
+    type: enum
+    values: [low, high]
+    required: true

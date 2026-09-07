@@ -269,6 +269,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "az"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
+
+[[package]]
 name = "backtrace"
 version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -689,6 +695,7 @@ dependencies = [
 name = "barracuda-board-hal"
 version = "0.1.0"
 dependencies = [
+ "barracuda-driver",
  "embassy-executor",
  "embedded-hal 1.0.0",
  "embedded-hal-async",
@@ -702,18 +709,8 @@ dependencies = [
  "barracuda-board-config",
  "barracuda-board-hal",
  "barracuda-board-tool",
+ "barracuda-driver-config",
  "embassy-executor",
-]
-
-[[package]]
-name = "barracuda-board-stm32f429zi-nucleo"
-version = "0.1.0"
-dependencies = [
- "barracuda-board-hal",
- "barracuda-indicator-led",
- "embassy-executor",
- "embassy-stm32",
- "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -724,6 +721,7 @@ dependencies = [
  "anstyle",
  "barracuda-board-config",
  "barracuda-cli-style",
+ "barracuda-driver-config",
  "barracuda-platform-config",
  "barracuda-platform-tool",
  "clap",
@@ -758,6 +756,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "barracuda-chip-esp32"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
+ "esp-hal",
+ "static_cell",
+]
+
+[[package]]
+name = "barracuda-chip-esp32s3"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "embedded-hal 1.0.0",
+ "embedded-hal-bus",
+ "esp-hal",
+ "static_cell",
+]
+
+[[package]]
+name = "barracuda-chip-stm32f429zi"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-hal",
+ "embassy-stm32",
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
 name = "barracuda-cli"
 version = "0.1.0"
 dependencies = [
@@ -782,6 +811,34 @@ version = "0.1.0"
 dependencies = [
  "anstyle",
  "clap",
+]
+
+[[package]]
+name = "barracuda-driver"
+version = "0.1.0"
+dependencies = [
+ "embedded-graphics-core",
+]
+
+[[package]]
+name = "barracuda-driver-config"
+version = "0.1.0"
+dependencies = [
+ "barracuda-board-config",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "yaml-peg",
+]
+
+[[package]]
+name = "barracuda-gdeh0154d67-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "epd-waveshare",
 ]
 
 [[package]]
@@ -949,6 +1006,7 @@ dependencies = [
 name = "barracuda-indicator-led"
 version = "0.1.0"
 dependencies = [
+ "barracuda-driver",
  "embedded-hal 1.0.0",
 ]
 
@@ -992,6 +1050,16 @@ dependencies = [
 [[package]]
 name = "barracuda-minimal-yaml"
 version = "0.1.0"
+
+[[package]]
+name = "barracuda-mipi-dbi-display"
+version = "0.1.0"
+dependencies = [
+ "barracuda-driver",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
+ "mipidsi",
+]
 
 [[package]]
 name = "barracuda-model-api"
@@ -3061,6 +3129,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-graphics-core"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95743bef3ff70fcba3930246c4e6872882bbea0dcc6da2ca860112e0cd4bd09f"
+dependencies = [
+ "az",
+ "byteorder",
+]
+
+[[package]]
 name = "embedded-hal"
 version = "0.2.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3082,6 +3160,16 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c4c685bbef7fe13c3c6dd4da26841ed3980ef33e841cddfa15ce8a8fb3f1884"
 dependencies = [
+ "embedded-hal 1.0.0",
+]
+
+[[package]]
+name = "embedded-hal-bus"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513e0b3a8fb7d3013a8ae17a834283f170deaf7d0eeab0a7c1a36ad4dd356d22"
+dependencies = [
+ "critical-section",
  "embedded-hal 1.0.0",
 ]
 
@@ -3266,6 +3354,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f47e0157f2cb54f5ae1bd371b30a2ae4311e1c028f575cd4e81de7353215965"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "epd-waveshare"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5080903b18a41a89d1dfe07cd5d7f800165ed4dcdf0513b770f83c1e4750150c"
+dependencies = [
+ "bit_field",
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]
@@ -4619,6 +4718,16 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mipidsi"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790ebd28bd67addbccf41b1c0c188c26bb9f5bdcd91d4d6da9bd558e20d97a1d"
+dependencies = [
+ "embedded-graphics-core",
+ "embedded-hal 1.0.0",
 ]
 
 [[package]]

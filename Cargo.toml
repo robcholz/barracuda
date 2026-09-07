@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "boards/api",
+    "boards/chips/*",
     "boards/config",
-    "drivers/indicator-led",
+    "drivers/*",
     "boards/tool",
-    "boards/configs/*/hal",
     "bench/crates/*",
     "composition/*",
     "core/plugin",
@@ -37,8 +37,15 @@ barracuda-platform-macos = { path = "platforms/macos" }
 barracuda-platform-stm32 = { path = "platforms/stm32" }
 # END GENERATED PLATFORM WORKSPACE DEPENDENCIES
 # BEGIN GENERATED BOARD WORKSPACE DEPENDENCIES
-barracuda-board-stm32f429zi-nucleo = { path = "boards/configs/stm32f429zi-nucleo/hal" }
+barracuda-chip-esp32 = { path = "boards/chips/esp32" }
+barracuda-chip-esp32s3 = { path = "boards/chips/esp32s3" }
+barracuda-chip-stm32f429zi = { path = "boards/chips/stm32f429zi" }
 # END GENERATED BOARD WORKSPACE DEPENDENCIES
+# BEGIN GENERATED DRIVER WORKSPACE DEPENDENCIES
+barracuda-gdeh0154d67-display = { path = "drivers/gdeh0154d67-display" }
+barracuda-indicator-led = { path = "drivers/indicator-led" }
+barracuda-mipi-dbi-display = { path = "drivers/mipi-dbi-display" }
+# END GENERATED DRIVER WORKSPACE DEPENDENCIES
 # BEGIN GENERATED PLUGIN WORKSPACE DEPENDENCIES
 barracuda-agent-plugin = { path = "plugins/agent/crates/plugin" }
 barracuda-agent-file-plugin = { path = "plugins/agent-file/crates/plugin" }
@@ -76,7 +83,8 @@ barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
 barracuda-cli-style = { path = "shared/cli-style" }
-barracuda-indicator-led = { path = "drivers/indicator-led" }
+barracuda-driver = { path = "drivers/api" }
+barracuda-driver-config = { path = "drivers/config" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-minimal-yaml = { path = "shared/minimal-yaml" }
 barracuda-platform = { path = "platforms/api" }
@@ -110,7 +118,12 @@ embassy-net-driver-channel = { version = "0.4.0", default-features = false }
 embedded-storage-async = "0.4.1"
 embedded-hal = "1.0.0"
 embedded-hal-async = "1.0.0"
+embedded-hal-bus = { version = "0.3.0", default-features = false }
+epd-waveshare = { version = "0.6.0", default-features = false, features = ["epd2in13_v3", "graphics"] }
+embedded-graphics-core = "0.4.0"
+mipidsi = { version = "0.10.0", default-features = false }
 log = { version = "0.4", default-features = false }
+static_cell = "2"
 
 [patch.crates-io]
 # picoserve 0.19.0 gates core Error implementations on its `std` feature,
