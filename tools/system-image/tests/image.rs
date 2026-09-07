@@ -250,6 +250,109 @@ fn workspace_build_bundles_enabled_plugin_resources_under_the_manifest_id() {
 }
 
 #[test]
+fn workspace_build_merges_enabled_plugin_workspace_resources() {
+    let workspace = tempdir().expect("workspace directory");
+    for (directory, id, file, contents) in [
+        ("first", "first-id", "first.txt", b"first".as_slice()),
+        ("second", "second-id", "second.txt", b"second".as_slice()),
+    ] {
+        let plugin = workspace.path().join("plugins").join(directory);
+        fs::create_dir_all(plugin.join("filesystem/workspace/resources/models"))
+            .expect("shared Plugin resources");
+        fs::write(
+            plugin.join("plugin.toml"),
+            format!("id = \"{id}\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n"),
+        )
+        .expect("Plugin manifest");
+        fs::write(
+            plugin
+                .join("filesystem/workspace/resources/models")
+                .join(file),
+            contents,
+        )
+        .expect("shared Plugin resource");
+    }
+
+    for filesystem in [ResourcesFilesystem::FatFs, ResourcesFilesystem::LittleFs] {
+        let image = build_workspace_with_filesystem(workspace.path(), CAPACITY, filesystem)
+            .expect("build workspace image");
+        let filesystem = match filesystem {
+            ResourcesFilesystem::FatFs => mounted_fat(image),
+            ResourcesFilesystem::LittleFs => mounted_littlefs(image),
+        };
+
+        assert_eq!(
+            read_file(&filesystem, "/workspace/models/first.txt").expect("first shared resource"),
+            b"first"
+        );
+        assert_eq!(
+            read_file(&filesystem, "/workspace/models/second.txt").expect("second shared resource"),
+            b"second"
+        );
+    }
+}
+
+#[test]
+fn workspace_build_rejects_conflicting_plugin_workspace_resources() {
+    let workspace = tempdir().expect("workspace directory");
+    for directory in ["first", "second"] {
+        let plugin = workspace.path().join("plugins").join(directory);
+        fs::create_dir_all(plugin.join("filesystem/workspace/resources"))
+            .expect("shared Plugin resources");
+        fs::write(
+            plugin.join("plugin.toml"),
+            format!("id = \"{directory}\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n"),
+        )
+        .expect("Plugin manifest");
+        fs::write(
+            plugin.join("filesystem/workspace/resources/common.txt"),
+            directory,
+        )
+        .expect("shared Plugin resource");
+    }
+
+    assert!(matches!(
+        build_workspace(workspace.path(), CAPACITY),
+        Err(ImageBuildError::DuplicateWorkspaceResource(path))
+            if path == "/workspace/common.txt"
+    ));
+}
+
+#[test]
+fn workspace_build_rejects_file_directory_workspace_conflicts() {
+    let workspace = tempdir().expect("workspace directory");
+    let first = workspace.path().join("plugins/first");
+    fs::create_dir_all(first.join("filesystem/workspace/resources"))
+        .expect("first shared Plugin resources");
+    fs::write(
+        first.join("plugin.toml"),
+        "id = \"first\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n",
+    )
+    .expect("first Plugin manifest");
+    fs::write(first.join("filesystem/workspace/resources/common"), b"file")
+        .expect("shared Plugin file");
+
+    let second = workspace.path().join("plugins/second");
+    fs::create_dir_all(second.join("filesystem/workspace/resources/common"))
+        .expect("second shared Plugin resources");
+    fs::write(
+        second.join("plugin.toml"),
+        "id = \"second\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n",
+    )
+    .expect("second Plugin manifest");
+    fs::write(
+        second.join("filesystem/workspace/resources/common/nested.txt"),
+        b"nested",
+    )
+    .expect("nested shared Plugin file");
+
+    assert!(matches!(
+        build_workspace(workspace.path(), CAPACITY),
+        Err(ImageBuildError::DuplicateWorkspaceResource(path)) if path == "/workspace/common"
+    ));
+}
+
+#[test]
 fn workspace_build_excludes_disabled_plugin_resources() {
     let workspace = tempdir().expect("workspace directory");
     let plugin = workspace.path().join("plugins/disabled");
@@ -260,6 +363,13 @@ fn workspace_build_excludes_disabled_plugin_resources() {
     )
     .expect("Plugin manifest");
     fs::write(plugin.join("filesystem/resources/asset.txt"), b"disabled").expect("Plugin resource");
+    fs::create_dir_all(plugin.join("filesystem/workspace/resources"))
+        .expect("shared Plugin resources");
+    fs::write(
+        plugin.join("filesystem/workspace/resources/shared.txt"),
+        b"disabled",
+    )
+    .expect("shared Plugin resource");
     fs::create_dir_all(workspace.path().join(".barracuda")).expect("selection directory");
     fs::write(
         workspace.path().join(".barracuda/disabled-plugins"),
@@ -271,6 +381,7 @@ fn workspace_build_excludes_disabled_plugin_resources() {
     let filesystem = mounted_fat(image);
 
     assert!(read_file(&filesystem, "/plugins/disabled-id/asset.txt").is_err());
+    assert!(read_file(&filesystem, "/workspace/shared.txt").is_err());
 }
 
 #[test]
@@ -309,6 +420,27 @@ fn workspace_build_rejects_non_resource_plugin_filesystem_entries() {
             build_workspace(workspace.path(), CAPACITY),
             Err(ImageBuildError::UnsupportedPluginFilesystemEntry(path))
                 if path == plugin.join("filesystem").join(entry)
+        ));
+    }
+}
+
+#[test]
+fn workspace_build_rejects_non_resource_workspace_entries() {
+    for entry in ["data", "cache", "media", "unknown"] {
+        let workspace = tempdir().expect("workspace directory");
+        let plugin = workspace.path().join("plugins/demo");
+        fs::create_dir_all(plugin.join("filesystem/workspace").join(entry))
+            .expect("invalid Workspace filesystem source");
+        fs::write(
+            plugin.join("plugin.toml"),
+            "id = \"demo\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n",
+        )
+        .expect("Plugin manifest");
+
+        assert!(matches!(
+            build_workspace(workspace.path(), CAPACITY),
+            Err(ImageBuildError::UnsupportedPluginFilesystemEntry(path))
+                if path == plugin.join("filesystem/workspace").join(entry)
         ));
     }
 }

@@ -20,8 +20,9 @@ use barracuda_plugin::manager::{
 };
 use barracuda_target_api::TargetResources;
 use barracuda_tls::ClientTls;
-use barracuda_vfs::{global_namespace, mount, FsError, MountOptions};
+use barracuda_vfs::{create_dir_all, global_namespace, mount, mount_scoped, FsError, MountOptions};
 use barracuda_vfs_littlefs::mount_or_format_partition;
+use barracuda_vfs_memfs::MemFs;
 use embassy_embedded_hal::adapter::BlockingAsync;
 use embassy_executor::Spawner;
 use embedded_storage::nor_flash::NorFlash;
@@ -107,8 +108,11 @@ where
         let prepared = resources::prepare(resources)?;
         log::info!("assigned selected Target resources to System roles");
         let backend = mount_or_format_partition(prepared.partitions.system)?;
-        mount("/data", backend, MountOptions::read_write()).await?;
+        mount("/data", backend.clone(), MountOptions::read_write()).await?;
         log::info!("mounted System data filesystem");
+        create_dir_all("/data/media").await?;
+        mount_scoped("/media", backend, "/media", MountOptions::read_write()).await?;
+        log::info!("mounted durable media filesystem from System storage");
         let resources_filesystem = prepared.partitions.resources.filesystem;
         let resources =
             mount_resources_partition(prepared.partitions.resources.region, resources_filesystem)
@@ -118,6 +122,9 @@ where
             "mounted bundled Plugin resources from read-only {:?}",
             resources_filesystem
         );
+        let cache = MemFs::new().into_backend();
+        mount("/cache", cache, MountOptions::read_write()).await?;
+        log::info!("mounted System cache filesystem");
         let mut plugins =
             PluginManager::open(BlockingAsync::new(prepared.partitions.kv_database)).await?;
         log::info!("opened Plugin Manager storage");

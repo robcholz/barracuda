@@ -12,5 +12,8 @@ pub(crate) fn scoped_filesystem(vfs: &Vfs, plugin_id: &PluginId) -> Result<Scope
         ("/data", format!("/data/plugins/{plugin_id}")),
         ("/cache", format!("/cache/plugins/{plugin_id}")),
         ("/media", format!("/media/plugins/{plugin_id}")),
+        ("/workspace/resources", "/resources/workspace".into()),
+        ("/workspace/cache", "/cache/workspace".into()),
+        ("/workspace/media", "/media/workspace".into()),
     ])
 }

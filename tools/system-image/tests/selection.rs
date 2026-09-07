@@ -5,7 +5,9 @@
 use std::fs;
 use std::path::Path;
 
-use barracuda_system_image::{build_selected, selected_resources_region, ResourcesFilesystem};
+use barracuda_system_image::{
+    build_selected, build_workspace, selected_resources_region, ResourcesFilesystem,
+};
 use tempfile::tempdir;
 
 fn select_board(root: &Path, name: &str, board: &str, artifact: &str, layout: &str) {
@@ -117,6 +119,21 @@ fn builds_the_selected_workspace_image() {
         "file-layout.yml",
         "capacity: 1048576\nregions:\n  - name: resources\n    offset: 262144\n    size: 524288\n    access: read-only\n    filesystem: littlefs\n",
     );
+    let plugin = root.path().join("plugins/demo");
+    fs::create_dir_all(plugin.join("filesystem/workspace/resources/models"))
+        .expect("shared Plugin resources");
+    fs::write(
+        plugin.join("plugin.toml"),
+        "id = \"demo\"\ndepends-on = []\ndescription = \"Test Plugin.\"\n",
+    )
+    .expect("Plugin manifest");
+    fs::write(
+        plugin.join("filesystem/workspace/resources/models/common.txt"),
+        b"shared",
+    )
+    .expect("shared Plugin resource");
+    let expected = build_workspace(root.path(), 524_288, ResourcesFilesystem::LittleFs)
+        .expect("expected selected image");
 
     let built = build_selected(root.path()).expect("build selected image");
 
@@ -132,6 +149,7 @@ fn builds_the_selected_workspace_image() {
         fs::metadata(built.output()).expect("output metadata").len(),
         524_288
     );
+    assert_eq!(fs::read(built.output()).expect("selected image"), expected);
 }
 
 #[test]

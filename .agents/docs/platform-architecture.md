@@ -498,42 +498,119 @@ unchanged.
 
 ## Filesystems and database
 
-System constructs software storage from Platform partitions. Filesystem and
-database objects are not Platform resources.
+System constructs application storage from Platform partitions, memory, and
+storage capabilities supplied by the selected Target. Filesystem and database
+objects are System-owned software services rather than Platform resources.
 
-Different filesystems retain their native APIs:
-
-- mutable runtime files use the selected LittleFS implementation;
-- provisioned read-only Plugin resources use FATFS or LittleFS as selected by
-  the Board-native layout and built by `system-image`;
-- key/value state uses ekv over its raw writable region.
-
-Barracuda does not force LittleFS and FATFS through one universal filesystem
-trait. Their different APIs and guarantees remain visible to the System-owned
-consumer that selected them.
+`shared/vfs` is the filesystem mechanism layer. It defines the backend
+contract, independent mount namespaces, path resolution, portable file
+operations, and mount-management-free `ScopedVfs` views. It has no knowledge of
+Barracuda's semantic roots, Plugin layout, Workspace, partitions, or concrete
+filesystem selection. System owns that application policy and composes
+concrete backends into one process-wide VFS.
 
 System selects the resources backend only from the partition metadata supplied
 by Platform. It never reads image bytes or boot-sector magic to guess whether
 the partition contains FATFS or LittleFS.
 
 ~~~text
-PlatformResources::partitions
-             |
-             v
-System storage construction
-+-- LittleFS                    -> mutable `/data`
-+-- FATFS or LittleFS resources -> read-only `/resources`
-+-- ekv                         -> Plugin Manager persistence
+Target storage and memory
+          |
+          v
+System application composition
+  +-- FATFS
+  +-- LittleFS
+  +-- MemFS
+  `-- ekv
+          |
+          +----> process-wide VFS ----> scoped Plugin views
+          `----> Plugin Manager KV storage
 ~~~
 
-System mounts the process-wide VFS before constructing its consumers. The
-resource image contains each enabled Plugin's repository contribution below
-`/plugins/<id>`. System mounts that image at `/resources`, producing the global
-path `/resources/plugins/<id>`. Plugin Manager exposes that subtree as the
-Plugin's read-only logical `/resources` mount and maps writable Plugin data
-under logical `/data` to global `/data/plugins/<id>`. Concrete FATFS and
-LittleFS backends stop at System construction. Plugin Manager owns ekv
-persistence and exposes only semantic Plugin storage.
+### Semantic roots
+
+System assigns every global VFS root a lifecycle contract and a default
+backend:
+
+| Semantic root | Default backend | Access and lifecycle |
+| --- | --- | --- |
+| `/resources` | FATFS or LittleFS selected by native partition metadata | Read-only image content. An upgrade may replace the complete filesystem. |
+| `/data` | LittleFS | Durable read-write state required for correctness. System never evicts it. |
+| `/cache` | MemFS | Read-write reproducible or temporary content. It starts empty after every restart and may be cleared while running. |
+| `/media` | System LittleFS subtree | Durable read-write runtime content. It shares the System storage partition with `/data` but is exposed as a distinct VFS mount. |
+
+System mounts `/resources` read-only regardless of the filesystem selected by
+the native Board layout. The default `/media` mount scopes the `/media` subtree
+of the same persistent LittleFS backend mounted at `/data`; the separate VFS
+mount preserves lifecycle boundaries and cross-mount rename behavior without
+inventing another native partition. A future Target may supply a dedicated
+bulk or removable media backend while preserving the same logical contract.
+
+The VFS API exposes only each root's semantic contract. Filesystem selection,
+formatting, mounting, and recovery remain in System composition. The ekv
+database remains separate from the VFS and backs Plugin Manager's scoped
+structured storage.
+
+### Plugin and Workspace namespaces
+
+The global VFS separates private Plugin trees from one shared Workspace:
+
+~~~text
+/resources/plugins/<plugin-id>/...
+/data/plugins/<plugin-id>/...
+/cache/plugins/<plugin-id>/...
+/media/plugins/<plugin-id>/...
+
+/resources/workspace/...
+/cache/workspace/...
+/media/workspace/...
+~~~
+
+Plugin Manager derives one `ScopedVfs` for each filesystem-enabled Plugin:
+
+| Plugin-visible path | Global source | Ownership |
+| --- | --- | --- |
+| `/resources` | `/resources/plugins/<plugin-id>` | Plugin-private |
+| `/data` | `/data/plugins/<plugin-id>` | Plugin-private |
+| `/cache` | `/cache/plugins/<plugin-id>` | Plugin-private |
+| `/media` | `/media/plugins/<plugin-id>` | Plugin-private |
+| `/workspace/resources` | `/resources/workspace` | Shared, read-only |
+| `/workspace/cache` | `/cache/workspace` | Shared, disposable |
+| `/workspace/media` | `/media/workspace` | Shared, durable |
+
+Every filesystem-enabled Plugin sees the same Workspace content at the same
+logical paths. Private paths remain isolated by Plugin identity. Shared state
+required for correctness retains an explicit owner and belongs in that
+Plugin's `/data` tree or scoped KV storage, so Workspace exposes only
+`resources`, `cache`, and `media`.
+
+`/workspace/resources` contains immutable common inputs supplied by the System
+image. `/workspace/cache` is the short-lived exchange area for VM output and
+other files passed among Plugins; System may clear it by run, by session, under
+memory pressure, or during restart. `/workspace/media` contains shared user
+uploads and generated files that must outlive the producing run; System does
+not automatically evict it.
+
+### Composition and operation invariants
+
+The image builder places `filesystem/resources` contributions below
+`/resources/plugins/<plugin-id>` and merges
+`filesystem/workspace/resources` contributions below
+`/resources/workspace`. A shared-path collision fails the image build.
+
+System completes the process-wide mount table before Plugin Manager derives
+any `ScopedVfs`. A scoped view supports file operations and path translation;
+mount, unmount, backend inspection, and concrete filesystem selection stay at
+the System boundary.
+
+Path normalization contains operations within exposed logical mounts. Rename
+is confined to one mounted filesystem, so moving from `/workspace/cache` to
+`/workspace/media` requires copy followed by removal. Atomic publication writes
+a temporary file and renames it within the destination mount.
+
+Plugin unload releases its handles and scoped view while preserving durable
+`/data`, `/media`, and `/workspace/media` content. Cache content remains
+disposable independently of Plugin lifetime.
 
 ## IP and communication capabilities
 
