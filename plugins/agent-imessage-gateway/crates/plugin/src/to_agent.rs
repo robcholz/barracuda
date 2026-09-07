@@ -174,3 +174,25 @@ where
         Box::pin(async move { Ok(invoke(&shared, request).await) })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use barracuda_imessage_gateway_plugin::{GatewayInboundMessage, GatewayRoute};
+    use barracuda_workflow_plugin::{WorkflowActionSchema, workflow_action_schema};
+
+    const TO_AGENT: WorkflowActionSchema = workflow_action_schema!("imessage_bridge.to_agent");
+
+    #[test]
+    fn threadless_gateway_event_matches_the_to_agent_resolve_schema() {
+        let message = GatewayInboundMessage {
+            route: GatewayRoute::new("web", "conversation"),
+            message_id: "web-in-1".into(),
+            text: "hello".into(),
+        };
+
+        assert!(
+            serde_json::to_value(message)
+                .is_ok_and(|input| TO_AGENT.request().validate(&input).is_ok())
+        );
+    }
+}
