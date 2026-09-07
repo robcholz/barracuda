@@ -14,7 +14,7 @@ The Event input is a JSON object:
 
 `id` is the schedule identity and `run_number` is the one-based count of
 accepted occurrences. Scheduler emits it directly to `WorkflowService` as a
-`serde_json::Value`; there is no RPC frame or lane allocation.
+`serde_json::Value`.
 
 The occurrence is committed only after Workflow accepts the Event. The
 affected schedule key is then atomically updated or deleted. A one-shot or

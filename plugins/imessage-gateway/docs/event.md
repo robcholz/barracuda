@@ -7,8 +7,6 @@ Gateway emits the complete value as `gateway.message.received`:
 {"route":{"channel":"telegram","conversation_id":"chat-42","thread_id":"topic-7"},"message_id":"message-100","text":"hello"}
 ```
 
-No Event Router lane bounds this document.
-
 `gateway.send_stream.finished` and `gateway.send_media.finished` are emitted
 after provider completion or failure. Successful stream delivery contains its
 correlation key, accepted terminal sequence, `outcome: "completed"`, and the

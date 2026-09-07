@@ -8,7 +8,6 @@ fn terminal_channel_has_no_selected_target_or_system_dependencies() {
     for forbidden in [
         "barracuda-system.workspace",
         "barracuda-target.workspace",
-        "barracuda-event-router.workspace",
         "embassy-executor",
         "mod local_native",
     ] {

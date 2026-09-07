@@ -29,9 +29,6 @@ fn workspace_catalog_exposes_only_core_facades() -> Result<(), std::io::Error> {
         "barracuda-plugin-macros",
         "barracuda-plugin-manager",
         "barracuda-plugin-manifest",
-        "barracuda-router",
-        "barracuda-rpc",
-        "barracuda-workflow",
     ] {
         assert!(
             !has_workspace_dependency(&manifest, package),
@@ -39,17 +36,10 @@ fn workspace_catalog_exposes_only_core_facades() -> Result<(), std::io::Error> {
         );
     }
 
-    for facade in ["barracuda-plugin"] {
-        assert!(
-            has_workspace_dependency(&manifest, facade),
-            "workspace dependencies do not expose facade {facade}"
-        );
-    }
-
-    assert!(!has_workspace_dependency(
-        &manifest,
-        "barracuda-event-router"
-    ));
+    assert!(
+        has_workspace_dependency(&manifest, "barracuda-plugin"),
+        "workspace dependencies do not expose facade barracuda-plugin"
+    );
 
     Ok(())
 }

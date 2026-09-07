@@ -72,6 +72,7 @@ barracuda-board-config = { path = "boards/config" }
 barracuda-board-hal = { path = "boards/hal" }
 barracuda-board-selected = { path = "boards/selected" }
 barracuda-board-tool = { path = "boards/tool" }
+barracuda-cli-style = { path = "shared/cli-style" }
 barracuda-indicator-led = { path = "drivers/indicator-led" }
 barracuda-kv = { path = "shared/kv" }
 barracuda-minimal-yaml = { path = "shared/minimal-yaml" }

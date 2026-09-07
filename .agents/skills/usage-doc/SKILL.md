@@ -24,8 +24,8 @@ write and what happens, in plain positive sentences.
 
 Quick start first, then one numbered section per caller action, then an
 Examples list and any constraints. Adapt to the crate rather than forcing a
-template. `core/event-router/docs/usage.md` is the in-repo reference for voice
-and shape.
+template. Use `plugins/imessage-gateway/docs/usage.md` as the in-repo reference
+for voice and shape.
 
 ## Keep in sync
 
@@ -37,5 +37,5 @@ and shape.
 - Follow [.agents/docs/codestyle.md](.agents/docs/codestyle.md) for API surface
   references.
 
-In-repo voice: `core/event-router/docs/usage.md`. The `design-doc` skill holds
-the shared "positive, no why-vs-why-not" writing rules.
+The `design-doc` skill holds the shared "positive, no why-vs-why-not" writing
+rules.

@@ -3,7 +3,7 @@
 ## Layout
 
 - `plugins/` contains every system-managed Plugin together with its private
-  Component and support crates under that Plugin's `crates/` directory.
+  runtime and support crates under that Plugin's `crates/` directory.
 - Every Plugin documents its capabilities, Agent Tools, Workflow Actions and
   Events, errors, and lifecycle under its own `docs/` directory.
 - `shared/` contains crates shared across Plugins and applications.
@@ -36,7 +36,7 @@ platform implementations:
   capabilities, constructs the fixed Plugin set, registers every Plugin in
   dependency order, and then starts the complete set. System and Plugins never
   select a host/device executor, filesystem, network stack, or listener and do not
-  construct a Plugin's component-specific services.
+  construct a Plugin's private services.
 - **Plugins** own their typed capabilities, Workflow integrations, runtime
   tasks, and other Plugin-scoped resources. Built-in Plugins establish their
   own defaults instead of receiving an assembled service bundle from Host.

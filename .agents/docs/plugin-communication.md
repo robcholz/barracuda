@@ -1,50 +1,67 @@
 # Plugin Communication
 
-Event Router is designed primarily for Workflow and Agent call contracts.
-Other Plugin-to-Plugin integrations generally use typed capabilities. Treat
-this as design guidance rather than a prohibition: choose the mechanism that
-best matches the Plugin's ownership, lifecycle, and contract requirements.
+Barracuda uses typed capabilities for direct Plugin collaboration, Workflow
+Actions and Events for Workflow integration, and Agent Tools for model-facing
+operations. Choose the contract that matches the caller and keep execution
+ownership with the implementing subsystem.
 
-System-owned Platform and HAL resources are fixed construction inputs. System
-assembles shared construction resources in `PluginContext` and passes the same
-context reference to every concrete Plugin constructor. Typed capability lookup
-through `PluginRegisterContext` is reserved for capabilities published by
-declared Plugin dependencies.
+## Typed capabilities
 
-Communication mechanism and execution ownership are separate decisions. See
-[`execution-ownership.md`](execution-ownership.md) before placing a long-lived
-future in `Component::run`.
+A provider publishes a typed capability during `Plugin::register` with
+`PluginRegisterContext::provide`. A consumer declares the provider in
+`plugin.toml` and obtains the same value with
+`PluginRegisterContext::require`.
 
-## Plugin documentation
+Typed capabilities are the default for direct Plugin-to-Plugin collaboration.
+They expose domain operations and registrations without JSON adaptation or
+runtime lookup outside the declared Plugin dependency graph.
 
-Every `plugins/<plugin>/docs/plugin.md` must state the typed capabilities that
-the Plugin provides. Use the exact public Rust type names. When the Plugin
-provides no typed capability, write `none` explicitly.
+## Workflow contracts
 
-Use this field in the Plugin summary:
+An operation callable from the Workflow DSL implements
+`WorkflowActionHandler` and registers with `WorkflowActionRegistry`. Its stable
+address and request/response schemas live with the owning Plugin under
+`schemas/action/<address>/`.
 
-```text
-- Provided typed capabilities: `CapabilityType`
-```
+An asynchronous fact implements `Event` and is emitted through
+`WorkflowService`. Event payloads are ordinary bounded Serde values. Producers
+include correlation and ordering fields when a logical operation spans several
+Events.
 
-or:
+A Plugin may expose one implementation through both a typed capability and
+Workflow Actions. The capability remains the direct machine-oriented API; the
+Action contract remains stable, serializable, and suitable for the Workflow
+DSL.
 
-```text
-- Provided typed capabilities: none
-```
+## Agent contracts
+
+Model-facing operations are native Agent Tools registered through
+`AgentToolRegistry`. Adapter Plugins translate Tool calls into a provider's
+typed capability or `WorkflowService` operation and retain the Tool
+registration for their lifecycle. This keeps the provider independent of Agent
+prompting and Tool response conventions.
 
 ## Plugin lifecycle
 
-`Plugin::register` synchronously constructs the complete Plugin graph without
-yielding. A Plugin publishes and requires typed capabilities, installs retained
-registrations, and explicitly loads each owned Event Router-facing Component through
-`context.event_router.load(component)` in this phase. A background service that
-does not directly advance an Event Router contract is an owner-managed Embassy
-task, not a Component.
+`Plugin::register` synchronously constructs the complete capability graph,
+publishes provided capabilities, requires declared dependencies, registers
+Workflow Actions and Agent Tools, and retains every registration guard.
 
-`Plugin::start` is only an optional synchronous post-registration hook. Its
-`PluginStartContext` cannot publish capabilities or load Components. Event
-Router begins polling loaded Components only after registration and startup
-hooks complete. Plugin-owned tasks obtain the System-installed Embassy spawner
-from `PluginStartContext::task_spawner` and start only after the complete Plugin
-graph has registered.
+`Plugin::start` is an optional synchronous post-registration hook. Its
+`PluginStartContext` cannot publish capabilities. Plugin-owned long-running
+work starts through the System-installed Embassy spawner only after every
+Plugin has registered. See [`execution-ownership.md`](execution-ownership.md)
+for task ownership and cancellation.
+
+## Plugin documentation
+
+Every `plugins/<plugin>/docs/plugin.md` states:
+
+- the exact Plugin ID and direct Plugin dependencies;
+- provided and required typed capabilities using exact public Rust type names;
+- registered Workflow Actions, emitted Events, and Agent Tools;
+- owned long-running tasks and their capacity;
+- the Plugin's storage and retained-registration responsibilities.
+
+Write `none` for an empty capability category when the summary uses that
+category.

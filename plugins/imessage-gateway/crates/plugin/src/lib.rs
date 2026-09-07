@@ -8,7 +8,7 @@ mod workflow;
 
 use alloc::rc::Rc;
 
-use barracuda_imessage_gateway_component::{GatewayIngress, GatewayRuntime};
+use barracuda_imessage_gateway_runtime::{GatewayIngress, GatewayRuntime};
 use barracuda_plugin::api::PluginContext;
 use barracuda_plugin::manager::{
     Plugin, PluginError, PluginRegisterContext, PluginResult, PluginStartContext, PluginTaskToken,
@@ -16,7 +16,7 @@ use barracuda_plugin::manager::{
 use barracuda_workflow_plugin::{WorkflowActionRegistry, WorkflowService};
 use embassy_futures::select::select;
 
-pub use barracuda_imessage_gateway_component::{
+pub use barracuda_imessage_gateway_runtime::{
     GatewayAccepted, GatewayInboundMessage, GatewayIngressError, GatewayMediaKind,
     GatewayMessageReceived, GatewayOperationError, GatewayRoute, GatewaySendMediaFinished,
     GatewaySendMediaRequest, GatewaySendRequest, GatewaySendResponse, GatewaySendStreamFinished,

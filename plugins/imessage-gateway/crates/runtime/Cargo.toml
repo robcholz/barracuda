@@ -1,5 +1,5 @@
 [package]
-name = "barracuda-imessage-gateway-component"
+name = "barracuda-imessage-gateway-runtime"
 version = "0.1.0"
 edition = "2021"
 publish = false

@@ -22,18 +22,13 @@ fn application_uses_the_selected_target_resource_factory() -> Result<(), std::io
     assert!(!platform_entry.contains("barracuda_target"));
     assert!(!platform_entry.contains("barracuda_system_app"));
     assert!(application.contains("System::new(resources, spawner)"));
-    assert!(!application.contains("RPC_LANES"));
-    assert!(!application.contains("RpcLaneStorage"));
     assert!(system.contains("TargetResources<"));
     assert!(system.contains("PlatformResources<Tls, Partitions<"));
     assert!(system.contains("mount_or_format_partition(prepared.partitions.system)"));
     assert!(system.contains("BlockingAsync::new(prepared.partitions.kv_database)"));
     assert!(system.contains("mount(\"/data\", backend, MountOptions::read_write())"));
-    assert!(!system.contains("EventRouter"));
-    assert!(!system.contains("RpcLaneStorage"));
     assert!(system.contains("$manager.register_all()"));
     assert!(system.contains("plugins.start()"));
-    assert!(!system.contains("filesystem.scoped(\"/system/event-router\")"));
     assert!(system.contains("plugins.install_vfs(global_namespace().await)"));
     assert!(!system.contains("StorageNotConstructed"));
     let resources = std::fs::read_to_string(root.join("core/system/src/resources.rs"))?;

@@ -13,10 +13,10 @@ use gateway::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::component::STREAM_WORKERS;
 use crate::json::{
     map_gateway_error, valid_required, valid_stream_id, GatewayAccepted, GatewayOperationError,
 };
+use crate::runtime::STREAM_WORKERS;
 
 const CHUNK_QUEUE_CAPACITY: usize = 2;
 
@@ -330,7 +330,7 @@ fn decode_base64(encoded: &str) -> Result<Vec<u8>, GatewayOperationError> {
     if !encoded.len().is_multiple_of(4) {
         return Err(GatewayOperationError::InvalidRequest);
     }
-    let mut output = Vec::with_capacity(encoded.len() / 4 * 3);
+    let mut output = Vec::with_capacity(encoded.len());
     let group_count = encoded.len() / 4;
     for (index, chunk) in encoded.as_bytes().chunks_exact(4).enumerate() {
         let a = decode_base64_byte(*chunk.first().ok_or(GatewayOperationError::InvalidRequest)?)?;

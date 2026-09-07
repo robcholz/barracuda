@@ -15,7 +15,7 @@ portable WebSocket routes with `serve` and ordinary HTTP routes with
 `serve_http`. Both return scoped registrations that dependent Plugins retain
 for their lifetime. Registration publishes the capability and installs every
 route before startup. The WebServer startup hook then obtains the System-owned
-Embassy spawner and starts the server task; Event Router does not poll it.
+Embassy spawner and starts the server task.
 Plugin unload or startup rollback cancels the task and drops all pending
 accept/connection futures.
 

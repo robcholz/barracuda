@@ -3,12 +3,19 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use anstream::{eprintln, println};
+use barracuda_cli_style::{DIM, EMPHASIS, ERROR, SUCCESS};
 use barracuda_system_image::{build_selected, flash_selected};
 use clap::{Parser, Subcommand};
 
 /// Manages the selected Board's System image.
 #[derive(Debug, Parser)]
-#[command(name = "cargo system-image", bin_name = "cargo system-image", version)]
+#[command(
+    name = "cargo system-image",
+    bin_name = "cargo system-image",
+    version,
+    styles = barracuda_cli_style::CLI_STYLES
+)]
 struct Cli {
     /// System-image operation to perform.
     #[command(subcommand)]
@@ -32,13 +39,15 @@ fn main() -> ExitCode {
 
 fn flash() -> ExitCode {
     let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
-        eprintln!("error: system-image crate is not located below the workspace root");
+        eprintln!(
+            "{ERROR}error:{ERROR:#} system-image crate is not located below the workspace root"
+        );
         return ExitCode::FAILURE;
     };
     match flash_selected(workspace) {
         Ok(image) => {
             println!(
-                "Flashed {}-byte system image for Board `{}` at {:#x} from `{}` to `{}`.",
+                "{SUCCESS}✔{SUCCESS:#} Flashed {DIM}{}-byte system image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} at {DIM}{:#x}{DIM:#} from `{}` to `{}`.",
                 image.size(),
                 image.board(),
                 image.offset(),
@@ -48,7 +57,7 @@ fn flash() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
             ExitCode::FAILURE
         }
     }
@@ -56,13 +65,15 @@ fn flash() -> ExitCode {
 
 fn build() -> ExitCode {
     let Some(workspace) = workspace_root(Path::new(env!("CARGO_MANIFEST_DIR"))) else {
-        eprintln!("error: system-image crate is not located below the workspace root");
+        eprintln!(
+            "{ERROR}error:{ERROR:#} system-image crate is not located below the workspace root"
+        );
         return ExitCode::FAILURE;
     };
     match build_selected(workspace) {
         Ok(image) => {
             println!(
-                "Built {}-byte system image for Board `{}` region at {:#x} from `{}` at `{}`.",
+                "{SUCCESS}✔{SUCCESS:#} Built {DIM}{}-byte system image{DIM:#} for {EMPHASIS}Board `{}`{EMPHASIS:#} region at {DIM}{:#x}{DIM:#} from `{}` at `{}`.",
                 image.size(),
                 image.board(),
                 image.offset(),
@@ -72,7 +83,7 @@ fn build() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("{ERROR}error:{ERROR:#} {error}");
             ExitCode::FAILURE
         }
     }

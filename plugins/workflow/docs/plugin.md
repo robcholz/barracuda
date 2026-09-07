@@ -18,8 +18,7 @@ Workflow builder without turning the Action itself into an Agent Tool.
 
 Production Actions use `workflow_action_schema!("address")`, which loads
 `schemas/action/<address>/request.json` and `response.json` from the owning
-Plugin. The registry contains no RPC transport, lanes, or runtime registration
-phase. `WorkflowService` loads and unloads definitions at runtime, lists the
+Plugin. `WorkflowService` loads and unloads definitions at runtime, lists the
 loaded catalog, and emits Events.
 
 ```rust

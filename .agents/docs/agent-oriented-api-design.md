@@ -1,7 +1,6 @@
 # Agent-Oriented API Design
 
-This document defines conventions for model-facing ToolCalls. It does not
-define Rust traits, transport protocols, or component RPCs. Internal APIs may
+This document defines conventions for model-facing ToolCalls. Internal APIs may
 take any shape as long as the Agent-facing contract follows these rules.
 
 ## ToolCall nature

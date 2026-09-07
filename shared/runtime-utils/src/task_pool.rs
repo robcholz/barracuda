@@ -16,7 +16,7 @@ type PooledFuture = Pin<Box<dyn Future<Output = ()> + 'static>>;
 
 /// A cloneable, single-thread task pool driven by an external event loop.
 ///
-/// Clones refer to the same pool. Components submit owned futures through any
+/// Clones refer to the same pool. Callers submit owned futures through any
 /// clone, while the engine that owns the event loop calls [`drive`](Self::drive)
 /// with the [`Context`] received by its own [`Future::poll`]. The pool creates
 /// no thread, executor, or runner of its own.

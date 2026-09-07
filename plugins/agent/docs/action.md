@@ -1,10 +1,9 @@
 # Agent Workflow Actions
 
 The Agent Plugin registers its session operations directly through
-`WorkflowActionRegistry`. There is no RPC adapter, lane, frame size, or encoded
-request/response byte limit on this path. Static request and response schemas
-are compiled together with their validators, and the Action adapter uses owned
-Serde request and response types.
+`WorkflowActionRegistry`. Static request and response schemas are compiled
+together with their validators, and the Action adapter uses owned Serde request
+and response types.
 
 Existing Workflow behavior is retained: stable business failures are successful
 Action responses with `{"error":"code"}`. An operation that already parsed a
@@ -28,7 +27,7 @@ these established business outcomes.
 | `session.close` | `{"session":"session-N"}` | `{}` | `invalid_request`, `session_not_open`, `session_closed`, `worker_stopped` |
 
 Omitting `session.list.limit` returns every remaining session. Supplying a limit
-retains the existing pagination contract without the former 16-session cap.
+enables pagination.
 
 `session.open` establishes the control lease and Event subscription used by the
 other session Actions. `session.close` acknowledges the command; the matching

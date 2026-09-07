@@ -934,7 +934,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_plugin_registrations_without_an_event_router() {
+    fn renders_plugin_registrations() {
         let demo = plugin("demo", "demo", &[]);
 
         assert_eq!(

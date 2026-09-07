@@ -690,7 +690,10 @@ dependencies = [
 name = "barracuda-board-tool"
 version = "0.1.0"
 dependencies = [
+ "anstream",
+ "anstyle",
  "barracuda-board-config",
+ "barracuda-cli-style",
  "barracuda-platform-config",
  "barracuda-platform-tool",
  "clap",
@@ -718,6 +721,14 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "unicode-width",
+]
+
+[[package]]
+name = "barracuda-cli-style"
+version = "0.1.0"
+dependencies = [
+ "anstyle",
+ "clap",
 ]
 
 [[package]]
@@ -774,7 +785,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-imessage-gateway-component"
+name = "barracuda-imessage-gateway-plugin"
+version = "0.1.0"
+dependencies = [
+ "barracuda-imessage-gateway-runtime",
+ "barracuda-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
+ "gateway",
+ "gateway-http",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-imessage-gateway-runtime"
 version = "0.1.0"
 dependencies = [
  "async-channel",
@@ -784,21 +810,6 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "barracuda-imessage-gateway-plugin"
-version = "0.1.0"
-dependencies = [
- "barracuda-imessage-gateway-component",
- "barracuda-plugin",
- "barracuda-workflow-plugin",
- "embassy-executor",
- "embassy-futures",
- "gateway",
- "gateway-http",
- "serde",
  "thiserror 2.0.18",
 ]
 
@@ -1188,6 +1199,8 @@ dependencies = [
 name = "barracuda-platform-tool"
 version = "0.1.0"
 dependencies = [
+ "anstream",
+ "barracuda-cli-style",
  "barracuda-platform-config",
  "clap",
  "tempfile",
@@ -1257,6 +1270,7 @@ version = "0.1.0"
 dependencies = [
  "anstream",
  "anstyle",
+ "barracuda-cli-style",
  "barracuda-plugin",
  "clap",
  "ctrlc",
@@ -1385,7 +1399,9 @@ dependencies = [
 name = "barracuda-system-image"
 version = "0.1.0"
 dependencies = [
+ "anstream",
  "barracuda-board-config",
+ "barracuda-cli-style",
  "barracuda-platform-config",
  "barracuda-vfs-littlefs",
  "clap",
@@ -1504,24 +1520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-vm-component"
-version = "0.1.0"
-dependencies = [
- "barracuda-lua",
- "barracuda-vm-builtin-packages",
- "barracuda-vm-package-api",
- "barracuda-workflow-plugin",
- "critical-section",
- "embassy-executor",
- "embassy-time",
- "embedded-alloc",
- "getset",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "barracuda-vm-package-api"
 version = "0.1.0"
 dependencies = [
@@ -1537,11 +1535,29 @@ dependencies = [
  "barracuda-lua",
  "barracuda-plugin",
  "barracuda-vm-builtin-packages",
- "barracuda-vm-component",
  "barracuda-vm-package-api",
+ "barracuda-vm-runtime",
  "barracuda-workflow-plugin",
  "embassy-executor",
  "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "barracuda-vm-runtime"
+version = "0.1.0"
+dependencies = [
+ "barracuda-lua",
+ "barracuda-vm-builtin-packages",
+ "barracuda-vm-package-api",
+ "barracuda-workflow-plugin",
+ "critical-section",
+ "embassy-executor",
+ "embassy-time",
+ "embedded-alloc",
+ "getset",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 

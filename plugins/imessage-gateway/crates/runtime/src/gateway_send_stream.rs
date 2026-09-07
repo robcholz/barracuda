@@ -13,9 +13,9 @@ use gateway::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::component::STREAM_WORKERS;
 use crate::json::{map_gateway_error, valid_required, GatewayAccepted, GatewayOperationError};
 use crate::route::GatewayRoute;
+use crate::runtime::STREAM_WORKERS;
 
 const EVENT_QUEUE_CAPACITY: usize = 16;
 

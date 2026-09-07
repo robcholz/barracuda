@@ -13,7 +13,7 @@ use strum::IntoStaticStr;
 use barracuda_agent::Message;
 use barracuda_agent::{AgentId, AgentKind};
 
-/// Everything the Multiagent component needs to materialize one child Agent.
+/// Everything Multiagent needs to materialize one child Agent.
 #[derive(Clone, Getters)]
 pub struct SubagentSpec {
     #[getset(get = "pub")]
