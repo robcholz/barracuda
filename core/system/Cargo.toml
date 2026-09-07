@@ -31,6 +31,7 @@ barracuda-time-plugin.workspace = true
 barracuda-vm-plugin.workspace = true
 barracuda-web-search-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
 # END GENERATED PLUGINS
 barracuda-plugin.workspace = true
 barracuda-platform.workspace = true

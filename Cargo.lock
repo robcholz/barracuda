@@ -329,25 +329,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "barracuda-agent-component"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "barracuda-agent-runtime",
- "barracuda-event-router",
- "barracuda-model-api",
- "barracuda-platform-test",
- "barracuda-vfs",
- "embassy-time",
- "futures-lite",
- "http-client",
- "log",
- "serde",
- "serde_json",
- "static_cell",
-]
-
-[[package]]
 name = "barracuda-agent-context"
 version = "0.1.0"
 dependencies = [
@@ -422,13 +403,15 @@ dependencies = [
 name = "barracuda-agent-plugin"
 version = "0.1.0"
 dependencies = [
- "barracuda-agent-component",
+ "async-channel",
  "barracuda-agent-runtime",
- "barracuda-event-router",
  "barracuda-model-api",
  "barracuda-platform-test",
  "barracuda-plugin",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
+ "embassy-executor",
+ "embassy-futures",
  "embassy-net",
  "embassy-time",
  "embedded-io-async 0.7.0",
@@ -540,7 +523,6 @@ dependencies = [
  "anyhow",
  "barracuda-agent-permission",
  "barracuda-agent-persistence",
- "barracuda-event-router",
  "barracuda-platform-test",
  "futures-channel",
  "futures-core",
@@ -1394,6 +1376,7 @@ dependencies = [
  "barracuda-vm-plugin",
  "barracuda-web-search-plugin",
  "barracuda-webserver-plugin",
+ "barracuda-workflow-plugin",
  "embassy-embedded-hal 0.5.0",
  "embassy-executor",
  "embassy-net",

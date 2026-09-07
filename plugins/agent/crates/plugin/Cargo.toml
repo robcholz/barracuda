@@ -2,14 +2,18 @@
 name = "barracuda-agent-plugin"
 version = "0.1.0"
 edition = "2021"
-description = "Barracuda Plugin that owns the Agent Component"
+description = "Barracuda Plugin that owns the Agent runtime and Workflow adapter"
 
 [dependencies]
-barracuda-agent-component = { path = "../component" }
+async-channel = { version = "2", default-features = false }
 barracuda-agent-runtime = { path = "../runtime", features = ["cache_profile", "multiagent"] }
 barracuda-model-api = { path = "../model-api" }
 barracuda-plugin.workspace = true
 barracuda-webserver-plugin.workspace = true
+barracuda-workflow-plugin.workspace = true
+embassy-executor.workspace = true
+embassy-futures.workspace = true
+futures-lite = { version = "2", default-features = false, features = ["alloc"] }
 http-client = { workspace = true, features = ["mbedtls"] }
 log.workspace = true
 serde = { version = "1", default-features = false, features = ["alloc", "derive"] }
@@ -17,7 +21,6 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 thiserror = { version = "2", default-features = false }
 
 [dev-dependencies]
-barracuda-event-router.workspace = true
 barracuda-model-api = { path = "../model-api" }
 barracuda-platform-test.workspace = true
 embassy-net.workspace = true

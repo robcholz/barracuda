@@ -15,7 +15,7 @@ small, stable envelope:
 ```
 
 - `session` identifies the source session.
-- `sequence` is the Agent Component's monotonically increasing output order.
+- `sequence` is the Agent Workflow adapter's monotonically increasing output order.
   Consumers use it to restore order when separate Workflow executions overlap.
 - `type` identifies the semantic event.
 - `payload` is an event-specific object. Marker events use `{}`.
@@ -64,13 +64,12 @@ Errors and closure records are:
 - `closed`: `{ "reason" }`.
 - `stream_error`: `{ "error" }`.
 
-### Bounded deltas
+### Direct deltas
 
-Every record must fit the Event Router lane. Text-bearing values that exceed
-one record are emitted as multiple records of the same semantic delta type,
-each with its own sequence. Splitting never divides a UTF-8 code point or JSON
-escape. Consumers concatenate only delta types whose semantics call for it;
-they never reconstruct arbitrary object fields from transport metadata.
+The adapter forwards every runtime delta directly as one Workflow Event. It
+does not split text to fit a transport frame and does not truncate error text.
+Consumers still concatenate consecutive semantic delta records because the
+model runtime itself may produce output incrementally.
 
 The authoritative schema is `schemas/event/session_event.json`. It fixes the
 four envelope properties while intentionally leaving each payload's contents

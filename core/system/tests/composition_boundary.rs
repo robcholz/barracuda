@@ -70,6 +70,7 @@ fn system_constructs_every_plugin_from_one_public_field_context() -> Result<(), 
     }
 
     for plugin in [
+        "WorkflowPlugin",
         "FilePlugin",
         "WebServerPlugin",
         "VmPlugin",

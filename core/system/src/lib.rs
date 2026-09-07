@@ -163,6 +163,7 @@ where
             barracuda_vm_plugin::VmPlugin::new(&mut plugin_context),
             barracuda_web_search_plugin::WebSearchPlugin::new(&mut plugin_context),
             barracuda_webserver_plugin::WebServerPlugin::new(&mut plugin_context),
+            barracuda_workflow_plugin::WorkflowPlugin::new(&mut plugin_context),
         );
         // END GENERATED PLUGINS
         plugins.start(&mut router)?;

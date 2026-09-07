@@ -62,6 +62,7 @@ barracuda-time-plugin = { path = "plugins/time/crates/plugin" }
 barracuda-vm-plugin = { path = "plugins/vm/crates/plugin" }
 barracuda-web-search-plugin = { path = "plugins/web-search/crates/plugin" }
 barracuda-webserver-plugin = { path = "plugins/webserver/crates/plugin" }
+barracuda-workflow-plugin = { path = "plugins/workflow/crates/plugin" }
 # END GENERATED PLUGIN WORKSPACE DEPENDENCIES
 
 barracuda-board = { path = "boards/api" }
