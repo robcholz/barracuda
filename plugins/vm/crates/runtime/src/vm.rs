@@ -1,10 +1,15 @@
-use alloc::rc::Rc;
+use alloc::rc::{Rc, Weak};
 use alloc::string::String;
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 
 use barracuda_vm_builtin_packages::BuiltinPackages;
 use barracuda_vm_package_api::LuaPackageRegistry;
-use barracuda_workflow_plugin::WorkflowService;
 use embassy_executor::Spawner;
+use futures_channel::oneshot;
 use getset::CopyGetters;
 use serde::{Deserialize, Serialize};
 
@@ -46,11 +51,195 @@ pub struct VmRunRequest {
     pub source: String,
 }
 
-/// Accepted VM execution.
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-pub struct VmRunAccepted {
+/// Terminal state of one accepted Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmRunOutcome {
+    /// The source completed successfully.
+    Success,
+    /// The caller cancelled the execution.
+    Cancelled,
+    /// Lua creation, configuration, loading, or execution failed.
+    Error,
+}
+
+/// Stable execution failure reported after a run was accepted.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmExecutionError {
+    /// The Lua state could not be created.
+    VmCreate,
+    /// The sandbox or native packages could not be configured.
+    VmConfigure,
+    /// The source document could not be loaded.
+    LuaLoad,
+    /// The loaded source failed while running.
+    LuaRuntime,
+    /// Lua yielded for a reason not owned by the VM scheduler.
+    UnexpectedYield,
+    /// The fixed Lua heap was exhausted.
+    LuaMemory,
+}
+
+/// Complete result of one accepted Lua execution.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmRunCompletion {
     /// Runtime-generated execution identifier.
     pub run_id: u32,
+    /// Terminal execution state.
+    pub outcome: VmRunOutcome,
+    /// Complete messages emitted by `io.print(...)`, in order.
+    pub output: Vec<String>,
+    /// Stable execution failure when `outcome` is `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<VmExecutionError>,
+    /// Human-readable execution diagnostic when `outcome` is `error`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
+}
+
+/// Current state of one active Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VmRunState {
+    /// The execution is running or cooperatively yielding.
+    Running,
+    /// The execution requires input or EOF before it can continue.
+    InputRequired,
+}
+
+/// Bounded public information about one active Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmRunInfo {
+    /// Runtime-generated execution identifier.
+    pub run_id: u32,
+    /// Current execution state.
+    pub state: VmRunState,
+}
+
+/// Snapshot of all active Lua executions.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmListResponse {
+    /// Active executions in runtime slot order.
+    pub runs: Vec<VmRunInfo>,
+}
+
+/// Non-terminal state change produced by an accepted Lua execution.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum VmRunProgress {
+    /// The execution is suspended until input or EOF is supplied.
+    InputRequired {
+        /// Runtime-generated execution identifier.
+        run_id: u32,
+    },
+}
+
+/// Next observable update from an accepted Lua execution.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum VmRunUpdate {
+    /// The execution remains active.
+    Progress(VmRunProgress),
+    /// The execution has returned and cannot produce more updates.
+    Completed(VmRunCompletion),
+}
+
+/// Awaitable handle for one accepted Lua execution.
+#[derive(CopyGetters)]
+pub struct VmRun {
+    /// Runtime-generated execution identifier available before completion.
+    #[getset(get_copy = "pub")]
+    run_id: u32,
+    progress: VmProgressReceiver,
+    completion: oneshot::Receiver<VmRunCompletion>,
+}
+
+impl VmRun {
+    pub(crate) const fn new(
+        run_id: u32,
+        progress: VmProgressReceiver,
+        completion: oneshot::Receiver<VmRunCompletion>,
+    ) -> Self {
+        Self {
+            run_id,
+            progress,
+            completion,
+        }
+    }
+
+    /// Waits for the next progress update or terminal completion.
+    pub async fn next_update(&mut self) -> Result<VmRunUpdate, VmError> {
+        core::future::poll_fn(|context| {
+            if let Poll::Ready(progress) = self.progress.poll_next(context) {
+                return Poll::Ready(Ok(VmRunUpdate::Progress(progress)));
+            }
+            Pin::new(&mut self.completion).poll(context).map(|result| {
+                result
+                    .map(VmRunUpdate::Completed)
+                    .map_err(|_error| VmError::RuntimeUnavailable)
+            })
+        })
+        .await
+    }
+}
+
+struct VmProgressState {
+    next: RefCell<Option<VmRunProgress>>,
+    waker: RefCell<Option<Waker>>,
+}
+
+pub(crate) struct VmProgressSender {
+    state: Weak<VmProgressState>,
+}
+
+impl VmProgressSender {
+    pub(crate) fn send(&self, progress: VmRunProgress) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        *state.next.borrow_mut() = Some(progress);
+        if let Some(waker) = state.waker.borrow_mut().take() {
+            waker.wake();
+        }
+    }
+}
+
+pub(crate) struct VmProgressReceiver {
+    state: Rc<VmProgressState>,
+}
+
+impl VmProgressReceiver {
+    fn poll_next(&mut self, context: &mut Context<'_>) -> Poll<VmRunProgress> {
+        if let Some(progress) = self.state.next.borrow_mut().take() {
+            return Poll::Ready(progress);
+        }
+        *self.state.waker.borrow_mut() = Some(context.waker().clone());
+        Poll::Pending
+    }
+}
+
+pub(crate) fn vm_progress_channel() -> (VmProgressSender, VmProgressReceiver) {
+    let state = Rc::new(VmProgressState {
+        next: RefCell::new(None),
+        waker: RefCell::new(None),
+    });
+    (
+        VmProgressSender {
+            state: Rc::downgrade(&state),
+        },
+        VmProgressReceiver { state },
+    )
+}
+
+impl Future for VmRun {
+    type Output = Result<VmRunCompletion, VmError>;
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.completion)
+            .poll(context)
+            .map(|result| result.map_err(|_error| VmError::RuntimeUnavailable))
+    }
 }
 
 /// Request to provide input or EOF to an active execution.
@@ -146,13 +335,9 @@ impl Vm {
         self
     }
 
-    /// Installs the task spawner and Workflow Event destination.
-    pub fn start(
-        &self,
-        spawner: Spawner,
-        workflow: Rc<WorkflowService>,
-    ) -> Result<(), VmRuntimeStartError> {
-        self.runtime.start(spawner, workflow)
+    /// Installs the task spawner after Plugin registration completes.
+    pub fn start(&self, spawner: Spawner) -> Result<(), VmRuntimeStartError> {
+        self.runtime.start(spawner)
     }
 
     /// Stops accepting executions and cancels every active run.
@@ -160,8 +345,8 @@ impl Vm {
         self.runtime.stop();
     }
 
-    /// Starts one isolated Lua execution and returns immediately after acceptance.
-    pub fn run(&self, request: VmRunRequest) -> Result<VmRunAccepted, VmError> {
+    /// Starts one isolated Lua execution and returns its awaitable completion handle.
+    pub fn run(&self, request: VmRunRequest) -> Result<VmRun, VmError> {
         self.runtime
             .dispatch(
                 request.source,
@@ -169,8 +354,15 @@ impl Vm {
                 self.builtin_packages,
                 self.package_registry.clone(),
             )
-            .map(|run_id| VmRunAccepted { run_id })
             .map_err(VmError::from)
+    }
+
+    /// Returns a snapshot of all currently active executions.
+    #[must_use]
+    pub fn list(&self) -> VmListResponse {
+        VmListResponse {
+            runs: self.runtime.list(),
+        }
     }
 
     /// Supplies one input value or EOF to an active execution.

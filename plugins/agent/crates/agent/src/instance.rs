@@ -8,7 +8,7 @@ use core::{
 
 use async_channel::{Receiver, TryRecvError};
 use barracuda_agent_persistence::DurableState;
-use barracuda_agent_tool::{ToolDetachHandle, ToolInvocation, ToolOutput};
+use barracuda_agent_tool::{ToolDetachHandle, ToolDetachUpdate, ToolInvocation, ToolOutput};
 use barracuda_model_api::ToolCall;
 use futures_core::Stream;
 use futures_lite::{future, StreamExt as _};
@@ -34,22 +34,47 @@ struct DetachedCompletion {
 }
 
 impl DetachedCompletion {
-    fn from_tool((invocation, output): (ToolInvocation, ToolOutput)) -> Self {
+    fn into_notification(self) -> DetachedNotification {
+        DetachedNotification {
+            call: self.call,
+            update: ToolDetachUpdate::Completed(self.output),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct DetachedNotification {
+    call: ToolCall,
+    update: ToolDetachUpdate,
+}
+
+impl DetachedNotification {
+    fn from_tool((invocation, update): (ToolInvocation, ToolDetachUpdate)) -> Self {
         Self {
             call: ToolCall {
                 id: invocation.id().unwrap_or_default().to_owned(),
                 name: invocation.name().to_owned(),
                 arguments_json: invocation.arguments_json().to_owned(),
             },
-            output,
+            update,
         }
+    }
+
+    fn completion(&self) -> Option<DetachedCompletion> {
+        let ToolDetachUpdate::Completed(output) = &self.update else {
+            return None;
+        };
+        Some(DetachedCompletion {
+            call: self.call.clone(),
+            output: output.clone(),
+        })
     }
 }
 
 /// Runtime-only state that disappears when this Agent is dropped or restarted.
 struct AgentEphemeralState {
     inflight_detached_toolcalls: SelectAll<ToolDetachHandle>,
-    ready_detached_toolcalls: VecDeque<DetachedCompletion>,
+    ready_detached_toolcalls: VecDeque<DetachedNotification>,
 }
 
 impl AgentEphemeralState {
@@ -64,11 +89,11 @@ impl AgentEphemeralState {
         self.inflight_detached_toolcalls.push(handle);
     }
 
-    fn poll_completion(&mut self, context: &mut Context<'_>) -> Poll<DetachedCompletion> {
+    fn poll_update(&mut self, context: &mut Context<'_>) -> Poll<DetachedNotification> {
         match Pin::new(&mut self.inflight_detached_toolcalls).poll_next(context) {
-            Poll::Ready(Some(completion)) => Poll::Ready(DetachedCompletion::from_tool(completion)),
-            // An exhausted set yields `None`; no completion can arrive until
-            // another detached handle is pushed, so keep the wait pending.
+            Poll::Ready(Some(update)) => Poll::Ready(DetachedNotification::from_tool(update)),
+            // An exhausted set yields `None`; no update can arrive until
+            // another detached handle is pushed, so keep waiting.
             Poll::Ready(None) | Poll::Pending => Poll::Pending,
         }
     }
@@ -110,10 +135,10 @@ impl AgentEphemeralState {
 
             enum Wake {
                 Command(Option<AgentCommand>),
-                Detached(DetachedCompletion),
+                Detached(DetachedNotification),
             }
             match future::or(async { Wake::Command(commands.recv().await.ok()) }, async {
-                Wake::Detached(future::poll_fn(|context| self.poll_completion(context)).await)
+                Wake::Detached(future::poll_fn(|context| self.poll_update(context)).await)
             })
             .await
             {
@@ -126,8 +151,8 @@ impl AgentEphemeralState {
                     self.clear();
                     return None;
                 }
-                Wake::Detached(completion) => {
-                    self.ready_detached_toolcalls.push_back(completion);
+                Wake::Detached(update) => {
+                    self.ready_detached_toolcalls.push_back(update);
                 }
             }
         }
@@ -251,14 +276,14 @@ where
                         }
                     };
                     let mut applied_completions = turn.applied_completions;
-                    let mut pending_completions = Vec::new();
+                    let mut pending_updates = Vec::new();
                     let mut outcome = None;
                     let mut failure = None;
 
                     while outcome.is_none() && failure.is_none() {
                         enum ActiveWake {
                             Command(Option<AgentCommand>),
-                            Detached(DetachedCompletion),
+                            Detached(DetachedNotification),
                             Engine(Option<Result<AgentEngineEvent, AgentError>>),
                         }
                         let wake = future::or(
@@ -266,10 +291,8 @@ where
                             future::or(
                                 async {
                                     ActiveWake::Detached(
-                                        future::poll_fn(|context| {
-                                            ephemeral.poll_completion(context)
-                                        })
-                                        .await,
+                                        future::poll_fn(|context| ephemeral.poll_update(context))
+                                            .await,
                                     )
                                 },
                                 async { ActiveWake::Engine(run.next().await) },
@@ -293,11 +316,11 @@ where
                             })) => {
                                 let _ = run.resolve_approval(tool_call_id, decision);
                             }
-                            ActiveWake::Detached(completion) => {
-                                run.continue_with(Message::text(render_completions(
-                                    core::slice::from_ref(&completion),
+                            ActiveWake::Detached(update) => {
+                                run.continue_with(Message::text(render_notifications(
+                                    core::slice::from_ref(&update),
                                 )));
-                                pending_completions.push(completion);
+                                pending_updates.push(update);
                             }
                             ActiveWake::Engine(Some(Ok(AgentEngineEvent::Iteration(progress)))) => {
                                 if matches!(
@@ -306,7 +329,11 @@ where
                                         AgentIterationEvent::Started(_)
                                     )
                                 ) {
-                                    applied_completions.append(&mut pending_completions);
+                                    for update in pending_updates.drain(..) {
+                                        if let Some(completion) = update.completion() {
+                                            applied_completions.push(completion);
+                                        }
+                                    }
                                 }
                                 yielder
                                     .yield_one(AgentStreamItem::Event(Ok(AgentEvent::Iteration(
@@ -354,14 +381,18 @@ where
                     };
                     match &outcome {
                         AgentOutcome::Completed(_) => {
-                            for completion in pending_completions.into_iter().rev() {
-                                ephemeral.ready_detached_toolcalls.push_front(completion);
+                            for update in pending_updates.into_iter().rev() {
+                                ephemeral.ready_detached_toolcalls.push_front(update);
                             }
                         }
                         AgentOutcome::Interrupted => {
-                            pending_completions.append(&mut applied_completions);
-                            for completion in pending_completions.into_iter().rev() {
-                                ephemeral.ready_detached_toolcalls.push_front(completion);
+                            pending_updates.extend(
+                                applied_completions
+                                    .drain(..)
+                                    .map(DetachedCompletion::into_notification),
+                            );
+                            for update in pending_updates.into_iter().rev() {
+                                ephemeral.ready_detached_toolcalls.push_front(update);
                             }
                         }
                         AgentOutcome::Cancelled => {
@@ -418,29 +449,88 @@ where
     }
 }
 
-fn detached_turn(completions: &mut VecDeque<DetachedCompletion>) -> Option<PendingTurn> {
-    let first = completions.front()?.call.clone();
-    let completions = completions.drain(..).collect::<Vec<_>>();
+fn detached_turn(notifications: &mut VecDeque<DetachedNotification>) -> Option<PendingTurn> {
+    let first = notifications.front()?.call.clone();
+    let notifications = notifications.drain(..).collect::<Vec<_>>();
+    let applied_completions = notifications
+        .iter()
+        .filter_map(DetachedNotification::completion)
+        .collect();
     Some(PendingTurn {
         origin: AgentTurnOrigin::ToolCall { call: first },
-        message: Message::text(render_completions(&completions)),
-        applied_completions: completions,
+        message: Message::text(render_notifications(&notifications)),
+        applied_completions,
     })
 }
 
-fn render_completions(completions: &[DetachedCompletion]) -> String {
-    let mut message = String::from("[detached:results]");
-    for completion in completions {
-        let (status, label) = if completion.output.ok {
-            ("completed", "result")
-        } else {
-            ("failed", "error")
+fn render_notifications(notifications: &[DetachedNotification]) -> String {
+    let mut message = String::from("[detached:updates]");
+    for notification in notifications {
+        let (status, label, output) = match &notification.update {
+            ToolDetachUpdate::Progress(output) => ("progress", "update", output),
+            ToolDetachUpdate::Completed(output) if output.ok => ("completed", "result", output),
+            ToolDetachUpdate::Completed(output) => ("failed", "error", output),
         };
         let _ = write!(
             message,
             "\n\n[detached:{status}]\ntool: {}\ncall_id: {}\n{label}:\n{}",
-            completion.call.name, completion.call.id, completion.output.content,
+            notification.call.name, notification.call.id, output.content,
         );
     }
     message
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::VecDeque, string::ToString, vec};
+
+    use barracuda_agent_tool::{ToolDetachUpdate, ToolOutput};
+    use barracuda_model_api::ToolCall;
+
+    use super::{detached_turn, render_notifications, DetachedNotification};
+
+    fn notification(update: ToolDetachUpdate) -> DetachedNotification {
+        DetachedNotification {
+            call: ToolCall {
+                id: "call-1".to_string(),
+                name: "background".to_string(),
+                arguments_json: "{}".to_string(),
+            },
+            update,
+        }
+    }
+
+    #[test]
+    fn progress_is_rendered_as_non_terminal_update() {
+        let rendered =
+            render_notifications(&[notification(ToolDetachUpdate::Progress(ToolOutput {
+                content: "input_required".to_string(),
+                ok: true,
+            }))]);
+
+        assert!(rendered.contains("[detached:progress]"));
+        assert!(rendered.contains("update:\ninput_required"));
+        assert!(!rendered.contains("[detached:completed]"));
+    }
+
+    #[test]
+    fn detached_turn_tracks_only_terminal_updates_as_applied_completions() {
+        let mut notifications = VecDeque::from(vec![
+            notification(ToolDetachUpdate::Progress(ToolOutput {
+                content: "working".to_string(),
+                ok: true,
+            })),
+            notification(ToolDetachUpdate::Completed(ToolOutput {
+                content: "done".to_string(),
+                ok: true,
+            })),
+        ]);
+
+        let Some(turn) = detached_turn(&mut notifications) else {
+            return;
+        };
+        assert_eq!(turn.applied_completions.len(), 1);
+        assert!(turn.message.as_str().contains("[detached:progress]"));
+        assert!(turn.message.as_str().contains("[detached:completed]"));
+    }
 }

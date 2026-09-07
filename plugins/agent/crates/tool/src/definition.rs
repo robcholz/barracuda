@@ -1,12 +1,16 @@
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use alloc::string::{String, ToString};
-use alloc::sync::Arc;
+use alloc::sync::{Arc, Weak};
+use core::cell::RefCell;
 use core::fmt;
 use core::future::Future;
 use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
 
 use barracuda_agent_permission::{Action, RiskClass};
+use futures_core::Stream;
 use getset::CopyGetters;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -18,13 +22,14 @@ pub type ToolCompletionFuture = Pin<Box<dyn Future<Output = ToolResult<ToolOutpu
 pub type DetachedToolFuture<'a> = Pin<Box<dyn Future<Output = ToolResult<DetachedTool>> + 'a>>;
 pub type ToolResult<T> = Result<T, ToolInvokeError>;
 
-/// The two settlements produced by a dynamically detached tool.
+/// Accepted, progress, and terminal values produced by a detached tool.
 ///
-/// The accepted output is returned to the current model turn. The completion
-/// future is transferred to the owning Agent runtime and may finish after that
-/// turn has ended.
+/// The accepted output is returned to the current model turn. Optional
+/// progress is delivered while the invocation remains in flight. Returning
+/// from the completion future implicitly completes the invocation.
 pub struct DetachedTool {
     accepted: ToolOutput,
+    progress: Option<ToolProgressReceiver>,
     completion: ToolCompletionFuture,
 }
 
@@ -32,13 +37,98 @@ impl DetachedTool {
     pub fn new(accepted: ToolOutput, completion: ToolCompletionFuture) -> Self {
         Self {
             accepted,
+            progress: None,
             completion,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (ToolOutput, ToolCompletionFuture) {
-        (self.accepted, self.completion)
+    /// Creates a detached tool whose handler can publish non-terminal updates.
+    ///
+    /// Returning from the completion future remains the only completion
+    /// signal; the progress sender cannot complete the tool call.
+    pub fn with_progress(
+        accepted: ToolOutput,
+        completion: impl FnOnce(ToolProgressSender) -> ToolCompletionFuture,
+    ) -> Self {
+        let (sender, progress) = tool_progress_channel();
+        Self {
+            accepted,
+            progress: Some(progress),
+            completion: completion(sender),
+        }
     }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        ToolOutput,
+        Option<ToolProgressReceiver>,
+        ToolCompletionFuture,
+    ) {
+        (self.accepted, self.progress, self.completion)
+    }
+}
+
+/// Non-terminal update channel owned by a dynamically detached tool handler.
+#[derive(Clone)]
+pub struct ToolProgressSender {
+    state: Weak<ToolProgressState>,
+}
+
+impl ToolProgressSender {
+    /// Publishes one best-effort progress update.
+    ///
+    /// Updates are ignored after the owning Agent stops observing the tool.
+    pub fn send(&self, output: ToolOutput) {
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let mut queued = state.queued.borrow_mut();
+        if queued.len() >= TOOL_PROGRESS_CAPACITY {
+            return;
+        }
+        queued.push_back(output);
+        drop(queued);
+        if let Some(waker) = state.waker.borrow_mut().take() {
+            waker.wake();
+        };
+    }
+}
+
+const TOOL_PROGRESS_CAPACITY: usize = 8;
+
+struct ToolProgressState {
+    queued: RefCell<VecDeque<ToolOutput>>,
+    waker: RefCell<Option<Waker>>,
+}
+
+pub(crate) struct ToolProgressReceiver {
+    state: Arc<ToolProgressState>,
+}
+
+impl Stream for ToolProgressReceiver {
+    type Item = ToolOutput;
+
+    fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if let Some(output) = self.state.queued.borrow_mut().pop_front() {
+            return Poll::Ready(Some(output));
+        }
+        *self.state.waker.borrow_mut() = Some(context.waker().clone());
+        Poll::Pending
+    }
+}
+
+fn tool_progress_channel() -> (ToolProgressSender, ToolProgressReceiver) {
+    let state = Arc::new(ToolProgressState {
+        queued: RefCell::new(VecDeque::new()),
+        waker: RefCell::new(None),
+    });
+    (
+        ToolProgressSender {
+            state: Arc::downgrade(&state),
+        },
+        ToolProgressReceiver { state },
+    )
 }
 
 /// Framework-only execution configuration. It is never rendered into a tool's
@@ -209,6 +299,15 @@ mod invocation_tests {
 pub struct ToolOutput {
     pub content: String,
     pub ok: bool,
+}
+
+/// One update emitted by an already accepted detached tool invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolDetachUpdate {
+    /// Non-terminal information; the invocation remains in flight.
+    Progress(ToolOutput),
+    /// Terminal result produced when the tool handler future returns.
+    Completed(ToolOutput),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
